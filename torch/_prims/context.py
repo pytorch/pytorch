@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import functools
 from contextlib import nullcontext
-from typing import Any, Callable, TYPE_CHECKING, TypeVar
+from typing import Any, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 import torch
 import torch._decomp

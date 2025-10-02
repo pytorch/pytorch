@@ -17,6 +17,8 @@
 #include <torch/csrc/monitor/events.h>
 #include <torch/csrc/monitor/python_init.h>
 
+TORCH_MAKE_PYBIND_ENUM_FASTER(torch::monitor::Aggregation)
+
 namespace pybind11::detail {
 template <>
 struct type_caster<torch::monitor::data_value_t> {

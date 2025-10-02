@@ -6,8 +6,8 @@ import re
 import sys
 import traceback
 import weakref
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch

@@ -1037,7 +1037,7 @@ def _get_unexposed_collectives(graph: torch.fx.Graph) -> list[torch.fx.Node]:
     """
 
     def _is_compute_intensive(node: torch.fx.Node) -> bool:
-        return node.target in [torch.ops.aten.mm.default]
+        return node.target is torch.ops.aten.mm.default
 
     collective_to_overlapping_candidates = defaultdict(list)
     available_nodes = OrderedSet[torch.fx.Node]()

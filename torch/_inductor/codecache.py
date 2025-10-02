@@ -1797,7 +1797,7 @@ class AotCodeCompiler:
 
         header_code = ""
         header_path = ""
-        if config.aot_inductor.compile_standalone:
+        if not config.aot_inductor.dynamic_linkage:
             # to link statically, we also need a header file
             with open(
                 os.path.join(
@@ -1847,7 +1847,7 @@ class AotCodeCompiler:
             generated_files.append(wrapper_path)
             if not config.aot_inductor.package_cpp_only:
                 generated_files.append(kernel_path)
-            if config.aot_inductor.compile_standalone:
+            if not config.aot_inductor.dynamic_linkage:
                 generated_files.append(header_path)
 
         output_code_log.info("Wrapper code written to: %s", wrapper_path)
@@ -1870,7 +1870,7 @@ class AotCodeCompiler:
             },
             payload_fn=lambda: kernel_code,
         )
-        if config.aot_inductor.compile_standalone:
+        if not config.aot_inductor.dynamic_linkage:
             output_code_log.info("Header code written to: %s", header_path)
             trace_structured(
                 "graph_dump",

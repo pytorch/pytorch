@@ -263,7 +263,7 @@ class FrameStateSizeEntry:
                 return f"tensor size={render_tuple(self.size)} stride={render_tuple(self.stride)}"
 
         # Fallback
-        return "unusual {repr(self)}"
+        return f"unusual {repr(self)}"
 
     def __post_init__(self) -> None:
         assert not isinstance(self.scalar, torch.SymInt), self.scalar

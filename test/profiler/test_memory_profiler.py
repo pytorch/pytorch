@@ -4,8 +4,8 @@ import gc
 import itertools as it
 import textwrap
 import unittest
-from collections.abc import Iterator
-from typing import Callable, Optional
+from collections.abc import Callable, Iterator
+from typing import Optional
 
 import torch
 from torch._C._profiler import _EventType, _TensorMetadata

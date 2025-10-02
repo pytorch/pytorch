@@ -442,6 +442,18 @@ class VariableBuilder:
             dup_guard = make_dupe_guard(self.source, side_effect_result.source)
             if dup_guard:
                 self.install_guards(dup_guard)
+
+            if isinstance(value, torch.nn.Module) and isinstance(
+                side_effect_result, UnspecializedNNModuleVariable
+            ):
+                # This means that two nn module instances with different sources
+                # have the same id. NN modules are somewhat special objects,
+                # because we have to track their nn_module_stack for ease of
+                # use. But if we don't do anything, we will just return the
+                # older variable tracker with the older nn_module_stack. So,
+                # lets return the old variable tracker but update its
+                # nn_module_stack
+                side_effect_result.set_nn_module_stack_source(self.source)
             return side_effect_result
 
         cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
@@ -1943,6 +1955,8 @@ class VariableBuilder:
                 result = UnspecializedNNModuleVariable(value, source=new_source)
                 install_guard(new_source.make_guard(GuardBuilder.TYPE_MATCH))
 
+            self.tx.output.add_fqn_info_for_inlined_modules(value, self.source)
+
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
@@ -3015,7 +3029,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         ]
         or (
             # TODO: this is a little sus, because we didn't check what the self is
-            proxy.node.op == "call_method" and proxy.node.target in ["bit_length"]
+            proxy.node.op == "call_method" and proxy.node.target == "bit_length"
         )
     ):
         set_example_value(proxy.node, example_value)

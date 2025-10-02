@@ -24,6 +24,7 @@ def fuzz_and_execute(
     seed: Optional[int] = None,
     max_depth: Optional[int] = None,
     log_at_faluire: bool = False,
+    template: str = "default",
 ) -> None:
     """
     Generate a fuzzed operation stack, convert it to Python code, and execute it.
@@ -111,7 +112,7 @@ def fuzz_and_execute(
         # Generate target specification first
         logger.debug("⏱️  Step 1: Generating target spec...")
         start_time = time.time()
-        target_spec = fuzz_spec()
+        target_spec = fuzz_spec(template)
         logger.debug(
             "   Completed in %.3fs - %s", time.time() - start_time, target_spec
         )
@@ -119,11 +120,50 @@ def fuzz_and_execute(
         logger.debug("⏱️  Step 2: Generating operation graph...")
         start_time = time.time()
         operation_graph = fuzz_operation_graph(
-            target_spec, max_depth=max_depth, seed=seed
+            target_spec, max_depth=max_depth, seed=seed, template=template
         )
+
+        # Extract and print operation statistics
+        operation_counts = {}
+        for node in operation_graph.nodes.values():
+            # Use the fully qualified torch operation name if available
+            from torchfuzz.operators import get_operator
+
+            # Try to get the fully qualified torch operation name
+            torch_op_name = None
+
+            # Extract the base operation name (without arg_X suffixes)
+            base_op_name = node.op_name
+            if node.op_name.startswith("arg_"):
+                # For arg operations, use just "arg" to look up in registry
+                base_op_name = "arg"
+
+            try:
+                operator = get_operator(base_op_name)
+                if (
+                    operator
+                    and hasattr(operator, "torch_op_name")
+                    and operator.torch_op_name
+                ):
+                    torch_op_name = operator.torch_op_name
+            except (KeyError, ValueError):
+                # If the operator doesn't exist in registry, use the node's op_name
+                pass
+
+            # Use fully qualified name if available, otherwise use the node's op_name
+            display_name = torch_op_name if torch_op_name else node.op_name
+            operation_counts[display_name] = operation_counts.get(display_name, 0) + 1
+
+        # Print operation statistics in a parseable format
+        print("OPERATION_STATS:")
+        for op_name, count in sorted(operation_counts.items()):
+            print(f"  {op_name}: {count}")
+
         logger.debug("⏱️  Step 3: Converting to Python code...")
         start_time = time.time()
-        python_code = convert_graph_to_python_code(operation_graph, seed=seed)
+        python_code = convert_graph_to_python_code(
+            operation_graph, seed=seed, template=template
+        )
         logger.debug(
             "   Completed in %.3fs - %d chars",
             time.time() - start_time,
@@ -153,6 +193,7 @@ def fuzz_and_execute(
         traceback.print_exc()
         error_message = str(e)
         print(f"Error: {error_message}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
@@ -178,6 +219,12 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, help="Random seed for single execution")
     parser.add_argument(
         "--max-depth", type=int, help="Maximum depth for operation stack (1-20)"
+    )
+    parser.add_argument(
+        "--template",
+        choices=["default", "dtensor", "unbacked"],
+        default="default",
+        help="Template to use for code generation (default: default)",
     )
 
     # Multi-process fuzzing arguments
@@ -225,7 +272,9 @@ if __name__ == "__main__":
     if args.seed is not None or args.single:
         # Single seed execution mode
         print("Running single fuzz_and_execute...")
-        fuzz_and_execute(seed=args.seed, max_depth=args.max_depth)
+        fuzz_and_execute(
+            seed=args.seed, max_depth=args.max_depth, template=args.template
+        )
     elif args.start is not None or args.count is not None:
         # Multi-process fuzzing mode
         if args.start is None:
@@ -255,6 +304,7 @@ if __name__ == "__main__":
                 seed_start=args.start,
                 seed_count=args.count,
                 verbose=args.verbose,
+                template=args.template,
             )
         except Exception as e:
             print(f"❌ Unexpected error: {str(e)}")

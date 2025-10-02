@@ -5,10 +5,10 @@ import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from typing_extensions import Self
 from warnings import warn
 

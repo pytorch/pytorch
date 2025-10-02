@@ -4,9 +4,9 @@ r"""Implementation for Stochastic Weight Averaging implementation."""
 import itertools
 import math
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from copy import deepcopy
-from typing import Any, Callable, cast, Literal, Optional, Union
+from typing import Any, cast, Literal, Optional, Union
 from typing_extensions import override
 
 import torch

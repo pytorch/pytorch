@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, get_args, Optional, Union
+from typing import Any, get_args, Optional, Union
 
 import torch
 import torch._library.utils as library_utils

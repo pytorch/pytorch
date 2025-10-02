@@ -216,7 +216,7 @@ you never specialize.
 
 #### `mark_unbacked(tensor, dim)`
 
-The {func}`torch._dynamo.mark_unbacked` function marks a tensor dimension as unbacked. It is unlikely
+The {func}`torch._dynamo.decorators.mark_unbacked` function marks a tensor dimension as unbacked. It is unlikely
 to be the tool you need, but it could be useful if the specialization occurs inside
 a condition `guard_size_oblivious(x)`, and if using it removes the specialization.
 Ensure it fixes the specialization and does not introduce a data-dependent error

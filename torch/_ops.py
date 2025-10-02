@@ -6,19 +6,19 @@ import importlib
 import inspect
 import sys
 import types
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from functools import cached_property
 from typing import (
     Any,
-    Callable,
     ClassVar,
+    Concatenate,
     final,
     Generic,
     Optional,
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import Concatenate, ParamSpec, TypeVar
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch.utils._pytree as pytree

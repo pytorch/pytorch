@@ -1041,10 +1041,10 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
     return ms
 
 
+@dataclasses.dataclass(slots=True)
 class WhyNoFuse:
-    # TODO when we drop support for Python < 3.10, we can use
-    # @dataclass(slots=True) instead of manually specifying __slots__.
-    __slots__ = ["name1", "name2", "reason", "args"]
+    name1: str
+    name2: str
     reason: str
     args: tuple[Any, ...]
 

@@ -13,8 +13,8 @@ import os
 import tempfile
 import textwrap
 import warnings
-from collections.abc import Sequence
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir

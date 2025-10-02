@@ -18,8 +18,8 @@ import logging
 import math
 import operator
 import types
-from typing import Callable, Literal, Union
-from typing_extensions import TypeAlias
+from collections.abc import Callable
+from typing import Literal, TypeAlias, Union
 
 import torch
 import torch._ops

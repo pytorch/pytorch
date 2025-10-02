@@ -4,9 +4,9 @@ import logging
 import operator
 import typing
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.export._trace

@@ -24,11 +24,10 @@ import threading
 import types
 import warnings
 from collections import defaultdict, deque, namedtuple, OrderedDict
-from collections.abc import Hashable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from enum import Enum
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Final,

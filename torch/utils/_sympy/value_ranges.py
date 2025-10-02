@@ -7,17 +7,17 @@ import itertools
 import logging
 import math
 import operator
+from collections.abc import Callable
 from typing import (
-    Callable,
     Generic,
     Optional,
     overload,
     SupportsFloat,
     TYPE_CHECKING,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import TypeGuard
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom

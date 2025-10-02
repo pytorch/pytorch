@@ -16,8 +16,9 @@ import inspect
 import os
 import re
 import warnings
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch

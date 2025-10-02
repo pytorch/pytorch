@@ -397,6 +397,21 @@ def create_call_function(nargs: int, push_null: bool) -> list[Instruction]:
     return [create_instruction("CALL_FUNCTION", arg=nargs)]
 
 
+def create_call_function_ex(has_kwargs: bool) -> list[Instruction]:
+    """
+    Assumes that in 3.14+, if has_kwargs=False, there is NOT a NULL
+    on the TOS for the kwargs. This utility function will add a PUSH_NULL.
+
+    If the caller has already pushed a NULL, then do not call this function -
+    just use create_instruction("CALL_FUNCTION_EX", arg=...).
+    """
+    insts = []
+    if sys.version_info >= (3, 14) and not has_kwargs:
+        insts.append(create_instruction("PUSH_NULL"))
+    insts.append(create_instruction("CALL_FUNCTION_EX", arg=int(has_kwargs)))
+    return insts
+
+
 def create_call_method(nargs: int) -> list[Instruction]:
     if sys.version_info >= (3, 12):
         return [create_instruction("CALL", arg=nargs)]
@@ -452,7 +467,7 @@ def create_swap(n: int) -> list[Instruction]:
         create_instruction("BUILD_LIST", arg=n - 1),
         create_instruction("DUP_TOP"),
         create_instruction("LOAD_CONST", argval=-1),
-        create_instruction("BINARY_SUBSCR"),
+        create_binary_subscr(),
         create_instruction("ROT_THREE"),
         create_instruction("DUP_TOP"),
         create_instruction("ROT_THREE"),
@@ -472,7 +487,15 @@ def create_binary_slice(
     """
     BINARY_SLICE and STORE_SLICE (if `set` is True) for all Python versions
     """
-    if sys.version_info >= (3, 12):
+    if sys.version_info >= (3, 14):
+        subscr_inst = (
+            create_instruction("STORE_SUBSCR") if store else create_binary_subscr()
+        )
+        return [
+            create_load_const(slice(start, end)),
+            subscr_inst,
+        ]
+    elif sys.version_info >= (3, 12):
         inst_name = "STORE_SLICE" if store else "BINARY_SLICE"
         return [
             create_load_const(start),
@@ -524,6 +547,19 @@ def create_print_value(value: Any) -> list[Instruction]:
         *create_call_function(1, False),
         create_instruction("POP_TOP"),
     ]
+
+
+def create_binary_subscr() -> Instruction:
+    if sys.version_info < (3, 14):
+        return create_instruction("BINARY_SUBSCR")
+    # https://github.com/python/cpython/blob/0e46c0499413bc5f9f8336fe76e2e67cf93f64d8/Include/opcode.h#L36
+    return create_instruction("BINARY_OP", arg=26)
+
+
+def create_build_tuple(n: int) -> Instruction:
+    if sys.version_info >= (3, 14) and n == 0:
+        return create_load_const(())
+    return create_instruction("BUILD_TUPLE", arg=n)
 
 
 def linetable_writer(
@@ -1143,7 +1179,10 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
         new_insts.append(inst)
         if inst.opname in ("BINARY_SLICE", "STORE_SLICE"):
             # new instruction
-            subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
+            if sys.version_info >= (3, 14) and inst.opname == "BINARY_SLICE":
+                subscr_inst = create_binary_subscr()
+            else:
+                subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
             if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
                 inst.exn_tab_entry.end = subscr_inst
             subscr_inst.exn_tab_entry = copy.copy(inst.exn_tab_entry)
@@ -1159,6 +1198,7 @@ def remove_binary_store_slice(instructions: list[Instruction]) -> None:
 
 FUSED_INSTS = {
     "LOAD_FAST_LOAD_FAST": ("LOAD_FAST", "LOAD_FAST"),
+    "LOAD_FAST_BORROW_LOAD_FAST_BORROW": ("LOAD_FAST_BORROW", "LOAD_FAST_BORROW"),
     "STORE_FAST_STORE_FAST": ("STORE_FAST", "STORE_FAST"),
     "STORE_FAST_LOAD_FAST": ("STORE_FAST", "LOAD_FAST"),
 }

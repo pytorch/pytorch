@@ -420,7 +420,7 @@ class _CudaKernel:
             # navi, CDNA1-CDNA3 allows a max of 64KB shared memory
             # CDNA4 allows a max of 160KB shared memory
             max_shared_mem = (
-                65536 if device_props.gcnArchName not in ["gfx950"] else 160 * 1024
+                65536 if device_props.gcnArchName != "gfx950" else 160 * 1024
             )
         else:
             max_shared_mem = getattr(

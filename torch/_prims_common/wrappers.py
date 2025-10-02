@@ -2,10 +2,10 @@
 import inspect
 import types
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import wraps
 from types import GenericAlias
-from typing import Callable, NamedTuple, Optional, overload, TypeVar, Union
+from typing import NamedTuple, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

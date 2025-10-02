@@ -203,6 +203,14 @@ struct ShareableHandle {
   std::string handle;
 };
 
+struct StreamSegmentSize {
+  StreamSegmentSize(cudaStream_t s, bool small, size_t sz)
+      : stream(s), is_small_pool(small), total_size(sz) {}
+  cudaStream_t stream;
+  bool is_small_pool;
+  size_t total_size;
+};
+
 class CUDAAllocator : public DeviceAllocator {
  public:
   virtual void* raw_alloc(size_t nbytes) = 0;
@@ -211,6 +219,8 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void init(int device_count) = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
+  virtual std::vector<StreamSegmentSize> getExpandableSegmentSizes(
+      c10::DeviceIndex device) = 0;
   virtual void enable(bool value) = 0;
   virtual bool isEnabled() const = 0;
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
@@ -363,6 +373,11 @@ inline double getMemoryFraction(c10::DeviceIndex device) {
 
 inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {
   return get()->setMemoryFraction(fraction, device);
+}
+
+inline std::vector<StreamSegmentSize> getExpandableSegmentSizes(
+    c10::DeviceIndex device) {
+  return get()->getExpandableSegmentSizes(device);
 }
 
 inline void emptyCache(MempoolId_t mempool_id = {0, 0}) {

@@ -765,7 +765,7 @@ class QuantizationTestCase(TestCase):
             and not isinstance(module, _FusedModule)
         ):
             for child in module.children():
-                if type(child) in [nn.Dropout]:
+                if type(child) is nn.Dropout:
                     continue
                 self.checkObservers(
                     child, propagate_qconfig_list, prepare_custom_config_dict

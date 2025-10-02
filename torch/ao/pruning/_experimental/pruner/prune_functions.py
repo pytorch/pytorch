@@ -4,7 +4,8 @@ Collection of conversion functions for linear / conv2d structured pruning
 Also contains utilities for bias propagation
 """
 
-from typing import Callable, cast, Optional
+from collections.abc import Callable
+from typing import cast, Optional
 
 import torch
 from torch import nn, Tensor

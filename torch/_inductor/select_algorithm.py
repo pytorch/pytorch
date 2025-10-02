@@ -1977,9 +1977,7 @@ class TritonTemplate(KernelTemplate):
             expected_input_args,
         )
 
-        full_input_nodes = tuple(
-            [V.graph.get_buffer(k) for k in result.input_call_args]
-        )
+        full_input_nodes = tuple(V.graph.get_buffer(k) for k in result.input_call_args)
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, result.kernel_args_sizevars_keys),
             fallback=config.unbacked_symint_fallback,

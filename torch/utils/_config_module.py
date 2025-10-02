@@ -8,18 +8,10 @@ import os
 import pickle
 import tokenize
 import unittest
+from collections.abc import Callable
 from dataclasses import dataclass
 from types import FunctionType, ModuleType
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    NoReturn,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated
 from unittest import mock
 
@@ -412,7 +404,7 @@ class ConfigModule(ModuleType):
         try:
             module = importlib.import_module(module_name)
         except ImportError as e:
-            raise AttributeError("config alias {alias} does not exist") from e
+            raise AttributeError(f"config alias {alias} does not exist") from e
         return module, constant_name
 
     def _get_alias_val(self, entry: _ConfigEntry) -> Any:

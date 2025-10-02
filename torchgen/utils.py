@@ -11,7 +11,7 @@ from dataclasses import is_dataclass
 from enum import auto, Enum
 from pathlib import Path
 from pprint import pformat
-from typing import Any, Callable, Generic, NoReturn, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NoReturn, TYPE_CHECKING, TypeVar
 from typing_extensions import assert_never, deprecated, Self
 
 from torchgen.code_template import CodeTemplate
@@ -19,7 +19,7 @@ from torchgen.code_template import CodeTemplate
 
 if TYPE_CHECKING:
     from argparse import Namespace
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
 
 TORCHGEN_ROOT = Path(__file__).absolute().parent

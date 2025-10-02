@@ -882,7 +882,7 @@ def proxy_call(
     def can_handle_tensor(x: Tensor) -> bool:
         r = type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
         if proxy_mode._allow_fake_constant:
-            r = r or type(x) in (torch._subclasses.FakeTensor,)
+            r = r or type(x) is torch._subclasses.FakeTensor
         if not r:
             unrecognized_types.append(type(x))
         return r
@@ -1534,7 +1534,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         with set_original_aten_op(func):
             kwargs = kwargs or {}
 
-            if func in (prim.device.default,):
+            if func == prim.device.default:
                 return func(*args, **kwargs)
 
             return proxy_call(self, func, self.pre_dispatch, args, kwargs)

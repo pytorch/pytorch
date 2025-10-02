@@ -8,9 +8,9 @@ import operator
 import types
 import warnings
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, final, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, final, NamedTuple, Optional, TYPE_CHECKING, Union
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented

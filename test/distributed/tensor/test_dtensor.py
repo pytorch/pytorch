@@ -870,6 +870,19 @@ class DTensorMeshTest(DTensorTestBase):
         local_expected = expected.to_local()
         self.assertEqual(local_result, local_expected)
 
+    @unittest.expectedFailure
+    @with_comms
+    def test_inplace_on_local_tensor_view(self):
+        mesh = self.build_device_mesh()
+        seq = 8
+        vocab = 16
+        leaf = torch.randn((seq, vocab), device=self.device_type, requires_grad=True)
+        dtensor_leaf = DTensor.from_local(leaf, mesh, [Shard(1)])
+        dtensor_vocab_parallel_logits = dtensor_leaf * 2  # make this non-leaf
+        vocab_parallel_logits = dtensor_vocab_parallel_logits.to_local()
+        logits_max = torch.randn(seq, device=self.device_type)
+        vocab_parallel_logits -= logits_max.unsqueeze(dim=1)
+
     @with_comms
     def test_auto_implicit_replication(self):
         mesh = self.build_device_mesh()

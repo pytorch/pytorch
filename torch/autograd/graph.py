@@ -4,18 +4,24 @@ import functools
 import logging
 import threading
 from collections import defaultdict, deque
-from collections.abc import Generator, Iterable, Iterator, MutableMapping, Sequence
+from collections.abc import (
+    Callable,
+    Generator,
+    Iterable,
+    Iterator,
+    MutableMapping,
+    Sequence,
+)
 from typing import (
     Any,
-    Callable,
     cast,
     Literal,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
+    TypeAlias,
     Union,
 )
-from typing_extensions import TypeAlias
 from weakref import WeakKeyDictionary, WeakValueDictionary
 
 import torch

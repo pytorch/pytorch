@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import io
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

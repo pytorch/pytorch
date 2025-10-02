@@ -8,8 +8,8 @@ import logging
 import operator
 import threading
 from collections import defaultdict
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import sympy

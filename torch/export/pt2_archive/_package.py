@@ -6,8 +6,7 @@ import os
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import Any, IO, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
+from typing import Any, IO, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -794,7 +793,9 @@ def _load_state_dict(
                     ),
                 )
                 if payload_meta.is_param:
-                    state_dict[weight_fqn] = torch.nn.Parameter(weight_tensor)
+                    state_dict[weight_fqn] = torch.nn.Parameter(
+                        weight_tensor, requires_grad=tensor_meta.requires_grad
+                    )
                 else:
                     state_dict[weight_fqn] = weight_tensor
 

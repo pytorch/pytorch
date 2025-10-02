@@ -5244,7 +5244,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 return torch.contiguous_format
             if memory_format in (torch.contiguous_format, torch.channels_last, torch.channels_last_3d):
                 return memory_format
-            raise ValueError("Unable to detect memory format for backend={backend} and memory_format={memory_format}")
+            raise ValueError(f"Unable to detect memory format for backend={backend} and memory_format={memory_format}")
 
         def _get_memory_format(t: torch.Tensor) -> torch.memory_format:
             if t.is_contiguous(memory_format=torch.contiguous_format):
@@ -12802,6 +12802,43 @@ if __name__ == '__main__':
         b_bf16.backward(torch.ones(3, device=device))
         expected_bf16 = torch.tensor([0., 0., 1.], device=device, dtype=dtype)
         self.assertEqual(a_bf16.grad, expected_bf16)
+
+    @onlyCPU
+    def test_rrelu_bounds_validation(self, device):
+        """Test RReLU bounds validation for finite and infinite values."""
+        x = torch.randn(5, 5, device=device)
+
+        # Test with finite bounds
+        result = F.rrelu(x, lower=0.1, upper=0.3)
+        self.assertEqual(result.shape, x.shape)
+
+        # Test with infinite lower bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: lower bound must be finite, got inf"):
+            F.rrelu(x, lower=float('inf'), upper=0.3)
+
+        # Test with infinite upper bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: upper bound must be finite, got inf"):
+            F.rrelu(x, lower=0.1, upper=float('inf'))
+
+        # Test with NaN lower bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: lower bound must be finite, got nan"):
+            F.rrelu(x, lower=float('nan'), upper=0.3)
+
+        # Test with NaN upper bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: upper bound must be finite, got nan"):
+            F.rrelu(x, lower=0.1, upper=float('nan'))
+
+        # Test with negative infinity lower bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: lower bound must be finite, got -inf"):
+            F.rrelu(x, lower=float('-inf'), upper=0.3)
+
+        # Test with negative infinity upper bound
+        with self.assertRaisesRegex(RuntimeError, "rrelu: upper bound must be finite, got -inf"):
+            F.rrelu(x, lower=0.1, upper=float('-inf'))
+
+        # Test with lower bound greater than upper bound
+        with self.assertRaisesRegex(RuntimeError, "Lower bound should be less than or equal to the upper bound"):
+            F.rrelu(x, lower=0.5, upper=0.3)
 
     @onlyCPU
     def test_softshrink(self, device):

@@ -727,6 +727,26 @@ class SizeVarAllocator:
         if self.unbacked_replacements is not None:
             return self.unbacked_replacements
 
+        def should_keep_src_dst(lhs: Expr, rhs: Expr):
+            # assuming lhs is the expr to be replaced (src), rhs is the replacement (dst)
+            # checking if we should keep them for the replacement rule or swap
+
+            if not has_free_unbacked_symbols(rhs):
+                # prioritize replacing unbacked exprs with backed expressions
+                # e.g. u0 + s3 ==> s0 + s1
+                return True
+            elif not has_free_unbacked_symbols(lhs):
+                return False
+            elif lhs.has(rhs):
+                # handles cases where LHS is a sub-expression of the RHS
+                # e.g. Max(2, u0) == s1 * Max(2, u0)
+                return True
+            elif rhs.has(lhs):
+                return False
+            else:
+                # fallback to sympy.Basic.compare for a deterministic ordering
+                return lhs.compare(rhs) == 1
+
         self.unbacked_replacements = {}
         for assertions in self.shape_env.deferred_runtime_asserts.values():
             for assertion in assertions:
@@ -734,9 +754,9 @@ class SizeVarAllocator:
                     continue
 
                 lhs, rhs = assertion.expr.lhs, assertion.expr.rhs
-                l2r = lhs.compare(rhs) == 1  # see sympy.Basic.compare
-                src = lhs if l2r else rhs
-                dst = rhs if l2r else lhs
+                should_keep = should_keep_src_dst(lhs, rhs)
+                src = lhs if should_keep else rhs
+                dst = rhs if should_keep else lhs
 
                 existing_replacement = self.unbacked_replacements.get(src, None)
                 if existing_replacement and isinstance(
@@ -751,11 +771,19 @@ class SizeVarAllocator:
     def _sub_unbacked_exprs(self, expr: Expr) -> Expr:
         # it's fine to cache this fn since self is a singleton
         replacements = self._get_unbacked_replacements()
-        while True:
+
+        # consider making this threshold configurable
+        sub_cnt_limit = 30
+        sub_cnt = 0
+        while sub_cnt < sub_cnt_limit:
             new_expr = expr.subs(replacements)
             if new_expr == expr:
                 return new_expr
             expr = sympy.factor(new_expr)
+            sub_cnt += 1
+
+        log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
+        return expr
 
     def atomically_apply_size_hint(
         self, expr: Union[Expr, int], *, fallback: Optional[int] = None

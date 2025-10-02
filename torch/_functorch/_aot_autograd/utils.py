@@ -6,9 +6,10 @@ Contains various utils for AOTAutograd, including those for handling collections
 import dataclasses
 import operator
 import warnings
+from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

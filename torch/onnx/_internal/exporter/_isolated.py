@@ -5,8 +5,12 @@ from __future__ import annotations
 import multiprocessing
 import os
 import warnings
-from typing import Any, Callable, TypeVar, TypeVarTuple, Union, Unpack
+from typing import Any, TYPE_CHECKING, TypeVar, TypeVarTuple, Union, Unpack
 from typing_extensions import ParamSpec
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 _P = ParamSpec("_P")

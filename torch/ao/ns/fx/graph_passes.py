@@ -164,8 +164,6 @@ def add_loggers_to_model(
                                 index_of_arg=node_arg_idx,
                                 fqn=fqn,
                             )
-                    else:
-                        pass
 
             # ensure env is populated with base node
             # Note: runs for both inputs and outputs

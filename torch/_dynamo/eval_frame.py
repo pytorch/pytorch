@@ -2038,6 +2038,7 @@ def export(
                 automatic_dynamic_shapes=False,
                 capture_dynamic_output_shape_ops=True,
                 capture_scalar_outputs=True,
+                constant_fold_autograd_profiler_enabled=True,
                 prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
             ),
             _compiling_state_context(),

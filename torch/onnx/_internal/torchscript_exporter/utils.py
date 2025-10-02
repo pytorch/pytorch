@@ -62,7 +62,7 @@ import inspect
 import re
 import typing
 import warnings
-from typing import Any, Callable, cast
+from typing import Any, cast
 from typing_extensions import deprecated
 
 import torch
@@ -80,7 +80,7 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Collection, Mapping, Sequence
+    from collections.abc import Callable, Collection, Mapping, Sequence
 
 
 # TODO(justinchuby): Remove dependency to this global variable from constant_fold.cpp

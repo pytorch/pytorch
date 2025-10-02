@@ -28,6 +28,7 @@ fi
 MANY_LINUX_VERSION=${MANY_LINUX_VERSION:-}
 DOCKERFILE_SUFFIX=${DOCKERFILE_SUFFIX:-}
 OPENBLAS_VERSION=${OPENBLAS_VERSION:-}
+ACL_VERSION=${ACL_VERSION:-}
 
 case ${image} in
     manylinux2_28-builder:cpu)
@@ -41,13 +42,6 @@ case ${image} in
         GPU_IMAGE=arm64v8/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13 --build-arg NINJA_VERSION=1.12.1"
         MANY_LINUX_VERSION="2_28_aarch64"
-        OPENBLAS_VERSION="v0.3.30"
-        ;;
-    manylinuxcxx11-abi-builder:cpu-cxx11-abi)
-        TARGET=final
-        GPU_IMAGE=""
-        DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=9"
-        MANY_LINUX_VERSION="cxx11-abi"
         ;;
     manylinuxs390x-builder:cpu-s390x)
         TARGET=final
@@ -125,7 +119,8 @@ tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 DOCKER_BUILDKIT=1 docker build  \
     ${DOCKER_GPU_BUILD_ARG} \
     --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
-    --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION}" \
+    --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
+    --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
     --target "${TARGET}" \
     -t "${tmp_tag}" \
     $@ \

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from torchgen.api import cpp, dispatcher, functionalization
 from torchgen.api.translate import translate
@@ -51,6 +51,8 @@ from torchgen.utils import concatMap, dataclass_repr, FileManager
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torchgen.selective_build.selector import SelectiveBuilder
 
 

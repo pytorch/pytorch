@@ -681,10 +681,10 @@ PyObject* THCPModule_hostMemoryStats(PyObject* _unused, PyObject* noargs) {
   py::dict result;
   result["num_host_alloc"] = stats.num_host_alloc;
   result["num_host_free"] = stats.num_host_free;
-  result["allocation"] = statToDict(stats.allocation);
-  result["segment"] = statToDict(stats.segment);
+  result["allocations"] = statToDict(stats.allocations);
+  result["active_requests"] = statToDict(stats.active_requests);
   result["allocated_bytes"] = statToDict(stats.allocated_bytes);
-  result["reserved_bytes"] = statToDict(stats.reserved_bytes);
+  result["active_bytes"] = statToDict(stats.active_bytes);
   result["host_alloc_time"] = durationStatToDict(stats.host_alloc_time);
   result["host_free_time"] = durationStatToDict(stats.host_free_time);
 

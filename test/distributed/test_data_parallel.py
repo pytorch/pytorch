@@ -96,7 +96,7 @@ class TestDataParallel(TestCase):
         step(model_dp)
 
         for p1, p2 in zip(model.parameters(), model_dp.parameters()):
-            self.assertTrue(p1.allclose(p2))
+            self.assertEqual(p1, p2)
 
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_lazy_linear(self):

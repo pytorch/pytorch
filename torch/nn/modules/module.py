@@ -6,8 +6,8 @@ import itertools
 import warnings
 import weakref
 from collections import namedtuple, OrderedDict
-from collections.abc import Iterator, Mapping
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
 import torch

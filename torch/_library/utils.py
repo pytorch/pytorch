@@ -2,8 +2,8 @@
 import dataclasses
 import inspect
 import sys
-from collections.abc import Iterable, Iterator
-from typing import Any, Callable, Literal, Optional, overload, Union
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, Literal, Optional, overload, Union
 
 import torch
 import torch.utils._pytree as pytree
