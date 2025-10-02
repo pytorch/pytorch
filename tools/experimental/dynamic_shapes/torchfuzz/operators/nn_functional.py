@@ -91,8 +91,9 @@ class EmbeddingOperator(Operator):
             raise ValueError("Embedding requires exactly 2 inputs: weight and input")
 
         weight_name, input_name = input_names
-        # Ensure indices are integer type (division operations can make them float)
-        return f"{output_name} = torch.nn.functional.embedding({input_name}.to(torch.int64), {weight_name})"
+        # Ensure indices are integer type and clamped to valid range
+        # This handles any arithmetic operations that might produce out-of-bounds indices
+        return f"{output_name} = torch.nn.functional.embedding(torch.clamp({input_name}.to(torch.int64), 0, {weight_name}.size(0)-1), {weight_name})"
 
 
 class LinearOperator(Operator):
