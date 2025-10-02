@@ -109,7 +109,7 @@ def _varlen_attn_fake(
     return output, logsumexp
 
 
-def varlen_atten(
+def varlen_attn(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,

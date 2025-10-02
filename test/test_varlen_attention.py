@@ -4,7 +4,7 @@ from collections import namedtuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.attention.varlen import varlen_atten
+from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
@@ -65,7 +65,7 @@ class AttentionBlock(nn.Module):
         k = k.view(-1, self.num_heads, self.head_dim)
         v = v.view(-1, self.num_heads, self.head_dim)
 
-        attn_out = varlen_atten(
+        attn_out = varlen_attn(
             q, k, v, cu_seq, cu_seq, max_len, max_len, is_causal
         )
         attn_out = attn_out.view(-1, self.embed_dim)
