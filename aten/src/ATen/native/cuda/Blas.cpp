@@ -107,6 +107,9 @@ inline CublasTransPrepStrategy predict_matrix_trans_prep_strategy_cublas(const T
 
 // Given a strategy, "negate" it by deriving a strategy
 // for a transposed tensor.
+// IMPORTANT NOTE: this operation is not idempotent and, therefore,
+// it is meant to be use only once and only on the result of
+// `predict_matrix_trans_prep_strategy_cublas`.
 // NOTE: here we map N_* to T_* and T_* to N_* just to comply
 // with the previous logic where the trans prep was just
 // a boolean, and it was directly negated.
