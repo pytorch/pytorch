@@ -62,13 +62,51 @@ def _compile_and_extract_layout(
         elif "End of search list." in line:
             break
         elif in_include_section and line.strip().startswith("/"):
-            # Only add essential system paths
+            # Add all system include paths to ensure we get everything
             path = line.strip()
-            if any(
-                essential in path
-                for essential in ["/include/c++", "/usr/include", "clang"]
-            ):
-                include_paths.append(f"-I{path}")
+            include_paths.append(f"-I{path}")
+
+    # Try to get additional standard library paths using gcc as well
+    # since sometimes clang might miss some paths that gcc would find
+    try:
+        gcc_result = subprocess.run(
+            ["gcc", "-E", "-v", "-x", "c++", "-"],
+            input="",
+            capture_output=True,
+            text=True,
+        )
+        gcc_in_include_section = False
+        for line in gcc_result.stderr.split("\n"):
+            if "#include <...> search starts here:" in line:
+                gcc_in_include_section = True
+                continue
+            elif "End of search list." in line:
+                break
+            elif gcc_in_include_section and line.strip().startswith("/"):
+                path = line.strip()
+                gcc_flag = f"-I{path}"
+                if gcc_flag not in include_paths:
+                    include_paths.append(gcc_flag)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # gcc might not be available, that's ok
+        pass
+
+    # Add architecture-agnostic fallback paths
+    import glob
+
+    fallback_patterns = [
+        "/usr/include/c++/*",
+        "/usr/include/*/c++/*",
+        "/usr/include",
+        "/usr/lib/llvm-*/lib/clang/*/include",
+    ]
+
+    for pattern in fallback_patterns:
+        for path in glob.glob(pattern):
+            if os.path.isdir(path):
+                fallback_flag = f"-I{path}"
+                if fallback_flag not in include_paths:
+                    include_paths.append(fallback_flag)
 
     # Use clang -cc1 with reduced include paths
     cmd = [
