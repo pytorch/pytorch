@@ -37,7 +37,7 @@ on:
       runner:
         required: false
         type: string
-        default: "linux.2xlarge"
+        default: "linux.2xlarge.c7a.test.donotuse"
         description: |
           Label of the runner this job should run on.
       test-matrix:
