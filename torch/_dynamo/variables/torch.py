@@ -270,6 +270,26 @@ class BaseTorchVariable(VariableTracker):
     def can_constant_fold_through(self):
         if self.value in constant_fold_functions:
             return True
+
+        if (
+            self.value is torch.autograd._profiler_enabled
+            and config.constant_fold_autograd_profiler_enabled
+        ):
+            # The relevant flag is enabled only for export. One might wonder
+            # why?
+            #
+            # Actually we would like to not graph break even in the case of
+            # Dynamo. But there is a weird-unsolved bug with Kineto + Dynamo
+            # when there are distributed jobs that lead to NCCL timeouts. This
+            # bug is a rare edege case, but we have not been able to root cause
+            # it yet. See https://www.internalfb.com/sevmanager/view/560336 for
+            # more details.
+            #
+            # So is this safe for export? Yes, for export, we do not anticipate
+            # JIT tracing in distributed job training, and the weird edge-case
+            # interaction with Kineto is not a valid usecase. So, this is ok.
+            return True
+
         return getattr(self.value, "__module__", None) == "math"
 
 
