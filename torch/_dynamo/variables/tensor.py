@@ -1098,17 +1098,15 @@ class TensorVariable(VariableTracker):
 
             # Not sure if __setitem__ can ever save activations, disabling just in case
 
-            # Ignore fresh unbacked symbols that arises from patterns like this:
-            #   idx = b[i].item()
-            #   wrk[idx] += 1
-            #
+            # Ignore fresh unbacked symbols that arises from patterns the could arise from the
+            # internal indexing (selection) in, since the whole op output size/stride is not
+            # dependent on the indexing.
+            #   t[idx] += 1
+
             with (
                 torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
                 tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                if tx.fake_mode
-                and tx.fake_mode.shape_env
-                and hasattr(key, "proxy")
-                and key.proxy.node.target == "item"
+                if tx.fake_mode and tx.fake_mode.shape_env
                 else nullcontext(),
             ):
                 get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
