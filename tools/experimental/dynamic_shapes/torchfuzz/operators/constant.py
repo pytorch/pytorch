@@ -102,7 +102,13 @@ class ConstantOperator(Operator):
                 # For integer types, clamp the value to a smaller range to avoid
                 # issues when used in arithmetic with embedding indices
                 import torch
-                if output_spec.dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
+
+                if output_spec.dtype in [
+                    torch.int8,
+                    torch.int16,
+                    torch.int32,
+                    torch.int64,
+                ]:
                     # Clamp integer values to [0, 3] to avoid index overflow in multiplication
                     # Even with multiplication, indices should stay in reasonable range
                     fill_value = max(0, min(3, abs(fill_value)))

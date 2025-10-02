@@ -400,17 +400,13 @@ class LayerNormOperator(Operator):
             # LayerNorm weight and bias parameters should match input tensor dtype
             # for compatibility (conversion will be handled in codegen)
             weight_spec = TensorSpec(
-                size=normalized_shape,
-                stride=(1,),
-                dtype=output_spec.dtype
+                size=normalized_shape, stride=(1,), dtype=output_spec.dtype
             )
             specs.append(weight_spec)
 
             if random.random() < 0.7:
                 bias_spec = TensorSpec(
-                    size=normalized_shape,
-                    stride=(1,),
-                    dtype=output_spec.dtype
+                    size=normalized_shape, stride=(1,), dtype=output_spec.dtype
                 )
                 specs.append(bias_spec)
 
