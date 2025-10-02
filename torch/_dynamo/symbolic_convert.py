@@ -472,25 +472,6 @@ def is_stdlib(mod: object) -> bool:
     return mod.__name__.split(".")[0] in sys.stdlib_module_names
 
 
-@functools.cache
-def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
-    if with_msg:
-
-        def fn(x: Any) -> None:
-            assert x, "msg"
-    else:
-
-        def fn(x: Any) -> None:
-            assert x
-
-    insts = [inst.opname for inst in dis.get_instructions(fn)]
-
-    begin_idx = insts.index("POP_JUMP_IF_TRUE")
-    end_idx = insts.index("RAISE_VARARGS")
-
-    return insts[begin_idx + 1 : end_idx + 1]
-
-
 def _detect_and_normalize_assert_statement(
     self: InstructionTranslatorBase,
     truth_fn: Callable[[object], bool],
@@ -499,38 +480,62 @@ def _detect_and_normalize_assert_statement(
     # Detect if this jump instruction is assert and normalize the assert
     # by pushing dummy error message when nothing is given.
     #
-    # Python 3.9-3.13 assertion is in following format (minus small differences)
+    # Python 3.9 assertion is in following format:
     # 18 POP_JUMP_IF_TRUE       28
     # 20 LOAD_ASSERTION_ERROR
     # 22 LOAD_CONST               3 ('Assert message') -> optional instruction
     # 24 CALL_FUNCTION            1                    -> optional instruction
     # 26 RAISE_VARARGS
+    #
+    # Python 3.8 assertion is in following format:
+    # 18 POP_JUMP_IF_TRUE       28
+    # 20 LOAD_GLOBAL              0 (Assertion type)
+    # 22 LOAD_CONST               3 ('Assert message') -> optional instruction
+    # 24 CALL_FUNCTION            1                    -> optional instruction
+    # 26 RAISE_VARARGS            1
 
     if (truth_fn is not operator.truth) or push:
         return False
 
     assert isinstance(self.instruction_pointer, int)
     current_instruction_pointer = self.instruction_pointer
+    inst = self.instructions[current_instruction_pointer]
+    # Detect LOAD_ASSERTION_ERROR or LOAD_GLOBAL 0
+    if inst.opname != "LOAD_ASSERTION_ERROR":
+        return False
 
-    for with_msg in (False, True):
-        assert_insts = get_assert_bytecode_sequence(with_msg)
-        cur_insts = self.instructions[
-            current_instruction_pointer : current_instruction_pointer
-            + len(assert_insts)
-        ]
-        cur_insts = [inst.opname for inst in cur_insts]
-        if cur_insts == assert_insts:
-            if with_msg:
-                load_const_idx = assert_insts.index("LOAD_CONST")
-                error_msg = self.instructions[
-                    current_instruction_pointer + load_const_idx
-                ].argval
-            else:
-                error_msg = "assertion error"
-            self.push(ConstantVariable.create(error_msg))
-            return True
+    current_instruction_pointer += 1
 
-    return False
+    # Use dummy error message if its hard to extract
+    error_msg = "assertion error"
+
+    inst = self.instructions[current_instruction_pointer]
+    # DETECT RAISE_VARARGS or LOAD CONST
+    if inst.opname == "LOAD_CONST":
+        if not isinstance(inst.argval, str):
+            return False
+        error_msg = inst.argval
+
+        # if it is LOAD_CONSTANT, it must be followed by CALL_FUNCTION
+        # (PRECALL for Python 3.11, CALL for Python 3.12+)
+        current_instruction_pointer += 1
+        inst = self.instructions[current_instruction_pointer]
+        if inst.opname not in ("CALL_FUNCTION", "PRECALL", "CALL"):
+            return False
+
+        # for Python 3.11, PRECALL should be followed by CALL, then RAISE_VARARGS
+        # for Python != 3.11, CALL_FUNCTION/CALL should be followed by RAISE_VARARGS
+        current_instruction_pointer += 1
+        if inst.opname == "PRECALL":
+            current_instruction_pointer += 1
+        inst = self.instructions[current_instruction_pointer]
+
+    if inst.opname != "RAISE_VARARGS":
+        return False
+
+    self.push(ConstantVariable.create(error_msg))
+
+    return True
 
 
 explain = False

@@ -858,8 +858,6 @@ class DistributedTest:
                 with exception_ctx:
                     dist.barrier(group_id)
                 self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.1)
-            else:
-                pass
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports timeouts"
