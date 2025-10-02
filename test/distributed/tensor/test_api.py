@@ -18,7 +18,6 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -408,7 +407,6 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
             mesh_shape = (2, self.world_size // 2)
         return init_device_mesh(DTensorContinuousTestBase.device_type(), mesh_shape)
 
-    @skip_if_lt_x_gpu(4)
     def test_neither_placements_nor_shard_order_raises_error(self):
         """Test that neither placements nor shard_order raises RuntimeError."""
         mesh = self.build_device_mesh((2, self.world_size // 2))
@@ -422,7 +420,6 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
         ):
             distribute_tensor(input_tensor, mesh)
 
-    @skip_if_lt_x_gpu(4)
     @parametrize(
         "placements, shard_order_dict, should_pass",
         [
@@ -456,7 +453,6 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
                 input_tensor, mesh, placements=placements, shard_order=shard_order_dict
             )
 
-    @skip_if_lt_x_gpu(4)
     @parametrize(
         "placements, expected_shard_order_tuple",
         [
@@ -476,7 +472,6 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
         self.assertEqual(input_tensor_dt.full_tensor(), input_tensor)
         self.assertEqual(input_tensor_dt.shard_order, expected_shard_order_tuple)
 
-    @skip_if_lt_x_gpu(4)
     @parametrize(
         "expected_placements, shard_order_dict",
         [
@@ -498,7 +493,6 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
         self.assertEqual(input_tensor_dt.placements, expected_placements)
         self.assertEqual(input_tensor_dt.full_tensor(), input_tensor)
 
-    @skip_if_lt_x_gpu(4)
     @parametrize(
         "placements, shard_order_dict, should_pass",
         [
@@ -528,7 +522,6 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
                 input_tensor, mesh, placements=placements, shard_order=shard_order_dict
             )
 
-    @skip_if_lt_x_gpu(4)
     def test_empty_shard_order_creates_replicated_dtensor(self):
         """Test that empty shard_order creates a replicated DTensor."""
         mesh = self.build_device_mesh((2, self.world_size // 2))
@@ -542,7 +535,6 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
         self.assertEqual(dt_empty_shard_order.placements, expected_default_placements)
         self.assertEqual(dt_empty_shard_order.full_tensor(), input_tensor)
 
-    @skip_if_lt_x_gpu(4)
     @parametrize(
         "placements, expected_shard_order_tuple",
         [
@@ -567,7 +559,6 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
         self.assertEqual(dt_redist_placements.full_tensor(), input_tensor)
         self.assertEqual(dt_redist_placements.shard_order, expected_shard_order_tuple)
 
-    @skip_if_lt_x_gpu(4)
     @parametrize(
         "expected_placements, shard_order_dict",
         [
