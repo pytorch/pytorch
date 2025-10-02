@@ -858,7 +858,10 @@ struct type_specialized_kernel_launcher {
       storer_t storer) {
     if (ret_t == rt_binary_specializations[arg_index][0] &&
         arg0_t == rt_binary_specializations[arg_index][1] &&
-        arg1_t == rt_binary_specializations[arg_index][2])
+        arg1_t == rt_binary_specializations[arg_index][2]) {
+      using cret_t = rt_binary_specializations[arg_index][0]::type;
+      using carg0_t = rt_binary_specializations[arg_index][1]::type;
+      using carg0_t = rt_binary_specializations[arg_index][2]::type;
       launch_vectorized_templated_kernel<
           func_t,
           array_t,
@@ -866,12 +869,9 @@ struct type_specialized_kernel_launcher {
           out_calc_t,
           loader_t,
           storer_t,
-          decltype(c10::impl::ScalarTypeToCPPType<
-                   rt_binary_specializations[arg_index][0]>::t),
-          decltype(c10::impl::ScalarTypeToCPPType<
-                   rt_binary_specializations[arg_index][1]>::t),
-          decltype(c10::impl::ScalarTypeToCPPType<
-                   rt_binary_specializations[arg_index][2]>::t)>(
+          cret_t,
+          carg0_t,
+          carg1_t>(
           numel,
           f,
           data,
@@ -879,6 +879,7 @@ struct type_specialized_kernel_launcher {
           output_offset_calculator,
           loader,
           storer);
+    }
   }
 };
 
