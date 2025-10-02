@@ -55,12 +55,10 @@
 
 #define THPUtils_checkReal_BOOL(object) PyBool_Check(object)
 
-#define THPUtils_checkReal_COMPLEX(object)                                    \
-  PyComplex_Check(object) || PyFloat_Check(object) || PyLong_Check(object) || \
-      PyInt_Check(object)
+#define THPUtils_checkReal_COMPLEX(object) \
+  PyComplex_Check(object) || PyFloat_Check(object) || PyLong_Check(object)
 
 #define THPUtils_newReal_FLOAT(value) PyFloat_FromDouble(value)
-#define THPUtils_newReal_INT(value) PyInt_FromLong(value)
 
 #define THPUtils_newReal_BOOL(value) PyBool_FromLong(value)
 
@@ -105,36 +103,16 @@
 #define THPBoolUtils_newAccreal(value) THPUtils_newReal_BOOL(value)
 #define THPLongUtils_checkReal(object) THPUtils_checkReal_INT(object)
 #define THPLongUtils_unpackReal(object) (int64_t)THPUtils_unpackReal_INT(object)
-#define THPLongUtils_newReal(value) THPUtils_newReal_INT(value)
 #define THPIntUtils_checkReal(object) THPUtils_checkReal_INT(object)
 #define THPIntUtils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)
-#define THPIntUtils_newReal(value) THPUtils_newReal_INT(value)
 #define THPShortUtils_checkReal(object) THPUtils_checkReal_INT(object)
 #define THPShortUtils_unpackReal(object) (short)THPUtils_unpackReal_INT(object)
-#define THPShortUtils_newReal(value) THPUtils_newReal_INT(value)
 #define THPCharUtils_checkReal(object) THPUtils_checkReal_INT(object)
 #define THPCharUtils_unpackReal(object) (char)THPUtils_unpackReal_INT(object)
-#define THPCharUtils_newReal(value) THPUtils_newReal_INT(value)
 #define THPByteUtils_checkReal(object) THPUtils_checkReal_INT(object)
 #define THPByteUtils_unpackReal(object) \
   (unsigned char)THPUtils_unpackReal_INT(object)
 #define THPByteUtils_newReal(value) THPUtils_newReal_INT(value)
-// quantized types
-#define THPQUInt8Utils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPQUInt8Utils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)
-#define THPQUInt8Utils_newReal(value) THPUtils_newReal_INT(value)
-#define THPQInt8Utils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPQInt8Utils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)
-#define THPQInt8Utils_newReal(value) THPUtils_newReal_INT(value)
-#define THPQInt32Utils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPQInt32Utils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)
-#define THPQInt32Utils_newReal(value) THPUtils_newReal_INT(value)
-#define THPQUInt4x2Utils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPQUInt4x2Utils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)
-#define THPQUInt4x2Utils_newReal(value) THPUtils_newReal_INT(value)
-#define THPQUInt2x4Utils_checkReal(object) THPUtils_checkReal_INT(object)
-#define THPQUInt2x4Utils_unpackReal(object) (int)THPUtils_unpackReal_INT(object)
-#define THPQUInt2x4Utils_newReal(value) THPUtils_newReal_INT(value)
 
 /*
    From https://github.com/python/cpython/blob/v3.7.0/Modules/xxsubtype.c
