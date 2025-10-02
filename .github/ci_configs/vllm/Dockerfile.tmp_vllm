@@ -353,6 +353,7 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
     git clone --depth 1 --recursive --shallow-submodules \
         --branch ${FLASHINFER_GIT_REF} \
         ${FLASHINFER_GIT_REPO} flashinfer \
+    && uv pip install --system cuda-python==$(echo $CUDA_VERSION | cut -d. -f1,2) pynvml==$(echo $CUDA_VERSION | cut -d. -f1) nvidia-nvshmem-cu$(echo $CUDA_VERSION | cut -d. -f1) \
     && echo "Building FlashInfer with AOT for arches FLASHINFER_CUDA_ARCH_LIST: ${FLASHINFER_CUDA_ARCH_LIST}, TORCH_CUDA_ARCH_LIST ${TORCH_CUDA_ARCH_LIST}" \
     && cd flashinfer \
     && python3 -m flashinfer.aot \
