@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional, Union
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.fx_passes.bucketing import is_wait_tensor
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 
@@ -18,13 +19,6 @@ from torch.utils._ordered_set import OrderedSet
 log = logging.getLogger(__name__)
 
 from ..pattern_matcher import stable_topological_sort
-
-
-def is_wait_tensor(node: torch.fx.Node) -> bool:
-    return (
-        node.op == "call_function"
-        and node.target == torch.ops._c10d_functional.wait_tensor.default
-    )
 
 
 def get_custom_estimation(n: fx.Node) -> Optional[float]:
@@ -79,9 +73,8 @@ def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
         )
 
 
-def benchmark_node(n: fx.Node) -> float:
-    if (est := get_custom_estimation(n)) is not None:
-        return est
+def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, Optional[str]]:
+    assert is_compute_node(n)
 
     from torch._dynamo.testing import rand_strided
 
@@ -89,7 +82,7 @@ def benchmark_node(n: fx.Node) -> float:
     success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(n)
 
     if not success:
-        return 0
+        return 0, None
 
     unbacked_tensor = False
 
@@ -116,15 +109,23 @@ def benchmark_node(n: fx.Node) -> float:
         )
 
         if val := get_cached_node_time(key):
-            return val
+            return val, key
 
         if unbacked_tensor:
-            return 0
+            return 0, key
+
+        if (est := get_custom_estimation(n)) is not None:
+            set_cached_node_time(key, est)
+            return est, key
 
         bench = get_collective_do_bench()
         out = bench(lambda: n.target(*args, **kwargs))  # type: ignore[operator]
         set_cached_node_time(key, out)
-        return out
+        return out, key
+
+
+def benchmark_node(n: fx.Node) -> float:
+    return benchmark_node_with_cache_key(n)[0]
 
 
 @functools.cache
@@ -156,6 +157,16 @@ class CollectiveInfo:
         return self.exposed_time_ms != 0
 
 
+@dataclass
+class CollBucket:
+    """Track information about a bucket of collectives."""
+
+    collectives: list[fx.Node]  # Original collective starts
+    bucketed_start: Optional[fx.Node] = None  # After bucketing
+    bucketed_wait: Optional[fx.Node] = None  # After bucketing
+    total_bytes: int = 0
+
+
 class OverlapScheduler:
     """
     Scheduler that reorders operations to maximize compute-collective overlap.
@@ -184,7 +195,7 @@ class OverlapScheduler:
         self,
         gm: torch.fx.GraphModule,
         max_in_flight_gb: float = 2.0,
-        compute_overlap_multipler: float = 1.0,
+        compute_overlap_multipler: float = 2.0,
         max_coll_distance: int = 1000,
     ):
         self.gm = gm
@@ -301,8 +312,50 @@ class OverlapScheduler:
 
         return compute_depth_dominance
 
+    def _align_compute_nodes_runtime_estimations_across_all_distributed_ranks(
+        self,
+    ) -> None:
+        log.info(
+            "Overlap scheduling: Aligning runtime estimations across all distributed ranks"
+        )
+        runtime_estimations_keys: list[Optional[str]] = []
+        runtime_estimations: list[float] = []
+        for n in self.compute_nodes:
+            val, key = benchmark_node_with_cache_key(n)
+            runtime_estimations.append(val)
+            runtime_estimations_keys.append(key)
+
+        import torch.distributed as dist
+        from torch.distributed.distributed_c10d import _get_default_group
+
+        world_size = dist.get_world_size()
+        pg = _get_default_group()
+        with no_dispatch():
+            gathered_runtime_estimations: list[list[float]] = [
+                [] for _ in range(world_size)
+            ]
+            dist.all_gather_object(
+                gathered_runtime_estimations, runtime_estimations, pg
+            )
+            median_runtime_estimations = torch.median(
+                torch.tensor(gathered_runtime_estimations), dim=0
+            ).values.tolist()
+        for key, median_runtime_estimation in zip(
+            runtime_estimations_keys, median_runtime_estimations
+        ):
+            if key is None:
+                continue
+            set_cached_node_time(key, median_runtime_estimation)
+        log.info(
+            "Overlap scheduling: Runtime estimations across all distributed ranks were aligned"
+        )
+
     def run(self) -> torch.fx.GraphModule:
         """Run the scheduling algorithm."""
+        # All ranks must make identical decisions on overlap reordering,
+        # Thus we must have identical runtime estimations across ranks.
+        # For now we do benchmarking only for compute nodes.
+        self._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
 
         while self.ready:
             if self._should_force_wait_for_memory():
@@ -325,6 +378,8 @@ class OverlapScheduler:
                 self._handle_other(node)
 
         self._reorder_graph()
+        if torch._inductor.config.test_configs.aten_fx_overlap_preserving_bucketing:
+            self._bucket_collectives()
         return self.gm
 
     def _handle_other(self, node: fx.Node) -> None:
@@ -582,6 +637,20 @@ class OverlapScheduler:
         )
 
         self.reorder_graph()
+
+    def _bucket_collectives(self) -> None:
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            graph=self.graph,
+            collective_info=self.collective_info,
+            node_ancestors=self.node_ancestors,
+            scheduled=self.scheduled,
+            max_bucket_memory_gb=1.0,  # Could make this configurable
+        )
+        bucketer.bucket_collectives()
 
     def compute_potential_hidden_nodes(
         self, nodes_to_check: Iterable[fx.Node], limit_coll_per_compute: bool = False
