@@ -31,8 +31,30 @@ from torch.utils._debug_mode import get_active_debug_mode
 logger = logging.getLogger(__name__)
 
 
-# Print mapping of tensor dimensions to mesh dimensions for tensor distribution.
-print_distribution_from_tensor_dim_to_mesh_dims = True
+# Controls the print format for tensor distribution visualization.
+# When True: Shows tensor-centric format mapping tensor dimensions to mesh dimensions
+# When False: Shows standard DTensor mesh-centric format mapping mesh dimensions to tensor dimensions
+#
+# Example with a 3D tensor on a 2x2x2x2 mesh (16 devices) with
+#   ``placements``: [Partial(), Shard(1), Shard(1), Replicate()],
+#   ``shard_order``: {1: [2, 1]} (tensor dim 1 shard on mesh dimension 2 first then 1)
+#   - mesh_dim_0: Partial reduction (sum)
+#   - mesh_dim_1: Shard tensor dimension 1 (executed second)
+#   - mesh_dim_2: Shard tensor dimension 1 (executed first)
+#   - mesh_dim_3: Replicate
+#
+#   When True (tensor-centric):  "S(1)[1, 2]P(sum)[0]"
+#     - S(1)[1, 2]: tensor dimension 1 sharded on mesh dimension 1 and then 2
+#     - P(sum)[0]: partial reduction on mesh dimension 0
+#     - Clearly shows which tensor dims map to which mesh dims
+#
+#   When False (mesh-centric): "P(sum)S(1)[1]S(1)[0]R"
+#     - P(sum): mesh dimension 0 has partial reduction
+#     - S(1): mesh dimension 1 shards tensor dimension 1 (with order 1)
+#     - S(1): mesh dimension 2 shards tensor dimension 1 (with order 0)
+#     - R: Replicated on mesh dimension 3
+#     - Standard DTensor placement with concise format following mesh dimension order
+tensor_centric_format = True
 
 
 class _TransformInfo(NamedTuple):
@@ -103,7 +125,7 @@ class DTensorRedistributePlanner:
             return DTensorSpec.format_shard_order_str(
                 self.placements,
                 self.tensor_dim_to_mesh_dim,
-                print_distribution_from_tensor_dim_to_mesh_dims,
+                tensor_centric_format,
             )
 
         def __repr__(self):
@@ -675,7 +697,6 @@ def _gen_transform_infos_non_cached(
     src_shard_order = src_spec.shard_order
     dst_shard_order = dst_spec.shard_order
     assert src_shard_order is not None and dst_shard_order is not None
-    assert len(src_shard_order) == len(dst_shard_order)
     if all(
         _is_default_device_order(order) for order in (src_shard_order, dst_shard_order)
     ):
@@ -887,12 +908,21 @@ class Redistribute(torch.autograd.Function):
         ctx.current_spec = current_spec
 
         if current_spec.placements != placements:
-            target_spec = DTensorSpec(
-                device_mesh,
-                placements,
-                shard_order=shard_order,
-                tensor_meta=current_spec.tensor_meta,
-            )
+            if shard_order is not None:
+                target_spec = DTensorSpec(
+                    device_mesh,
+                    placements,
+                    shard_order=shard_order,
+                    tensor_meta=current_spec.tensor_meta,
+                )
+            else:
+                # let DTensorSpec automatically generate shard_order
+                target_spec = DTensorSpec(
+                    device_mesh,
+                    placements,
+                    tensor_meta=current_spec.tensor_meta,
+                )
+
             output = redistribute_local_tensor(
                 local_tensor,
                 current_spec,
