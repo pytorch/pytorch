@@ -32,6 +32,7 @@ from typing import (
 import torch
 from torch._dynamo.utils import set_feature_use
 from torch._environment import is_fbcode
+from torch._inductor import metrics
 from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
@@ -1086,6 +1087,18 @@ class CachingAutotuner(KernelInterface):
                         k.n_regs,
                         k.n_spills,
                         k.shared,
+                    )
+
+            if metrics.is_metric_table_enabled("kernel_autotune"):
+                if self.fn.fn is None:
+                    self.fn = self._reload_kernel().fn
+
+                kernel_path = self.fn.fn.__code__.co_filename
+                kernel_name = self.fn.__name__
+
+                for k, v in timings.items():
+                    metrics.log_kernel_autotune_result(
+                        kernel_path, kernel_name, k.config, v
                     )
 
             self.reset_to_zero_args(*args, **kwargs)
