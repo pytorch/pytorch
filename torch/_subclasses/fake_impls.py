@@ -5,8 +5,9 @@ import itertools
 import math
 import operator
 import sys
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch._custom_op
