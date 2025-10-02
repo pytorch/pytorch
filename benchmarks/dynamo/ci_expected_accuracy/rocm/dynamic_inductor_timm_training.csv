@@ -34,7 +34,7 @@ convnext_base,pass,7
 
 
 
-crossvit_9_240,pass,7
+crossvit_9_240,fail_accuracy,7
 
 
 
@@ -62,7 +62,7 @@ eca_botnext26ts_256,pass,7
 
 
 
-eca_halonext26ts,pass,7
+eca_halonext26ts,fail_accuracy,7
 
 
 
@@ -74,7 +74,7 @@ fbnetc_100,pass,7
 
 
 
-fbnetv3_b,pass,6
+fbnetv3_b,fail_accuracy,6
 
 
 

@@ -70,7 +70,7 @@ fastNLP_Bert,pass,10
 
 
 
-functorch_dp_cifar10,pass,7
+functorch_dp_cifar10,fail_accuracy,7
 
 
 
@@ -278,7 +278,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,39
+vision_maskrcnn,fail_accuracy,39
 
 
 

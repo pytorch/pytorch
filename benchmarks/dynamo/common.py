@@ -52,6 +52,7 @@ from torch._dynamo.testing import (
 )
 from torch._logging.scribe import open_source_signpost
 
+torch.use_deterministic_algorithms(True)
 
 try:
     from torch._dynamo.utils import clone_inputs, graph_break_reasons
