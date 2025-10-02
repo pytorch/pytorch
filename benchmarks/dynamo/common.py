@@ -3758,7 +3758,7 @@ def run(runner, args, original_dir=None):
         if (
             args.only is not None
             and not torch.version.hip
-            and args.only 
+            and args.only
             not in {
                 "alexnet",
                 "Background_Matting",
