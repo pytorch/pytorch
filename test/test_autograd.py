@@ -8224,7 +8224,7 @@ for shape in [(1,), ()]:
         class IdOneOutput(Function):
             @staticmethod
             def forward(ctx, a, make_view, pure_view):
-                ctx.is_pure_view = pure_view
+                ctx._is_pure_view = pure_view
                 if make_view:
                     a = a.narrow(0, 0, 2)
                 else:
@@ -8239,7 +8239,7 @@ for shape in [(1,), ()]:
         class IdTwoOutput(Function):
             @staticmethod
             def forward(ctx, a, b, make_view, pure_view):
-                ctx.is_pure_view = pure_view
+                ctx._is_pure_view = pure_view
                 if make_view:
                     a = a.narrow(0, 0, 2)
                 else:
@@ -8258,7 +8258,7 @@ for shape in [(1,), ()]:
         class ViewOfTemp(Function):
             @staticmethod
             def forward(ctx, a, make_view, pure_view):
-                ctx.is_pure_view = pure_view
+                ctx._is_pure_view = pure_view
                 ctx.save_for_backward(a)
                 if make_view:
                     a = a.narrow(0, 0, 2)
@@ -8334,16 +8334,17 @@ for shape in [(1,), ()]:
                             int(pure_view)
                         ]
 
-                        print(pure_view, fn_id, inplace, output_is_a_view)
-                        if (
-                            (pure_view and fn_id == "one_output")
-                            or (pure_view and fn_id == "view_of_temp" and not inplace)
-                            or (not pure_view and (not inplace or not output_is_a_view))
-                        ):
-                            gradcheck(fn, (a, b), check_batched_grad=False)
-                        else:
+                        will_raise_error = (
+                            (pure_view and fn_id == "two_output")
+                            or (pure_view and fn_id == "view_of_temp" and inplace)
+                            or (not pure_view and inplace and output_is_a_view)
+                        )
+
+                        if will_raise_error:
                             with self.assertRaisesRegex(RuntimeError, err_msg):
                                 gradcheck(fn, (a, b), check_batched_grad=False)
+                        else:
+                            gradcheck(fn, (a, b), check_batched_grad=False)
 
                         # Was the custom backward called properly
                         bw_called[0] = 0
@@ -8352,11 +8353,7 @@ for shape in [(1,), ()]:
                         expected_called = 1
                         expected_ga_nz = True
 
-                        if (
-                            (pure_view and fn_id == "two_output")
-                            or (pure_view and fn_id == "view_of_temp" and inplace)
-                            or (not pure_view and inplace and output_is_a_view)
-                        ):
+                        if will_raise_error:
                             expected_called = 0
                             with self.assertRaisesRegex(RuntimeError, err_msg):
                                 fn(a, b)
