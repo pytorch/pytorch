@@ -1512,7 +1512,11 @@ Tensor nanmean(
 }
 
 
-static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+static void logsumexp_out_impl(const Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+  // Create a mutable reference for operations that require non-const Tensor&
+  // This is safe because Tensor is a handle type and we're modifying the underlying data
+  Tensor& result_mut = const_cast<Tensor&>(result);
+
   // can't take max of empty tensor
   if (self.numel() != 0) {
     // For complex numbers, use the real part to calculate the max. Based on
@@ -1520,13 +1524,12 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
     auto maxes = at::amax(at::real(self), dims, true);
     auto maxes_squeezed = (keepdim ? maxes : at::squeeze(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
-    at::sum_out(result, (self - maxes).exp_(), dims, keepdim);
-    result.log_().add_(maxes_squeezed);
+    at::sum_out(result_mut, (self - maxes).exp_(), dims, keepdim);
+    result_mut.log_().add_(maxes_squeezed);
   } else {
-    at::sum_out(result, at::exp(self), dims, keepdim);
-    result.log_();
+    at::sum_out(result_mut, at::exp(self), dims, keepdim);
+    result_mut.log_();
   }
-  return result;
 }
 
 TORCH_IMPL_FUNC(logsumexp_out)
@@ -1539,9 +1542,9 @@ TORCH_IMPL_FUNC(logsumexp_out)
   if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     // for integral inputs, promote input to default floating type.
     auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
-    logsumexp_out_impl(const_cast<Tensor&>(result), self.to(default_dtype), dims, keepdim);
+    logsumexp_out_impl(result, self.to(default_dtype), dims, keepdim);
   } else {
-    logsumexp_out_impl(const_cast<Tensor&>(result), self, dims, keepdim);
+    logsumexp_out_impl(result, self, dims, keepdim);
   }
 }
 
