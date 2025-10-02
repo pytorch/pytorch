@@ -2,9 +2,9 @@
 # flake8: noqa: B950
 
 
-import contextlib
 import functools
 import unittest
+from contextlib import contextmanager, ExitStack
 
 import torch
 import torch._dynamo
@@ -32,6 +32,17 @@ from torch.testing._internal.common_utils import (
 
 
 nested_compile_region = torch.compiler.nested_compile_region
+
+
+@contextmanager
+def enable_local_map_wrapping():
+    from torch._dynamo.variables.higher_order_ops import (
+        LocalMapWrappedHigherOrderVariable as vt_cls,
+    )
+    from torch._higher_order_ops import local_map as local_map_module
+
+    with vt_cls.enable(), local_map_module.defer_inlining():
+        yield
 
 
 def get_skip_reasons():
@@ -123,7 +134,7 @@ def create_model(attention_fn, nheads, dim1, dim2, sac_policy=None):
     return LocalMapTransformerBlock(nheads, dim1, dim2)
 
 
-def get_local_mapped_functions():
+def get_local_mapped_functions(mesh):
     assert torch.distributed.is_available()
 
     @local_map(
@@ -135,7 +146,7 @@ def get_local_mapped_functions():
         ),
         redistribute_inputs=True,
         in_grad_placements=None,
-        device_mesh=None,
+        device_mesh=mesh,
     )
     def cp_decorated(query, key, value):
         return context_parallel_attention(query, key, value)
@@ -150,7 +161,7 @@ def get_local_mapped_functions():
         ),
         redistribute_inputs=True,
         in_grad_placements=None,
-        device_mesh=None,
+        device_mesh=mesh,
     )
 
     return cp_decorated, cp_function
@@ -158,15 +169,34 @@ def get_local_mapped_functions():
 
 class TestLocalMap(TestCase):
     def setUp(self):
-        self.exit_stack = contextlib.ExitStack()
+        self.exit_stack = ExitStack()
         self.exit_stack.enter_context(sdpa_kernel(backends=[SDPBackend.MATH]))
+        if torch.distributed.is_available():
+            from torch.testing._internal.distributed.fake_pg import FakeStore
+
+            self.fake_store = FakeStore()
+            self.world_size = 256
+            torch.distributed.init_process_group(
+                "fake", store=self.fake_store, rank=0, world_size=self.world_size
+            )
+            self.mesh = torch.distributed.device_mesh.init_device_mesh(
+                "cpu",
+                (self.world_size // 32, 8, 4),
+                mesh_dim_names=(
+                    "dp",
+                    "tp",
+                    "cp",
+                ),
+            )
 
     def tearDown(self):
         self.exit_stack.close()
+        if torch.distributed.is_available():
+            torch.distributed.destroy_process_group()
 
     @unittest.skipIf(*get_skip_reasons())
     def test_simple(self):
-        cp_decorated, cp_function = get_local_mapped_functions()
+        cp_decorated, cp_function = get_local_mapped_functions(self.mesh)
         bs = 8 * 1
         dim1 = 96
         dim2 = dim1 * 4
@@ -252,7 +282,7 @@ class GraphModule(torch.nn.Module):
 
     @unittest.skipIf(*get_skip_reasons())
     def test_sac(self):
-        cp_decorated, cp_function = get_local_mapped_functions()
+        cp_decorated, cp_function = get_local_mapped_functions(self.mesh)
         bs = 8 * 1
         dim1 = 96
         dim2 = dim1 * 4
@@ -329,9 +359,9 @@ class GraphModule(torch.nn.Module):
         # so that we can defer inlining for up until AOTAutograd stage 1.
         # Then we should be inlined by stage 2. But we can't do that today.
 
-        cp_decorated, cp_function = get_local_mapped_functions()
+        cp_decorated, cp_function = get_local_mapped_functions(self.mesh)
         bs = 8 * 1
-        dim1 = 96
+        dim1 = 128
         dim2 = dim1 * 4
         nheads = 16
         seq_len = 16
@@ -342,13 +372,12 @@ class GraphModule(torch.nn.Module):
 
         model = create_model(
             cp_decorated, nheads, dim1, dim2, sac_policy=save_scalar_muls
+        ).to(torch.bfloat16)
+        inputs = (
+            torch.randn(bs, seq_len, dim1, requires_grad=True, dtype=torch.bfloat16),
         )
-        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True),)
         try:
-            with (
-                LocalMapWrappedHigherOrderVariable.enable(),
-                torch._higher_order_ops.local_map.defer_inlining(),
-            ):
+            with enable_local_map_wrapping():
                 out = torch.compile(model, backend=backend)(*inputs)
             out.sum().backward()
         except AttributeError as e:
@@ -360,13 +389,12 @@ class GraphModule(torch.nn.Module):
 
         model = create_model(
             cp_function, nheads, dim1, dim2, sac_policy=save_scalar_muls
+        ).to(torch.bfloat16)
+        inputs = (
+            torch.randn(bs, seq_len, dim1, requires_grad=True, dtype=torch.bfloat16),
         )
-        inputs = (torch.randn(bs, seq_len, dim1, requires_grad=True),)
         try:
-            with (
-                LocalMapWrappedHigherOrderVariable.enable(),
-                torch._higher_order_ops.local_map.defer_inlining(),
-            ):
+            with enable_local_map_wrapping():
                 out = torch.compile(model, backend=backend)(*inputs)
             out.sum().backward()
         except AttributeError as e:
