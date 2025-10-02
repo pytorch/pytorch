@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.utils import reenter_make_fx
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
 from torch.fx import GraphModule
@@ -319,11 +320,12 @@ def proxy_mode_key(
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # type: ignore[union-attr]
     proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs)  # type: ignore[union-attr]
     qualname = proxy_mode.tracer.get_fresh_qualname("wrap_body")  # type: ignore[union-attr]
-    proxy_mode.tracer.root.register_module(qualname, gmod)  # type: ignore[union-attr]
-    proxy_gmod = proxy_mode.tracer.unwrap_proxy(gmod)  # type: ignore[union-attr, call-overload]
-    for node in proxy_gmod.graph.nodes:
-        if "example_value" in node.meta:
-            node.meta["val"] = node.meta["example_value"]
+
+    # TODO (tmanlaibaatar) don't we need flat_apply here??
+    flat_args, _ = pytree.tree_flatten((args, kwargs))
+    gmod_aten = reenter_make_fx(gmod)(*flat_args)
+    proxy_mode.tracer.root.register_module(qualname, gmod_aten)  # type: ignore[union-attr]
+    proxy_gmod = proxy_mode.tracer.unwrap_proxy(gmod_aten)  # type: ignore[union-attr, call-overload]
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
         tag_activation_checkpoint,
