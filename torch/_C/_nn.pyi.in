@@ -1,0 +1,139 @@
+# ${generated_comment}
+# mypy: disable-error-code="type-arg"
+
+from collections.abc import Sequence
+from typing import Literal, overload
+
+from torch import memory_format, Tensor
+from torch.types import _bool, _device, _dtype, _int, _size
+
+# Defined in tools/autograd/templates/python_nn_functions.cpp
+
+${c_nn_function_hints}
+
+# Defined in aten/src/ATen/native/mkldnn/Linear.cpp
+def mkldnn_linear(input: Tensor, weight: Tensor, bias: Tensor | None) -> Tensor: ...
+
+# Defined at aten/src/ATen/native/mkldnn/MKLDNNConversions.cpp
+def mkldnn_reorder_conv2d_weight(
+    self: Tensor,
+    padding: list,
+    stride: list,
+    dilatation: list,
+    groups: int,
+) -> Tensor: ...
+def mkldnn_reorder_conv3d_weight(
+    self: Tensor,
+    padding: list,
+    stride: list,
+    dilatation: list,
+    groups: int,
+) -> Tensor: ...
+
+# Defined in aten/src/ATen/native/mkldnn/Prelu.cpp
+def mkldnn_prelu(input: Tensor, weight: Tensor) -> Tensor: ...
+
+# Defined at tools/autograd/templates/python_nn_functions.cpp
+@overload
+def _parse_to(
+    device: _device,
+    dtype: _dtype,
+    non_blocking: _bool,
+    copy: _bool,
+    *,
+    memory_format: memory_format,
+) -> tuple[_device, _dtype, _bool, memory_format]: ...
+@overload
+def _parse_to(
+    dtype: _dtype,
+    non_blocking: _bool,
+    copy: _bool,
+    *,
+    memory_format: memory_format,
+) -> tuple[_device, _dtype, _bool, memory_format]: ...
+@overload
+def _parse_to(
+    tensor: Tensor,
+    non_blocking: _bool,
+    copy: _bool,
+    *,
+    memory_format: memory_format,
+) -> tuple[_device, _dtype, _bool, memory_format]: ...
+
+# Defined in aten/src/ATen/native/PackedSequence.cpp
+def pad_sequence(
+    sequences: list[Tensor] | tuple[Tensor, ...],
+    batch_first: bool = False,
+    padding_value: float = 0.0,
+    padding_side: Literal["left", "right"] = "right",
+) -> Tensor: ...
+
+# Upsample functions used by torch.nn.functional.interpolate
+def upsample_nearest1d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_nearest2d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_nearest3d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def _upsample_nearest_exact1d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def _upsample_nearest_exact2d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def _upsample_nearest_exact3d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_linear1d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def _upsample_bilinear2d_aa(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_bilinear2d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_trilinear3d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def _upsample_bicubic2d_aa(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def upsample_bicubic2d(
+    input: Tensor,
+    output_size: Sequence[int] | None,
+    align_corners: bool,
+    scale_factors: Sequence[float] | None,
+) -> Tensor: ...
+def flatten_dense_tensors(tensors: list[Tensor]) -> Tensor: ...
+def unflatten_dense_tensors(flat: Tensor, tensors: list[Tensor]) -> list[Tensor]: ...

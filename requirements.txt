@@ -1,0 +1,19 @@
+# Python dependencies required for development
+
+# Build System requirements
+--requirement requirements-build.txt
+
+# Install / Development extra requirements
+build[uv]  # for building sdist and wheel
+expecttest>=0.3.0
+filelock
+fsspec>=0.8.5
+hypothesis
+jinja2
+lintrunner ; platform_machine != "s390x" and platform_machine != "riscv64"
+networkx>=2.5.1
+optree>=0.13.0
+psutil
+sympy>=1.13.3
+typing-extensions>=4.13.2
+wheel

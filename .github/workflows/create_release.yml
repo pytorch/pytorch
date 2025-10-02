@@ -1,0 +1,147 @@
+name: Create Release
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      # Final Release tags look like: v1.11.0
+      - v[0-9]+.[0-9]+.[0-9]+
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+  release:
+    types: [published]
+  pull_request:
+    paths: [.github/workflows/create_release.yml]
+
+jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  release:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
+    name: Create Release
+    runs-on: ubuntu-latest
+    # https://github.com/softprops/action-gh-release?tab=readme-ov-file#permissions
+    permissions:
+      contents: write
+    outputs:
+      pt_release_name: ${{ steps.release_name.outputs.pt_release_name }}
+      pt_pep517_release_name: ${{ steps.release_name.outputs.pt_pep517_release_name }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          show-progress: false
+          submodules: 'recursive'
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Fake name for PRs
+        if: ${{ github.event_name == 'pull_request' }}
+        run: echo "PT_GITHUB_REF=refs/tags/pr-tag" >> "$GITHUB_ENV"
+      - name: Real name for non-PRs
+        if: ${{ github.event_name != 'pull_request' }}
+        run: echo "PT_GITHUB_REF=$GITHUB_REF" >> "$GITHUB_ENV"
+      - name: Set filenames
+        run: |
+          tag_or_branch="${PT_GITHUB_REF#refs/tags/}"
+          tag_or_branch="${tag_or_branch#refs/heads/}"
+          # replace directory separators with _ in branch name
+          tag_or_branch="${tag_or_branch//\//_}"
+          torch_version="$(python -c 'from tools.generate_torch_version import get_torch_version; print(get_torch_version())')"
+          {
+            echo "PT_RELEASE_NAME=pytorch-$tag_or_branch";
+            echo "PT_RELEASE_FILE=pytorch-$tag_or_branch.tar.gz";
+            echo "PT_PEP517_RELEASE_FILE=torch-${torch_version}.tar.gz";
+          } >> "$GITHUB_ENV"
+      - name: Checkout optional submodules
+        run: python3 tools/optional_submodules.py
+      - name: Copy docs requirements for inclusion
+        run: |
+          # Replace symlink with actual file
+          rm docs/requirements.txt || true
+          cp .ci/docker/requirements-docs.txt docs/requirements.txt
+      - name: Create source distribution
+        run: |
+          # Create new folder with specified name so extracting the archive yields that
+          rm -rf "/tmp/$PT_RELEASE_NAME"
+          cp -r "$PWD" "/tmp/$PT_RELEASE_NAME"
+          mv "/tmp/$PT_RELEASE_NAME" .
+          # Cleanup
+          rm -rf "$PT_RELEASE_NAME"/{.circleci,.ci}
+          find "$PT_RELEASE_NAME" -name '.git*' -exec rm -rv {} \; || true
+          # Create archive
+          tar -czf "$PT_RELEASE_FILE" "$PT_RELEASE_NAME"
+          echo "Created source archive $PT_RELEASE_FILE with content: $(ls -a "$PT_RELEASE_NAME")"
+      - name: Create PEP 517 compatible source distribution
+        run: |
+          pip install build==1.2.2.post1 || exit 1
+          python -m build --sdist || exit 1
+          cd dist || exit 1
+      - name: Upload source distribution for release
+        if: ${{ github.event_name == 'release' }}
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        with:
+          files: |
+            ${{ env.PT_RELEASE_FILE }}
+            ${{ env.PT_PEP517_RELEASE_FILE }}
+      - name: Upload source distribution to GHA artifacts  # for release tags
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: ${{ env.PT_RELEASE_FILE }}
+          path: ${{ env.PT_RELEASE_FILE }}
+      - name: Upload PEP 517 source distribution to GHA artifacts  # for release tags
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: ${{ env.PT_PEP517_RELEASE_FILE }}
+          path: dist/${{ env.PT_PEP517_RELEASE_FILE }}
+      - name: Set output
+        id: release_name
+        run: |
+          {
+            echo "pt_release_name=${{ env.PT_RELEASE_FILE }}";
+            echo "pt_pep517_release_name=${{ env.PT_PEP517_RELEASE_FILE }}";
+          } >> "${GITHUB_OUTPUT}"
+
+  upload_source_code_to_s3:
+    if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+    environment: sourcecode-upload
+    name: Upload source code to S3 for release tags
+    permissions:
+      id-token: write
+    needs:
+      - get-label-type
+      - release
+    steps:
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
+        with:
+          name: ${{ needs.release.outputs.pt_release_name }}
+      - uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
+        with:
+          name: ${{ needs.release.outputs.pt_pep517_release_name }}
+      - name: Configure AWS credentials(PyTorch account)
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_pytorch_source_code_upload_role
+          aws-region: us-east-1
+      - uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          s3-bucket: pytorch
+          s3-prefix: source_code/test
+          if-no-files-found: warn
+          path: |
+            ${{ needs.release.outputs.pt_release_name }}
+            ${{ needs.release.outputs.pt_pep517_release_name }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
+  cancel-in-progress: true

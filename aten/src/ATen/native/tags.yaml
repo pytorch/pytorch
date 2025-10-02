@@ -1,0 +1,95 @@
+# This yaml file contains all the possible tags that can be defined in `tags` in `native_functions.yaml`
+
+- tag: inplace_view
+  desc: |
+          This tag indicates if an operator *only* modifies the tensor metadata
+- tag: pt2_compliant_tag
+  desc: |
+          This tag indicates if the operator is guaranteed to
+          work with the PT2 compilation APIs (torch.compile,
+          torch.export, etc). If you add this tag to an
+          operator, please use
+          `torch.testing._internal.optest.opcheck` to test that
+          the operator has been registered correctly and
+          works with torch.compile
+- tag: view_copy
+  desc: |
+          This tag indicates operators that are *_copy* variants
+          of view/aliasing operators. If an operator has a view_copy tag,
+          then it should have the name {op}_copy, where {op} is a view operator.
+- tag: dynamic_output_shape
+  desc: |
+          This tag indicates if an operator's output's shape depends on input Tensor
+          data.
+- tag: data_dependent_output
+  desc: |
+          Operator has a non-Tensor output whose value is dependent on the data
+          of Tensor inputs.  Among other things, this implies that this operator
+          cannot be run with meta tensor (since data is not available), nor
+          can it be symbolically traced.
+- tag: generated
+  desc: |
+          This tag indicates that the operator doesn't have an explicit entry in
+          native_functions.yaml, and instead was generated automatically by the codegen.
+- tag: nondeterministic_seeded
+  desc: |
+          This tag indicates if an operator is nondeterministically seeded
+          (i.e., is random) such that the operator intentionally produces
+          different results when run twice on the same inputs, but this randomness
+          is controlled by a Generator which, if reseeded would give you the
+          same result.
+- tag: nondeterministic_bitwise
+  desc: |
+          This tag indicates if an operator doesn't guarantee bitwise equivalence
+          across different runs of an operator with identical inputs.
+- tag: needs_exact_strides
+  desc: |
+          This tag indicates that the operator should be passed Tensors following
+          the same strides as observed in eager when compiled in inductor.
+          Only one of {needs_exact_strides, needs_contiguous_strides, needs_fixed_stride_order, flexible_layout}
+          can apply; if multiple are assigned then we assume the most restrictive one.
+- tag: needs_contiguous_strides
+  desc: |
+          This tag indicates that the operator should be passed contiguous Tensors.
+          Failure to do so will result in undefined behavior.
+- tag: needs_fixed_stride_order
+  desc: |
+          This tag indicates that the operator should be passed Tensors following
+          the same stride permutation as observed in eager when compiled in inductor.
+          Only one of {needs_exact_strides, needs_contiguous_strides, needs_fixed_stride_order, flexible_layout}
+          can apply; if multiple are assigned then we assume the most restrictive one.
+- tag: flexible_layout
+  desc: |
+          This tag indicates that the custom operator can accept inputs with varying
+          strides/storage_offset and that when compiled, Inductor is allowed to change
+          the strides/storage_offset of inputs to the custom operator.
+          Only one of {needs_exact_strides, needs_contiguous_strides, needs_fixed_stride_order, flexible_layout}
+          can apply; if multiple are assigned then we assume the most restrictive one.
+
+# NOTE [Core ATen Ops]
+- tag: core
+  desc: |
+          Core aten ops is a subset of aten ops that remains after aten-to-aten decomposition and
+          functionalization pass. Core aten ops are fully functional and adhere to single static
+          assignment (SSA): this implies there will be no `inplace` or `_out` variants in this opset.
+          This opset is designed to serve as the functional IR to interface with compiler backends.
+          In contrast to primTorch, core aten opset doesn't decompose ops into explicit
+          type promotion and broadcasting ops.
+          Core aten ops is also effectively the opset produced by torchdynamo.export(aten_graph=True),
+          and thus can be used as an opset for export purpose.
+- tag: pointwise
+  desc: |
+          Pointwise operators are operators where each element of the output is computed only by accessing
+          the corresponding element of all the broadcasted inputs. The output shape will be the broadcasted
+          shape of the inputs.
+- tag: maybe_aliasing_or_mutating
+  desc: |
+          For some ops, we can't statically determine whether the op is functional or not. Note that this is only
+          relevant to CIA ops that decompose before functionalization/autograd. It is useful to
+          know this information for export as we would want to decompose these ops as they are unsafe to be
+          preserved.
+- tag: cudagraph_unsafe
+  desc: |
+          This operator does not support cudagraphs. The presence of this tag on an operator will cause
+          Inductor to split the graph around this operator. Note that operators without this tag may still
+          not support CUDAGraphs. Inductor may have other hardcoded lists around that.

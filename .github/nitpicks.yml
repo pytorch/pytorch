@@ -1,0 +1,12 @@
+- markdown: |
+    ## Attention! native_functions.yaml was changed
+    If you are adding a new function or defaulted argument to native_functions.yaml, you cannot use it from pre-existing Python frontend code until our FC window passes (two weeks).  Split your PR into two PRs, one which adds the new C++ functionality, and one that makes use of it from Python, and land them two weeks apart.  See https://github.com/pytorch/pytorch/wiki/PyTorch's-Python-Frontend-Backward-and-Forward-Compatibility-Policy#forwards-compatibility-fc for more info.
+  pathFilter:
+    - 'aten/src/ATen/native/native_functions.yaml'
+
+- markdown: |
+    ## Attention! PyTorch one of the C-stable API file was changed
+    You MUST NOT change existing function declarations in this, as this header defines a stable C ABI.  If you need to change the signature for a function, introduce a new v2 version of the function and modify code generation to target the new version of the function.
+  pathFilter:
+    - 'torch/csrc/inductor/aoti_torch/c/*'
+    - 'torch/csrc/inductor/aoti_torch/generated/*'
