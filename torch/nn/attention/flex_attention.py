@@ -997,9 +997,7 @@ def create_mask(
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
     if device is None:
-        device = torch.accelerator.current_accelerator()
-        if device is None:
-            device = "cpu"
+        device = torch.accelerator.current_accelerator() or "cpu"
     if B is None:
         B = 1
     if H is None:
@@ -1070,9 +1068,7 @@ def create_block_mask(
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
     if device is None:
-        device = torch.accelerator.current_accelerator()
-        if device is None:
-            device = "cpu"
+        device = torch.accelerator.current_accelerator() or "cpu"
     mod_type = _get_mod_type(mask_mod)
     assert mod_type == _ModificationType.MASK_MOD, (
         f"create-block_mask requires a mask_mod function! Got {mask_mod}"
