@@ -254,6 +254,7 @@ class TestIndexingSimplification(InductorTestCase):
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
 
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
     def test_floordiv_div_sympy_is_integer_bug(self):
         def foo(arg0, arg1, arg2, arg3, arg4, sentinel):
             t0 = arg0

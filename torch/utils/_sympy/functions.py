@@ -20,6 +20,8 @@ from sympy.core.traversal import walk
 from sympy.printing.precedence import PRECEDENCE
 from sympy.utilities.iterables import sift
 
+from torch.torch_version import TorchVersion
+
 from .numbers import int_oo
 
 
@@ -272,7 +274,9 @@ class FloorDiv(sympy.Function):
                 # sympy can generate a quotient with (1/22)*.... such that quotient.is_integer is True
                 # FloorDiv should not allow that as output. see
                 quotient_is_integer = None
-                if isinstance(quotient, sympy.Mul) and sympy.__version__ < "1.14.0":
+                if isinstance(quotient, sympy.Mul) and TorchVersion(
+                    sympy.__version__
+                ) < TorchVersion("1.14.0"):
                     rationals = quotient.atoms(sympy.Rational)
                     all_rationals_ints = all(r.q == 1 for r in rationals)
                     quotient_is_integer = quotient.is_integer and all_rationals_ints
