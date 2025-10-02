@@ -11,6 +11,7 @@ import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.distributed._composable.replicate_with_fsdp import replicate, ReplicateModule
 from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.fx.node import Argument, map_aggregate
 from torch.nn.parallel import DistributedDataParallel
@@ -588,7 +589,7 @@ class _PipelineStageBase(ABC):
         last_backward: bool = False,
     ) -> tuple[tuple[Optional[torch.Tensor], ...], Optional[list[dict[str, Any]]]]:
         """
-        Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
+        Whether using PP with FSDP, DDP, or replicate there are some runtime differences between the last backward step and the
         other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
         there are additional state-variables and performance considerations depending on the data parallelism used.
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
@@ -642,7 +643,8 @@ class _PipelineStageBase(ABC):
             else:
                 with self.submod.no_sync():  # type: ignore[operator]
                     result = perform_backward(backward_type)()
-        # If submod is a FSDP module
+
+        # If submod is a FSDP or replicate module
         elif isinstance(self.submod, FSDPModule):
             self.submod.set_is_last_backward(False)
             self.submod.set_reshard_after_backward(False)
@@ -654,15 +656,20 @@ class _PipelineStageBase(ABC):
                     fsdp_module.set_is_last_backward(True)
                     fsdp_module.set_reshard_after_backward(True)
                     fsdp_module.set_requires_gradient_sync(True)
-                    fsdp_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
-                    for state in fsdp_state._state_ctx.all_states:
+
+                    if isinstance(fsdp_module, ReplicateModule):
+                        distributed_state = replicate.state(fsdp_module)  # type: ignore[arg-type]
+                    else:
+                        distributed_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
+
+                    for state in distributed_state._state_ctx.all_states:
                         if state._fsdp_param_group:
                             state._fsdp_param_group.post_backward()
 
                     # it would be much better if pipelining backward invoked .backward so autograd hooks
                     # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
                     # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
-                    fsdp_state._root_post_backward_final_callback()
+                    distributed_state._root_post_backward_final_callback()
 
                 run_post_backward(self.submod)
 
