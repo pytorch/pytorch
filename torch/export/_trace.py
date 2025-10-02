@@ -8,9 +8,9 @@ import re
 import sys
 import time
 import warnings
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 
 if TYPE_CHECKING:
