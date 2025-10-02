@@ -190,9 +190,20 @@ class DefaultFuzzTemplate(FuzzTemplate):
                         storage_size = 1
 
                     stride_str = str(spec.stride)
-                    code_lines.append(
-                        f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
-                    )
+
+                    # Special handling for integer tensors which might be used as indices
+                    if spec.dtype in [torch.int32, torch.int64]:
+                        # For integer tensors, generate valid indices in a conservative range
+                        # Use randint to ensure non-negative values in a smaller range
+                        # to be safer for embedding operations
+                        max_val = 100  # Conservative upper bound for indices
+                        code_lines.append(
+                            f"{arg_name} = torch.as_strided(torch.randint(0, {max_val}, ({storage_size},)).to({dtype_str}), {size_str}, {stride_str})"
+                        )
+                    else:
+                        code_lines.append(
+                            f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
+                        )
 
         return code_lines
 
