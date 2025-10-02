@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import operator
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import partial, reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch._prims_common as utils
@@ -352,12 +352,14 @@ def _make_prim(
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
-    if not any(contains_tensor_types(a.type) for a in _prim._schema.arguments) or str(
-        _prim
-    ) in [
-        # See https://github.com/pytorch/pytorch/issues/103532
-        "prims.device_put.default"
-    ]:
+    if (
+        not any(contains_tensor_types(a.type) for a in _prim._schema.arguments)
+        or str(
+            _prim
+            # See https://github.com/pytorch/pytorch/issues/103532
+        )
+        == "prims.device_put.default"
+    ):
         prim_backend_select_impl.impl(name, _backend_select_impl)
 
     for p in (_prim_packet, _prim):

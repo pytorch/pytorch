@@ -191,7 +191,6 @@ class TestMatmulCuda(InductorTestCase):
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_precision
 
     @onlyCUDA
-    @xfailIfSM100OrLaterAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
     @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
@@ -493,7 +492,6 @@ class TestMatmulCuda(InductorTestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     # TODO(future PR): enable compile for torch._grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
-    @unittest.skipIf(SM100OrLater, "Grouped gemm is inconsistently raising numeric issues see: #163462 ")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])
@@ -783,6 +781,59 @@ class TestMatmulCuda(InductorTestCase):
                 torch.mm(a, b, out_dtype=torch.float32)
 
             torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accum
+
+    @onlyCUDA
+    @parametrize("ops", [("mm", torch.mm), ("bmm", torch.bmm), ("addmm", torch.addmm), ("baddbmm", torch.baddbmm)])
+    def test_input_dimension_checking_out_dtype(self, ops):
+        op_name, op = ops
+        B = 2
+        M, N, K = 32, 32, 32
+
+        def is_addmm():
+            return "add" in op_name
+
+        def is_batched():
+            return "bmm" in op_name
+
+        if is_batched():
+            a = torch.randn(B, M, K, device="cuda", dtype=torch.bfloat16)
+            mismatch_k_b = torch.randn(B, K + 1, N, device="cuda", dtype=torch.bfloat16)
+            c = torch.randn(B, M, N, device="cuda", dtype=torch.bfloat16)
+            extra_dim_b = a.clone().unsqueeze(0)
+
+            mismatch_k_err = "Expected size for first two dimensions of batch2 tensor to be"
+            extra_dim_err = "batch2 must be a 3D tensor"
+        else:
+            a = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
+            mismatch_k_b = torch.randn(K + 1, N, device="cuda", dtype=torch.bfloat16)
+            c = torch.randn(M, N, device="cuda", dtype=torch.bfloat16)
+            extra_dim_b = a.clone().unsqueeze(0)
+
+            mismatch_k_err = "mat1 and mat2 shapes cannot be multiplied"
+            extra_dim_err = "mat2 must be a matrix, got 3-D tensor"
+
+        # Test mismatch K
+        with self.assertRaisesRegex(RuntimeError, mismatch_k_err):
+            if is_addmm():
+                op(c, a, mismatch_k_b, out_dtype=torch.float32)
+            else:
+                op(a, mismatch_k_b, out_dtype=torch.float32)
+
+        # Test extra dimension
+        with self.assertRaisesRegex(RuntimeError, extra_dim_err):
+            if is_addmm():
+                op(c, a, extra_dim_b, out_dtype=torch.float32)
+            else:
+                op(c, extra_dim_b, out_dtype=torch.float32)
+
+        if is_batched():
+            with self.assertRaisesRegex(RuntimeError, "Expected size for first two dimensions of batch2 tensor to be"):
+                # Test mismatch B for bmm/baddbmm
+                mismatch_batch_dim_b = torch.randn(B + 1, K, N, device="cuda", dtype=torch.bfloat16)
+                if is_addmm():
+                    op(c, a, mismatch_batch_dim_b, out_dtype=torch.float32)
+                else:
+                    op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")

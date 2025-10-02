@@ -1642,6 +1642,61 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @skipIfMPS
+    @config.patch({"unbacked_symint_fallback": 12})
+    @config.patch({"triton.autotune_at_compile_time": None})
+    def test_replace_unbacked_symbol_with_backed_expr(self):
+        # This will test how autotune_at_compile_time generates sample inputs
+        # when the user torch._checks(s0 + s1 == u0).
+        # We may fail with IMA if the generated input sizes aren't correct.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires triton")
+
+        def force_realize(tensor):
+            # Realize the tensor as an intermediate buffer
+            nrows, ncols = tensor.shape
+            numel = tensor.numel()
+            add_kernel[nrows,](
+                in_ptr0=tensor,
+                in_ptr1=tensor,
+                out_ptr=tensor,
+                n_elements=numel,
+                BLOCK_SIZE=ncols,
+            )
+
+        INNER_DIM = 256
+
+        class Repro(torch.nn.Module):
+            def forward(self, x, y, lengths):
+                # Realize an intermediate buffer with backed shape: s0 + s1
+                relevant_embeddings = torch.cat([x, y], dim=0)
+                force_realize(relevant_embeddings)
+
+                # Realize an intermediate buffer with unbacked shape: u0
+                num_relevant_embeddings = lengths.nonzero().size(0)
+                ones = torch.ones((num_relevant_embeddings, INNER_DIM), device=x.device)
+                force_realize(ones)
+
+                # Add deferred runtime assertion: s0 + s1 == u0
+                torch._check(relevant_embeddings.size(0) == ones.size(0))
+                relevant_embeddings += ones
+                return relevant_embeddings * relevant_embeddings
+
+        torch.cuda.caching_allocator_enable(False)
+        model = Repro()
+        example_inputs = (
+            torch.randn((1000, INNER_DIM), device=self.device),
+            torch.randn((2000, INNER_DIM), device=self.device),
+            torch.ones(3000),
+        )
+        spec = {
+            "x": (Dim.DYNAMIC, Dim.STATIC),
+            "y": (Dim.DYNAMIC, Dim.STATIC),
+            "lengths": (Dim.DYNAMIC,),
+        }
+        self.check_model(model, example_inputs, dynamic_shapes=spec)
+        torch.cuda.caching_allocator_enable(True)
+
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
         class Repro(torch.nn.Module):
@@ -7332,14 +7387,16 @@ class AOTInductorLoggingTest(LoggingTestCase):
 
 class TestAOTInductorConfig(TestCase):
     def test_no_compile_standalone(self):
-        with config.patch({"aot_inductor.compile_standalone": False}):
+        with config.patch({"aot_inductor_mode.compile_standalone": False}):
             result = maybe_aoti_standalone_config({})
             self.assertEqual(result, {})
 
     def test_compile_standalone_sets_package_cpp(self):
-        result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
+        result = maybe_aoti_standalone_config(
+            {"aot_inductor_mode.compile_standalone": True}
+        )
         self.assertEqual(result["aot_inductor.package_cpp_only"], True)
-        self.assertEqual(result["aot_inductor.compile_standalone"], True)
+        self.assertEqual(result["aot_inductor_mode.compile_standalone"], True)
         self.assertEqual(result["aot_inductor.embed_kernel_binary"], True)
         self.assertEqual(
             result["aot_inductor.emit_multi_arch_kernel"], not torch.version.hip
@@ -7347,12 +7404,15 @@ class TestAOTInductorConfig(TestCase):
         self.assertEqual(
             result["aot_inductor.model_name_for_generated_files"], "aoti_model"
         )
+        self.assertEqual(result["aot_inductor.dynamic_linkage"], False)
 
     def test_compile_standalone_explicit_set(self):
         patches = {
-            "aot_inductor.compile_standalone": True,
+            "aot_inductor_mode.compile_standalone": True,
             "aot_inductor.package_cpp_only": True,
             "aot_inductor.embed_kernel_binary": True,
+            "aot_inductor.dynamic_linkage": False,
+            "aot_inductor.link_libtorch": False,
             "aot_inductor.emit_multi_arch_kernel": not torch.version.hip,
             "aot_inductor.model_name_for_generated_files": "aoti_model",
         }
@@ -7361,7 +7421,7 @@ class TestAOTInductorConfig(TestCase):
 
     def test_compile_standalone_package_cpp_false_raises(self):
         patches = {
-            "aot_inductor.compile_standalone": True,
+            "aot_inductor_mode.compile_standalone": True,
             "aot_inductor.package_cpp_only": False,
         }
         with self.assertRaises(RuntimeError):
@@ -7369,7 +7429,7 @@ class TestAOTInductorConfig(TestCase):
 
         with config.patch({"aot_inductor.package_cpp_only": False}):
             patches = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
             }
             with self.assertRaises(RuntimeError):
                 maybe_aoti_standalone_config(patches)
