@@ -263,7 +263,9 @@ constexpr static int kNumUvThreads = 16;
 
 std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
+  contexts.reserve(kNumUvThreads);
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
+  listeners.reserve(kNumUvThreads);
   for ([[maybe_unused]] const auto laneIdx : c10::irange(kNumUvThreads)) {
     auto context = tensorpipe::transport::uv::create();
     const std::string& address = TensorPipeAgent::guessAddress();
