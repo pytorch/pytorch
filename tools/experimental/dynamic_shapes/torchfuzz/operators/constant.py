@@ -98,14 +98,15 @@ class ConstantOperator(Operator):
             else:
                 # For non-empty tensors, use the first element as fill value
                 fill_value = actual_tensor.flatten()[0].item()
-                  
+
                 # For integer types, clamp the value to a smaller range to avoid
                 # issues when used in arithmetic with embedding indices
                 import torch
                 if output_spec.dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
-                    # Clamp integer values to [-10, 10] to avoid index out-of-range issues
-                    fill_value = max(-10, min(10, fill_value))
-                  
+                    # Clamp integer values to [0, 10] to avoid negative indices
+                    # Negative values are never valid for embedding operations
+                    fill_value = max(0, min(10, abs(fill_value)))
+
                 tensor_creation = (
                     f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
                 )
