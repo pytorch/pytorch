@@ -1,4 +1,6 @@
 # Owner(s): ["module: dynamo"]
+import weakref
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -12,6 +14,14 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
+
+    def test_stream_weakref(self):
+        s = torch.Stream()
+        weakref.ref(s)
+
+    def test_event_weakref(self):
+        e = torch.Event()
+        weakref.ref(e)
 
     def test_stream_enter_exit(self):
         def fn(x, y):
