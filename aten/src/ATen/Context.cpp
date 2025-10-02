@@ -41,7 +41,7 @@ namespace {
                 ->conv
                 ->rnn
 */
-const std::array<std::pair<detail::Float32Backend, std::array<detail::Float32Precision, 4>>, 3> _fp32_precisions = {{
+constexpr std::array<std::pair<detail::Float32Backend, std::array<detail::Float32Precision, 4>>, 3> _fp32_precisions = {{
     {detail::Float32Backend::GENERIC, {{detail::Float32Precision::IEEE, detail::Float32Precision::TF32, detail::Float32Precision::BF16, detail::Float32Precision::NONE}}},
     {detail::Float32Backend::MKLDNN, {{detail::Float32Precision::IEEE, detail::Float32Precision::TF32, detail::Float32Precision::BF16, detail::Float32Precision::NONE}}},
     {detail::Float32Backend::CUDA, {{detail::Float32Precision::IEEE, detail::Float32Precision::TF32, detail::Float32Precision::NONE}}}}};
@@ -50,7 +50,7 @@ const std::array<std::pair<detail::Float32Backend, std::array<detail::Float32Pre
 std::pair<detail::Float32Backend, detail::Float32Op> check_fp32_prec_backend_and_op(
     std::string_view backend,
     std::string_view op) {
-  static constexpr std::array<std::string_view, 4> operators = {"conv", "matmul", "rnn", "all"};
+  static constexpr std::array<std::string_view, 4> operators = {"matmul", "conv", "rnn", "all"};
   if (backend == "generic") {
     TORCH_CHECK(op == "all", "Invalid operation for generic backend: ", op);
     return std::make_pair(detail::Float32Backend::GENERIC, detail::Float32Op::ALL);
@@ -64,13 +64,13 @@ std::pair<detail::Float32Backend, detail::Float32Op> check_fp32_prec_backend_and
   } else if (backend == "mkldnn") {
     result_backend = detail::Float32Backend::MKLDNN;
   } else {
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
         false,
         "Invalid backend: ",
         backend);
   }
   const auto op_it = std::find(operators.begin(), operators.end(), op);
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
       op_it != operators.end(),
       "Invalid operator: ",
       op);
@@ -416,18 +416,14 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
 
 std::string_view Context::float32Precision(std::string_view backend_str, std::string_view op_str) const {
   const auto [backend, op] = check_fp32_prec_backend_and_op(backend_str, op_str);
-  auto backend_it = std::find_if(fp32_precision.begin(), fp32_precision.end(), [backend](const auto& p) { return p.first == backend; });
-  const auto op_pred = [op](const auto& p) { return p.first == op; };
-  auto op_it = std::find_if(backend_it->second.begin(), backend_it->second.end(), op_pred);
-  auto precision = op_it->second;
+  const auto& backend_row = fp32_precision.at(static_cast<int>(backend));
+  auto precision = backend_row.at(static_cast<int>(op));
   if (precision == detail::Float32Precision::NONE) {
-    op_it = std::find_if(backend_it->second.begin(), backend_it->second.end(), [](const auto& p) { return p.first == detail::Float32Op::ALL; });
-    precision = op_it->second;
+    precision = backend_row.at(static_cast<int>(detail::Float32Op::ALL));
   }
   if (precision == detail::Float32Precision::NONE) {
-    backend_it = std::find_if(fp32_precision.begin(), fp32_precision.end(), [](const auto& p) { return p.first == detail::Float32Backend::GENERIC; });
-    op_it = std::find_if(backend_it->second.begin(), backend_it->second.end(), [](const auto& p) { return p.first == detail::Float32Op::ALL; });
-    precision = op_it->second;
+    const auto& generic_backend_row = fp32_precision.at(static_cast<int>(detail::Float32Backend::GENERIC));
+    precision = generic_backend_row.at(static_cast<int>(detail::Float32Op::ALL));
   }
   const bool valid_prec = validate_fp32_prec(backend, precision);
   return valid_prec ? fp32_prec_to_str(precision) : "none";
@@ -466,15 +462,14 @@ void Context::setFloat32MatmulPrecision(const std::string &s) {
 
 void Context::setFloat32Precision(std::string_view backend_str, std::string_view op_str, const std::string& p) {
   const auto [backend, op] = check_fp32_prec_backend_and_op(backend_str, op_str);
-  if (const auto opt_normalized_prec = validate_fp32_prec(backend, p)) {
-    const auto backend_it = std::find_if(fp32_precision.begin(), fp32_precision.end(), [backend](const auto& p) { return p.first == backend; });
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(backend_it != fp32_precision.end(), "fp32 precision use of string_view relies on enforcement that backend comes from a limited set.");
-    const auto op_it = std::find_if(backend_it->second.begin(), backend_it->second.end(), [op](const auto& p) { return p.first == op; });
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op_it != backend_it->second.end(), "fp32 precision use of string_view relies on enforcement that op come from a limited set");
-    op_it->second = *opt_normalized_prec;
+  if (const auto opt_prec = validate_fp32_prec(backend, p)) {
+    auto& backend_row = fp32_precision.at(static_cast<int>(backend));
+    backend_row.at(static_cast<int>(op)) = *opt_prec;
   } else {
     std::string msg;
-    auto iterp = std::find_if(_fp32_precisions.begin(), _fp32_precisions.end(), [backend](const auto& p) { return p.first == backend; });
+    // work around compiler issue with capturing structured bindings.
+    auto backend_ = backend;
+    auto iterp = std::find_if(_fp32_precisions.begin(), _fp32_precisions.end(), [backend_](const auto& p) { return p.first == backend_; });
     TORCH_CHECK(iterp != _fp32_precisions.end());
     for (const auto& p : iterp->second) {
       msg += fp32_prec_to_str(p);

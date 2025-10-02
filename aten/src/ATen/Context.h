@@ -40,7 +40,7 @@ enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
 
 namespace detail {
 enum class Float32Backend { GENERIC, MKLDNN, CUDA };
-enum class Float32Op { CONV, MATMUL, RNN, ALL };
+enum class Float32Op { MATMUL, CONV, RNN, ALL };
 enum class Float32Precision { IEEE, TF32, BF16, NONE };
 } // namespace detail
 
@@ -496,31 +496,31 @@ class TORCH_API Context {
   bool allow_fp16_reduction_cpu = false;
 
   // Yes, it's odd that the inner array has extra length here for the
-  // generic backend, but it seems better than using std::vector.
-  // Map backend->op->precision setting.
-  std::array<
-      std::pair<
-          detail::Float32Backend,
-          std::
-              array<std::pair<detail::Float32Op, detail::Float32Precision>, 4>>,
-      3>
-      fp32_precision = {{
-          {detail::Float32Backend::GENERIC,
-           {{{detail::Float32Op::ALL, detail::Float32Precision::NONE}}}},
-          {detail::Float32Backend::MKLDNN,
-           {{{detail::Float32Op::MATMUL, detail::Float32Precision::NONE},
-             {detail::Float32Op::CONV, detail::Float32Precision::NONE},
-             {detail::Float32Op::RNN, detail::Float32Precision::NONE},
-             {detail::Float32Op::ALL, detail::Float32Precision::NONE}}}},
-          {detail::Float32Backend::CUDA,
-           {{{detail::Float32Op::MATMUL,
-              float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
-                  ? detail::Float32Precision::NONE
-                  : detail::Float32Precision::TF32},
-             {detail::Float32Op::CONV, detail::Float32Precision::TF32},
-             {detail::Float32Op::RNN, detail::Float32Precision::TF32},
-             {detail::Float32Op::ALL, detail::Float32Precision::NONE}}}},
-      }};
+  // generic backend, but it seems better than using std::vector.  Map
+  // backend->op->precision setting. The map has no explicit keys and
+  // instead uses the enum key as an array index.
+  std::array<std::array<detail::Float32Precision, 4>, 3> fp32_precision = {
+      {// detail::Float32Backend::GENERIC
+       {{detail::Float32Precision::NONE,
+         detail::Float32Precision::NONE,
+         detail::Float32Precision::NONE,
+         detail::Float32Precision::NONE}},
+       // detail::Float32Backend::MKLDNN,
+       {{detail::Float32Precision::NONE,
+         detail::Float32Precision::NONE,
+         detail::Float32Precision::NONE,
+         detail::Float32Precision::NONE}},
+       // detail::Float32Backend::CUDA,
+       {{// detail::Float32Op::MATMUL,
+         float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+             ? detail::Float32Precision::NONE
+             : detail::Float32Precision::TF32,
+         // detail::Float32Op::CONV
+         detail::Float32Precision::TF32,
+         // detail::Float32Op::RNN
+         detail::Float32Precision::TF32,
+         // detail::Float32Op::ALL
+         detail::Float32Precision::NONE}}}};
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
