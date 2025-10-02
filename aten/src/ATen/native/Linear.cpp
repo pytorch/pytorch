@@ -632,15 +632,15 @@ Tensor einsum(std::string_view equation, TensorList operands, at::OptionalIntArr
       for (auto dim = perm_index - 1; dim >= out_num_dim; --dim) {
         sizes.erase(sizes.begin() + dim);
       }
-      return ops[0].view_symint(sizes);
+      return std::move(ops[0].view_symint(sizes));
     } else {
       std::vector<int64_t> sum_dims(perm_index - out_num_dim);
       std::iota(sum_dims.begin(), sum_dims.end(), out_num_dim);
-      return ops[0].sum(sum_dims);
+      return std::move(ops[0].sum(sum_dims));
     }
   }
 
-  return ops[0];
+  return std::move(ops[0]);
 }
 
 // _trilinear computes a trilinear einstein sum with an unrolled dimension
