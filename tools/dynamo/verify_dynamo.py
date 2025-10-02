@@ -8,7 +8,7 @@ import warnings
 
 MIN_CUDA_VERSION = "11.6"
 MIN_ROCM_VERSION = "5.4"
-MIN_PYTHON_VERSION = (3, 8)
+MIN_PYTHON_VERSION = (3, 10)
 
 
 class VerifyDynamoError(BaseException):

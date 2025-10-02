@@ -747,7 +747,10 @@ class ConstDictVariable(VariableTracker):
     def call_obj_hasattr(self, tx, name):
         # dict not allow setting arbitrary attributes.  OrderedDict and
         # defaultdict allow arbitrary setattr, but not deletion of default attrs
-        if self.user_cls in (dict, collections.OrderedDict, collections.defaultdict):
+        if any(
+            self.user_cls is t
+            for t in (dict, collections.OrderedDict, collections.defaultdict)
+        ):
             if hasattr(self.user_cls, name):
                 return ConstantVariable.create(True)
             if self.user_cls is dict:
