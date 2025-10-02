@@ -333,3 +333,20 @@ def my_new_zeros_dtype_variant(t) -> Tensor:
     Returns: New zeros tensor
     """
     return torch.ops.libtorch_agnostic.my_new_zeros_dtype_variant.default(t)
+
+
+def ScalarType2string(t) -> str:
+    """
+    Returns the result of c10::toString(t.dtype)
+
+    Args:
+        t: Input tensor
+
+    Returns: dtype name as defined by its ScalarType value.
+    """
+    return (
+        torch.ops.libtorch_agnostic.ScalarType2string.default(t)
+        .numpy()
+        .tobytes()
+        .decode()
+    )
