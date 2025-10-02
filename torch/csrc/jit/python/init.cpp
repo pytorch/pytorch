@@ -121,9 +121,6 @@
 #include <tuple>
 #include <utility>
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(MobileOptimizerType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10::SchemaArgType)
-
 namespace torch::jit {
 
 using c10::AliasInfo;

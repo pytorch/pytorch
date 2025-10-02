@@ -34,9 +34,6 @@
 
 namespace py = pybind11;
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10::DispatchKey)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10::impl::TorchDispatchModeKey)
-
 namespace torch::impl::dispatch {
 
 // Global storage for leaked Python filenames to ensure they remain valid

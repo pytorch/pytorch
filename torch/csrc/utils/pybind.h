@@ -29,28 +29,6 @@ PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true)
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>)
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true)
 
-// pybind11 3.x's type_caster_enum_type handles both py::native_enum
-// and py::enum_. py::native_enum is preferred, so it gets checked
-// first. We still use lots of py::enum_ because we don't (yet?)
-// require pybind11 3.x, and possibly because the difference is
-// user-visible. Putting TORCH_MAKE_PYBIND_ENUM_FASTER(T) at global
-// scope before using py::enum_<T> will cause pybind function calls
-// that pass arguments of type T to go faster (16% at time of writing,
-// but they are quite slow currently and the savings is a fixed cost,
-// so the percentage may be higher after other optimizations for
-// py::enum_ happen).
-#ifdef PYBIND11_HAS_NATIVE_ENUM
-#define TORCH_MAKE_PYBIND_ENUM_FASTER(T)                                    \
-  namespace pybind11::detail {                                              \
-  template <>                                                               \
-  struct type_caster_enum_type_enabled<T, void> : std::false_type {};       \
-  template <>                                                               \
-  struct type_caster_enum_type_enabled<const T, void> : std::false_type {}; \
-  } // namespace pybind11::detail
-#else // PYBIND11_HAS_NATIVE_ENUM
-#define TORCH_MAKE_PYBIND_ENUM_FASTER(T)
-#endif // PYBIND11_HAS_NATIVE_ENUM
-
 namespace pybind11::detail {
 
 // torch.Tensor <-> at::Tensor conversions (without unwrapping)
