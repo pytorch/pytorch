@@ -648,47 +648,37 @@ class CodeGen:
                     "val",
                     node.meta.get("tensor_meta", node.meta.get("example_value", None)),
                 )
-                # Tensor subclass printing support
-                if (
-                    issubclass(meta_val.__class__, torch.Tensor)
-                    and meta_val.__class__ != torch.Tensor
-                    and isinstance(meta_val, torch.Tensor)
-                    # Fake tensors cause tests to wobble and the benefits to end
-                    # users are unclear so let's not custom print them for now.
-                    and not isinstance(meta_val, torch._subclasses.FakeTensor)
-                ):
-                    # Get the basic tensor representation
-                    stride_annotation = (
-                        f"{stringify_shape(meta_val.stride())}"
-                        if include_stride
-                        else ""
+
+                def _tensor_annotation(t: torch.Tensor) -> str:
+                    stride = stringify_shape(t.stride()) if include_stride else ""
+                    device = f"{t.device}" if include_device else ""
+                    return (
+                        f"{red(dtype_abbrs[t.dtype])}"
+                        f"{blue(stringify_shape(t.shape))}"
+                        f"{dim_blue(stride)}"
+                        f"{dim_green(device)}"
                     )
-                    device_annotation = f"{meta_val.device}" if include_device else ""
-                    tensor_repr = (
-                        f"{red(dtype_abbrs[meta_val.dtype])}{blue(stringify_shape(meta_val.shape))}"
-                        f"{dim_blue(stride_annotation)}{dim_green(device_annotation)}"
-                    )
-                    # Wrap with the tensor subclass name
-                    class_name = meta_val.__class__.__name__
-                    maybe_type_annotation = f': "{class_name}({tensor_repr})"'
+
                 # use string as annotation, to make it valid python code
-                elif isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
+                if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
                     torch.sparse_csc,
                     torch.sparse_csr,
                 ):
-                    stride_annotation = (
-                        f"{stringify_shape(meta_val.stride())}"
-                        if include_stride
-                        else ""
+                    # Fake tensors cause tests to wobble, so do not custom print them.
+                    is_plain = type(meta_val) is torch.Tensor or isinstance(
+                        meta_val, torch._subclasses.FakeTensor
                     )
-                    device_annotation = f"{meta_val.device}" if include_device else ""
-                    maybe_type_annotation = (
-                        f': "{red(dtype_abbrs[meta_val.dtype])}{blue(stringify_shape(meta_val.shape))}'
-                        f'{dim_blue(stride_annotation)}{dim_green(device_annotation)}"'
-                    )
+                    core = _tensor_annotation(meta_val)
+                    if is_plain:
+                        maybe_type_annotation = f': "{core}"'
+                    else:
+                        cls = meta_val.__class__.__name__
+                        maybe_type_annotation = f': "{cls}({core})"'
+
                 elif isinstance(meta_val, py_sym_types):
                     val_str = CodeGen._sym_repr(meta_val)
                     maybe_type_annotation = f': "Sym({val_str})"'
+
                 elif isinstance(meta_val, TensorMetadata):
                     maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
 
