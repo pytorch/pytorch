@@ -859,7 +859,10 @@ struct type_specialized_kernel_launcher {
     constexpr ScalarType sret_t = rt_binary_specializations[arg_index][0];
     constexpr ScalarType sarg0_t = rt_binary_specializations[arg_index][1];
     constexpr ScalarType sarg1_t = rt_binary_specializations[arg_index][2];
-    if (ret_t == sret_t && arg0_t == sarg0_t && arg1_t == sarg1_t)
+    if (ret_t == sret_t && arg0_t == sarg0_t && arg1_t == sarg1_t) {
+      using cret_t = c10::impl::ScalarTypeToCPPType<sret_t>::type;
+      using carg0_t = c10::impl::ScalarTypeToCPPType<sarg0_t>::type;
+      using carg1_t = c10::impl::ScalarTypeToCPPType<sarg1_t>::type;
       launch_vectorized_templated_kernel<
           func_t,
           array_t,
@@ -867,9 +870,9 @@ struct type_specialized_kernel_launcher {
           out_calc_t,
           loader_t,
           storer_t,
-          c10::impl::ScalarTypeToCPPType<sret_t>::type,
-          c10::impl::ScalarTypeToCPPType<sarg0_t>::type,
-          c10::impl::ScalarTypeToCPPType<sarg1_t>::type>(
+          cret_t,
+          carg0_t,
+          carg1_t>(
           numel,
           f,
           data,
@@ -877,6 +880,7 @@ struct type_specialized_kernel_launcher {
           output_offset_calculator,
           loader,
           storer);
+    }
   }
 };
 
