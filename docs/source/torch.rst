@@ -790,14 +790,6 @@ Optimizations
 
 `torch.compile documentation <https://pytorch.org/docs/main/torch.compiler.html>`__
 
-Configuration
-~~~~~~~~~~~~~
-
-.. toctree::
-    :maxdepth: 1
-
-    dynamo_config
-
 Operator Tags
 ------------------------------------
 .. autoclass:: Tag
