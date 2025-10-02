@@ -145,14 +145,6 @@
 
 namespace py = pybind11;
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::ConvBackend)
-TORCH_MAKE_PYBIND_ENUM_FASTER(sdp::SDPBackend)
-TORCH_MAKE_PYBIND_ENUM_FASTER(at::LinalgBackend)
-TORCH_MAKE_PYBIND_ENUM_FASTER(at::BlasBackend)
-TORCH_MAKE_PYBIND_ENUM_FASTER(at::ROCmFABackend)
-TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::BatchNormBackend)
-TORCH_MAKE_PYBIND_ENUM_FASTER(at::impl::TorchFunctionDisabledState)
-
 static PyObject* module;
 
 static THPGenerator* THPDefaultCPUGenerator = nullptr;
