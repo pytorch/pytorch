@@ -967,7 +967,7 @@ class TestProfiler(TestCase):
         profiler_output = prof.key_averages(group_by_input_shape=True).table(
             sort_by="cpu_time_total", row_limit=10
         )
-        self.assertIn("Total MFLOPs", profiler_output)
+        self.assertRegex(profiler_output, "Total M?FLOPs")
         if not (kineto_available() and torch.cuda.is_available()):
             return
 
@@ -983,7 +983,7 @@ class TestProfiler(TestCase):
         profiler_output = kineto_profiler.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1
         )
-        self.assertIn("Total MFLOPs", profiler_output)
+        self.assertRegex(profiler_output, "Total M?FLOPs")
 
     def test_override_time_units(self):
         US_IN_SECOND = 1000.0 * 1000.0

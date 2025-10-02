@@ -26,7 +26,7 @@ struct ReductionOp {
   inline opmath_t<T> operator()(
       opmath_t<T> weight_val,
       opmath_t<T> out_val,
-      bool is_first) {
+      bool /*is_first*/) {
     return weight_val + out_val;
   }
 };
@@ -45,10 +45,10 @@ template <EmbeddingBagMode M, typename T>
 struct MaybeApplyPerSampleWeight {
   inline opmath_t<T> operator()(
       opmath_t<T> weight_val,
-      bool use_per_sample_weights,
-      uint32_t per_sample_weights_index,
-      constant T* per_sample_weights,
-      uint32_t per_sample_weights_stride) {
+      bool /*use_per_sample_weights*/,
+      uint32_t /*per_sample_weights_index*/,
+      constant T* /*per_sample_weights*/,
+      uint32_t /*per_sample_weights_stride*/) {
     return weight_val;
   }
 };
@@ -74,12 +74,12 @@ struct MaybeApplyPerSampleWeight<EmbeddingBagMode::SUM, T> {
 template <EmbeddingBagMode M, typename T, typename I>
 struct MaybeCalcMaxIndex {
   inline void operator()(
-      opmath_t<T> weight_val,
-      opmath_t<T> out_val,
-      bool is_first,
-      thread I& max_idx,
-      I weight_idx,
-      bool pad) {}
+      opmath_t<T> /*weight_val*/,
+      opmath_t<T> /*out_val*/,
+      bool /*is_first*/,
+      thread I& /*max_idx*/,
+      I /*weight_idx*/,
+      bool /*pad*/) {}
 };
 
 template <typename T, typename I>

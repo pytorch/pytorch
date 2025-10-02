@@ -316,6 +316,12 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   return false;
 #endif
 #else
+  if (!at::cuda::is_available()) {
+    if (debug) {
+      TORCH_WARN("flash attention requires a CUDA device, which is not available.");
+    }
+    return false;
+  }
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm80, sm121>(dprops)) {
     if (debug) {
@@ -367,6 +373,12 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   return false;
 #endif
 #else
+  if (!at::cuda::is_available()) {
+    if (debug) {
+      TORCH_WARN("Mem Efficient attention requires a CUDA device, which is not available.");
+    }
+    return false;
+  }
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm50, sm121>(dprops)) {
     if (debug) {
@@ -597,6 +609,12 @@ bool check_cudnn_layout(sdp_params const& params, bool debug) {
 bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
   using sm80 = SMVersion<8, 0>;
   using sm121 = SMVersion<12, 1>;
+  if (!at::cuda::is_available()) {
+    if (debug) {
+      TORCH_WARN("cuDNN SDPA requires a CUDA device, which is not available.");
+    }
+    return false;
+  }
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm80, sm121>(dprops)) {
     if (debug) {
@@ -688,6 +706,15 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
     TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use cuDNN Attention (< v9.0.0)");
   }
   return false;
+#endif
+#if defined(CUDNN_VERSION)
+  static auto cudnn_version = cudnnGetVersion();
+  if (params.dropout > 0.0 && cudnn_version > 91100 && cudnn_version < 91400) {
+    if (debug) {
+      TORCH_WARN(CUDNN_VERSION, " cuDNN version does not support droppout in SDPA (9.11 - 9.13).");
+    }
+    return false;
+  }
 #endif
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20

@@ -41,7 +41,9 @@ def process_inputs(
                         return x
                     source = ConstantSource(f"sym_{idx}")
                     return shape_env.create_symintnode(
-                        shape_env.create_symbol(x, source), hint=x, source=source
+                        shape_env.create_symbol(x, source),
+                        hint=x,
+                        source=source,
                     )
             if isinstance(x, torch.ScriptObject):
                 return torch._library.fake_class_registry.maybe_to_fake_obj(
