@@ -854,9 +854,6 @@ class TestMatmulCuda(InductorTestCase):
                     op(c, a, mismatch_batch_dim_b, out_dtype=torch.float32)
                 else:
                     op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
-                    # correct behavior
-                    self.assertNotEqual(no_carveout, carveout_66)
-                    self.assertNotEqual(carveout_66, carveout_0)
 
 
     @unittest.skipIf(not _get_torch_cuda_version() >= (12, 8), "Green Context only tested on 12.8+")
