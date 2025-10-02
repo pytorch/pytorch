@@ -4093,6 +4093,103 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         torch._dynamo.decorators.mark_unbacked(x, 0)
         self.assertEqual(func(x), compiled(x))
 
+    @fresh_cache()
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_reshape_copy(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        # Reshape happens in place reshape (no-clone)
+        # reshape u1 -> (u0*u0)
+        def func(x, y):
+            f = y.item()
+            t3 = torch._ops.ops.aten._reshape_copy(x, (f, f))
+            return t3
+
+        compiled_func = torch.compile(
+            fullgraph=True,
+            backend=cnt,
+            dynamic=True,
+        )(func)
+
+        # create a non-contiguous with data being even numbers in [0:cnt-1]
+        # and reshape it into sqrt(cnt)*sqrt(cnt)
+        def make_non_contiguous_tensor_and_test(cnt):
+            # create a non-contiguous tensor x that is skipping odd indices.
+            x = torch.arange(cnt * 2)
+            x = x.as_strided((x.size()[0] // 2,), (2,))
+
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+            sz = torch.tensor([int(math.sqrt(cnt))])
+            compiled_result = compiled_func(x, sz)
+            eager_result = func(x, sz)
+            self.assertEqual(compiled_result, eager_result)
+
+        log_stream, ctx = logs_to_string(
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
+        )
+        with ctx():
+            make_non_contiguous_tensor_and_test(4)
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            aot_graphs,
+            """\
+def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
+        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+        ge_3: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
+        eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
+        return (_reshape_copy,)""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+        make_non_contiguous_tensor_and_test(49)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Pass in a contiguous tensor, it will recompile due to stride being 1 (0/1 specialization).
+        # marking strides unbacked would have avoided the recompilation here.
+        x = torch.arange(100)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        log_stream, ctx = logs_to_string(
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
+        )
+        with ctx():
+            compiled_result = compiled_func(x, torch.tensor([10]))
+            eager_result = func(x, torch.tensor([10]))
+            self.assertEqual(compiled_result, eager_result)
+            self.assertEqual(cnt.frame_count, 2)
+
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            aot_graphs,
+            """\
+def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]cpu"):
+        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+        ge_3: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
+        eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
+        return (_reshape_copy,)""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+        x = torch.arange(25)
+        compiled_result = compiled_func(x, torch.tensor([5]))
+        eager_result = func(x, torch.tensor([5]))
+        self.assertEqual(cnt.frame_count, 2)
+
 
 instantiate_parametrized_tests(TestUnbacked)
 

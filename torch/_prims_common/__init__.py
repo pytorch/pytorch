@@ -4,22 +4,23 @@ from __future__ import annotations
 import operator
 import typing
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import reduce
 from typing import (
     Any,
-    Callable,
     cast,
     NamedTuple,
     Optional,
     overload,
     TYPE_CHECKING,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, TypeAlias, TypeGuard
+from typing_extensions import deprecated
 
 import torch
 from torch import sym_float, sym_int, sym_max
