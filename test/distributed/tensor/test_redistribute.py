@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import itertools
 
 import torch
@@ -355,7 +356,7 @@ class RedistributeTest(DTensorTestBase):
         replica_spec = Replicate()
         # 1) test replicate -> partial forward
         replica_tensor = distribute_tensor(local_tensor, device_mesh, [replica_spec])
-        with self.assertRaisesRegex(RuntimeError, "Can not redistribute to Partial"):
+        with self.assertRaisesRegex(RuntimeError, "Can not redistribute"):
             partial_tensor = replica_tensor.redistribute(device_mesh, [partial_spec])
 
         from torch.distributed.tensor._redistribute import Redistribute
@@ -598,6 +599,58 @@ class RedistributeTest(DTensorTestBase):
 
         self.assertEqual(new_tensor.shape, new_meta_tensor.shape)
         self.assertEqual(new_tensor.stride(), new_meta_tensor.stride())
+
+    @with_comms
+    def test_one_chunk_mesh(self):
+        # mesh size is 1 on second dim
+        mesh = init_device_mesh(self.device_type, (4, 1))
+
+        srcs = [Shard(1), Replicate(), Partial()]
+        dsts = [Shard(0), Shard(1), Replicate()]
+
+        comm_mode = CommDebugMode()
+
+        for src, dst in itertools.product(srcs, dsts):
+            tensor = torch.randn(16, 8, device=self.device_type)
+            dt = DTensor.from_local(tensor, mesh, [Shard(0), src])
+
+            with comm_mode:
+                out = dt.redistribute(mesh, [Shard(0), dst])
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(out.placements, [Shard(0), dst])
+
+    @with_comms
+    def test_redistribute_to_partial(self):
+        mesh = init_device_mesh(self.device_type, (2, 2))
+
+        tensor = torch.randn(12, 8, device=self.device_type)
+
+        test_cases = [
+            # Partial to Partial is allowed
+            ([Partial(), Shard(0)], [Partial(), Shard(0)], True),
+            ([Partial(), Shard(0)], [Partial(), Shard(1)], True),
+            ([Shard(0), Partial()], [Replicate(), Partial()], True),
+            ([Shard(0), Partial("prod")], [Replicate(), Partial("prod")], True),
+            # Non-Partial to Partial is NOT allowed
+            ([Shard(0), Replicate()], [Shard(0), Partial()], False),
+            ([Shard(0), Replicate()], [Replicate(), Partial()], False),
+            ([Shard(0), Shard(1)], [Replicate(), Partial()], False),
+            # Partial to partial is allowed, if only the reduction ops is the same
+            ([Shard(0), Partial("prod")], [Replicate(), Partial("sum")], False),
+        ]
+
+        for src, dst, allow in test_cases:
+            dt = DTensor.from_local(tensor, mesh, src)
+            raise_context = (
+                self.assertRaisesRegex(RuntimeError, "Can not redistribute")
+                if not allow
+                else contextlib.nullcontext()
+            )
+
+            with raise_context:
+                out = dt.redistribute(mesh, dst)
+                self.assertEqual(out.placements, dst)
 
 
 instantiate_parametrized_tests(RedistributeTest)

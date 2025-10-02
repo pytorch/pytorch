@@ -212,7 +212,7 @@ if TYPE_CHECKING:
     from sympy import Symbol
 
     from torch._C import DispatchKeySet
-    from torch._dynamo.output_graph import OutputGraph, OutputGraphGuardsState
+    from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -392,7 +392,7 @@ class GuardManagerWrapper:
         -----------------------------------------------------------------------
         A ``tag safe root`` is a tag safe node whose parent is not tag safe.
         These boundary nodes mark the points where guard evaluation can safely
-        prune traversal: if a tag-safe root’s dictionary tag matches, the entire
+        prune traversal: if a tag-safe root's dictionary tag matches, the entire
         subtree beneath it is skipped.
 
         One strong requirement for tag safe root is for the guarded object to
@@ -544,12 +544,12 @@ class GuardManagerWrapper:
                 and node.get_source().endswith(dunder_attrs_assumed_constants)
                 and config.assume_dunder_attributes_remain_unchanged
             ):
-                # We trust tuples obtained from a function’s __closure__ or
+                # We trust tuples obtained from a function's __closure__ or
                 # __defaults__. Any *other* tuple-valued attribute can be
                 # silently replaced—for example:
                 #
                 #     foo.bar = (1, 2)      # original
-                #     foo.bar = (3, 4)      # rebinding that our dict-tag optimisation won’t see
+                #     foo.bar = (3, 4)      # rebinding that our dict-tag optimisation won't see
                 #
                 # Therefore only tuples from __closure__ / __defaults__ participate in the
                 # recursive-dict-tag optimization; all others are ignored.
@@ -2061,10 +2061,10 @@ class GuardBuilder(GuardBuilderBase):
         # TODO(anijain2305) - Consider this moving this guard to C++
         compare_fn = torch._functorch.pyfunctorch.compare_functorch_state
 
-        def fn() -> bool:
+        def fn(x: Any) -> bool:
             return compare_fn(states)
 
-        self.guard_manager.root.add_lambda_guard_no_args(
+        self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2090,10 +2090,10 @@ class GuardBuilder(GuardBuilderBase):
         ]
         self._set_guard_export_info(guard, code)
 
-        def fn() -> bool:
+        def fn(x: Any) -> bool:
             return guard_hooks_ids == hooks_ids_fn(get_hooks())
 
-        self.guard_manager.root.add_lambda_guard_no_args(
+        self.guard_manager.root.add_lambda_guard(
             fn, get_verbose_code_parts(code, guard)
         )
 
@@ -2114,7 +2114,7 @@ class GuardBuilder(GuardBuilderBase):
                 return x.__tensor_flatten__()[1] == original_metadata
 
         global_name = f"___check_metadata_{id(metadata_checker)}_c{CompileContext.current_compile_id()}"
-        self.get_guard_manager(guard).add_lambda_guard_no_framelocals(
+        self.get_guard_manager(guard).add_lambda_guard(
             metadata_checker, get_verbose_code_parts(global_name, guard)
         )
 
@@ -2456,7 +2456,7 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def SHAPE_ENV(self, guard: Guard) -> None:
-        from torch._dynamo.output_graph import OutputGraph
+        from torch._dynamo.output_graph import OutputGraphCommon
 
         assert guard.name == ""
         output_graph = self.check_fn_manager.output_graph
@@ -2473,8 +2473,9 @@ class GuardBuilder(GuardBuilderBase):
             # shape variables to sources from tracked_fakes.  This must happen after
             # tensor checks.
             # NB: self.output_graph can be None in the debug_nops tests
-            assert isinstance(output_graph, OutputGraph)
-            fs = output_graph.tracked_fakes
+            assert isinstance(output_graph, OutputGraphCommon)
+            assert output_graph.shape_env is not None
+            fs = output_graph.shape_env.tracked_fakes or []
             input_contexts = [a.symbolic_context for a in fs]
 
             def get_sources(t_id: int, dim: int) -> list[Source]:
@@ -2485,7 +2486,6 @@ class GuardBuilder(GuardBuilderBase):
                     for source in output_graph.tracked_fakes_id_to_source[t_id]
                 ]
 
-            assert output_graph.shape_env is not None
             if output_graph.export_constraints:
                 names: dict[str, tuple[int, int]] = {}
                 source_pairs: list[tuple[Source, Source]] = []
@@ -2721,9 +2721,10 @@ class GuardBuilder(GuardBuilderBase):
 
             if config.log_compilation_metrics and isinstance(value, torch.nn.Parameter):
                 metrics_context = get_metrics_context()
-                metrics_context.increment("param_numel", value.numel())
-                metrics_context.increment("param_bytes", value.nbytes)
-                metrics_context.increment("param_count", 1)
+                if metrics_context.in_progress():
+                    metrics_context.increment("param_numel", value.numel())
+                    metrics_context.increment("param_bytes", value.nbytes)
+                    metrics_context.increment("param_count", 1)
 
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
@@ -3354,7 +3355,7 @@ class CheckFunctionManager:
     def __init__(
         self,
         f_code: types.CodeType,
-        output_graph: OutputGraphGuardsState,
+        output_graph: OutputGraphCommon,
         cache_entry: Optional[CacheEntry] = None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
         guard_filter_fn: Optional[
@@ -3371,7 +3372,7 @@ class CheckFunctionManager:
         existing_diff_guard_sources = (
             update_diff_guard_managers_for_existing_cache_entries(cache_entry)
         )
-        self.output_graph: Optional[OutputGraphGuardsState] = output_graph
+        self.output_graph: Optional[OutputGraphCommon] = output_graph
         assert self.output_graph is not None
 
         # Only used for serialization.
@@ -3536,9 +3537,9 @@ class CheckFunctionManager:
 
         self.guards_state: Optional[bytes] = None
         if save_guards:
-            from torch._dynamo.output_graph import OutputGraph
+            from torch._dynamo.output_graph import OutputGraphCommon
 
-            assert isinstance(self.output_graph, OutputGraph)
+            assert isinstance(self.output_graph, OutputGraphCommon)
             try:
                 self.guards_state = self.serialize_guards(
                     builder, sorted_guards, self.output_graph
@@ -3580,7 +3581,7 @@ class CheckFunctionManager:
         self,
         builder: GuardBuilder,
         sorted_guards: list[Guard],
-        output_graph: OutputGraph,
+        output_graph: OutputGraphCommon,
     ) -> bytes:
         # We check whether our list of guards are serializable here
         for guard in sorted_guards:
@@ -3612,7 +3613,7 @@ class CheckFunctionManager:
                     f"{failed} guard cannot be serialized."
                 )
 
-        builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals
+        builtins_dict_name = output_graph.name_of_builtins_dict_key_in_fglobals or ""
         used_global_vars = set()
         used_local_vars = set()
 
@@ -3622,7 +3623,7 @@ class CheckFunctionManager:
                 # Leave out the builtins dict key, as we will special handle
                 # it later because the guarded code rarely use the entire
                 # builtin dict in the common case.
-                if name not in (builtins_dict_name,):
+                if name != builtins_dict_name:
                     used_global_vars.add(name)
             elif name := get_local_source_name(source):
                 assert isinstance(name, str)
@@ -3869,13 +3870,13 @@ class CheckFunctionManager:
             )
 
         # Note - On Lambda guarding of object aliasing
-        # We previously installed object‑aliasing guards as relational guards,
-        # but that undermined the recursive‑dict guard optimization: placing the
+        # We previously installed object-aliasing guards as relational guards,
+        # but that undermined the recursive-dict guard optimization: placing the
         # aliasing guard at a leaf prevented the parent dict node from
-        # qualifying as a recursive‑dict guard root. Because aliasing guards are
+        # qualifying as a recursive-dict guard root. Because aliasing guards are
         # rare, we now emit them as epilogue guards via a small Python lambda.
         # This repeats the access in Python—adding a bit of work—but the
-        # overhead is outweighed by the gains from enabling recursive‑dict guard
+        # overhead is outweighed by the gains from enabling recursive-dict guard
         # optimization.
         if (
             config.use_lamba_guard_for_object_aliasing

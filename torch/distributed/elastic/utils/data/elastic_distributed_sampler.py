@@ -62,8 +62,8 @@ class ElasticDistributedSampler(DistributedSampler[T]):
 
         self.start_index = start_index
         sized_dataset = cast(Sized, self.dataset)
-        self.num_samples = int(
-            math.ceil(float(len(sized_dataset) - self.start_index) / self.num_replicas)
+        self.num_samples = math.ceil(
+            float(len(sized_dataset) - self.start_index) / self.num_replicas
         )
         self.total_size = self.num_samples * self.num_replicas
 
