@@ -466,7 +466,7 @@ else:
                         self.device_type,
                         self.mesh_dim_names,
                         self._thread_id,
-                        self.root_mesh,
+                        self._root_mesh,
                     )
                 )
             return self._hash
@@ -482,7 +482,7 @@ else:
                 and self.device_type == other.device_type
                 and self.mesh_dim_names == other.mesh_dim_names
                 and self._thread_id == other._thread_id
-                and self.root_mesh == other.root_mesh
+                and self._root_mesh == other._root_mesh
             )
 
         def __getitem__(
