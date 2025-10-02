@@ -397,6 +397,8 @@ class DTensorAPITest(DTensorTestBase):
 
 
 class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
+    world_size = 4
+
     @property
     def device(self):
         return f"{DTensorContinuousTestBase.device_type()}:{self.rank}"
