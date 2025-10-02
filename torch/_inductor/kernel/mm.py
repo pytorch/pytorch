@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
+from enum import IntEnum
 from typing import Any, Optional, Union
 
 import torch
@@ -360,15 +361,15 @@ persistent_tma_mm_template = TritonTemplate(
 
 load_scales = r"""
 @triton.jit
-def load_scales(a_scale_ptr, b_scale_ptr, SCALING_ROWWISE: tl.constexpr):
-    if SCALING_ROWWISE:
-        # For row-wise scaling, we'll return the pointers
-        return a_scale_ptr, b_scale_ptr
-    else:
+def load_scales(a_scale_ptr, b_scale_ptr, SCALING_MODE: tl.constexpr):
+    if SCALING_MODE == 0:  # ScalingMode.TENSOR
         # For per-tensor scaling, we'll load the scalar values
         a_scale = tl.load(a_scale_ptr)
         b_scale = tl.load(b_scale_ptr)
         return a_scale, b_scale
+    else:
+        # For row-wise and deepseek-style scaling, we'll return the pointers
+        return a_scale_ptr, b_scale_ptr
 """
 
 
@@ -378,7 +379,7 @@ def apply_scaling(
     accumulator,
     a_scale,
     b_scale,
-    SCALING_ROWWISE: tl.constexpr,
+    SCALING_MODE: tl.constexpr,
     offs_cm,
     offs_cn,
     M,
@@ -386,7 +387,7 @@ def apply_scaling(
     stride_a_scale_m,
     stride_b_scale_n,
 ):
-    if SCALING_ROWWISE:
+    if SCALING_MODE == 1:  # ScalingMode.ROW
         # For row-wise scaling, we need to load the scales for each row/column
         a_scales = tl.load(
             a_scale + (offs_cm * stride_a_scale_m),
@@ -407,7 +408,7 @@ def apply_scaling(
 """
 
 
-device_tma = r"""
+scaled_mm_device_tma_tensor_row = r"""
 {{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
     M = {{size("A", 0)}}
     N = {{size("B", 1)}}
@@ -421,7 +422,7 @@ device_tma = r"""
     stride_bk = {{stride("B", 0)}}
     stride_bn = {{stride("B", 1)}}
 
-    if SCALING_ROWWISE:
+    if SCALING_MODE == 1:  # ScalingMode.ROW
         stride_a_scale_m = 1
         stride_b_scale_n = 1
     else:
@@ -488,7 +489,7 @@ device_tma = r"""
 
     num_pid_in_group = GROUP_M * num_pid_n
     accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    a_scale, b_scale = load_scales(A_inverse_scale, B_inverse_scale, SCALING_ROWWISE)
+    a_scale, b_scale = load_scales(A_inverse_scale, B_inverse_scale, SCALING_MODE)
 
     for _ in range(0, k_tiles * tiles_per_SM):
         ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
@@ -530,7 +531,7 @@ device_tma = r"""
                 accumulator,
                 a_scale,
                 b_scale,
-                SCALING_ROWWISE,
+                SCALING_MODE,
                 offs_cm,
                 offs_cn,
                 M,
@@ -558,10 +559,131 @@ device_tma = r"""
 """
 
 
-scaled_mm_device_tma_template = TritonTemplate(
-    name="scaled_mm_device_tma",
+scaled_mm_device_tma_tensor_row_template = TritonTemplate(
+    name="scaled_mm_device_tma_tensor_row",
     grid=persistent_mm_grid,
-    source=device_tma + load_scales + apply_scaling,
+    source=scaled_mm_device_tma_tensor_row + load_scales + apply_scaling,
+)
+
+scaled_mm_device_tma_deepseek_block_group = r"""
+{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
+    M = {{size("A", 0)}}
+    N = {{size("B", 1)}}
+    K = {{size("A", 1)}}
+    if M * N == 0:
+        # early exit due to zero-size input(s)
+        return
+
+    stride_am = {{stride("A", 0)}}
+    stride_ak = {{stride("A", 1)}}
+    stride_bk = {{stride("B", 0)}}
+    stride_bn = {{stride("B", 1)}}
+
+    start_pid = tl.program_id(axis=0).to(INDEX_DTYPE)
+    num_pid_m = tl.cdiv(M, BLOCK_M)
+    num_pid_n = tl.cdiv(N, BLOCK_N)
+    k_tiles = tl.cdiv(K, BLOCK_K)
+    num_tiles = num_pid_m * num_pid_n
+
+    stride_am = {{stride("A", 0)}}
+    stride_bn = {{stride("B", 1)}}
+    a_desc = triton.language.make_tensor_descriptor(
+        base=A,
+        shape=[M, K],
+        strides=[stride_am, 1],
+        block_shape=[BLOCK_M, BLOCK_K],
+    )
+    b_desc = triton.language.make_tensor_descriptor(
+        base=B,
+        shape=[N, K],
+        strides=[stride_bn, 1],
+        block_shape=[BLOCK_N, BLOCK_K],
+    )
+
+    tiles_per_SM = num_tiles // NUM_SMS
+    if start_pid < num_tiles % NUM_SMS:
+        tiles_per_SM += 1
+
+    tile_id = start_pid - NUM_SMS
+    ki = -1
+
+    pid_m = 0
+    pid_n = 0
+    offs_am = 0
+    offs_bn = 0
+
+    num_pid_in_group = GROUP_M * num_pid_n
+    accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+    a_scale, b_scale = load_scales(A_inverse_scale, B_inverse_scale, SCALING_MODE)
+
+    for _ in range(0, k_tiles * tiles_per_SM):
+        ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
+        if ki == 0:
+            tile_id += NUM_SMS
+            group_id = tile_id // num_pid_in_group
+            first_pid_m = group_id * GROUP_M
+            group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
+            pid_m = first_pid_m + (tile_id % group_size_m)
+            pid_n = (tile_id % num_pid_in_group) // group_size_m
+
+            offs_am = pid_m * BLOCK_M
+            offs_bn = pid_n * BLOCK_N
+
+        offs_k = ki * BLOCK_K
+
+        a = tl.load_tensor_descriptor(a_desc, [offs_am, offs_k])
+        b = tl.load_tensor_descriptor(b_desc, [offs_bn, offs_k])
+
+        # Deepseek-style scaling
+        k_blocks = tl.cdiv(K, 128)
+        n_blocks = tl.cdiv(N, 128)
+
+        row_offs_scale_a = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)  # [BLOCK_M]
+        col_offs_scale_a = ki * tl.cdiv(BLOCK_K, 128) + tl.arange(0, (BLOCK_K + 128 - 1) // 128)  # [BLOCK_K // 128]
+        ptrs = a_scale + row_offs_scale_a[:, None] * k_blocks + col_offs_scale_a[None, :]  # [BLOCK_M, BLOCK_K // 128]
+        mask_a = (row_offs_scale_a[:, None] < M) & (col_offs_scale_a[None, :] < k_blocks)   # [BLOCK_M, BLOCK_K // 128]
+        scale_a_tile = tl.load(ptrs, mask=mask_a, other=1.0)
+
+        row_offs_scale_b = pid_n * tl.cdiv(BLOCK_N, 128) + tl.arange(0, (BLOCK_N + 128 - 1) // 128)  # [BLOCK_N // 128]
+        col_offs_scale_b = ki * tl.cdiv(BLOCK_K, 128) + tl.arange(0, (BLOCK_K + 128 - 1) // 128)  # [BLOCK_K // 128]
+        ptrs_b = b_scale + row_offs_scale_b[:, None] * k_blocks + col_offs_scale_b[None, :]  # [BLOCK_N // 128, BLOCK_K // 128]
+        mask_b = (row_offs_scale_b[:, None] < n_blocks) & (col_offs_scale_b[None, :] < k_blocks)  # [BLOCK_N // 128, BLOCK_K // 128]
+        scale_b_block = tl.load(ptrs_b, mask=mask_b, other=1.0)
+
+        scale_a_expanded = scale_a_tile[:, :, None]  # [BLOCK_M, tl.cdiv(K, BLOCK_K), 1]
+        scale_a_expanded = tl.broadcast_to(scale_a_expanded, (BLOCK_M, (BLOCK_K + 128 - 1) // 128, MIN_BLOCK_K_128))  # [BLOCK_M, tl.cdiv(K, BLOCK_K), MIN_BLOCK_K_128]
+        scale_a_expanded = scale_a_expanded.reshape(BLOCK_M, ((BLOCK_K + 128 - 1) // 128) * MIN_BLOCK_K_128)  # [BLOCK_M, MIN_BLOCK_K_128]
+
+        scale_b_expanded = scale_b_block[:, :, None, None]  # [tl.cdiv(N, BLOCK_N), tl.cdiv(K, BLOCK_K), 1, 1]
+        scale_b_expanded = tl.broadcast_to(
+            scale_b_expanded,
+            ((BLOCK_N + 128 - 1) // 128, (BLOCK_K + 128 - 1) // 128, MIN_BLOCK_N_128, MIN_BLOCK_K_128)
+        )  # [tl.cdiv(N, BLOCK_N), tl.cdiv(K, BLOCK_K), MIN_BLOCK_N_128, MIN_BLOCK_K_128]
+        scale_b_expanded = scale_b_expanded.reshape(((BLOCK_N + 128 - 1) // 128) * MIN_BLOCK_N_128, ((BLOCK_K + 128 - 1) // 128) * MIN_BLOCK_K_128)  # [MIN_BLOCK_N_128, MIN_BLOCK_K_128]
+
+        a_scaled = a * scale_a_expanded
+        b_scaled = b * scale_b_expanded
+        accumulator = tl.dot(a_scaled, b_scaled.T, accumulator)
+
+        if ki == k_tiles - 1:
+            offs_cm = offs_am + tl.arange(0, BLOCK_M)
+            offs_cn = offs_bn + tl.arange(0, BLOCK_N)
+
+            # inductor generates a suffix
+            {{store_output(
+                ("offs_am", "offs_bn"),
+                "accumulator",
+                indent_width=12,
+                val_shape=("BLOCK_M", "BLOCK_N"),
+                block_indexing=True,
+            )}}
+            accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+"""
+
+scaled_mm_device_tma_deepseek_block_group_template = TritonTemplate(
+    name="scaled_mm_device_tma_deepseek_block_group",
+    grid=persistent_mm_grid,
+    source=scaled_mm_device_tma_deepseek_block_group + load_scales,
 )
 
 _compute_blackwell_pid = r"""
@@ -1256,6 +1378,12 @@ def tuned_sparse_semi_structured_mm(
 add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
 
 
+class ScalingMode(IntEnum):
+    TENSOR = 0
+    ROW = 1
+    DEEPSEEK = 2
+
+
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
 def tuned_scaled_mm(
     mat_a,
@@ -1341,8 +1469,60 @@ def tuned_scaled_mm(
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
-            templates_to_use.append(scaled_mm_device_tma_template)
-            kwarg_overrides[scaled_mm_device_tma_template.uid] = overriders
+            scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
+
+            def _is_scalar_like(sz: Any) -> bool:
+                return (len(sz) == 0) or all(
+                    V.graph.sizevars.statically_known_equals(d, 1) for d in sz
+                )
+
+            def _ceil_div(v: int, d: int) -> int:
+                return (v + d - 1) // d
+
+            def _is_blockwise_1x128(
+                t: torch.Tensor, scale_t_size: torch.Tensor
+            ) -> bool:
+                return scale_t_size[0] == t.shape[0] and scale_t_size[1] == _ceil_div(
+                    t.shape[1], 128
+                )
+
+            def _is_blockwise_128x128(
+                t: torch.Tensor, scale_t_size: torch.Tensor
+            ) -> bool:
+                return scale_t_size[0] == _ceil_div(t.shape[0], 128) and scale_t_size[
+                    1
+                ] == _ceil_div(t.shape[1], 128)
+
+            # Supported scaling modes (from aten/src/ATen/native/cuda/Blas.cpp::1163):
+            # TensorWise, RowWise, Deepseek (BlockWise1x128 x BlockWise128x128)
+            # TODO (jananisriram): support BlockWise1x16, BlockWise1x32
+            if _is_scalar_like(scale_a_size) and _is_scalar_like(scale_b_size):
+                scaling_mode = ScalingMode.TENSOR.value
+            elif scale_a_size[-1] == scale_b_size[0] == 1:
+                scaling_mode = ScalingMode.ROW.value
+            elif _is_blockwise_1x128(mat_a, scale_a_size) and _is_blockwise_128x128(
+                mat_b, scale_b_size
+            ):
+                scaling_mode = ScalingMode.DEEPSEEK.value
+            else:
+                raise AssertionError(
+                    f"Inductor Triton does not support scale_a.shape = {scale_a_size}, scale_b.shape = {scale_b_size}"
+                )
+
+            overriders["SCALING_MODE"] = scaling_mode
+
+            if scaling_mode in (ScalingMode.TENSOR, ScalingMode.ROW):  # tensor, row
+                templates_to_use.append(scaled_mm_device_tma_tensor_row_template)
+                kwarg_overrides[scaled_mm_device_tma_tensor_row_template.uid] = (
+                    overriders
+                )
+            else:  # deepseek, block, group
+                templates_to_use.append(
+                    scaled_mm_device_tma_deepseek_block_group_template
+                )
+                kwarg_overrides[
+                    scaled_mm_device_tma_deepseek_block_group_template.uid
+                ] = overriders
 
         if (
             use_triton_blackwell_tma_template(mat_a, mat_b, output_layout=layout)
