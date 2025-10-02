@@ -662,6 +662,7 @@ class TritonPrinter(PythonPrinter):
         if expr.is_integer:
             # sympy considers 0.0 to be integer, but triton doesn't.
             # this workaround prints the float as an integer
+            # xref: https://github.com/sympy/sympy/issues/26620
             ret = str(int(expr))
         elif config.is_fbcode() and torch.version.hip:
             ret = f"{expr}"
