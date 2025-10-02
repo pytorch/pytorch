@@ -140,31 +140,6 @@ inline CublasTransPrepStrategy neg_matrix_trans_prep_strategy_cublas(
   return t_neg_trans_prep_strategy;
 }
 
-// See predict_matrix_trans_prep_strategy_cublas for prep strategies.
-// Additioanally, this method can return the N_OWNED strategy,
-// which implies a col-major copy of the input.
-inline std::tuple<CublasTransPrepStrategy, CublasTransPrepStrategy, CublasTransPrepStrategy>
-predict_gemm_args_trans_prep_strategies_cublas(const Tensor& result, const Tensor& mat1, const Tensor& mat2) {
-  const auto result_trans_strategy = predict_matrix_trans_prep_strategy_cublas(result);
-  const auto mat1_trans_strategy = predict_matrix_trans_prep_strategy_cublas(mat1);
-  const auto mat2_trans_strategy = predict_matrix_trans_prep_strategy_cublas(mat2);
-  if (!is_trans_strategy(result_trans_strategy)) {
-    // Means result is col-compliant, so we will use the res = A @ B path.
-    // Nothing to do, return types as is
-    return std::make_tuple(
-        result_trans_strategy,
-        mat1_trans_strategy,
-        mat2_trans_strategy
-    );
-  } else {
-    return std::make_tuple(
-        result_trans_strategy,
-        neg_matrix_trans_prep_strategy_cublas(mat1, mat1_trans_strategy),
-        neg_matrix_trans_prep_strategy_cublas(mat2, mat2_trans_strategy)
-    );
-  }
-}
-
 // TODO: https://github.com/pytorch/pytorch/pull/59380#pullrequestreview-725310492
 c10::MaybeOwned<Tensor> inline resolve_conj_if_indicated(const Tensor& tensor, bool resolve_conj) {
   if (resolve_conj && tensor.is_conj()) {
@@ -274,6 +249,10 @@ struct cublasCommonArgs {
       scale_matb_dtype = transpose_result ? scale_a->scalar_type() : scale_b->scalar_type();
       scaling_matb_type = transpose_result ? scaling_choice_a : scaling_choice_b;
     }
+    
+    const auto res_trans_strategy = predict_matrix_trans_prep_strategy_cublas(c);
+    auto mat1_trans_strategy = predict_matrix_trans_prep_strategy_cublas(mat1);
+    auto mat2_trans_strategy = predict_matrix_trans_prep_strategy_cublas(mat2);
 
     if (scale_result) {
       scale_result_ptr = scale_result->data_ptr();
@@ -284,9 +263,11 @@ struct cublasCommonArgs {
     if (transpose_result) {
       transpose_a = !transpose_a;
       transpose_b = !transpose_b;
+
+      mat1_trans_strategy = neg_matrix_trans_prep_strategy_cublas(mat1, mat1_trans_strategy);
+      mat2_trans_strategy = neg_matrix_trans_prep_strategy_cublas(mat2, mat2_trans_strategy);
     }
 
-    const auto [res_trans_strategy, mat1_trans_strategy, mat2_trans_strategy] = predict_gemm_args_trans_prep_strategies_cublas(c, mat1, mat2);
     const auto res_trans = is_trans_strategy(res_trans_strategy);
     const auto mat1_trans = is_trans_strategy(mat1_trans_strategy);
     const auto mat2_trans = is_trans_strategy(mat2_trans_strategy);
