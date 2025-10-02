@@ -25,6 +25,7 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
+#include <c10/util/hash.h>
 #include <c10/util/irange.h>
 
 #include <cstdint>
@@ -495,32 +496,21 @@ class TORCH_API Context {
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 
-  struct BackendOpHash {
-    size_t operator()(const std::pair<Float32Backend, Float32Op>& key) const {
-      size_t k1{static_cast<size_t>(key.first)};
-      size_t k2{static_cast<size_t>(key.second)};
-      return std::hash<size_t>{}((k1 << 32) | k2);
-    }
+  using Key = std::pair<Float32Backend, Float32Op>;
+  std::unordered_map<Key, Float32Precision, c10::hash<Key>> fp32_precision = {
+      {{Float32Backend::GENERIC, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::CONV}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
+      {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::MATMUL},
+       float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+           ? Float32Precision::NONE
+           : Float32Precision::TF32},
   };
-
-  std::unordered_map<
-      std::pair<Float32Backend, Float32Op>,
-      Float32Precision,
-      BackendOpHash>
-      fp32_precision = {
-          {{Float32Backend::GENERIC, Float32Op::ALL}, Float32Precision::NONE},
-          {{Float32Backend::MKLDNN, Float32Op::ALL}, Float32Precision::NONE},
-          {{Float32Backend::MKLDNN, Float32Op::CONV}, Float32Precision::NONE},
-          {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
-          {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
-          {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
-          {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::TF32},
-          {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::TF32},
-          {{Float32Backend::CUDA, Float32Op::MATMUL},
-           float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
-               ? Float32Precision::NONE
-               : Float32Precision::TF32},
-      };
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
@@ -701,5 +691,4 @@ struct TORCH_API ROCmBackwardPassGuard {
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
 };
-
 } // namespace at
