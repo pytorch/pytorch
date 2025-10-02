@@ -492,7 +492,7 @@ class TORCH_API Optimizer {
  private:
   /// Helper function to try merging for a specific optimizer type
   template <typename OptimizerType>
-  static bool try_merge_optimizer_type(
+  static bool _try_merge_optimizer_type(
       std::unique_ptr<OptimizerOptions>& final_options,
       const OptimizerOptions& user_options,
       const OptimizerOptions& defaults) {
@@ -509,19 +509,19 @@ class TORCH_API Optimizer {
 
   /// Simple variadic dispatch helper - try all optimizer types in one call
   template <typename... OptimizerTypes>
-  static void try_merge_all_optimizer_types(
+  static void _try_merge_all_optimizer_types(
       std::unique_ptr<OptimizerOptions>& final_options,
       const OptimizerOptions& user_options,
       const OptimizerOptions& defaults) {
     // Try each optimizer type until one succeeds - much cleaner than manual
     // chain
-    (void)(try_merge_optimizer_type<OptimizerTypes>(
+    (void)(_try_merge_optimizer_type<OptimizerTypes>(
                final_options, user_options, defaults) ||
            ...);
   }
 
   /// Convenience function with all known PyTorch optimizers
-  static void try_merge_all_optimizers(
+  static void _try_merge_all_optimizers(
       std::unique_ptr<OptimizerOptions>& final_options,
       const OptimizerOptions& user_options,
       const OptimizerOptions& defaults);

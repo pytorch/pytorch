@@ -18,12 +18,12 @@
 namespace torch::optim {
 
 // Simple implementation using variadic template helper
-void Optimizer::try_merge_all_optimizers(
+void Optimizer::_try_merge_all_optimizers(
     std::unique_ptr<OptimizerOptions>& final_options,
     const OptimizerOptions& user_options,
     const OptimizerOptions& defaults) {
   // Clean one-liner replaces the entire repetitive dispatch chain
-  try_merge_all_optimizer_types<
+  _try_merge_all_optimizer_types<
       SGDOptions,
       AdamOptions,
       AdamWOptions,
@@ -133,7 +133,7 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
     auto final_options = defaults_->clone();
 
     // Simple variadic dispatch - try all known optimizer types
-    try_merge_all_optimizers(final_options, param_group.options(), *defaults_);
+    _try_merge_all_optimizers(final_options, param_group.options(), *defaults_);
 
     // If no merging was done (custom optimizer), final_options already contains
     // defaults
