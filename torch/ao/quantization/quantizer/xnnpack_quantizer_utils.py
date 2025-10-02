@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import itertools
 import typing
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
 import torch
 import torch.nn.functional as F

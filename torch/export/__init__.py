@@ -2,8 +2,8 @@ import logging
 import os
 import warnings
 import zipfile
-from collections.abc import Mapping
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Mapping
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch

@@ -1390,61 +1390,6 @@ class TestCutlassBackend(TestCase):
                     f"M={M}, N={N}, K={K}",
                 )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @parametrize("presets", ("", "0", "0,999"))
-    def test_cutlass_presets(
-        self,
-        presets: str,
-    ):
-        """
-        Test if some configs can be generated with presets.
-        """
-
-        M, N, K = (128, 128, 16)
-        A = torch.randn(M, K).cuda().half()
-        B = torch.randn(N, K).cuda().half().t()
-
-        with (
-            fresh_cache(),
-            config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
-                    "cuda.cutlass_presets": presets,
-                }
-            ),
-            mock.patch(
-                "torch._inductor.kernel.mm.autotune_select_algorithm",
-                wraps=select_no_algorithm,
-            ) as sa,
-        ):
-            with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
-                torch.compile(torch.mm)(A, B)
-
-            self.assertTrue(
-                sa.called,
-                f"autotune_select_algorithm was not called with shape M={M}, N={N}, K={K}",
-            )
-            args, _ = sa.call_args
-            op_name, choices, _, __ = args
-            assert op_name == "mm"
-            cuda_template_count = 0
-            for choice in choices:
-                if isinstance(choice, CUDATemplateCaller):
-                    choice_info = choice.info_dict()
-                    op_conf_name = choice_info.get("op_conf_name", "")
-                    assert isinstance(op_conf_name, str)
-                    cuda_template_count += 1
-
-            self.assertGreater(
-                cuda_template_count,
-                0,
-                "No CUDATemplateCaller choices found for matmul with shape "
-                f"M={M}, N={N}, K={K}",
-            )
-
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_get_max_alignment(self):

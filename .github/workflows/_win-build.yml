@@ -84,9 +84,6 @@ jobs:
           # in https://github.com/actions/checkout/issues/1018
           git config --global core.fsmonitor false
 
-      - name: Clean up leftover processes on non-ephemeral Windows runner
-        uses: pytorch/test-infra/.github/actions/cleanup-runner@main
-
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
