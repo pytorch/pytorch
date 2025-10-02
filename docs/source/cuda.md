@@ -271,6 +271,14 @@ See the docs for {class}`~torch.cuda.green_contexts.GreenContext` for an example
 .. currentmodule:: torch.cuda.green_contexts
 ```
 
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    GreenContext
+```
+
 
 % This module needs to be documented. Adding here in the meantime
 
