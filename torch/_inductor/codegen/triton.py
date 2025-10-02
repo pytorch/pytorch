@@ -1285,14 +1285,14 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def minimum(a, b):
         if torch.version.hip:
-            return f"tl.minimum({a}, {b})"
+            return f"tl.minimum({a}, {b}, tl.PropagateNan.ALL)"
         else:
             return f"triton_helpers.minimum({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
         if torch.version.hip:
-            return f"tl.maximum({a}, {b})"
+            return f"tl.maximum({a}, {b}, tl.PropagateNan.ALL)"
         else:
             return f"triton_helpers.maximum({a}, {b})"
 
