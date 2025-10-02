@@ -77,7 +77,7 @@ std::pair<detail::Float32Backend, detail::Float32Op> check_fp32_prec_backend_and
   return std::make_pair(result_backend, detail::Float32Op(op_it - operators.begin()));
 }
 
-constexpr std::array<std::string_view, 4> float32_precision_strs = {"ieee", "tf32", "bf16", "none"};
+constexpr std::array<std::string_view, 4> float32_precision_strs = {"none", "ieee", "tf32", "bf16"};
 
 std::string_view fp32_prec_to_str(detail::Float32Precision prec) {
   return float32_precision_strs.at(static_cast<int>(prec));

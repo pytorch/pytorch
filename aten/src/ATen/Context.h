@@ -41,7 +41,7 @@ enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
 namespace detail {
 enum class Float32Backend { GENERIC, MKLDNN, CUDA };
 enum class Float32Op { MATMUL, CONV, RNN, ALL };
-enum class Float32Precision { IEEE, TF32, BF16, NONE };
+enum class Float32Precision { NONE, IEEE, TF32, BF16 };
 } // namespace detail
 
 class TORCH_API Context {
