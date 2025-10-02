@@ -664,7 +664,7 @@ class DTensorRedistributePlanner:
                 new_logical_shape[tensor_dim] = new_size
         return new_logical_shape
 
-    def generate_optimal_transform_infos(
+    def generate_graph_based_transform_infos(
         self,
         src_spec: DTensorSpec,
         dst_spec: DTensorSpec,
@@ -925,7 +925,7 @@ def _gen_transform_infos_non_cached(
     if use_greedy_transform:
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
     else:
-        transform_infos = drp.generate_optimal_transform_infos(
+        transform_infos = drp.generate_graph_based_transform_infos(
             src_spec, dst_spec, src_spec.shape
         )
     return transform_infos
@@ -956,6 +956,13 @@ def redistribute_local_tensor(
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
+
+    # make sure we are not having any weird Placement type (e.g., _StridedShard)
+    # for redistribution
+    for placement in current_spec.placements:
+        assert isinstance(placement, Replicate | Shard | Partial)
+    for placement in target_spec.placements:
+        assert isinstance(placement, Replicate | Shard | Partial)
 
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh

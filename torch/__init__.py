@@ -1699,7 +1699,7 @@ def _check(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(RuntimeError, cond, message)
+    _check_with(RuntimeError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
 def _check_is_size(i, message=None, *, max=None):
@@ -1748,7 +1748,7 @@ def _check_index(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(IndexError, cond, message)
+    _check_with(IndexError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
 def _check_value(cond, message=None):  # noqa: F811
@@ -1766,7 +1766,7 @@ def _check_value(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(ValueError, cond, message)
+    _check_with(ValueError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
 def _check_type(cond, message=None):  # noqa: F811
@@ -1784,7 +1784,7 @@ def _check_type(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(TypeError, cond, message)
+    _check_with(TypeError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
 def _check_not_implemented(cond, message=None):  # noqa: F811
@@ -1802,7 +1802,12 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(NotImplementedError, cond, message)
+    _check_with(
+        NotImplementedError,
+        cond,
+        # pyrefly: ignore  # bad-argument-type
+        message,
+    )
 
 
 def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
@@ -2612,7 +2617,7 @@ def compile(
         def fn(model: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
             if model is None:
                 raise RuntimeError("Model can't be None")
-            return compile(
+            return compile(  # pyrefly: ignore  # no-matching-overload
                 model,
                 fullgraph=fullgraph,
                 dynamic=dynamic,
