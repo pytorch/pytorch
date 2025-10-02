@@ -557,8 +557,10 @@ class SizeVarAllocator:
     ) -> Union[Expr, int]:
         if isinstance(expr, int):
             return expr
+
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
+        expr = self.remove_precomputed_replacements(expr)
         if not isinstance(expr, Expr):
             assert isinstance(expr, int)
             return expr
@@ -571,8 +573,6 @@ class SizeVarAllocator:
 
         if hint_override:
             return hint_override
-
-        expr = self.remove_precomputed_replacements(expr)
 
         if use_user_provided_hint_override:
             expr = sympy_subs(expr, self.var_to_hint_override)
