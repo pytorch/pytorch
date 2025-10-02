@@ -1078,6 +1078,14 @@ enable_caching_generated_triton_templates: bool = True
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
+# This is used for debugging purposes in JIT Inductor where you just want to
+# check the graph after post-grad passes. Instead of running with Inductor's
+# generated python code + generated triton kernels, we will just run with the
+# post-grad graph.
+debug_return_post_grad_graph: bool = (
+    os.environ.get("TORCHINDUCTOR_DEBUG_RETURN_POST_GRAD", "0") == "1"
+)
+
 
 def get_worker_log_path() -> Optional[str]:
     log_loc = None

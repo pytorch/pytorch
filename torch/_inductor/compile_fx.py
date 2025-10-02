@@ -13,7 +13,7 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from inspect import currentframe
@@ -640,6 +640,52 @@ def is_tf32_warning_applicable(gm: GraphModule) -> bool:
             ):
                 return True
     return False
+
+
+def create_post_grad_runnable(
+    gm: torch.fx.GraphModule,
+    *,
+    static_input_idxs: Sequence[int],
+    fx_kwargs: _CompileFxKwargs,
+    inputs_to_check: Sequence[int],
+    runnable_graph_str: str,
+    inductor_post_grad_graph_str: str,
+) -> CompiledFxGraph:
+    """
+    Creates a CompiledFxGraph given a graph module. This is used to directly run
+    with the post-grad graph.
+    """
+
+    def compiled_fn(args):  # type: ignore[no-untyped-def]
+        return torch.fx.Interpreter(gm).boxed_run(args)
+
+    compiled_fn._boxed_call = True  # type: ignore[attr-defined]
+
+    dummy_metrics_deltas = metrics.CachedMetricsDeltas(
+        generated_kernel_count=0,
+        generated_cpp_vec_kernel_count=0,
+        ir_nodes_pre_fusion=0,
+        cpp_to_dtype_count=0,
+        num_bytes_accessed=0,
+        num_matches_for_scatter_upon_const_tensor=0,
+    )
+
+    return CompiledFxGraph(
+        current_callable=compiled_fn,
+        graph=GraphLowering(gm),  # type: ignore[arg-type]
+        gm=gm,
+        output_strides=[],
+        disabled_cudagraphs_reason="Running with post-grad graph",
+        metrics_deltas=dummy_metrics_deltas,
+        counter_deltas=Counter(),
+        cudagraphs=BoxedBool(False),
+        example_inputs=[],
+        static_input_idxs=static_input_idxs,
+        fx_kwargs=fx_kwargs,
+        inputs_to_check=inputs_to_check,
+        runnable_graph_str=runnable_graph_str,
+        inductor_post_grad_graph_str=inductor_post_grad_graph_str,
+    )
 
 
 def maybe_disable_comprehensive_padding(
@@ -1348,6 +1394,16 @@ class _InProcessFxCompile(FxCompile):
                         # TODO(T216453900): need to work around for now to support vllm
                         # See details in vllm/compilation/pass_manager.py.
                         log.warning("failed to log pt2_configs")
+
+            if config.debug_return_post_grad_graph:
+                return create_post_grad_runnable(
+                    gm,
+                    static_input_idxs=static_input_idxs,
+                    fx_kwargs=graph_kwargs,
+                    inputs_to_check=inputs_to_check,
+                    runnable_graph_str=runnable_graph_str,
+                    inductor_post_grad_graph_str=inductor_post_grad_graph_str,
+                )
 
             with (
                 V.set_fake_mode(fake_mode),
