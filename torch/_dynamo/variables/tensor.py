@@ -1098,13 +1098,14 @@ class TensorVariable(VariableTracker):
 
             # Not sure if __setitem__ can ever save activations, disabling just in case
 
-            # Ignore fresh unbacked symbols that arises from patterns the could arise from the
-            # internal indexing (selection) in, since the whole op output size/stride is not
-            # dependent on the indexing.
-            #   t[idx] += 1
-
+            # Ignore fresh unbacked symbols that could arise from the internal indexing (selection),
+            # that happen in patterns like t[idx] += 1 when idx is unabacked.
+            # When the selection happens if idx is unbacked we allocate a new unbacked symbol for the
+            # storage offset in select_meta, but the output of the operation t[idx] += 1 has the same
+            # shape as t and does not depend on t[idx]. Note that during dynamo tracing we do not 
+            # decompose this into item and copy calls yet. It will just show up as set_item.
             with (
-                torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+                torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
                 tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
                 if tx.fake_mode and tx.fake_mode.shape_env
                 else nullcontext(),
