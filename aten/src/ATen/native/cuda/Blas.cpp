@@ -67,8 +67,8 @@ enum class CublasPrepTransStrategy : int {
   T_OWNED = 3 // make a row-major copy, then transpose
 };
 
-inline bool is_trans_strategy(const CublasPrepTransStrategy& trans_type) {
-  return static_cast<int>(trans_type) >= static_cast<int>(CublasPrepTransStrategy::T_BORROWED);
+inline bool is_trans_strategy(const CublasPrepTransStrategy& trans_strategy) {
+  return static_cast<int>(trans_strategy) >= static_cast<int>(CublasPrepTransStrategy::T_BORROWED);
 }
 
 // Fast dim must be contiguous, and the leading one
@@ -109,16 +109,16 @@ inline CublasPrepTransStrategy predict_matrix_trans_prep_strategy_cublas(const T
 // which implies a col-major copy of the input.
 inline std::tuple<CublasPrepTransStrategy, CublasPrepTransStrategy, CublasPrepTransStrategy>
 predict_gemm_args_trans_prep_strategies_cublas(const Tensor& result, const Tensor& mat1, const Tensor& mat2) {
-  const auto result_trans_type = predict_matrix_trans_prep_strategy_cublas(result);
-  const auto mat1_trans_type = predict_matrix_trans_prep_strategy_cublas(mat1);
-  const auto mat2_trans_type = predict_matrix_trans_prep_strategy_cublas(mat2);
-  if (!is_trans_strategy(result_trans_type)) {
+  const auto result_trans_strategy = predict_matrix_trans_prep_strategy_cublas(result);
+  const auto mat1_trans_strategy = predict_matrix_trans_prep_strategy_cublas(mat1);
+  const auto mat2_trans_strategy = predict_matrix_trans_prep_strategy_cublas(mat2);
+  if (!is_trans_strategy(result_trans_strategy)) {
     // Means result is col-compliant, so we will use the res = A @ B path.
     // Nothing to do, return types as is
     return std::make_tuple(
-        result_trans_type,
-        mat1_trans_type,
-        mat2_trans_type
+        result_trans_strategy,
+        mat1_trans_strategy,
+        mat2_trans_strategy
     );
   } else {
     // Means result is row-complaint, so we will use
@@ -134,9 +134,9 @@ predict_gemm_args_trans_prep_strategies_cublas(const Tensor& result, const Tenso
     // TODO: we can simplify the logic substantially by just
     // negating T_OWNED, and for other cases returning
     // prediction for the transposed tensor.
-    const auto neg_trans_type = [](const Tensor& t, const CublasPrepTransStrategy& t_trans_type) -> auto {
+    const auto neg_trans_strategy = [](const Tensor& t, const CublasPrepTransStrategy& t_trans_strategy) -> auto {
       if (t.is_non_overlapping_and_dense()) { // when t is row- or col-major
-        switch(t_trans_type) {
+        switch(t_trans_strategy) {
           case CublasPrepTransStrategy::T_BORROWED:
             return CublasPrepTransStrategy::N;
           case CublasPrepTransStrategy::N:
@@ -145,7 +145,7 @@ predict_gemm_args_trans_prep_strategies_cublas(const Tensor& result, const Tenso
             TORCH_CHECK(false, "This path should not be reachable")
         }
       }
-      switch (t_trans_type) {
+      switch (t_trans_strategy) {
         case CublasPrepTransStrategy::T_OWNED:
           // Implies negating the case with an owned row-major copy,
           // so we can just create a col-major copy directly
@@ -162,9 +162,9 @@ predict_gemm_args_trans_prep_strategies_cublas(const Tensor& result, const Tenso
       }
     };
     return std::make_tuple(
-        result_trans_type,
-        neg_trans_type(mat1, mat1_trans_type),
-        neg_trans_type(mat2, mat2_trans_type)
+        result_trans_strategy,
+        neg_trans_strategy(mat1, mat1_trans_strategy),
+        neg_trans_strategy(mat2, mat2_trans_strategy)
     );
   }
 }
@@ -290,14 +290,14 @@ struct cublasCommonArgs {
       transpose_b = !transpose_b;
     }
 
-    const auto [res_trans_type, mat1_trans_type, mat2_trans_type] = predict_gemm_args_trans_prep_strategies_cublas(c, mat1, mat2);
-    const auto res_trans = is_trans_strategy(res_trans_type);
-    const auto mat1_trans = is_trans_strategy(mat1_trans_type);
-    const auto mat2_trans = is_trans_strategy(mat2_trans_type);
+    const auto [res_trans_strategy, mat1_trans_strategy, mat2_trans_strategy] = predict_gemm_args_trans_prep_strategies_cublas(c, mat1, mat2);
+    const auto res_trans = is_trans_strategy(res_trans_strategy);
+    const auto mat1_trans = is_trans_strategy(mat1_trans_strategy);
+    const auto mat2_trans = is_trans_strategy(mat2_trans_strategy);
     TORCH_CHECK(transpose_result == res_trans);
     if (transpose_result) {
-      //TORCH_CHECK(transpose_a == static_cast<bool>(mat2_trans_type))
-      //TORCH_CHECK(transpose_b == static_cast<bool>(mat1_trans_type))
+      //TORCH_CHECK(transpose_a == static_cast<bool>(mat2_trans_strategy))
+      //TORCH_CHECK(transpose_b == static_cast<bool>(mat1_trans_strategy))
       if (transpose_a != mat2_trans) {
       }
       if (transpose_b != mat1_trans) {
