@@ -15,8 +15,17 @@ import typing
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Literal, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self, TypeGuard
+from typing import (
+    Any,
+    cast,
+    Literal,
+    Optional,
+    TYPE_CHECKING,
+    TypeGuard,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Self
 from weakref import ReferenceType
 
 import torch
@@ -53,7 +62,7 @@ from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputSt
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Mapping, Sequence
+    from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
     from types import TracebackType
 
     from torch._guards import Source

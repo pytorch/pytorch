@@ -156,12 +156,12 @@ static void check_shape_forward(const Tensor& input,
 //
 
 static bool mkldnn_conv_enabled_fpmath_mode_bf16(){
-  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::BF16 &&
+  return at::globalContext().float32Precision("mkldnn", "conv") == "bf16" &&
       mkldnn_bf16_device_check();
 }
 
 static bool mkldnn_conv_enabled_fpmath_mode_tf32(){
-  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::TF32 &&
+  return at::globalContext().float32Precision("mkldnn", "conv") == "tf32" &&
       cpuinfo_has_x86_amx_fp16();
 }
 
