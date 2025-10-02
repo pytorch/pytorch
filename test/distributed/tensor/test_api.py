@@ -400,12 +400,12 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
 
     @property
     def device(self):
-        return f"{self.device_type()}:{self.rank}"
+        return f"{DTensorContinuousTestBase.device_type()}:{self.rank}"
 
     def build_device_mesh(self, mesh_shape=None) -> DeviceMesh:
         if mesh_shape is None:
             mesh_shape = (self.world_size,)
-        return init_device_mesh(self.device_type(), mesh_shape)
+        return init_device_mesh(DTensorContinuousTestBase.device_type(), mesh_shape)
 
     def test_neither_placements_nor_shard_order_raises_error(self):
         """Test that neither placements nor shard_order raises RuntimeError."""
