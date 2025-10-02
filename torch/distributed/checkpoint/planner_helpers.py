@@ -177,7 +177,6 @@ def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
         tensor.shape,
         tensor.device_mesh,
         tensor.placements,
-        getattr(tensor._spec, "device_order", None),
     )
     sizes, offsets = torch.Size(sizes), torch.Size(offsets)
 

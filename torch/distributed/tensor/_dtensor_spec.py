@@ -34,15 +34,20 @@ class DTensorSpec:
     tensor_meta: Optional[TensorMeta] = None
 
     # When a tensor dimension is sharded across multiple mesh axes,
-    # `shard_order` specifies the sequence in which these shardings are applied,
-    # which in turn determines the placement of tensor shards on devices.
-    # `len(shard_order)` is equal to tensor dimensions and `shard_order[i]` is a
-    # tuple of mesh axis indices indicating the order in which sharding is
-    # applied to the tensor dimensions `i`. Note that since `tensor_meta` can be
-    # None, we are unable to tell the rank of the tensor. Therefore, the size of
-    # `shard_order` is only extended to the largest mesh axis index appeared in
-    # `placements` if we let __post_init__ to help fill the `shard_order`.
-    shard_order: Optional[TensorDimTuple] = None
+    # `shard_order` defines the order in which these shardings are applied,
+    # which determines how tensor shards are distributed across devices.
+    # `shard_order` is a tuple of tuples of int, where each inner tuple's first
+    # element is the tensor dimension being sharded, and the remaining elements
+    # specify the ordered device mesh dimensions over which that tensor
+    # dimension is sharded.
+    shard_order: TensorDimTuple = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.shard_order is None:
+            self.shard_order = DTensorSpec.compute_default_sparse_shard_order(
+                self.placements, self.mesh
+            )
+        self._hash: int | None = None
 
     @staticmethod
     def compute_default_sparse_shard_order(
@@ -73,21 +78,11 @@ class DTensorSpec:
         )
         return default_sparse_shard_order
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.placements, tuple):
-            self.placements = tuple(self.placements)
-
-        if self.shard_order is None:
-            self.shard_order = DTensorSpec.compute_default_sparse_shard_order(
-                self.placements, self.mesh
-            )
-
-        self._hash: Optional[int] = None
-
     def __setattr__(self, attr: str, value: Any) -> None:
         super().__setattr__(attr, value)
         # Make sure to recompute the hash in case any of the hashed attributes
-        # change (though we do not expect `mesh` or `placements` to change)
+        # change (though we do not expect `mesh`, `placements` or `shard_order`
+        # to change)
         if hasattr(self, "_hash") and attr in (
             "mesh",
             "placements",
@@ -167,11 +162,24 @@ class DTensorSpec:
     def format_shard_order_str(
         placements: tuple[Placement, ...],
         shard_order: Optional[TensorDimTuple] = None,
-        use_tensor_dim_to_mesh_dims_print: bool = False,
+        tensor_centric_format: bool = False,
     ) -> str:
+        """
+        Format DTensor sharding information as a string.
+
+        Args:
+            placements: Tuple of placement objects for each mesh dimension
+            shard_order: Optional tensor dimension to mesh dimension mapping
+            tensor_centric_format: Controls output format
+                - When True: Shows tensor-centric format mapping tensor dims to mesh dims
+                - When False: Shows standard DTensor mesh-centric format
+
+        Returns:
+            String representation of the sharding pattern
+        """
         out_str = ""
         # print mapping from tensor dim to mesh dim
-        if shard_order and use_tensor_dim_to_mesh_dims_print:
+        if shard_order and tensor_centric_format:
             for tensor_dim, *mesh_dims in shard_order:
                 if len(mesh_dims) > 0:
                     out_str += f"S({tensor_dim})"
@@ -212,6 +220,20 @@ class DTensorSpec:
                     assert isinstance(placement, Partial)
                     out_str += f"P({placement.reduce_op})"
         return out_str
+
+    @staticmethod
+    def is_default_device_order(shard_order: TensorDimTuple) -> bool:
+        """
+        Check if the device order is the default left-to-right order.
+        """
+        for tensor_dim_and_mesh_dims in shard_order:
+            tensor_dim, *mesh_dims = tensor_dim_and_mesh_dims
+            is_increasing = all(
+                prev < nxt for prev, nxt in zip(mesh_dims, mesh_dims[1:])
+            )
+            if not is_increasing:
+                return False
+        return True
 
     @property
     def shape(self) -> torch.Size:
