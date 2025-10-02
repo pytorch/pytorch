@@ -67,6 +67,7 @@ enum class CublasTransPrepStrategy : int {
   T_OWNED = 3 // make a row-major copy, then transpose
 };
 
+// Whether to apply a transposition transform in cuBLAS
 inline bool is_trans_strategy(const CublasTransPrepStrategy& trans_strategy) {
   return static_cast<int>(trans_strategy) >= static_cast<int>(CublasTransPrepStrategy::T_BORROWED);
 }
