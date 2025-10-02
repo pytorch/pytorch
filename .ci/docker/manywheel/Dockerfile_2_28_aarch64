@@ -70,11 +70,6 @@ RUN rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4
 RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6
 RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
 COPY --from=openblas     /opt/OpenBLAS/  /opt/OpenBLAS/
-<<<<<<< HEAD
 ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:$LD_LIBRARY_PATH
-=======
-COPY --from=arm_compute /acl /acl
-ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:/acl/build/:$LD_LIBRARY_PATH
 ADD ./common/patch_libstdc.sh patch_libstdc.sh
 RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
->>>>>>> 566ea4e86abf (Work Around exposing statically linked libstdc++ CXX11 ABI strong symbols (#163980))
