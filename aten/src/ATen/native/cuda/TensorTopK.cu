@@ -395,7 +395,7 @@ __global__ void computeBlockwiseWithinKCounts(
   uint32_t k_to_find = ks_to_find_in[slice_idx];
 
   if (tidx < RADIX_DIGITS) {
-    uint32_t position = slice_idx*RADIX_DIGITS + tidx;
+    uint32_t position = slice_idx * RADIX_DIGITS + tidx;
     uint32_t digit_count_cumsum = digit_cum_sum[position];
     uint32_t digit_count_cumsum_left = (tidx == 0) ? 0 : digit_cum_sum[position - 1];
 
