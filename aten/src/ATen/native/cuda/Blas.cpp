@@ -83,7 +83,7 @@ inline bool matrix_ld_complies_cublas(const Tensor& t, int64_t ld_idx) {
 // Derive a strategy for preparing an input tensor t for cuBLAS, i.e.
 // N - no-op for t,
 // T_BORROWED - a transposed view of t,
-// T_OWNED - a transposed contigious copy of t (i.e. a row-major copy of t)
+// T_OWNED - a transposed contiguous copy of t (i.e. a row-major copy of t)
 inline CublasPrepTransStrategy predict_matrix_trans_prep_strategy_cublas(const Tensor& t) {
   if (t.is_non_overlapping_and_dense()) { // is t row- or col-major?
       return t.is_contiguous()
