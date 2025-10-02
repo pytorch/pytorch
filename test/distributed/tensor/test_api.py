@@ -407,18 +407,21 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
             mesh_shape = (2, self.world_size // 2)
         return init_device_mesh(DTensorContinuousTestBase.device_type(), mesh_shape)
 
-    def test_neither_placements_nor_shard_order_raises_error(self):
-        """Test that neither placements nor shard_order raises RuntimeError."""
+    def test_neither_placements_nor_shard_order(self):
+        """Test that neither placements nor shard_order, use default"""
         mesh = self.build_device_mesh((2, self.world_size // 2))
         input_tensor = torch.randn(8, 6, 5, device=self.device)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            (
-                "tensor distribution and dtensor redistribution require at least one "
-                "of `placements` or `shard_order` to be specified."
-            ),
-        ):
-            distribute_tensor(input_tensor, mesh)
+        input_tensor_dt = distribute_tensor(input_tensor, mesh)
+        self.assertEqual(
+            input_tensor_dt.placements, [Replicate() for _ in range(mesh.ndim)]
+        )
+        self.assertEqual(input_tensor_dt.shard_order, ())
+        input_tensor_dt.redistribute(mesh, (Shard(0), Shard(0)))
+        input_tensor_dt.redistribute(mesh)
+        self.assertEqual(
+            input_tensor_dt.placements, [Replicate() for _ in range(mesh.ndim)]
+        )
+        self.assertEqual(input_tensor_dt.shard_order, ())
 
     @parametrize(
         "placements, shard_order_dict, should_pass",
