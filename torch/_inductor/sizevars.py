@@ -730,12 +730,22 @@ class SizeVarAllocator:
         def should_keep_src_dst(lhs: Expr, rhs: Expr):
             # assuming lhs is the expr to be replaced (src), rhs is the replacement (dst)
             # checking if we should keep them for the replacement rule or swap
-            if lhs.has(rhs):
+
+            if not has_free_unbacked_symbols(rhs):
+                # prioritize replacing unbacked exprs with backed expressions
+                # e.g. u0 + s3 ==> s0 + s1
+                return True
+            elif not has_free_unbacked_symbols(lhs):
+                return False
+            elif lhs.has(rhs):
+                # handles cases where LHS is a sub-expression of the RHS
+                # e.g. Max(2, u0) == s1 * Max(2, u0)
                 return True
             elif rhs.has(lhs):
                 return False
             else:
-                return lhs.compare(rhs) == 1  # see sympy.Basic.compare
+                # fallback to sympy.Basic.compare for a deterministic ordering
+                return lhs.compare(rhs) == 1
 
         self.unbacked_replacements = {}
         for assertions in self.shape_env.deferred_runtime_asserts.values():
