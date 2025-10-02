@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 from torch.ao.quantization.experimental.adaround_fake_quantize import (
