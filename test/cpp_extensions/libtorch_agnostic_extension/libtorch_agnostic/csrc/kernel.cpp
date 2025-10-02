@@ -486,6 +486,37 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_amax_vec", &boxed_my_amax_vec);
 }
 
+Tensor string2Tensor(std::string s) {
+  // an utility function that allows returning strings encoded in a
+  // Tensor object.
+  AtenTensorHandle ath;
+  int64_t sizes[] = {static_cast<int64_t>(s.size())};
+  int64_t strides[] = {1};
+  aoti_torch_create_tensor_from_blob(s.data(), 1, sizes, strides, 0, aoti_torch_dtype_int8(), aoti_torch_device_type_cpu(), 0, &ath);
+  // cloning the Tensor instance because ath does not own the data
+  // when creating a tensor from blob:
+  return torch::stable::clone(Tensor(ath));
+}
+
+Tensor ScalarType2string(Tensor t) {
+  return string2Tensor(c10::toString(t.scalar_type()));
+}
+
+void boxed_ScalarType2string(StableIValue* stack,
+    uint64_t num_args,
+    uint64_t num_outputs) {
+  Tensor res = ScalarType2string(to<Tensor>(stack[0]));
+  stack[0] = from(res);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("ScalarType2string(Tensor t) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
+  m.impl("ScalarType2string", &boxed_ScalarType2string);
+}
+
 // Test functions for torch::stable::accelerator APIs
 
 #ifdef LAE_USE_CUDA
