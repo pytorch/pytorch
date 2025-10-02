@@ -60,15 +60,15 @@ namespace {
 // NOTE: conjugation is handled seperately
 // Strategies for mapping an input tensor to a tensor
 // with a memory layout which complies with cuBLAS (col-major).
-enum class CublasPrepTransStrategy : int {
+enum class CublasTransPrepStrategy : int {
   N = 0, // no transposition, no copy
   N_OWNED = 1, // make a col-major copy, no transposition
   T_BORROWED = 2, // transpose, no copy
   T_OWNED = 3 // make a row-major copy, then transpose
 };
 
-inline bool is_trans_strategy(const CublasPrepTransStrategy& trans_strategy) {
-  return static_cast<int>(trans_strategy) >= static_cast<int>(CublasPrepTransStrategy::T_BORROWED);
+inline bool is_trans_strategy(const CublasTransPrepStrategy& trans_strategy) {
+  return static_cast<int>(trans_strategy) >= static_cast<int>(CublasTransPrepStrategy::T_BORROWED);
 }
 
 // Fast dim must be contiguous, and the leading one
@@ -84,30 +84,66 @@ inline bool matrix_ld_complies_cublas(const Tensor& t, int64_t ld_idx) {
 // N - no-op for t,
 // T_BORROWED - a transposed view of t,
 // T_OWNED - a transposed contiguous copy of t (i.e. a row-major copy of t)
-inline CublasPrepTransStrategy predict_matrix_trans_prep_strategy_cublas(const Tensor& t) {
+inline CublasTransPrepStrategy predict_matrix_trans_prep_strategy_cublas(const Tensor& t) {
   if (t.is_non_overlapping_and_dense()) { // can t be viwed as row- or col-major?
       return t.is_contiguous() // can t be viewed as row-major?
-        ? CublasPrepTransStrategy::T_BORROWED // yes, then transpose without copy
-        : CublasPrepTransStrategy::N; // no, then use as is without transposition
+        ? CublasTransPrepStrategy::T_BORROWED // yes, then transpose without copy
+        : CublasTransPrepStrategy::N; // no, then use as is without transposition
   }
   // We transpose a tensor if the rows dim (dim 0) complies
   // with the cublas requirements for the leading dimension
   const auto row_dim_ld_compliant = matrix_ld_complies_cublas(t, /*ld_idx=*/0);
   if (row_dim_ld_compliant) {
-    return CublasPrepTransStrategy::T_BORROWED; // no copy
+    return CublasTransPrepStrategy::T_BORROWED; // no copy
   } else {
     // If neither row nor col dim complies, a contiguous copy is created
     // which has its row dim compliant, so the tensor will need transposition
     return matrix_ld_complies_cublas(t, /*ld_idx=*/1)
-      ? CublasPrepTransStrategy::N // no copy
-      : CublasPrepTransStrategy::T_OWNED; // copy
+      ? CublasTransPrepStrategy::N // no copy
+      : CublasTransPrepStrategy::T_OWNED; // copy
   }
+}
+
+// Given a strategy, "negate" it by deriving a strategy
+// for a transposed tensor.
+// NOTE: here we map N_* to T_* and T_* to N_* just to comply
+// with the previous logic where the trans prep was just
+// a boolean, and it was directly negated.
+// One can see that there are tensors which can be
+// passed as transposed and not transposed without
+// any correctness issues. Consider, for example, a tensor
+// of shape (1, 1) with strides (1, 1).
+// NOTE: one might think that N_OWNED is redundant,
+// but it can be used in conjuctions with the conj
+// flag to map it to the conj-transpose transformation `c`
+// in cuBLAS.
+inline CublasTransPrepStrategy neg_matrix_trans_prep_strategy_cublas(
+    const Tensor& t,
+    const CublasTransPrepStrategy& t_trans_prep_strategy
+) {
+  const auto t_neg_trans_prep_strategy = predict_matrix_trans_prep_strategy_cublas(t.mT());
+  if (t_neg_trans_prep_strategy == t_trans_prep_strategy) {
+    // Only T_OWNED and T_BORROWED are the stationary points.
+    switch (t_neg_trans_prep_strategy) {
+      case CublasTransPrepStrategy::T_OWNED:
+        // Implies negating the case with an owned row-major copy,
+        // so we can just create a col-major copy directly
+        return CublasTransPrepStrategy::N_OWNED;
+      case CublasTransPrepStrategy::T_BORROWED:
+        // This only happens for contiguous tensors
+        TORCH_CHECK(t.is_contiguous());
+        return CublasTransPrepStrategy::N;
+      default:
+        TORCH_CHECK(false, "This path should not be reachable")
+    }
+  }
+  return t_neg_trans_prep_strategy;
 }
 
 // See predict_matrix_trans_prep_strategy_cublas for prep strategies.
 // Additioanally, this method can return the N_OWNED strategy,
 // which implies a col-major copy of the input.
-inline std::tuple<CublasPrepTransStrategy, CublasPrepTransStrategy, CublasPrepTransStrategy>
+inline std::tuple<CublasTransPrepStrategy, CublasTransPrepStrategy, CublasTransPrepStrategy>
 predict_gemm_args_trans_prep_strategies_cublas(const Tensor& result, const Tensor& mat1, const Tensor& mat2) {
   const auto result_trans_strategy = predict_matrix_trans_prep_strategy_cublas(result);
   const auto mat1_trans_strategy = predict_matrix_trans_prep_strategy_cublas(mat1);
@@ -121,39 +157,10 @@ predict_gemm_args_trans_prep_strategies_cublas(const Tensor& result, const Tenso
         mat2_trans_strategy
     );
   } else {
-    // Means result is row-complaint, so we will use
-    // the res^T = B^T @ A^T path.
-    // NOTE: here we map N_* to T_* and T_* to N_* just to comply
-    // with the previous logic where the trans prep was just
-    // a boolean, and it was directly negated.
-    // One can see that there are tensors which can be
-    // passed as transposed and not transposed without
-    // any correctness issues. Consider, for example, a tensor
-    // of shape (1, 1) with strides (1, 1).
-    // NOTE: one might think that N_OWNED is redundant
-    const auto neg_trans_strategy = [](const Tensor& t, const CublasPrepTransStrategy& t_trans_strategy) -> auto {
-      const auto t_neg_trans_strategy = predict_matrix_trans_prep_strategy_cublas(t.mT());
-      if (t_neg_trans_strategy == t_trans_strategy) {
-        // Only T_OWNED and T_BORROWED are the stationary points.
-        switch (t_neg_trans_strategy) {
-          case CublasPrepTransStrategy::T_OWNED:
-            // Implies negating the case with an owned row-major copy,
-            // so we can just create a col-major copy directly
-            return CublasPrepTransStrategy::N_OWNED;
-          case CublasPrepTransStrategy::T_BORROWED:
-            // This only happens for contiguous tensors
-            TORCH_CHECK(t.is_contiguous());
-            return CublasPrepTransStrategy::N;
-          default:
-            TORCH_CHECK(false, "This path should not be reachable")
-        }
-      }
-      return t_neg_trans_strategy;
-    };
     return std::make_tuple(
         result_trans_strategy,
-        neg_trans_strategy(mat1, mat1_trans_strategy),
-        neg_trans_strategy(mat2, mat2_trans_strategy)
+        neg_matrix_trans_prep_strategy_cublas(mat1, mat1_trans_strategy),
+        neg_matrix_trans_prep_strategy_cublas(mat2, mat2_trans_strategy)
     );
   }
 }
