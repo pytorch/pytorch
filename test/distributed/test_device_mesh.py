@@ -881,9 +881,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_cp_mesh.get_group().group_desc, "mesh_dp_cp")
         root_mesh = dp_cp_mesh.root_mesh
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_layout = root_mesh._flatten_mapping[
-            "dp_cp"
-        ]._layout
+        flatten_mesh_layout = root_mesh._flatten_mapping["dp_cp"]._layout
         self.assertEqual(flatten_mesh_layout, flattened_dp_cp_mesh._layout)
         self.assertEqual(
             flattened_dp_cp_mesh._layout.global_ranks(8),
@@ -903,9 +901,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_tp_mesh.mesh_dim_names[0], "dp_tp")
         root_mesh = dp_tp_mesh.root_mesh
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_layout = root_mesh._flatten_mapping[
-            "dp_tp"
-        ]._layout
+        flatten_mesh_root_layout = root_mesh._flatten_mapping["dp_tp"]._layout
         self.assertEqual(flatten_mesh_root_layout, flattened_dp_tp_mesh._layout)
         self.assertEqual(
             flattened_dp_tp_mesh._layout.global_ranks(8),
