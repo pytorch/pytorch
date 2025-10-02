@@ -103,7 +103,7 @@ class Capture:
     def __getattr__(self, attrname):
         if attrname == "kwarg" or attrname == "kwargs":
             raise RuntimeError("no kwargs!")
-        if attrname in ["__deepcopy__"]:
+        if attrname == "__deepcopy__":
             raise AttributeError
         result = CaptureGetAttr(self, attrname, ctx=self.ctx)
         return result

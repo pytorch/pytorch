@@ -5,8 +5,9 @@ import itertools
 import math
 import operator
 import sys
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch._custom_op
@@ -157,8 +158,7 @@ def _is_op_registered_to_fake_rule(op):
 
 
 def _deregister_op_impl(op):
-    if op in op_implementations_dict:
-        del op_implementations_dict[op]
+    op_implementations_dict.pop(op, None)
     for check, impl in op_implementations_checks:
         if check is op:
             op_implementations_checks.remove((check, impl))
@@ -591,6 +591,21 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
 
     msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
     raise ValueError(msg)
+
+
+@register_op_impl(aten._reshape_copy.default)
+def _reshape_copy(fake_mode, func, a, *shape):
+    if a.is_sparse or a.is_mkldnn:
+        return NotImplemented
+
+    shape = utils.infer_size(*shape, a.numel())
+    if is_contiguous_or_false(a):
+        view = _view_meta(fake_mode, func, a, *shape)
+        return view.clone(memory_format=torch.contiguous_format)
+    else:
+        return _view_meta(
+            fake_mode, func, a.clone(memory_format=torch.contiguous_format), *shape
+        )
 
 
 @register_op_impl(aten.view.default)
