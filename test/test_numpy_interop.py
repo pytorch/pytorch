@@ -176,7 +176,6 @@ class TestNumPyInterop(TestCase):
             torch.long,
             torch.bool,
         ]
-        
         for dtype in dtypes:
             x = torch._efficientzerotensor((10), dtype=dtype)
             self.assertRaises(RuntimeError, lambda: x.numpy())
