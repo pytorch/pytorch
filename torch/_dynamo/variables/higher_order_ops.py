@@ -3603,8 +3603,12 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             actual=len(user_args),
         )
 
-        from torch.distributed._tensor import distribute_tensor
+        from torch._higher_order_ops.local_map import (
+            redistribute_fw_inputs,
+            redistribute_fw_outputs,
+        )
 
+        # Step 2: Convert inputs to local shapes
         priors = {}
         for placements, vt in zip(in_placements.value, user_args):
             if isinstance(vt, variables.lazy.LazyVariableTracker):
@@ -3614,24 +3618,21 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
                 assert placements is None
                 continue
 
-            # 1. Convert inputs to local shapes
             global_tensor = vt.as_proxy().node.meta["example_value"]
             # NOTE: We don't support local_map region relying on exact grad_fn information
             # This is okay since accessing grad_fn is a graph break.
-            temp = distribute_tensor(
-                global_tensor.detach().requires_grad_(global_tensor.requires_grad),
+            local_tensor = redistribute_fw_inputs(
+                (global_tensor,),
+                (placements,),
                 mesh,
-                placements,
-                src_data_rank=None,
             )
-            local_tensor = temp._local_tensor
-            del temp
+            local_tensor = local_tensor[0]
 
             priors[vt] = global_tensor
             vt.as_proxy().node.meta["example_value"] = local_tensor
             vt.synchronize_attributes(tx)
 
-        # 2. Trace trace local_map subgraph with local tensors
+        # Step 3: Trace local_map subgraph with local tensors
         (
             p_args,
             p_kwargs,
@@ -3644,7 +3645,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
         )
 
-        # Validate
+        # Step 4: Validate traced graph signature still matches placement information
         expected_num_inputs = len(in_placements.value)
         actual_num_inputs = len(body_gmod.graph.find_nodes(op="placeholder"))
         expected_num_outputs = len(out_placements.value)
@@ -3689,12 +3690,13 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_r.as_proxy(),
         )
 
+        # Step 5: Install local_map subgraph
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         out = _call_function_and_unflatten_output(
             tx, self.value, p_args, p_kwargs, flat_example_value, treespec
         )
 
-        # 3. Restore inputs and outputs to global shapes
+        # Step 6: Restore inputs and outputs to global shapes
         for vt, global_tensor in priors.items():
             vt.as_proxy().node.meta["example_value"] = global_tensor
             vt.synchronize_attributes(tx)
@@ -3710,20 +3712,13 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
             # NOTE: We don't support code after the local_map region relying on exact grad_fn information
             # This is okay since accessing grad_fn is a graph break.
-            from torch.distributed.tensor._utils import compute_global_tensor_info
-
-            global_shape, global_stride = compute_global_tensor_info(
-                local_tensor, mesh, placements
+            global_tensor = redistribute_fw_outputs(
+                (local_tensor,),
+                (placements,),
+                mesh,
+                num_activations=0,  # this is not the joint
             )
-            assert tx.fake_mode is not None
-            with tx.fake_mode:
-                global_tensor = torch.empty_strided(
-                    global_shape,
-                    global_stride,
-                    dtype=local_tensor.dtype,
-                    device=local_tensor.device,
-                    requires_grad=local_tensor.requires_grad,
-                )
+            global_tensor = global_tensor[0]
 
             vt.as_proxy().node.meta["example_value"] = global_tensor
             vt.synchronize_attributes(tx)

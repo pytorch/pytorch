@@ -599,8 +599,25 @@ class GraphModule(torch.nn.Module):
         model = MyModule()
         with FakeTensorMode():
             inputs = (torch.randn(80, 80, requires_grad=True),)
-        # should not error
-        ap_style_initial_capture(model, inputs)
+        gm = ap_style_initial_capture(model, inputs)
+        fw_node, bw_node = [n for n in gm.graph.nodes if "call_local_map" in n.name]
+
+        # Graph should not be aware that Fake key used local shapes
+        fw_inputs = fw_node.args
+        assert len(fw_inputs) == 1
+        self.assertEqual(fw_inputs[0].meta["val"].shape, (80, 80))
+
+        fw_outputs = fw_node.args
+        assert len(fw_outputs) == 1
+        self.assertEqual(fw_outputs[0].meta["val"].shape, (80, 80))
+
+        fw_outputs = fw_node.meta["val"]
+        assert len(fw_outputs) == 1
+        self.assertEqual(fw_outputs[0].shape, (80, 80))
+
+        bw_outputs = fw_node.meta["val"]
+        assert len(bw_outputs) == 1
+        self.assertEqual(bw_outputs[0].shape, (80, 80))
 
 
 if __name__ == "__main__":
