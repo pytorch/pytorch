@@ -44,8 +44,6 @@ project-excludes = [
   "torch/_prims_common/**",
   "torch/backends/**",
   "torch/_C/**",
-  "torch/sparse/**",
-  "torch/_library/**",
   # formatting issues
   "torch/linalg/__init__.py",
   "torch/package/importer.py",
