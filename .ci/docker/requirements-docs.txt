@@ -24,4 +24,4 @@ beautifulsoup4==4.14.2
 python-etcd==0.4.5
 
 # For notebook examples which use torch.utils.cpp_extension
-ninja==1.13.0  
+ninja==1.13.0
