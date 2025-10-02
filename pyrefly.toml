@@ -43,13 +43,17 @@ project-excludes = [
   "torch/profiler/**",
   "torch/_prims_common/**",
   "torch/backends/**",
-  "torch/testing/**",
+  # "torch/testing/**",
   "torch/_C/**",
   "torch/sparse/**",
   "torch/_library/**",
   "torch/_prims/**",
   "torch/_decomp/**",
   "torch/_meta_registrations.py",
+  # formatting issues
+  "torch/linalg/__init__.py",
+  "torch/package/importer.py",
+  "torch/package/_package_pickler.py",
   # ====
   "benchmarks/instruction_counts/main.py",
   "benchmarks/instruction_counts/definitions/setup.py",
