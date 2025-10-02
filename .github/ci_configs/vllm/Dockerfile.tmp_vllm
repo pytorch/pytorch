@@ -340,8 +340,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system build==1.3.0
 RUN uv pip freeze | grep -E 'setuptools|packaging|build'
 
-ENV TORCH_CUDA_ARCH_LIST='8.0 8.9 9.0a'
-ENV FLASHINFER_CUDA_ARCH_LIST='8.0 8.9 9.0a'
+ARG flashinfer_cuda_arch_list = '8.0 8.9 9.0a'
+ENV TORCH_CUDA_ARCH_LIST=${flashinfer_cuda_arch_list}
+ENV FLASHINFER_CUDA_ARCH_LIST=${flashinfer_cuda_arch_list}
 # Build flashinfer for torch nightly from source around 10 mins
 ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
 # Keep this in sync with https://github.com/vllm-project/vllm/blob/main/requirements/cuda.txt
