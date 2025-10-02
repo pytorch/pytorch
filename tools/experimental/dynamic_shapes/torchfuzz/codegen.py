@@ -194,10 +194,10 @@ class DefaultFuzzTemplate(FuzzTemplate):
                     # Special handling for integer tensors which might be used as indices
                     if spec.dtype in [torch.int32, torch.int64]:
                         # For integer tensors, generate valid indices with headroom for arithmetic
-                        # Use range [10, 90] to allow for ±10 arithmetic operations
-                        # This prevents indices from becoming negative or too large
-                        min_val = 10   # Minimum to avoid negative results after subtraction
-                        max_val = 90   # Maximum to avoid out-of-bounds after addition
+                        # Use smaller range [5, 30] to allow for multiplication and other operations
+                        # This prevents indices from becoming too large after arithmetic
+                        min_val = 5    # Minimum to avoid negative results after subtraction
+                        max_val = 30   # Maximum to avoid out-of-bounds after multiplication
                         code_lines.append(
                             f"{arg_name} = torch.as_strided(torch.randint({min_val}, {max_val}, ({storage_size},)).to({dtype_str}), {size_str}, {stride_str})"
                         )
