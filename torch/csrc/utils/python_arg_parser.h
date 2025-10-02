@@ -198,9 +198,6 @@ struct FunctionSignature {
 
   std::string toString() const;
 
-  // Check if input is numerical type, scalar tensor, or scalar numpy array
-  bool isNumericLike(PyObject* obj);
-
   std::string name;
   std::vector<FunctionParameter> params;
   size_t min_args;
