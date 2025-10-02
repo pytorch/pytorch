@@ -45,6 +45,10 @@ import sympy
 import torch
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.graph_bytecode_inputs import (
+    get_user_object_by_index,
+    register_user_object,
+)
 from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
@@ -1035,16 +1039,10 @@ class VariableBuilder:
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
-            self.install_guards(GuardBuilder.ID_MATCH)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            index = register_user_object(value, self.source)
             stream_proxy = self.tx.output.create_proxy(
-                "call_function",
-                type(value),
-                (),
-                {
-                    "stream_id": value.stream_id,
-                    "device_index": value.device_index,
-                    "device_type": value.device_type,
-                },
+                "call_function", get_user_object_by_index, (index,), {}
             )
             set_example_value(stream_proxy.node, value)
             return StreamVariable(
@@ -1060,12 +1058,12 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             return FuncTorchInterpreterVariable(value)
         elif isinstance(value, torch.Event):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            torch._dynamo.utils.store_user_object_weakref(value)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            index = register_user_object(value, self.source)
             event_proxy = self.tx.output.create_proxy(
                 "call_function",
-                torch._dynamo.utils.get_user_object_from_id,
-                (id(value),),
+                get_user_object_by_index,
+                (index,),
                 {},
             )
             set_example_value(event_proxy.node, value)
