@@ -40,7 +40,6 @@ project-excludes = [
   "torch/autograd/**",
   "torch/cuda/**",
   "torch/export/**",
-  "torch/profiler/**",
   # formatting issues
   "torch/linalg/__init__.py",
   "torch/package/importer.py",
