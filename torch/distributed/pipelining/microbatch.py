@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import operator
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 import torch
 from torch.fx.node import map_aggregate
@@ -121,7 +121,7 @@ def _split_block_mask(
     spec: TensorChunkSpec,
     num_chunks: int,
 ) -> list[BlockMask]:
-    chunk_block_masks = []
+    chunk_block_masks: list[BlockMask] = []
     kv_num_blocks_chunks = torch.tensor_split(
         block_mask.kv_num_blocks, num_chunks, spec.split_dim
     )
@@ -169,7 +169,7 @@ def _split_tensor(
     tensor: torch.Tensor,
     spec: TensorChunkSpec,
     num_chunks: int,
-) -> list[torch.Tensor]:
+) -> Sequence[torch.Tensor]:
     chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
 
     if not _debug_mask_minibatches:
@@ -187,7 +187,7 @@ def _split_tensor(
 
         expanded_chunks.append(new_val)
 
-        split_dim_idx += chunk_tensor.size(chunk_v.split_dim)
+        split_dim_idx += chunk_tensor.size(spec.split_dim)
 
     return expanded_chunks
 
@@ -224,7 +224,7 @@ def _shard_dict_of_args(
 
     # Fist check and find the actual number of chunks
     split_sizes = []
-    for v, spec in zip(values, chunk_specs):
+    for v, spec in zip(values, chunk_specs, strict=True):
         if spec is _Replicate:
             split_sizes.append(num_chunks)
         elif isinstance(v, torch.Tensor):
@@ -232,23 +232,23 @@ def _shard_dict_of_args(
             split_sizes.append(v.size(spec.split_dim))
         elif isinstance(v, BlockMask):
             assert isinstance(spec, TensorChunkSpec)
-            assert spec.split_dim == 0
+            assert spec.split_dim == 0, "BlockMask only supports split_dim=0"
             split_sizes.append(v.kv_num_blocks.size(0))
         else:
             raise ValueError(
                 f"Unsupported chunk spec: {spec} and value: {v} combination."
             )
-    num_chunks = min(min(split_sizes), num_chunks)
+    result_num_chunks = min(min(split_sizes), num_chunks)
 
-    flat_split_results = [[] for _ in range(num_chunks)]
-    for v, spec in zip(values, chunk_specs):
-        v_splits = []
+    flat_split_results: list[Any] = [[] for _ in range(result_num_chunks)]
+    for v, spec in zip(values, chunk_specs, strict=True):
+        v_splits: Sequence[Any] = []
         if spec is _Replicate:
-            v_splits = [v] * num_chunks
+            v_splits = [v] * result_num_chunks
         elif isinstance(v, torch.Tensor):
-            v_splits = _split_tensor(v, spec, num_chunks)
+            v_splits = _split_tensor(v, spec, result_num_chunks)
         elif isinstance(v, BlockMask):
-            v_splits = _split_block_mask(v, spec, num_chunks)
+            v_splits = _split_block_mask(v, spec, result_num_chunks)
         else:
             raise ValueError(
                 f"Unsupported chunk spec: {spec} and value: {v} combination."
@@ -261,8 +261,6 @@ def _shard_dict_of_args(
         tree_unflatten(_flat_split_result, tree_spec)
         for _flat_split_result in flat_split_results
     ]
-
-    return args_split
 
 
 def split_args_kwargs_into_chunks(

@@ -396,9 +396,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(group, dist.ProcessGroup), (
-        "process group must be single dimension"
-    )
+    assert isinstance(
+        group, dist.ProcessGroup
+    ), "process group must be single dimension"
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -1126,25 +1126,135 @@ def _generate_round_robin_indices(
     return all_indices_tensor
 
 
+_compiled_create_block_mask = torch.compile(
+    create_block_mask, dynamic=False, fullgraph=True
+)
+
+
 def _context_parallel_buffers(
     mesh: DeviceMesh,
-    buffers: list[torch.Tensor],
+    buffers: list[torch.Tensor | BlockMask],
     buffer_seq_dims: list[int],
     load_balance_indices: Optional[torch.Tensor] = None,
-) -> list[torch.Tensor]:
+) -> list[torch.Tensor | BlockMask]:
     """Shard the buffers along the sequence dimensions according to CP rules."""
     new_buffers = []
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if load_balance_indices is not None:
             buffer = torch.index_select(buffer, dim=seq_dim, index=load_balance_indices)
 
-        # use DTensor to shard the buffer on sequence dimension, retain the local tensor
-        sharded_buffer = distribute_tensor(
-            buffer, mesh, [Shard(seq_dim)], src_data_rank=None
-        ).to_local()
+        if isinstance(buffer, torch.Tensor):
+            # use DTensor to shard the buffer on sequence dimension, retain the local tensor
+            sharded_buffer = distribute_tensor(
+                buffer, mesh, [Shard(seq_dim)], src_data_rank=None
+            ).to_local()
+        elif isinstance(buffer, BlockMask):
+            sharded_buffer = _create_cp_block_mask(
+                mask_mod=buffer.mask_mod,
+                B=buffer.kv_num_blocks.shape[0],
+                H=buffer.kv_num_blocks.shape[1],
+                Q_LEN=buffer.seq_lengths[0],
+                KV_LEN=buffer.seq_lengths[1],
+                device_mesh=mesh,
+            )
+        else:
+            raise ValueError(f"Unknown buffer type: {type(buffer)}")
+
         new_buffers.append(sharded_buffer)
 
     return new_buffers
+
+
+def _create_cp_block_mask(
+    mask_mod: _mask_mod_signature,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device_mesh: DeviceMesh,
+) -> BlockMask:
+    """
+    This API creates a special BlockMask for Context Parallel FlexAttention:
+    1. This BlockMask is masking on the attention of Q shard and KV global views, by
+    mapping the local q_idx to the global q_idx before sending to mask_mod.
+    2. The kv_seq_length (i.e. seq_lengths[1]) of this blockMask is tailored to match
+    the sequence length of KV shard instead of KV global. This is to pass the shape check
+    in flex_atttention(). The correct value (i.e. the sequence length of KV global) will be
+    used in flex_attention once the shape check passes.
+
+    Args:
+        mask_mod (Callable): Function to modify the mask over the global attention result.
+        B (int): Batch size.
+        H (int): Number of query heads.
+        Q_LEN (int): Sequence length of query (global view).
+        KV_LEN (int): Sequence length of key/value (global view).
+        device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
+
+    Return:
+        :class:`BlockMask`: the block_mask to be used in flex_attention() within the
+        context_parallel() context.
+
+    .. warning::
+        This function cannot generate correct block_mask if the BLOCK_SIZE is not
+        ``_DEFAULT_SPARSE_BLOCK_SIZE`` which usually happens when the attention
+        size is smaller than 128. Please do not use context_parallel() when the
+        FlexAttention size is small.
+    """
+    from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
+
+    compiled_create_block_mask = torch.compile(
+        create_block_mask, dynamic=False, fullgraph=True
+    )
+
+    def _rewrite_mask_mod(
+        mask_mod: _mask_mod_signature,
+        rank: int,
+        world_size: int,
+        block_size: int,
+        local_q_size: int,
+    ) -> _mask_mod_signature:
+        def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
+            # calculate local block_idx and block_offset
+            local_blk_idx, local_blk_offset = (
+                local_q_idx // block_size,
+                local_q_idx % block_size,
+            )
+            # NOTE: load balancing is not used
+            local_num_blocks = local_q_size // block_size
+            blk_idx = local_num_blocks * rank + local_blk_idx
+            return blk_idx * block_size + local_blk_offset
+
+        return lambda b, h, q_idx, kv_idx: mask_mod(
+            b,
+            h,
+            local_q_idx_to_q_idx(q_idx),
+            kv_idx,
+        )
+
+    cp_rank = device_mesh.get_local_rank()
+    cp_group_size = device_mesh.size()
+    Q_SHARD_LEN = Q_LEN // cp_group_size
+    block_size = _DEFAULT_SPARSE_BLOCK_SIZE
+    block_mask = compiled_create_block_mask(
+        _rewrite_mask_mod(mask_mod, cp_rank, cp_group_size, block_size, Q_SHARD_LEN),
+        B,
+        H,
+        Q_SHARD_LEN,
+        KV_LEN,
+        device=device_mesh.device_type,
+        BLOCK_SIZE=(block_size, block_size),
+    )
+
+    # TODO: remove this legacy code once we are sure that TorchFunctionMode
+    # is not going to be supported anymore.
+    """
+    # flex_attention function checks the following shape so we need to rewrite:
+    # key.size(-2) == block_mask.seq_lengths[1]
+    seq_lengths = block_mask.seq_lengths
+    block_mask.seq_lengths = (seq_lengths[0], seq_lengths[1] // cp_group_size)
+    """
+
+    return block_mask
 
 
 #####################
@@ -1228,6 +1338,9 @@ class _ContextParallel(ParallelStyle):
         args_list[1] = global_key
         args_list[2] = global_value
 
+        # TODO: remove this legacy code once we are sure that TorchFunctionMode
+        # is not going to be supported anymore.
+        """
         # shape rewrite: because torch.nn.flex_attention() checks
         # the QKV shape against the block_mask object, we need to
         # manually rewrite the shape info in block_mask tuple to
@@ -1243,16 +1356,21 @@ class _ContextParallel(ParallelStyle):
                     global_key.size(-2),
                 )
                 self._block_mask = block_mask
+        """
 
         return tuple(args_list), kwargs
 
     def flex_output_fn(
         self, module: Optional[nn.Module], inputs: Any, outputs: Any, mesh: DeviceMesh
     ) -> Any:
+        # TODO: remove this legacy code once we are sure that TorchFunctionMode
+        # is not going to be supported anymore.
+        """
         if self._orig_seq_lengths is not None:
             assert isinstance(self._block_mask, BlockMask)
             self._block_mask.seq_lengths = self._orig_seq_lengths
         self._block_mask = None
+        """
         return outputs
 
     def sdpa_input_fn(
@@ -1287,6 +1405,35 @@ class _ContextParallel(ParallelStyle):
             return new_outputs[0]
 
         return tuple(new_outputs)
+
+
+def _context_parallel_shard(
+    mesh: DeviceMesh,
+    buffers: list[torch.Tensor | BlockMask],
+    seq_dims: list[int],
+    load_balance_indices: Optional[torch.Tensor] = None,
+) -> list[torch.Tensor | BlockMask]:
+
+    if len(buffers) != len(seq_dims):
+        raise ValueError(
+            "`seq_dims` must have the same number of elements as `buffers`."
+        )
+
+    device = buffers[0].device
+    seq_length = buffers[0].shape[seq_dims[0]]
+    cp_world_size = mesh.size()
+    if _cp_options.enable_load_balance:
+        load_balance_indices = _generate_round_robin_indices(
+            seq_length=seq_length,
+            cp_world_size=cp_world_size,
+            device=device,
+        )
+    else:
+        load_balance_indices = None
+
+    shards = _context_parallel_buffers(mesh, buffers, seq_dims, load_balance_indices)
+
+    return shards
 
 
 #####################################################
@@ -1443,89 +1590,3 @@ def set_rotate_method(rotate_method: str) -> None:
             "Context Parallel does not support "
             f"using {rotate_method} for kv shards rotation"
         )
-
-
-def create_cp_block_mask(
-    mask_mod: _mask_mod_signature,
-    B: int,
-    H: int,
-    Q_LEN: int,
-    KV_LEN: int,
-    device_mesh: DeviceMesh,
-) -> BlockMask:
-    """
-    This API creates a special BlockMask for Context Parallel FlexAttention:
-    1. This BlockMask is masking on the attention of Q shard and KV global views, by
-    mapping the local q_idx to the global q_idx before sending to mask_mod.
-    2. The kv_seq_length (i.e. seq_lengths[1]) of this blockMask is tailored to match
-    the sequence length of KV shard instead of KV global. This is to pass the shape check
-    in flex_atttention(). The correct value (i.e. the sequence length of KV global) will be
-    used in flex_attention once the shape check passes.
-
-    Args:
-        mask_mod (Callable): Function to modify the mask over the global attention result.
-        B (int): Batch size.
-        H (int): Number of query heads.
-        Q_LEN (int): Sequence length of query (global view).
-        KV_LEN (int): Sequence length of key/value (global view).
-        device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
-
-    Return:
-        :class:`BlockMask`: the block_mask to be used in flex_attention() within the
-        context_parallel() context.
-
-    .. warning::
-        This function cannot generate correct block_mask if the BLOCK_SIZE is not
-        ``_DEFAULT_SPARSE_BLOCK_SIZE`` which usually happens when the attention
-        size is smaller than 128. Please do not use context_parallel() when the
-        FlexAttention size is small.
-    """
-    from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
-
-    compiled_create_block_mask = torch.compile(
-        create_block_mask, dynamic=False, fullgraph=True
-    )
-
-    def _rewrite_mask_mod(
-        mask_mod: _mask_mod_signature,
-        rank: int,
-        world_size: int,
-        block_size: int,
-        local_q_size: int,
-    ) -> _mask_mod_signature:
-        def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
-            # calculate local block_idx and block_offset
-            local_blk_idx, local_blk_offset = (
-                local_q_idx // block_size,
-                local_q_idx % block_size,
-            )
-            # NOTE: load balancing is not used
-            local_num_blocks = local_q_size // block_size
-            blk_idx = local_num_blocks * rank + local_blk_idx
-            return blk_idx * block_size + local_blk_offset
-
-        return lambda b, h, q_idx, kv_idx: mask_mod(
-            b,
-            h,
-            local_q_idx_to_q_idx(q_idx),
-            kv_idx,
-        )
-
-    cp_rank = device_mesh.get_local_rank()
-    cp_group_size = device_mesh.size()
-    Q_SHARD_LEN = Q_LEN // cp_group_size
-    block_size = _DEFAULT_SPARSE_BLOCK_SIZE
-    block_mask = compiled_create_block_mask(
-        _rewrite_mask_mod(mask_mod, cp_rank, cp_group_size, block_size, Q_SHARD_LEN),
-        B,
-        H,
-        Q_SHARD_LEN,
-        KV_LEN,
-        device=device_mesh.device_type,
-        BLOCK_SIZE=(block_size, block_size),
-    )
-    # flex_attention function checks the following shape so we need to rewrite:
-    # key.size(-2) == block_mask.seq_lengths[1]
-    seq_lengths = block_mask.seq_lengths
-    block_mask.seq_lengths = (seq_lengths[0], seq_lengths[1] // cp_group_size)
-    return block_mask

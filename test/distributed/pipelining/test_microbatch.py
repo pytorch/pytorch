@@ -1,8 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-from model_registry import ModelWithKwargs
-
 import torch
+from model_registry import ModelWithKwargs
 from torch.distributed.pipelining import pipeline
 from torch.distributed.pipelining.microbatch import (
     merge_chunks,
@@ -64,8 +63,8 @@ class MicrobatchTests(TestCase):
     def test_split_block_mask(self, device):
         B = 6
         H = 1
-        Q_LEN = 32
-        KV_LEN = 32
+        Q_LEN = 512
+        KV_LEN = 512
         DIM = 32
 
         def create_block_causal_mask(batch, eos_id: int):
@@ -85,7 +84,7 @@ class MicrobatchTests(TestCase):
 
             return block_causal_mask
 
-        batch = list(range(30)) * 8
+        batch = list(range(30)) * 1024
         batch = torch.tensor(batch[: B * Q_LEN], device=device).reshape(B, Q_LEN)
         q = torch.randn(B, H, Q_LEN, DIM, device=device, requires_grad=True)
         k = torch.randn(B, H, KV_LEN, DIM, device=device, requires_grad=True)
