@@ -3364,6 +3364,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               })
           .def_static("get_runtime_nccl_version", [] {
             return ::c10d::getNcclVersionTuple();
+          })
+          .def_static("is_nccl_dynamic_used", [] {
+            #ifdef NCCL_DYNAMIC
+                return true;
+            #endif
+                return false;
           });
 
   module.def(
