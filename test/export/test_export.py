@@ -868,9 +868,11 @@ graph():
             "Please file an issue on github.",
         ):
             # can't trigger all variant of export because later on it will crash
-            # and it is good because we warned :). 
+            # and it is good because we warned :).
             with torch._export.config.patch(error_on_lifted_constant_tensors=False):
-                _ = torch.export.export(MyModel(), (torch.randn(1, 3, 5),), strict=False)
+                _ = torch.export.export(
+                    MyModel(), (torch.randn(1, 3, 5),), strict=False
+                )
 
     def test_inline_script_class_method(self):
         class M(torch.nn.Module):
