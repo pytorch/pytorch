@@ -253,13 +253,15 @@ def _prepare_placements_and_shard_order(
                 first element of each inner tuple is the tensor dimension, and the
                 remaining elements are the ordered device mesh dimensions. If a
                 tensor dimension is not sharded, its tuple will be empty.
-
     Raises:
-        AssertionError: If both ``placements`` and ``shard_order`` are
-        specified. ValueError: If the length of placements does not match
-        device_mesh.ndim,
-            or if ``shard_order`` contains invalid tensor or mesh dimensions.
-        RuntimeError: If attempting to redistribute to Partial placement.
+        ValueError: If the length of `placements` does not match `device_mesh.ndim`,
+            if `shard_order` contains invalid tensor or mesh dimensions, or if both normalized and un-normalized
+            tensor_dim are specified in `shard_order`, or if a tensor_dim in `shard_order` is out of range.
+        IndexError: If a mesh_dim specified in `shard_order` is out of range for the device mesh.
+        RuntimeError: If attempting to redistribute from a non-Partial to a Partial placement,
+            or from one Partial type to a different Partial type.
+        AssertionError: If a placement's shard dim normalization would result in a negative value,
+            or if there is a conflict between placements and shard_order for sharding annotation.
 
     """
 
@@ -288,10 +290,7 @@ def _prepare_placements_and_shard_order(
         return tuple(placements)
 
     if placements is None and shard_order is None:
-        raise RuntimeError(
-            "tensor distribution and dtensor redistribution require at least one of "
-            "`placements` or `shard_order` to be specified."
-        )
+        placements = [Replicate() for _ in range(device_mesh.ndim)]
 
     if placements is not None and len(placements) != device_mesh.ndim:
         raise ValueError(
@@ -550,6 +549,10 @@ class DTensor(torch.Tensor):
         Returns:
             A :class:`DTensor` object
 
+        Raises:
+            RuntimeError: If both ``shape`` and ``stride`` are not provided together,
+                or if the device mesh does not contain the current rank.
+
         .. note:: When ``run_check=False``, it is the user's responsibility to ensure the
             local tensor passed in is correct across ranks (i.e. the tensor is sharded for
             the ``Shard(dim)`` placement or replicated for the ``Replicate()`` placement).
@@ -619,6 +622,9 @@ class DTensor(torch.Tensor):
             local tensor on its current rank. When an ``AsyncCollectiveTensor`` object is returned,
             it means the local tensor is not ready yet (i.e. communication is not finished). In this
             case, user needs to call ``wait`` to wait the local tensor to be ready.
+
+        Raises:
+            ValueError: If ``grad_placements`` has a different length than the device mesh dimensions.
 
         .. note:: ``to_local`` is differentiable, the ``requires_grad`` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
@@ -693,6 +699,14 @@ class DTensor(torch.Tensor):
 
         Returns:
             A :class:`DTensor` object
+
+        Raises:
+            RuntimeError: If attempting to redistribute from a non-Partial to a Partial placement,
+                or from one Partial type to a different Partial type.
+            ValueError: If ``placements`` has a different length than the device mesh dimensions,
+                if ``shard_order`` contains invalid tensor or mesh dimensions, or if both normalized and un-normalized
+                tensor_dim are specified in ``shard_order``, or if a tensor_dim in ``shard_order`` is out of range.
+            IndexError: If a mesh_dim specified in ``shard_order`` is out of range for the device mesh.
 
         .. note:: ``redistribute`` is differentiable, which means user do not need to worry about
             the backward formula of the redistribute operation.
@@ -913,6 +927,17 @@ def distribute_tensor(
     Returns:
         A :class:`DTensor` or ``XLAShardedTensor`` object.
 
+    Raises:
+        RuntimeError: If the tensor is not a leaf tensor, if attempting to distribute Partial placements,
+            or if trying to distribute a tensor with unsupported placements.
+        ValueError: If a DTensor with a different device mesh or placements is provided,
+            if ``placements`` has a different length than the device mesh dimensions,
+            if ``shard_order`` contains invalid tensor or mesh dimensions, or if both normalized and un-normalized
+            tensor_dim are specified in ``shard_order``, or if a tensor_dim in ``shard_order`` is out of range.
+        IndexError: If a mesh_dim specified in ``shard_order`` is out of range for the device mesh.
+        ImportError: If XLA support is requested but torch_xla package is not installed.
+        AssertionError: If ``shard_order`` conflicts with ``_StridedShard`` placement type.
+
     .. note::
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_tensor``
         return `XLAShardedTensor` instead. see `this issue <https://github.com/pytorch/pytorch/issues/92909>`__
@@ -1109,6 +1134,11 @@ def distribute_module(
 
     Returns:
         A module that contains parameters/buffers that are all ``DTensor`` s.
+
+    Raises:
+        RuntimeError: If ``distribute_module`` has already been called on the module.
+        ImportError: If XLA support is requested but torch_xla package is not installed.
+        ValueError: If ``input_fn`` or ``output_fn`` have an incorrect number of arguments.
 
     .. note::
         When initialize the DeviceMesh with the ``xla`` device_type, ``distribute_module``
