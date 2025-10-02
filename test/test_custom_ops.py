@@ -22,7 +22,7 @@ import torch._custom_ops as custom_ops
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
-from functorch import make_fx
+import functorch
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
 from torch._library.fake_profile import (
@@ -56,6 +56,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 # Shadowed by `torch.testing._internal.common_utils.custom_op`
@@ -1670,7 +1671,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         x = torch.randn(2, 3, device="cpu")
         op = self.get_op(f"{self.test_ns}::foo")
-        make_fx(op, tracing_mode="symbolic")(x)
+        functorch.make_fx(op, tracing_mode="symbolic")(x)
 
     def test_meta_for_data_dependent_shape_operation(self):
         x = torch.randn(10, device="meta")
@@ -1690,7 +1691,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         x = torch.randn(3)
         op = self.get_op(f"{self.test_ns}::foo")
-        gm = make_fx(op, tracing_mode="symbolic")(x)
+        gm = functorch.make_fx(op, tracing_mode="symbolic")(x)
         self.assertTrue(f"{TestCustomOp.test_ns}.foo" in gm.code)
 
     def test_not_implemented_error(self):
@@ -1717,21 +1718,21 @@ class TestCustomOp(CustomOpTestCaseBase):
 
     def test_data_dependent_basic(self):
         x = torch.randn(5, 5)
-        gm = make_fx(numpy_nonzero, tracing_mode="symbolic")(x)
+        gm = functorch.make_fx(numpy_nonzero, tracing_mode="symbolic")(x)
         self.assertTrue("nonzero" in gm.code)
 
     def test_data_dependent_fake_tracing(self):
         x = torch.randn(5, 5)
         # We've updated to attempt to use unbacked symints even for fake
         # tracing
-        make_fx(numpy_nonzero, tracing_mode="fake")(x)
+        functorch.make_fx(numpy_nonzero, tracing_mode="fake")(x)
 
     def test_symints(self):
         def f(x):
             return torch.ops._torch_testing.numpy_view_copy(x, x.shape)
 
         x = torch.randn(2, 3, 4)
-        gm = make_fx(f, tracing_mode="symbolic")(x)
+        gm = functorch.make_fx(f, tracing_mode="symbolic")(x)
         result = gm(x)
         self.assertEqual(result, f(x))
         self.assertExpectedInline(
@@ -2549,6 +2550,46 @@ class TestCustomOpAPI(TestCase):
         expected = x.sin()
         sin_(x)
         self.assertEqual(x, expected)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_subclass_accessor_view(self):
+        class MyTwoTensor(TwoTensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if func is torch.ops._torch_testing._two_tensor_accessor.default:
+                    self.assertIsInstance(args[0], MyTwoTensor)
+                    res = args[0].a
+                    # Always return a fresh Tensor!
+                    return res.view_as(res)
+                return super().__torch_dispatch__(func, types, args, kwargs)
+
+        @torch.library.custom_op(
+            "_torch_testing::_two_tensor_accessor",
+            mutates_args=(),
+            schema="(Tensor(a) tx) -> Tensor(a)",
+        )
+        def _two_tensor_accessor(tx):
+            raise RuntimeError("Should never be called")
+
+        def backward(ctx, gO):
+            gI = gO.clone()
+            return MyTwoTensor(gI, torch.zeros_like(gO))
+
+        def setup_ctx(ctx, inputs, output):
+            pass
+
+        _two_tensor_accessor.register_autograd(backward, setup_context=setup_ctx)
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.rand(3, requires_grad=True)
+        z = MyTwoTensor(x, y)
+        print(z)
+        res = torch.ops._torch_testing._two_tensor_accessor(z)
+        print(res)
+        res.sum().backward()
+        self.assertEqual(res, x)
+        self.assertTrue(res._is_view())
+        self.assertTrue(res._base is z)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_kwarg_only_tensors(self):

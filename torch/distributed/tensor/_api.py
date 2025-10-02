@@ -3,8 +3,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
-from collections.abc import Sequence
-from typing import Any, Callable, cast, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, cast, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -536,9 +536,10 @@ class DTensor(torch.Tensor):
 
         placements = list(placements)
         for i, placement in enumerate(placements):
-            if placement.is_partial():
+            if placement.is_partial() and self.placements[i] != placement:
                 raise RuntimeError(
-                    "Can not redistribute to Partial, redistributing to Partial is for internal use only!"
+                    f"Can not redistribute from {self.placements[i]} to {placement}, "
+                    "redistributing to Partial is for internal use only!"
                 )
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
