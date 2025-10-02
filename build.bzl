@@ -145,12 +145,12 @@ def define_targets(rules):
     rules.genrule(
         name = "version_h",
         srcs = [
-            ":torch/headeronly:version.h.in",
+            "//torch/headeronly:version.h.in",
             ":version.txt",
         ],
-        outs = ["torch/csrc/api/include/torch/version.h"],
+        outs = ["torch/headeronly/version.h"],
         cmd = "$(execpath //tools/setup_helpers:gen_version_header) " +
-              "--template-path $(location :torch/headeronly:version.h.in) " +
+              "--template-path $(location //torch/headeronly:version.h.in) " +
               "--version-path $(location :version.txt) --output-path $@ ",
         tools = ["//tools/setup_helpers:gen_version_header"],
     )
