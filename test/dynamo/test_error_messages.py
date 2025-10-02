@@ -1370,6 +1370,12 @@ from user code:
 
 
 class ErrorMessageClarityTest(TestCase):
+    def __init__(self, method_name):
+        super().__init__(method_name)
+        self.N = 7312
+        self.S0 = 420
+        self.S1 = self.N - self.S0
+
     def opSetup(self, lib_name):
         torch.library.define(
             lib_name + "::iterator_mismatch", "(Tensor input, int[] sizes) -> Tensor[]"
@@ -1399,10 +1405,6 @@ class ErrorMessageClarityTest(TestCase):
             r0, r1 = torch.ops.test_clarity_list.iterator_mismatch.default(x, [s0, s1])
             return torch.ops.aten.sort.default(r1)
 
-        N = 7312
-        S0 = 420
-        S1 = N - S0
-
         with self.assertRaisesRegex(
             Exception,
             re.escape(
@@ -1410,8 +1412,8 @@ class ErrorMessageClarityTest(TestCase):
             ),
         ):
             f(
-                torch.tensor([S0, S1], device=device),
-                make_tensor(N, dtype=torch.float32, device=device),
+                torch.tensor([self.S0, self.S1], device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
             )
 
     def test_tuple_iterator_contents_error_message(self, device):
@@ -1424,10 +1426,6 @@ class ErrorMessageClarityTest(TestCase):
             r0, r1 = torch.ops.test_clarity_tuple.iterator_mismatch.default(x, (s0, s1))
             return torch.ops.aten.sort.default(r1)
 
-        N = 7312
-        S0 = 420
-        S1 = N - S0
-
         with self.assertRaisesRegex(
             Exception,
             re.escape(
@@ -1435,8 +1433,8 @@ class ErrorMessageClarityTest(TestCase):
             ),
         ):
             f(
-                torch.tensor((S0, S1), device=device),
-                make_tensor(N, dtype=torch.float32, device=device),
+                torch.tensor((self.S0, self.S1), device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
             )
 
     def test_dict_iterator_contents_error_message(self, device):
@@ -1451,10 +1449,6 @@ class ErrorMessageClarityTest(TestCase):
             )
             return torch.ops.aten.sort.default(r1)
 
-        N = 7312
-        S0 = 420
-        S1 = N - S0
-
         with self.assertRaisesRegex(
             Exception,
             re.escape(
@@ -1462,8 +1456,8 @@ class ErrorMessageClarityTest(TestCase):
             ),
         ):
             f(
-                torch.tensor((S0, S1), device=device),
-                make_tensor(N, dtype=torch.float32, device=device),
+                torch.tensor((self.S0, self.S1), device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
             )
 
     def test_named_tuple_iterator_contents_error_message(self, device):
@@ -1479,10 +1473,6 @@ class ErrorMessageClarityTest(TestCase):
             )
             return torch.ops.aten.sort.default(r1)
 
-        N = 7312
-        S0 = 420
-        S1 = N - S0
-
         with self.assertRaisesRegex(
             Exception,
             re.escape(
@@ -1490,8 +1480,8 @@ class ErrorMessageClarityTest(TestCase):
             ),
         ):
             f(
-                torch.tensor([S0, S1], device=device),
-                make_tensor(N, dtype=torch.float32, device=device),
+                torch.tensor([self.S0, self.S1], device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
             )
 
     def test_noniter_contents_error_message(self, device):
@@ -1504,10 +1494,6 @@ class ErrorMessageClarityTest(TestCase):
             r0, r1 = torch.ops.test_clarity_noniter.iterator_mismatch.default(x, s0)
             return torch.ops.aten.sort.default(r1)
 
-        N = 7312
-        S0 = 420
-        S1 = N - S0
-
         with self.assertRaisesRegex(
             Exception,
             re.escape(
@@ -1515,8 +1501,8 @@ class ErrorMessageClarityTest(TestCase):
             ),
         ):
             f(
-                torch.tensor([S0, S1], device=device),
-                make_tensor(N, dtype=torch.float32, device=device),
+                torch.tensor([self.S0, self.S1], device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
             )
 
 
