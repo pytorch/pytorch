@@ -11,7 +11,6 @@ from collections import Counter
 from functools import partial, wraps
 from typing import (
     Any,
-    Callable,
     cast,
     Literal,
     Optional,
@@ -29,7 +28,7 @@ from .optimizer import _to_scalar, Optimizer
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
 
 __all__ = [

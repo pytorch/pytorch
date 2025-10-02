@@ -597,6 +597,8 @@ class ProcessGroup:
 
 class FakeProcessGroup(Backend):
     def __init__(self, rank: int, world_size: int) -> None: ...
+    @staticmethod
+    def _create_internal(rank: int, world_size: int) -> FakeProcessGroup: ...
 
 class FakeWork(Work):
     seq_id: int
