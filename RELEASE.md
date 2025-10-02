@@ -71,13 +71,13 @@ For Release 2.9 PyTorch Supports following CUDA Architectures:
 | CUDA | architectures supported for Linux x86 and Windows builds | notes |
 | --- | --- | --- |
 | 12.6.3 | Maxwell(5.0), Pascal(6.0), Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0) | |
-| 12.8.0 | Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)  | |
+| 12.8.1 | Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)  | |
 | 13.0.0 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
 
 | CUDA | architectures supported for Linux aarch64 builds |
 | --- | --- |
 | 12.6.3 | Ampere(8.0), Hopper(9.0) |
-| 12.8.0 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 12.0)  |
+| 12.8.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 12.0)  |
 | 13.0.0 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
 
 ## Release Cadence
