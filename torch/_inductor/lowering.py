@@ -2955,7 +2955,7 @@ make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
 @register_lowering(aten.copy, type_promotion_kind=None)
 def copy(self, src, non_blocking=False):
-    if not isinstance(src, (TensorBox, ir.IRNode)):
+    if not isinstance(src, ir.IRNode):
         src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
     x = src
     if self.get_device() != src.get_device():
