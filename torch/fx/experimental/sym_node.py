@@ -16,6 +16,7 @@ to avoid having to load SymPy at import time, as doing so is *very* slow.
 
 import builtins
 import functools
+import importlib
 import inspect
 import itertools
 import logging
@@ -63,6 +64,23 @@ def _to_symtype(t):
     if t is float:
         return SymFloat
     return t
+
+
+if TYPE_CHECKING:
+    import sympy
+
+    _sympy = sympy
+else:
+
+    class _LazySymPy:
+        sympy = None
+
+        def __getattr__(self, name):
+            if self.sympy is None:
+                self.sympy = importlib.import_module("sympy")
+            return getattr(self.sympy, name)
+
+    _sympy = _LazySymPy()
 
 
 # TODO: An incomplete list
@@ -227,19 +245,15 @@ class SymNode:
 
     # NB: This does conversions, not sure if this is good or not
     def maybe_as_float(self):
-        import sympy
-
-        if isinstance(self.expr, sympy.Float):
+        if isinstance(self.expr, _sympy.Float):
             return float(self.expr)
         else:
             return None
 
     def maybe_as_bool(self):
-        import sympy
-
-        if self.expr is sympy.true:
+        if self.expr is _sympy.true:
             return True
-        elif self.expr is sympy.false:
+        elif self.expr is _sympy.false:
             return False
         else:
             return None
@@ -263,26 +277,22 @@ class SymNode:
 
     def wrap_int(self, num):
         assert type(num) is int
-        import sympy
-
         return SymNode(
-            sympy.Integer(num), self.shape_env, int, num, constant=num, fx_node=num
+            _sympy.Integer(num), self.shape_env, int, num, constant=num, fx_node=num
         )
 
     def wrap_float(self, num):
         assert type(num) is float
-        import sympy
 
         return SymNode(
-            sympy.Float(num), self.shape_env, float, num, constant=num, fx_node=num
+            _sympy.Float(num), self.shape_env, float, num, constant=num, fx_node=num
         )
 
     def wrap_bool(self, num):
         assert type(num) is bool
-        import sympy
 
         return SymNode(
-            sympy.true if num else sympy.false,
+            _sympy.true if num else _sympy.false,
             self.shape_env,
             bool,
             num,
@@ -472,8 +482,6 @@ class SymNode:
     # some load bearing logic is directly in torch.sym_sum
 
     def sym_sum(self, args) -> SymNode:
-        import sympy
-
         # Inner impl
         from torch.fx.experimental.proxy_tensor import (
             get_proxy_mode,
@@ -490,7 +498,7 @@ class SymNode:
                 ),
             )
         exprs = [a.expr for a in args]
-        out = sympy.Add(*exprs)
+        out = _sympy.Add(*exprs)
 
         size_hints = []
         out_hint = None
@@ -833,15 +841,11 @@ def _sympy_float_pow(a, b):
 
 
 def _sympy_and(a, b):
-    import sympy
-
-    return sympy.And(a, b)
+    return _sympy.And(a, b)
 
 
 def _sympy_or(a, b):
-    import sympy
-
-    return sympy.Or(a, b)
+    return _sympy.Or(a, b)
 
 
 def _sympy_lshift(a, b):
@@ -903,12 +907,11 @@ def _optimized_add(
     The function returns a tuple of (1) a boolean that indicates whether the output is a summation of unique symbols,
     (2) the result sympy expression.
     """
-    import sympy
-    from sympy.core.basic import _args_sortkey as sortkey
+    sortkey = _sympy.core.basic._args_sortkey
 
     def make_optimized(ordered_args):
         assert ordered_args is not None
-        result = sympy.Add(*ordered_args, evaluate=False)
+        result = _sympy.Add(*ordered_args, evaluate=False)
         return (True, result)
 
     from torch.utils._sympy.functions import _is_symbols_binary_summation
@@ -949,7 +952,7 @@ def _optimized_add(
         if new_args is not None:
             return make_optimized(new_args)
 
-    result = sympy.Add(lhs, rhs)
+    result = _sympy.Add(lhs, rhs)
     return (_is_symbols_binary_summation(result), result)
 
 
@@ -985,20 +988,18 @@ reflectable_magic_methods = {
 
 
 def _floor_ceil_helper(a, fn):
-    import sympy
-
-    if isinstance(a, sympy.Mul):
+    if isinstance(a, _sympy.Mul):
         aa = a.args
-        if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
-            coef = sympy.Integer(aa[0])
+        if len(aa) == 2 and isinstance(aa[0], _sympy.Float) and aa[1].is_integer:
+            coef = _sympy.Integer(aa[0])
             if aa[0] == coef:  # structural equality test
                 return coef * aa[1]
     if (
-        isinstance(a, sympy.Float)
-        and a == sympy.Integer(a)
-        or isinstance(a, sympy.Integer)
+        isinstance(a, _sympy.Float)
+        and a == _sympy.Integer(a)
+        or isinstance(a, _sympy.Integer)
     ):
-        return sympy.Integer(a)
+        return _sympy.Integer(a)
     return fn(a)
 
 
@@ -1023,39 +1024,27 @@ def _sympy_ceil(a):
 
 
 def _sympy_eq(a, b):
-    import sympy
-
-    return sympy.Eq(a, b)
+    return _sympy.Eq(a, b)
 
 
 def _sympy_ne(a, b):
-    import sympy
-
-    return sympy.Ne(a, b)
+    return _sympy.Ne(a, b)
 
 
 def _sympy_gt(a, b):
-    import sympy
-
-    return sympy.Gt(a, b)
+    return _sympy.Gt(a, b)
 
 
 def _sympy_lt(a, b):
-    import sympy
-
-    return sympy.Lt(a, b)
+    return _sympy.Lt(a, b)
 
 
 def _sympy_le(a, b):
-    import sympy
-
-    return sympy.Le(a, b)
+    return _sympy.Le(a, b)
 
 
 def _sympy_ge(a, b):
-    import sympy
-
-    return sympy.Ge(a, b)
+    return _sympy.Ge(a, b)
 
 
 def _sympy_min(a, b):
@@ -1071,9 +1060,7 @@ def _sympy_max(a, b):
 
 
 def _sympy_ite(a, t, f):
-    import sympy
-
-    return sympy.Piecewise((t, a), (f, True))
+    return _sympy.Piecewise((t, a), (f, True))
 
 
 current_module = sys.modules[__name__]
@@ -1098,9 +1085,7 @@ del fn, name, priv_sympy_name  # type: ignore[possibly-undefined]
 
 
 def _sympy_abs(a):
-    import sympy
-
-    return sympy.Abs(a)
+    return _sympy.Abs(a)
 
 
 def _sympy_round(number, ndigits=None):
@@ -1121,11 +1106,9 @@ def _sympy_sym_float(a):
 
 
 def _sympy_is_integer(a):
-    import sympy
-
     from torch.utils._sympy.functions import ToFloat
 
-    return sympy.Eq(ToFloat(sympy.floor(a)), a)
+    return _sympy.Eq(ToFloat(_sympy.floor(a)), a)
 
 
 magic_methods = {
@@ -1165,22 +1148,20 @@ def sympy_is_contiguous(sizes, strides):
 
 
 def sympy_is_contiguous_generic(sizes, strides, dim_order):
-    import sympy
-
     dim = len(sizes)
 
     if len(dim_order) != dim:
-        return sympy.false
+        return _sympy.false
 
-    is_contiguous = sympy.true
-    z = sympy.S.One
+    is_contiguous = _sympy.true
+    z = _sympy.S.One
     # Contiguous if the strides make sense (or the dim is size 1)
     for d in dim_order:
-        is_contiguous &= sympy.Eq(sizes[d], sympy.S.One) | sympy.Eq(strides[d], z)
+        is_contiguous &= _sympy.Eq(sizes[d], _sympy.S.One) | _sympy.Eq(strides[d], z)
         z *= sizes[d]
     # OR if any size is zero
     for d in range(dim):
-        is_contiguous |= sympy.Eq(sizes[d], sympy.S.Zero)
+        is_contiguous |= _sympy.Eq(sizes[d], _sympy.S.Zero)
     return is_contiguous
 
 
@@ -1197,23 +1178,21 @@ def sympy_is_channels_last_contiguous_3d(sizes, strides):
 
 
 def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
-    import sympy
-
     from torch.utils._sympy.functions import Max
 
     dim = len(sizes)
 
     if dim != len(dim_order):
-        return sympy.false
+        return _sympy.false
 
-    m = sympy.S.Zero
-    r = sympy.true
+    m = _sympy.S.Zero
+    r = _sympy.true
 
     # special case for trivial C dimension. default to NCHW
-    r &= sympy.Ne(strides[1], 0)
+    r &= _sympy.Ne(strides[1], 0)
 
     for d in dim_order:
-        r &= sympy.Ne(sizes[d], 0) & (strides[d] >= m)
+        r &= _sympy.Ne(sizes[d], 0) & (strides[d] >= m)
         # Fallback to NCHW as default layout for ambiguous cases
         # This is the flaw of implicit memory_format from strides.
         # N111 tensor with identical strides for size 1 dimension;
@@ -1222,7 +1201,7 @@ def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
         # b. N11W contiguous Tensor sliced on the W-dimension.
         # ([N,1,1,1]@[W,W,W,W])
         if d == 0:
-            r &= sympy.Ne(m, strides[1])
+            r &= _sympy.Ne(m, strides[1])
         # This is necessary to:
         # 1. distinguish the memory_format of N1H1;
         #     [H, 1, 1, 1] channels_last stride
@@ -1335,15 +1314,14 @@ def _make_node_magic(method, func):
 
                 def get_id(sym_node) -> Optional[int]:
                     # We don't want to return an ID if the input is a constant
-                    import sympy
 
                     if sym_node.constant is not None:
                         return None
                     elif id(sym_node) == id(result):
                         return None
-                    elif isinstance(sym_node.expr, (sympy.Integer, sympy.Float)):
+                    elif isinstance(sym_node.expr, (_sympy.Integer, _sympy.Float)):
                         return None
-                    elif sym_node.expr in (sympy.true, sympy.false):
+                    elif sym_node.expr in (_sympy.true, _sympy.false):
                         return None
                     return id(sym_node)
 
@@ -1644,8 +1622,6 @@ def _make_node_sizes_strides(method, func):
     # guards on this will resolve at a higher level so you never
     # spend time in this code
     def sizes_strides_user(sizes, strides):
-        import sympy
-
         from torch.fx.experimental.symbolic_shapes import (
             eval_is_non_overlapping_and_dense,
         )
@@ -1664,8 +1640,8 @@ def _make_node_sizes_strides(method, func):
             # TODO: this is an awful implementation
             return bool(
                 func(
-                    [sympy.sympify(a) for a in sizes],
-                    [sympy.sympify(a) for a in strides],
+                    [_sympy.sympify(a) for a in sizes],
+                    [_sympy.sympify(a) for a in strides],
                 )
             )
 
