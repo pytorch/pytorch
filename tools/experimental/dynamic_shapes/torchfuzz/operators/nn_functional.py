@@ -184,7 +184,7 @@ class LinearOperator(Operator):
             raise ValueError("LinearOperator can only produce TensorSpec outputs")
 
         # Ensure dtype compatibility by converting all inputs to the expected output dtype
-        target_dtype = f"torch.{output_spec.dtype}".replace("torch.torch.", "torch.")
+        target_dtype = str(output_spec.dtype)
 
         if len(input_names) == 2:
             input_name, weight_name = input_names
@@ -434,13 +434,16 @@ class LayerNormOperator(Operator):
         # Normalize over the last dimension
         normalized_shape = f"({output_spec.size[-1]},)"
 
+        # Ensure dtype compatibility by converting all inputs to the expected output dtype
+        target_dtype = str(output_spec.dtype)
+
         input_name = input_names[0]
 
         if len(input_names) == 1:
-            return f"{output_name} = torch.nn.functional.layer_norm({input_name}, {normalized_shape})"
+            return f"{output_name} = torch.nn.functional.layer_norm({input_name}.to({target_dtype}), {normalized_shape})"
         elif len(input_names) == 2:
             weight_name = input_names[1]
-            return f"{output_name} = torch.nn.functional.layer_norm({input_name}, {normalized_shape}, weight={weight_name})"
+            return f"{output_name} = torch.nn.functional.layer_norm({input_name}.to({target_dtype}), {normalized_shape}, weight={weight_name}.to({target_dtype}))"
         else:  # len(input_names) == 3
             weight_name, bias_name = input_names[1], input_names[2]
-            return f"{output_name} = torch.nn.functional.layer_norm({input_name}, {normalized_shape}, weight={weight_name}, bias={bias_name})"
+            return f"{output_name} = torch.nn.functional.layer_norm({input_name}.to({target_dtype}), {normalized_shape}, weight={weight_name}.to({target_dtype}), bias={bias_name}.to({target_dtype}))"
