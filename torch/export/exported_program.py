@@ -8,9 +8,9 @@ import operator
 import types
 import warnings
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, final, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, final, NamedTuple, Optional, TYPE_CHECKING, Union
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -1086,7 +1086,7 @@ class ExportedProgram:
         # Validate should be always the last step of the constructor.
         self.validate()
 
-        self._guards_code = _convert_guards_to_code(_get_shape_env(self._graph_module))
+        self._guards_code = _convert_guards_to_code(self._graph_module)
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1690,7 +1690,8 @@ def _create_graph_module_for_export(root, graph):
     return gm
 
 
-def _convert_guards_to_code(shape_env):
+def _convert_guards_to_code(graph_module):
+    shape_env = _get_shape_env(graph_module)
     if shape_env is None:
         return []
 

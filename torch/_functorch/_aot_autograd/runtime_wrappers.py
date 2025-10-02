@@ -11,12 +11,14 @@ import builtins
 import collections
 import contextlib
 import copy
+import functools
 import itertools
 import pprint
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
@@ -149,7 +151,7 @@ class AliasOfInputHandler:
         self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
-        self.functional_tensor = info.functional_tensor
+        self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(self, orig_inputs, fw_outs, out):
@@ -158,7 +160,7 @@ class AliasOfInputHandler:
             aliased_base_tensor,
             self.unwrap_out(out),
             self.requires_grad,
-            self.functional_tensor,
+            self.view_meta_sequence,
             replay_views=self.replay_views,
         )
 
@@ -189,7 +191,7 @@ class AliasOfIntermediateHandler:
 
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
-        self.functional_tensor = info.functional_tensor
+        self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(self, orig_inputs, fw_outs, out):
@@ -198,7 +200,7 @@ class AliasOfIntermediateHandler:
             self._unwrap_aliased_base_tensor(aliased_base_tensor),
             self.unwrap_out(out),
             self.requires_grad,
-            self.functional_tensor,
+            self.view_meta_sequence,
             replay_views=self.replay_views,
         )
 
@@ -307,6 +309,7 @@ def _create_runtime_wrapper(
         if cm is not None:
             cm.__exit__(None, None, None)
 
+    @simple_wraps(compiled_fn)
     def runtime_wrapper(args: list[Any]):
         # Create context manager for profiler
         cm = record_runtime_wrapper_prologue_enter()
@@ -465,6 +468,7 @@ def _create_runtime_wrapper(
         return runtime_wrapper
 
     # Disabling saved tensors hooks
+    @simple_wraps(runtime_wrapper)
     def _runtime_wrapper(*args, **kwargs):
         with _disable_saved_tensors_hooks():
             return runtime_wrapper(*args, **kwargs)
@@ -1929,6 +1933,33 @@ def _disable_saved_tensors_hooks():
             )
 
 
+@dataclass
+class SerializableCompiledFunction:
+    """
+    Represents a result of AOTDispatch after calling the inner compiler
+    that can be serialized
+    """
+
+    compiled_fn: Callable
+    serialize_fn: Callable
+
+    def __init__(self, compiled_fn: Callable, serialize_fn: Callable):
+        self.compiled_fn = compiled_fn
+        self.serialize_fn = serialize_fn
+        # Equivalent to functools.wraps
+        functools.update_wrapper(
+            self,
+            compiled_fn,
+            assigned=("__doc__", "__annotations__", "__type_params__"),
+        )
+
+    def serialize(self) -> Any:
+        return self.serialize_fn()
+
+    def __call__(self, *args, **kwargs):
+        return self.compiled_fn(*args, **kwargs)
+
+
 # This is wrapped in a class just for namespacing purposes
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
@@ -2037,7 +2068,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
-        try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
+        try_save_cache_entry: Optional[Callable],  # Serialization function
     ):
         # For additional context see Note [CUDA Graph Safe RNG Functionalization]
         # Each pair forward, backward rng states must be equal prior to its invocation on any

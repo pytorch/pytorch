@@ -68,7 +68,6 @@ import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
-from torch._dynamo.trace_rules import _as_posix_path
 from torch._utils_internal import get_writable_path
 from torch._logging.scribe import open_source_signpost
 from torch.nn import (
@@ -103,7 +102,7 @@ except ImportError:
 
 
 MI300_ARCH = ("gfx942",)
-
+MI200_ARCH = ("gfx90a")
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -1464,6 +1463,10 @@ TEST_WITH_ROCM: bool = TestEnvironment.def_flag(
     "TEST_WITH_ROCM",
     env_var="PYTORCH_TEST_WITH_ROCM",
 )
+TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
+    "TEST_WITH_MTIA",
+    env_var="PYTORCH_TEST_WITH_MTIA",
+)
 
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
@@ -1986,16 +1989,6 @@ def skipIfMPS(fn):
     def wrapper(*args, **kwargs):
         if TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
-
-def skipIfMPSOnMacOS13(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_MPS and int(MACOS_VERSION) == 13:
-            raise unittest.SkipTest("Test crashes MPSGraph on MacOS13")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -5606,6 +5599,8 @@ class LazyVal:
 
 
 def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
+    from torch._dynamo.trace_rules import _as_posix_path
+
     if file is None:
         file = inspect.stack()[1 + skip].filename  # skip one frame
 
@@ -5705,8 +5700,7 @@ def install_cpp_extension(extension_root):
             shutil.rmtree(d)
 
     # Build the extension
-    setup_py_path = os.path.join(extension_root, "setup.py")
-    cmd = [sys.executable, setup_py_path, "install", "--root", install_dir]
+    cmd = [sys.executable, "-m", "pip", "install", extension_root, "-v", "--no-build-isolation", "--root", install_dir]
     return_code = shell(cmd, cwd=extension_root, env=os.environ)
     if return_code != 0:
         raise RuntimeError(f"build failed for cpp extension at {extension_root}")

@@ -1,6 +1,6 @@
 import math
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -504,13 +504,6 @@ def flex_attention_fake_impl(
         allowed_subclasses=(FakeTensor,),
     ):
         return NotImplemented
-
-    # TODO: Figure out a better way to handle this for NJT than using sum()
-    if query.is_nested:
-        out = torch.empty_like(query, memory_format=torch.contiguous_format)
-        logsumexp = query.sum(dim=-1)
-        max_scores = query.max(dim=-1)[0]
-        return out, logsumexp, max_scores
 
     v_head_dim = value.size(-1)
     batch_size, num_heads, seq_len_q, _q_head_dim = query.shape
@@ -1263,14 +1256,12 @@ def flex_attention_backward_fake_tensor_mode(
     grad_query = torch.empty_like(query)
     # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
     grad_score_mod_captured = tuple(
-        [
-            (
-                torch.empty_like(buffer, memory_format=torch.contiguous_format)
-                if isinstance(buffer, torch.Tensor) and buffer.requires_grad
-                else None
-            )
-            for buffer in score_mod_other_buffers
-        ]
+        (
+            torch.empty_like(buffer, memory_format=torch.contiguous_format)
+            if isinstance(buffer, torch.Tensor)
+            else None
+        )
+        for buffer in score_mod_other_buffers
     )
 
     broadcasted_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))

@@ -107,12 +107,14 @@ def _check_if_instances_equal(op1, op2) -> bool:
     return True
 
 
-un_ops_under_test = [torch.relu]
+un_ops_under_test = [torch.relu, torch.tanh, torch.exp, torch.sigmoid]
 bin_ops_under_test = [torch.add, torch.mul, torch.sub, torch.div]
 
 evt_all_ops = parametrize(
     "op", un_ops_under_test + bin_ops_under_test, name_fn=lambda f: f.__name__
 )
+
+evt_un_ops = parametrize("op", un_ops_under_test, name_fn=lambda f: f.__name__)
 
 evt_bin_ops = parametrize("op", bin_ops_under_test, name_fn=lambda f: f.__name__)
 
@@ -255,7 +257,7 @@ class TestCutlassBackend(TestCase):
         if config.is_fbcode():
             import python_cutlass
         else:
-            import cutlass as python_cutlass  # noqa: F401
+            import cutlass_cppgen as python_cutlass  # noqa: F401
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):
@@ -1388,61 +1390,6 @@ class TestCutlassBackend(TestCase):
                     f"M={M}, N={N}, K={K}",
                 )
 
-    @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
-    @parametrize("presets", ("", "0", "0,999"))
-    def test_cutlass_presets(
-        self,
-        presets: str,
-    ):
-        """
-        Test if some configs can be generated with presets.
-        """
-
-        M, N, K = (128, 128, 16)
-        A = torch.randn(M, K).cuda().half()
-        B = torch.randn(N, K).cuda().half().t()
-
-        with (
-            fresh_cache(),
-            config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "CUTLASS",
-                    "cuda.cutlass_max_profiling_configs": 2,
-                    "cuda.cutlass_presets": presets,
-                }
-            ),
-            mock.patch(
-                "torch._inductor.kernel.mm.autotune_select_algorithm",
-                wraps=select_no_algorithm,
-            ) as sa,
-        ):
-            with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
-                torch.compile(torch.mm)(A, B)
-
-            self.assertTrue(
-                sa.called,
-                f"autotune_select_algorithm was not called with shape M={M}, N={N}, K={K}",
-            )
-            args, _ = sa.call_args
-            op_name, choices, _, __ = args
-            assert op_name == "mm"
-            cuda_template_count = 0
-            for choice in choices:
-                if isinstance(choice, CUDATemplateCaller):
-                    choice_info = choice.info_dict()
-                    op_conf_name = choice_info.get("op_conf_name", "")
-                    assert isinstance(op_conf_name, str)
-                    cuda_template_count += 1
-
-            self.assertGreater(
-                cuda_template_count,
-                0,
-                "No CUDATemplateCaller choices found for matmul with shape "
-                f"M={M}, N={N}, K={K}",
-            )
-
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_get_max_alignment(self):
@@ -1960,6 +1907,30 @@ class TestCutlassBackend(TestCase):
             def forward(self, a, b, extra_args):
                 acc = a @ b
                 return acc, op(acc.relu(), *extra_args)
+
+        M = 1024
+        N = 512
+        a = torch.ones(M, N).cuda().half()
+        b = torch.ones(N, N).cuda().half().t()
+        extra_args = gen_args(op, (M, N))
+        model = TestModel().cuda()
+
+        result = torch.compile(model)(a, b, extra_args)
+        ref_result = model(a, b, extra_args)
+
+        self.assertEqual(
+            torch._dynamo.utils.counters["inductor"]["cuda_epilogue_fusion_counter"], 1
+        )
+        torch.testing.assert_close(result, ref_result)
+
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @use_evt_config
+    @evt_un_ops
+    def test_evt_activations(self, op):
+        class TestModel(torch.nn.Module):
+            def forward(self, a, b, extra_args):
+                acc = a @ b
+                return acc, op(acc, *extra_args)
 
         M = 1024
         N = 512
