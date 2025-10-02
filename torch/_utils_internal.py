@@ -5,7 +5,8 @@ import os
 import sys
 import tempfile
 import typing_extensions
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -305,7 +306,7 @@ def deprecated():
     """
 
     def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
-        # Validate naming convention – single leading underscore, not dunder
+        # Validate naming convention - single leading underscore, not dunder
         if not (func.__name__.startswith("_")):
             raise ValueError(
                 "@deprecate must decorate a function whose name "
