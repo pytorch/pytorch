@@ -1229,13 +1229,16 @@ class DeviceCachingAllocator {
   // record used memory.
   size_t total_allocated_memory = 0;
 
-  size_t allowed_memory_maximum = 0;
+  // global memory available to the device
+  size_t total_global_memory = 0;
+
+  // maximum amount of memory that the device is allowed to
+  // allocate. This is set iff memory fraction is less than 1
+  std::optional<size_t> allowed_memory_maximum{std::nullopt};
 
   // all live expandable segments
   std::vector<ExpandableSegment*> expandable_segments_;
   std::vector<c10::DeviceIndex> devices_with_peer_access_;
-
-  bool set_fraction = false;
 
   bool record_history = false;
 
@@ -1271,8 +1274,12 @@ class DeviceCachingAllocator {
 
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  DeviceCachingAllocator()
+  explicit DeviceCachingAllocator(c10::DeviceIndex id)
       : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
+    cudaDeviceProp prop;
+    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, id));
+    total_global_memory = prop.totalGlobalMem;
+
     stats.max_split_size =
         static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
@@ -1403,7 +1410,7 @@ class DeviceCachingAllocator {
     if (!block_found) {
       // Do garbage collection if the flag is set.
       if (C10_UNLIKELY(
-              set_fraction &&
+              allowed_memory_maximum.has_value() &&
               CUDAAllocatorConfig::garbage_collection_threshold() > 0.0)) {
         garbage_collect_cached_blocks(context);
       }
@@ -1459,8 +1466,9 @@ class DeviceCachingAllocator {
       C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
       std::string allowed_info;
 
-      if (set_fraction) {
-        allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
+      if (allowed_memory_maximum.has_value()) {
+        allowed_info =
+            format_size(allowed_memory_maximum.value()) + " allowed; ";
       }
 
       std::string proc_info = reportProcessMemoryInfo(device);
@@ -1521,7 +1529,7 @@ class DeviceCachingAllocator {
       for (const auto& obs : observers_local) {
         obs(device,
             alloc_size,
-            set_fraction ? allowed_memory_maximum : device_total,
+            allowed_memory_maximum.value_or(device_total),
             device_free);
       }
 
@@ -2016,26 +2024,21 @@ class DeviceCachingAllocator {
   }
 
   /** get memory fraction limiting maximum allocated memory **/
-  double getMemoryFraction() {
-    if (!set_fraction) {
+  double getMemoryFraction() const {
+    if (!allowed_memory_maximum.has_value()) {
       return 1.0;
     }
-
-    size_t device_free = 0;
-    size_t device_total = 0;
-    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
-    return static_cast<double>(allowed_memory_maximum) /
-        static_cast<double>(device_total);
+    return static_cast<double>(allowed_memory_maximum.value()) /
+        static_cast<double>(total_global_memory);
   }
 
   /** set memory fraction to limit maximum allocated memory **/
   void setMemoryFraction(double fraction) {
-    size_t device_free = 0;
-    size_t device_total = 0;
-    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
-    allowed_memory_maximum =
-        static_cast<size_t>(fraction * static_cast<double>(device_total));
-    set_fraction = true;
+    allowed_memory_maximum = std::nullopt;
+    if (fraction < 1.0) {
+      allowed_memory_maximum = static_cast<size_t>(
+          fraction * static_cast<double>(total_global_memory));
+    }
   }
 
   /** get expandable segment size for all the streams on device **/
@@ -3011,7 +3014,7 @@ class DeviceCachingAllocator {
     BlockPool& pool = *p.pool;
 
     if (C10_UNLIKELY(
-            set_fraction &&
+            allowed_memory_maximum.has_value() &&
             CUDAAllocatorConfig::garbage_collection_threshold() > 0.0)) {
       // Track block reuse interval only when garbage collection is enabled.
       ++pool.get_free_blocks_call_count;
@@ -3084,7 +3087,7 @@ class DeviceCachingAllocator {
 
     size_t gc_threshold = static_cast<size_t>(
         CUDAAllocatorConfig::garbage_collection_threshold() *
-        static_cast<double>(allowed_memory_maximum));
+        static_cast<double>(allowed_memory_maximum.value()));
     // No need to trigger GC yet
     if (total_allocated_memory <= gc_threshold) {
       return;
@@ -3162,8 +3165,8 @@ class DeviceCachingAllocator {
 
     bool active_pool =
         p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator();
-    if (set_fraction &&
-        total_allocated_memory + size > allowed_memory_maximum) {
+    if (allowed_memory_maximum.has_value() &&
+        total_allocated_memory + size > allowed_memory_maximum.value()) {
       p.err = cudaErrorMemoryAllocation;
       return false;
       // Temporarily disable checkpointing & cudagraphs internally
@@ -3810,7 +3813,8 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (size < device_count) {
       device_allocator.resize(device_count);
       for (const auto i : c10::irange(size, device_count)) {
-        device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
+        device_allocator[i] =
+            std::make_unique<DeviceCachingAllocator>(c10::DeviceIndex(i));
       }
     }
     CUDAAllocator::init(device_count);
@@ -3863,7 +3867,6 @@ class NativeCachingAllocator : public CUDAAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    C10_CUDA_CHECK(c10::cuda::SetDevice(device));
     return device_allocator[device]->getMemoryFraction();
   }
 
@@ -3878,7 +3881,6 @@ class NativeCachingAllocator : public CUDAAllocator {
         "invalid fraction:",
         fraction,
         ". Please set within [0, 1].");
-    C10_CUDA_CHECK(c10::cuda::SetDevice(device));
     device_allocator[device]->setMemoryFraction(fraction);
   }
 
