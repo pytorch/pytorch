@@ -611,11 +611,11 @@ class GraphModule(torch.nn.Module):
         assert len(fw_outputs) == 1
         self.assertEqual(fw_outputs[0].meta["val"].shape, (80, 80))
 
-        fw_outputs = fw_node.meta["val"]
-        assert len(fw_outputs) == 1
-        self.assertEqual(fw_outputs[0].shape, (80, 80))
+        bw_inputs = bw_node.args
+        assert len(bw_inputs) == 1
+        self.assertEqual(bw_inputs[0].meta["val"].shape, (80, 80))
 
-        bw_outputs = fw_node.meta["val"]
+        bw_outputs = bw_node.meta["val"]
         assert len(bw_outputs) == 1
         self.assertEqual(bw_outputs[0].shape, (80, 80))
 
