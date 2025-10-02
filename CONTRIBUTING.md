@@ -1160,6 +1160,8 @@ if [ -n "$STAGED_FILES" ]; then
 fi
 ```
 
+Note: It is possible to skip the pre-commit hooks check with the git commit `--no-verify` flag in the case there are lint errors in unrelated sections which may muddy your PR.
+
 ## Building PyTorch with ASAN
 
 [ASAN](https://github.com/google/sanitizers/wiki/AddressSanitizer) is very
