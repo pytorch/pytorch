@@ -182,7 +182,7 @@ def scaled_mm_wrap(
     out_dtype=torch.bfloat16,
     use_fast_accum=False,
     bias=None,
-    wrap_v2=True,
+    wrap_v2=wrap,
     use_deprecated_api=False,
 ):
     if not wrap_v2:
@@ -412,7 +412,7 @@ class TestFP8Matmul(TestCase):
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
         # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
         # supported on ROCm but fails on CUDA
-        ctx = self.assertRaises(RuntimeError) if torch.version.hip is None and device != "cpu" else contextlib.nullcontext()
+        ctx = self.assertRaises(ValueError) if torch.version.hip is None and device != "cpu" else contextlib.nullcontext()
         with ctx:
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
 
@@ -759,7 +759,7 @@ class TestFP8Matmul(TestCase):
         scale_b = torch.tensor(1.0, device=device)
         bias = torch.full((m,), 4.0, device=device, dtype=torch.bfloat16)
         self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             "Bias is not supported when out_dtype is set to Float32",
             lambda: scaled_mm_wrap(x, y, scale_a, scale_b, bias=bias, out_dtype=torch.float32),
         )
@@ -833,7 +833,7 @@ class TestFP8Matmul(TestCase):
         y_fp8 = y.to(e4m3_type).t()
 
         with self.assertRaisesRegex(
-            RuntimeError, re.escape("scale_b must have 1 Float element")
+            ValueError, re.escape("scale_b must have 1 Float element")
         ):
             scaled_mm_wrap(
                 x_fp8,
@@ -846,7 +846,7 @@ class TestFP8Matmul(TestCase):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError, re.escape(f"scale_b must have {N} Float elements, got {N + 1}"),
+            ValueError, re.escape(f"scale_b must have {N} Float elements, got {N + 1}"),
         ):
             scaled_mm_wrap(
                 x_fp8,
@@ -871,7 +871,7 @@ class TestFP8Matmul(TestCase):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError, re.escape("Expected scale_b.stride(1) == 1 to be true, but got false."),
+            ValueError, re.escape("expected scale_b.stride(1) to be 1, but got 2"),
         ):
             scaled_mm_wrap(
                 x_fp8,
@@ -959,6 +959,7 @@ class TestFP8Matmul(TestCase):
         else:
             test()
 
+    # Note: Removed parameterization over M,N,K from #163829 as it failed tests as-is
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
     @unittest.skipIf(
@@ -980,12 +981,20 @@ class TestFP8Matmul(TestCase):
         # 1x128 blocks need scales to be outer-dim-major
         if lhs_block == 1:
             x_scales = x_scales.t().contiguous().t()
+            lhs_recipe = ScalingType.Blockwise_1x128
+        else:
+            lhs_recipe = ScalingType.Blockwise_128x128
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
+            rhs_recipe = ScalingType.Blockwise_1x128
+        else:
+            rhs_recipe = ScalingType.Blockwise_128x128
+
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
-            x_fp8, y_fp8.t(), a_scale=x_scales, b_scale=y_scales.t(), output_dtype=output_dtype
+        out_scaled_mm = scaled_mm_wrap(
+            x_fp8, y_fp8.t(), scale_a=x_scales.reciprocal(), scale_b=y_scales.reciprocal().t(), out_dtype=output_dtype,
+            scale_recipe_a=lhs_recipe, scale_recipe_b=rhs_recipe
         )
 
         # Calculate emulated F8 mm
