@@ -859,9 +859,9 @@ struct type_specialized_kernel_launcher {
     if (ret_t == rt_binary_specializations[arg_index][0] &&
         arg0_t == rt_binary_specializations[arg_index][1] &&
         arg1_t == rt_binary_specializations[arg_index][2]) {
-      using cret_t = rt_binary_specializations[arg_index][0]>::type;
-      using carg0_t = rt_binary_specializations[arg_index][1]>::type;
-      using carg0_t = rt_binary_specializations[arg_index][2]>::type;
+      using cret_t = rt_binary_specializations[arg_index][0]::type;
+      using carg0_t = rt_binary_specializations[arg_index][1]::type;
+      using carg0_t = rt_binary_specializations[arg_index][2]::type;
       launch_vectorized_templated_kernel<
           func_t,
           array_t,
