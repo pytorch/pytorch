@@ -471,10 +471,7 @@ class TestFP8Lowering(TestCase):
             else:
                 self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(
-        torch.cuda.is_available() and torch.cuda.get_device_capability() < (9, 0),
-        "Triton does not support fp8 on A100",
-    )
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_scaled_mm_preserves_strides(self):
         """Test that scaled_mm preserves stride ordering through a custom pass."""
 
