@@ -1633,6 +1633,7 @@ class ErrorMessageClarityTest(TestCase):
         self.N = 7312
         self.S0 = 420
         self.S1 = self.N - self.S0
+        torch._dynamo.config.capture_scalar_outputs = True
 
     def opSetup(self, lib_name):
         torch.library.define(
