@@ -66,14 +66,6 @@
 
 #include <torch/custom_class.h>
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::BuiltinCommHookType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::DebugLevel)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ReduceOp::RedOpType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ProcessGroup::BackendType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::OpType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::WorkResult)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ErrorType)
-
 namespace {
 
 #ifdef USE_C10D_NCCL
@@ -3815,7 +3807,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       fakeProcessGroup, "Options", backendOptions)
       .def(py::init())
       .def_readwrite(
-          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option);
+          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option)
+      .def_readwrite(
+          "error_on_collective",
+          &::c10d::FakeProcessGroup::Options::error_on_collective);
   fakeProcessGroup
       .def(
           py::init([](int rank,
