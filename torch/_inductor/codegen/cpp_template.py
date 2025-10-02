@@ -131,7 +131,7 @@ class CppTemplate(KernelTemplate):
             "win32",
         ]
         if enable_kernel_profile:
-            res.writelines(["#include <ATen/record_function.h>"])
+            res.writelines(["#include <torch/csrc/inductor/aoti_runtime/utils.h>"])
         return res
 
     def render(self, **kwargs) -> str:

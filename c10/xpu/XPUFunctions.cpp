@@ -157,9 +157,9 @@ void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {
 #define ASSIGN_DEVICE_PROP(property) \
   device_prop->property = raw_device.get_info<device::property>();
 
-#define ASSIGN_EXT_DEVICE_PROP(property, default_value)                      \
-  device_prop->property = raw_device.has(sycl::aspect::ext_intel_##property) \
-      ? raw_device.get_info<intel::info::device::property>()                 \
+#define ASSIGN_EXT_DEVICE_PROP(property, aspect_tag, default_value)            \
+  device_prop->property = raw_device.has(sycl::aspect::ext_intel_##aspect_tag) \
+      ? raw_device.get_info<intel::info::device::property>()                   \
       : default_value;
 
 #define ASSIGN_DEVICE_ASPECT(member) \

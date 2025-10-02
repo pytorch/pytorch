@@ -1,34 +1,33 @@
-# mypy: ignore-errors
-
 import argparse
 import ast
 import json
 import re
 from pathlib import Path
+from typing import Any, Optional
 
 
-def get_source_segment(source, node):
+def get_source_segment(source: str, node: ast.AST) -> Optional[str]:
     return ast.get_source_segment(source, node)
 
 
-def load_registry(path):
+def load_registry(path: Path) -> dict[str, Any]:
     if path.exists():
         with path.open() as f:
-            return json.load(f)
+            return json.load(f)  # type: ignore[no-any-return]
     return {}
 
 
-def save_registry(reg, path):
+def save_registry(reg: dict[str, Any], path: Path) -> None:
     with path.open("w") as f:
         json.dump(reg, f, indent=2)
 
 
-def next_gb_id(reg):
+def next_gb_id(reg: dict[str, Any]) -> str:
     ids = [int(x[2:]) for x in reg if x.startswith("GB") and x[2:].isdigit()]
     return f"GB{(max(ids, default=-1) + 1):04d}"
 
 
-def clean_string(s):
+def clean_string(s: Any) -> Any:
     """
     Normalizes string literals by removing formatting artifacts and escape sequences.
     Handles f-strings, quotes, newlines, and other syntax elements for cleaner output.
@@ -49,23 +48,23 @@ def clean_string(s):
     return s
 
 
-def expand_hints(hints, dynamo_dir=None):
+def expand_hints(hints: list[str], dynamo_dir: Optional[str] = None) -> list[str]:
     """
     Expands hint references to their actual values from graph_break_hints.
     Uses exec() to avoid import dependencies.
     """
     if dynamo_dir is None:
         script_dir = Path(__file__).resolve().parent
-        dynamo_dir = script_dir.parent.parent / "torch" / "_dynamo"
+        dynamo_dir_path = script_dir.parent.parent / "torch" / "_dynamo"
     else:
-        dynamo_dir = Path(dynamo_dir)
+        dynamo_dir_path = Path(dynamo_dir)
 
-    graph_break_hints_path = dynamo_dir / "graph_break_hints.py"
+    graph_break_hints_path = dynamo_dir_path / "graph_break_hints.py"
 
     with open(graph_break_hints_path) as f:
         hints_source = f.read()
 
-    hints_namespace = {}
+    hints_namespace: dict[str, Any] = {}
     exec(hints_source, hints_namespace)
 
     hint_constants = {
@@ -88,7 +87,7 @@ def expand_hints(hints, dynamo_dir=None):
     return expanded_hints
 
 
-def extract_info_from_keyword(source, kw):
+def extract_info_from_keyword(source: str, kw: ast.keyword) -> Any:
     """
     Extracts and returns the value of a keyword argument from an AST node.
 
@@ -114,14 +113,16 @@ def extract_info_from_keyword(source, kw):
         return clean_string(param_source)
 
 
-def find_unimplemented_v2_calls(path, dynamo_dir=None):
+def find_unimplemented_v2_calls(
+    path: str, dynamo_dir: Optional[str] = None
+) -> list[dict[str, Any]]:
     results = []
-    path = Path(path)
+    path_obj = Path(path)
 
-    if path.is_dir():
-        file_paths = path.glob("**/*.py")
+    if path_obj.is_dir():
+        file_paths = path_obj.glob("**/*.py")
     else:
-        file_paths = [path]
+        file_paths = [path_obj]  # type: ignore[assignment]
 
     for file_path in file_paths:
         with open(file_path) as f:
@@ -142,7 +143,7 @@ def find_unimplemented_v2_calls(path, dynamo_dir=None):
                         and node.func.id
                         in ("unimplemented_v2", "unimplemented_v2_with_warning")
                     ):
-                        info = {
+                        info: dict[str, Any] = {
                             "gb_type": None,
                             "context": None,
                             "explanation": None,
@@ -175,7 +176,7 @@ def find_unimplemented_v2_calls(path, dynamo_dir=None):
     return results
 
 
-def create_registry(dynamo_dir, registry_path):
+def create_registry(dynamo_dir: str, registry_path: str) -> None:
     calls = find_unimplemented_v2_calls(dynamo_dir)
     registry = {}
 
@@ -201,7 +202,7 @@ def create_registry(dynamo_dir, registry_path):
         json.dump(registry, f, indent=2)
 
 
-def main():
+def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent.parent
     registry_path = repo_root / "torch" / "_dynamo" / "graph_break_registry.json"
 

@@ -79,7 +79,6 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  # NB: Keep this in sync with trunk.yml
   build:
     name: cuda12.8-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml

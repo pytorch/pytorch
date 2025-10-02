@@ -52,6 +52,21 @@ def move_to_device_pass(
         if isinstance(v, torch.Tensor):
             ep._constants[k] = v.to(_get_new_device(v.device, location))
 
+    # move example_inputs if they exist
+    if ep.example_inputs is not None:
+        args, kwargs = ep.example_inputs
+        moved_args = pytree.tree_map_only(
+            torch.Tensor,
+            lambda tensor: tensor.to(_get_new_device(tensor.device, location)),
+            args,
+        )
+        moved_kwargs = pytree.tree_map_only(
+            torch.Tensor,
+            lambda tensor: tensor.to(_get_new_device(tensor.device, location)),
+            kwargs,
+        )
+        ep._example_inputs = (moved_args, moved_kwargs)
+
     for m in ep.graph_module.modules():
         if isinstance(m, torch.fx.GraphModule):
             for node in m.graph.nodes:
@@ -60,6 +75,15 @@ def move_to_device_pass(
                     kwargs = node.kwargs.copy()
                     kwargs["device"] = _get_new_device(kwargs["device"], location)
                     node.kwargs = kwargs
+
+                if (
+                    node.op == "call_function"
+                    and node.target == torch.ops.aten.to.device
+                ):
+                    args = list(node.args)
+                    args[1] = _get_new_device(args[1], location)
+                    node.args = tuple(args)
+
                 # move all the tensor metadata
                 node.meta["val"] = pytree.tree_map(
                     lambda v: v.to(_get_new_device(v.device, location))
