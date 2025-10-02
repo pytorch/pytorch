@@ -559,31 +559,31 @@ class TestReductions(TestCase):
     def test_logsumexp_dim_none_keepdim(self, device, dtype):
         """Test logsumexp with dim=None and keepdim parameter"""
         from scipy.special import logsumexp
-        
+
         # Test with 2D tensor
         a = torch.randn(3, 4, device=device, dtype=dtype)
-        
+
         # Test keepdim=False (default behavior)
         actual_false = torch.logsumexp(a, dim=None, keepdim=False)
         expected_false = logsumexp(a.cpu().numpy().flatten())
         self.assertEqual(expected_false.shape, actual_false.shape)
         self.assertEqual(expected_false, actual_false)
         self.assertEqual(actual_false.shape, torch.Size([]))  # Should be scalar
-        
+
         # Test keepdim=True
         actual_true = torch.logsumexp(a, dim=None, keepdim=True)
         expected_true = logsumexp(a.cpu().numpy().flatten())
         self.assertEqual(expected_true, actual_true)
         self.assertEqual(actual_true.shape, torch.Size([1, 1]))  # Should preserve all dims as size 1
-        
+
         # Test with 3D tensor
         b = torch.randn(2, 3, 4, device=device, dtype=dtype)
-        
+
         actual_3d_false = torch.logsumexp(b, dim=None, keepdim=False)
         expected_3d_false = logsumexp(b.cpu().numpy().flatten())
         self.assertEqual(expected_3d_false, actual_3d_false)
         self.assertEqual(actual_3d_false.shape, torch.Size([]))  # Should be scalar
-        
+
         actual_3d_true = torch.logsumexp(b, dim=None, keepdim=True)
         expected_3d_true = logsumexp(b.cpu().numpy().flatten())
         self.assertEqual(expected_3d_true, actual_3d_true)
@@ -594,21 +594,21 @@ class TestReductions(TestCase):
     def test_logsumexp_structured_kernel_meta(self, device, dtype):
         """Test that the structured kernel meta function works correctly"""
         a = torch.randn(2, 3, device=device, dtype=dtype)
-        
+
         # Test that the meta function produces correct shapes
         with torch.no_grad():
             # Test with dim=None, keepdim=False
             result_false = torch.logsumexp(a, dim=None, keepdim=False)
             self.assertEqual(result_false.shape, torch.Size([]))
-            
+
             # Test with dim=None, keepdim=True
             result_true = torch.logsumexp(a, dim=None, keepdim=True)
             self.assertEqual(result_true.shape, torch.Size([1, 1]))
-            
+
             # Test with specific dims
             result_dim0 = torch.logsumexp(a, dim=0, keepdim=False)
             self.assertEqual(result_dim0.shape, torch.Size([3]))
-            
+
             result_dim0_keep = torch.logsumexp(a, dim=0, keepdim=True)
             self.assertEqual(result_dim0_keep.shape, torch.Size([1, 3]))
 
@@ -616,23 +616,22 @@ class TestReductions(TestCase):
     @dtypes(torch.float32, torch.double)
     def test_logsumexp_edge_cases_dim_none(self, device, dtype):
         """Test edge cases for logsumexp with dim=None (real dtypes only)"""
-        from scipy.special import logsumexp
-        
+
         # Test with empty tensor
         empty = torch.empty(0, device=device, dtype=dtype)
         result_empty = torch.logsumexp(empty, dim=None)
         self.assertEqual(result_empty.item(), float('-inf'))
-        
+
         # Test with single element
         single = torch.tensor([5.0], device=device, dtype=dtype)
         result_single = torch.logsumexp(single, dim=None)
         self.assertEqual(result_single.item(), 5.0)
-        
+
         # Test with all -inf
         neg_inf = torch.full((2, 3), float('-inf'), device=device, dtype=dtype)
         result_neg_inf = torch.logsumexp(neg_inf, dim=None)
         self.assertEqual(result_neg_inf.item(), float('-inf'))
-        
+
         # Test with all +inf
         pos_inf = torch.full((2, 3), float('inf'), device=device, dtype=dtype)
         result_pos_inf = torch.logsumexp(pos_inf, dim=None)
@@ -647,13 +646,13 @@ class TestReductions(TestCase):
         result_single = torch.logsumexp(single, dim=None)
         # For a single element, logsumexp should return that element
         self.assertEqual(result_single.item(), (5.0+2.0j))
-        
+
         # Test with multiple complex elements
         a = torch.tensor([1.0+1.0j, 2.0+2.0j], device=device, dtype=dtype)
         result = torch.logsumexp(a, dim=None)
         # Verify shape is scalar
         self.assertEqual(result.shape, torch.Size([]))
-        
+
         # Test keepdim with complex
         result_keepdim = torch.logsumexp(a, dim=None, keepdim=True)
         self.assertEqual(result_keepdim.shape, torch.Size([1]))
@@ -667,11 +666,11 @@ class TestReductions(TestCase):
         y.backward()
         self.assertIsNotNone(x.grad)
         self.assertEqual(x.grad.shape, x.shape)
-        
+
         # Verify gradient values are reasonable (should sum to 1)
         grad_sum = x.grad.sum().item()
         self.assertAlmostEqual(grad_sum, 1.0, places=5)
-        
+
         # Test keepdim=True
         x2 = torch.randn(3, 4, device=device, dtype=dtype, requires_grad=True)
         y2 = torch.logsumexp(x2, dim=None, keepdim=True)
@@ -680,7 +679,7 @@ class TestReductions(TestCase):
         self.assertEqual(x2.grad.shape, x2.shape)
         grad_sum2 = x2.grad.sum().item()
         self.assertAlmostEqual(grad_sum2, 1.0, places=5)
-        
+
         # Test gradient with specific dimensions for comparison
         x3 = torch.randn(3, 4, device=device, dtype=dtype, requires_grad=True)
         y3_none = torch.logsumexp(x3, dim=None)
@@ -693,26 +692,26 @@ class TestReductions(TestCase):
         """Test JIT compilation for logsumexp with dim=None"""
         def logsumexp_no_dim(x):
             return torch.logsumexp(x)
-        
+
         def logsumexp_dim_none(x):
             return torch.logsumexp(x, dim=None, keepdim=False)
-        
+
         def logsumexp_dim_none_keepdim(x):
             return torch.logsumexp(x, dim=None, keepdim=True)
-        
+
         # Test JIT compilation
         x = torch.randn(3, 4, device=device, dtype=dtype)
-        
+
         scripted_no_dim = torch.jit.script(logsumexp_no_dim)
         result_no_dim = scripted_no_dim(x)
         expected_no_dim = logsumexp_no_dim(x)
         self.assertEqual(result_no_dim, expected_no_dim)
-        
+
         scripted_dim_none = torch.jit.script(logsumexp_dim_none)
         result_dim_none = scripted_dim_none(x)
         expected_dim_none = logsumexp_dim_none(x)
         self.assertEqual(result_dim_none, expected_dim_none)
-        
+
         scripted_keepdim = torch.jit.script(logsumexp_dim_none_keepdim)
         result_keepdim = scripted_keepdim(x)
         expected_keepdim = logsumexp_dim_none_keepdim(x)
