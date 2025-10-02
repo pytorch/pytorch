@@ -4,10 +4,11 @@ import enum
 import functools
 import warnings
 from collections import OrderedDict
+from collections.abc import Callable
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Callable, cast, Optional, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
+from typing import Any, cast, Concatenate, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._C as _C
@@ -1699,7 +1700,7 @@ class Tensor(torch._C.TensorBase):
     def __dlpack__(
         self,
         *,
-        stream: Optional[Any] = None,
+        stream: Optional[Any] = -1,
         max_version: Optional[tuple[int, int]] = None,
         dl_device: Optional[tuple[enum.IntEnum, int]] = None,
         copy: Optional[bool] = None,
@@ -1717,9 +1718,12 @@ class Tensor(torch._C.TensorBase):
                 pointer to a CUDA stream. The current stream is synchronized with
                 this stream before the capsule is created, and since the capsule
                 shares its storage with the tensor this make it safe to access from
-                both streams.  If None or -1 is passed then no synchronization is performed.
+                both streams.  If -1 is passed then no synchronization is performed.
                 If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
-                synchronization.
+                synchronization. This API intentionally slightly deviates from the DLPack
+                guidance: the default stream is -1 (stream-preserving; no cross-stream sync),
+                because many from_dlpack implementations intend stream preservation.
+                For non-CUDA devices, -1 is treated the same as None.
 
             max_version (tuple[int, int] or None): An optional Python tuple with
                 2 integers, representing the maximum version the caller supports. If
@@ -1797,7 +1801,7 @@ class Tensor(torch._C.TensorBase):
                 event.record(current_stream)
                 stream.wait_event(event)
         elif self.device.type == "cpu":
-            assert stream is None, "stream should be None on cpu."
+            assert stream is None or stream == -1, "stream should be None on cpu."
 
         if self.device.type == "xla":
             import torch_xla

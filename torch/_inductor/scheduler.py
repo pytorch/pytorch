@@ -50,6 +50,7 @@ from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
 from .ir import (
+    assign_origin_node,
     get_device_type,
     GraphPartitionSignature,
     MultiOutput,
@@ -1041,10 +1042,10 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
     return ms
 
 
+@dataclasses.dataclass(slots=True)
 class WhyNoFuse:
-    # TODO when we drop support for Python < 3.10, we can use
-    # @dataclass(slots=True) instead of manually specifying __slots__.
-    __slots__ = ["name1", "name2", "reason", "args"]
+    name1: str
+    name2: str
     reason: str
     args: tuple[Any, ...]
 
@@ -3163,11 +3164,15 @@ class Scheduler:
                         node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
-                out_tensorbox = min_node_unfused.output_node()
+                with ir.IRNode.current_origins(multi_node.origins):
+                    out_tensorbox = min_node_unfused.output_node()
                 out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
+
+                if multi_node.origin_node:
+                    assign_origin_node(out_tensorbox, multi_node.origin_node)
 
                 out_buffer.layout = multi_node.layout
                 replace_operation_buffer(multi_node, out_buffer)
@@ -5606,7 +5611,7 @@ class Scheduler:
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)
 
 
-class BaseScheduling:
+class BaseScheduling:  # noqa: docstring_linter
     def __init__(self, scheduler: Optional[Scheduler]):
         super().__init__()
         self.scheduler = scheduler
@@ -5749,3 +5754,19 @@ class BaseScheduling:
         and memory copy time in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError
+
+    def codegen_comment(
+        self,
+        node_schedule: Sequence[BaseSchedulerNode],
+        kernel_name: Optional[str] = None,
+    ) -> None:
+        if kernel_name:
+            from torch._inductor.debug import set_kernel_post_grad_provenance_tracing
+
+            debug_handle = set_kernel_post_grad_provenance_tracing(
+                node_schedule,  # type: ignore[arg-type]
+                kernel_name,
+            )
+            V.graph.wrapper_code.write_provenance_debug_handle(
+                kernel_name, debug_handle
+            )
