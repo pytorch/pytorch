@@ -613,8 +613,7 @@ Available options:
   CUDA Graph capture by using the graph topology (instead of CUDA events) to determine
   when a freed block is safe to reuse. This can reduce peak memory during long captures that free
   and reallocate buffers across multiple streams, especially when the capture DAG frequently
-  reaches joined frontiers. Note: Enabling this option can significantly increase the time spent
-  capturing the graph.
+  reaches joined frontiers.
 
 .. note::
 

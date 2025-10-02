@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch.utils._pytree as pytree

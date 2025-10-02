@@ -15,8 +15,9 @@ import tempfile
 import time
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, Optional, Union
+from typing import Any, Generic, Optional, Union
 from typing_extensions import ParamSpec
 from weakref import WeakSet
 
