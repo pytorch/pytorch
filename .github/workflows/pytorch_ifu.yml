@@ -46,7 +46,7 @@ jobs:
       DOWNSTREAM_REMOTE: origin                              # IFU target remote name
       DOWNSTREAM_REPO: ${{ inputs.ifu_target_repo }}         # target repo for IFU (fork); actions/checkout sets this to origin
       DOWNSTREAM_BRANCH: ${{ inputs.ifu_target_branch }}     # target branch for IFU
-      GH_TOKEN: ${{ secrets.PG_GITHUB_TOKEN }}               # used by gh; provided by Action @TODO remove PG before merging
+      GH_TOKEN: ${{ secrets.IFU_GITHUB_TOKEN }}              # used by gh; provided by Action 
     steps:
       - name: Checkout repository (${{ env.DOWNSTREAM_REPO }}) (full history)
         uses: actions/checkout@v4
