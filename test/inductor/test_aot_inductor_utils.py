@@ -159,7 +159,11 @@ class AOTIRunnerUtil:
         with torch.no_grad():
             # strict=False needs extra migration work
             ep = torch.export.export(
-                model, example_inputs, dynamic_shapes=dynamic_shapes, strict=True
+                model,
+                example_inputs,
+                dynamic_shapes=dynamic_shapes,
+                strict=True,
+                prefer_deferred_runtime_asserts_over_guards=True,
             )
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=inductor_configs

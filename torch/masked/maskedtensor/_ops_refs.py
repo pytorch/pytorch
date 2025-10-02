@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -285,7 +286,9 @@ def layout(func, *args, **kwargs):
     return _get_data(args[0]).layout
 
 
-@register_dispatch_func([torch.ops.aten.is_contiguous])
+@register_dispatch_func(
+    [torch.ops.aten.is_contiguous, torch.ops.aten.sym_is_contiguous]
+)
 def is_contiguous(func, *args, **kwargs):
     data = _get_data(args[0])
     if data.is_sparse:
@@ -382,7 +385,7 @@ def _softmax_backward_data(func, *args, **kwargs):
     if is_masked_tensor(grad) and is_masked_tensor(output):
         if not _masks_match(grad, output):
             raise ValueError(
-                "__torch_dispatch__, {func}: expected the masks of grad and output to match"
+                f"__torch_dispatch__, {func}: expected the masks of grad and output to match"
             )
         grad_data = _get_data(grad)
         new_grad_data = torch.ops.aten._masked_softmax_backward(
@@ -414,7 +417,7 @@ def where(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise ValueError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mx = args[1]
     my = args[2]
     if not is_masked_tensor(mx):
@@ -432,7 +435,7 @@ def _to_sparse(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise TypeError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise TypeError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
     if not is_masked_tensor(mt):
         mt = MaskedTensor(mt, torch.ones_like(mt, dtype=torch.bool))
@@ -449,7 +452,7 @@ def _to_sparse_csr(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise ValueError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
     if not is_masked_tensor(mt):
         mt = MaskedTensor(mt, torch.ones_like(mt).bool())
@@ -466,7 +469,7 @@ def _to_dense(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise ValueError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
     if not is_masked_tensor(mt):
         mt = MaskedTensor(mt, torch.ones_like(mt).bool())

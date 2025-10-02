@@ -42,7 +42,7 @@ from ..pattern_matcher import (
     Match,
     MultiOutputPattern,
     MULTIPLE,
-    PatternMatcherPass,
+    PatternMatcherPass as PatternMatcherPassBase,
     register_graph_pattern,
     register_replacement,
     stable_topological_sort,
@@ -67,6 +67,10 @@ from .split_cat import POST_GRAD_PATTERNS
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+PatternMatcherPass = functools.partial(
+    PatternMatcherPassBase, subsystem="post_grad_passes"
+)
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -198,19 +202,21 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
     collectives_bucketing: bool = False
+
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
 
         p = (
             bucket_fsdp_reduce_scatter
-            if config.bucket_reduce_scatters_fx == "fsdp"
+            if "fsdp" in config.bucket_reduce_scatters_fx
             else bucket_reduce_scatter
         )
         GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
+                config.bucket_reduce_scatters_fx,
             )
         )
         collectives_bucketing = True
@@ -223,13 +229,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         p = (
             bucket_fsdp_all_gather  # type: ignore[assignment]
-            if config.bucket_all_gathers_fx == "fsdp"
+            if "fsdp" in config.bucket_all_gathers_fx
             else bucket_all_gather
         )
         GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_all_gathers_fx_bucket_size_determinator,
+                config.bucket_all_gathers_fx,
             )
         )
         collectives_bucketing = True
@@ -806,6 +813,12 @@ def scatter_upon_const_tensor(
     when it is a tensor as well.
     """
     from torch._inductor import metrics
+
+    # Check if inputs are tensors instead of inductor IR nodes
+    if isinstance(selector, torch.Tensor):
+        # Return a fake tensor with the proper shape that this operator is intended to return
+        device = selector.device if hasattr(selector, "device") else torch.device("cpu")
+        return torch.empty(shape, dtype=dtype, device=device)
 
     metrics.num_matches_for_scatter_upon_const_tensor += 1
 

@@ -5,7 +5,8 @@ import os
 import sys
 import tempfile
 import typing_extensions
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -176,6 +177,9 @@ def log_torch_jit_trace_exportability(
     return
 
 
+DISABLE_JUSTKNOBS = True
+
+
 def justknobs_check(name: str, default: bool = True) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
@@ -302,7 +306,7 @@ def deprecated():
     """
 
     def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
-        # Validate naming convention – single leading underscore, not dunder
+        # Validate naming convention - single leading underscore, not dunder
         if not (func.__name__.startswith("_")):
             raise ValueError(
                 "@deprecate must decorate a function whose name "
@@ -358,3 +362,10 @@ def get_default_numa_options():
 
 def log_triton_builds(fail: Optional[str]):
     pass
+
+
+def find_compile_subproc_binary() -> Optional[str]:
+    """
+    Allows overriding the binary used for subprocesses
+    """
+    return None

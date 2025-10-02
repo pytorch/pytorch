@@ -459,6 +459,14 @@ def require_world_size(world_size):
     return lambda func: func
 
 
+def require_exact_world_size(world_size):
+    if int(os.environ["WORLD_SIZE"]) != world_size:
+        return skip_but_pass_in_sandcastle(
+            f"Test requires an exact world size of {world_size:d}"
+        )
+    return lambda func: func
+
+
 @contextmanager
 def _lock():
     TEMP_DIR = os.environ["TEMP_DIR"]
@@ -699,7 +707,7 @@ class DistributedTest:
                 self.assertNotEqual(args.get("dtype", ""), "")
 
                 per_coll_meta[collname].append(args)
-                if collname in {"wait"}:
+                if collname == "wait":
                     continue
 
                 self.assertEqual(args["Process Group Description"], "default_pg")
@@ -850,8 +858,6 @@ class DistributedTest:
                 with exception_ctx:
                     dist.barrier(group_id)
                 self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.1)
-            else:
-                pass
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports timeouts"
@@ -921,8 +927,7 @@ class DistributedTest:
             BACKEND not in DistTestCases.backend_feature["subgroup"],
             f"The {BACKEND} backend does not support creating subgroups on CUDA devices",
         )
-        @require_world_size(4)
-        @skip_if_lt_x_gpu(4)
+        @require_exact_world_size(4)
         def test_new_subgroups_with_group_param(self):
             # Initialize global test environment
             self._init_global_test()
@@ -967,9 +972,10 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_new_subgroups_world_size_not_divisible_by_group_size(self):
+            expected_msg = f"The world size ({dist.get_world_size()}) must be divisible by 'group_size=3'"
             with self.assertRaisesRegex(
                 ValueError,
-                re.escape("The world size (4) must be divisible by 'group_size=3'"),
+                re.escape(expected_msg),
             ):
                 dist.new_subgroups(3)
 
@@ -7021,7 +7027,7 @@ class DistributedTest:
                 self.assertNotEqual(attrs.get("dtype", ""), "")
 
                 per_coll_meta[collname].append(attrs)
-                if collname in {"wait"}:
+                if collname == "wait":
                     continue
 
                 self.assertEqual(attrs["pg_name"], "0")  # yes this is a string

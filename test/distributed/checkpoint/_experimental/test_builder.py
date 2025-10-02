@@ -55,7 +55,7 @@ class TestMakeCheckpointer(TestCase):
 
         # Test that it works for sync operations
         checkpoint_path = os.path.join(self.temp_dir, "checkpoint_factory_sync")
-        result = checkpointer.save(self.state_dict, checkpoint_path)
+        result = checkpointer.save(checkpoint_path, self.state_dict)
         self.assertIsNone(result)  # Sync mode returns None
 
         # Verify checkpoint was created
@@ -81,7 +81,7 @@ class TestMakeCheckpointer(TestCase):
         checkpoint_path = os.path.join(
             self.temp_dir, "checkpoint_factory_sync_config_first"
         )
-        result = checkpointer.save(self.state_dict, checkpoint_path)
+        result = checkpointer.save(checkpoint_path, self.state_dict)
         self.assertIsNone(result)  # Sync mode returns None
 
         # Verify checkpoint was created
@@ -105,7 +105,7 @@ class TestMakeCheckpointer(TestCase):
         checkpoint_path = os.path.join(
             self.temp_dir, "checkpoint_factory_sync_custom_config"
         )
-        result = checkpointer.save(self.state_dict, checkpoint_path)
+        result = checkpointer.save(checkpoint_path, self.state_dict)
         self.assertIsNone(result)  # Sync mode returns None
 
         # Verify checkpoint was created
@@ -135,7 +135,7 @@ class TestMakeCheckpointer(TestCase):
             # Test that it works for async operations
             checkpoint_path = os.path.join(self.temp_dir, "checkpoint_factory_async")
             stage_future, write_future = checkpointer.save(
-                self.state_dict, checkpoint_path
+                checkpoint_path, self.state_dict
             )
 
             # Verify futures are returned

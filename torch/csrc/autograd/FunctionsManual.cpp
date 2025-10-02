@@ -1078,7 +1078,7 @@ std::vector<Tensor> cat_tensors_backward(
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape.size() == 1) {
-      if (TORCH_GUARD_SIZE_OBLIVIOUS(shape[0].sym_eq(0))) {
+      if (TORCH_GUARD_OR_FALSE(shape[0].sym_eq(0))) {
         grad_inputs[i] = at::zeros({0}, grad_val.options());
         continue;
       }
@@ -3452,8 +3452,11 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
   const auto V = Vh.mH();
 
   // dP = U^H dA V
-  auto dP = m >= n ? at::matmul(U.mH(), at::matmul(dA, V))
-                   : at::matmul(at::matmul(U.mH(), dA), V);
+  // U^H (dA V) is O(km(n + k))
+  // (U^H dA) V is O(kn(m + k))
+  // So prefer U^H (dA V) if m < n
+  auto dP = m < n ? at::matmul(U.mH(), at::matmul(dA, V))
+                  : at::matmul(at::matmul(U.mH(), dA), V);
 
   auto dS =
       is_complex ? at::real(dP.diagonal(0, -2, -1)) : dP.diagonal(0, -2, -1);

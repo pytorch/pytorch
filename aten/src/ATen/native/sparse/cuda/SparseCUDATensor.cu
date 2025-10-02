@@ -106,8 +106,34 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
     values = values.contiguous();
     int64_t stride = c10::multiply_integers(values.sizes().slice(1));
     int warp_size = at::cuda::warp_size();
+#ifdef USE_ROCM
+    const int64_t BATCHING_SEGMENT = 4096;
+    int64_t nsegments = ceil_div(newNnz, (int64_t) SZ);
+    int64_t s_batch = ceil_div(nsegments, BATCHING_SEGMENT);
+    dim3 grid(s_batch, (s_batch == 1) ? nsegments : BATCHING_SEGMENT, ceil_div(stride, (int64_t) warp_size*SZ));
+#else
     dim3 grid(ceil_div(newNnz, (int64_t) SZ), ceil_div(stride, (int64_t) warp_size*SZ));
+#endif
     dim3 block(warp_size, SZ);
+#ifdef USE_ROCM
+    // Must duplicate the whole section otherwise does not compile on Windows
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      at::ScalarType::ComplexHalf, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
+      values.scalar_type(), "coalesce_sparse_cuda", [&] {
+        using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
+        apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
+          uniqueOffsets.data_ptr<int64_t>(),
+          origIndices.data_ptr<int64_t>(),
+          values.data_ptr<scalar_t>(),
+          newValues.data_ptr<scalar_t>(),
+          nnz,
+          newNnz,
+          nsegments,
+          stride
+        );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
+#else
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::ComplexHalf, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
       values.scalar_type(), "coalesce_sparse_cuda", [&] {
@@ -123,6 +149,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
         );
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
+#endif
   }
 
 // this grid-strided version is slower but probably more flexible

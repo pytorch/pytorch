@@ -190,7 +190,7 @@ if not IS_WINDOWS:
 
             deterministic = torch.are_deterministic_algorithms_enabled()
             try:
-                # set use_deterministic_algorithms to fill unintialized memory
+                # set use_deterministic_algorithms to fill uninitialized memory
                 torch.use_deterministic_algorithms(True)
 
                 t = torch.rand(2, 7, device=device)
@@ -208,6 +208,27 @@ if not IS_WINDOWS:
             out = libtorch_agnostic.ops.my_zero_(t)
             self.assertEqual(id(out), id(t))
             self.assertEqual(out, torch.zeros_like(t))
+
+        def test_my_amax(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, device=device)
+            out = libtorch_agnostic.ops.my_amax(t)
+            self.assertEqual(out, torch.amax(t, 0))
+
+        def test_my_amax_vec(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, 5, device=device)
+            out = libtorch_agnostic.ops.my_amax_vec(t)
+            self.assertEqual(out, torch.amax(t, (0, 1)))
+
+        def test_my_is_cpu(self, device):
+            import libtorch_agnostic
+
+            t = torch.rand(2, 7, device=device)
+            out = libtorch_agnostic.ops.my_is_cpu(t)
+            self.assertEqual(out, t.is_cpu)
 
         def test_fill_infinity(self, device):
             import libtorch_agnostic
@@ -300,6 +321,51 @@ if not IS_WINDOWS:
                 self.assertEqual(current_device, expected_device)
             finally:
                 torch.cuda.set_device(prev_device)
+
+        def test_my_new_empty_dtype_variant(self, device):
+            import libtorch_agnostic
+
+            deterministic = torch.are_deterministic_algorithms_enabled()
+            try:
+                # set use_deterministic_algorithms to fill uninitialized memory
+                torch.use_deterministic_algorithms(True)
+                t = torch.randn(3, 4, device=device)
+                out = libtorch_agnostic.ops.my_new_empty_dtype_variant(t)
+                ref_out = t.new_empty((2, 5), dtype=torch.bfloat16)
+
+                self.assertEqual(out, ref_out, exact_device=True)
+            finally:
+                torch.use_deterministic_algorithms(deterministic)
+
+        def test_my_new_zeros_dtype_variant(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(3, 4, device=device)
+            out = libtorch_agnostic.ops.my_new_zeros_dtype_variant(t)
+            ref_out = t.new_zeros((2, 5), dtype=torch.float)
+            self.assertEqual(out, ref_out, exact_device=True)
+
+        def test_my_copy_(self, device):
+            import libtorch_agnostic
+
+            dst = torch.empty(2, 5, device=device)
+            src = torch.randn(2, 5, device=device)
+
+            result = libtorch_agnostic.ops.my_copy_(dst, src, False)
+            expected = src
+            self.assertEqual(result, expected)
+            self.assertEqual(result.data_ptr(), dst.data_ptr())
+
+        def test_my_clone(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 5, device=device)
+
+            result = libtorch_agnostic.ops.my_clone(t)
+            expected = t.clone()
+            self.assertEqual(result, expected)
+            self.assertNotEqual(result.data_ptr(), expected.data_ptr())
+            self.assertEqual(result.stride(), expected.stride())
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
