@@ -557,11 +557,19 @@ class SizeVarAllocator:
     ) -> Union[Expr, int]:
         if isinstance(expr, int):
             return expr
+
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
+        expr = self.remove_precomputed_replacements(expr)
         if not isinstance(expr, Expr):
             assert isinstance(expr, int)
             return expr
+
+        if has_free_unbacked_symbols(expr):
+            # Make sure to substitute with the factored version
+            # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
+            expr = self._sub_unbacked_exprs(sympy.factor(expr))
+
         free_symbols = expr.free_symbols
         if not free_symbols:
             try:
@@ -570,9 +578,9 @@ class SizeVarAllocator:
                 return expr  # inf/nan/I
 
         if hint_override:
-            return hint_override
-
-        expr = self.remove_precomputed_replacements(expr)
+            out = expr.subs({symbol: hint_override for symbol in free_symbols})
+            assert isinstance(out, sympy.Integer)
+            return out
 
         if use_user_provided_hint_override:
             expr = sympy_subs(expr, self.var_to_hint_override)
@@ -720,7 +728,7 @@ class SizeVarAllocator:
         expressions: s0 + u0 and u1. And s0 + u0 is known to be equal to u1
         via deferred_runtime_asserts.
 
-        For example in atomically_apply_size_hint, it must return the same size
+        For example in symbolic_hint, it must return the same size
         hint for both s0 + u0 and u1, but it first needs to know they are equal.
         Then it can substitute s0 + u0 for u1.
         """
@@ -784,29 +792,6 @@ class SizeVarAllocator:
 
         log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
         return expr
-
-    def atomically_apply_size_hint(
-        self, expr: Union[Expr, int], *, fallback: Optional[int] = None
-    ) -> Union[Expr, int]:
-        if isinstance(expr, (int, sympy.Integer)):
-            return int(expr)
-
-        if has_free_unbacked_symbols(expr):
-            # Make sure to substitute with the factored version
-            # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-            expr = self._sub_unbacked_exprs(sympy.factor(expr))
-
-        # For multiple expressions that depend on an unbacked symint,
-        # we want to compute them consistently for a size hint we have chosen.
-        # So, recursively compute expressions via size hints of contained symbols.
-        # For example: u1 * u2 - 10 ==> fallback * fallback - 10
-        assert isinstance(expr, Expr), type(expr)
-        free_symbols = expr.free_symbols
-        size_dict = {
-            symbol: V.graph.sizevars.size_hint(symbol, fallback=fallback)
-            for symbol in free_symbols
-        }
-        return expr.subs(size_dict)
 
     def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
