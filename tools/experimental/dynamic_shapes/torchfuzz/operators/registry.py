@@ -34,6 +34,14 @@ from torchfuzz.operators.tensor_pointwise import (
     SubOperator,
 )
 from torchfuzz.operators.unique import UniqueOperator
+from torchfuzz.operators.nn_functional import (
+    EmbeddingOperator,
+    LinearOperator,
+    ReLUOperator,
+    SoftmaxOperator,
+    DropoutOperator,
+    LayerNormOperator,
+)
 
 
 class OperatorRegistry:
@@ -80,6 +88,14 @@ class OperatorRegistry:
         self.register(AddmmOperator())
         self.register(BmmOperator())
         self.register(MatmulOperator())
+
+        # Neural network functional operators
+        self.register(EmbeddingOperator())
+        self.register(LinearOperator())
+        self.register(ReLUOperator())
+        self.register(SoftmaxOperator())
+        self.register(DropoutOperator())
+        self.register(LayerNormOperator())
 
     def register(self, operator: Operator):
         """Register an operator in the registry."""

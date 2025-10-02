@@ -32,6 +32,14 @@ from torchfuzz.operators.tensor_pointwise import (
     PointwiseOperator,
     SubOperator,
 )
+from torchfuzz.operators.nn_functional import (
+    EmbeddingOperator,
+    LinearOperator,
+    ReLUOperator,
+    SoftmaxOperator,
+    DropoutOperator,
+    LayerNormOperator,
+)
 
 
 __all__ = [
@@ -58,6 +66,12 @@ __all__ = [
     "AddmmOperator",
     "BmmOperator",
     "MatmulOperator",
+    "EmbeddingOperator",
+    "LinearOperator",
+    "ReLUOperator",
+    "SoftmaxOperator",
+    "DropoutOperator",
+    "LayerNormOperator",
     "get_operator",
     "register_operator",
     "list_operators",

@@ -124,6 +124,12 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.addmm",
                 "torch.bmm",
                 "torch.matmul",
+                "torch.nn.functional.embedding",
+                "torch.nn.functional.linear",
+                "torch.nn.functional.relu",
+                "torch.nn.functional.softmax",
+                "torch.nn.functional.dropout",
+                "torch.nn.functional.layer_norm",
             ],
             check=EagerVsFullGraphDynamicCompileWithNumericsCheck(),
         )
