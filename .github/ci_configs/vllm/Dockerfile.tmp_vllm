@@ -297,7 +297,7 @@ RUN echo "[INFO] Listing current directory before torch install step:" && \
     echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
 
-# Install build and runtime dependencies
+# Install build and runtime dependencies, this is needed for flashinfer install
 COPY requirements/build.txt requirements/build.txt
 COPY use_existing_torch.py use_existing_torch.py
 RUN python3 use_existing_torch.py
