@@ -265,6 +265,7 @@ class TestFakePG(TestCase):
             RuntimeError, "FakeProcessGroup collective operation error"
         ):
             dist.barrier()
+
     def test_fake_process_group_direct_usage_error(self):
         class SimpleTensorMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
