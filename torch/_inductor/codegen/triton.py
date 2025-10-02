@@ -2969,7 +2969,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         reduction_type: ReductionType,
         value: Union[CSEVariable, tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
-
         def maybe_upcast(value: CSEVariable) -> CSEVariable:
             # Math reductions in FP16/BF16 are less accurate because the Triton compiler does not
             # automatically promote to FP32 for accumulation. Additionally, max/min reductions
@@ -3091,13 +3090,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             return TritonKernelOverrides.where(cond, tval, fval)
 
         if self.persistent_reduction:
-            values = (value,) if not isinstance(value, tuple) else value
-            assert all(v.dtype == values[0].dtype for v in values)
 
-            default = ir.Reduction.default_value(reduction_type, values[0].dtype)
-            default = self._map_tuple_or_scalar(constant_repr, default)
+            def _mask_value(value) -> CSEVariable:
+                default = ir.Reduction.default_value(reduction_type, value.dtype)
+                default = self._map_tuple_or_scalar(constant_repr, default)
 
-            def _mask_value(value, default) -> CSEVariable:
                 return self.cse.generate(
                     self.compute,
                     where_cond(value, default),
@@ -3111,9 +3108,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # will fallback below
                 pass
             elif isinstance(value, tuple):
-                masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
+                masked_value = [_mask_value(v) for v in value]
             else:
-                masked_value = _mask_value(value, default)
+                masked_value = _mask_value(value)
 
             if reduction_type in ("argmax", "argmin"):
                 assert isinstance(masked_value, CSEVariable)
