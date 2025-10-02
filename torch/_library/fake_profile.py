@@ -2,9 +2,9 @@ import contextlib
 import io
 import logging
 import os
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch._library.custom_ops import _maybe_get_opdef
