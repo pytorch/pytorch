@@ -68,29 +68,6 @@ c10::MaybeOwned<Tensor> prepare_dense_matrix_for_cusparse(
   }
 }
 
-// This function is used for old CUDA Toolkit versions that doesn't support new cuSPARSE Generic API
-void addmm_out_legacy(
-    const at::sparse_csr::SparseCsrTensor& mat1,
-    const Tensor& mat2,
-    const Scalar& beta,
-    const Scalar& alpha,
-    const Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
-  auto nnz = mat1._nnz();
-  auto m = mat1.size(0);
-  auto k = mat1.size(1);
-  auto n = mat2.size(1);
-  auto crow_indices = mat1.crow_indices().to(kInt);
-  auto col_indices = mat1.col_indices().to(kInt);
-  auto values = mat1.values();
-  auto mat2_ = at::native::expect_resolved_conj(mat2);
-  auto result_ = at::native::expect_resolved_conj(result);
-  at::native::s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, result, beta, *result_, alpha, crow_indices, col_indices, values, *mat2_);
-  if (!result.is_same(*result_)) {
-    result.copy_(*result_);
-  }
-}
-
 c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_cusparse(
     const Tensor& tensor) {
   if (tensor.is_non_overlapping_and_dense()) {
@@ -582,9 +559,6 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
-  addmm_out_legacy(mat1, mat2, beta, alpha, result);
-#else
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);
   c10::MaybeOwned<Tensor> mat2_ = prepare_dense_matrix_for_cusparse(mat2);
 
@@ -683,7 +657,6 @@ void spmm(
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
-#endif // !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
 }
 
 void spgemm(

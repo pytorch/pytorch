@@ -59,9 +59,9 @@ performance-*,
 -performance-enum-size,
 readability-container-size-empty,
 readability-delete-null-pointer,
-readability-duplicate-include
+readability-duplicate-include,
 readability-misplaced-array-index,
-readability-redundant*
+readability-redundant*,
 readability-simplify-subscript-expr,
 readability-string-compare,
 -readability-redundant-access-specifiers,

@@ -1089,8 +1089,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool useNonblocking();
 
  protected:
-  int globalRankStart_;
-  int globalRankStride_;
+  int globalRankStart_{};
+  int globalRankStride_{};
 
  private:
   bool eagerInit_{false};
@@ -1380,7 +1380,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
 
   // Whether the coalesced calls are sync or async.
-  bool coalescedAsync_;
+  bool coalescedAsync_{};
 
   // keeps track of input and output tensors when coalescing is in flight.  Will
   // hand over these tensors to WorkNCCL's stash when coalescing is ended.

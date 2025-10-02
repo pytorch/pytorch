@@ -186,29 +186,15 @@ triton_grouped_mm_source = r"""
 {%- endif %}
         a_ptr,
 {%- if A_IS_2D %}
-{%- if A_IS_K_MAJOR %}
         shape=[M, K],
         # fixme: strides=[A_STRIDE_M, A_STRIDE_K],
         strides=[{{stride("a_ptr", -2)}}, {{stride("a_ptr", -1)}}],
         block_shape=[BLOCK_M, BLOCK_K],
 {%- else %}
-        shape=[K, M],
-        # fixme: strides=[A_STRIDE_K, A_STRIDE_M],
-        strides=[{{stride("a_ptr", -1)}}, {{stride("a_ptr", -2)}}],
-        block_shape=[BLOCK_K, BLOCK_M],
-{%- endif %}
-{%- else %}
-{%- if A_IS_K_MAJOR %}
         shape=[G, M, K],
         # fixme: strides=[A_STRIDE_G, A_STRIDE_M, A_STRIDE_K],
         strides=[{{stride("a_ptr", 0)}}, {{stride("a_ptr", -2)}}, {{stride("a_ptr", -1)}}],
         block_shape=[1, BLOCK_M, BLOCK_K],
-{%- else %}
-        shape=[G, K, M],
-        # fixme: strides=[A_STRIDE_G, A_STRIDE_K, A_STRIDE_M],
-        strides=[{{stride("a_ptr", 0)}}, {{stride("a_ptr", -1)}}, {{stride("a_ptr", -2)}}],
-        block_shape=[1, BLOCK_K, BLOCK_M],
-{%- endif %}
 {%- endif %}
     )
 
@@ -219,29 +205,15 @@ triton_grouped_mm_source = r"""
 {%- endif %}
         b_ptr,
 {%- if B_IS_2D %}
-{%- if B_IS_K_MAJOR %}
         shape=[N, K],
         # fixme: strides=[B_STRIDE_N, B_STRIDE_K],
         strides=[{{stride("b_ptr", -1)}}, {{stride("b_ptr", -2)}}],
         block_shape=[BLOCK_N, BLOCK_K],
 {%- else %}
-        shape=[K, N],
-        # fixme: strides=[B_STRIDE_K, B_STRIDE_N],
-        strides=[{{stride("b_ptr", -2)}}, {{stride("b_ptr", -1)}}],
-        block_shape=[BLOCK_K, BLOCK_N],
-{%- endif %}
-{%- else %}
-{%- if B_IS_K_MAJOR %}
         shape=[G, N, K],
         # fixme: strides=[B_STRIDE_G, B_STRIDE_N, B_STRIDE_K],
         strides=[{{stride("b_ptr", 0)}}, {{stride("b_ptr", -1)}}, {{stride("b_ptr", -2)}}],
         block_shape=[1, BLOCK_N, BLOCK_K],
-{%- else %}
-        shape=[G, K, N],
-        # fixme: strides=[B_STRIDE_G, B_STRIDE_K, B_STRIDE_N],
-        strides=[{{stride("b_ptr", 0)}}, {{stride("b_ptr", -2)}}, {{stride("b_ptr", -1)}}],
-        block_shape=[1, BLOCK_K, BLOCK_N],
-{%- endif %}
 {%- endif %}
     )
 {%- endif %}
@@ -314,102 +286,39 @@ triton_grouped_mm_source = r"""
                 accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
 {%- if USE_TMA_LOAD %}
-                m_tile_offset = tile_m_idx * BLOCK_M
-                n_tile_offset = tile_n_idx * BLOCK_N
-                m_offset = (m_start_offset + m_tile_offset).to(tl.int32)
-                n_offset = (n_start_offset + n_tile_offset).to(tl.int32)
+                m_offset = (m_start_offset + tile_m_idx * BLOCK_M).to(tl.int32)
+                n_offset = (n_start_offset + tile_n_idx * BLOCK_N).to(tl.int32)
 
-                for k_block_offset in range(0, k_size, BLOCK_K):
+                for k_offset in range(0, k_size, BLOCK_K):
 {%- if A_IS_2D %}
-{%- if A_IS_K_MAJOR %}
-                    a = a_desc.load([m_offset, k_start_offset + k_block_offset])
+                    a = a_desc.load([m_offset, k_start_offset + k_offset])
 {%- else %}
-                    a = a_desc.load([k_start_offset + k_block_offset, m_offset])
-{%- endif %}
-{%- else %}
-{%- if A_IS_K_MAJOR %}
-                    a = a_desc.load([g, m_offset, k_start_offset + k_block_offset]).reshape(BLOCK_M, BLOCK_K)
-{%- else %}
-                    a = a_desc.load([g, k_start_offset + k_block_offset, m_offset]).reshape(BLOCK_K, BLOCK_M)
-{%- endif %}
+                    a = a_desc.load([g, m_offset, k_start_offset + k_offset]).reshape(BLOCK_M, BLOCK_K)
 {%- endif %}
 {%- if B_IS_2D %}
-{%- if B_IS_K_MAJOR %}
-                    b = b_desc.load([n_offset, k_start_offset + k_block_offset])
+                    b = b_desc.load([n_offset, k_start_offset + k_offset])
 {%- else %}
-                    b = b_desc.load([k_start_offset + k_block_offset, n_offset])
-{%- endif %}
-{%- else %}
-{%- if B_IS_K_MAJOR %}
-                    b = b_desc.load([g, n_offset, k_start_offset + k_block_offset]).reshape(BLOCK_N, BLOCK_K)
-{%- else %}
-                    b = b_desc.load([g, k_start_offset + k_block_offset, n_offset]).reshape(BLOCK_K, BLOCK_N)
-{%- endif %}
+                    b = b_desc.load([g, n_offset, k_start_offset + k_offset]).reshape(BLOCK_N, BLOCK_K)
 {%- endif %}
 
-{%- if M_IS_VARYING %}
-                    if m_tile_offset + BLOCK_M > m_size:
-                        group_offs = m_tile_offset + tl.arange(0, BLOCK_M)
-                        mask = group_offs < m_size
-{%- if A_IS_K_MAJOR %}
-                        a = tl.where(mask[:, None], a, 0)
-{%- else %}
-                        a = tl.where(mask, a, 0)
-{%- endif %}
-{%- endif %}
-{%- if N_IS_VARYING %}
-                    if n_tile_offset + BLOCK_N > n_size:
-                        group_offs = n_tile_offset + tl.arange(0, BLOCK_N)
-                        mask = group_offs < n_size
-{%- if B_IS_K_MAJOR %}
-                        b = tl.where(mask[:, None], b, 0)
-{%- else %}
-                        b = tl.where(mask, b, 0)
-{%- endif %}
-{%- endif %}
 {%- if K_IS_VARYING %}
-                    if k_block_offset + BLOCK_K > k_size:
-                        group_offs = k_block_offset + tl.arange(0, BLOCK_K)
-                        mask = group_offs < k_size
-{%- if A_IS_K_MAJOR %}
-                        a = tl.where(mask, a, 0)
-{%- else %}
-                        a = tl.where(mask[:, None], a, 0)
-{%- endif %}
-{%- if B_IS_K_MAJOR %}
-                        b = tl.where(mask, b, 0)
-{%- else %}
-                        b = tl.where(mask[:, None], b, 0)
-{%- endif %}
+                    if k_offset + BLOCK_K > k_size:
+                        group_offs_k = k_offset + tl.arange(0, BLOCK_K)
+                        a = tl.where(group_offs_k < k_size, a, 0)
+                        b = tl.where(group_offs_k < k_size, b, 0)
 {%- endif %}
 
 {%- if USE_FAST_ACCUM %}
-{%- if A_IS_K_MAJOR and B_IS_K_MAJOR %}
                     accumulator = tl.dot(a, b.T, accumulator)
-{%- elif A_IS_K_MAJOR and not B_IS_K_MAJOR %}
-                    accumulator = tl.dot(a, b, accumulator)
-{%- elif not A_IS_K_MAJOR and B_IS_K_MAJOR %}
-                    accumulator = tl.dot(a.T, b.T, accumulator)
 {%- else %}
-                    accumulator = tl.dot(a.T, b, accumulator)
-{%- endif %}
-{%- else %}
-{%- if A_IS_K_MAJOR and B_IS_K_MAJOR %}
                     accumulator += tl.dot(a, b.T)
-{%- elif A_IS_K_MAJOR and not B_IS_K_MAJOR %}
-                    accumulator += tl.dot(a, b)
-{%- elif not A_IS_K_MAJOR and B_IS_K_MAJOR %}
-                    accumulator += tl.dot(a.T, b.T)
-{%- else %}
-                    accumulator += tl.dot(a.T, b)
-{%- endif %}
 {%- endif %}
 {%- else %}
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
-                for k_block_offset in range(0, k_size, BLOCK_K):
-                    block_offs_k = k_block_offset + tl.arange(0, BLOCK_K)
-                    offs_k = block_offs_k + k_start_offset
+                for k_offset in range(0, k_size, BLOCK_K):
+                    group_offs_k = k_offset + tl.arange(0, BLOCK_K)
+                    offs_k = group_offs_k + k_start_offset
                     a_ptrs = (
                         a_ptr
 {%- if not A_IS_2D %}
@@ -426,8 +335,8 @@ triton_grouped_mm_source = r"""
                         + (n_start_offset + offs_bn[:, None]) * B_STRIDE_N
                         + offs_k[None, :] * B_STRIDE_K
                     )
-                    a_mask = (offs_am[:, None] < m_size) & (block_offs_k[None, :] < k_size)
-                    b_mask = (offs_bn[:, None] < n_size) & (block_offs_k[None, :] < k_size)
+                    a_mask = (offs_am[:, None] < m_size) & (group_offs_k[None, :] < k_size)
+                    b_mask = (offs_bn[:, None] < n_size) & (group_offs_k[None, :] < k_size)
                     a = tl.load(a_ptrs, mask=a_mask, other=0)
                     b = tl.load(b_ptrs, mask=b_mask, other=0)
 {%- if USE_FAST_ACCUM %}
@@ -739,9 +648,6 @@ def _tuned_grouped_mm_common(
                 V.graph.sizevars.check_equals(k1, k2)
                 a_is_2d, b_is_2d = False, False
 
-        a_is_k_major = mat_a.get_stride()[-1] == 1
-        b_is_k_major = mat_b.get_stride()[-2] == 1
-
         triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
         triton_has_experimental_make_tensor_descriptor = hasattr(
             tl, "_experimental_make_tensor_descriptor"
@@ -750,12 +656,15 @@ def _tuned_grouped_mm_common(
             triton_has_make_tensor_descriptor
             or triton_has_experimental_make_tensor_descriptor
         )
+        # The make_tensor_descriptor imposes this additional limitation.
+        use_tma_load = use_tma_load and (
+            mat_a.get_stride()[-1] == 1 and mat_b.get_stride()[-2] == 1
+        )
+
         kwargs = {
             "SCALED": scaled,
             "A_IS_2D": a_is_2d,
             "B_IS_2D": b_is_2d,
-            "A_IS_K_MAJOR": a_is_k_major,
-            "B_IS_K_MAJOR": b_is_k_major,
             "USE_FAST_ACCUM": use_fast_accum,
             "NUM_SMS": get_num_sms(),
             "USE_TMA_LOAD": use_tma_load,
