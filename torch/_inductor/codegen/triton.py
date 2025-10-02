@@ -3127,7 +3127,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # will fallback below
                 pass
             elif isinstance(value, tuple):
-                masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
+                masked_value = [_mask_value(v, d) for v, d in zip(value, default)]  # type: ignore[arg-type]
             else:
                 masked_value = _mask_value(value, default)
 
