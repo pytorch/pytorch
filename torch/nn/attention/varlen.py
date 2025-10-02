@@ -1,6 +1,5 @@
 """
 Variable-length attention implementation using Flash Attention.
-
 This module provides a high-level Python interface for variable-length attention
 that calls into the optimized Flash Attention kernels.
 """
@@ -14,6 +13,10 @@ import torch
 
 log = logging.getLogger(__name__)
 
+__all__ = [
+    "varlen_attn",
+]
+
 
 @lru_cache(maxsize=8)
 def _should_use_cudnn(device_index: int) -> bool:
@@ -21,8 +24,7 @@ def _should_use_cudnn(device_index: int) -> bool:
     return False
 
 
-# import failures when I try to register as custom op
-# @torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
+@torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
 def _varlen_attn(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -35,7 +37,6 @@ def _varlen_attn(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention using Flash Attention.
-
     This is the internal implementation that calls into the Flash Attention kernels.
     Users should use the public varlen_attn function instead.
     """
@@ -91,7 +92,6 @@ def _varlen_attn_fake(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
-
     Based on the 3D varlen path from meta__flash_attention_forward:
     - query shape: (total, num_heads, head_dim)
     - logsumexp shape: (num_heads, total_q)
@@ -122,10 +122,8 @@ def varlen_attn(
 ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
     """
     Compute variable-length attention using Flash Attention.
-
     This function is similar to scaled_dot_product_attention but optimized for
     variable-length sequences using cumulative sequence position tensors.
-
     Args:
         query (Tensor): Query tensor
         key (Tensor): Key tensor
@@ -135,7 +133,6 @@ def varlen_attn(
         max_q (int): Maximum query sequence length
         max_k (int): Maximum key/value sequence length
         is_causal (bool): Whether to apply causal masking (default: False)
-
     Returns:
         Tensor: Output tensor from attention computation
     """
