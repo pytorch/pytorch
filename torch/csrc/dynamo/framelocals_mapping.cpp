@@ -76,9 +76,9 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 #endif
 
   // Get references to closure variables
-#if IS_PYTHON_3_15_PLUS
+#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
   PyObject* closure;
-  TORCH_CHECK(false, "Python 3.15+ not supported");
+  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
 #else
   PyObject* closure = FUNC(frame)->func_closure;
 #endif
