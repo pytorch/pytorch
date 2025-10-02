@@ -800,7 +800,7 @@ inline std::string friendlyTypeName(py::handle obj) {
     ss << py::str(py::type::handle_of(obj).attr("__name__"));
     ss << "(";
     bool first = true;
-    for (auto item : obj) {
+    for (const auto& item : obj) {
       if (!first) {
         ss << ", ";
       }
