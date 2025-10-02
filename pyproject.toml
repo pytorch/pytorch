@@ -123,6 +123,26 @@ standard_library = ["typing_extensions"]
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 
+include = [
+    "**/*.py",
+    "**/*.pyi",
+    "**/*.ipynb",
+]
+
+exclude = [
+    ".git/**",
+    "android/**",
+    "caffe2/**",
+    "functorch/docs/**",
+    "torch/_inductor/fx_passes/serialized_patterns/**",
+    "torch/_inductor/autoheuristic/artifacts/**",
+    "test/dynamo/cpython/**",
+    "scripts/**",
+    "third_party/**",
+    "fb/**",
+    "**/fb/**",
+]
+
 [tool.ruff.format]
 docstring-code-format = true
 quote-style = "double"
