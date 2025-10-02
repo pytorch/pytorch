@@ -12,6 +12,9 @@ on:
     paths:
       - .github/workflows/build-vllm-wheel.yml
       - .github/ci_commit_pins/vllm.txt
+  schedule:
+    # every morning at 01:30PM UTC, 9:30AM EST, 6:30AM PST
+    - cron: 30 13 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -24,21 +27,33 @@ jobs:
       fail-fast: false
       matrix:
         python-version: [ '3.12' ]
-        # TODO (huydhn): Add cu130 https://github.com/pytorch/pytorch/pull/162000#issuecomment-3261541554
+        # TODO (huydhn): Add cu130 after https://github.com/vllm-project/vllm/issues/24464 is resolved
+        platform: [ 'manylinux_2_28_x86_64', 'manylinux_2_28_aarch64' ]
         device: [ 'cu128', 'cu129' ]
-        runner: [ 'linux.12xlarge.memory' ]
         include:
-          - device: cu128
+          - platform: manylinux_2_28_x86_64
+            device: cu128
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.8'
-          - device: cu129
+            runner: linux.12xlarge.memory
+          - platform: manylinux_2_28_x86_64
+            device: cu129
             manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.9'
-    name: "Build ${{ matrix.device }} vLLM wheel"
+            runner: linux.12xlarge.memory
+          - platform: manylinux_2_28_aarch64
+            device: cu128
+            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.8'
+            runner: linux.arm64.r7g.12xlarge.memory
+          - platform: manylinux_2_28_aarch64
+            device: cu129
+            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.9'
+            runner: linux.arm64.r7g.12xlarge.memory
+    name: "Build ${{ matrix.device }} vLLM wheel on ${{ matrix.platform }}"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 480
     env:
       PY_VERS: ${{ matrix.python-version }}
       MANYLINUX_IMAGE: ${{ matrix.manylinux-image }}
-      PLATFORM: 'manylinux_2_28_x86_64'
+      PLATFORM: ${{ matrix.platform }}
       BUILD_DEVICE: ${{ matrix.device }}
     steps:
       - name: Setup SSH (Click me for login details)
@@ -58,20 +73,6 @@ jobs:
         shell: bash
         run: |
           set -eux
-
-          # Keep PyTorch nightly wheel here so that we can install it later during
-          # vLLM build process
-          mkdir -p "${RUNNER_TEMP}/artifacts/"
-
-          container_name=$(docker run \
-            --tty \
-            --detach \
-            -e PLATFORM \
-            -v "${GITHUB_WORKSPACE}:/pytorch" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w /artifacts/ \
-            "${MANYLINUX_IMAGE}"
-          )
 
           # Determine python executable for given version (copied from build-triton-wheel)
           case $PY_VERS in
@@ -102,6 +103,21 @@ jobs:
             ;;
           esac
 
+          # Keep PyTorch nightly wheel here so that we can install it later during
+          # vLLM build process
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -e PLATFORM \
+            -e PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}" \
+            -v "${GITHUB_WORKSPACE}:/pytorch" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w /artifacts/ \
+            "${MANYLINUX_IMAGE}"
+          )
+
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -mpip install \
             --pre torch torchvision torchaudio \
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
@@ -113,7 +129,6 @@ jobs:
             --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
 
           # Save this for later
-          echo "PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}" >> "$GITHUB_ENV"
           echo "container_name=${container_name}" >> "$GITHUB_ENV"
 
       - name: Build vLLM wheel
@@ -131,41 +146,12 @@ jobs:
           set -eux
 
           # Get these wheels ready, the vllm renaming logic is copied from its .buildkite/scripts/upload-wheels.sh
-          docker exec -t "${container_name}" bash -c "
-            set -eux
-
-            nightly=\$(unzip -p torch-* '**/METADATA' | grep '^Version: ' | cut -d' ' -f2 | cut -d'.' -f4)
-
-            pushd externals/vllm/wheels
-            for package in xformers flashinfer-python vllm; do
-              pushd \$package
-              auditwheel repair --plat \$PLATFORM *.whl \
-                --exclude libc10* --exclude libtorch* --exclude libcu* --exclude libnv*
-              repair_wheel=\$(find wheelhouse -name *\${PLATFORM}*)
-              repair_wheel=\$(basename \${repair_wheel})
-              popd
-
-              cp \${package}/wheelhouse/\${repair_wheel} .
-              version=\$(unzip -p \$repair_wheel '**/METADATA' | grep '^Version: ' | cut -d' ' -f2)
-
-              if [[ \$package == vllm ]]; then
-                new_wheel=\${repair_wheel/\$version/1.0.0.\$nightly}
-              else
-                major_version=\$(echo \$version | tr '.+' '.' | cut -d'.' -f1-3)
-                new_wheel=\${repair_wheel/\$version/\$major_version.\$nightly}
-              fi
-
-              mv -- \$repair_wheel \$new_wheel
-              rm -rf \$package
-            done
-            popd
-          "
-
+          docker exec -t "${container_name}" bash -c /pytorch/.github/scripts/prepare_vllm_wheels.sh
           docker exec -t "${container_name}" chown -R 1000:1000 /artifacts
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: vllm-wheel-${{ matrix.device }}-${{ matrix.python-version }}-${{ env.PLATFORM }}
+          name: vllm-wheel-${{ matrix.device }}-${{ matrix.platform }}-${{ matrix.python-version }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/externals/vllm/wheels/*.whl
 
@@ -175,27 +161,29 @@ jobs:
 
   # Copied from build-triton-wheel workflow (mostly)
   upload-wheel:
-    name: "Upload ${{ matrix.device }} vLLM wheel"
+    name: "Upload ${{ matrix.device }} vLLM wheel on ${{ matrix.platform }}"
     needs:
       - build-wheel
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
+        platform: [ 'manylinux_2_28_x86_64', 'manylinux_2_28_aarch64' ]
         device: [ 'cu128', 'cu129' ]
     env:
+      PLATFORM: ${{ matrix.platform }}
       BUILD_DEVICE: ${{ matrix.device }}
     permissions:
       id-token: write
       contents: read
     container:
       image: continuumio/miniconda3:4.12.0
-    environment: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') && 'nightly-wheel-upload' || '' }}
+    environment: ${{ ((github.event_name == 'push' && github.event.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'nightly-wheel-upload' || '' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Configure AWS credentials(PyTorch account) for main
-        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/main' }}
+        if: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
@@ -219,15 +207,15 @@ jobs:
         run: |
           set -eux
           mkdir -p "${RUNNER_TEMP}/artifacts/"
-          mv "${RUNNER_TEMP}"/artifacts-all/vllm-wheel-"${BUILD_DEVICE}"-*/* "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/vllm-wheel-"${BUILD_DEVICE}"-"${PLATFORM}"-*/* "${RUNNER_TEMP}/artifacts/"
 
-      - name: Set DRY_RUN (only for tagged pushes)
-        if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}
+      - name: Set DRY_RUN
+        if: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v'))) || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
         shell: bash
         run: |
           echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
 
-      - name: Set UPLOAD_CHANNEL (only for tagged pushes)
+      - name: Set UPLOAD_CHANNEL
         if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
         shell: bash
         run: |

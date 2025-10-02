@@ -26,6 +26,7 @@
 #include <ATen/native/Normalization.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -55,6 +56,7 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
+#include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <torch/csrc/autograd/generated/python_return_types.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
@@ -69,8 +71,10 @@
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/cpu/Module.h>
+#include <torch/csrc/distributed/python_placement.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
+#include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
@@ -120,11 +124,13 @@
 #endif
 #endif
 
+#ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
+#endif
 #endif
 
 #if defined(USE_VALGRIND)
@@ -138,6 +144,14 @@
 #include <torch/nativert/python/Bindings.h>
 
 namespace py = pybind11;
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::ConvBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(sdp::SDPBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::LinalgBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::BlasBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::ROCmFABackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::BatchNormBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::impl::TorchFunctionDisabledState)
 
 static PyObject* module;
 
@@ -405,11 +419,9 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
   std::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
+      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
   std::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
+      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
   TORCH_INTERNAL_ASSERT(
       mb_obj_a.has_value() && mb_obj_b.has_value(),
       "Both tensors should have PyObjects tagged by the current python interpreter");
@@ -550,7 +562,11 @@ static PyObject* THPModule_getBackcompatKeepdimWarn(
 }
 
 static PyObject* THPModule_hasDistributed(PyObject* _unused, PyObject* noargs) {
+#ifdef USE_DISTRIBUTED
   Py_RETURN_TRUE;
+#else
+  Py_RETURN_FALSE;
+#endif
 }
 
 static PyObject* THPModule_showConfig(PyObject* module, PyObject* noargs) {
@@ -1552,6 +1568,15 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_ensureCUDADeviceGuardSet(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::ensureCUDADeviceGuardSet();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
@@ -1847,7 +1872,13 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
      METH_FASTCALL,
      nullptr},
-    {nullptr, nullptr, 0, nullptr}};
+    {"_ensureCUDADeviceGuardSet",
+     THCPModule_ensureCUDADeviceGuardSet,
+     METH_NOARGS,
+     nullptr},
+    {nullptr, nullptr, 0, nullptr}
+
+};
 
 #ifdef USE_CUDA
 // NOLINTBEGIN(misc-use-internal-linkage)
@@ -1987,7 +2018,7 @@ PyObject* initModule() {
 #ifdef USE_XPU
   THPUtils_addPyMethodDefs(methods, THXPModule_methods());
 #endif
-#ifdef USE_C10D
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
@@ -2068,8 +2099,10 @@ PyObject* initModule() {
   torch::cpu::initModule(module);
   torch::accelerator::initModule(module);
   torch::instruction_counter::initModule(module);
+  torch::acc::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
+  torch::functionalization::initModule(module);
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -2086,6 +2119,8 @@ PyObject* initModule() {
   THXPStream_init(module);
   THXPEvent_init(module);
 #endif
+
+  torch::distributed::initPlacementBindings(module);
 
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
@@ -2469,7 +2504,8 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_fp32_precision_getter",
       [](const std::string& backend, const std::string& op) {
-        return at::globalContext().float32Precision(backend, op);
+        return at::precision2str(at::globalContext().float32Precision(
+            at::str2backend(backend), at::str2op(op)));
       });
 
   py_module.def(
@@ -2477,7 +2513,10 @@ Call this whenever a new thread is created in order to propagate values from
       [](const std::string& backend,
          const std::string& op,
          const std::string& precision) {
-        at::globalContext().setFloat32Precision(backend, op, precision);
+        at::globalContext().setFloat32Precision(
+            at::str2backend(backend),
+            at::str2op(op),
+            at::str2precision(precision));
         return precision;
       });
 
