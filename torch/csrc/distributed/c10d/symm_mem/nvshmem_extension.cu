@@ -880,8 +880,10 @@ __global__ void tile_reduce_kernel(
   auto team = teams[bid];
   CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID && " invalid team\n");
 
+  // Global tile shape
   auto [rows, cols] = shape;
   auto [stride0, stride1] = strides;
+
   // Divide rows among CUDA blocks
   auto rows_per_block = at::ceil_div(rows, (int64_t)gridDim.x);
   auto block_start_row = rows_per_block * bid;
@@ -893,13 +895,19 @@ __global__ void tile_reduce_kernel(
   auto block_dst_ptr = dst_ptr + stride0 * block_start_row;
   auto block_src_tensor = nvshmemx::Tensor(block_src_ptr, block_layout);
   auto block_dst_tensor = nvshmemx::Tensor(block_dst_ptr, block_layout);
-  auto start_coord = nvshmemx::make_shape(0, 0);
-  auto& boundary = block_shape;
 
+  // Making these empty to avoid nvshmemx::tile_sum_reduce_block() from doing
+  // additional range checks
+  auto start_coord = nvshmemx::make_shape();
+  auto boundary = nvshmemx::make_shape();
+
+  // Use one-shot pull to reduce the tile
   uint64_t flag = 0;
   constexpr auto algo = nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI;
-  nvshmemx::tile_sum_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), Shape2D, algo>(
+  nvshmemx::tile_sum_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
       team, block_src_tensor, block_dst_tensor, start_coord, boundary, root, flag /* unused */);
+
+  // Wait for the operation to complete
   nvshmemx::tile_collective_wait<algo>(team, flag /* unused */);
 #endif
 }
