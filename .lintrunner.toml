@@ -1560,23 +1560,7 @@ command = [
 
 [[linter]]
 code = 'RUFF'
-include_patterns = [
-    '**/*.py',
-    '**/*.pyi',
-    '**/*.ipynb',
-    'pyproject.toml',
-]
-exclude_patterns = [
-    'caffe2/**',
-    'functorch/docs/**',
-    'torch/_inductor/fx_passes/serialized_patterns/**',
-    'torch/_inductor/autoheuristic/artifacts/**',
-    'test/dynamo/cpython/**',
-    'scripts/**',
-    'third_party/**',
-    'fb/**',
-    '**/fb/**',
-]
+# include_patterns and exclude_patterns for RUFF are specified in pyproject.toml
 command = [
     'python3',
     'tools/linter/adapters/ruff_linter.py',
