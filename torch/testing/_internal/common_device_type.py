@@ -9,10 +9,10 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, Callable, ClassVar, Optional, TypeVar, Union
+from typing import Any, ClassVar, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
