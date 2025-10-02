@@ -149,6 +149,12 @@ def torchscript(
     return torch.jit.script(gm)
 
 
+def nop(
+    fx_g: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
+) -> Callable[..., Any]:
+    return fx_g
+
+
 # used boxed call to discard inputs when they are no longer needed
 def boxed_nop(
     fx_g: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
@@ -213,8 +219,8 @@ def aot_eager(
     **kwargs: Any,
 ) -> Callable[..., Any]:
     return aot_autograd(
-        fw_compiler=fw_compiler or boxed_nop,
-        bw_compiler=bw_compiler or boxed_nop,
+        fw_compiler=fw_compiler or nop,
+        bw_compiler=bw_compiler or nop,
         partition_fn=min_cut_rematerialization_partition,
         keep_inference_input_mutations=True,
     )(gm, fake_tensor_inputs, **kwargs)
