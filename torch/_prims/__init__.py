@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import operator
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import partial, reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch._prims_common as utils
