@@ -3366,6 +3366,7 @@ class CheckFunctionManager:
         save_guards: bool = False,
         strict_error: bool = False,
     ):
+        breakpoint()
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
 
@@ -3423,6 +3424,7 @@ class CheckFunctionManager:
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
 
+        breakpoint()
         if guard_filter_fn:
             # If we're filtering guards, we need to build it an extra time first
             # because filtering depends on the builder/guard_manager results
