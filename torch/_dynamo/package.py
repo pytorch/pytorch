@@ -739,8 +739,7 @@ class CompilePackage:
 
         self.uninstall()
         for code, entry in self._codes.items():
-            if entry.bypassed:
-                continue
+
             context = (
                 _compile_frame_context(code)
                 if entry.has_compile_id
@@ -759,6 +758,11 @@ class CompilePackage:
                         self._install_global(module, function_name, fn)
                 if entry.code_source:
                     target_code = _lookup_code(entry)
+
+                if entry.bypassed:
+                    # If the entry is bypassed, do not install backends
+                    # or guarded codes.
+                    continue
 
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
@@ -779,6 +783,7 @@ class CompilePackage:
                     # Dynamo generates empty graph for trivial functions, should just skip them
                     # in these cases.
                     torch._dynamo.eval_frame.skip_code(target_code)
+
 
                 for guarded_code in entry.guarded_codes:
                     guards_state = pickle.loads(guarded_code.guards_state)

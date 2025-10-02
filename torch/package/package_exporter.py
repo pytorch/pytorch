@@ -8,12 +8,12 @@ import pickletools
 import platform
 import types
 from collections import defaultdict, OrderedDict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import Any, Callable, cast, IO, Optional, Union
+from typing import Any, cast, IO, Optional, Union
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
