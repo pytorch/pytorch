@@ -16,6 +16,7 @@
 
 #include <c10/core/SafePyObject.h>
 #include <torch/csrc/PyInterpreter.h>
+#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/jit/python/pybind_utils.h>

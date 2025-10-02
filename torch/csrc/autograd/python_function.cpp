@@ -1731,7 +1731,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
      (setter)THPFunction_set_materialize_grads,
      nullptr,
      nullptr},
-    {"is_pure_view",
+    {"_is_pure_view",
      nullptr,
      (setter)THPFunction_set_pure_view,
      nullptr,

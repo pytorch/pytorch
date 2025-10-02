@@ -18,11 +18,11 @@ from typing import *  # noqa: F403
 import numpy as np
 import yaml
 
+import functorch
 import torch._custom_ops as custom_ops
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
 import torch.utils.cpp_extension
-import functorch
 from torch import Tensor
 from torch._custom_op.impl import CustomOp, infer_schema
 from torch._library.fake_profile import (
@@ -2576,20 +2576,30 @@ class TestCustomOpAPI(TestCase):
             return MyTwoTensor(gI, torch.zeros_like(gO))
 
         def setup_ctx(ctx, inputs, output):
-            pass
+            ctx._is_pure_view = True
 
         _two_tensor_accessor.register_autograd(backward, setup_context=setup_ctx)
 
-        x = torch.randn(3, requires_grad=True)
-        y = torch.rand(3, requires_grad=True)
-        z = MyTwoTensor(x, y)
-        print(z)
+        x = torch.rand(3)
+        y = torch.rand(3)
+        z = MyTwoTensor(x, y, requires_grad=True)
         res = torch.ops._torch_testing._two_tensor_accessor(z)
-        print(res)
         res.sum().backward()
         self.assertEqual(res, x)
         self.assertTrue(res._is_view())
         self.assertTrue(res._base is z)
+        self.assertEqual(z.grad, torch.ones_like(z.grad))
+
+        leaf = MyTwoTensor(torch.rand(3), torch.rand(3), requires_grad=True)
+        non_leaf = leaf.clone()
+        view_a = torch.ops._torch_testing._two_tensor_accessor(non_leaf)
+        self.assertTrue(view_a._is_view())
+        self.assertTrue(view_a._base is non_leaf)
+        view_a *= 2
+        self.assertEqual(non_leaf.a, view_a)
+        self.assertNotEqual(leaf.a, view_a)
+        non_leaf.sum().backward()
+        self.assertEqual(leaf.grad, MyTwoTensor(2 * torch.ones(3), torch.ones(3)))
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_kwarg_only_tensors(self):

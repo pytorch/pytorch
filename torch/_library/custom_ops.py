@@ -632,13 +632,17 @@ class CustomOpDef:
 
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
         lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
-        lib.m.register_ad_inplace_or_view_fallback(self._name)
-
         schema = self._opoverload._schema
+
+        if schema._is_view_op() or schema.is_mutable:
+            lib.m.register_ad_inplace_or_view_fallback(self._name)
+
         if schema.is_mutable:
             mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
 
-            original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(f"{lib.ns}::{self._name}", "ADInplaceOrView")
+            original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+                f"{lib.ns}::{self._name}", "ADInplaceOrView"
+            )
 
             def adinplaceorview_impl(keyset, *args, **kwargs):
                 # Handle the mutated idx the user gave us explicitly

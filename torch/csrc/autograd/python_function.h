@@ -109,7 +109,7 @@ struct THPFunction {
   // Default is true.
   bool materialize_grads;
 
-  // boolean indication whether the function is a "pure view", meaning that
+  // boolean indicating whether the function is a "pure view", meaning that
   // replaying the view is enough to get a correct backward.
   bool pure_view;
 
