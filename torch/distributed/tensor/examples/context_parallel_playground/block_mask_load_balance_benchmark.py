@@ -22,10 +22,13 @@ from torch.nn.attention.flex_attention import (
 )
 
 
-# Compile the flex_attention function
+# Compile the BlockMask creation function
+"""
 compiled_create_block_mask = torch.compile(
     create_block_mask, dynamic=False, fullgraph=True
 )
+"""
+compiled_create_block_mask = create_block_mask  # turn-off compilation
 torch._dynamo.config.cache_size_limit = 100
 
 
@@ -49,7 +52,20 @@ def generate_random_lengths(total_length, num_documents) -> list[int]:
     return lengths
 
 
-# TODO: add generate_random_lengths_in_range(..., min, max)
+def generate_random_lengths_in_range(total_length, min_len, max_len) -> list[int]:
+    res = []
+
+    generated_length = 0
+    while generated_length < total_length:
+        length = random.randint(min_len, max_len)
+        if generated_length + length > total_length:
+            length = total_length - generated_length
+
+        res.append(length)
+        generated_length += length
+
+    print(f"document lengths = {res}")
+    return res
 
 
 # generate random document lengths
@@ -272,7 +288,8 @@ def benchmark_load_balance_document_mask(
 
     for _ in range(num_experiments):
         # initialize document mask
-        lengths = [(generate_random_lengths(S, document_count)) for _ in range(B)]
+        # lengths = [(generate_random_lengths(S, document_count)) for _ in range(B)]
+        lengths = [(generate_random_lengths_in_range(S, 10, 4000)) for _ in range(B)]
         offsets = length_to_offsets(lengths, device_type)
         document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
 
@@ -311,6 +328,9 @@ def benchmark_load_balance_document_mask(
                 block_mask_sparsity_on_rank
             )
 
+        base_line_context_parallel_block_mask_sparsity_min = report_stats(
+            base_line_context_parallel_block_mask_sparsity
+        )["min"]
         base_line_context_parallel_block_mask_sparsity_max = report_stats(
             base_line_context_parallel_block_mask_sparsity
         )["max"]
@@ -337,6 +357,9 @@ def benchmark_load_balance_document_mask(
                 compute_block_mask_sparsity(cp_block_mask)
             )
 
+        auto_load_balance_context_parallel_block_mask_sparsity_min = report_stats(
+            auto_load_balance_context_parallel_block_mask_sparsity
+        )["min"]
         auto_load_balance_context_parallel_block_mask_sparsity_max = report_stats(
             auto_load_balance_context_parallel_block_mask_sparsity
         )["max"]
@@ -344,7 +367,9 @@ def benchmark_load_balance_document_mask(
         exp_records.append(
             (
                 full_block_mask_sparsity,
+                base_line_context_parallel_block_mask_sparsity_min,
                 base_line_context_parallel_block_mask_sparsity_max,
+                auto_load_balance_context_parallel_block_mask_sparsity_min,
                 auto_load_balance_context_parallel_block_mask_sparsity_max,
             )
         )
@@ -354,7 +379,9 @@ def benchmark_load_balance_document_mask(
         exp_records,
         columns=[
             "attn_sparsity",
+            "min_sparsity_base",
             "max_sparsity_base",
+            "min_sparsity_auto",
             "max_sparsity_auto",
         ],
     )
