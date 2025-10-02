@@ -11,8 +11,9 @@ import os
 import os.path
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims

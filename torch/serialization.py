@@ -661,6 +661,11 @@ register_package(
     functools.partial(_backend_tag, "xpu"),
     functools.partial(_deserialize, "xpu"),
 )
+register_package(
+    26,
+    functools.partial(_backend_tag, "mtia"),
+    functools.partial(_deserialize, "mtia"),
+)
 
 
 def location_tag(
