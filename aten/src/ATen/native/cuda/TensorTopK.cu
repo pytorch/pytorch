@@ -322,7 +322,7 @@ __global__ void computeBlockDigitCounts(
 
 // compute global histogram and cumsum for each row
 __global__ void computeDigitCumSum(
-  short* counts, 
+  short* counts,
   uint32_t* digit_cum_sum,
   uint32_t blocks_per_slice) {
   int tidx = threadIdx.x + blockIdx.x * blockDim.x;
