@@ -569,6 +569,7 @@ def flex_attention_backward(*args, **kwargs):
         query,
         key,
         value,
+        logsumexp,
         grad_out,
         kv_num_blocks,
         kv_indices,
@@ -583,6 +584,7 @@ def flex_attention_backward(*args, **kwargs):
             query,
             key,
             value,
+            logsumexp,
             grad_out,
             kv_num_blocks,
             kv_indices,
@@ -782,7 +784,7 @@ def flex_attention_backward(*args, **kwargs):
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
             if hasattr(conf, attrib):
                 cur_kernel_options[attrib] = getattr(conf, attrib)
-
+        # import transformer_nuggets; transformer_nuggets.vscode_breakpoint()
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
