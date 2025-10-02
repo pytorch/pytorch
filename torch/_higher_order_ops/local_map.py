@@ -45,8 +45,8 @@ class LocalMapHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("local_map_hop")
 
-    def __call__(self, fw_gm: GraphModule, *args: Any, **kwargs: Any) -> Any:
-        return super().__call__(fw_gm, *args, **kwargs)
+    def __call__(self, gm: GraphModule, *args: Any, **kwargs: Any) -> Any:
+        return super().__call__(gm, *args, **kwargs)
 
 
 local_map_hop = LocalMapHOP()
@@ -274,25 +274,25 @@ def autograd_key(
 
 @local_map_hop.py_functionalize_impl
 def functional_mode_key(
-    ctx: Any, fw_gm: GraphModule, *args: Any, **kwargs: Any
+    ctx: Any, gm: GraphModule, *args: Any, **kwargs: Any
 ) -> tuple[torch.Tensor]:
     assert not kwargs
 
     unwrapped_inputs = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
-        out = local_map_hop(fw_gm, *unwrapped_inputs)
+        out = local_map_hop(gm, *unwrapped_inputs)
         return ctx.wrap_tensors(out)
 
 
 @local_map_hop.py_impl(FakeTensorMode)
 def fake_mode_key(
     mode: FakeTensorMode,
-    fw_gm: GraphModule,
+    gm: GraphModule,
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor]:
     with mode:
-        return fw_gm(*args, **kwargs)
+        return gm(*args, **kwargs)
 
 
 def proxy_mode_key_common(
@@ -328,22 +328,22 @@ def proxy_mode_key_common(
 @local_map_hop.py_impl(ProxyTorchDispatchMode)
 def proxy_mode_key(
     proxy_mode: ProxyTorchDispatchMode,
-    fw_gm: GraphModule,
+    gm: GraphModule,
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor]:
     # TODO: get rid of this when we can install as a subgraph
     def call_local_map(*_args: Any, **_kwargs: Any) -> Any:
-        return functools.partial(local_map_hop, fw_gm)(*_args, **_kwargs)
+        return functools.partial(local_map_hop, gm)(*_args, **_kwargs)
 
-    return proxy_mode_key_common(call_local_map, proxy_mode, fw_gm, *args, **kwargs)
+    return proxy_mode_key_common(call_local_map, proxy_mode, gm, *args, **kwargs)
 
 
 # Running HOP in eager with real tensors
 @local_map_hop.py_impl(DispatchKey.CompositeExplicitAutograd)
 def real_impl(
-    fw_gm: GraphModule,
+    gm: GraphModule,
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor]:
-    return fw_gm(*args, **kwargs)
+    return gm(*args, **kwargs)
