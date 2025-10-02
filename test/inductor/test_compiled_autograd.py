@@ -5166,7 +5166,6 @@ known_graph_breaks_tests = {
     "test_checkpointing_without_reentrant_memory_savings",  # reentrant .backward
     "test_dtensor_basic",  # torch._dynamo.exc.Unsupported: Failed to convert args/kwargs to proxy
     "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",  # subclass constructor
-    "test_grad_dtype",  #  AttributeError: args
     "test_retain_grad",  # retains_grad_hooks
     "test_retain_grad_cycle",  # retains_grad_hooks
     "test_retain_grad_inplace",  # retains_grad_hooks
@@ -5267,6 +5266,7 @@ xfail_by_backend = {
         "test_dropout_inductor",  # functionalize_rng_ops not yet supported
         "test_function_with_kwargs",  # functionalize_rng_ops not yet supported
         "test_module",  # functionalize_rng_ops not yet supported
+        "test_grad_dtype",  # AttributeError: args / Float did not match Double
     },
     "eager": {  # will be run without torch.compiling the CA graph
         "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
