@@ -5,7 +5,7 @@ import itertools
 import math
 import pickle
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 import sympy
 
@@ -427,7 +427,7 @@ class TestSympyInterp(TestCase):
                 # Yes, I know this is a long-winded way of saying xreplace; the
                 # point is to test sympy_interp
                 r = sympy_interp(
-                    ReferenceAnalysis, dict(zip(symbols, sargs)), sympy_expr
+                    ReferenceAnalysis, dict(zip(symbols, sargs, strict=False)), sympy_expr
                 )
                 self.assertEqual(ref_r, r)
 
@@ -502,7 +502,7 @@ class TestSympyInterp(TestCase):
 
                 self.assertEqual(
                     sympy_interp(
-                        PythonReferenceAnalysis, dict(zip(symbols, args)), sympy_expr
+                        PythonReferenceAnalysis, dict(zip(symbols, args, strict=False)), sympy_expr
                     ),
                     gm(*args),
                 )
@@ -556,7 +556,7 @@ class TestSympyInterp(TestCase):
                     direct_result = tensor_fn(*tensor_args)
                     interp_result = sympy_interp(
                         TensorReferenceAnalysis,
-                        dict(zip(symbols, tensor_args)),
+                        dict(zip(symbols, tensor_args, strict=False)),
                         sympy_expr,
                     )
 
