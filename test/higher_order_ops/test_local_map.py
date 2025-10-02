@@ -511,26 +511,24 @@ class GraphModule(torch.nn.Module):
     def test_local_map_dynamo_mismatch_placements(self):
         @local_map(
             out_placements=((Shard(0), Shard(1), Shard(2)),),
-            in_placements=(
-                (Shard(0), Shard(1), Shard(2)),
-                None,
-            ),
+            in_placements=((Shard(0), Shard(1), Shard(2)),),
             redistribute_inputs=True,
             in_grad_placements=None,
             device_mesh=self.mesh,
         )
-        def mismatch_input(x, scalar):
-            return x + scalar, scalar
+        def mismatch_input(x, y):
+            return x + y
 
         x = torch.randn(64, 64, 64, requires_grad=True)
+        y = torch.randn(64, 64, 64, requires_grad=True)
         with (
             LocalMapWrappedHigherOrderVariable.enable(),
             self.assertRaisesRegex(
                 AssertionError,
-                "Expecting 2 inputs to local_map function based on placements, but found 1.",
+                "Expecting 1 inputs to local_map function based on placements, but found 2.",
             ),
         ):
-            torch.compile(mismatch_input, backend="eager", fullgraph=True)(x, 10)
+            torch.compile(mismatch_input, backend="eager", fullgraph=True)(x, y)
 
         @local_map(
             out_placements=(
