@@ -744,7 +744,7 @@ def redistribute_local_tensor(
                 device_mesh,
                 transform_infos,
                 current_spec.placements,
-                src_shard_order,
+                current_spec.shard_order,
             ),
         )
         if debug_mode is not None
