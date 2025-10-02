@@ -10256,6 +10256,7 @@
   structured: True
   dispatch:
     CPU, CUDA: all_all_out
+    MTIA: all_all_out_mtia
     MPS: all_all_out_mps
 
 - func: any(Tensor self) -> Tensor
