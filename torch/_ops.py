@@ -6,19 +6,19 @@ import importlib
 import inspect
 import sys
 import types
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from functools import cached_property
 from typing import (
     Any,
-    Callable,
     ClassVar,
+    Concatenate,
     final,
     Generic,
     Optional,
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import Concatenate, ParamSpec, TypeVar
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
@@ -931,7 +931,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
                         return self._op_dk(key, *args, **kwargs)
 
                 with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
-                    return self.python_key_table[curr_mode](mode, *args, **kwargs)
+                    return self.python_key_table[curr_mode](mode, *args, **kwargs)  # type: ignore[index]
 
             self._dispatch_cache[key] = handler
             add_cached_op(self)

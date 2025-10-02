@@ -56,6 +56,7 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
+#include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <torch/csrc/autograd/generated/python_return_types.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
@@ -72,6 +73,7 @@
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
+#include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
@@ -121,10 +123,14 @@
 #endif
 #endif
 
+#ifdef USE_DISTRIBUTED
+#ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
+#endif
+#endif
 
 #if defined(USE_VALGRIND)
 #include <callgrind.h>
@@ -547,7 +553,11 @@ static PyObject* THPModule_getBackcompatKeepdimWarn(
 }
 
 static PyObject* THPModule_hasDistributed(PyObject* _unused, PyObject* noargs) {
+#ifdef USE_DISTRIBUTED
   Py_RETURN_TRUE;
+#else
+  Py_RETURN_FALSE;
+#endif
 }
 
 static PyObject* THPModule_showConfig(PyObject* module, PyObject* noargs) {
@@ -1999,6 +2009,7 @@ PyObject* initModule() {
 #ifdef USE_XPU
   THPUtils_addPyMethodDefs(methods, THXPModule_methods());
 #endif
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
@@ -2008,6 +2019,7 @@ PyObject* initModule() {
       methods, torch::distributed::autograd::python_functions());
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::rpc::testing::python_functions());
+#endif
 #endif
 
   static struct PyModuleDef torchmodule = {
@@ -2078,8 +2090,10 @@ PyObject* initModule() {
   torch::cpu::initModule(module);
   torch::accelerator::initModule(module);
   torch::instruction_counter::initModule(module);
+  torch::acc::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
+  torch::functionalization::initModule(module);
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -2479,7 +2493,8 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_fp32_precision_getter",
       [](const std::string& backend, const std::string& op) {
-        return at::globalContext().float32Precision(backend, op);
+        return at::precision2str(at::globalContext().float32Precision(
+            at::str2backend(backend), at::str2op(op)));
       });
 
   py_module.def(
@@ -2487,7 +2502,10 @@ Call this whenever a new thread is created in order to propagate values from
       [](const std::string& backend,
          const std::string& op,
          const std::string& precision) {
-        at::globalContext().setFloat32Precision(backend, op, precision);
+        at::globalContext().setFloat32Precision(
+            at::str2backend(backend),
+            at::str2op(op),
+            at::str2precision(precision));
         return precision;
       });
 

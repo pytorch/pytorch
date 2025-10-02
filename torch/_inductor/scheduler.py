@@ -50,6 +50,7 @@ from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
 from .ir import (
+    assign_origin_node,
     get_device_type,
     GraphPartitionSignature,
     MultiOutput,
@@ -1041,10 +1042,10 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
     return ms
 
 
+@dataclasses.dataclass(slots=True)
 class WhyNoFuse:
-    # TODO when we drop support for Python < 3.10, we can use
-    # @dataclass(slots=True) instead of manually specifying __slots__.
-    __slots__ = ["name1", "name2", "reason", "args"]
+    name1: str
+    name2: str
     reason: str
     args: tuple[Any, ...]
 
@@ -1112,7 +1113,11 @@ def _prune_redundant_deps(
     def should_prune(dep: Dep) -> bool:
         if isinstance(dep, WeakDep):
             op_name = name_to_buf[dep.name].defining_op_name()
-            is_redundant = name_to_dep_count[name_to_fused_node[op_name].get_name()] > 0
+            is_redundant = name_to_dep_count[
+                name_to_fused_node[op_name].get_name()
+            ] > 0 and node.scheduler.fusable_weak_dep(
+                dep, name_to_fused_node[op_name], node
+            )
             # These can occur because fused nodes always gather deps from their snodes
             # If B has a weakdep on A
             # B gets fused with C, then any time BC is fused, the weakdep will reappear
@@ -3159,11 +3164,15 @@ class Scheduler:
                         node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
-                out_tensorbox = min_node_unfused.output_node()
+                with ir.IRNode.current_origins(multi_node.origins):
+                    out_tensorbox = min_node_unfused.output_node()
                 out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
+
+                if multi_node.origin_node:
+                    assign_origin_node(out_tensorbox, multi_node.origin_node)
 
                 out_buffer.layout = multi_node.layout
                 replace_operation_buffer(multi_node, out_buffer)
@@ -3535,6 +3544,7 @@ class Scheduler:
             - self.can_fuse(): checks if a fusion is legal
             - self.score_fusion(): assigns priority to a given fusion
         """
+        self.prune_redundant_deps(nodes)
         fused_nodes = OrderedSet(nodes)
         if fusion_log.isEnabledFor(logging.DEBUG):
             fusion_log.debug("fuse_nodes_once, candidates:")
@@ -3628,7 +3638,6 @@ class Scheduler:
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
-        self.prune_redundant_deps(nodes)
         return nodes
 
     def create_combo_kernel_nodes(self, num_ck_nodes: Optional[int] = None) -> None:
@@ -4408,22 +4417,36 @@ class Scheduler:
         if len(mutating_writes) != 1:
             return False
         write = mutating_writes[0]
+        if isinstance(write, StarDep):
+            return False
         assert isinstance(write, MemoryDep)
 
         if free_symbol_is_type(write.index, SymT.TMP):
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
-        relevant_reads = [
-            read for read in node1.read_writes.reads if read.name == real_name
-        ]
-        return all(
-            isinstance(read, MemoryDep)
-            and not free_symbol_is_type(read.index, SymT.TMP)
-            and read.index == write.index
-            and read.size == write.size
-            for read in relevant_reads
-        )
+        relevant_reading_nodes = [node1]
+        if isinstance(node1, ForeachKernelSchedulerNode):
+            relevant_reading_nodes = node1.snodes
+        num_concurrent_reads = 0
+        for reading_node in relevant_reading_nodes:
+            relevant_reads = [
+                read
+                for read in reading_node.read_writes.reads
+                if read.name == real_name
+            ]
+            if not relevant_reads:
+                continue
+            num_concurrent_reads += 1
+            if not all(
+                isinstance(read, MemoryDep)
+                and not free_symbol_is_type(read.index, SymT.TMP)
+                and read.index == write.index
+                and read.size == write.size
+                for read in relevant_reads
+            ):
+                return False
+        return num_concurrent_reads <= 1
 
     # StarDep doesn't match MemoryDep, different indices don't match
     # However, broadcasting sometimes strips dimensions, and if that's the case
@@ -5245,9 +5268,10 @@ class Scheduler:
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()
 
+            graph_name = V.graph.name
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
-        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)
+        V.graph.wrapper_code.define_subgraph_launcher_fn(graph_name, partition_code)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
         V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
@@ -5587,7 +5611,7 @@ class Scheduler:
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)
 
 
-class BaseScheduling:
+class BaseScheduling:  # noqa: docstring_linter
     def __init__(self, scheduler: Optional[Scheduler]):
         super().__init__()
         self.scheduler = scheduler
@@ -5730,3 +5754,19 @@ class BaseScheduling:
         and memory copy time in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError
+
+    def codegen_comment(
+        self,
+        node_schedule: Sequence[BaseSchedulerNode],
+        kernel_name: Optional[str] = None,
+    ) -> None:
+        if kernel_name:
+            from torch._inductor.debug import set_kernel_post_grad_provenance_tracing
+
+            debug_handle = set_kernel_post_grad_provenance_tracing(
+                node_schedule,  # type: ignore[arg-type]
+                kernel_name,
+            )
+            V.graph.wrapper_code.write_provenance_debug_handle(
+                kernel_name, debug_handle
+            )
