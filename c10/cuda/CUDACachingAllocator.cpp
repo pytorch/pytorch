@@ -4237,7 +4237,8 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (zeroAllocations()) {
       c10::DeviceIndex device = 0;
       C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
-      C10_CUDA_CHECK(cudaMemsetAsync(r, 0, nbytes, cuda::getCurrentCUDAStream(device)));
+      C10_CUDA_CHECK(
+          cudaMemsetAsync(r, 0, nbytes, cuda::getCurrentCUDAStream(device)));
     }
     return r;
   }
