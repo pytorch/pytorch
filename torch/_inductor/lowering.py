@@ -7243,9 +7243,11 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     # Realize all additional dependencies
     dep_names = []
     for dep in additional_deps:
-        if hasattr(dep, "realize"):
-            dep.realize()
-            dep_names.append(dep.get_name())
+        if not isinstance(dep, IRNode):
+            continue
+
+        dep.realize()
+        dep_names.append(dep.get_name())
 
     original_args = V.graph.current_node.args
     arg_offset = 2  # first two args (additional_deps, subgraph)
@@ -7268,9 +7270,10 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     output_list = output if isinstance(output, (list, tuple)) else [output]
 
     for out in output_list:
-        if not hasattr(out, "realize"):
+        if not isinstance(out, IRNode):
             continue
 
+        # need to realize in order to add the dep
         out.realize()
         out_name = out.get_name()
         for dep_name in dep_names:
