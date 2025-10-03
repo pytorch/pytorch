@@ -3,11 +3,34 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/types.h>
 
+// Include complete type definitions for all optimizers to enable dynamic_cast
+#include <torch/optim/adagrad.h>
+#include <torch/optim/adam.h>
+#include <torch/optim/adamw.h>
+#include <torch/optim/lbfgs.h>
+#include <torch/optim/rmsprop.h>
+#include <torch/optim/sgd.h>
+
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace torch::optim {
+
+// Simple implementation using variadic template helper
+void Optimizer::_try_merge_all_optimizers(
+    std::unique_ptr<OptimizerOptions>& final_options,
+    const OptimizerOptions& user_options,
+    const OptimizerOptions& defaults) {
+  // Clean one-liner replaces the entire repetitive dispatch chain
+  _try_merge_all_optimizer_types<
+      SGDOptions,
+      AdamOptions,
+      AdamWOptions,
+      AdagradOptions,
+      RMSpropOptions,
+      LBFGSOptions>(final_options, user_options, defaults);
+}
 
 bool OptimizerParamGroup::has_options() const {
   return options_ != nullptr;
@@ -101,9 +124,20 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
   TORCH_INTERNAL_ASSERT(defaults_ != nullptr);
   OptimizerParamGroup param_group_(param_group.params());
   if (!param_group.has_options()) {
+    // No options provided - use defaults directly
     param_group_.set_options(defaults_->clone());
   } else {
-    param_group_.set_options(param_group.options().clone());
+    // Options provided - merge user's explicit settings with defaults for
+    // parameter group inheritance This enables Python-C++ API parity by
+    // honoring user intent while inheriting missing parameters
+    auto final_options = defaults_->clone();
+
+    // Simple variadic dispatch - try all known optimizer types
+    _try_merge_all_optimizers(final_options, param_group.options(), *defaults_);
+
+    // If no merging was done (custom optimizer), final_options already contains
+    // defaults
+    param_group_.set_options(std::move(final_options));
   }
   for (const auto& p : param_group_.params()) {
     TORCH_CHECK(
