@@ -545,7 +545,11 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       /*reduce_range=*/reduce_range);
   const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(1, q_params.zero_point);
   // weights, dst
+<<<<<<< HEAD
   auto w = *weight_;
+=======
+  auto w = *(weight_);
+>>>>>>> bd9b54ceff0 (Fix clang-tidy readability checks)
   auto dst_dims = {x.get_dim(0), w.get_dim(1)};
   const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/q_params.scale);
   const ideep::scale_t& weights_scales = w.get_scale();
