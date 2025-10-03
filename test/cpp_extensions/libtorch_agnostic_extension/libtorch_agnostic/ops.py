@@ -333,3 +333,16 @@ def my_new_zeros_dtype_variant(t) -> Tensor:
     Returns: New zeros tensor
     """
     return torch.ops.libtorch_agnostic.my_new_zeros_dtype_variant.default(t)
+
+
+def test_parallel_for(size, grain_size) -> Tensor:
+    """
+    Tests the parallel_for functionality by using it to fill a tensor with indices.
+
+    Args:
+        size: int - size of the tensor to create
+        grain_size: int - grain size for parallel_for
+
+    Returns: Tensor - a 1D int64 tensor where each element contains its index
+    """
+    return torch.ops.libtorch_agnostic.test_parallel_for.default(size, grain_size)
