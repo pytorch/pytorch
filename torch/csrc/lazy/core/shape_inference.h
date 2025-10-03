@@ -83,6 +83,8 @@ TORCH_API std::vector<torch::lazy::Shape> compute_shape_std(const at::Tensor & s
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_std(const at::Tensor & self, at::OptionalIntArrayRef dim, bool unbiased, bool keepdim);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_std(const at::Tensor & self, at::OptionalIntArrayRef dim, const ::std::optional<at::Scalar> & correction, bool keepdim);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_sum(const at::Tensor & self, ::std::optional<at::ScalarType> dtype);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_logsumexp(const at::Tensor & self);
+TORCH_API std::vector<torch::lazy::Shape> compute_shape_logsumexp(const at::Tensor & self, at::OptionalIntArrayRef dim, bool keepdim);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape__to_copy(const at::Tensor & self, ::std::optional<at::ScalarType> dtype, ::std::optional<at::Layout> layout, ::std::optional<at::Device> device, ::std::optional<bool> pin_memory, bool non_blocking, ::std::optional<at::MemoryFormat> memory_format);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_take(const at::Tensor & self, const at::Tensor & index);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_trace(const at::Tensor & self);

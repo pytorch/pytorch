@@ -2,6 +2,7 @@
 
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/OptionalArrayRef.h>
 #include <optional>
 
 namespace c10 {
@@ -11,6 +12,9 @@ class Scalar;
 namespace at {
 struct TensorIterator;
 class Tensor;
+struct Dimname;
+using DimnameList = c10::ArrayRef<Dimname>;
+using OptionalIntArrayRef = c10::OptionalArrayRef<int64_t>;
 }
 
 namespace at::native {
@@ -53,5 +57,14 @@ DECLARE_DISPATCH(void (*)(const Tensor&, Tensor&, Tensor&), aminmax_allreduce_st
 TORCH_API std::tuple<Tensor&,Tensor&> var_mean_out(
     Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim,
     int64_t correction, bool keepdim);
+
+// Forward declarations for logsumexp dispatchers (defined in ReduceOps.cpp)
+// These are called by codegen for CompositeExplicitAutograd dispatch
+TORCH_API Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim);
+TORCH_API Tensor logsumexp(const Tensor& self);
+TORCH_API Tensor logsumexp(const Tensor& self, OptionalIntArrayRef opt_dims, bool keepdim);
+TORCH_API Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim);
+// Note: logsumexp_out(self, result) is auto-generated for the no-dim case
+TORCH_API Tensor& logsumexp_out(const Tensor& self, DimnameList dims, bool keepdim, Tensor& result);
 
 } // namespace at::native

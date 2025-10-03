@@ -715,6 +715,33 @@ std::vector<Shape> compute_shape_sum(
   ;
 }
 
+std::vector<Shape> compute_shape_logsumexp(const at::Tensor& self) {
+  // logsumexp with no dim reduces over all dimensions, returns scalar
+  // Promotes integers to float
+  auto dtype = self.scalar_type();
+  if (isIntegralType(dtype, /*includeBool*/ true)) {
+    dtype = c10::ScalarType::Float;
+  }
+  return {Shape(dtype, {})};
+}
+
+std::vector<Shape> compute_shape_logsumexp(
+    const at::Tensor& self,
+    at::OptionalIntArrayRef dim,
+    bool keepdim) {
+  // Compute output shape - just call the actual function on a meta tensor
+  // to get the shape without executing the kernel
+  auto self_meta = at::native::empty_strided_meta_symint(
+      self.sym_sizes(),
+      self.sym_strides(),
+      /*dtype=*/std::make_optional(self.scalar_type()),
+      /*layout=*/std::make_optional(self.layout()),
+      /*device=*/std::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/std::nullopt);
+  auto result_meta = at::compositeexplicitautograd::logsumexp(self_meta, dim, keepdim);
+  return {Shape(result_meta.scalar_type(), result_meta.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_zero(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }

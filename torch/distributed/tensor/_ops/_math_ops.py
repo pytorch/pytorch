@@ -1236,7 +1236,7 @@ def histc_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [aten.logsumexp.default],
+    [aten.logsumexp.default, aten.logsumexp.dim_IntList],
     schema_info=RuntimeSchemaInfo(
         # static_argnum is the position where non-Tensor args beings.
         static_argnum=1,
@@ -1250,13 +1250,18 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
 
     # args_schema contains all but the DTensor args (e.g., dim, keepdim).
     args_schema = op_schema.args_schema
-    assert len(args_schema) > 1  # input and dim are required.
-
     input_strategy = args_schema[0]
     assert isinstance(input_strategy, OpStrategy)
 
-    dims_arg = args_schema[1]
-    reduce_dims = _infer_reduction_dims(dims_arg, input_strategy.ndim)
+    # Handle both logsumexp.default (no dim) and logsumexp.dim_IntList (with dim)
+    if len(args_schema) > 1:
+        # logsumexp.dim_IntList: input, dim, keepdim
+        dims_arg = args_schema[1]
+        reduce_dims = _infer_reduction_dims(dims_arg, input_strategy.ndim)
+    else:
+        # logsumexp.default: input only, reduce over all dimensions
+        reduce_dims = list(range(input_strategy.ndim))
+    
     assert reduce_dims is not None
 
     keep_dim = cast(bool, op_schema.kwargs_schema.get("keepdim", False))
