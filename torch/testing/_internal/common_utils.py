@@ -1463,6 +1463,10 @@ TEST_WITH_ROCM: bool = TestEnvironment.def_flag(
     "TEST_WITH_ROCM",
     env_var="PYTORCH_TEST_WITH_ROCM",
 )
+TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
+    "TEST_WITH_MTIA",
+    env_var="PYTORCH_TEST_WITH_MTIA",
+)
 
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
@@ -5696,7 +5700,7 @@ def install_cpp_extension(extension_root):
             shutil.rmtree(d)
 
     # Build the extension
-    cmd = [sys.executable, "-m", "pip", "install", "--no-build-isolation", "-v", ".", "--root", install_dir]
+    cmd = [sys.executable, "-m", "pip", "install", extension_root, "-v", "--no-build-isolation", "--root", install_dir]
     return_code = shell(cmd, cwd=extension_root, env=os.environ)
     if return_code != 0:
         raise RuntimeError(f"build failed for cpp extension at {extension_root}")
