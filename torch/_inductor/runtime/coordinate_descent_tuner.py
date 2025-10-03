@@ -2,7 +2,10 @@
 import copy
 import itertools
 import logging
+from functools import lru_cache
 from typing import Callable, Optional, TYPE_CHECKING
+
+import torch
 
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable
@@ -35,6 +38,17 @@ def set_field(config, name, value):
         config.kwargs[name] = value
 
 
+@lru_cache(maxsize=1)
+def get_warpsmax():
+    # CUDA/ROCm has a maximum of 1024 threads per block
+    warp_size = (
+        torch.cuda.get_device_properties().warp_size
+        if torch.cuda.is_available()
+        else 32
+    )
+    return 1024 // warp_size
+
+
 class CoordescTuner:
     """
     The coordinate descent tuner. Tune one field/coordinate at a time.
@@ -59,11 +73,6 @@ class CoordescTuner:
         max_block = TRITON_MAX_BLOCK[prefix.upper()]
         size_hint = self.size_hints.get(prefix) if self.size_hints is not None else None
         return min(max_block, size_hint) if size_hint is not None else max_block
-
-    def get_warpsmax(self):
-        # Currently, CUDA has a maximum of 1024 threads, so 32 is the max
-        # number of warps.
-        return 1024 // 32
 
     def cache_benchmark_result(self, config, timing):
         self.cached_benchmark_results[triton_config_to_hashable(config)] = timing
@@ -110,7 +119,7 @@ class CoordescTuner:
             prefix = name.strip(block_suffix).lower()
             return val > self.get_config_max(prefix)
         if name == "num_warps":
-            return val > self.get_warpsmax()
+            return val > get_warpsmax()
         if name == "waves_per_eu":
             return val > 8
 
