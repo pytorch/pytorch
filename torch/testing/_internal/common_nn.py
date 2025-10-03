@@ -15,6 +15,7 @@ import torch.cuda
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
+from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
     gradcheck, gradgradcheck, set_default_dtype, skipIfTorchDynamo, TEST_WITH_ROCM
 from torch.testing._internal.common_cuda import TEST_CUDA, SM90OrLater
@@ -23,7 +24,8 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Callable, Union, Any
+from typing import Union, Any
+from collections.abc import Callable
 from collections.abc import Sequence
 
 TemporaryFile = tempfile.TemporaryFile
@@ -1078,6 +1080,7 @@ def single_batch_reference_fn(input, parameters, module):
 
 
 def get_new_module_tests():
+    common_utils.set_rng_seed()
     new_module_tests = [
         poissonnllloss_no_reduce_test(),
         bceloss_no_reduce_test(),
