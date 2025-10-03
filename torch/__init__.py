@@ -2881,7 +2881,3 @@ def _as_tensor_fullprec(t):
 # an autoloaded backend are defined
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
-
-import einops
-if hasattr(einops.einops, "_reconstruct_from_shape_uncached"):
-    einops.einops._reconstruct_from_shape = einops.einops._reconstruct_from_shape_uncached
