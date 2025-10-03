@@ -148,10 +148,11 @@ class RingAttentionTest(DTensorTestBase):
         with context_parallel(
             mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(seq_dim,) * 3
         ):
-            # NOTE: this some how proves that monkey patching is not stable.
-            # If we directly use SDPAWrapper, then the monkey patching
-            # dispatch mode wont work. When we refer to F.scaled_dot_product_attention,
-            # we have to be within the scope of context_parallel().
+            # NOTE: This demonstrates that monkey patching is not fully reliable.
+            # If we use SDPAWrapper directly, the monkey patching dispatch mode
+            # does not function correctly. To ensure proper behavior,
+            # F.scaled_dot_product_attention must be referenced within the
+            # context_parallel() scope.
             if dispatch_mode == _DispatchMode.MONKEY_PATCH:
                 attention = F.scaled_dot_product_attention
                 if compiled:
