@@ -2684,6 +2684,10 @@ class Scheduler:
                             )
                             add_user(other_name, node, is_weak=True)
 
+                for add_dep in V.graph.additional_buffer_deps[buf.get_name()]:
+                    add_user(add_dep, node, is_weak=True)
+                    node.add_fake_dep(WeakDep(add_dep, node.get_name()))
+
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
                 if not isinstance(read, WeakDep):
