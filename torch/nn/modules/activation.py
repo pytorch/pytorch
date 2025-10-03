@@ -1074,9 +1074,13 @@ def _is_make_fx_tracing():
         torch_dispatch_mode_stack = (
             torch.utils._python_dispatch._get_current_dispatch_mode_stack()
         )
-        return any(
-            type(x) == torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode
-            for x in torch_dispatch_mode_stack
+        # this can be triggered when dynamo inlining the module too.
+        return (
+            any(
+                type(x) == torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode
+                for x in torch_dispatch_mode_stack
+            )
+            or torch.compiler.is_exporting()
         )
     else:
         return False
@@ -1407,10 +1411,6 @@ class MultiheadAttention(Module):
                 why_not_fast_path = "some Tensor argument has_torch_function"
             elif _is_make_fx_tracing():
                 why_not_fast_path = "we are running make_fx tracing"
-            elif not torch.jit.is_scripting():
-                # TS doesn't understand shortcircuiting.
-                if torch.compiler.is_exporting():
-                    why_not_fast_path = "we are exporting"
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = (
                     "some Tensor argument's device is neither one of "
