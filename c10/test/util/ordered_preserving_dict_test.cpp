@@ -48,7 +48,7 @@ dict_int_int test_dict(dict_int_int& dict) {
 
   std::vector<int64_t> order;
   for (const auto i : c10::irange(100)) {
-    if (!erase_set.count(i)) {
+    if (!erase_set.contains(i)) {
       order.push_back(i);
     }
   }
@@ -146,7 +146,7 @@ TEST(OrderedPreservingDictTest, DictCollisions) {
 
     std::vector<int64_t> order;
     for (const auto j : c10::irange(init_dict_size)) {
-      if (!erase_set.count(j)) {
+      if (!erase_set.contains(j)) {
         order.push_back(j);
       }
     }
