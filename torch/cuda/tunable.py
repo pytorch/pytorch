@@ -213,6 +213,7 @@ __all__ = [
     "mgpu_tune_gemm_in_file",
     "set_rotating_buffer_size",
     "get_rotating_buffer_size",
+    "set_numerical_check_tolerances",
 ]
 
 
@@ -346,6 +347,10 @@ def set_rotating_buffer_size(buffer_size: int) -> None:
 def get_rotating_buffer_size() -> int:
     r"""Get the rotating buffer size in kilobytes."""
     return torch._C._cuda_tunableop_get_rotating_buffer_size()  # type: ignore[attr-defined]
+
+def set_numerical_check_tolerances(enable : bool, atol : float, rtol: float) -> None:
+    r"""Set the atol and rtol values in numeric check"""
+    return torch._C._cuda_tunableop_set_numerical_check_tolerances(enable, atol, rtol)
 
 
 def tune_gemm_in_file(filename: str) -> None:
