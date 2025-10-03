@@ -635,7 +635,7 @@ class CustomOpDef:
         schema = self._opoverload._schema
 
         if schema._is_view_op() or schema.is_mutable:
-            lib.m.register_ad_inplace_or_view_fallback(self._name)
+            lib.m.register_ad_inplace_or_view_fallback(self._name)  # type: ignore[union-attr]
 
         if schema.is_mutable:
             mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
