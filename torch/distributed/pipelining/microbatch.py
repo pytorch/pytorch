@@ -121,7 +121,6 @@ def _split_block_mask(
     spec: TensorChunkSpec,
     num_chunks: int,
 ) -> list[BlockMask]:
-    chunk_block_masks: list[BlockMask] = []
     kv_num_blocks_chunks = torch.tensor_split(
         block_mask.kv_num_blocks, num_chunks, spec.split_dim
     )
@@ -139,7 +138,7 @@ def _split_block_mask(
         else [None] * num_chunks
     )
 
-    ret = []
+    chunk_block_masks = []
     batch_offset = 0
     for chunk_idx in range(num_chunks):
 
@@ -150,7 +149,7 @@ def _split_block_mask(
 
             return mask_mod_wrapper
 
-        ret.append(
+        chunk_block_masks.append(
             BlockMask.from_kv_blocks(
                 kv_num_blocks=kv_num_blocks_chunks[chunk_idx],
                 kv_indices=kv_indices_chunks[chunk_idx],
@@ -162,7 +161,7 @@ def _split_block_mask(
             )
         )
         batch_offset += kv_num_blocks_chunks[chunk_idx].size(0)
-    return ret
+    return chunk_block_masks
 
 
 def _split_tensor(
@@ -213,9 +212,9 @@ def _shard_dict_of_args(
     if not args_dict:
         return [{} for _ in range(num_chunks)]
 
-    assert len(args_dict) == len(
-        args_chunk_spec
-    ), f"args_dict.keys() = {list(args_dict.keys())} args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
+    assert len(args_dict) == len(args_chunk_spec), (
+        f"args_dict.keys() = {list(args_dict.keys())} args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
+    )
     assert args_chunk_spec is not None  # Should have been set by caller
 
     values, tree_spec = tree_flatten(args_dict)
@@ -238,7 +237,7 @@ def _shard_dict_of_args(
             raise ValueError(
                 f"Unsupported chunk spec: {spec} and value: {v} combination."
             )
-    result_num_chunks = min(min(split_sizes), num_chunks)
+    result_num_chunks = min(*split_sizes, num_chunks)
 
     flat_split_results: list[Any] = [[] for _ in range(result_num_chunks)]
     for v, spec in zip(values, chunk_specs, strict=True):

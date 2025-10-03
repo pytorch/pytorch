@@ -3923,9 +3923,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 continue
             inp = torch.rand(batch, groups, *image_size, dtype=dtype, device=device)
             w = torch.randn(8, groups, *kernel_size, dtype=dtype, device=device)
-            conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             inp = inp.to(memory_format=memory_format)
             w = w.to(memory_format=memory_format)
+            conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             if torch.version.hip:
                 cudnn_out = torch.miopen_convolution_relu(
                     inp, w, None, (1, 1), (0, 0), (1, 1), 1
@@ -3957,12 +3957,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
                 continue
             inp = torch.rand(batch, groups, *image_size, dtype=dtype, device=device)
             w = torch.randn(8, groups, *kernel_size, dtype=dtype, device=device)
+            inp = inp.to(memory_format=memory_format)
+            w = w.to(memory_format=memory_format)
             conv2d_out = torch.conv2d(inp, w, None, (1, 1), (0, 0), (1, 1), 1)
             alpha = 2.0
             z = torch.randn_like(conv2d_out)
-
-            inp = inp.to(memory_format=memory_format)
-            w = w.to(memory_format=memory_format)
             z = z.to(memory_format=memory_format)
             if torch.version.hip:
                 cudnn_out = torch.miopen_convolution_add_relu(
@@ -4084,6 +4083,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         y = m.to(device=device)(x.to(device=device))
         self.assertEqual(yref, y)
 
+    @skipCUDAIfRocm
     @onlyCUDA
     @largeTensorTest("40GB", "cuda")
     def test_conv3d_cudnn_broken(self, device):
