@@ -98,6 +98,21 @@ class ConstantOperator(Operator):
             else:
                 # For non-empty tensors, use the first element as fill value
                 fill_value = actual_tensor.flatten()[0].item()
+
+                # For integer types, clamp the value to a smaller range to avoid
+                # issues when used in arithmetic with embedding indices
+                import torch
+
+                if output_spec.dtype in [
+                    torch.int8,
+                    torch.int16,
+                    torch.int32,
+                    torch.int64,
+                ]:
+                    # Clamp integer values to [0, 3] to avoid index overflow in multiplication
+                    # Even with multiplication, indices should stay in reasonable range
+                    fill_value = max(0, min(3, abs(fill_value)))
+
                 tensor_creation = (
                     f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
                 )
