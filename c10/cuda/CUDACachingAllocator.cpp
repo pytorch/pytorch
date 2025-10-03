@@ -1116,7 +1116,7 @@ class RingBuffer {
 } // anonymous namespace
 } // namespace Native
 
-static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
+static std::string reportProcessMemoryInfo(const cudaDeviceProp& prop) {
 #ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
   void* nvml_handle = DriverAPI::get_nvml_handle();
   if (!nvml_handle) {
@@ -1126,9 +1126,6 @@ static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
     TORCH_INTERNAL_ASSERT(NVML_SUCCESS == DriverAPI::get()->nvmlInit_v2_());
     return true;
   }();
-
-  cudaDeviceProp prop{};
-  C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
 
   // NOLINTNEXTLINE(*-c-arrays)
   char pci_id[80];
@@ -1229,8 +1226,7 @@ class DeviceCachingAllocator {
   // record used memory.
   size_t total_allocated_memory = 0;
 
-  // global memory available to the device
-  size_t total_global_memory = 0;
+  cudaDeviceProp device_prop;
 
   // maximum amount of memory that the device is allowed to
   // allocate. This is set iff memory fraction is less than 1
@@ -1276,9 +1272,7 @@ class DeviceCachingAllocator {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit DeviceCachingAllocator(c10::DeviceIndex id)
       : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
-    cudaDeviceProp prop;
-    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, id));
-    total_global_memory = prop.totalGlobalMem;
+    C10_CUDA_CHECK(cudaGetDeviceProperties(&device_prop, id));
 
     stats.max_split_size =
         static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
@@ -1471,7 +1465,7 @@ class DeviceCachingAllocator {
             format_size(allowed_memory_maximum.value()) + " allowed; ";
       }
 
-      std::string proc_info = reportProcessMemoryInfo(device);
+      std::string proc_info = reportProcessMemoryInfo(device_prop);
 
       record_trace(
           TraceEntry::OOM,
@@ -2029,7 +2023,7 @@ class DeviceCachingAllocator {
       return 1.0;
     }
     return static_cast<double>(allowed_memory_maximum.value()) /
-        static_cast<double>(total_global_memory);
+        static_cast<double>(device_prop.totalGlobalMem);
   }
 
   /** set memory fraction to limit maximum allocated memory **/
@@ -2037,7 +2031,7 @@ class DeviceCachingAllocator {
     allowed_memory_maximum = std::nullopt;
     if (fraction < 1.0) {
       allowed_memory_maximum = static_cast<size_t>(
-          fraction * static_cast<double>(total_global_memory));
+          fraction * static_cast<double>(device_prop.totalGlobalMem));
     }
   }
 
