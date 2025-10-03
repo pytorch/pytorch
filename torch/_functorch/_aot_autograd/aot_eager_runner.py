@@ -29,12 +29,17 @@ class JointGraphModule(torch.nn.Module):
 
         self.fw_metadata = fw_metadata
 
+        self.input_mutation_indices = []
+        for i, input_info in enumerate(self.fw_metadata.input_info):
+            if input_info.mutates_data or input_info.mutates_metadata:
+                self.input_mutation_indices.append(i)
+
         self.num_user_outputs = get_num_user_outputs(self.fw_metadata)
         # mutated inputs that show up as outputs
         self.num_mutate_inputs = get_num_mutate_inputs(self.fw_metadata)
         self.num_inner_fwd_outputs = self.num_mutate_inputs + self.num_user_outputs
 
-        self.num_fw_output = num_outputs(fw_gm)
+        self.num_fw_output = fw_metadata.num_outputs
         self.num_saved_intermediates = self.num_fw_output - self.num_inner_fwd_outputs
         self.num_bw_inputs = num_inputs(bw_gm)
 
@@ -59,26 +64,29 @@ class JointGraphModule(torch.nn.Module):
             *self._params,
             *self._buffers,
             *args,
+            self.input_mutation_indices,
             self.num_mutate_inputs,
             self.num_user_outputs,
             self.fw_runner,
             self.bw_runner,
         ]
 
-        flat_outs = GraphRunner.apply(*flat_args)
+        user_outputs = GraphRunner.apply(*flat_args)
 
         # TODO: apply pytree unflattening here
         # TODO: How to convert local_tensor back to DTensor, placement missing
-        if len(flat_outs) == 1:
-            return flat_outs[0]
+        if len(user_outputs) == 1:
+            return user_outputs[0]
         else:
-            return flat_outs
+            return user_outputs
 
 
 class GraphRunner(torch.autograd.Function):
     @staticmethod
     def forward(ctx, *args):
-        # Extract components: (*params, *buffers, *user_inputs,  num_mutate_inputs, num_user_outputs, fw_gm, bw_gm,)
+        # Extract components: (*params, *buffers, *user_inputs, num_mutate_inputs, num_user_outputs, fw_gm, bw_gm)
+
+        input_mutation_indices = args[-5]
         num_mutate_inputs = args[-4]
         num_user_outputs = args[-3]
         num_inner_fwd_outputs = num_mutate_inputs + num_user_outputs
@@ -89,13 +97,20 @@ class GraphRunner(torch.autograd.Function):
         # Save backward graph and metadata
         ctx.bw_runner = bw_runner
 
-        # Construct forward arguments: (*params, *buffers, user_input)
-        fw_args = args[:-4]
+        # Construct forward arguments: (*params, *buffers, *user_input)
+        fw_args = args[:-5]
 
         # Run the forward graph module
         # fw_graph_inputs = (*parameters, *buffers, *user_inputs)
         # fw_graph_outputs = (*updated_inputs, *user_outputs, *saved_intermediates)
         fw_outputs = fw_runner(*fw_args)
+
+        # apply mutations
+        mutations = fw_outputs[:num_mutate_inputs]
+        assert len(input_mutation_indices) == len(mutations)
+
+        for input_idx, mutation in zip(input_mutation_indices, mutations):
+            fw_args[input_idx].copy_(mutation)
 
         # Save tensors for backward
         saved_intermediates = fw_outputs[num_inner_fwd_outputs:]
@@ -119,7 +134,7 @@ class GraphRunner(torch.autograd.Function):
         # assert(len(bw_outputs) == num_params + num_user_inputs)
 
         # append None as gradient for the last non-tensor inputs
-        result = bw_outputs + (None,) * 4
+        result = bw_outputs + (None,) * 5
         return tuple(result)
 
 

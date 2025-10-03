@@ -162,9 +162,7 @@ class DTensorExportTest(TestCase):
     @parametrize(
         "run_mode", [RunMode.CODEGEN, RunMode.GRAPH_MODULE, RunMode.FX_INTERPRETER]
     )
-    def test_jonit_graph_runner(self, run_mode):
-
-                
+    def test_joint_graph_runner(self, run_mode):
         class Model(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
@@ -175,17 +173,17 @@ class DTensorExportTest(TestCase):
 
             def forward(self, input0, input1):
                 # buffer mutation
-                # self.buffer.add_(1)
+                self.buffer.add_(1)
 
-                # # input mutation
-                # input0.add_(2)
+                # input mutation
+                input0.add_(2)
 
                 out1 =self.mlp_0(input0) 
                 out2 =self.mlp_1(input1) 
                 out = out1 + out2
                 out = self.mlp_2(out)
 
-                return out
+                return out, out1, out2
 
         model = Model(self.device_type)
         input0 = torch.rand(20, 10, device=self.device_type)
@@ -233,12 +231,17 @@ class DTensorExportTest(TestCase):
 
         # Run forward pass through the custom function
         outputs = joint_graph_module(local_inputs)
-        outputs.sum().backward()
+        loss = outputs[0].sum() + outputs[1].sum() + outputs[2].sum()
+        loss.backward()
 
-        eager_out = model(*inputs)
-        eager_out.sum().backward()
+        eager_outs = model(*inputs)
+        loss = eager_outs[0].sum() + eager_outs[1].sum() + eager_outs[2].sum()
+        loss.backward()
 
-        self.assertEqual(outputs[0], eager_out[0])
+        for output, eager_out in zip(outputs, eager_outs):
+            self.assertEqual(output, eager_out)
+
+        self.assertEqual(outputs[0], eager_outs[0])
 
         for param, local_param in zip(model.parameters(), local_params):
             self.assertIsNotNone(param.grad)
@@ -252,6 +255,13 @@ class DTensorExportTest(TestCase):
 
             self.assertIsNone(buffer.grad)
             self.assertIsNone(local_buffer.grad)
+        
+        for input, local_input in zip(inputs, local_inputs):
+            self.assertEqual(input, local_input)
+
+            self.assertIsNone(input.grad)
+            self.assertIsNone(local_input.grad)
+         
 
 
 instantiate_parametrized_tests(DTensorExportTest)
