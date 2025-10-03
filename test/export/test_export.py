@@ -3289,6 +3289,32 @@ def forward(self, causal_mask, fill_value):
                 },
             )
 
+    def test_unbacked_slice_forward(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, xs):
+                u0, u1 = xs.tolist()
+                out = x[u0:u1]
+                return out
+
+        x = torch.randn(10)
+        idxs = torch.tensor([3, 6])
+        mod = Foo()
+        ep = export(mod, (x, idxs))
+        for xs in [
+            idxs,
+            torch.tensor([-9, -1]),
+            torch.tensor([-10000, 10000]),
+            torch.tensor([0, -10]),
+        ]:
+            self.assertTrue(torch.allclose(ep.module()(x, xs), mod(x, xs)))
+
+        # check unbacked bindings
+        # should be 4 symbols: u0, u1, output size, output storage offset
+        bound_unbacked = set()
+        for node in ep.graph.nodes:
+            bound_unbacked |= node.meta.get("unbacked_bindings", {}).keys()
+        self.assertEqual(len(bound_unbacked), 4)
+
     def test_dim_hint_ranges(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -5422,7 +5448,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         # check ShapeEnv counters compared to binding indices
         shape_env = _get_shape_env_from_gm(ep.graph_module)
-        next_index = next(shape_env.unbacked_symint_counter)
+        next_index = shape_env.unbacked_symint_counter
+        shape_env.unbacked_symint_counter += 1
         for symbol in bound:
             self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
             self.assertTrue(
@@ -6213,7 +6240,27 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    def test_unbacked_slice(self):
+    def test_unbacked_stack(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                nz = torch.nonzero(x)
+                nz_size = nz.size(0)
+                torch._check(nz_size % 4 == 0)
+
+                # Create two tensors whose leading dimensions are equivalent at
+                # runtime but expressed via different SymInt formulas.
+                first = torch.zeros((nz_size // 2, 4))
+                second = torch.zeros(((nz_size // 4) * 2, 4))
+                return torch.stack([first, second], dim=0)
+
+        inputs = (torch.ones((32,)),)
+
+        ep = export(M(), inputs)
+        orig_res = M()(*inputs)
+        ep_res = ep.module()(*inputs)
+        self.assertTrue(torch.allclose(orig_res, ep_res))
+
+    def test_unbacked_slice_simple(self):
         class M(torch.nn.Module):
             def forward(self, scores, score_thr, topk: torch.Tensor, results=None):
                 valid_mask = scores > score_thr
@@ -10266,6 +10313,28 @@ graph():
         args = (torch.randn(4, 3),)
         ep = export(m, args)
         self.assertEqual(ep.module()(*args), m(*args))
+
+    def test_cdist_forward_compute_mode_zero_export(self):
+        class CDistModel(torch.nn.Module):
+            def __init__(self):
+                super(CDistModel, self).__init__()
+
+            def forward(self, x, y, compute_mode):
+                return torch.ops.aten._cdist_forward(
+                    x, y, p=2.0, compute_mode=compute_mode
+                )
+
+        x = torch.ones([3, 3])
+        y = torch.ones([3, 3])
+        model = CDistModel()
+
+        expected_none = model(x, y, None)
+        ep_none = torch.export.export(model, (x, y, None))
+        self.assertTrue(torch.equal(ep_none.module()(x, y, None), expected_none))
+
+        expected_0 = model(x, y, 0)
+        ep_0 = torch.export.export(model, (x, y, 0))
+        self.assertTrue(torch.equal(ep_0.module()(x, y, 0), expected_0))
 
     def test_export_then_compile_tensor_ctor(self):
         class M(torch.nn.Module):
@@ -14728,13 +14797,8 @@ graph():
             for nn_module_stack in nn_module_stacks
         ]
 
-        if is_inline_and_install_strict_test(self._testMethodName):
-            # when inlined and install have same ID so reference same layer
-            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
-            self.assertEqual(filtered_nn_module_stack[1], "sub_net.0")
-        else:
-            self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
-            self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
+        self.assertEqual(filtered_nn_module_stack[0], "sub_net.0")
+        self.assertEqual(filtered_nn_module_stack[1], "sub_net.2")
 
     def test_slice_nn_module_stack(self):
         class N(torch.nn.Module):
@@ -14769,7 +14833,7 @@ graph():
         ]
         if is_inline_and_install_strict_test(self._testMethodName):
             self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
-            self.assertEqual(filtered_nn_module_stack[1], "mod_list_1.2")
+            self.assertEqual(filtered_nn_module_stack[1], "mod_list_2.4")
         # This is fine since both of these will be deprecated soon.
         elif is_strict_v2_test(self._testMethodName) and IS_FBCODE:
             self.assertEqual(

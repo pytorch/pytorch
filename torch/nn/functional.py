@@ -1080,6 +1080,9 @@ def lp_pool3d(
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     See :class:`~torch.nn.LPPool3d` for details.
     """
     if has_torch_function_unary(input):
@@ -1118,6 +1121,9 @@ def lp_pool2d(
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     See :class:`~torch.nn.LPPool2d` for details.
     """
     if has_torch_function_unary(input):
@@ -1152,6 +1158,9 @@ def lp_pool1d(
 
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
+
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
@@ -3263,11 +3272,13 @@ def gaussian_nll_loss(
         if input.size()[:-1] == var.size():
             var = torch.unsqueeze(var, -1)
 
-        # This checks if the sizes match up to the final dimension, and the final dimension of var is of size 1.
+        # This checks if the var is broadcastable to the input and there is only one mismatched dimension.
         # This is also a homoscedastic case.
         # e.g. input.size = (10, 2, 3), var.size = (10, 2, 1)
+        # or  input.size = (4, 3, 32, 32), var.size = (4, 1, 32, 32)
         elif (
-            input.size()[:-1] == var.size()[:-1] and var.size(-1) == 1
+            input.ndim == var.ndim
+            and sum(y for x, y in zip(input.size(), var.size()) if x != y) == 1
         ):  # Heteroscedastic case
             pass
 
@@ -4707,7 +4718,7 @@ def interpolate(  # noqa: F811
             ]
         elif torch.jit.is_scripting():
             output_size = [
-                int(math.floor(float(input.size(i + 2)) * scale_factors[i]))
+                math.floor(float(input.size(i + 2)) * scale_factors[i])
                 for i in range(dim)
             ]
         else:
