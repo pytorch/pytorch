@@ -534,13 +534,6 @@ class Op:
                     MatchState.COLLECTIVE_STATE_MISMATCH,
                     f"Expected state: '{self.state}' does not match found state: '{other.state}'",
                 )
-            if self.dtype_mismatch(other):
-                return MatchInfo(
-                    MatchState.COLLECTIVE_DTYPE_MISMATCH,
-                    f"Expected dtypes: '{set(self.input_dtypes)}' does not "
-                    f"match found dtype: '{set(self.output_dtypes)}/"
-                    f"{set(other.input_dtypes)}/{set(other.output_dtypes)}'",
-                )
             if self.type == "all_to_all":
                 return MatchInfo(MatchState.UNDECIDED)
             if self.type != "scatter" and self.input_sizes != other.input_sizes:
@@ -588,6 +581,13 @@ class Op:
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Found input numel '{math.prod(other.input_sizes[0])}' does not match output numel "
                     f"'{math.prod(other.output_sizes[0])} * pg size {self.pg_size}'",
+                )
+            if self.dtype_mismatch(other):
+                return MatchInfo(
+                    MatchState.COLLECTIVE_DTYPE_MISMATCH,
+                    f"Expected dtypes: '{set(self.input_dtypes)}' does not "
+                    f"match found dtype: '{set(self.output_dtypes)}/"
+                    f"{set(other.input_dtypes)}/{set(other.output_dtypes)}'",
                 )
         elif self.type in [
             "coalesced",
