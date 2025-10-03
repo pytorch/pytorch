@@ -2583,7 +2583,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             elif isinstance(
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
-                context_fn = ctx.as_python_constant()
+                context_fn = ctx.guard_as_python_constant()
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"

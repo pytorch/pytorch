@@ -11,7 +11,8 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 import torch.utils._pytree as pytree
