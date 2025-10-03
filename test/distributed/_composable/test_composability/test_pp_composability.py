@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: distributed"]
+import copy
 import os
 from typing import TYPE_CHECKING
 
@@ -6,6 +7,7 @@ import torch
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed._composable.replicate_with_fsdp import replicate
 from torch.distributed.checkpoint import FileSystemReader
 from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
 from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
@@ -363,6 +365,242 @@ class ComposabilityTest(MultiProcessTestCase):
 
             for optimizer in optimizers:
                 optimizer.step()
+
+        torch.distributed.destroy_process_group()
+
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @skip_if_lt_x_gpu(8)
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
+    )
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleGPipe,
+            Schedule1F1B,
+            ScheduleInterleaved1F1B,
+            ScheduleLoopedBFS,
+            ScheduleInterleavedZeroBubble,
+        ],
+    )
+    @parametrize(
+        "MixedPrecisionParam",
+        [
+            torch.bfloat16,
+            torch.float32,
+        ],
+    )
+    def test_replicate_pp(self, ScheduleClass, MixedPrecisionParam):
+        _device_raii = torch.device(device_type, self.device)
+        torch.accelerator.set_device_index(self.device)
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            backend=backend,
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        dim = 8
+        pp_size = 2
+        num_microbatches = 8
+        replicate_size = self.world_size // (pp_size)
+        device_mesh = init_device_mesh(
+            device_type,
+            mesh_shape=(replicate_size, 1, pp_size),
+            mesh_dim_names=("replicate", "shard", "pp"),
+        )
+        torch.manual_seed(42)
+        dp_mesh = device_mesh["replicate", "shard"]
+        pp_mesh = device_mesh["pp"]
+        pp_group = device_mesh["pp"].get_group()
+
+        # create "entire model"
+        total_layers = 8
+        full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
+        ref_full_model = copy.deepcopy(full_model)
+
+        # dummy loss needed just to force backwards to run in schedule step
+        def loss_fn(y, target):
+            return y.sum()
+
+        # Apply DP to stage module
+        def apply_replicate(partial_model):
+            # apply replicate
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=MixedPrecisionParam,
+                reduce_dtype=torch.float32,
+            )
+            replicate_config = {"mp_policy": mp_policy}
+            for layer_id in range(len(partial_model)):
+                replicate(
+                    partial_model[layer_id],
+                    device_mesh=dp_mesh,
+                    **replicate_config,
+                    reshard_after_forward=False,
+                )
+            dp_model = replicate(partial_model, device_mesh=dp_mesh, **replicate_config)
+            return dp_model
+
+        # Apply same precision to reference model (without replicate)
+        def apply_same_precision(partial_model):
+            if MixedPrecisionParam != torch.float32:
+                # Cast to same precision as pipeline model
+                partial_model = partial_model.to(dtype=MixedPrecisionParam)
+            return partial_model
+
+        # Attach to a schedule
+        if issubclass(ScheduleClass, PipelineScheduleSingle):
+            stage_idx = pp_group.rank()
+            partial_model = nn.Sequential(
+                *full_model[stage_idx * 2 : stage_idx * 2 + 2]
+            )
+            partial_model.to(self.device)
+
+            dp_model = apply_replicate(partial_model)
+            pipeline_stage = PipelineStage(
+                dp_model,
+                stage_idx,
+                pp_group.size(),
+                self.device,
+                group=pp_group,
+            )
+            partial_models = [pipeline_stage.submod]
+            pipeline_schedule = ScheduleClass(
+                pipeline_stage,
+                n_microbatches=num_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+            )
+
+            ref_partial_model = nn.Sequential(
+                *ref_full_model[stage_idx * 2 : stage_idx * 2 + 2]
+            )
+            ref_partial_model.to(self.device)
+            ref_partial_model = apply_same_precision(
+                ref_partial_model
+            )  # Apply same precision
+
+            ref_pipeline_stage = PipelineStage(
+                ref_partial_model,
+                stage_idx,
+                pp_group.size(),
+                self.device,
+                group=pp_group,
+            )
+            ref_partial_models = [ref_pipeline_stage.submod]
+            ref_pipeline_schedule = ScheduleClass(
+                ref_pipeline_stage,
+                n_microbatches=num_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+            )
+        else:
+            n_virtual = 2
+            num_stages = pp_group.size() * n_virtual
+            stages = []
+            ref_stages = []
+            for i in range(n_virtual):
+                stage_idx = pp_group.rank() + n_virtual * i
+                # divide the model layers by the number of stages
+                partial_model = nn.Sequential(*full_model[stage_idx : stage_idx + 1])
+                partial_model.to(self.device)
+
+                dp_model = apply_replicate(partial_model)
+                stage = PipelineStage(
+                    dp_model,
+                    stage_idx,
+                    num_stages,
+                    self.device,
+                    group=pp_group,
+                )
+
+                stages.append(stage)
+                partial_models = [pipeline_stage.submod for pipeline_stage in stages]
+
+                ref_partial_model = nn.Sequential(
+                    *ref_full_model[stage_idx : stage_idx + 1]
+                )
+                ref_partial_model.to(self.device)
+                ref_partial_model = apply_same_precision(
+                    ref_partial_model
+                )  # Apply same precision
+
+                ref_stage = PipelineStage(
+                    ref_partial_model,
+                    stage_idx,
+                    num_stages,
+                    self.device,
+                    group=pp_group,
+                )
+
+                ref_stages.append(ref_stage)
+                ref_partial_models = [
+                    pipeline_stage.submod for pipeline_stage in ref_stages
+                ]
+            pipeline_schedule = ScheduleClass(
+                stages,
+                n_microbatches=num_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+            )
+
+            ref_pipeline_schedule = ScheduleClass(
+                ref_stages,
+                n_microbatches=num_microbatches,
+                loss_fn=loss_fn,
+                scale_grads=False,
+            )
+
+        optimizer_kwargs = {
+            "lr": 0.01,
+            "betas": (0.9, 0.95),
+            "weight_decay": 0.1,
+            "fused": False,
+            "foreach": True,
+        }
+
+        optimizers = [
+            torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
+            for model in partial_models
+        ]
+
+        ref_optimizers = [
+            torch.optim.AdamW(model.parameters(), **optimizer_kwargs)
+            for model in ref_partial_models
+        ]
+
+        for train_step in range(5):
+            for optimizer in optimizers:
+                optimizer.zero_grad()
+            for ref_optimizer in ref_optimizers:
+                ref_optimizer.zero_grad()
+
+            inputs = torch.rand(
+                (num_microbatches, dim), device=self.device, dtype=MixedPrecisionParam
+            )
+            labels = torch.rand(
+                (num_microbatches, dim), device=self.device, dtype=MixedPrecisionParam
+            )
+            is_last_stage = pp_mesh.get_local_rank() == pp_mesh.size() - 1
+            if pp_mesh.get_local_rank() == 0:
+                pipeline_schedule.step(inputs)
+                ref_pipeline_schedule.step(inputs)
+            elif is_last_stage:
+                losses = []
+                ref_losses = []
+                pipeline_schedule.step(target=labels, losses=losses)
+                ref_pipeline_schedule.step(target=labels, losses=ref_losses)
+
+                for loss, ref_loss in zip(losses, ref_losses):
+                    self.assertEqual(loss, ref_loss)
+            else:
+                pipeline_schedule.step()
+                ref_pipeline_schedule.step()
+
+            for optimizer in optimizers:
+                optimizer.step()
+            for ref_optimizer in ref_optimizers:
+                ref_optimizer.step()
 
         torch.distributed.destroy_process_group()
 

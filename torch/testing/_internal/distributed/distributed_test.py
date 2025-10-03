@@ -707,7 +707,7 @@ class DistributedTest:
                 self.assertNotEqual(args.get("dtype", ""), "")
 
                 per_coll_meta[collname].append(args)
-                if collname in {"wait"}:
+                if collname == "wait":
                     continue
 
                 self.assertEqual(args["Process Group Description"], "default_pg")
@@ -858,8 +858,6 @@ class DistributedTest:
                 with exception_ctx:
                     dist.barrier(group_id)
                 self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.1)
-            else:
-                pass
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports timeouts"
@@ -7029,7 +7027,7 @@ class DistributedTest:
                 self.assertNotEqual(attrs.get("dtype", ""), "")
 
                 per_coll_meta[collname].append(attrs)
-                if collname in {"wait"}:
+                if collname == "wait":
                     continue
 
                 self.assertEqual(attrs["pg_name"], "0")  # yes this is a string

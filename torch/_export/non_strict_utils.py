@@ -6,9 +6,9 @@ import inspect
 import logging
 import math
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree

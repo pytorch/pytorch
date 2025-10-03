@@ -27,9 +27,9 @@ import contextlib
 import functools
 import types
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
