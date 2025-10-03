@@ -1322,6 +1322,35 @@ from user code:
             post_munge=post_munge,
         )
 
+    # Test that the bytecode source attribution is correct with VariableTracker
+    @torch._dynamo.config.patch(verbose=True)
+    @make_logging_test(bytecode=True)
+    def test_variable_tracker_source_attribution(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            y = x + 1
+            z = x + y
+            return z
+
+        fn(torch.ones(3))
+
+        self.assertExpectedInline(
+            munge_exc(records[-1].getMessage(), skip=0),
+            """
+TRACE RESUME 0 []
+TRACE LOAD_FAST x []
+TRACE LOAD_CONST 1 [LazyVariableTracker()]
+TRACE BINARY_OP 0 [LazyVariableTracker(), ConstantVariable(int: 1)]
+TRACE STORE_FAST y [TensorVariable()]
+TRACE LOAD_FAST x []
+TRACE LOAD_FAST y [TensorVariable()]
+TRACE BINARY_OP 0 [TensorVariable(), TensorVariable()]
+TRACE STORE_FAST z [TensorVariable()]
+TRACE LOAD_FAST z []
+TRACE RETURN_VALUE None [TensorVariable()]
+""",
+        )
+
     # Test that errors while tracing resume function prologues do not get suppressed
     def test_graph_break_in_buggy_resume_prologue(self):
         import torch._dynamo.bytecode_transformation as bt
