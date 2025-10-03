@@ -37,18 +37,20 @@ struct dummy_int1_7_t {};
 // AT_FORALL_SCALAR_TYPES / AT_FORALL_SCALAR_TYPES_AND macros below, which are
 // designed to behave similarly to the Dispatch macros with the same name.
 //
-// For adding a new dtype: In the beginning, we had an idea that there was a
-// list of all scalar types, and you could use AT_FORALL_SCALAR_TYPES to
-// iterate over them.  But over the years we added weird types which couldn't
-// be handled uniformly everywhere and so in the end we ended up with some
-// mish-mosh of some helper macros, but mostly use sites making a call about
-// what dtypes they can or can't support.  So if you want to add a new dtype,
-// the preferred resolution is to find a dtype similar to what you want,
-// grep for it and edit all the sites you find this way.  If you need to add
-// a completely new kind of dtype, you're going to have to laboriously audit
-// all of the sites everywhere to figure out how it should work.  Consulting
-// some old PRs where we added new dtypes (check history of this file) can
-// help give you an idea where to start.
+// For adding a new dtype: In the beginning, we had an idea that there
+// was a list of all scalar types, and you could use
+// AT_FORALL_SCALAR_TYPES to iterate over them.  But over the years we
+// added weird types which couldn't be handled uniformly everywhere
+// and so in the end we ended up with some mish-mosh of some helper
+// macros, but mostly use sites making a call about what dtypes they
+// can or can't support.  So if you want to add a new dtype, the
+// preferred resolution is to find a dtype similar to what you want,
+// grep for it and edit all the sites you find this way.  If you need
+// to add a completely new kind of dtype, you're going to have to
+// laboriously audit all of the sites everywhere to figure out how it
+// should work.  Consulting some old PRs where we added new dtypes
+// (check history of this and c10/core/ScalarType.h files) can help
+// give you an idea where to start.
 
 // If you want to support ComplexHalf for real, add ComplexHalf
 // into this macro (and change the name).  But beware: convert()
@@ -285,6 +287,28 @@ inline std::ostream& operator<<(
     at::ScalarType scalar_type) {
   return stream << toString(scalar_type);
 }
+
+namespace impl {
+
+// These are used to map ScalarTypes to C++ types.
+
+template <c10::ScalarType N>
+struct ScalarTypeToCPPType;
+
+#define SPECIALIZE_ScalarTypeToCPPType(cpp_type, scalar_type) \
+  template <>                                                 \
+  struct ScalarTypeToCPPType<c10::ScalarType::scalar_type> {  \
+    using type = cpp_type;                                    \
+  };
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
+
+#undef SPECIALIZE_ScalarTypeToCPPType
+
+template <c10::ScalarType N>
+using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
+
+} // namespace impl
 
 } // namespace c10
 
