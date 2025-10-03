@@ -1808,7 +1808,7 @@ std::optional<c10::ScalarType> out_dtype) {
 #ifndef USE_ROCM
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
 #else
-    at::hip::detail::bf16bf16_grouped_mm_ck(mat_a, mat_b, offs, bias, out);
+    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
 #endif
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);

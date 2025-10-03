@@ -7,7 +7,7 @@
 namespace at {
 namespace hip {
 namespace detail {
-void bf16bf16_grouped_mm_ck(
+void group_gemm_ck(
     const at::Tensor& mat_a,
     const at::Tensor& mat_b,
     const std::optional<at::Tensor>& offs,
