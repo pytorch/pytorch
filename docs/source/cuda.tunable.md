@@ -69,14 +69,6 @@
 ```
 
 ```{eval-rst}
-.. autofunction:: write_file_on_exit
-```
-
-```{eval-rst}
-.. autofunction:: write_file
-```
-
-```{eval-rst}
 .. autofunction:: read_file
 ```
 
