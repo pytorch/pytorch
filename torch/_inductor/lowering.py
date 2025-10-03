@@ -7226,6 +7226,62 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
 
 
+# Import the control_deps_op HOP for lowering
+from torch._inductor.fx_passes.control_dependencies import control_deps
+
+
+@register_lowering(control_deps, type_promotion_kind=None)
+def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
+    """
+    Lower control_deps_op by ensuring dependencies are realized and tracking them.
+
+    The control_deps_op HOP makes dependencies explicit in the graph. During lowering:
+    1. Realize all additional dependencies to ensure they're computed
+    2. Execute the target operation normally
+    3. Track the dependencies for the scheduler
+    """
+    # Realize all additional dependencies
+    dep_names = []
+    for dep in additional_deps:
+        if not isinstance(dep, IRNode):
+            continue
+
+        dep.realize()
+        dep_names.append(dep.get_name())
+
+    original_args = V.graph.current_node.args
+    arg_offset = 2  # first two args (additional_deps, subgraph)
+    assert len(args) + arg_offset == len(original_args)
+
+    output = None
+
+    assert len(subgraph_fn.graph_module.graph.find_nodes(op="placeholder")) == len(args)
+    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
+        if node.op == "placeholder":
+            V.graph.env[node] = args[i]
+            continue
+        elif node.op == "output":
+            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
+        else:
+            V.graph.env[node] = V.graph.run_node(node)
+
+    assert output is not None and additional_deps
+    output_list = output if isinstance(output, (list, tuple)) else [output]
+
+    for out in output_list:
+        if not isinstance(out, IRNode):
+            continue
+
+        # need to realize in order to add the dep
+        out.realize()
+        out_name = out.get_name()
+        for dep_name in dep_names:
+            V.graph.additional_buffer_deps[out_name].add(dep_name)
+
+    return output
+
+
 @register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)
 def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
     output = None

@@ -385,6 +385,9 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.device_idxs if const_module else OrderedSet()
         )
         self.device_type = "cpu"
+        self.additional_buffer_deps: dict[str, OrderedSet[str]] = defaultdict(
+            OrderedSet
+        )
 
         # Inplace padding may require Inductor to allocate slightly larger
         # tensor for padding.
