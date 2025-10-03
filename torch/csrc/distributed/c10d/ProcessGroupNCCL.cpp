@@ -1429,7 +1429,7 @@ bool ProcessGroupNCCL::abortComms(
 void ProcessGroupNCCL::dumpExtraDebuggingInfo() {
   // This extra dump is intended to capture the current snapshot of collectives
   // When this process group is terminated for some exception out of NCCL
-  bool dumpExtraOnExec_ = getCvarBool(TORCH_NCCL_EXTRA_DUMP_ON_EXEC, true);
+  bool dumpExtraOnExec_ = getCvarBool(TORCH_NCCL_EXTRA_DUMP_ON_EXEC, false);
   if (dumpExtraOnExec_) {
     bool should_dump_local = false;
     bool succeded = shouldDump_.compare_exchange_strong(should_dump_local, true, std::memory_order_release, std::memory_order_acquire);
