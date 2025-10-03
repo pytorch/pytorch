@@ -274,12 +274,16 @@ void set_grad_accumulator(
       std::move(grad_accumulator);
 }
 
-std::shared_ptr<Node> try_get_grad_accumulator(const Variable& self) {
+std::shared_ptr<Node> try_get_grad_accumulator(const at::TensorBase& self) {
   if (get_autograd_meta(self)) {
     return get_autograd_meta(self)->grad_accumulator_.lock();
   } else {
     return nullptr;
   }
+}
+
+std::shared_ptr<Node> try_get_grad_accumulator(const Variable& self) {
+  return try_get_grad_accumulator(get_tensor_base(self));
 }
 
 std::shared_ptr<Node> grad_accumulator(const Variable& self) {
@@ -713,7 +717,8 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
             self.sym_sizes(), // Note: sizes(), not base_.sizes(), is
                               // intentional
             self.unsafeGetTensorImpl()->is_python_dispatch(),
-            self.is_nested());
+            self.is_nested(),
+            self.grad_dtype());
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);
@@ -907,6 +912,21 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
   return std::make_unique<ChainedViewFunc>(
       first->clone_and_set(first_symints, first_tensors),
       second->clone_and_set(second_symints, second_tensors));
+}
+
+std::optional<c10::ScalarType> VariableHooks::grad_dtype(
+    const at::TensorBase& self) const {
+  if (auto* meta = impl::get_autograd_meta(self)) {
+    return meta->grad_dtype(self);
+  }
+  return self.scalar_type();
+}
+
+void VariableHooks::set_grad_dtype(
+    const at::TensorBase& self,
+    const std::optional<c10::ScalarType>& grad_dtype) const {
+  auto* meta = impl::materialize_autograd_meta(self);
+  meta->set_grad_dtype(grad_dtype, self);
 }
 
 } // namespace torch::autograd
