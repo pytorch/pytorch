@@ -84,7 +84,7 @@ def _explicit_order_placements(
             for mesh_dim in mesh_dims:
                 device_order[mesh_dim] = current_order
                 current_order += 1
-        for idx, val in enumerate(ordered):
+        for idx, val in enumerate(device_order):
             if val == -1:
                 device_order[idx] = current_order
                 current_order += 1
