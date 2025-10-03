@@ -156,7 +156,7 @@ static PyMethodDef THCPStream_methods[] = {
     {"__eq__", THCPStream_eq, METH_O, nullptr},
     {nullptr}};
 
-PyTypeObject THCPStreamType = {
+static PyTypeObject THCPStreamType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._CudaStreamBase", /* tp_name */
     sizeof(THCPStream), /* tp_basicsize */

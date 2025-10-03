@@ -124,7 +124,7 @@ cudnnBatchNormMode_t getCudnnBatchNormMode(
 size_t _get_cudnn_batch_norm_reserve_space_size(
     const Tensor& input_t,
     bool training) {
-  size_t reserve_size;
+  size_t reserve_size = 0;
   TensorArg input{input_t, "input", 1};
   TensorDescriptor idesc{*input, 4};
   auto handle = getCudnnHandle();
@@ -207,7 +207,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(
 
   if (training) {
     auto op = CUDNN_BATCHNORM_OPS_BN;
-    size_t workspace_size;
+    size_t workspace_size = 0;
     AT_CUDNN_CHECK(cudnnGetBatchNormalizationForwardTrainingExWorkspaceSize(
         handle,
         mode,
@@ -391,7 +391,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 
   auto op = CUDNN_BATCHNORM_OPS_BN;
 
-  size_t workspace_size;
+  size_t workspace_size = 0;
   AT_CUDNN_CHECK(cudnnGetBatchNormalizationBackwardExWorkspaceSize(
       handle,
       mode,

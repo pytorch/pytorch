@@ -13,6 +13,8 @@
 #else
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addmv_native.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/copy_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/mul.h>

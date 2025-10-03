@@ -25,19 +25,19 @@
 #define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
 
-ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
+static ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
   return reinterpret_cast<ncclComm_t*>(var);
 }
 
-ncclComm_t to_nccl_comm(torch::cuda::nccl::ncclComm_t var) {
+static ncclComm_t to_nccl_comm(torch::cuda::nccl::ncclComm_t var) {
   return reinterpret_cast<ncclComm_t>(var);
 }
 
-ncclUniqueId* to_nccl_unique_id(torch::cuda::nccl::ncclUniqueId* var) {
+static ncclUniqueId* to_nccl_unique_id(torch::cuda::nccl::ncclUniqueId* var) {
   return reinterpret_cast<ncclUniqueId*>(var);
 }
 
-ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
+static ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
   switch (var) {
     case torch::cuda::nccl::ncclResult::Success:
       return ncclResult_t::ncclSuccess;
@@ -66,7 +66,7 @@ ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
   }
 }
 
-torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
+static torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
   switch (var) {
     case ncclSuccess:
       return torch::cuda::nccl::ncclResult::Success;
@@ -95,7 +95,7 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
   }
 }
 
-ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
+static ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
   switch (type) {
     case at::kFloat:
       return ncclDataType_t::ncclFloat;
@@ -135,7 +135,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
   }
 }
 
-ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
+static ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
   if (!t.is_cuda()) {
     TORCH_CHECK(
         false,
@@ -145,7 +145,7 @@ ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
   return to_nccl_data_type(t.scalar_type());
 }
 
-ncclRedOp_t to_nccl_red_op(int var) {
+static ncclRedOp_t to_nccl_red_op(int var) {
   return (ncclRedOp_t)(var);
 }
 
@@ -160,7 +160,7 @@ static void NCCL_CHECK(ncclResult_t result) {
 }
 
 // TODO(eqy): can this duplication be avoided from NCCLUtils.cpp?
-bool nccl_use_nonblocking() {
+static bool nccl_use_nonblocking() {
   static bool nccl_use_nonblocking_ =
       c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
   if (nccl_use_nonblocking_) {
@@ -385,7 +385,7 @@ void check_inputs(
   }
 }
 
-void check_inputs(
+static void check_inputs(
     TensorList inputs,
     const at::Tensor& output,
     int root,

@@ -131,11 +131,10 @@ void spatial_dilated_max_pooling3d(
       auto* oData = qyd + batch_idx * oC * oT * oH * oW;
 
       // Handle each Channel
-      int64_t time, row, col;
       const T* i_p = iData + channel_idx * iT * iW * iH;
-      for (time = 0; time < oT; ++time) {
-        for (row = 0; row < oH; ++row) {
-          for (col = 0; col < oW; ++col) {
+      for (int64_t time = 0; time < oT; ++time) {
+        for (int64_t row = 0; row < oH; ++row) {
+          for (int64_t col = 0; col < oW; ++col) {
             // Handle each output element
             int64_t t_start = time * sT - pT;
             int64_t h_start = row * sH - pH;

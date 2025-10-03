@@ -20,6 +20,7 @@ hipError_t hipReturnSuccess() {
 } // namespace
 #endif
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void initCudartBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 

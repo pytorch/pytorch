@@ -2464,7 +2464,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      .declare_static_shape(pivots_->sizes(), /*squash_dims=*/pivots_->dim() - 1)
+      .declare_static_shape(pivots_->sizes(), /*squash_dim=*/pivots_->dim() - 1)
       .add_output(perm)
       .add_const_input(*pivots_)
       .build();

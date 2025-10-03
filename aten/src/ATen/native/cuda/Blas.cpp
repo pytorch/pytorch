@@ -34,6 +34,8 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
+#include <ATen/ops/_int_mm_native.h>
+#include <ATen/ops/_scaled_grouped_mm_native.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
 #include <ATen/ops/abs.h>
@@ -60,7 +62,7 @@ namespace at::native {
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
-c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
+static c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
   IntArrayRef tensor_strides = tensor.strides();
   c10::MaybeOwned<Tensor> tensor_;
   int fast_dim = transpose_result ? 2 : 1;

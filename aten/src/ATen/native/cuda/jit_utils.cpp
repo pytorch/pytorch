@@ -44,7 +44,7 @@ namespace at::cuda::jit {
 // integral_constant, is_same, is_integral, enable_if, is_floating_point, is_arithmetic.
 // Copied from aten/src/ATen/cuda/llvm_basic.cpp, then modified as above.
 // If not compiling for ROCm, return the original get_traits_string().
-std::string get_traits_string_but_hiprtc_safe() {
+static std::string get_traits_string_but_hiprtc_safe() {
 #if defined(USE_ROCM) && HIP_VERSION_MAJOR < 7
     return R"ESCAPE(
 namespace std {
@@ -853,13 +853,13 @@ static std::string unhipify_math_functions(const std::string &original) {
 // TODO: refactor codegenOutputQuery into its own file
 //   that can be included by both files
 // See NOTE [ USE OF NVRTC AND DRIVER API ]
-const at::cuda::NVRTC& nvrtc() {
+static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
 // query codegen output arch and target
 // TODO refactor so this function is usable both from jit and from aten
-void codegenOutputQuery(
+static void codegenOutputQuery(
     const cudaDeviceProp* const prop,
     int& cuda_major,
     int& cuda_minor,
@@ -1277,7 +1277,7 @@ std::string generate_code(
 }
 
 // Creates directories recursively
-bool _r_mkdir(const std::string& dir) {
+static bool _r_mkdir(const std::string& dir) {
   // Check if current dir exists
   const char* p_dir = dir.c_str();
   const bool dir_exists = (access(p_dir, F_OK) == 0);
@@ -1317,7 +1317,7 @@ bool _r_mkdir(const std::string& dir) {
 }
 
 // Creates directories recursively assuming that base exists
-bool r_mkdir_with_base(std::string& base, std::string& dir){
+static bool r_mkdir_with_base(std::string& base, std::string& dir){
   const char* p_base = base.c_str();
   const bool base_exists = (access(p_base, F_OK) == 0);
   if (!base_exists) {
@@ -1336,7 +1336,7 @@ bool r_mkdir_with_base(std::string& base, std::string& dir){
 
 }
 
-std::string load_code_template(const std::string& path) {
+static std::string load_code_template(const std::string& path) {
   std::ifstream ifs{path};
   std::string s{
     std::istreambuf_iterator<char>(ifs),
@@ -1438,7 +1438,7 @@ std::string generate_reduction_code(
 }
 
 // Acquires (possibly creating) the kernel cache directory
-std::optional<std::string> get_cache_dir() {
+static std::optional<std::string> get_cache_dir() {
   // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
   const char* uptkc = std::getenv("USE_PYTORCH_KERNEL_CACHE");
   const bool use_kernel_cache = (uptkc == nullptr) ? true : std::strcmp(uptkc, "0");
@@ -1576,7 +1576,7 @@ NvrtcFunction jit_pwise_function(
   // Just-in-time compiles the program
 
   // Creates the NVRTC program
-  nvrtcProgram program;
+  nvrtcProgram program = nullptr;
   AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcCreateProgram(
       &program, code.c_str(), nullptr, 0, nullptr, nullptr));
 
@@ -1611,7 +1611,7 @@ NvrtcFunction jit_pwise_function(
 
   // Throws an error on compilation failure
   if (compilation_result != NVRTC_SUCCESS) {
-    size_t logsize;
+    size_t logsize = 0;
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
     std::string log(logsize, '\0');
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, &log[0]));

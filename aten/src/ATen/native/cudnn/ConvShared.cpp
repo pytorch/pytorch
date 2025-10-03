@@ -206,7 +206,7 @@ std::string repro_from_args(const ConvolutionParams& params) {
 //
 // ---------------------------------------------------------------------
 
-void cudnn_convolution_forward_out(
+static void cudnn_convolution_forward_out(
     TensorArg& output,
     CheckedFrom c,
     const TensorArg& input,
@@ -310,7 +310,7 @@ at::Tensor& cudnn_convolution_out(
 }
 
 // NB: output_padding not needed here, as there is no ambiguity to resolve
-Tensor cudnn_convolution_transpose_backward_input(
+static Tensor cudnn_convolution_transpose_backward_input(
     const Tensor& grad_output_t,
     const Tensor& weight_t,
     IntArrayRef padding,
@@ -366,7 +366,7 @@ Tensor cudnn_convolution_transpose_backward_input(
 // output_padding parameter.  Both of these interfaces are equivalent,
 // but they are differently convenient depending on the use case.
 
-Tensor cudnn_convolution_backward_input(
+static Tensor cudnn_convolution_backward_input(
     CheckedFrom c,
     IntArrayRef input_size,
     const TensorArg& grad_output,
@@ -408,7 +408,7 @@ Tensor cudnn_convolution_backward_input(
   return *grad_input;
 }
 
-Tensor cudnn_convolution_transpose_forward(
+static Tensor cudnn_convolution_transpose_forward(
     CheckedFrom c,
     const TensorArg& grad_output,
     const TensorArg& weight,
@@ -442,7 +442,7 @@ Tensor cudnn_convolution_transpose_forward(
       allow_tf32);
 }
 
-Tensor cudnn_convolution_backward_input(
+static Tensor cudnn_convolution_backward_input(
     IntArrayRef input_size,
     const Tensor& grad_output_t,
     const Tensor& weight_t,
@@ -503,7 +503,7 @@ Tensor cudnn_convolution_transpose(
 //
 // ---------------------------------------------------------------------
 
-Tensor cudnn_convolution_backward_weight(
+static Tensor cudnn_convolution_backward_weight(
     CheckedFrom c,
     IntArrayRef weight_size,
     const Tensor& grad_output_t,
@@ -557,7 +557,7 @@ Tensor cudnn_convolution_backward_weight(
   return grad_weight_t;
 }
 
-Tensor cudnn_convolution_backward_weight(
+static Tensor cudnn_convolution_backward_weight(
     IntArrayRef weight_size,
     const Tensor& grad_output_t,
     const Tensor& input_t,
@@ -582,7 +582,7 @@ Tensor cudnn_convolution_backward_weight(
       allow_tf32);
 }
 
-std::tuple<at::Tensor, at::Tensor> cudnn_convolution_backward(
+static std::tuple<at::Tensor, at::Tensor> cudnn_convolution_backward(
     const at::Tensor& input,
     const at::Tensor& grad_output_t,
     const at::Tensor& weight,
@@ -636,7 +636,7 @@ std::tuple<at::Tensor, at::Tensor> cudnn_convolution_backward(
   return std::tuple<Tensor, Tensor>{grad_input, grad_weight};
 }
 
-Tensor cudnn_convolution_transpose_backward_weight(
+static Tensor cudnn_convolution_transpose_backward_weight(
     IntArrayRef weight_size,
     const Tensor& grad_output_t,
     const Tensor& input_t,
@@ -661,7 +661,7 @@ Tensor cudnn_convolution_transpose_backward_weight(
       allow_tf32);
 }
 
-std::tuple<at::Tensor, at::Tensor> cudnn_convolution_transpose_backward(
+static std::tuple<at::Tensor, at::Tensor> cudnn_convolution_transpose_backward(
     const at::Tensor& input,
     const at::Tensor& grad_output_t,
     const at::Tensor& weight,

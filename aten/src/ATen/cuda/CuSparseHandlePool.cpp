@@ -35,7 +35,7 @@ cusparseHandle_t getCurrentCUDASparseHandle() {
   // This thread local unique_ptrs will be destroyed when the thread terminates,
   // releasing its reserved handles back to the pool.
   static auto pool = std::make_shared<CuSparsePoolType>();
-  thread_local std::unique_ptr<CuSparsePoolType::PoolWindow> myPoolWindow(
+  static thread_local std::unique_ptr<CuSparsePoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);

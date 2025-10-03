@@ -70,11 +70,7 @@ static PyObject* THPEvent_pynew(
 }
 
 PyObject* THPEvent_new(c10::DeviceType device_type, c10::EventFlag flag) {
-<<<<<<< HEAD
   auto type = &THPEventType;
-=======
-  auto type = (&THPEventType);
->>>>>>> 347957e693f (Fix clang-tidy readability checks)
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   TORCH_CHECK(self, "Failed to allocate memory for Event");
   auto self_ = reinterpret_cast<THPEvent*>(self.get());

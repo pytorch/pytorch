@@ -728,7 +728,7 @@ c10::intrusive_ptr<Backend> ProcessGroupGloo::split(
     const std::vector<int>& ranks,
     const c10::intrusive_ptr<Backend::Options>& opts) {
   auto it = std::find(ranks.begin(), ranks.end(), rank_);
-  int groupRank;
+  int groupRank = 0;
   if (it == ranks.end()) {
     return nullptr;
   } else {

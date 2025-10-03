@@ -11,7 +11,7 @@ namespace at::cuda::solver {
 template <>
 void getrf<double>(
     cusolverDnHandle_t handle, int m, int n, double* dA, int ldda, int* ipiv, int* info) {
-  int lwork;
+  int lwork = 0;
   TORCH_CUSOLVER_CHECK(
       cusolverDnDgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -23,7 +23,7 @@ void getrf<double>(
 template <>
 void getrf<float>(
     cusolverDnHandle_t handle, int m, int n, float* dA, int ldda, int* ipiv, int* info) {
-  int lwork;
+  int lwork = 0;
   TORCH_CUSOLVER_CHECK(
       cusolverDnSgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -41,7 +41,7 @@ void getrf<c10::complex<double>>(
     int ldda,
     int* ipiv,
     int* info) {
-  int lwork;
+  int lwork = 0;
   TORCH_CUSOLVER_CHECK(cusolverDnZgetrf_bufferSize(
       handle, m, n, reinterpret_cast<cuDoubleComplex*>(dA), ldda, &lwork));
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -66,7 +66,7 @@ void getrf<c10::complex<float>>(
     int ldda,
     int* ipiv,
     int* info) {
-  int lwork;
+  int lwork = 0;
   TORCH_CUSOLVER_CHECK(cusolverDnCgetrf_bufferSize(
       handle, m, n, reinterpret_cast<cuComplex*>(dA), ldda, &lwork));
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -380,7 +380,7 @@ void gesvdjBatched<float>(
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int m, int n, float* A, int lda, float* S, float* U,
     int ldu, float *V, int ldv, int *info, gesvdjInfo_t params, int batchSize
 ) {
-  int lwork;
+  int lwork = 0;
   TORCH_CUSOLVER_CHECK(cusolverDnSgesvdjBatched_bufferSize(handle, jobz, m, n, A, lda, S, U, ldu, V, ldv, &lwork, params, batchSize));
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -397,7 +397,7 @@ void gesvdjBatched<double>(
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int m, int n, double* A, int lda, double* S, double* U,
     int ldu, double *V, int ldv, int *info, gesvdjInfo_t params, int batchSize
 ) {
-  int lwork;
+  int lwork = 0;
   TORCH_CUSOLVER_CHECK(cusolverDnDgesvdjBatched_bufferSize(handle, jobz, m, n, A, lda, S, U, ldu, V, ldv, &lwork, params, batchSize));
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -414,7 +414,7 @@ void gesvdjBatched<c10::complex<float>>(
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int m, int n, c10::complex<float>* A, int lda, float* S, c10::complex<float>* U,
     int ldu, c10::complex<float> *V, int ldv, int *info, gesvdjInfo_t params, int batchSize
 ) {
-  int lwork;
+  int lwork = 0;
   TORCH_CUSOLVER_CHECK(cusolverDnCgesvdjBatched_bufferSize(
     handle, jobz, m, n,
     reinterpret_cast<cuComplex*>(A),
@@ -444,7 +444,7 @@ void gesvdjBatched<c10::complex<double>>(
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int m, int n, c10::complex<double>* A, int lda, double* S, c10::complex<double>* U,
     int ldu, c10::complex<double> *V, int ldv, int *info, gesvdjInfo_t params, int batchSize
 ) {
-  int lwork;
+  int lwork = 0;
   TORCH_CUSOLVER_CHECK(cusolverDnZgesvdjBatched_bufferSize(
     handle, jobz, m, n,
     reinterpret_cast<cuDoubleComplex*>(A),

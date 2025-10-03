@@ -25,7 +25,7 @@
 
 // TODO: there is a table from input dtype and weight dtype to operator qdtype,
 // we can derive the operator dtype based on input dtype
-cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, c10::IntArrayRef padding, c10::IntArrayRef stride, c10::IntArrayRef dilation) {
+static cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, c10::IntArrayRef padding, c10::IntArrayRef stride, c10::IntArrayRef dilation) {
   int64_t convDim = static_cast<int64_t>(stride.size());
   return cudnn_frontend::ConvDescBuilder()
     .setDataType(dataType)

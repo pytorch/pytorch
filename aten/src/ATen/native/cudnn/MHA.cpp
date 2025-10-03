@@ -148,7 +148,7 @@ constexpr uint8_t MAX_MHA_DIM = 4;
 
 // Whether we will use ragged offsets in the dense (non-nested) path
 // to avoid recompilation
-bool use_ragged_in_dense(
+static bool use_ragged_in_dense(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
@@ -182,7 +182,7 @@ bool use_ragged_in_dense(
   return all_bshd;
 }
 
-int roundup_power2(int dim) {
+static int roundup_power2(int dim) {
   if (!dim) {
     return 1;
   }
@@ -222,7 +222,7 @@ struct MHAParams {
   bool use_ragged;
 };
 
-void setMHAParams(
+static void setMHAParams(
     MHAParams& params,
     int64_t b,
     int64_t h,

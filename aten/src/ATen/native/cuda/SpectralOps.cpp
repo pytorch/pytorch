@@ -303,7 +303,7 @@ Tensor& _fft_apply_normalization_out(Tensor& out, const Tensor& self, int64_t no
 }  // namespace (anonymous)
 
 // Use the optimized path to perform single R2C or C2R if transformation dim is supported by cuFFT
-bool use_optimized_cufft_path(IntArrayRef dim) {
+static bool use_optimized_cufft_path(IntArrayRef dim) {
   // For performance reason, when dim starts with (0, 1), do not use the optimized path.
   if (dim.size() > cufft_max_ndim || (
     dim.size() >= 2 && dim[0] == 0 && dim[1] == 1

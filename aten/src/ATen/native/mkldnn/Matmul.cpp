@@ -129,7 +129,7 @@ static bool use_mkldnn_tf32_matmul() {
 // - strides: Memory layout
 // - data: data pointer
 template <typename scalar_t>
-inline ideep::tensor make_ideep_tensor(
+static inline ideep::tensor make_ideep_tensor(
     std::vector<int64_t> dims,
     ideep::tensor::data_type idtype,
     ideep::tensor::dims& strides,
@@ -211,7 +211,7 @@ mkldnn_gemm(
 }
 
 template<typename scalar_t>
-inline typename std::enable_if_t<
+static inline typename std::enable_if_t<
     std::is_same_v<scalar_t, c10::BFloat16>,
     bool>
 mkldnn_gemm(

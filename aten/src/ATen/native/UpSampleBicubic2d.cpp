@@ -141,17 +141,17 @@ void upsample_bicubic2d_backward_out_frame(
         for (const auto output_x : c10::irange(output_width)) {
 
           const opmath_t real_x = area_pixel_compute_source_index(width_scale, output_x, align_corners, /*cubic=*/true);
-          int64_t input_x;
+          int64_t input_x = 0;
           opmath_t t_x;
           guard_index_and_lambda(real_x, input_width, input_x, t_x);
 
           const opmath_t real_y = area_pixel_compute_source_index(height_scale, output_y, align_corners, /*cubic=*/true);
-          int64_t input_y;
+          int64_t input_y = 0;
           opmath_t t_y;
           guard_index_and_lambda(real_y, input_height, input_y, t_y);
 
-          std::array<opmath_t, 4> x_coeffs;
-          std::array<opmath_t, 4> y_coeffs;
+          std::array<opmath_t, 4> x_coeffs{};
+          std::array<opmath_t, 4> y_coeffs{};
 
           get_cubic_upsample_coefficients<opmath_t>(x_coeffs.data(), t_x);
           get_cubic_upsample_coefficients<opmath_t>(y_coeffs.data(), t_y);

@@ -983,8 +983,8 @@ const std::vector<PyThreadState*> PythonTracer::interpreterThreads() const {
 static PyObject* py_gc_callback = nullptr;
 // The C function to be called by Python's GC
 PyObject* PythonTracer::gc_event_callback(PyObject* self, PyObject* args) {
-  const char* phase;
-  PyObject* info;
+  const char* phase = nullptr;
+  PyObject* info = nullptr;
   if (!PyArg_ParseTuple(args, "sO", &phase, &info)) {
     return nullptr;
   }

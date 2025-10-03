@@ -54,7 +54,7 @@ cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type) {
   }
 }
 
-cusparseDnMatDescr_t createRawDnMatDescriptor(const Tensor& input, int64_t batch_offset, bool is_const=false) {
+static cusparseDnMatDescr_t createRawDnMatDescriptor(const Tensor& input, int64_t batch_offset, bool is_const=false) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.layout() == kStrided);
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();

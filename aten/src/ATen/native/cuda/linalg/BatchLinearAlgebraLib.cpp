@@ -391,7 +391,7 @@ static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Te
   int econ = full_matrices ? 0 : 1;
 
   // gesvdj_params controls the numerical accuracy of cusolver gesvdj iterations on GPU
-  gesvdjInfo_t gesvdj_params;
+  gesvdjInfo_t gesvdj_params = nullptr;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
 
   // Todo: expose the following two parameters to users
@@ -467,7 +467,7 @@ static void apply_svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, c
                         "m = ", m, " n = ", n);
 
   // gesvdj_params controls the numerical accuracy of cusolver gesvdj iterations on GPU
-  gesvdjInfo_t gesvdj_params;
+  gesvdjInfo_t gesvdj_params = nullptr;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
 
   // Todo: expose the following two parameters to users
@@ -601,7 +601,7 @@ static void svd_cusolver_gesvdaStridedBatched(
 // If not converged, return a vector that contains indices of the non-converging batches.
 // If the returned vector is empty, all the matrices are converged.
 // This function will cause a device-host sync.
-std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_converging_info) {
+static std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_converging_info) {
   at::Tensor infos_cpu = infos.cpu();
   auto infos_cpu_data = infos_cpu.data_ptr<int>();
 
@@ -628,7 +628,7 @@ std::vector<int64_t> _check_gesvdj_convergence(const Tensor& infos, int64_t non_
 // format the non-converging batches string as either (no leading or trailing whitespaces)
 // batches 2, 3, 5  // or
 // batches 2, 3, 5, 7, 11 and other 65535 batches
-std::string _format_non_converging_batches(const std::vector<int64_t>& batches) {
+static std::string _format_non_converging_batches(const std::vector<int64_t>& batches) {
   std::stringstream ss;
   const int too_long = 5;
 
@@ -732,9 +732,9 @@ static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_working_copy
   int* infos_ptr = infos.data_ptr<int>();
 
 #ifdef USE_CUSOLVER_64_BIT
-  size_t worksize_device;
-  size_t worksize_host;
-  cusolverDnParams_t params;
+  size_t worksize_device = 0;
+  size_t worksize_host = 0;
+  cusolverDnParams_t params = nullptr;
   cudaDataType datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
   TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
   at::cuda::solver::xpotrf_buffersize(handle, params, uplo, n, datatype, nullptr, lda, datatype, &worksize_device, &worksize_host);
@@ -841,7 +841,7 @@ static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tenso
   int* infos_ptr = infos.data_ptr<int>();
 
 #ifdef USE_CUSOLVER_64_BIT
-  cusolverDnParams_t params;
+  cusolverDnParams_t params = nullptr;
   cudaDataType datatype = at::cuda::solver::get_cusolver_datatype<scalar_t>();
   TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
 
@@ -935,7 +935,7 @@ Tensor _cholesky_solve_helper_cuda_cusolver(const Tensor& self, const Tensor& A,
 }
 
 
-void _cholesky_inverse_cusolver_potrs_based(Tensor& result, Tensor& infos, bool upper) {
+static void _cholesky_inverse_cusolver_potrs_based(Tensor& result, Tensor& infos, bool upper) {
   at::Tensor input_working_copy = cloneBatchedColumnMajor(result);
   at::Tensor infos_gpu = at::zeros({1}, result.options().dtype(at::kInt));
   result.fill_(0);
@@ -986,8 +986,8 @@ static void apply_geqrf(const Tensor& A, const Tensor& tau) {
 
   // get the optimal work size and allocate workspace tensor
 #ifdef USE_CUSOLVER_64_BIT
-  size_t worksize_device; // workspaceInBytesOnDevice
-  size_t worksize_host; // workspaceInBytesOnHost
+  size_t worksize_device = 0; // workspaceInBytesOnDevice
+  size_t worksize_host = 0; // workspaceInBytesOnHost
   cusolverDnParams_t params = NULL; // use default algorithm (currently it's the only option)
   at::cuda::solver::xgeqrf_bufferSize<scalar_t>(
       at::cuda::getCurrentCUDASolverDnHandle(),
@@ -1097,7 +1097,7 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   auto ldc = std::max<int>(1, m);
 
   // get the optimal work size and allocate workspace tensor
-  int lwork;
+  int lwork = 0;
   at::cuda::solver::ormqr_bufferSize<scalar_t>(
     at::cuda::getCurrentCUDASolverDnHandle(), side, trans, m, n, k, input_data, lda, tau_data, other_data, ldc, &lwork);
 
@@ -1175,7 +1175,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau) {
   }
 
   // get the optimal work size and allocate workspace tensor
-  int lwork;
+  int lwork = 0;
   at::cuda::solver::orgqr_buffersize<scalar_t>(
     at::cuda::getCurrentCUDASolverDnHandle(), m, n, k, self_data, lda, tau_data, &lwork);
 
@@ -1344,8 +1344,8 @@ static void apply_syevd(const Tensor& values, const Tensor& vectors, const Tenso
 
   // get the optimal work size and allocate workspace tensor
 #ifdef USE_CUSOLVER_64_BIT
-  size_t worksize_device; // workspaceInBytesOnDevice
-  size_t worksize_host; // workspaceInBytesOnHost
+  size_t worksize_device = 0; // workspaceInBytesOnDevice
+  size_t worksize_host = 0; // workspaceInBytesOnHost
   cusolverDnParams_t params = NULL; // use default algorithm (currently it's the only option)
   at::cuda::solver::xsyevd_bufferSize<scalar_t>(
       at::cuda::getCurrentCUDASolverDnHandle(),
@@ -1435,11 +1435,11 @@ static void apply_syevj(const Tensor& values, const Tensor& vectors, const Tenso
   // cuSOLVER documentations says: "15 sweeps are good enough to converge to machine accuracy"
   // LAPACK has SVD routine based on similar Jacobi algorithm (gesvj) and there a maximum of 30 iterations is set
   // Let's use the default values for now
-  syevjInfo_t syevj_params;
+  syevjInfo_t syevj_params = nullptr;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateSyevjInfo(&syevj_params));
 
   // get the optimal work size and allocate workspace tensor
-  int lwork;
+  int lwork = 0;
   at::cuda::solver::syevj_bufferSize<scalar_t>(
       at::cuda::getCurrentCUDASolverDnHandle(), jobz, uplo, n, vectors_data, lda, values_data, &lwork, syevj_params);
 
@@ -1530,14 +1530,14 @@ static void apply_syevj_batched(const Tensor& values, const Tensor& vectors, con
 
 #else
 
-  cusolverDnParams_t syev_params;
+  cusolverDnParams_t syev_params = nullptr;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&syev_params));
 
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
   // get the optimal work size and allocate workspace tensor
-  size_t worksize_device;
-  size_t worksize_host;
+  size_t worksize_device = 0;
+  size_t worksize_host = 0;
 
   at::cuda::solver::xsyevBatched_bufferSize<scalar_t>(
       handle,

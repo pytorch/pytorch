@@ -35,7 +35,7 @@ std::string cuGDSFileGetErrorString(T status) {
 }
 } // namespace
 
-void gds_load_storage(
+static void gds_load_storage(
     int64_t handle,
     const at::Storage& storage,
     off_t offset) {
@@ -51,7 +51,7 @@ void gds_load_storage(
   TORCH_CHECK(ret >= 0, "cuFileRead failed: ", cuGDSFileGetErrorString(ret));
 }
 
-void gds_save_storage(
+static void gds_save_storage(
     int64_t handle,
     const at::Storage& storage,
     off_t offset) {
@@ -67,7 +67,7 @@ void gds_save_storage(
   TORCH_CHECK(ret >= 0, "cuFileWrite failed: ", cuGDSFileGetErrorString(ret));
 }
 
-void gds_register_buffer(const at::Storage& storage) {
+static void gds_register_buffer(const at::Storage& storage) {
   void* dataPtr = storage.mutable_data();
   const size_t nbytes = storage.nbytes();
 
@@ -79,7 +79,7 @@ void gds_register_buffer(const at::Storage& storage) {
   return;
 }
 
-void gds_deregister_buffer(const at::Storage& storage) {
+static void gds_deregister_buffer(const at::Storage& storage) {
   void* dataPtr = storage.mutable_data();
   CUfileError_t status = cuFileBufDeregister(dataPtr);
   TORCH_CHECK(
@@ -89,7 +89,7 @@ void gds_deregister_buffer(const at::Storage& storage) {
   return;
 }
 
-int64_t gds_register_handle(int fd) {
+static int64_t gds_register_handle(int fd) {
   CUfileDescr_t cf_descr;
   CUfileHandle_t cf_handle{};
   memset((void*)&cf_descr, 0, sizeof(CUfileDescr_t));
@@ -107,7 +107,7 @@ int64_t gds_register_handle(int fd) {
   return reinterpret_cast<int64_t>(cf_handle);
 }
 
-void gds_deregister_handle(int64_t handle) {
+static void gds_deregister_handle(int64_t handle) {
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   CUfileHandle_t cf_handle = reinterpret_cast<CUfileHandle_t>(handle);
   cuFileHandleDeregister(cf_handle);

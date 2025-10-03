@@ -292,7 +292,7 @@ namespace {
               scalar_t iz = grid_ptr_NDHW[2 * grid_sCoor];
 
               // multipliers for gradients on ix, iy, and iz
-              scalar_t gix_mult, giy_mult, giz_mult;
+              scalar_t gix_mult{}, giy_mult{}, giz_mult{};
               ix = grid_sampler_compute_source_index_set_grad(ix, inp_W, padding_mode, align_corners, &gix_mult);
               iy = grid_sampler_compute_source_index_set_grad(iy, inp_H, padding_mode, align_corners, &giy_mult);
               iz = grid_sampler_compute_source_index_set_grad(iz, inp_D, padding_mode, align_corners, &giz_mult);

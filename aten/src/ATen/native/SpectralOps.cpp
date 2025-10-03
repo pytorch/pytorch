@@ -947,7 +947,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
   }
 
   const bool align_to_window = align_to_windowOpt.value_or(false);
-  int64_t n_frames;
+  int64_t n_frames = 0;
   if (!center && align_to_window) {
     // Calculate n_frames based on window length, since we are aligning start of window with t = 0.
     n_frames = 1 + (len - win_length) / hop_length;

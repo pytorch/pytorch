@@ -44,7 +44,8 @@ void NCCLComm::setUniqueHash(ncclUniqueId ncclId) {
   const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&ncclId);
 
   fmt::memory_buffer buf;
-  buf.reserve(static_cast<size_t>(NCCL_UNIQUE_ID_BYTES * 2)); // 2 hex chars per byte
+  buf.reserve(
+      static_cast<size_t>(NCCL_UNIQUE_ID_BYTES * 2)); // 2 hex chars per byte
   for (int i = 0; i < NCCL_UNIQUE_ID_BYTES; ++i) {
     fmt::format_to(
         std::back_inserter(buf), "{:02x}", static_cast<int>(bytes[i]));

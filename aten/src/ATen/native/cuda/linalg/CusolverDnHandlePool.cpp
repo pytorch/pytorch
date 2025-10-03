@@ -38,7 +38,7 @@ cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
   // This thread local unique_ptrs will be destroyed when the thread terminates,
   // releasing its reserved handles back to the pool.
   static auto pool = std::make_shared<CuSolverDnPoolType>();
-  thread_local std::unique_ptr<CuSolverDnPoolType::PoolWindow> myPoolWindow(
+  static thread_local std::unique_ptr<CuSolverDnPoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);

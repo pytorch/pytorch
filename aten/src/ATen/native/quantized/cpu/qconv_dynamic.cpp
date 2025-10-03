@@ -11,6 +11,7 @@
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <c10/util/irange.h>
+#include <math.h>
 #include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -29,7 +30,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_dynamic(
   TORCH_CHECK(
       fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
 
-  float x_min, x_max;
+  float x_min = NAN, x_max = NAN;
   fbgemm::FindMinMax(
       /*m=*/input.data_ptr<float>(),
       /*min=*/&x_min,

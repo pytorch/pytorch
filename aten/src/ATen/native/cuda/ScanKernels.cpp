@@ -88,7 +88,7 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   return _logcumsumexp_out_cuda(self, dim, result);
 }
 
-void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+static void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto result_ = contiguous_out_arg(result);
   launch_cumsum_cuda_kernel(*result_, self, dim);
   if (!result.is_same(*result_)) {
@@ -96,7 +96,7 @@ void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   }
 }
 
-void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+static void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   auto result_ = contiguous_out_arg(result);
   launch_cumprod_cuda_kernel(*result_, self, dim);
   if (!result.is_same(*result_)) {
