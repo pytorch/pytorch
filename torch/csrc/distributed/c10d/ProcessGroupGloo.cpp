@@ -559,7 +559,7 @@ c10::intrusive_ptr<ProcessGroupGloo::Options> ProcessGroupGloo::Options::
   // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
   auto ifnameEnv = c10::utils::get_env("GLOO_SOCKET_IFNAME");
   if (ifnameEnv && ifnameEnv->size() > 1) {
-    for (const auto& iface : ::c10d::split(',', ifnameEnv->c_str())) {
+    for (const auto& iface : ::c10d::split(',', *ifnameEnv)) {
       options->devices.push_back(
           ::c10d::ProcessGroupGloo::createDeviceForInterface(iface, lazyInit));
     }
@@ -1381,7 +1381,8 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     // Use single flat output tensor.
     // The first dimension corresponds to the index into outputs[N],
     // so copying into the actual output later is easy.
-    at::Tensor flatOutputTensor = newLikeFlat(outputs[0]);
+    at::Tensor flatOutputTensor =
+        newLikeFlat(outputs[0], /*preserve_strides*/ false);
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
     gloo::allgather(opts);
 
@@ -1398,7 +1399,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
-    return {newLikeFlat(outputs[0])};
+    return {newLikeFlat(outputs[0], /*preserve_strides*/ false)};
   }
 
   void run() override {
@@ -1694,7 +1695,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
-    return {newLikeFlat(output_lists[0])};
+    return {newLikeFlat(output_lists[0], /*preserve_strides*/ false)};
   }
 
   void run() override {
@@ -1818,7 +1819,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     // This is later scattered to the separate output tensors.
     at::Tensor flatOutputTensor;
     if (context_->rank == root) {
-      flatOutputTensor = newLikeFlat(outputs[0]);
+      flatOutputTensor = newLikeFlat(outputs[0], /*preserve_strides*/ false);
       GENERATE_ALL_TYPES(scalarType, setOutput, opts, flatOutputTensor);
     }
 
@@ -1841,7 +1842,8 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
 
   const std::vector<at::Tensor> getOutputTensors() override {
     return outputs.empty() ? std::vector<at::Tensor>{}
-                           : std::vector<at::Tensor>{newLikeFlat(outputs[0])};
+                           : std::vector<at::Tensor>{newLikeFlat(
+                                 outputs[0], /*preserve_strides*/ false)};
   }
 
   void run() override {
@@ -2057,7 +2059,8 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
 
   const std::vector<at::Tensor> getInputTensors() override {
     return inputs.empty() ? std::vector<at::Tensor>{}
-                          : std::vector<at::Tensor>{newLikeFlat(inputs[0])};
+                          : std::vector<at::Tensor>{newLikeFlat(
+                                inputs[0], /*preserve_strides*/ false)};
   }
 
   const std::vector<at::Tensor> getOutputTensors() override {
