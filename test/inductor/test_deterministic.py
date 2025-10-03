@@ -87,13 +87,35 @@ class DeterministicTest(TestCase):
 
             inp = torch.rand([2048, 2048], device=GPU_TYPE)
 
-            out = foo(inp)
+            from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+            old_init = CachingAutotuner.__init__
+            caching_autotuners = []
+
+            def new_init(self, *args, **kwargs):
+                old_init(self, *args, **kwargs)
+                nonlocal caching_autotuners
+                caching_autotuners.append(self)
+
+            with unittest.mock.patch.object(CachingAutotuner, "__init__", new_init):
+                out = foo(inp)
+
             self.assertEqual(out, inp.sum(dim=-1))
 
+            self.assertEqual(len(caching_autotuners), 1)
+
+            coordesc_tuner = caching_autotuners[0].coordesc_tuner
+            frozen_fields = coordesc_tuner.frozen_fields
+
             if deterministic:
-                self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] == 0)
+                self.assertTrue(len(frozen_fields) > 0)
+                self.assertTrue("R0_BLOCK" in frozen_fields)
+                self.assertTrue("R1_BLOCK" in frozen_fields)
+                self.assertTrue("num_warps" in frozen_fields)
             else:
-                self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
+                self.assertTrue(len(frozen_fields) == 0)
+
+            self.assertTrue(counters["inductor"]["coordesc_tuning_bench"] > 0)
 
 
 if __name__ == "__main__":

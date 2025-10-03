@@ -47,6 +47,7 @@ from .hints import (
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    is_reduction_heuristic,
     ReductionHint,
     TileHint,
     TRITON_MAX_BLOCK,
@@ -345,12 +346,24 @@ class CachingAutotuner(KernelInterface):
             )
         log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
+        coordesc_frozen_fields = (
+            [
+                "R0_BLOCK",
+                "R1_BLOCK",
+                "num_warps",
+                "num_ctas",
+            ]
+            if self.deterministic_mode and is_reduction_heuristic(self.heuristic_type)
+            else []
+        )
+
         self.size_hints = size_hints
         self.coordesc_tuner = CoordescTuner(
             is_mm=False,
             name=self.fn.__name__,
             size_hints=size_hints,
             inductor_meta=self.inductor_meta,
+            frozen_fields=coordesc_frozen_fields,
         )
         self.filename = filename
 
@@ -1203,19 +1216,6 @@ class CachingAutotuner(KernelInterface):
             HeuristicType.USER_AUTOTUNE,
             HeuristicType.FIXED,
         ):
-            # skip triton template
-            return launcher
-
-        if self.deterministic_mode and self.heuristic_type in (
-            HeuristicType.REDUCTION,
-            HeuristicType.PERSISTENT_REDUCTION,
-            HeuristicType.SPLIT_SCAN,
-        ):
-            # Not only RBLOCK size matters for numericals of reduction.
-            # num_warps also matters since that affect how much data
-            # is handled by each thread, how many warp-reduction we do
-            # in parallel and how much data is there for block
-            # reduction.
             return launcher
 
         with dynamo_timed(
