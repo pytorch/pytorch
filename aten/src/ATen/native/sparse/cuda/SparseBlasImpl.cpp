@@ -945,7 +945,11 @@ void addmv_out_sparse_csr(
   auto descX = at::cuda::sparse::CuSparseDnVecDescriptor(*vec_);
   auto descY = at::cuda::sparse::CuSparseDnVecDescriptor(*result_);
 
+#ifdef USE_ROCM
+  cusparseSpMVAlg_t alg = CUSPARSE_MV_ALG_DEFAULT;
+#else
   cusparseSpMVAlg_t alg = CUSPARSE_SPMV_ALG_DEFAULT;
+#endif
 
   // SpMV doesn't support uniform precision computation
   // For float16/bfloat16 inputs compute_type must be CUDA_R_32F
@@ -1214,6 +1218,9 @@ void triangular_solve_out_sparse_csr(
       return block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular);
     }
   }
+#ifdef USE_ROCM
+  TORCH_CHECK(false, "ROCm is not supported");
+#else
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
   // It should be possible to use mixed memory format
   // but there is a bug in CUDA 11.3.1 version:
@@ -1279,13 +1286,6 @@ void triangular_solve_out_sparse_csr(
               desc_spsv.descriptor()));
         });
   } else {
-#if !AT_USE_CUSPARSE_GENERIC_SPSM()
-    TORCH_CHECK(
-        false,
-        "Calling triangular solve on a sparse GPU tensor requires compiling ",
-        "PyTorch with at least CUDA 11.3.1. ",
-        "Please use PyTorch built with newer CUDA version.");
-#else
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
         X.scalar_type(), "triangular_solve_out_sparse_csr_cuda_impl", [&] {
           scalar_t alpha = 1;
@@ -1339,11 +1339,11 @@ void triangular_solve_out_sparse_csr(
               CUSPARSE_SPSM_ALG_DEFAULT,
               desc_spsm.descriptor()));
         });
-#endif // !AT_USE_CUSPARSE_GENERIC_SPSM()
   }
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
+#endif
 }
 
 void sampled_addmm_out_sparse_csr(
