@@ -1005,17 +1005,18 @@ def _enable_context_parallel_dispatcher_impl(seq_dim: int, mesh: DeviceMesh) -> 
     elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
         _enable_cp_dtensor_dispatcher()
     else:
-        raise NotImplementedError
+        raise ValueError(f"Unknown dispatch mode: {_dispatch_mode}")
 
 
 def _disable_context_parallel_dispatcher_impl() -> None:
     if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
         _restore_function(F.scaled_dot_product_attention, F)
-        _disable_cp_dtensor_dispatcher()
     elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
-        _disable_cp_dtensor_dispatcher()
+        pass
     else:
         raise NotImplementedError
+
+    _disable_cp_dtensor_dispatcher()
 
 
 def _generate_round_robin_indices(
@@ -1206,10 +1207,6 @@ class _ContextParallel(ParallelStyle):
         self.attention_type = attention_type
         self.dispatch_mode = dispatch_mode
 
-        # Used by FlexAttention
-        self._block_mask: Optional[BlockMask] = None
-        self._orig_seq_lengths: Optional[tuple[int, int]] = None
-
     def _apply(self, module: nn.Module, mesh: DeviceMesh) -> nn.Module:
         if self.attention_type == self.AttentionType.FLEX:
             module.register_forward_pre_hook(
@@ -1244,24 +1241,9 @@ class _ContextParallel(ParallelStyle):
         key = key.contiguous()
         value = value.contiguous()
 
-        if self.dispatch_mode == _DispatchMode.TORCH_FUNCTION:
-            """
-            UserWarning: _c10d_functional::wait_tensor: an autograd kernel was not
-            registered to the Autograd key(s) but we are trying to backprop through it.
-            This may lead to silently incorrect behavior. This behavior is deprecated and
-            will be removed in a future version of PyTorch. If your operator is differentiable,
-            please ensure you have registered an autograd kernel to the correct Autograd key
-            (e.g. DispatchKey::Autograd, DispatchKey::CompositeImplicitAutograd).  If your
-            operator is not differentiable, or to squash this warning and use the previous
-            behavior, please register torch::CppFunction::makeFallthrough() to
-            DispatchKey::Autograd.
-            """
-            global_key = ft_c.all_gather_tensor_autograd(key, self.seq_dim, mesh)
-            global_value = ft_c.all_gather_tensor_autograd(value, self.seq_dim, mesh)
-        else:
-            global_key, global_value = flex_cp_forward(
-                key, value, self.seq_dim, c10d._get_process_group_name(mesh.get_group())
-            )
+        global_key, global_value = flex_cp_forward(
+            key, value, self.seq_dim, c10d._get_process_group_name(mesh.get_group())
+        )
         args_list[1] = global_key
         args_list[2] = global_value
 
@@ -1307,6 +1289,10 @@ def _context_parallel_shard(
     seq_dims: list[int],
     load_balance_indices: Optional[torch.Tensor] = None,
 ) -> list[torch.Tensor | BlockMask]:
+    # For the new API, we only support the module wrapper mode.
+    global _dispatch_mode
+    _dispatch_mode = _DispatchMode.MODULE_WRAPPER
+
     if len(buffers) != len(seq_dims):
         raise ValueError(
             "`seq_dims` must have the same number of elements as `buffers`."
@@ -1393,6 +1379,11 @@ def context_parallel(
         `torch.distributed.tensor.experimental.context_parallel` is a
         prototype feature in PyTorch. The API is subject to change.
     """
+    # For the legacy API, we only support the monkey-patch mode.
+    # We will deprecate this API once the new API is widely used.
+    global _dispatch_mode
+    _dispatch_mode = _DispatchMode.MONKEY_PATCH
+
     buffers = [] if buffers is None else buffers
     buffer_seq_dims = [] if buffer_seq_dims is None else buffer_seq_dims
     no_restore_buffers = set() if no_restore_buffers is None else no_restore_buffers
