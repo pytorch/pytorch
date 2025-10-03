@@ -1567,6 +1567,7 @@ Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor
   return result;
 }
 
+// Manual dispatcher for logsumexp with IntArrayRef (called by codegen)
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   TensorOptions result_options;
   if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
@@ -1580,21 +1581,21 @@ Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   return at::logsumexp_outf(self, dims, keepdim, result);
 }
 
+// Manual dispatcher for logsumexp with no dims (called by codegen)
 Tensor logsumexp(const Tensor& self) {
   // Route to our new structured kernel with OptionalIntArrayRef
   return at::logsumexp(self, std::nullopt, false);
 }
 
+// Manual dispatcher for logsumexp with OptionalIntArrayRef
 Tensor logsumexp(const Tensor& self, OptionalIntArrayRef opt_dims, bool keepdim) {
-  // Handle optional dimensions - if no dims specified, reduce over all dimensions
-  if (opt_dims.has_value()) {
-    return at::logsumexp(self, opt_dims.value(), keepdim);
-  } else {
-    // Reduce over all dimensions (flatten)
-    return at::logsumexp(self, IntArrayRef{}, keepdim);
-  }
+  // Route directly to the main IntArrayRef dispatcher to avoid recursion
+  // When opt_dims is nullopt, we use empty IntArrayRef which means "all dimensions"
+  IntArrayRef dims = opt_dims.has_value() ? opt_dims.value() : IntArrayRef{};
+  return at::logsumexp(self, dims, keepdim);
 }
 
+// Manual dispatcher for logsumexp with dimnames
 Tensor logsumexp(const Tensor& self, DimnameList dims, bool keepdim) {
   return at::logsumexp(self, dimnames_to_positions(self, dims), keepdim);
 }

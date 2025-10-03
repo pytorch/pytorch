@@ -477,27 +477,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> LazyNativeFunctions::svd(
 // functionalize_aten_op can't handle out= ops directly.
 // Instead, we can call the composite kernel from core, and copy and mutations
 // back to the inputs.
-at::Tensor& LazyNativeFunctions::logsumexp_out(
-    const at::Tensor& self,
-    at::Tensor& out) {
-  auto self_wrapped = at::functionalization::impl::to_functional_tensor(self);
-  auto out_wrapped = at::functionalization::impl::to_functional_tensor(out);
-  // directly call the composite kernel from core (no-dim version).
-  // Make sure to re-enable functionalization first.
-  auto curr_tls = c10::impl::tls_local_dispatch_key_set();
-  auto tls_reenable_functionalize = c10::impl::PODLocalDispatchKeySet();
-  tls_reenable_functionalize.set_included(curr_tls.included_);
-  tls_reenable_functionalize.set_excluded(
-      curr_tls.excluded_.remove(c10::DispatchKey::Functionalize));
-  c10::impl::ForceDispatchKeyGuard guard_(tls_reenable_functionalize);
-  at::native::logsumexp_out(self_wrapped, out_wrapped);
-  auto out_unwrapped =
-      at::functionalization::impl::from_functional_tensor(out_wrapped);
-  // propagate mutations back to the inputs (including resizing)
-  out.resize_(out_unwrapped.sizes());
-  out.copy_(out_unwrapped);
-  return out;
-}
+//
+// Note: logsumexp and logsumexp.dim_IntList are in ts_native_functions.yaml
+// and will use eager fallback (no manual implementation needed), following
+// the same pattern as sum/mean/prod reduction ops.
 
 at::Tensor LazyNativeFunctions::diag_embed(
     const at::Tensor& self,
