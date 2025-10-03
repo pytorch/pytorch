@@ -26,6 +26,8 @@
 #include <internal/pycore_genobject.h>
 #include <internal/pycore_interpframe.h>
 #include <internal/pycore_stackref.h>
+#elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#include <internal/pycore_interpframe_structs.h> // _PyInterpreterFrame
 #endif
 
 #endif
