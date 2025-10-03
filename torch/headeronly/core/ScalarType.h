@@ -51,15 +51,15 @@
   _(int16_t, Short)                                                     \
   _(int, Int)                                                           \
   _(int64_t, Long)                                                      \
-  _(at::Half, Half)                                                     \
+  _(c10::Half, Half)                                                    \
   _(float, Float)                                                       \
   _(double, Double)                                                     \
   _(c10::complex<float>, ComplexFloat)                                  \
   _(c10::complex<double>, ComplexDouble)                                \
   _(bool, Bool)                                                         \
-  _(at::BFloat16, BFloat16)                                             \
-  _(at::Float8_e5m2, Float8_e5m2)                                       \
-  _(at::Float8_e4m3fn, Float8_e4m3fn)
+  _(c10::BFloat16, BFloat16)                                            \
+  _(c10::Float8_e5m2, Float8_e5m2)                                      \
+  _(c10::Float8_e4m3fn, Float8_e4m3fn)
 
 // This macro controls many of our C++ APIs, including constructors
 // for Scalar as well as the data() and item() accessors on Tensor
@@ -69,19 +69,19 @@
   _(int16_t, Short)                            \
   _(int, Int)                                  \
   _(int64_t, Long)                             \
-  _(at::Half, Half)                            \
+  _(c10::Half, Half)                           \
   _(float, Float)                              \
   _(double, Double)                            \
   _(c10::complex<c10::Half>, ComplexHalf)      \
   _(c10::complex<float>, ComplexFloat)         \
   _(c10::complex<double>, ComplexDouble)       \
   _(bool, Bool)                                \
-  _(at::BFloat16, BFloat16)                    \
-  _(at::Float8_e5m2, Float8_e5m2)              \
-  _(at::Float8_e4m3fn, Float8_e4m3fn)          \
-  _(at::Float8_e5m2fnuz, Float8_e5m2fnuz)      \
-  _(at::Float8_e4m3fnuz, Float8_e4m3fnuz)      \
-  _(at::Float8_e8m0fnu, Float8_e8m0fnu)
+  _(c10::BFloat16, BFloat16)                   \
+  _(c10::Float8_e5m2, Float8_e5m2)             \
+  _(c10::Float8_e4m3fn, Float8_e4m3fn)         \
+  _(c10::Float8_e5m2fnuz, Float8_e5m2fnuz)     \
+  _(c10::Float8_e4m3fnuz, Float8_e4m3fnuz)     \
+  _(c10::Float8_e8m0fnu, Float8_e8m0fnu)
 
 // NB: Order matters for this macro; it is relied upon in
 // _promoteTypesLookup and the serialization format.
@@ -91,7 +91,7 @@
   _(int16_t, Short) /* 2 */                              \
   _(int, Int) /* 3 */                                    \
   _(int64_t, Long) /* 4 */                               \
-  _(at::Half, Half) /* 5 */                              \
+  _(c10::Half, Half) /* 5 */                             \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
   _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
@@ -101,7 +101,7 @@
   _(c10::qint8, QInt8) /* 12 */                          \
   _(c10::quint8, QUInt8) /* 13 */                        \
   _(c10::qint32, QInt32) /* 14 */                        \
-  _(at::BFloat16, BFloat16) /* 15 */                     \
+  _(c10::BFloat16, BFloat16) /* 15 */                    \
   _(c10::quint4x2, QUInt4x2) /* 16 */                    \
   _(c10::quint2x4, QUInt2x4) /* 17 */                    \
   _(c10::bits1x8, Bits1x8) /* 18 */                      \
@@ -164,24 +164,19 @@
   _(int64_t, Long)                                \
   _(float, Float)                                 \
   _(double, Double)                               \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE>::t),  \
-    SCALARTYPE)
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE>, SCALARTYPE)
 
-#define AT_FORALL_SCALAR_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, _) \
-  _(uint8_t, Byte)                                               \
-  _(int8_t, Char)                                                \
-  _(int16_t, Short)                                              \
-  _(int, Int)                                                    \
-  _(int64_t, Long)                                               \
-  _(float, Float)                                                \
-  _(double, Double)                                              \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<                   \
-             ::c10::ScalarType::SCALARTYPE1>::t),                \
-    SCALARTYPE1)                                                 \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<                   \
-             ::c10::ScalarType::SCALARTYPE2>::t),                \
-    SCALARTYPE2)
+#define AT_FORALL_SCALAR_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, _)   \
+  _(uint8_t, Byte)                                                 \
+  _(int8_t, Char)                                                  \
+  _(int16_t, Short)                                                \
+  _(int, Int)                                                      \
+  _(int64_t, Long)                                                 \
+  _(float, Float)                                                  \
+  _(double, Double)                                                \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE1>, \
+    SCALARTYPE1)                                                   \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE2>, SCALARTYPE2)
 
 #define AT_FORALL_SCALAR_TYPES_AND3(SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, _) \
   _(uint8_t, Byte)                                                            \
@@ -191,53 +186,41 @@
   _(int64_t, Long)                                                            \
   _(float, Float)                                                             \
   _(double, Double)                                                           \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
-             ::c10::ScalarType::SCALARTYPE1>::t),                             \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE1>,            \
     SCALARTYPE1)                                                              \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
-             ::c10::ScalarType::SCALARTYPE2>::t),                             \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE2>,            \
     SCALARTYPE2)                                                              \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<                                \
-             ::c10::ScalarType::SCALARTYPE3>::t),                             \
-    SCALARTYPE3)
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE3>, SCALARTYPE3)
 
-#define AT_FORALL_SCALAR_TYPES_AND7(              \
-    SCALARTYPE1,                                  \
-    SCALARTYPE2,                                  \
-    SCALARTYPE3,                                  \
-    SCALARTYPE4,                                  \
-    SCALARTYPE5,                                  \
-    SCALARTYPE6,                                  \
-    SCALARTYPE7,                                  \
-    _)                                            \
-  _(uint8_t, Byte)                                \
-  _(int8_t, Char)                                 \
-  _(int16_t, Short)                               \
-  _(int, Int)                                     \
-  _(int64_t, Long)                                \
-  _(float, Float)                                 \
-  _(double, Double)                               \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE1>::t), \
-    SCALARTYPE1)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE2>::t), \
-    SCALARTYPE2)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE3>::t), \
-    SCALARTYPE3)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE4>::t), \
-    SCALARTYPE4)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE5>::t), \
-    SCALARTYPE5)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE6>::t), \
-    SCALARTYPE6)                                  \
-  _(decltype(::c10::impl::ScalarTypeToCPPType<    \
-             ::c10::ScalarType::SCALARTYPE7>::t), \
-    SCALARTYPE7)
+#define AT_FORALL_SCALAR_TYPES_AND7(                               \
+    SCALARTYPE1,                                                   \
+    SCALARTYPE2,                                                   \
+    SCALARTYPE3,                                                   \
+    SCALARTYPE4,                                                   \
+    SCALARTYPE5,                                                   \
+    SCALARTYPE6,                                                   \
+    SCALARTYPE7,                                                   \
+    _)                                                             \
+  _(uint8_t, Byte)                                                 \
+  _(int8_t, Char)                                                  \
+  _(int16_t, Short)                                                \
+  _(int, Int)                                                      \
+  _(int64_t, Long)                                                 \
+  _(float, Float)                                                  \
+  _(double, Double)                                                \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE1>, \
+    SCALARTYPE1)                                                   \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE2>, \
+    SCALARTYPE2)                                                   \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE3>, \
+    SCALARTYPE3)                                                   \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE4>, \
+    SCALARTYPE4)                                                   \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE5>, \
+    SCALARTYPE5)                                                   \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE6>, \
+    SCALARTYPE6)                                                   \
+  _(c10::impl::ScalarTypeToCPPTypeT<c10::ScalarType::SCALARTYPE7>, SCALARTYPE7)
 
 #define AT_FORALL_QINT_TYPES(_) \
   _(c10::qint8, QInt8)          \
@@ -246,12 +229,12 @@
   _(c10::quint4x2, QUInt4x2)    \
   _(c10::quint2x4, QUInt2x4)
 
-#define AT_FORALL_FLOAT8_TYPES(_)         \
-  _(at::Float8_e5m2, Float8_e5m2)         \
-  _(at::Float8_e4m3fn, Float8_e4m3fn)     \
-  _(at::Float8_e5m2fnuz, Float8_e5m2fnuz) \
-  _(at::Float8_e4m3fnuz, Float8_e4m3fnuz) \
-  _(at::Float8_e8m0fnu, Float8_e8m0fnu)
+#define AT_FORALL_FLOAT8_TYPES(_)          \
+  _(c10::Float8_e5m2, Float8_e5m2)         \
+  _(c10::Float8_e4m3fn, Float8_e4m3fn)     \
+  _(c10::Float8_e5m2fnuz, Float8_e5m2fnuz) \
+  _(c10::Float8_e4m3fnuz, Float8_e4m3fnuz) \
+  _(c10::Float8_e8m0fnu, Float8_e8m0fnu)
 
 #define AT_FORALL_COMPLEX_TYPES(_)     \
   _(c10::complex<float>, ComplexFloat) \
