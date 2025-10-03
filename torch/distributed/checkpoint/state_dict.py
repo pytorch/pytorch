@@ -1058,6 +1058,13 @@ def get_model_state_dict(
             submodules=submodules,
             options=options,
         )
+        if (options is not None and 
+            options.broadcast_from_rank0 and
+            options.full_state_dict
+            ):
+            dist.broadcast_object_list([obj], src=0)
+            model_state_dict = obj["model"]
+            optim_state_dict = obj["optimizer"]
         model_state_dict = _get_model_state_dict(model, info)
         _verify_state_dict(model_state_dict, {}, info)
         return model_state_dict
