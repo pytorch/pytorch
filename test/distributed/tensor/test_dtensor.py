@@ -1009,7 +1009,7 @@ class DTensorMeshTest(DTensorTestBase):
             return x.sum(dim=1)
 
         with self.assertRaisesRegex(
-            NotImplementedError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "torch.cond expects two branches return the same placement but one of "
             "true branch's return is Spec\\(P on \\(8,\\)\\) vs false branch's return Spec\\(S\\(0\\) on \\(8,\\)\\)",
         ):
@@ -1033,7 +1033,7 @@ class DTensorMeshTest(DTensorTestBase):
             return x[:1, :].clone()
 
         with self.assertRaisesRegex(
-            NotImplementedError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "torch.cond expects two branches return the same placement but one of "
             "true branch's return is Spec\\(P on \\(1, 4\\)\\) vs false branch's return Spec\\(R on \\(1, 4\\)\\)",
         ):
@@ -1100,7 +1100,7 @@ class DTensorMeshTest(DTensorTestBase):
 
         # This should fail because first output has mismatched sharding between branches
         with self.assertRaisesRegex(
-            NotImplementedError,
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
             "torch.cond expects two branches return the same placement but one of "
             "true branch's return is Spec\\(P on \\(1, 4\\)\\) vs false branch's return Spec\\(R on \\(1, 4\\)\\)",
         ):

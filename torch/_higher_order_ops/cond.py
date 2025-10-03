@@ -1,6 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import contextlib
 import functools
 import logging
 import warnings
@@ -25,6 +24,7 @@ from torch._higher_order_ops.utils import (
     filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
+    register_fake,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     unique_graph_id,
@@ -392,30 +392,36 @@ def inner(mode, pred, true_fn, false_fn, operands):
     return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
 
 
-@cond_op.py_impl(FakeTensorMode)
-def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
-    # Ignore here, because if you've gotten here but you're not manually
-    # tracing the inner graphs, that means that you intend to reuse the graph
-    # directly.  Which means the old unbacked symbol bindings are appropriate.
-    # This strategy will not work if unbacked symbols can escape.
-    ignore_fresh_unbacked = contextlib.nullcontext()
-    if mode.shape_env:
-        ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
+def _get_fake_mode(inputs: Any) -> FakeTensorMode:
+    fake_mode: Optional[FakeTensorMode] = None
 
-    with mode, ignore_fresh_unbacked:
-        flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
-        flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
-        if true_out_spec != false_out_spec:
-            raise RuntimeError(
-                "Unmatched output spec from torch.cond branches: "
-                f"true branch tree_spec {true_out_spec} vs false branch tree_spec {false_out_spec}."
-            )
+    def _find(t: FakeTensor):
+        nonlocal fake_mode
+        if fake_mode is None:
+            fake_mode = t.fake_mode
+        assert fake_mode is t.fake_mode, (
+            f"Got mixed fake modes {fake_mode}, {t.fake_mode}"
+        )
+
+    pytree.tree_map_only(FakeTensor, _find, inputs)
+    assert fake_mode is not None, "Cannot get fake mode from inputs."
+    return fake_mode
+
+
+@register_fake(cond_op)
+def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
+    flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
+    flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
+    if true_out_spec != false_out_spec:
+        raise RuntimeError(
+            "Unmatched output spec from torch.cond branches: "
+            f"true branch tree_spec {true_out_spec} vs false branch tree_spec {false_out_spec}."
+        )
 
     merged_outs = []
+    fake_mode = _get_fake_mode((pred,) + operands)
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
-        merged_outs.append(
-            _merge_output_maybe_unwrap_dtensor(true_out, false_out, mode)
-        )
+        merged_outs.append(_merge_output(true_out, false_out, fake_mode))
     return pytree.tree_unflatten(merged_outs, true_out_spec)
 
 
@@ -435,42 +441,6 @@ def check_tensor_meta_match(
             lattr == rattr,
             lambda: f"{msg_prefix} expected same {attr_name} but got {lattr} and {rattr}.",
         )
-
-
-# FakeTensorMode redirects to dispatching DTensor
-# first, then we could receive DTensor outputs
-# in fake tensor mode of cond.
-def _merge_output_maybe_unwrap_dtensor(
-    a: Optional[Union[torch.Tensor, int]],
-    b: Optional[Union[torch.Tensor, int]],
-    mode: FakeTensorMode,
-):
-    from torch.distributed.tensor import DTensor
-
-    local_a = a
-    local_b = b
-
-    _need_handle_dtensor = isinstance(a, DTensor) or isinstance(b, DTensor)
-    if _need_handle_dtensor:
-        assert isinstance(a, DTensor) and isinstance(b, DTensor), (
-            f"Cannot merge DTensor with non-DTensor got {a} and {b}"
-        )
-        local_a = a._local_tensor
-        local_b = b._local_tensor
-
-    fk_out = _merge_output(local_a, local_b, mode)
-
-    if _need_handle_dtensor:
-        assert (
-            isinstance(fk_out, torch.Tensor)
-            and isinstance(a, DTensor)
-            and isinstance(b, DTensor)
-        )
-        assert a.device_mesh == b.device_mesh and a.placements == b.placements, (
-            f"Cannot merge DTensor with different spec got {a} and {b}"
-        )
-        return DTensor.from_local(fk_out, a.device_mesh, a.placements)
-    return fk_out
 
 
 def _merge_output(
