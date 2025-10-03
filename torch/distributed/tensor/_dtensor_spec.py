@@ -4,6 +4,7 @@ from typing import Any, cast, NamedTuple, Optional
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -12,7 +13,7 @@ from torch.distributed.tensor.placement_types import (
 
 
 MeshDimTuple = tuple[int, ...]  # Sequence of mesh dimensions for a tensor dimension
-TensorDimTuple = tuple[MeshDimTuple, ...]  # Mapping from tensor dims to mesh dims
+TensorDimTuple = tuple[MeshDimTuple, ...]
 
 
 class TensorMeta(NamedTuple):
@@ -34,12 +35,17 @@ class DTensorSpec:
     tensor_meta: Optional[TensorMeta] = None
 
     # When a tensor dimension is sharded across multiple mesh axes,
-    # `shard_order` defines the order in which these shardings are applied,
-    # which determines how tensor shards are distributed across devices.
-    # `shard_order` is a tuple of tuples of int, where each inner tuple's first
-    # element is the tensor dimension being sharded, and the remaining elements
-    # specify the ordered device mesh dimensions over which that tensor
-    # dimension is sharded.
+    # `shard_order` specifies the sequence in which these shardings are applied.
+    # This order determines how tensor shards are mapped and distributed across
+    # devices. `shard_order` is a tuple of tuples of integers: in each inner
+    # tuple, the first element is the tensor dimension being sharded, and the
+    # remaining elements are the device mesh dimensions (in order) over which
+    # that tensor dimension is sharded.
+    #
+    # Example:
+    #   For a tensor of shape [8, 16] and a 3D device mesh, if dim 0 is sharded over
+    #   mesh dim 1, and dim 1 is sharded over mesh dim 0 and then mesh dim 2,
+    #   the shard_order would be: shard_order = ((0, 1), (1, 0, 2))
     shard_order: TensorDimTuple = None  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
@@ -60,6 +66,9 @@ class DTensorSpec:
         tensor_dim_to_mesh_dims: dict[int, list[int]] = {}
         mesh_ndim = mesh.ndim if mesh else 0
         for mesh_dim in range(0, mesh_ndim):
+            # shard_order doesn't work with _StridedShard
+            if isinstance(placements[mesh_dim], _StridedShard):
+                return ()
             if isinstance(placements[mesh_dim], Shard):
                 placement = cast(Shard, placements[mesh_dim])
                 shard_dim = placement.dim
