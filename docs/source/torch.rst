@@ -818,6 +818,7 @@ Operator Tags
 
 .. Compiler configuration module - documented in torch.compiler.config.md
 .. py:module:: torch.compiler.config
+   :noindex:
 
 .. Hidden aliases (e.g. torch.functional.broadcast_tensors()). We want `torch.broadcast_tensors()` to
    be visible only.
