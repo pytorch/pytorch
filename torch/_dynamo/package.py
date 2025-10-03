@@ -138,17 +138,7 @@ class SourceInfo:
 
 
 @dataclasses.dataclass
-class DynamoCaptureOutput:
-    """
-    Core information generated from Dynamo for fullgraph=True.
-    """
-
-    guarded_codes: list[_GuardedCodeCacheEntry]
-    backend_ids: list[_BackendId]
-
-
-@dataclasses.dataclass
-class _DynamoCodeCacheEntry(DynamoCaptureOutput):
+class _DynamoCodeCacheEntry:
     """
     Contains the serializable information associated with a single code object
     in dynamo. To restore an execution of compiled code, we will need the following
@@ -172,7 +162,9 @@ class _DynamoCodeCacheEntry(DynamoCaptureOutput):
     python_code: SerializedCode
     python_module: str
     function_names: list[_FunctionId]
+    guarded_codes: list[_GuardedCodeCacheEntry]
     import_sources: dict[str, str]
+    backend_ids: list[_BackendId]
     code_source: Optional[str]
     install_to_global: bool
     has_compile_id: bool = False
