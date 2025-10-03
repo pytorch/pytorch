@@ -313,10 +313,13 @@ class SubprocMain:
         self.running = True
 
     def main(self) -> None:
+        gc.disable()
+        gc.freeze()
         while True:
             msg_header, job_id, data = _recv_msg(self.read_pipe)
             if msg_header == MsgHeader.JOB:
                 self.submit(job_id, data)
+                gz.collect()
             elif msg_header == MsgHeader.WAKEUP:
                 self._start_pool()
             elif msg_header == MsgHeader.QUIESCE:
@@ -397,6 +400,8 @@ class SubprocMain:
             result = job()
         except Exception:
             result = _SubprocExceptionInfo(traceback.format_exc())
+        dump = pickler.dumps(result)
+        gc.collect()
         return pickler.dumps(result)
 
 
