@@ -9,6 +9,8 @@ from typing_extensions import deprecated
 
 import torch
 import torch.testing
+
+# pyrefly: ignore  # deprecated
 from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrTensors
