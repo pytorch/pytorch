@@ -183,7 +183,7 @@ class DTensorExportTest(TestCase):
                 out = out1 + out2
                 out = self.mlp_2(out)
 
-                return out
+                return out, out1, out2
 
         model = Model(self.device_type)
         input0 = torch.rand(20, 10, device=self.device_type)
@@ -231,12 +231,17 @@ class DTensorExportTest(TestCase):
 
         # Run forward pass through the custom function
         outputs = joint_graph_module(local_inputs)
-        outputs.sum().backward()
+        loss = outputs[0].sum() + outputs[1].sum() + outputs[2].sum()
+        loss.backward()
 
-        eager_out = model(*inputs)
-        eager_out.sum().backward()
+        eager_outs = model(*inputs)
+        loss = eager_outs[0].sum() + eager_outs[1].sum() + eager_outs[2].sum()
+        loss.backward()
 
-        self.assertEqual(outputs[0], eager_out[0])
+        for output, eager_out in zip(outputs, eager_outs):
+            self.assertEqual(output, eager_out)
+
+        self.assertEqual(outputs[0], eager_outs[0])
 
         for param, local_param in zip(model.parameters(), local_params):
             self.assertIsNotNone(param.grad)
