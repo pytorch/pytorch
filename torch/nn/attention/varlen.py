@@ -136,7 +136,7 @@ def varlen_attn(
     Returns:
         Tensor: Output tensor from attention computation
     """
-    out, lse = _varlen_attn(
+    out, lse = torch.ops.torch_nn_attention._varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
     if return_lse:
