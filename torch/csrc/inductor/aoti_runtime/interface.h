@@ -51,6 +51,14 @@ AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     const char* device_str,
     const char* cubin_dir);
 
+// Creates an AOTInductor model container that uses external weights.
+AOTI_API AOTIRuntimeError AOTInductorModelContainerCreateWithDeviceAndWeight(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
+    const char* cubin_dir,
+    const char* weight_path);
+
 // Deletes the AOTInductor model container.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle);
