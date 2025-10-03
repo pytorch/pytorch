@@ -60,14 +60,9 @@ class TestEinopsPatch(TestCase):
         self.einops_patch_module = import_einops_patch()
 
     def tearDown(self):
-        meta_path, path = list(sys.meta_path), list(sys.path)
-
         for module in list(sys.modules):
             if module == "einops" or module.startswith("einops."):
                 sys.modules.pop(module, None)
-
-        sys.meta_path[:] = meta_path
-        sys.path[:] = path
 
         importlib.invalidate_caches()
 
