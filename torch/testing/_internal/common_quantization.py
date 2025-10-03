@@ -87,7 +87,8 @@ import io
 import os
 
 import unittest
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
+from collections.abc import Callable
 
 import numpy as np
 import torch._dynamo as torchdynamo
