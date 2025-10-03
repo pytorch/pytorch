@@ -908,7 +908,7 @@ class DTensorMeshTest(DTensorTestBase):
                 placements=None,
             )
 
-        x = make_dtensor(1, 1, dtype=torch.bfloat16, device="cuda")
+        x = make_dtensor(1, 1, dtype=torch.bfloat16, device=self.device_type)
 
         result = torch.cond(
             x > 0, lambda x: 1.0 / x, lambda x: torch.zeros_like(x), (x,)
@@ -922,23 +922,55 @@ class DTensorMeshTest(DTensorTestBase):
     def test_dtensor_cond_same_sharding(self):
         mesh = self.build_device_mesh()
 
-        # Create input tensor - replicated
-        input_tensor = distribute_tensor(
-            torch.ones(4, 4, device=self.device_type),
-            device_mesh=mesh,
-            placements=[Replicate()],
-        )
+        for requires_grad in [True, False]:
+            # Create input tensor - replicated
+            input_tensor = distribute_tensor(
+                torch.ones(4, 4, device=self.device_type, requires_grad=requires_grad),
+                device_mesh=mesh,
+                placements=[Replicate()],
+            )
 
-        def true_fn(x):
-            return x * 2
+            def true_fn(x):
+                return x * 2
 
-        def false_fn(x):
-            return torch.mm(x, x.transpose(0, 1))
+            def false_fn(x):
+                return torch.mm(x, x.transpose(0, 1))
 
-        result = torch.cond(input_tensor.sum() > 0, true_fn, false_fn, (input_tensor,))
-        self.assertIsInstance(result, DTensor)
-        self.assertEqual(result.device_mesh, input_tensor.device_mesh)
-        self.assertEqual(result.placements, input_tensor.placements)
+            result = torch.cond(
+                input_tensor.sum() > 0, true_fn, false_fn, (input_tensor,)
+            )
+            self.assertIsInstance(result, DTensor)
+            self.assertEqual(result.device_mesh, input_tensor.device_mesh)
+            self.assertEqual(result.placements, input_tensor.placements)
+            self.assertEqual(result.requires_grad, input_tensor.requires_grad)
+
+    @with_comms
+    def test_dtensor_cond_same_sharding_different_shape(self):
+        mesh = self.build_device_mesh()
+
+        for requires_grad in [True, False]:
+            # Create input tensor - replicated
+            input_tensor = distribute_tensor(
+                torch.ones(4, 4, device=self.device_type, requires_grad=requires_grad),
+                device_mesh=mesh,
+                placements=[Replicate()],
+            )
+
+            def true_fn(x):
+                return (x * 2)[:2, :]
+
+            def false_fn(x):
+                return torch.mm(x, x.transpose(0, 1))
+
+            pred = input_tensor.sum() > 0
+            result = torch.cond(pred, true_fn, false_fn, (input_tensor,))
+            self.assertIsInstance(result, DTensor)
+            self.assertEqual(result.device_mesh, input_tensor.device_mesh)
+            self.assertEqual(result.placements, input_tensor.placements)
+            self.assertEqual(result.requires_grad, input_tensor.requires_grad)
+            # pred is always larger than 0, so the result should be the same as true_fn
+            # note that torch.cond is still compiled because pred is a tensor.
+            self.assertEqual(result.shape, torch.Size([2, 4]))
 
     @with_comms
     def test_dtensor_cond_aliasing_detection(self):

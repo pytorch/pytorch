@@ -413,7 +413,9 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
 
     merged_outs = []
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
-        merged_outs.append(_merge_output(true_out, false_out, mode))
+        merged_outs.append(
+            _merge_output_maybe_unwrap_dtensor(true_out, false_out, mode)
+        )
     return pytree.tree_unflatten(merged_outs, true_out_spec)
 
 
@@ -433,6 +435,42 @@ def check_tensor_meta_match(
             lattr == rattr,
             lambda: f"{msg_prefix} expected same {attr_name} but got {lattr} and {rattr}.",
         )
+
+
+# FakeTensorMode redirects to dispatching DTensor
+# first, then we could receive DTensor outputs
+# in fake tensor mode of cond.
+def _merge_output_maybe_unwrap_dtensor(
+    a: Optional[Union[torch.Tensor, int]],
+    b: Optional[Union[torch.Tensor, int]],
+    mode: FakeTensorMode,
+):
+    from torch.distributed.tensor import DTensor
+
+    local_a = a
+    local_b = b
+
+    _need_handle_dtensor = isinstance(a, DTensor) or isinstance(b, DTensor)
+    if _need_handle_dtensor:
+        assert isinstance(a, DTensor) and isinstance(b, DTensor), (
+            f"Cannot merge DTensor with non-DTensor got {a} and {b}"
+        )
+        local_a = a._local_tensor
+        local_b = b._local_tensor
+
+    fk_out = _merge_output(local_a, local_b, mode)
+
+    if _need_handle_dtensor:
+        assert (
+            isinstance(fk_out, torch.Tensor)
+            and isinstance(a, DTensor)
+            and isinstance(b, DTensor)
+        )
+        assert a.device_mesh == b.device_mesh and a.placements == b.placements, (
+            f"Cannot merge DTensor with different spec got {a} and {b}"
+        )
+        return DTensor.from_local(fk_out, a.device_mesh, a.placements)
+    return fk_out
 
 
 def _merge_output(
@@ -470,15 +508,6 @@ def _merge_output(
         merged_out = mode.shape_env.create_unbacked_symint()
         mode.shape_env.constrain_symbol_range(merged_out.node.expr, *min_max(a, b))
         return merged_out
-
-    # FakeTensorMode dispatch is before tensor subclass dispatch
-    # so we end up seeing DTensor here, we unwrap the local tensor
-    # to do the fake propagation.
-    # DTensor spec will be created when we dispatch dtensor
-    if isinstance(a, torch.distributed.tensor.DTensor):
-        assert isinstance(b, torch.distributed.tensor.DTensor)
-        a = a._local_tensor
-        b = b._local_tensor
 
     assert type(a) is FakeTensor and type(b) is FakeTensor, (a, type(a), b, type(b))
 

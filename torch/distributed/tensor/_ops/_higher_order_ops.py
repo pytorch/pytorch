@@ -19,7 +19,6 @@ def analyze_branch_output(
     if isinstance(result, DTensor):
         return result._spec
     elif isinstance(result, (tuple, list)):
-        # Handle multiple outputs
         specs: list[Optional[DTensorSpec]] = []
         for item in result:
             if isinstance(item, DTensor):
@@ -31,19 +30,18 @@ def analyze_branch_output(
         return None  # Scalar or other non-DTensor result
 
 
-def unify_dtensor_specs(
+def merge_dtensor_specs(
     true_spec: Union[DTensorSpec, list[Union[DTensorSpec, None]], None],
     false_spec: Union[DTensorSpec, list[Union[DTensorSpec, None]], None],
 ) -> Union[DTensorSpec, list[Union[DTensorSpec, None]], None]:
-    """Unify specs from both branches to find a compatible output spec."""
     if true_spec is None or false_spec is None:
-        assert true_spec is false_spec, (
+        assert true_spec == false_spec, (
             f"Incompatible specs from two branches {true_spec} vs {false_spec}"
         )
         return true_spec
 
     # For now, implement a simple unification strategy:
-    # If both specs are the same, use them. Otherwise, fall back to replicated.
+    # If both specs are the same, use them. Otherwise, raise an error
     if isinstance(true_spec, DTensorSpec) and isinstance(false_spec, DTensorSpec):
         if (
             true_spec.placements == false_spec.placements
@@ -56,16 +54,16 @@ def unify_dtensor_specs(
                 f"but one of true branch's return is {true_spec} vs false branch's return {false_spec}"
             )
     elif isinstance(true_spec, (tuple, list)) and isinstance(false_spec, (tuple, list)):
-        # Handle multiple outputs by unifying each spec pair
-        unified_specs = []
+        merged_specs = []
         for t_spec, f_spec in zip(true_spec, false_spec):
-            dtensor_spec = unify_dtensor_specs(t_spec, f_spec)
+            dtensor_spec = merge_dtensor_specs(t_spec, f_spec)
             assert isinstance(dtensor_spec, DTensorSpec) or dtensor_spec is None, (
                 "Expect DTensorSpec or None"
             )
-            unified_specs.append(dtensor_spec)
-        return unified_specs
+            merged_specs.append(dtensor_spec)
+        return merged_specs
     else:
+        # cond always normalize the output to be flat tuple
         raise NotImplementedError(
             f"Unsupported spec types: {type(true_spec)}, {type(false_spec)}"
         )
@@ -117,12 +115,11 @@ def cond_dtensor_handler(
     DTensor handler for torch.ops.higher_order.cond.
 
     This implementation:
-    1. Performs sharding propagation for both branches using meta tensors
-    2. Merges the output specs from both branches to find a compatible spec
-    3. Allows both branches to proceed without forcing predicate gathering
+    1. Performs sharding propagation for both branches
+    2. Merges the output specs from both branches to find a compatible spec, raise error if the specs differ
 
     Returns:
-        Result from executing either true_fn or false_fn with proper DTensor wrapping
+        Result from executing cond with proper DTensor wrapping
     """
     from torch.distributed.tensor import DTensor
 
@@ -134,7 +131,7 @@ def cond_dtensor_handler(
             if mesh is None:
                 mesh = operand.device_mesh
             assert mesh == operand.device_mesh, (
-                f"All DTensor operands must have the same mesh {mesh}"
+                f"All DTensor operands must have the same mesh but got {mesh} and {operand.device_mesh}"
             )
 
     assert mesh is not None, "No DTensor operands found in cond's inputs"
@@ -142,7 +139,7 @@ def cond_dtensor_handler(
     true_output_spec = analyze_branch_output(true_fn, operands)
     false_output_spec = analyze_branch_output(false_fn, operands)
 
-    unified_spec = unify_dtensor_specs(true_output_spec, false_output_spec)
+    merged_spec = merge_dtensor_specs(true_output_spec, false_output_spec)
 
     local_pred, local_operands = pytree.tree_map_only(
         DTensor, lambda x: x._local_tensor, (pred, operands)
@@ -150,4 +147,4 @@ def cond_dtensor_handler(
 
     local_result = cond_op(local_pred, true_fn, false_fn, local_operands)
 
-    return wrap_with_unified_spec(local_result, unified_spec)
+    return wrap_with_unified_spec(local_result, merged_spec)

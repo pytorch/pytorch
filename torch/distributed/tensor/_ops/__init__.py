@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from ._control_flow_ops import *  # noqa: F403
 from ._conv_ops import *  # noqa: F403
 from ._embedding_ops import *  # noqa: F403
+from ._higher_order_ops import *  # noqa: F403
 from ._math_ops import *  # noqa: F403
 from ._matrix_ops import *  # noqa: F403
 from ._pointwise_ops import *  # noqa: F403
