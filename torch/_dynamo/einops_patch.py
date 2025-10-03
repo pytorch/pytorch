@@ -2,39 +2,54 @@ import sys
 import importlib
 import importlib.abc
 import importlib.machinery
+from importlib._bootstrap import ModuleSpec
+from types import ModuleType
+from collections.abc import Sequence
 
-_EINOPS_061_NEEDS_PATCH = True
+_EINOPS_NEEDS_PATCH = True
 _TARGET_VERSIONS = {"0.6.1", "0.6.2rc0", "0.7.0rc1"}
 
 
-def _remove_patch_finder():
+def _attach_import_interceptor() -> None:
+    global _EINOPS_NEEDS_PATCH
+    if _EINOPS_NEEDS_PATCH and not any(
+        isinstance(f, _EinopsImportInterceptor) for f in sys.meta_path
+    ):
+        sys.meta_path.insert(0, _EinopsImportInterceptor())
+
+
+def _remove_import_interceptor() -> None:
+    global _EINOPS_NEEDS_PATCH
+    _EINOPS_NEEDS_PATCH = False
     for i, f in enumerate(sys.meta_path):
-        if isinstance(f, _EinopsImportIntercept):
+        if isinstance(f, _EinopsImportInterceptor):
             sys.meta_path.pop(i)
             break
 
 
-def _apply_patch():
+def _apply_patch() -> None:
     """
     Apply the einops patch to target versions only if einops is already loaded.
     Noop if einops isn't imported yet or already patched.
     Never try to apply patch again when einops loaded with different version than targets.
     """
-    global _EINOPS_061_NEEDS_PATCH
-    if not _EINOPS_061_NEEDS_PATCH:
-        return
+    try:
+        global _EINOPS_NEEDS_PATCH
+        if not _EINOPS_NEEDS_PATCH:
+            return
 
-    einops_module = sys.modules.get("einops")
+        einops_module = sys.modules.get("einops")
 
-    if not einops_module:
+        if not einops_module:
+            return
+    except Exception:
         return
 
     try:
-        ver = getattr(einops_module, "__version__", "")
+        version = getattr(einops_module, "__version__", "")
 
-        if ver not in _TARGET_VERSIONS:
-            _EINOPS_061_NEEDS_PATCH = False
-            _remove_patch_finder()
+        if version not in _TARGET_VERSIONS:
+            _remove_import_interceptor()
             return
 
         einops_module = sys.modules.get("einops.einops") or importlib.import_module(
@@ -44,7 +59,7 @@ def _apply_patch():
         if hasattr(einops_module, "_reconstruct_from_shape_uncached") and hasattr(
             einops_module, "_reconstruct_from_shape"
         ):
-            einops_module._reconstruct_from_shape = (
+            einops_module._reconstruct_from_shape = (  # type: ignore[attr-defined]
                 einops_module._reconstruct_from_shape_uncached
             )
 
@@ -54,16 +69,14 @@ def _apply_patch():
         if callable(_prepare_transformation_recipe) and hasattr(
             _prepare_transformation_recipe, "__wrapped__"
         ):
-            einops_module._prepare_transformation_recipe = (
+            einops_module._prepare_transformation_recipe = (  # type: ignore[attr-defined]
                 _prepare_transformation_recipe.__wrapped__
             )
 
-        _EINOPS_061_NEEDS_PATCH = False
-        _remove_patch_finder()
+        _remove_import_interceptor()
 
     except Exception:
-        _EINOPS_061_NEEDS_PATCH = False
-        _remove_patch_finder()
+        _remove_import_interceptor()
         return
 
 
@@ -71,16 +84,25 @@ class _EinopsPatchLoader(importlib.abc.Loader):
     def __init__(self, wrapped_loader: importlib.abc.Loader):
         self._wrapped_loader = wrapped_loader
 
-    def exec_module(self, module):
+    def exec_module(self, module: ModuleType) -> None:
         self._wrapped_loader.exec_module(module)
+
+        name = getattr(module, "__name__", "")
+        if name != "einops":
+            return
 
         _apply_patch()
 
 
-class _EinopsImportIntercept(importlib.abc.MetaPathFinder):
+class _EinopsImportInterceptor(importlib.abc.MetaPathFinder):
     """Intercept einops and submodules imports to apply the patch"""
 
-    def find_spec(self, fullname, path, target=None):
+    def find_spec(
+        self,
+        fullname: str,
+        path: Sequence[str] | None,
+        target: ModuleType | None = None,
+    ) -> ModuleSpec | None:
         if fullname == "einops" or fullname.startswith("einops."):
             spec = importlib.machinery.PathFinder.find_spec(fullname, path)
             if spec and spec.loader and isinstance(spec.loader, importlib.abc.Loader):
@@ -89,22 +111,17 @@ class _EinopsImportIntercept(importlib.abc.MetaPathFinder):
         return None
 
 
-def _patch_einops_061():
+def _patch_einops() -> None:
     """
     torch.compile fix for einops 0.6.1, 0.6.2rc0 and 0.7.0rc1
     https://github.com/pytorch/pytorch/issues/157417
 
     - If einops is already imported, patch immediately
-    - If not imported, register a meta_path finder to patch at first import
+    - If not imported, register a sys.meta_path finder to patch at first import
 
     TODO: verify if this patch can be removed once SymInt.__hash__ doesn't throw TypeError
     and returns a valid hash that satisfies or skips SymInt heap check
     https://github.com/pytorch/pytorch/blob/9e792f583afae92ec8ddedac1660bd79991d1f4f/c10/core/SymIntArrayRef.h#L41
     """
-
     _apply_patch()
-
-    if _EINOPS_061_NEEDS_PATCH and not any(
-        isinstance(f, _EinopsImportIntercept) for f in sys.meta_path
-    ):
-        sys.meta_path.insert(0, _EinopsImportIntercept())
+    _attach_import_interceptor()
