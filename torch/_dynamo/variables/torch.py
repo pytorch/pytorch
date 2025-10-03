@@ -245,6 +245,7 @@ class BaseTorchVariable(VariableTracker):
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
+        print(value)
         self.value = value
 
     def reconstruct(self, codegen: "PyCodegen"):
