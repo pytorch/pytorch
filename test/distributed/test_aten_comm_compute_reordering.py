@@ -817,23 +817,17 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             # Check that right deps are added
             f = FileCheck()
             for _ in range(2):
-                f.check("control_deps_op").check_same("all_gather").check_same(
+                f.check("control_deps").check_same("all_gather").check_same(
                     "subgraph_mm"
                 )
-                f.check("control_deps_op").check_same("mm").check_same("subgraph_wait")
+                f.check("control_deps").check_same("mm").check_same("subgraph_wait")
             f.run(li[0])
 
             f = FileCheck()
-            f.check("def call").check(
-                "torch.ops._c10d_functional.all_gather_into_tensor"
-            )
-            f.check_count(".mm(", 1, exactly=True)
-            f.check_count(".wait(", 1, exactly=True)
-            f.check_count(
-                "torch.ops._c10d_functional.all_gather_into_tensor_", 1, exactly=True
-            )
-            f.check_count(".mm(", 1, exactly=True)
-            f.check_count(".wait(", 1, exactly=True)
+            for _ in range(2):
+                f.check_count("all_gather_into_tensor_out.default(", 1, exactly=True)
+                f.check_count("extern_kernels.mm(", 1, exactly=True)
+                f.check_count("wait_tensor.default(", 1, exactly=True)
             f.run(code)
 
             correct = func(a, b, c, d, ranks=ranks)
