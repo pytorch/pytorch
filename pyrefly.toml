@@ -29,11 +29,6 @@ project-excludes = [
   "torch/fx/**",
   "torch/distributions/**",
   "torch/onnx/**",
-  "torch/_refs/**",
-  "torch/_export/**",
-  "torch/jit/**",
-  "torch/optim/**",
-  "torch/_higher_order_ops/**",
   # formatting issues
   "torch/linalg/__init__.py",
   "torch/package/importer.py",

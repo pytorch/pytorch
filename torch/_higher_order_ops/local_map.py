@@ -199,6 +199,7 @@ def create_hop_fw_bw(
 
 class LocalMapAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx: Any,
         fw_gm: GraphModule,
@@ -245,6 +246,7 @@ class LocalMapAutogradOp(torch.autograd.Function):
             )
 
             for i, meta in ctx.expected_tangent_metadata.items():
+                # pyrefly: ignore  # bad-argument-type
                 grads[i] = coerce_to_expected_memory_format(grads[i], meta)
 
             grad_ins = local_map_hop(ctx.bw_gm, *saved_activations, *grads)

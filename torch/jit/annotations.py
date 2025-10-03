@@ -33,7 +33,7 @@ from torch._C import (
     TupleType,
     UnionType,
 )
-from torch._jit_internal import (  # type: ignore[attr-defined]
+from torch._jit_internal import (  # type: ignore[attr-defined]; pyrefly: ignore  # missing-module-attribute
     _Await,
     _qualified_name,
     Any,
@@ -98,6 +98,7 @@ class EvalEnv:
     def __init__(self, rcb):
         self.rcb = rcb
         if torch.distributed.rpc.is_available():
+            # pyrefly: ignore  # unsupported-operation
             self.env["RRef"] = RRef
 
     def __getitem__(self, name):
