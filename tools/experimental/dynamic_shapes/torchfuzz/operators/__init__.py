@@ -17,6 +17,14 @@ from torchfuzz.operators.matrix_multiply import (
     MatmulOperator,
     MMOperator,
 )
+from torchfuzz.operators.nn_functional import (
+    DropoutOperator,
+    EmbeddingOperator,
+    LayerNormOperator,
+    LinearOperator,
+    ReLUOperator,
+    SoftmaxOperator,
+)
 from torchfuzz.operators.registry import get_operator, list_operators, register_operator
 from torchfuzz.operators.scalar_pointwise import (
     ScalarAddOperator,
@@ -58,6 +66,12 @@ __all__ = [
     "AddmmOperator",
     "BmmOperator",
     "MatmulOperator",
+    "EmbeddingOperator",
+    "LinearOperator",
+    "ReLUOperator",
+    "SoftmaxOperator",
+    "DropoutOperator",
+    "LayerNormOperator",
     "get_operator",
     "register_operator",
     "list_operators",
