@@ -1516,16 +1516,19 @@ static void logsumexp_out_impl(const Tensor& result, const Tensor& self, IntArra
   // Create a mutable reference for operations that require non-const Tensor&
   // This is safe because Tensor is a handle type and we're modifying the underlying data
   Tensor& result_mut = const_cast<Tensor&>(result);
-
+  
   // can't take max of empty tensor
   if (self.numel() != 0) {
     // For complex numbers, use the real part to calculate the max. Based on
     // https://scicomp.stackexchange.com/questions/34273/log-sum-exp-trick-for-signed-complex-numbers
-    auto maxes = at::amax(at::real(self), dims, true);
-    auto maxes_squeezed = (keepdim ? maxes : at::squeeze(maxes, dims));
-    maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
+    // Always keepdim=true for maxes to enable broadcasting with self
+    auto maxes = at::amax(at::real(self), dims, /*keepdim=*/true);
+    // For adding to result, we need maxes with the same shape as result
+    // When dims is empty (reduce all dims), squeeze() won't work, so squeeze all dims explicitly
+    auto maxes_for_result = keepdim ? maxes : (dims.empty() ? at::squeeze(maxes) : at::squeeze(maxes, dims));
+    maxes_for_result.masked_fill_(maxes_for_result.abs() == INFINITY, 0);
     at::sum_out(result_mut, (self - maxes).exp_(), dims, keepdim);
-    result_mut.log_().add_(maxes_squeezed);
+    result_mut.log_().add_(maxes_for_result);
   } else {
     at::sum_out(result_mut, at::exp(self), dims, keepdim);
     result_mut.log_();
