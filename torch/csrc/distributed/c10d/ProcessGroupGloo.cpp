@@ -1205,7 +1205,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
 
  protected:
   template <typename T>
-  void getFunction(gloo::ReduceOptions::Func& fn, const ReduceOp op) {
+  void getFunction(gloo::ReduceOptions::Func& fn, const ReduceOp& op) {
     fn = toFunction<T>(op);
   }
 
