@@ -23,10 +23,15 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
-from torch._inductor.utils import convert_shape_to_symint, sympy_product
+from torch._inductor.utils import convert_shape_to_symint, convert_to_symint
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
+from torch.fx.experimental.symbolic_shapes import (
+    CallMethodKey,
+    DivideByKey,
+    free_unbacked_symbols,
+)
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv
 from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
@@ -70,6 +75,7 @@ from .wrapper import (
     SubgraphPythonWrapperCodegen,
     SymbolicCallArg,
     SymbolicCallArgLine,
+    UnbackedSymbolDefsLine,
     WrapperLine,
 )
 
@@ -89,8 +95,10 @@ class SymbolBuffer(CodegenSymbol):
     def get_name(self) -> str:
         return str(self.symbol)
 
-    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
-        return self.symbol
+    def get_example(self) -> Union[torch.Tensor, torch.SymInt]:
+        sym_int = convert_to_symint(self.symbol)
+        assert isinstance(sym_int, torch.SymInt)
+        return sym_int
 
 
 CodegenBuffer = Union[BufferLike, SymbolBuffer]
@@ -114,30 +122,20 @@ def replace_floor_div(expr: sympy.Expr) -> sympy.Expr:
     def replace(expr: sympy.Expr) -> sympy.Expr:
         expr = sympy.together(expr)
 
-        # Find division operations in the sympy.floor expression
-        # Div is either represented as Mul with:
-        # Rational denominator or Pow with negative exponent
-        if not isinstance(expr, sympy.core.mul.Mul):
-            return sympy.floor(expr)
-
-        if isinstance(expr.args[0], sympy.Rational):
-            frac = expr.args[0]
-            numerator = sympy_product(expr.args[1:]) * frac.numerator
-            denominator = frac.denominator
-
-            return FloorDiv(numerator, denominator)
-        elif isinstance(expr.args[0], sympy.Pow):
-            base = expr.args[0].base
-            exp = expr.args[0].exp
-            numerator = sympy_product(expr.args[1:])
-            if exp < 0:
-                denominator = base ** (-exp)
+        # Division is represented as a Mul with a Rational factor or a Pow with negative
+        # exponent. We convert floor(Mul(...)) to FloorDiv(numerator, denominator) by
+        # partitioning factors into the numerator and denominator.
+        (numerator, denominator) = (sympy.S.One,) * 2
+        for arg in sympy.Mul.make_args(expr):
+            if isinstance(arg, sympy.Rational):
+                numerator *= arg.numerator
+                denominator *= arg.denominator
+            elif isinstance(arg, sympy.Pow) and arg.exp.is_negative:
+                denominator *= arg.base**-arg.exp
             else:
-                numerator = numerator * (base**exp)
-                denominator = 1
-            return FloorDiv(numerator, denominator)
-        else:
-            return sympy.floor(expr)
+                numerator *= arg
+
+        return FloorDiv(numerator, denominator)
 
     return expr.replace(sympy.floor, replace)
 
@@ -386,6 +384,13 @@ class FxConverter:
         else:
             raise NotImplementedError(f"Unable to extract buffer from node: {node}")
 
+    def _generate_size_proxy(
+        self, node: torch.fx.Node, expr: sympy.Expr
+    ) -> torch.fx.Proxy:
+        proxy = torch.fx.Proxy(node, tracer=self.tracer)
+        self.expr_to_proxy[expr] = proxy
+        return proxy
+
     def _generate_graph_inputs(self) -> None:
         """
         Converts graph inputs to FX placeholders.
@@ -398,14 +403,21 @@ class FxConverter:
                 continue
 
             # Introduce a new symbol for constant inputs.
+            is_constant = isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
             buffer = (
                 SymbolBuffer(sympy.Symbol(name, is_integer=True))
-                if isinstance(ir_node, (int, float, sympy.Integer, sympy.Float))
+                if is_constant
                 else self._get_buffer(ir_node)
             )
             placeholder_node = self.gm.graph.placeholder(buffer.get_name())
-            placeholder_node.meta["val"] = buffer.get_example()
+            placeholder_node.meta["val"] = (
+                ir_node if is_constant else buffer.get_example()
+            )
             self._record_allocation(buffer, placeholder_node)
+
+            # Record symbol definitions for dynamic shapes.
+            if isinstance(ir_node, sympy.Symbol):
+                self._generate_size_proxy(placeholder_node, ir_node)
 
     def _generate_graph_input_shapes(self) -> None:
         """
@@ -421,8 +433,7 @@ class FxConverter:
         ) -> None:
             def codegen_proxy() -> torch.fx.Proxy:
                 size_node = self.gm.graph.call_function(target, (base_node, dim))
-                size_proxy = torch.fx.Proxy(size_node, tracer=self.tracer)
-                self.expr_to_proxy[sym_or_exp] = size_proxy
+                size_proxy = self._generate_size_proxy(size_node, sym_or_exp)
                 return size_proxy
 
             if isinstance(sym_or_exp, sympy.Symbol):
@@ -475,9 +486,7 @@ class FxConverter:
                     undefined_symbol_expr
                 ]
 
-        for node in V.graph.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
-            name = node.name
-            ir_node = self.graph_inputs.get(name)
+        for ir_node in self.graph_inputs.values():
             if isinstance(ir_node, ir.TensorBox):
                 buffer = self._get_buffer(ir_node)
                 placeholder_node = self.buffer_to_node[buffer.get_name()]
@@ -503,6 +512,10 @@ class FxConverter:
         Generates FX IR for transformations on a buffer, such as ReinterpretView.
         Does nothing if no such transformations are present.
         """
+
+        if isinstance(node, ir.ShapeAsConstantBuffer):
+            # Generate FX nodes to compute the shape expression.
+            return self._sympy_interp(node.expr).node
 
         def generate_to_buffer(node: ir.IRNode) -> Optional[BufferLike]:
             if isinstance(node, (ir.Buffer, WorkspaceArg)):
@@ -539,7 +552,9 @@ class FxConverter:
         buffer = generate_to_buffer(node)
         return self.buffer_to_node[buffer.get_name()] if buffer is not None else None
 
-    def _generate_output(self) -> None:
+    def _generate_outputs(
+        self,
+    ) -> Union[Optional[torch.fx.Node], list[Optional[torch.fx.Node]]]:
         """
         Generate FX IR for graph outputs.
         """
@@ -554,7 +569,7 @@ class FxConverter:
             else output_nodes
         )
 
-        self.gm.graph.output(output_value)
+        return output_value
 
     def _generate_subgm_getattrs(self) -> None:
         """
@@ -614,7 +629,9 @@ class FxConverter:
                         )
                     )
 
-        self._generate_output()
+            output = self._generate_outputs()
+
+        self.gm.graph.output(output)
         self.gm.recompile()
         return self.gm
 
@@ -905,15 +922,11 @@ class FxConverter:
         call_args = self._lookup_args(line.call_args)
         kernel = self.kernels[line.kernel_name]
         tuner = kernel.tuner
-        # Use python_slow mode instead of python mode to avoid
-        # the round to neginf behaviour, which is not the convention
-        # in other languages.
-        tuner.grid_mode = "python_slow"
 
-        # Optionally autotune the kernels.
-        # The FX backend currently only supports compile-time tuning.
-        kernel_name = tuner.fn.__name__
-        if config.triton.autotune_at_compile_time:
+        class UnbackedSymintsError(Exception):
+            pass
+
+        def tune_kernel(tuner: CachingAutotuner, call_args: Sequence[Any]) -> None:
             from triton.runtime import driver
 
             log.info("Autotuning Triton kernel %s at compile time.", kernel_name)
@@ -925,9 +938,13 @@ class FxConverter:
                 Create real tensors for autotuning arguments, substituting size hints
                 for dynamic shapes.
                 """
-                to_size_hint = functools.partial(
-                    pytree.tree_map, V.graph.sizevars.size_hint
-                )
+
+                def to_size_hint(arg: Any) -> Any:
+                    if len(free_unbacked_symbols(arg)) > 0:
+                        # NYI: tuning args require backed symints.
+                        raise UnbackedSymintsError
+                    return pytree.tree_map(V.graph.sizevars.size_hint, arg)
+
                 if not isinstance(arg, torch.fx.Node):
                     return to_size_hint(arg)
 
@@ -935,11 +952,24 @@ class FxConverter:
                 return torch.empty_strided(
                     to_size_hint(fake.shape),
                     to_size_hint(fake.stride()),
+                    dtype=fake.dtype,
                     device=device,
                 ).zero_()
 
             arg_values = [node_to_tuning_arg(arg) for arg in call_args]
             tuner.run(*arg_values, stream=stream)
+
+        # Optionally autotune the kernels.
+        # The FX backend currently only supports compile-time tuning.
+        kernel_name = tuner.fn.__name__
+        if config.triton.autotune_at_compile_time:
+            try:
+                tune_kernel(tuner, call_args)
+            except UnbackedSymintsError:
+                log.info(
+                    "Detected unbacked symints. Skipping autotuning for kernel %s.",
+                    kernel_name,
+                )
         else:
             log.info(
                 "Skipping autotuning for kernel %s. Set config.triton.autotune_at_compile_time = True to enable.",
@@ -956,34 +986,40 @@ class FxConverter:
             Add constant kwargs to the arg list.
             """
             # Add args from the proper Triton signature.
+            # Exclude constants and config kwargs, as those are tracked separately.
             new_call_args = []
-            call_arg_idx = 0
             constants = triton_meta["constants"]
-            for arg_name in signature:
-                # Config kwargs are tracked separately.
-                if arg_name in cfg.kwargs:
-                    continue
+            call_kwargs = {
+                key: val
+                for key, val in zip(signature, call_args)
+                if key not in constants and key not in cfg.kwargs
+            }
 
-                try:
-                    new_arg = constants[arg_name]
-                except KeyError:
-                    new_arg = call_args[call_arg_idx]
-                    call_arg_idx += 1
-                new_call_args.append(new_arg)
+            # Add constants stored as Triton metadata, in signature order.
+            call_kwargs |= constants
+            new_call_args = [
+                call_kwargs[key] for key in signature if key not in cfg.kwargs
+            ]
 
-            # Add Inductor's extra call args to the end.
-            new_call_args.extend(call_args[call_arg_idx:])
+            # Add Inductor's extra launcher args to the end.
+            if extra_launcher_args := tuner.inductor_meta.get("extra_launcher_args"):
+                new_call_args.extend(
+                    call_args[len(call_args) - len(extra_launcher_args) :]
+                )
 
             return tuple(new_call_args)
 
         kernel_config = tuner.compile_results[0].config
+        extra_options = getattr(kernel_config, "extra_options", None)
         call_args = add_constants_to_call_args(call_args, kernel_config)
         call_args, grid = tuner._interpret_args_grid(call_args, kernel_config)
         call_kwargs = dict(zip(signature, call_args))
+        assert not any(kwarg in kernel_config.kwargs for kwarg in call_kwargs), (
+            f"kwargs overlap config: {call_kwargs}"
+        )
         call_kwargs.update(kernel_config.kwargs)
 
-        # Replace all sympy.floor with FloorDiv
-        # _generate_sym_node does not support sympy.floor
+        # Replace sympy.floor with FloorDiv, to make the expression traceable.
         grid = [replace_floor_div(x) if isinstance(x, sympy.Expr) else x for x in grid]
         wrapper_grid = [tuple(self._generate_sym_nodes(grid))]
         call_kwargs = {
@@ -996,7 +1032,7 @@ class FxConverter:
             constant_args_idx,
         ) = tracing_triton_hopifier_singleton.store_non_graphable_args(call_kwargs)
 
-        self.gm.graph.call_function(
+        triton_node = self.gm.graph.call_function(
             triton_kernel_wrapper_mutation,
             kwargs={
                 "kernel_idx": kernel.wrapped.kernel_idx,
@@ -1006,6 +1042,8 @@ class FxConverter:
                 "kwargs": call_kwargs,
             },
         )
+        if extra_options:
+            triton_node.meta["extra_options"] = extra_options
 
     def _generate_extern_kernel_alloc(self, line: WrapperLine) -> None:
         assert isinstance(line, ExternKernelAllocLine)
@@ -1087,3 +1125,57 @@ class FxConverter:
 
         inner_expr_proxy = self._sympy_interp(arg.inner_expr)
         self.expr_to_proxy[arg.inner] = inner_expr_proxy
+
+    def _generate_unbacked_symbol_defs(self, line: WrapperLine) -> None:
+        assert isinstance(line, UnbackedSymbolDefsLine)
+        graph = self.gm.graph
+
+        def convert_key(node: torch.fx.Node, path: pytree.KeyPath) -> torch.fx.Node:
+            """
+            Generate FX IR for each key entry.
+            """
+            # Base case.
+            if len(path) == 0:
+                return node
+
+            # Process the first entry and recurse.
+            entry = path[0]
+            if isinstance(entry, CallMethodKey):
+                target = {
+                    "size": aten.sym_size.int,
+                    "stride": aten.sym_stride.int,
+                    "storage_offset": aten.sym_storage_offset,
+                }[entry.name]
+                assert callable(target)
+                node = graph.call_function(
+                    target,
+                    args=(
+                        (node, path[1].idx)
+                        if len(path) > 1 and isinstance(path[1], pytree.SequenceKey)
+                        else (node,)
+                    ),
+                )
+                return convert_key(node, path[1 + len(node.args) :])
+            elif isinstance(entry, pytree.SequenceKey):
+                node = graph.call_function(operator.getitem, args=(node, entry.idx))
+                return convert_key(node, path[1:])
+            elif isinstance(entry, DivideByKey):
+                node = graph.call_function(
+                    operator.floordiv, args=(node, entry.divisor)
+                )
+                return convert_key(node, path[1:])
+            else:
+                raise NotImplementedError(f"Unrecognized entry type: {type(entry)}")
+
+        root_node = self.buffer_to_node[line.output_name]
+        unbacked_bindings = line.unbacked_bindings
+        assert unbacked_bindings is not None
+        for s, keypath in unbacked_bindings.items():
+            # Check if we already generated this symbol.
+            if s.name in self.buffer_to_node:
+                continue
+
+            node = convert_key(root_node, keypath)
+            out_buffer = SymbolBuffer(s)
+            self._record_allocation(out_buffer, node)
+            self._generate_size_proxy(node, s)
