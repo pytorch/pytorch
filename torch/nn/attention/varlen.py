@@ -60,7 +60,8 @@ def _varlen_attn(
             False,  # return_debug_mask
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
-        output, softmax_lse = result[0], result[1]
+        # output, softmax_lse, rng_state = result[0], result[1], result[6]
+        output, softmax_lse, rng_state = result[0], result[1]
     else:
         log.info("Using Flash Attention backend for varlen_attn")
         output, softmax_lse, rng_state, _, _ = torch.ops.aten._flash_attention_forward(
@@ -75,7 +76,7 @@ def _varlen_attn(
             is_causal,
             return_debug_mask=False,
         )
-
+    # return output, softmax_lse, rng_state
     return output, softmax_lse
 
 
@@ -139,6 +140,81 @@ def varlen_attn(
     out, lse = torch.ops.torch_nn_attention._varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
+
     if return_lse:
         return out, lse
     return out
+
+
+def setup_context(ctx, inputs, output):
+    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
+    # out, lse, rng_state = output
+    out, lse = output
+    ctx.query = query
+    ctx.key = key
+    ctx.value = value
+    ctx.cu_seq_q = cu_seq_q
+    ctx.cu_seq_k = cu_seq_k
+    ctx.max_q = max_q
+    ctx.max_k = max_k
+    ctx.is_causal = is_causal
+    ctx.output = out
+    ctx.lse = lse
+    # ctx.rng_state = rng_state
+
+
+def backward(ctx, grad_out, grad_lse):
+    print("in bwd")
+    query = ctx.query
+    key = ctx.key
+    value = ctx.value
+    cu_seq_q = ctx.cu_seq_q
+    cu_seq_k = ctx.cu_seq_k
+    max_q = ctx.max_q
+    max_k = ctx.max_k
+    is_causal = ctx.is_causal
+    out = ctx.output
+    lse = ctx.lse
+    rng_state = getattr(ctx, "rng_state", torch.empty(0, device=query.device))
+    unused = torch.empty(0, device=query.device)
+
+    use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
+    if use_cudnn:
+        log.info("Using cuDNN backend for varlen_attn")
+        dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            lse,
+            cu_seq_q,
+            cu_seq_k,
+            max_q,
+            max_k,
+            0.0,
+            is_causal,
+            rng_state,
+            unused
+        )
+    else:
+        log.info("Using Flash Attention backend for varlen_attn")
+        dq, dk, dv = torch.ops.aten._flash_attention_backward(
+            grad_out,
+            query,
+            key,
+            value,
+            out,
+            lse,
+            cu_seq_q,
+            cu_seq_k,
+            max_q,
+            max_k,
+            0.0,
+            is_causal,
+            rng_state,
+            unused
+        )
+    return dq, dk, dv, None, None, None, None, None, None
+
+_varlen_attn.register_autograd(backward, setup_context=setup_context)
