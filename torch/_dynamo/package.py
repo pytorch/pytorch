@@ -25,6 +25,7 @@ import shutil
 import sys
 import types
 from collections.abc import Generator, Iterator
+from contextlib import nullcontext
 from typing import Any, Callable, NewType, Optional
 from typing_extensions import Never
 
@@ -95,6 +96,17 @@ class _GuardedCodeCacheEntry:
 
     guards_state: bytes
     dynamo_code: SerializedCode
+
+
+def load_guards_state(guards_state: bytes) -> Any:
+    try:
+        import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
+
+        ctx = _fully_shard.disable_fsdp_module_new_init()
+    except ImportError:
+        ctx = nullcontext()  # type: ignore[assignment]
+    with ctx:
+        return pickle.loads(guards_state)
 
 
 _BackendId = NewType("_BackendId", str)  # __compiled_fn
@@ -784,7 +796,7 @@ class CompilePackage:
                     torch._dynamo.eval_frame.skip_code(target_code)
 
                 for guarded_code in entry.guarded_codes:
-                    guards_state = pickle.loads(guarded_code.guards_state)
+                    guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
                     # The installed builtins dict might be absent from the runtime
                     # while loading guards. Populate it if it's missing.
@@ -805,6 +817,7 @@ class CompilePackage:
                         OutputGraphCommon(guards_state.output_graph),
                         shape_code_parts=guards_state.shape_code_parts,
                         runtime_global_scope=runtime_global_scope,
+                        source_get_cache=guards_state.source_get_cache,
                     )
                     _load_precompile_entry(
                         target_code,
