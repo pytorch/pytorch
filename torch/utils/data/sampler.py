@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Iterable, Iterator, Sequence, Sized
-from typing import Generic, Optional, TypeVar, Union
+from typing import Any, Dict, Generic, Iterator, List, Optional, Sized, TypeVar, Union
 
 import torch
 
+from ._utils.stateful import Stateful
 
 # Note: For benchmarking changes to samplers, see:
 # /benchmarks/data/samplers_bench.py
@@ -92,6 +93,17 @@ class Sampler(Generic[_T_co]):
     #   + raise a `TypeError` instead, which is what Python uses when users call
     #     a method that is not defined on an object.
     #     (@ssnl verifies that this works on at least Python 3.7.)
+
+
+class _InfiniteConstantSampler(Sampler):
+    r"""Analogous to ``itertools.repeat(None, None)``.
+
+    Used as sampler for :class:`~torch.utils.data.IterableDataset`.
+    """
+
+    def __iter__(self):
+        while True:
+            yield None
 
 
 class SequentialSampler(Sampler[int]):
@@ -330,18 +342,12 @@ class BatchSampler(Sampler[list[int]]):
         self.batch_size = batch_size
         self.drop_last = drop_last
 
-    def __iter__(self) -> Iterator[list[int]]:
-        sampler_iter = iter(self.sampler)
-        if self.drop_last:
-            # Create multiple references to the same iterator
-            args = [sampler_iter] * self.batch_size
-            for batch_droplast in zip(*args):
-                yield [*batch_droplast]
-        else:
-            batch = [*itertools.islice(sampler_iter, self.batch_size)]
-            while batch:
-                yield batch
-                batch = [*itertools.islice(sampler_iter, self.batch_size)]
+    def __iter__(self):
+        return _BatchSamplerIterator(
+            sampler=self.sampler,
+            batch_size=self.batch_size,
+            drop_last=self.drop_last,
+        )
 
     def __len__(self) -> int:
         # Can only be called if self.sampler has __len__ implemented
@@ -352,3 +358,61 @@ class BatchSampler(Sampler[list[int]]):
             return len(self.sampler) // self.batch_size  # type: ignore[arg-type]
         else:
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
+
+
+class _BatchSamplerIterator(Iterator[list[int]], Stateful):
+    _SAMPLES_YIELDED = "samples_yielded"
+    _SAMPLER_STATE = "sampler_state"
+    _SAMPLER_ITER_STATE = "sampler_iter_state"
+
+    def __init__(self, sampler, batch_size: int, drop_last: bool):
+        self.sampler = sampler
+        self.sampler_iter = iter(self.sampler)
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.samples_yielded = 0
+
+    def __next__(self) -> list[int]:
+        batch = []
+        try:
+            for _ in range(self.batch_size):
+                batch.append(next(self.sampler_iter))
+                self.samples_yielded += 1
+            return batch
+        except StopIteration:
+            if self.drop_last or len(batch) == 0:
+                raise StopIteration
+            else:
+                return batch
+
+    def state_dict(self) -> Dict[str, Any]:
+        sd: Dict[str, Any] = {self._SAMPLES_YIELDED: self.samples_yielded}
+        if isinstance(self.sampler, Stateful):
+            sd[self._SAMPLER_STATE] = self.sampler.state_dict()
+        if isinstance(self.sampler_iter, Stateful):
+            sd[self._SAMPLER_ITER_STATE] = self.sampler_iter.state_dict()
+        return sd
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        self.samples_yielded = state_dict[self._SAMPLES_YIELDED]
+        if self._SAMPLER_STATE in state_dict:
+            assert isinstance(self.sampler, Stateful)
+            self.sampler.load_state_dict(state_dict[self._SAMPLER_STATE])
+        self.sampler_iter = iter(self.sampler)
+        if self._SAMPLER_ITER_STATE in state_dict:
+            assert isinstance(self.sampler_iter, Stateful)
+            self.sampler_iter.load_state_dict(state_dict[self._SAMPLER_ITER_STATE])
+
+        if not (
+            isinstance(self.sampler, Stateful)
+            or isinstance(self.sampler_iter, Stateful)
+        ) and not isinstance(self.sampler, _InfiniteConstantSampler):
+            # We skip x samples if underlying sampler is not stateful
+            for _ in range(self.samples_yielded):
+                next(self.sampler_iter)
+
+    def update_state_dict(self) -> None:
+        if isinstance(self.sampler_iter, Stateful) and hasattr(
+            self.sampler_iter, "update_state_dict"
+        ):
+            self.sampler_iter.update_state_dict()
