@@ -835,7 +835,8 @@ static void _save_variables(
     if (!opt_tensor.has_value()) {
       self->saved_variables.emplace_back();
     } else {
-      bool is_output = output_impls.count(opt_tensor.value().unsafeGetTensorImpl()) > 0;
+      bool is_output =
+          output_impls.count(opt_tensor.value().unsafeGetTensorImpl()) > 0;
       self->saved_variables.emplace_back(opt_tensor.value(), is_output);
     }
   }
@@ -1150,7 +1151,8 @@ PyObject* process_outputs(
   // wrapping as the outputs must have their grad_fn/fw_grad properly set before
   // we save them.
   if (is_executable) {
-    _save_variables(tensors_to_save, cdata, grad_fn, outputs.get(), num_outputs);
+    _save_variables(
+        tensors_to_save, cdata, grad_fn, outputs.get(), num_outputs);
   } else {
     // Remove unnecessary attributes
     Py_CLEAR(grad_fn->to_save);

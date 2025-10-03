@@ -8915,7 +8915,7 @@ for shape in [(1,), ()]:
                 pass
 
         def scope():
-            x = torch.tensor(1., requires_grad=True).clone()
+            x = torch.tensor(1.0, requires_grad=True).clone()
             x = x.view_as(x)
             y = Test.apply(x)
             return weakref.ref(x)
