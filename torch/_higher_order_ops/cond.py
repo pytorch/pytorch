@@ -19,7 +19,6 @@ from torch._C._functorch import (
 from torch._functorch.utils import exposed_in
 from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
-    _set_compilation_env,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
     fill_none_with_masks,
@@ -33,12 +32,7 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_metadata_torch_function_mode,
-    _temp_remove_pre_dispatch_torch_function_mode,
-    ProxyTorchDispatchMode,
-    track_tensor_tree,
-)
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
@@ -174,10 +168,6 @@ def cond(
     if torch.compiler.is_dynamo_compiling():
         return cond_op(pred, true_fn, false_fn, operands)
 
-    from torch._dynamo.backends.debugging import (
-        make_eager_backend_with_torch_function_mode,
-    )
-
     if isinstance(pred, (bool, int, float)):
         # This is the non-strict export case. Strict export and torch.compile are
         # handled above in dynamo.
@@ -223,21 +213,12 @@ def cond(
     def _cond_op_wrapper(*args, **kwargs):
         return cond_op(*args, **kwargs)
 
-    with (
-        _set_compilation_env(),
-        torch._dynamo.utils.disable_cache_limit(),
-        _temp_remove_pre_dispatch_torch_function_mode(),
-    ):
-        with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-            if metadata_mode:
-                backend: Union[str, Callable[..., Any]] = (
-                    make_eager_backend_with_torch_function_mode(metadata_mode)
-                )
-            else:
-                backend = "eager"
-            return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
-                pred, true_fn, false_fn, operands
-            )
+    from torch._higher_order_ops.utils import setup_compilation_env
+
+    with setup_compilation_env() as backend:
+        return torch.compile(_cond_op_wrapper, backend=backend, fullgraph=True)(
+            pred, true_fn, false_fn, operands
+        )
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
