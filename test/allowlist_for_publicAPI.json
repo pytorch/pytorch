@@ -995,7 +995,6 @@
     "all_types_and_complex",
     "all_types_and_complex_and",
     "all_types_and_half",
-    "assert_allclose",
     "assert_close",
     "complex_types",
     "double_types",
