@@ -49,6 +49,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "hf_Roberta_base",
                 "hf_T5",
                 "hf_T5_base",
+                "hf_T5_generate",
                 "levit_128",
                 "llava",
                 "microbench_unbacked_tolist_sum",
