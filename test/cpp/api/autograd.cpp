@@ -1292,12 +1292,6 @@ torch::Tensor view_op(const torch::Tensor& self) {
   return self.alias();
 }
 
-torch::Tensor view_op_with_extra_arg(
-    const torch::Tensor& self,
-    const torch::Tensor& other) {
-  return self.alias();
-}
-
 std::vector<torch::Tensor> ret_tensor_vector_view(
     const torch::Tensor& self,
     const torch::Tensor& other) {
