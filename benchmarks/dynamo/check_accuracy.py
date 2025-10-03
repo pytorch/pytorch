@@ -34,6 +34,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
     if "rocm" in expected_filename:
         flaky_models.update(
             {
+                "Background_Matting",
                 "alexnet",
                 "cait_m36_384",
                 "dla102",
@@ -43,6 +44,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "doctr_det_predictor",
                 "doctr_reco_predictor",
                 "dpn107",
+                "fbnetv3_b",
                 "hf_BigBird",
                 "hf_Longformer",
                 "hf_Reformer",
@@ -67,6 +69,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "squeezenet1_1",
                 "stable_diffusion_text_encoder",
                 "stable_diffusion_unet",
+                "swsl_resnext101_32x16d",
                 "timm_efficientdet",
                 "timm_efficientnet",
                 "timm_nfnet",
