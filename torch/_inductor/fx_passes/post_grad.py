@@ -202,6 +202,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
     collectives_bucketing: bool = False
+
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter

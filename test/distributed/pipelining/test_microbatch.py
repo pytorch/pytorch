@@ -1,14 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-import torch
 from model_registry import ModelWithKwargs
+
+import torch
 from torch.distributed.pipelining import pipeline
 from torch.distributed.pipelining.microbatch import (
     merge_chunks,
     split_args_kwargs_into_chunks,
     TensorChunkSpec,
 )
-
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,

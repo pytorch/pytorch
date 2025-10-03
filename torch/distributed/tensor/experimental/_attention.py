@@ -3,11 +3,11 @@ import itertools
 import logging
 import types
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import partial
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 import torch
 import torch.distributed as dist
@@ -393,9 +393,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(
-        group, dist.ProcessGroup
-    ), "process group must be single dimension"
+    assert isinstance(group, dist.ProcessGroup), (
+        "process group must be single dimension"
+    )
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -998,46 +998,10 @@ def _enable_cp_dtensor_dispatcher() -> Generator[None, None, None]:
 def _context_parallel_dispatcher(
     seq_dim: int, mesh: DeviceMesh
 ) -> Generator[None, None, None]:
-    flex_cp = _ContextParallel(
-        seq_dim=seq_dim,
-        attention_type=_ContextParallel.AttentionType.FLEX,
-    )
     sdpa_cp = _ContextParallel(
         seq_dim=seq_dim,
         attention_type=_ContextParallel.AttentionType.SDPA,
     )
-
-    class DistributeFunction(TorchFunctionMode):
-        def __init__(
-            self,
-            fns: tuple[Callable, ...],
-            device_mesh: DeviceMesh,
-            input_fns: tuple[InputFnType, ...],
-            output_fns: tuple[OutputFnType, ...],
-        ):
-            self._device_mesh = device_mesh
-            self._input_fns = input_fns
-            self._output_fns = output_fns
-            self._fns = fns
-
-        def __torch_function__(
-            self,
-            func: Callable,
-            types: Any,
-            args: tuple[Any, ...] = (),
-            kwargs: Optional[dict[str, Any]] = None,
-        ) -> Any:
-            kwargs = kwargs or {}
-
-            try:
-                idx = self._fns.index(func)
-            except ValueError:
-                return func(*args, **kwargs)
-
-            args, kwargs = self._input_fns[idx](None, args, kwargs, self._device_mesh)
-            outputs = func(*args, **kwargs)
-            outputs = self._output_fns[idx](None, args, outputs, self._device_mesh)
-            return outputs
 
     if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
         _distribute_function(
@@ -1050,32 +1014,9 @@ def _context_parallel_dispatcher(
         with _enable_cp_dtensor_dispatcher():
             yield
         _restore_function(F.scaled_dot_product_attention, F)
-    elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
-        tf_mode = _cp_global_vars.torch_function_mode
-        if tf_mode is None:
-            tf_mode = DistributeFunction(
-                (
-                    torch._higher_order_ops.flex_attention,
-                    F.scaled_dot_product_attention,
-                ),
-                mesh,
-                (
-                    flex_cp.flex_input_fn,
-                    sdpa_cp.sdpa_input_fn,
-                ),
-                (
-                    flex_cp.flex_output_fn,
-                    sdpa_cp.sdpa_output_fn,
-                ),
-            )
-            _cp_global_vars.torch_function_mode = tf_mode
-
-        with tf_mode:
-            with _enable_cp_dtensor_dispatcher():
-                yield
     elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
-        # Do nothing as we expect parallelize_module to handle this.
-        yield
+        with _enable_cp_dtensor_dispatcher():
+            yield
     else:
         raise NotImplementedError("torch dispatch mode is not supported yet.")
 
@@ -1224,15 +1165,6 @@ def _create_cp_block_mask(
         BLOCK_SIZE=(block_size, block_size),
     )
 
-    # TODO: remove this legacy code once we are sure that TorchFunctionMode
-    # is not going to be supported anymore.
-    """
-    # flex_attention function checks the following shape so we need to rewrite:
-    # key.size(-2) == block_mask.seq_lengths[1]
-    seq_lengths = block_mask.seq_lengths
-    block_mask.seq_lengths = (seq_lengths[0], seq_lengths[1] // cp_group_size)
-    """
-
     return block_mask
 
 
@@ -1260,7 +1192,6 @@ class _ContextParallel(ParallelStyle):
             module.register_forward_pre_hook(
                 partial(self.flex_input_fn, mesh=mesh), with_kwargs=True
             )
-            module.register_forward_hook(partial(self.flex_output_fn, mesh=mesh))
             return module
         elif self.attention_type == self.AttentionType.SDPA:
             module.register_forward_pre_hook(
@@ -1307,40 +1238,7 @@ class _ContextParallel(ParallelStyle):
         args_list[1] = global_key
         args_list[2] = global_value
 
-        # TODO: remove this legacy code once we are sure that TorchFunctionMode
-        # is not going to be supported anymore.
-        """
-        # shape rewrite: because torch.nn.flex_attention() checks
-        # the QKV shape against the block_mask object, we need to
-        # manually rewrite the shape info in block_mask tuple to
-        # make it compatible with q_shard, k_global, v_global
-        if isinstance(block_mask, tuple):
-            if block_mask[1] != global_key.size(-2):
-                block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
-        else:
-            if block_mask.seq_lengths[1] != global_key.size(-2):
-                self._orig_seq_lengths = block_mask.seq_lengths
-                block_mask.seq_lengths = (
-                    block_mask.seq_lengths[0],
-                    global_key.size(-2),
-                )
-                self._block_mask = block_mask
-        """
-
         return tuple(args_list), kwargs
-
-    def flex_output_fn(
-        self, module: Optional[nn.Module], inputs: Any, outputs: Any, mesh: DeviceMesh
-    ) -> Any:
-        # TODO: remove this legacy code once we are sure that TorchFunctionMode
-        # is not going to be supported anymore.
-        """
-        if self._orig_seq_lengths is not None:
-            assert isinstance(self._block_mask, BlockMask)
-            self._block_mask.seq_lengths = self._orig_seq_lengths
-        self._block_mask = None
-        """
-        return outputs
 
     def sdpa_input_fn(
         self,

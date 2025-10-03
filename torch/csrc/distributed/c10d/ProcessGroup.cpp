@@ -165,7 +165,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     const std::optional<std::string>& name,
     const std::optional<std::string>& desc) {
   TORCH_CHECK(
-      ranks.size() > 0,
+      !ranks.empty(),
       "Split ranks cannot be empty. Please provide a non-empty list of ranks to split the group.");
   TORCH_CHECK(
       ranks.size() <= static_cast<size_t>(size_),
