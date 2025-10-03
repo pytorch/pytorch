@@ -17,8 +17,6 @@ class TestControlDeps(InductorTestCase):
     @config.patch(reorder_for_locality=False)
     @requires_gpu()
     def test_control_deps_prevents_fusion(self):
-        from torch._inductor import config
-
         def fn(a, b):
             c = a + 1
             d = b @ b
