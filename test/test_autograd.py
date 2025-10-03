@@ -8920,9 +8920,8 @@ for shape in [(1,), ()]:
             y = Test.apply(x)
             return weakref.ref(x)
 
-        with disable_gc():
-            ref = scope()
-            self.assertIsNone(ref())
+        ref = scope()
+        self.assertIsNone(ref())
 
     def test_custom_function_return_view_in_nograd(self):
         class Alias(Function):
