@@ -4,10 +4,10 @@ import itertools
 import logging
 import types
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Callable, Optional, Protocol, Union
+from typing import Any, Optional, Protocol, Union
 
 import torch
 import torch.distributed as dist
@@ -84,6 +84,53 @@ class LoadBalancer(ABC):
 
         Returns:
             The generated indices.
+
+        Example:
+            Here is the causal mask for attention where q_len == kv_len == 8:
+                            KV_index
+                    [1, 0, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 1, 0, 0, 0, 0, 0]
+            Q_index [1, 1, 1, 1, 0, 0, 0, 0]
+                    [1, 1, 1, 1, 1, 0, 0, 0]
+                    [1, 1, 1, 1, 1, 1, 0, 0]
+                    [1, 1, 1, 1, 1, 1, 1, 0]
+                    [1, 1, 1, 1, 1, 1, 1, 1]
+
+            This mask matrix also represents the computation required to compute
+            the masked Q @ K^T by:
+            - mask[i, j] == 1: the computation of Q[i, :] dot K[j, :] is required
+            - mask[i, j] == 0: the computation should be skipped
+
+            Therefore the number of 1s in matrix represents the amount of computation
+            required.
+
+            Assume we want to distribute this Q @ K^T computation to 2 devices, then
+            the matrix is also distributed as:
+                            KV_index
+                    [1, 0, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 1, 0, 0, 0, 0, 0]    rank 0
+                    [1, 1, 1, 1, 0, 0, 0, 0]
+            Q_index ------------------------
+                    [1, 1, 1, 1, 1, 0, 0, 0]
+                    [1, 1, 1, 1, 1, 1, 0, 0]    rank 1
+                    [1, 1, 1, 1, 1, 1, 1, 0]
+                    [1, 1, 1, 1, 1, 1, 1, 1]
+
+            An imbalance of computation is observed on these 2 ranks and this could make
+            rank 1 the straggler when performing Context Parallel. In order to balance
+            the computation, we need to rearrange the QKV tensors before sharding in such a
+            way that the result mask matrix is evenly distributed over devices and each
+            rank has the number of 1s as close as possible.
+
+            This method defines the strategy of how to rearrange the QKV tensor for better
+            load-balance:
+            - when `restore == False`, this method returns an indices tensor `rearrange_idx`
+            such that Q[rearrange_idx] is the desired Q tensor after rearranging.
+            - when `restore == True`, this method returns an indices tensor `restore_idx`
+            such that Q[rearrange_idx][restore_idx] == Q, i.e. restoring the rearranged tensor
+            back to the original status before rearranging.
         """
 
 
@@ -134,15 +181,60 @@ class HeadTailLoadBalancer(LoadBalancer):
 
     def generate_indices(self, restore: bool = False) -> torch.Tensor:
         """
-        Generate round-robin load balancing indices or restore indices.
+        Generate head-and-tail load balancing indices or restore indices.
         Args:
             restore:
-                If True, generate restore indices that map round-robin reordered
+                If True, generate restore indices that map head-and-tail rearranged
                 positions back to original positions. If False, generate load
-                balance indices that reorder original positions to round-robin pattern.
+                balance indices that rearrange original positions to head-and-tail pattern.
 
         Returns:
             Index tensor of shape (seq_length,) with the requested mapping.
+
+        Example:
+            Here is the causal mask for attention where q_len == kv_len == 8:
+                            KV_index
+                    [1, 0, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 1, 0, 0, 0, 0, 0]
+            Q_index [1, 1, 1, 1, 0, 0, 0, 0]
+                    [1, 1, 1, 1, 1, 0, 0, 0]
+                    [1, 1, 1, 1, 1, 1, 0, 0]
+                    [1, 1, 1, 1, 1, 1, 1, 0]
+                    [1, 1, 1, 1, 1, 1, 1, 1]
+
+            Head-tail load-balance strategy rearranges the Q tensor by combining
+            Q[0:k] (on seq dim) and Q[-k:] for rank 0, Q[k:2k] and Q[-2k:-k] for
+            rank 1, and so on. In python code it looks like:
+
+                k = Q.size(0) // (2 * cp_world_size)
+                for rank in range(cp_world_size):
+                    reordered_Q[rank * 2 * k : (rank + 1) * 2 * k] = torch.cat(
+                        (Q[rank * k : (rank + 1) * k], Q[-(rank + 1) * k : -rank * k])
+                    )
+
+            This can also be done by tensor slicing. For the above example, the indices
+            tensor for slicing is:
+                slice_indices = torch.tensor([0, 7, 1, 6, 2, 5, 3, 4])
+
+            After reordering QKV using the `slice_indices`, the corresponding mask matrix
+            distributing over 2 devices becomes well-balanced:
+                            KV_index
+                    [1, 0, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 1, 1, 1, 1, 1, 1]
+                    [1, 1, 0, 0, 0, 0, 0, 0]    rank 0
+                    [1, 1, 1, 1, 1, 1, 1, 0]
+            Q_index ------------------------
+                    [1, 1, 1, 0, 0, 0, 0, 0]
+                    [1, 1, 1, 1, 1, 1, 0, 0]    rank 1
+                    [1, 1, 1, 1, 0, 0, 0, 0]
+                    [1, 1, 1, 1, 1, 0, 0, 0]
+
+            To restore the reordering and putting the tensor back, slicing op can do the
+            trick with a `restore_indices` such that:
+                slice_indices[restore_indices] == torch.tensor([0, 1, 2, ...])
+
+            In this way, `reordered_Q[restore_indices]` will just be the original Q.
         """
         seq_length = self.seq_length
         world_size = self.world_size
@@ -188,8 +280,60 @@ class PerDocumentHeadTailLoadBalancer(LoadBalancer):
 
     def generate_indices(self, restore: bool = False) -> torch.Tensor:
         """
-        Generate the per-document head-and-tail shuffle indices so that after shuffling
+        Generate the per-document head-and-tail rearrange indices so that after rearranging
         the input is load-balanced in per-document head-and-tail style.
+
+        Args:
+            restore:
+                If True, generate restore indices that map per-document head-and-tail
+                rearranged positions back to original positions. If False, generate load
+                balance indices that rearrange original positions to per-document
+                head-and-tail pattern.
+
+        Returns:
+            Index tensor of shape (seq_length,) with the requested mapping.
+
+        Example:
+            Here is the document causal mask for attention where q_len == kv_len == 16:
+                                        KV_index
+                    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            Q_index [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0]
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0]
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1]
+
+            The per-document head-and-tail load-balancer will apply head-and-tail
+            reordering within each document. After load-balancing for context-parallel
+            on 2 devices, the above mask matrix will look like this:
+                                        KV_index
+                    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]
+            Q_index [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1]
+                    ------------------------------------------------
+                    [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0]
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0]
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0]
         """
         if isinstance(self.seq_length_per_doc[0], list):
             # The load-balance is different within batch
@@ -1464,9 +1608,9 @@ def _generate_round_robin_indices(
         seq_length: Total sequence length
         cp_world_size: Context parallel world size
         device: Device to place the tensor on
-        restore: If True, generate restore indices that map round-robin reordered
+        restore: If True, generate restore indices that map round-robin rearranged
                 positions back to original positions. If False, generate load
-                balance indices that reorder original positions to round-robin pattern.
+                balance indices that rearrange original positions to round-robin pattern.
     Returns:
         Index tensor of shape (seq_length,) with the requested mapping.
     """
@@ -1765,8 +1909,8 @@ def create_cp_block_mask(
         Q_LEN (int): Sequence length of query (global view).
         KV_LEN (int): Sequence length of key/value (global view).
         device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
-        load_balancer (optional[:class:`LoadBalancer`]): The load-balancer used to shuffle QKV
-            before sharding. This will be used to modify the block_mask generated.
+        load_balancer (optional[:class:`LoadBalancer`]): The load-balancer used to rearrange
+            QKV before sharding. This will be used to modify the block_mask generated.
 
     Return:
         :class:`BlockMask`: the block_mask to be used in flex_attention() within the
@@ -1790,20 +1934,20 @@ def create_cp_block_mask(
         world_size: int,
         block_size: int,
         local_q_size: int,
-        qkv_shuffle_indices: Optional[torch.Tensor] = None,
+        qkv_rearrange_indices: Optional[torch.Tensor] = None,
     ) -> _mask_mod_signature:
         def qkv_idx_restore(
-            b: torch.Tensor, idx_post_shuffle: torch.Tensor
+            b: torch.Tensor, idx_post_rearrange: torch.Tensor
         ) -> torch.Tensor:
-            if qkv_shuffle_indices is not None:
-                if qkv_shuffle_indices.ndim == 1:  # identical across batches
-                    idx_pre_shuffle = qkv_shuffle_indices[idx_post_shuffle]
+            if qkv_rearrange_indices is not None:
+                if qkv_rearrange_indices.ndim == 1:  # identical across batches
+                    idx_pre_rearrange = qkv_rearrange_indices[idx_post_rearrange]
                 else:
-                    idx_pre_shuffle = qkv_shuffle_indices[b][idx_post_shuffle]
+                    idx_pre_rearrange = qkv_rearrange_indices[b][idx_post_rearrange]
             else:
-                idx_pre_shuffle = idx_post_shuffle
+                idx_pre_rearrange = idx_post_rearrange
 
-            return idx_pre_shuffle
+            return idx_pre_rearrange
 
         def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
             # calculate local block_idx and block_offset
@@ -1837,7 +1981,7 @@ def create_cp_block_mask(
             cp_group_size,
             block_size,
             Q_SHARD_LEN,
-            qkv_shuffle_indices=load_balancer.generate_indices(restore=False),
+            qkv_rearrange_indices=load_balancer.generate_indices(restore=False),
         ),
         B,
         H,

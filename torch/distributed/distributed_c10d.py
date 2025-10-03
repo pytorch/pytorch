@@ -14,8 +14,9 @@ import sys
 import time
 import warnings
 from collections import namedtuple
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
