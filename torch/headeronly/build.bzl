@@ -10,7 +10,6 @@ def define_targets(rules):
               "--template-path $(location version.h.in) " +
               "--version-path $(location //:version.txt) --output-path $@ ",
         tools = ["//tools/setup_helpers:gen_version_header"],
-        visibility = ["//visibility:public"],
     )
 
     rules.cc_library(
