@@ -4119,7 +4119,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(
-                        arg_sig.expr, hint_override=self.hint_override
+                        arg_sig.expr,
+                        hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
 
                     # Force the seed_offset to be 0 so calls to the same kernel
