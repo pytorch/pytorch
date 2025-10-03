@@ -4,7 +4,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import operator
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch
 
@@ -12,6 +12,8 @@ from ..utils import node_replace_, nodes_map
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._ops import HigherOrderOperator
     from torch.export.graph_signature import ExportGraphSignature
 

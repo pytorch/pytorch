@@ -16,9 +16,10 @@ import shutil
 import time
 import traceback
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from copy import copy
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override
 
 import torch
