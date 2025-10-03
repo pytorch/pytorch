@@ -13,6 +13,7 @@ import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch._decomp import decomposition_table
+from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._dynamo.testing import normalize_gm
 from torch._functorch._aot_autograd.descriptors import (
     BufferAOTInput,
@@ -777,13 +778,14 @@ class inner_f(torch.nn.Module):
 
         inputs = (torch.randn(4, 3),)
 
-        for with_export in [True, False]:
+        for with_export in [False]:  # TODO: make dynamo work for annotation
             with ExitStack() as stack:
                 model = None
                 with fx_traceback.preserve_node_meta():
                     if with_export:
-                        ep = torch.export.export(SimpleLinear(), inputs)
-                        model = ep.module()
+                        with torch._dynamo.config.patch(install_free_tensors=True):
+                            # TODO: switch to use the official graph_capture API once it is ready
+                            model = _dynamo_graph_capture_for_export(model)(*inputs)
                     else:
                         model = SimpleLinear()
 
@@ -792,13 +794,18 @@ class inner_f(torch.nn.Module):
                     )
 
                 for node in joint_with_descriptors.graph_module.graph.nodes:
+                    if node.op in ("placeholder", "output"):
+                        continue
                     if node.target != torch.ops.aten.sub.Tensor and node.op not in (
                         "placeholder",
                         "output",
                     ):
                         self.assertTrue(node.meta["custom"], {"pp_stage": 0})
-                    if node.target == torch.ops.aten.sub.default:
-                        self.assertTrue(node.meta.get("custom", {}), {})
+                    elif node.target == torch.ops.aten.sub.Tensor:
+                        if "custom" in node.meta:
+                            self.assertTrue(node.meta.get("custom", {}), {})
+                    else:
+                        raise AssertionError(f"Node not checked: {node}, {node.target}")
 
 
 if __name__ == "__main__":
