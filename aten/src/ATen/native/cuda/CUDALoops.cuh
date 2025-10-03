@@ -860,9 +860,9 @@ struct type_specialized_kernel_launcher {
     constexpr ScalarType sarg0_t = rt_binary_specializations[arg_index][1];
     constexpr ScalarType sarg1_t = rt_binary_specializations[arg_index][2];
     if (ret_t == sret_t && arg0_t == sarg0_t && arg1_t == sarg1_t) {
-      using cret_t = c10::impl::ScalarTypeToCPPType<sret_t>::type;
-      using carg0_t = c10::impl::ScalarTypeToCPPType<sarg0_t>::type;
-      using carg1_t = c10::impl::ScalarTypeToCPPType<sarg1_t>::type;
+      using cret_t = c10::impl::ScalarTypeToCPPTypeT<sret_t>;
+      using carg0_t = c10::impl::ScalarTypeToCPPTypeT<sarg0_t>;
+      using carg1_t = c10::impl::ScalarTypeToCPPTypeT<sarg1_t>;
       launch_vectorized_templated_kernel<
           func_t,
           array_t,
