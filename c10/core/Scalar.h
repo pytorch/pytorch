@@ -191,9 +191,15 @@ class C10_API Scalar {
   isIntegral() const {
     return Tag::HAS_i == tag || Tag::HAS_si == tag || Tag::HAS_u == tag;
   }
+
   bool isIntegral(bool includeBool) const {
     return Tag::HAS_i == tag || Tag::HAS_si == tag || Tag::HAS_u == tag ||
         (includeBool && isBoolean());
+  }
+
+  // See Note [Meaning of HAS_u]
+  bool isUnsigned() const {
+    return Tag::HAS_u == tag || (Tag::HAS_i == tag && v.i >= 0);
   }
 
   bool isComplex() const {

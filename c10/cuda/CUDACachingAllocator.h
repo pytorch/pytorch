@@ -163,6 +163,7 @@ struct AllocatorConfigInfo {
   bool expandable_segments;
   bool release_lock_on_malloc;
   bool pinned_use_host_register;
+  bool graph_capture_record_stream_reuse;
   std::string last_allocator_settings;
   std::vector<size_t> roundup_power2_divisions;
 };
@@ -202,25 +203,34 @@ struct ShareableHandle {
   std::string handle;
 };
 
-class CUDAAllocator : public Allocator {
+struct StreamSegmentSize {
+  StreamSegmentSize(cudaStream_t s, bool small, size_t sz)
+      : stream(s), is_small_pool(small), total_size(sz) {}
+  cudaStream_t stream;
+  bool is_small_pool;
+  size_t total_size;
+};
+
+class CUDAAllocator : public DeviceAllocator {
  public:
   virtual void* raw_alloc(size_t nbytes) = 0;
   virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) = 0;
   virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
-  virtual bool initialized() = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
-  virtual void emptyCache(MempoolId_t mempool_id = {0, 0}) = 0;
+  virtual std::vector<StreamSegmentSize> getExpandableSegmentSizes(
+      c10::DeviceIndex device) = 0;
   virtual void enable(bool value) = 0;
   virtual bool isEnabled() const = 0;
   virtual void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) = 0;
   virtual void* getBaseAllocation(void* ptr, size_t* size) = 0;
-  virtual void recordStream(const DataPtr&, CUDAStream stream) = 0;
-  virtual c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
-      c10::DeviceIndex device) = 0;
-  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
-  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
+  // Keep for BC only
+  virtual void recordStream(const DataPtr& ptr, CUDAStream stream) = 0;
+  void recordStream(const DataPtr& ptr, c10::Stream stream) override {
+    CUDAStream cuda_stream = CUDAStream(stream);
+    recordStream(ptr, cuda_stream);
+  }
   virtual SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0}) = 0;
   virtual void beginAllocateToPool(
       c10::DeviceIndex device,
@@ -363,6 +373,11 @@ inline double getMemoryFraction(c10::DeviceIndex device) {
 
 inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {
   return get()->setMemoryFraction(fraction, device);
+}
+
+inline std::vector<StreamSegmentSize> getExpandableSegmentSizes(
+    c10::DeviceIndex device) {
+  return get()->getExpandableSegmentSizes(device);
 }
 
 inline void emptyCache(MempoolId_t mempool_id = {0, 0}) {
@@ -525,6 +540,10 @@ inline void enablePeerAccess(
 
 namespace c10::cuda {
 
+// Keep BC only
+using c10::CaptureId_t;
+using c10::MempoolId_t;
+
 // MemPool represents a pool of memory in a caching allocator. Currently,
 // it's just the ID of the pool object maintained in the CUDACachingAllocator.
 //
@@ -535,8 +554,7 @@ struct C10_CUDA_API MemPool {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true,
-      bool use_on_oom = false,
-      bool symmetric = false);
+      bool use_on_oom = false);
   MemPool(const MemPool&) = delete;
   MemPool(MemPool&&) = default;
   MemPool& operator=(const MemPool&) = delete;
@@ -544,7 +562,6 @@ struct C10_CUDA_API MemPool {
   ~MemPool();
 
   MempoolId_t id();
-  bool is_symmetric();
   CUDACachingAllocator::CUDAAllocator* allocator();
   int use_count();
   c10::DeviceIndex device();
@@ -556,7 +573,6 @@ struct C10_CUDA_API MemPool {
   CUDACachingAllocator::CUDAAllocator* allocator_;
   bool is_user_created_;
   MempoolId_t id_;
-  bool symmetric_;
   c10::DeviceIndex device_;
 };
 

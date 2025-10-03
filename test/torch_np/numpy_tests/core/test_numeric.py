@@ -2733,10 +2733,18 @@ class TestMoveaxis(TestCase):
         assert_raises(np.AxisError, np.moveaxis, x, 3, 0)  # 'source.*out of bounds',
         assert_raises(np.AxisError, np.moveaxis, x, -4, 0)  # 'source.*out of bounds',
         assert_raises(
-            np.AxisError, np.moveaxis, x, 0, 5  # 'destination.*out of bounds',
+            np.AxisError,
+            np.moveaxis,
+            x,
+            0,
+            5,  # 'destination.*out of bounds',
         )
         assert_raises(
-            ValueError, np.moveaxis, x, [0, 0], [0, 1]  # 'repeated axis in `source`',
+            ValueError,
+            np.moveaxis,
+            x,
+            [0, 0],
+            [0, 1],  # 'repeated axis in `source`',
         )
         assert_raises(
             ValueError,  # 'repeated axis in `destination`',

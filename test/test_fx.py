@@ -3785,25 +3785,6 @@ class TestFX(JitTestCase):
 
         FileCheck().check("Tuple[()]").check("Tuple[str, Tuple[()]]").run(scripted.code)
 
-    @unittest.skipIf(
-        IS_WINDOWS, "Python Windows bug? https://bugs.python.org/issue45108"
-    )
-    @unittest.skipIf(sys.version_info >= (3, 10), "Does not work on Python-3.10")
-    def test_assert(self):
-        def f(x):
-            assert x > 1
-            return x + 1
-
-        try:
-            torch.fx.proxy.TracerBase.trace_asserts = True
-            traced = symbolic_trace(f)
-        finally:
-            torch.fx.proxy.TracerBase.trace_asserts = False
-
-        self.assertEqual(f(2), traced(2))
-        with self.assertRaises(AssertionError):
-            traced(0)
-
     def test_pytree(self):
         # Used to test that you can use your own placeholder class
         class PHTest(PHBase):
@@ -4660,7 +4641,6 @@ class TestFunctionalTracing(JitTestCase):
         "linear": BUILT_IN_FUNC,
         "logsigmoid": BUILT_IN_FUNC,
         "one_hot": BUILT_IN_FUNC,
-        "pad": ARG_TYPE_MISMATCH,
         "pairwise_distance": BUILT_IN_FUNC,
         "pdist": BUILT_IN_FUNC,
         "pixel_shuffle": BUILT_IN_FUNC,
@@ -4693,12 +4673,6 @@ class TestFunctionalTracing(JitTestCase):
         "max_unpool3d": PROXY_ITERATED,
         "fold": PROXY_ITERATED,
         "unfold": PROXY_ITERATED,
-        "adaptive_max_pool1d_with_indices": ARG_TYPE_MISMATCH,
-        "fractional_max_pool2d_with_indices": ARG_TYPE_MISMATCH,
-        "fractional_max_pool3d_with_indices": ARG_TYPE_MISMATCH,
-        "layer_norm": ARG_TYPE_MISMATCH,
-        "rms_norm": ARG_TYPE_MISMATCH,
-        "lp_pool1d": ARG_TYPE_MISMATCH,
         "affine_grid": CONTROL_FLOW,
         "alpha_dropout": CONTROL_FLOW,
         "batch_norm": CONTROL_FLOW,
@@ -4732,9 +4706,6 @@ class TestFunctionalTracing(JitTestCase):
         "leaky_relu": CONTROL_FLOW,
         "local_response_norm": CONTROL_FLOW,
         "margin_ranking_loss": CONTROL_FLOW,
-        "max_pool1d_with_indices": ARG_TYPE_MISMATCH,
-        "max_pool2d_with_indices": ARG_TYPE_MISMATCH,
-        "max_pool3d_with_indices": ARG_TYPE_MISMATCH,
         "mse_loss": CONTROL_FLOW,
         "multi_head_attention_forward": CONTROL_FLOW,
         "multi_margin_loss": CONTROL_FLOW,
@@ -4829,7 +4800,6 @@ class TestFunctionalTracing(JitTestCase):
         def functional_test(self):
             if (
                 func_name in self.UNTRACEABLE_FUNCTIONALS_PY38
-                and sys.version_info >= (3, 8)
                 and sys.version_info < (3, 12)
             ):
                 exc, err = self.UNTRACEABLE_FUNCTIONALS_PY38[func_name]

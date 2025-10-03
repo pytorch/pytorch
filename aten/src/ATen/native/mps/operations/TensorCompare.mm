@@ -297,9 +297,6 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
 
   const auto common_type = at::result_type(elements, test_elements);
   TORCH_CHECK(elements.is_mps() && test_elements.is_mps());
-  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) || supportedFloatingType(common_type),
-              "isin_Tensor_Tensor_out only works on floating types on MPS for pre MacOS_14_0. Received dtype: ",
-              common_type);
 
   @autoreleasepool {
     std::string key = op_name + getTensorsStringKey({elements, test_elements}) + std::to_string(invert);
@@ -338,6 +335,9 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
 }
 
 static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
+  if (iter.numel() == 0) {
+    return;
+  }
   const auto& self = iter.input(0);
   auto& out = iter.output(0);
   @autoreleasepool {

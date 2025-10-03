@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import (
     get_func_call,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_CUDA_AND_TRITON,
     IS_BIG_GPU,
 )
 
@@ -197,7 +197,7 @@ class BenchmarkFusionTestTemplate:
         self.common(f, (x,))
 
 
-if HAS_CUDA:
+if HAS_CUDA_AND_TRITON:
 
     class BenchmarkFusionCudaTest(TestCase):
         common = check_model_cuda
@@ -294,7 +294,7 @@ if HAS_CUDA:
             for out_code in [code, code2]:
                 FileCheck().check(get_func_call()).check_count(
                     "empty_strided", 1, exactly=True
-                ).check("triton_tem_fused_addmm_relu_0").check_count(
+                ).check("triton_tem_fused_addmm_relu_t_0").check_count(
                     ".reset()" if config.cpp_wrapper else "del", 3, exactly=True
                 ).check("" if config.cpp_wrapper else "return").run(out_code[0])
 
@@ -347,5 +347,5 @@ if HAS_CPU and not torch.backends.mps.is_available():
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_CUDA_AND_TRITON:
         run_tests()

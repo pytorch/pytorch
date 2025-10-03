@@ -1,34 +1,11 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
-import os
 
 import torch
 import torch.fx
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import extract_graph_and_tracker
 from torch.utils._pytree import tree_map
-
-
-def get_nodes_by_name(graph, names):
-    nodes = []
-    for node in graph.nodes:
-        if node.name in names:
-            nodes.append(node)
-
-    return nodes
-
-
-unique_ind = 0
-
-
-def track_same_nodes(names, graph, region_tracker):
-    global unique_ind
-    unique_ind += 1
-    # find nodes in graph with names and track them
-    # as if they were at the same code location
-    nodes = get_nodes_by_name(graph, names)
-    for node in nodes:
-        region_tracker.track_node("x", unique_ind, node)
 
 
 class GraphRegionTrackerTests(TestCase):
@@ -218,21 +195,6 @@ class GraphRegionTrackerTests(TestCase):
         )
 
     def test_mismatched_global_state(self):
-        @contextlib.contextmanager
-        def _hip_allow_tf32():
-            # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
-            # and only for MI300+
-            hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
-            os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
-
-            try:
-                yield
-            finally:
-                if hip_allow_tf32 is not None:
-                    os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
-                else:
-                    del os.environ["HIPBLASLT_ALLOW_TF32"]
-
         def inner_fn(x, y):
             x1 = x * 1
             y1 = y + 1
@@ -273,31 +235,29 @@ class GraphRegionTrackerTests(TestCase):
         def reset_default_dtype():
             torch.set_default_dtype(old_dtype)
 
-        tf32_ctx = _hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
-        with tf32_ctx():
-            for ctx in [
-                lambda: torch.set_grad_enabled(False),
-                torch.autograd.grad_mode.inference_mode,
-                lambda: torch.autograd.graph.disable_saved_tensors_hooks(
-                    "This is not supported"
-                ),
-                # lambda: torch.set_num_threads(2), : Unsupported
-                (set_default_dtype_bfloat16, reset_default_dtype),
-                (
-                    lambda: torch.use_deterministic_algorithms(True),
-                    lambda: torch.use_deterministic_algorithms(False),
-                ),
-                # (lambda: torch.use_deterministic_algorithms(True, warn_only=True),
-                # lambda: torch.use_deterministic_algorithms(False)), : Unsupported
-                create_toggle_fns("allow_bf16_reduced_precision_reduction"),
-                create_toggle_fns("allow_fp16_reduced_precision_reduction"),
-                create_toggle_fns("allow_tf32"),
-            ]:
-                self.assertExpectedInline(
-                    self.get_result(fn, torch.rand(10, 10), torch.ones(10, 20), ctx),
-                    """[[['x1_2', 'y1_2', 'sum_3', 'o0'], ['x1_3', 'y1_3', 'sum_4', 'o2']], \
+        for ctx in [
+            lambda: torch.set_grad_enabled(False),
+            torch.autograd.grad_mode.inference_mode,
+            lambda: torch.autograd.graph.disable_saved_tensors_hooks(
+                "This is not supported"
+            ),
+            # lambda: torch.set_num_threads(2), : Unsupported
+            (set_default_dtype_bfloat16, reset_default_dtype),
+            (
+                lambda: torch.use_deterministic_algorithms(True),
+                lambda: torch.use_deterministic_algorithms(False),
+            ),
+            # (lambda: torch.use_deterministic_algorithms(True, warn_only=True),
+            # lambda: torch.use_deterministic_algorithms(False)), : Unsupported
+            create_toggle_fns("allow_bf16_reduced_precision_reduction"),
+            create_toggle_fns("allow_fp16_reduced_precision_reduction"),
+            create_toggle_fns("allow_tf32"),
+        ]:
+            self.assertExpectedInline(
+                self.get_result(fn, torch.rand(10, 10), torch.ones(10, 20), ctx),
+                """[[['x1_2', 'y1_2', 'sum_3', 'o0'], ['x1_3', 'y1_3', 'sum_4', 'o2']], \
 [['x1', 'y1', 'sum_1', 'o4'], ['x1_1', 'y1_1', 'sum_2', 'o5']]]""",
-                )
+            )
 
     def test_mutation_tracking_simple(self):
         def fn(x, y, z):
@@ -369,6 +329,43 @@ class GraphRegionTrackerTests(TestCase):
             ),
             """[[['y', 'o1'], ['y_1', 'o2'], ['y_2', 'o3']]]""",
         )
+
+    def test_region_sorting(self):
+        from torch._dynamo.graph_region_tracker import _sort_with_ref_region
+
+        index_to_rank = {0: 0, 2: 1, 1: 2}
+        regions = [[0, 1, 2], [1, 2, 0]]
+        _sort_with_ref_region(index_to_rank, regions)
+        self.assertExpectedInline(regions, """[[0, 2, 1], [1, 0, 2]]""")
+
+    def test_no_duplicate_tracking(self):
+        def inner_fn(x, y):
+            x0 = x + 1
+            y0 = y + 2
+            z = x0.sum() + y0.sum()
+            return z
+
+        def fn(x, y):
+            o0 = inner_fn(x, y)
+            o1 = torch.sin(y)
+            o2 = inner_fn(x, o1)
+            o3 = inner_fn(x, y)
+            o4 = o3 * o3
+            return o2 * o4 + o0
+
+        graph, tracker = extract_graph_and_tracker(
+            fn, torch.rand(10, 10), torch.ones(10, 20)
+        )
+        self.assertExpectedInline(
+            tracker.node_to_duplicates,
+            """{l_x_: [l_x_], x0: [x0, x0_1, x0_2], l_y_: [l_y_], y0: [y0, y0_1, y0_2], sum_1: \
+[sum_1, sum_3, sum_5], sum_2: [sum_2, sum_4, sum_6], z: [z, z_1, z_2], o1: [o1], x0_1: [x0, x0_1, x0_2], y0_1: [y0, y0_1, y0_2], \
+sum_3: [sum_1, sum_3, sum_5], sum_4: [sum_2, sum_4, sum_6], \
+z_1: [z, z_1, z_2], x0_2: [x0, x0_1, x0_2], y0_2: [y0, y0_1, y0_2], sum_5: [sum_1, sum_3, sum_5], sum_6: [sum_2, sum_4, sum_6], \
+z_2: [z, z_1, z_2], o4: [o4], mul_1: [mul_1], add_9: [add_9]}""",
+        )
+        key = next(iter(tracker.node_to_duplicates.keys()))
+        tracker.track_node(None, key)  # this will fail if the node is added again
 
 
 if __name__ == "__main__":

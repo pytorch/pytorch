@@ -17,7 +17,7 @@ namespace {
 class OpKernel_prim_listpack : public OpKernel {
  public:
   explicit OpKernel_prim_listpack(const Node* node)
-      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
+      : OpKernel(node, OpKernelKind::kPrimKernel) {
     auto listType = node->outputs()[0]->type();
     switch (listType.kind()) {
       case Type::Kind::TensorList:
@@ -76,7 +76,7 @@ namespace {
 class OpKernel_variadic_concat : public OpKernel {
  public:
   explicit OpKernel_variadic_concat(const Node* node)
-      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
+      : OpKernel(node, OpKernelKind::kPrimKernel) {
     dim_ = node_->attributes().size() > 0
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;
@@ -121,7 +121,7 @@ namespace {
 class OpKernel_variadic_stack : public OpKernel {
  public:
   explicit OpKernel_variadic_stack(const Node* node)
-      : OpKernel(node, std::nullopt, OpKernelKind::kPrimKernel) {
+      : OpKernel(node, OpKernelKind::kPrimKernel) {
     dim_ = node_->attributes().size() > 0
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;

@@ -88,14 +88,8 @@ std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
 Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
-MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph,
-                               MPSGraphTensor* inputTensor,
-                               const TensorBase& input,
-                               bool includesInt64 = false);
-MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph,
-                                 MPSGraphTensor* inputTensor,
-                                 const TensorBase& input,
-                                 bool includesInt64 = false);
+MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input);
+MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const TensorBase& input);
 
 MPSNDArray* getStridedMPSNDArray(const TensorBase& src, MPSNDArray* srcNDArray);
 MPSNDArray* getMPSNDArray(const TensorBase& t, const IntArrayRef& sizes = {}, const IntArrayRef& strides = {});
@@ -145,8 +139,6 @@ MPSGraphTensorData* getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStre
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar);
 
 MPSGraph* make_mps_graph();
-void printTensorNDArray(const TensorBase& t);
-MPSNDArray* ndArrayFromTensor(const TensorBase& tensor, MPSShape* shape, MPSDataType mpsType);
 
 MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph* mpsGraph, MPSDataType dataType);
 MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph* mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
@@ -437,14 +429,6 @@ inline T* LookUpOrCreateCachedGraph(const std::string& key, std::function<void(M
 // Common math operations
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 
-#define MPS_CHECK_INT64_OP_SUPPORTED(input_tensor, mac_os_13_3_plus, op_name)                                            \
-  if (!mac_os_13_3_plus && input_tensor.scalar_type() == kLong) {                                                        \
-    TORCH_WARN_ONCE(                                                                                                     \
-        "MPS: no support for int64 for ",                                                                                \
-        op_name,                                                                                                         \
-        ", downcasting to a smaller data type (int32/float32). Native support for int64 has been added in macOS 13.3."); \
-  }
-
 /**
  * Returns distance from lowest to highest element offset in given tensor.
  */
@@ -620,10 +604,6 @@ inline void runMPSGraph(MPSStream* stream, MPSGraph* graph, NSDictionary* feeds,
   runMPSGraph(stream, graph, feeds, dictionaryFromPlaceholders(result));
 }
 
-inline bool supportsComplex() {
-  return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
-}
-
 // MPS yet to support double types, but starting from MacOS 14, supports bfloat16
 inline bool supportedFloatingType(ScalarType dtype) {
   return dtype == kFloat || dtype == kHalf || dtype == kBFloat16;
@@ -635,17 +615,12 @@ inline bool supportedFloatingType(const TensorBase& t) {
 
 inline bool supportedFloatingOrComplexType(ScalarType dtype) {
   if (dtype == kComplexFloat || dtype == kComplexHalf) {
-    return supportsComplex();
+    return true;
   }
   return supportedFloatingType(dtype);
 }
 inline bool supportedFloatingOrComplexType(const TensorBase& t) {
   return supportedFloatingOrComplexType(t.scalar_type());
-}
-
-inline void checkSupportsBFloat16() {
-  TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-                   "MPS bfloat16 type is supported on MacOS 14.0 or newer.");
 }
 
 inline bool needsGather(const TensorBase& t) {

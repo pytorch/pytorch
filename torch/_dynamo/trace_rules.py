@@ -21,7 +21,6 @@ compilation boundaries and optimize PyTorch programs effectively.
 
 import abc
 import builtins
-import collections
 import copy
 import dataclasses
 import functools
@@ -52,6 +51,7 @@ from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import (
     getfile,
     hashable,
+    is_annotate_wrapped_function,
     is_lru_cache_wrapped_function,
     NP_SUPPORTED_MODULES,
     unwrap_if_wrapper,
@@ -155,6 +155,7 @@ manual_torch_name_rule_map: dict[
         type[UserFunctionVariable],
     ],
 ] = {
+    "torch.fx.traceback.annotate": UserFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -172,6 +173,7 @@ manual_torch_name_rule_map: dict[
     "torch.distributed.distributed_c10d.get_process_group_ranks": TorchInGraphFunctionVariable,
     "torch._utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.fx._symbolic_trace.is_fx_tracing": TorchInGraphFunctionVariable,
+    "torch.fx._symbolic_trace.is_fx_symbolic_tracing": TorchInGraphFunctionVariable,
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
     "torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer": UserFunctionVariable,
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
@@ -244,6 +246,8 @@ manual_torch_name_rule_map: dict[
     "torch._C.set_autocast_xla_dtype": SkipFunctionVariable,
     "torch._C.set_autocast_xla_enabled": SkipFunctionVariable,
     "torch.resize_as_": SkipFunctionVariable,
+    "torch._functorch.predispatch._add_batch_dim": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch.resize_as_sparse_": SkipFunctionVariable,
     "torch.get_default_device": TorchInGraphFunctionVariable,
     # functorch/vmap
@@ -324,8 +328,6 @@ manual_torch_name_rule_map: dict[
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     # functorch/C++ bindings
-    "torch._C._functorch._add_batch_dim": TorchInGraphFunctionVariable,
-    "torch._C._functorch._remove_batch_dim": TorchInGraphFunctionVariable,
     "torch._C._functorch._wrap_for_grad": TorchInGraphFunctionVariable,
     "torch._C._functorch._unwrap_for_grad": TorchInGraphFunctionVariable,
     "torch._C._functorch._unwrap_batched": TorchInGraphFunctionVariable,
@@ -334,6 +336,8 @@ manual_torch_name_rule_map: dict[
     "torch._C._functorch.is_batchedtensor": TorchInGraphFunctionVariable,
     "torch._C._functorch.peek_interpreter_stack": TorchInGraphFunctionVariable,
     "torch._C._functorch.unwrap_if_dead": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._vmap_increment_nesting": TorchInGraphFunctionVariable,
+    "torch._functorch.predispatch._vmap_decrement_nesting": TorchInGraphFunctionVariable,
     # everything else
     "torch._functorch.pyfunctorch.coerce_cinterpreter": TorchInGraphFunctionVariable,
     "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,
@@ -346,7 +350,7 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.mark_static": UserFunctionVariable,
     "torch._dynamo.nonstrict_trace": UserFunctionVariable,
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
-    "torch._dynamo.set_fullgraph": UserFunctionVariable,
+    "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
@@ -583,7 +587,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._dispatch_has_kernel",
         "torch._C._dispatch_is_alias_key",
         "torch._C._dispatch_is_included_in_alias",
-        "torch._C._dispatch_is_main_interpreter",
         "torch._C._dispatch_isTensorSubclassLike",
         "torch._C._dispatch_key_for_device",
         "torch._C._dispatch_key_name",
@@ -659,6 +662,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_cublas_allow_tf32",
         "torch._C._get_cudnn_allow_tf32",
         "torch._C._get_cudnn_benchmark",
+        "torch._C._get_miopen_immediate",
         "torch._C._get_cudnn_deterministic",
         "torch._C._get_cudnn_enabled",
         "torch._C._get_custom_class_python_wrapper",
@@ -681,6 +685,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_mem_efficient_sdp_enabled",
         "torch._C._get_mkldnn_enabled",
         "torch._C._get_cudnn_sdp_enabled",
+        "torch._C._get_overrideable_sdp_enabled",
         "torch._C._set_sdp_use_cudnn",
         "torch._C._get_mobile_model_contained_types_from_buffer",
         "torch._C._get_mobile_model_contained_types",
@@ -1217,6 +1222,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_sdp_use_math",
         "torch._C._set_math_sdp_allow_fp16_bf16_reduction",
         "torch._C._set_sdp_use_mem_efficient",
+        "torch._C._set_sdp_use_overrideable",
         "torch._C._set_should_use_format_with_string_table",
         "torch._C._set_sm_carveout_experimental",
         "torch._C._set_storage_access_error_msg",
@@ -1958,6 +1964,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.hamming_window",
         "torch.hann_window",
         "torch.hardshrink",
+        "torch.hash_tensor",
         "torch.heaviside",
         "torch.hinge_embedding_loss",
         "torch.histc",
@@ -2364,7 +2371,11 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.utils.enable_single_level_autograd_function",
         "torch._functorch.utils.exposed_in",
         "torch._functorch.utils.unwrap_dead_wrappers",
-        "torch._functorch.vmap.lazy_load_decompositions",
+        "torch._functorch.predispatch.lazy_load_decompositions",
+        "torch._functorch.predispatch._vmap_increment_nesting",
+        "torch._functorch.predispatch._vmap_decrement_nesting",
+        "torch._functorch.predispatch._add_batch_dim",
+        "torch._functorch.predispatch._remove_batch_dim",
         "torch._guards.compile_context",
         "torch._guards.detect_fake_mode",
         "torch._guards.tracing",
@@ -2409,7 +2420,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._lowrank.svd_lowrank",
         "torch._preload_cuda_deps",
         "torch._register_device_module",
-        "torch._running_with_deploy",
         "torch._utils._dummy_type",
         "torch._utils._flatten_dense_tensors",
         "torch._utils._unflatten_dense_tensors",
@@ -2684,7 +2694,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.set_stream",
         "torch.cuda.set_sync_debug_mode",
         "torch.cuda.stream",
-        "torch.cuda.synchronize",
         "torch.cuda.temperature",
         "torch.cuda.utilization",
         "torch.einsum",
@@ -2963,6 +2972,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.xpu.random.seed_all",
         "torch.xpu.random.seed",
         "torch.xpu.set_stream",
+        "torch.xpu.stream",
         "torch.xpu.synchronize",
     ],
     TorchInGraphFunctionVariable,
@@ -2994,6 +3004,8 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                     continue
                 obj = torch_dir + k[len("torch/") :]
             if obj is not None:
+                if is_annotate_wrapped_function(obj):
+                    obj = obj.__wrapped__
                 if is_lru_cache_wrapped_function(obj):
                     obj = obj.__wrapped__
                 if obj in d and d[obj] != v:
@@ -3291,7 +3303,6 @@ def is_numpy_type_info(obj: Any) -> bool:
 
 BUILTIN_SKIPLIST = (
     abc,
-    collections,
     copy,
     random,
     traceback,
@@ -3398,6 +3409,8 @@ MOD_INLINELIST = [
     "torch._dynamo.compiled_autograd",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
+    "torch._dynamo.test_case",
+    "torch._export.non_strict_utils",
     "torch._functorch._aot_autograd.subclass_parametrization",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
@@ -3413,12 +3426,12 @@ MOD_INLINELIST = [
     "torch._tensor",
     "torch.amp.autocast_mode",
     "torch.ao.nn",
-    "torch.ao.quantization.fake_quantize",
     "torch.autograd.function",
     "torch.backends.cuda",
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.export._tree_utils",
+    "torch.export._unlift",
     "torch.export._wrapper_utils",
     "torch.fx._pytree",
     "torch.fx._symbolic_trace",
@@ -3473,7 +3486,6 @@ MOD_SKIPLIST = [
     "torch._custom_op",
     "torch._custom_ops",
     "torch._decomp",
-    "torch._deploy",
     "torch._dispatch",
     "torch._dynamo",
     "torch._export",

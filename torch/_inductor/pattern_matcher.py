@@ -63,10 +63,11 @@ from torch._dynamo.utils import counters
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import statically_known_true
+from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.fx.traceback import preserve_node_meta
 from torch.utils._ordered_set import OrderedSet
 
 from .._functorch import config as functorch_config
@@ -85,6 +86,8 @@ prims = torch.ops.prims
 
 Constant = Any
 NodeOrConstant = Union[Constant, torch.fx.Node]
+
+backend = os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_BACKEND", "inductor")
 
 
 class SearchFn(Protocol):
@@ -127,7 +130,7 @@ def _transfer_meta(
     # transfer metadata after pattern matching occurs.
     # skip "val" and "tensor_meta" because this info is too specific; it's unlikely
     # to remain accurate after pattern matching has occurred.
-    if config.trace.provenance_tracking:
+    if config.trace.provenance_tracking_level == 1:
         # We handle "from_node" field of the node meta specially to record that the new node comes from the old_node.
         new_from_node = new_meta.get("from_node", []).copy()
         new_from_node.append(NodeSource(old_node, pass_name, NodeSourceAction.REPLACE))
@@ -545,7 +548,7 @@ class _TargetExpr(PatternExpr):
         fns = [fns] if callable(fns) or isinstance(fns, str) else list(fns)
         for fn in fns:
             if isinstance(fn, torch._ops.OpOverloadPacket):
-                fns.extend(getattr(fn, overload) for overload in fn.overloads())
+                fns.extend(getattr(fn, overload) for overload in fn.overloads())  # noqa: B909
 
         self.fns = fns
         self.fns_set = OrderedSet(fns)
@@ -1124,6 +1127,10 @@ class GraphPatternEntry(PatternEntry):
 
 @dataclasses.dataclass
 class ReplacementPatternEntry(PatternEntry):
+    """
+    The replacement pattern for the graph
+    """
+
     normalize_args: Callable[..., list[Any]]
 
     @staticmethod
@@ -1133,6 +1140,12 @@ class ReplacementPatternEntry(PatternEntry):
         replacement_graph: Union[torch.fx.Graph, torch.fx.GraphModule],
         args: Sequence[torch.fx.Node],
     ) -> None:
+        """
+        Inserts the replacement graph into the toplevel graph at the match
+        """
+
+        added_replacement_nodes: list[torch.fx.Node] = []
+
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
             call_module = None  # type: ignore[assignment]
@@ -1146,6 +1159,7 @@ class ReplacementPatternEntry(PatternEntry):
                 if node.op == "call_function":
                     assert callable(target)
                     result = graph.call_function(target, args, kwargs)
+                    added_replacement_nodes.append(result)
                     _transfer_meta(
                         new_meta=result.meta,
                         old_node=node,
@@ -1186,7 +1200,9 @@ class ReplacementPatternEntry(PatternEntry):
                             graph.owning_module, target
                         )
                         graph.owning_module.register_module(graph_name, sub_gm)
-                    return graph.get_attr(graph_name)
+                    getattr_node = graph.get_attr(graph_name)
+                    added_replacement_nodes.append(getattr_node)
+                    return getattr_node
 
                 raise NotImplementedError(f"unhandled {node}")
 
@@ -1242,13 +1258,22 @@ class ReplacementPatternEntry(PatternEntry):
                 old: Union[torch.fx.Node, None],
                 new: Union[torch.fx.Node, Sequence[torch.fx.Node], None],
             ) -> None:
+                def filter_nodes_in_newly_added_nodes(node: torch.fx.Node) -> bool:
+                    # Do not replace the use of a node if it is being used by
+                    # nodes in the replaced graph
+                    return node not in added_replacement_nodes
+
                 if old is None:
                     assert new is None
                     return
                 assert isinstance(old, torch.fx.Node)
                 if new is None:
-                    old.replace_all_uses_with(None)  # type: ignore[arg-type]
-                    graph.erase_node(old)
+                    old.replace_all_uses_with(
+                        None,  # type: ignore[arg-type]
+                        delete_user_cb=filter_nodes_in_newly_added_nodes,
+                    )
+                    if len(old.users) == 0:
+                        graph.erase_node(old)
                     return
                 if isinstance(new, torch.fx.Node):
                     if "val" not in new.meta:
@@ -1268,8 +1293,11 @@ class ReplacementPatternEntry(PatternEntry):
                                 new, tag_name, old.meta[tag_name], OrderedSet(args)
                             )
 
-                    old.replace_all_uses_with(new)
-                    graph.erase_node(old)
+                    old.replace_all_uses_with(
+                        new, delete_user_cb=filter_nodes_in_newly_added_nodes
+                    )
+                    if len(old.users) == 0:
+                        graph.erase_node(old)
                     return
 
                 # `new` is not a node: it's a list of nodes.
@@ -1303,7 +1331,9 @@ class ReplacementPatternEntry(PatternEntry):
                 for user in old_uses:
                     idx = maybe_getitem(user)
                     if idx is None:
-                        raise AssertionError("can't handle")
+                        raise AssertionError(
+                            "Deleted index from getitem, did you erase the index and not properly replace it?"
+                        )
                     replace(user, new[idx])
                 graph.erase_node(old)
 
@@ -1429,7 +1459,9 @@ def register_replacement(
         )
 
         sym_args: list[torch.SymInt] = []
-        with torch._dynamo.utils.detect_fake_mode(args):
+        fake_mode = torch._dynamo.utils.detect_fake_mode(args)
+        assert fake_mode is not None
+        with fake_mode:
             for i, grad in enumerate(requires_grad):
                 if isinstance(args[i], torch.Tensor):
                     if grad and is_integer_dtype(args[i].dtype):
@@ -1898,12 +1930,14 @@ class PatternMatcherPass:
     def __init__(
         self,
         pass_name: Optional[str] = None,
+        subsystem: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.patterns: defaultdict[
             tuple[str, torch.fx.node.Target], list[PatternEntry]
         ] = defaultdict(list)
         self.pass_name = pass_name
+        self.subsystem = subsystem
 
         # For a particular generated pattern repr, store all of the str representations
         # of the graph used to generate them. Because we ignore certain patterns
@@ -1943,7 +1977,7 @@ class PatternMatcherPass:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
         pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
         assert isinstance(gm, torch.fx.GraphModule)
-        with GraphTransformObserver(gm, pass_name):
+        with GraphTransformObserver(gm, pass_name, self.subsystem):
             for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
                 target = extract_target(node)
                 if node.op == "call_module":
@@ -1971,11 +2005,12 @@ class PatternMatcherPass:
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
                         log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
-                    if is_match(m) and entry.extra_check(m):
+
+                    if is_match(m) and guard_or_false(entry.extra_check(m)):
                         count += 1
                         entry.apply(m, graph, node)
-                        counters["inductor"]["pattern_matcher_count"] += 1
-                        counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
+                        counters[backend]["pattern_matcher_count"] += 1
+                        counters[backend]["pattern_matcher_nodes"] += len(m.nodes)
         return count
 
     def clear(self) -> None:
@@ -2100,7 +2135,7 @@ def fwd_only(
 ) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
-    with enable_python_dispatcher():
+    with enable_python_dispatcher(), preserve_node_meta():
         decompositions = (
             get_decomp_fn() if get_decomp_fn is not None else select_decomp_table()
         )
@@ -2211,13 +2246,13 @@ def init_once_fakemode(fn: Callable[..., Any]) -> Callable[[], Any]:
     @functools.cache
     @functools.wraps(fn)
     def lazy_init() -> Any:
-        counters_ref = counters["inductor"].copy()
+        counters_ref = counters[backend].copy()
 
         with torch._guards.tracing(None), unset_fake_temporarily(), FakeTensorMode():
             result = fn()
 
         # clear view matches encountered during tracing
-        counters["inductor"] = counters_ref
+        counters[backend] = counters_ref
 
         return result
 

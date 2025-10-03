@@ -6,9 +6,7 @@
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
-// For MTLLanguageVersion_3_1
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,6 +20,7 @@
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
+#include <ATen/ops/eye_native.h>
 #include <ATen/ops/linalg_cholesky_ex_native.h>
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
@@ -105,6 +104,61 @@ Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output)
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, gridSizeZ);
 
       mtl_setArgs(computeEncoder, batch1, batch2, output, strides, sizes);
+      [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
+      getMPSProfiler().endProfileKernel(matmulPSO);
+    }
+  });
+  return output;
+}
+
+Tensor& do_metal_addmm(const Tensor& self,
+                       const Tensor& other,
+                       Tensor& output,
+                       const Scalar& alpha,
+                       const Scalar& beta,
+                       const Tensor& bias) {
+  if (beta.toDouble() == 0 && alpha.toDouble() == 1) {
+    return do_metal_mm(self, other, output);
+  }
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
+  auto matmulPSO = lib.getPipelineStateForFunc("addmm_" + mps::scalarToMetalTypeString(output));
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self, other});
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:matmulPSO];
+      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)),
+                                       static_cast<uint32_t>(self.size(1)),
+                                       static_cast<uint32_t>(output.size(1))};
+      std::array<int64_t, 8> strides = {self.stride(0),
+                                        self.stride(1),
+                                        other.stride(0),
+                                        other.stride(1),
+                                        output.stride(0),
+                                        output.stride(1),
+                                        bias.stride(0),
+                                        bias.stride(1)};
+      union {
+        std::array<int64_t, 2> i64;
+        std::array<int32_t, 2> i32;
+        std::array<float, 2> f32;
+      } alpha_beta;
+      if (output.scalar_type() == kLong) {
+        alpha_beta.i64 = {alpha.toLong(), beta.toLong()};
+      } else if (c10::isIntegralType(output.scalar_type(), true)) {
+        alpha_beta.i32 = {alpha.toInt(), beta.toInt()};
+      } else {
+        TORCH_INTERNAL_ASSERT(c10::isFloatingType(output.scalar_type()));
+        alpha_beta.f32 = {alpha.toFloat(), beta.toFloat()};
+      }
+      constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
+      uint32_t gridSizeX = (output.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (self.size(0) + TILE_DIM - 1) / TILE_DIM;
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
+      MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
+      mtl_setArgs(computeEncoder, self, other, output, bias, alpha_beta.i64, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
@@ -443,26 +497,24 @@ static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const
   using namespace mps;
   TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
   TORCH_CHECK(!A.is_complex(), "linalg_inv: not supported for complex types yet!");
-  using CachedGraph = MPSUnaryCachedGraph;
 
-  MPSStream* stream = getCurrentMPSStream();
   info.zero_();
-
   if (A.numel() == 0) {
     return;
   }
 
-  if (!result.is_contiguous()) {
-    result.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
-  }
   auto A_sizes = A.sizes();
   int ndim = A.dim();
 
-  Tensor LU = empty_like(A);
-  Tensor identity = zeros_like(A);
+  Tensor LU = empty_like(A, MemoryFormat::Contiguous);
+  Tensor identity = eye(A.size(-2), A.size(-1), A.scalar_type(), A.options().layout(), A.device()).expand_as(A);
   Tensor pivots = empty({A_sizes.begin(), A_sizes.end() - 1}, A.options().dtype(kInt));
-  (ndim == 2 ? identity.diagonal() : identity.diagonal(0, -2, -1)).fill_(1);
-  linalg_solve_out_mps_impl(A, identity, true, check_errors, result, LU, pivots, info);
+  // need to do this to keep the strides of the result tensor
+  // mps's solve expects row major layout, while inductor
+  // expects result to be column major
+  Tensor tmp = empty_like(A, MemoryFormat::Contiguous);
+  linalg_solve_out_mps_impl(A, identity, true, check_errors, tmp, LU, pivots, info);
+  result.copy_(tmp);
 }
 
 static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output) {
@@ -644,7 +696,6 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
-  TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support addmm for non-float input");
 
   TensorArg args[]{{output, "out", 0}, {bias, "self", 1}, {self, "mat1", 2}, {other, "mat2", 3}};
   checkAllSameGPU(__func__, args);
@@ -669,6 +720,10 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   }
   if (output.numel() == 0) {
     return output;
+  }
+
+  if (use_metal_mm(self, other, output)) {
+    return do_metal_addmm(self, other, output, alpha, beta, *bias_);
   }
 
   bool is_beta_non_zero = beta.toDouble() != 0.0;

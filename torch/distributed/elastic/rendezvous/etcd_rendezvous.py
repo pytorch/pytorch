@@ -208,7 +208,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
         try:
             self.set_closed()
             return True
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             logger.warning("Shutdown failed. Error occurred: %s", str(e))
             return False
 

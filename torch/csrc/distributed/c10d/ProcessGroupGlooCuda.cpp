@@ -1,6 +1,7 @@
 #ifdef USE_C10D_GLOO
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
+#include <utility>
 
 #include <gloo/cuda_allreduce_ring_chunked.h>
 
@@ -9,7 +10,7 @@ namespace c10d {
 class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
  public:
   AsyncAllreduceCUDADeviceWork(
-      const std::shared_ptr<gloo::Context>& context,
+      std::shared_ptr<gloo::Context> context,
       std::vector<at::Tensor>& inputs,
       ReduceOp reduceOp,
       uint32_t tag,
@@ -24,7 +25,7 @@ class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
             "gloo:all_reduce",
             inputs),
         inputs_(inputs),
-        reduceOp_(reduceOp) {}
+        reduceOp_(std::move(reduceOp)) {}
 
   template <typename T>
   void createAlgorithm(std::unique_ptr<gloo::Algorithm>& algo) {

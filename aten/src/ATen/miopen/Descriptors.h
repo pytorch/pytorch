@@ -9,6 +9,8 @@
 
 namespace at { namespace native {
 
+std::string miopenTypeToString(miopenDataType_t dtype);
+
 inline int dataSize(miopenDataType_t dataType)
 {
   switch (dataType) {
@@ -16,6 +18,32 @@ inline int dataSize(miopenDataType_t dataType)
     case miopenFloat: return 4;
     case miopenBFloat16: return 2;
     default: return 8;
+  }
+}
+
+// See NOTE [ cudnn fixSizeOneDimStride ] in aten/src/ATen/cudnn/Descriptors.h
+template <typename T>
+static inline void fixSizeOneDimStride(int dim, const T *size, T *stride, bool nhwc) {
+  int64_t z = 1;
+  int index = 0;
+  std::vector<int> permutation(dim);
+
+  if (nhwc) {
+    permutation[index++] = 1;
+  }
+  for (int d = dim-1; d > 1; d--) {
+    permutation[index++] = d;
+  }
+  if (!nhwc) {
+    permutation[index++] = 1;
+  }
+  permutation[index++] = 0;
+  for (int d : permutation) {
+    if (size[d] == 1) {
+      stride[d] = z;
+    } else {
+      z *= size[d];
+    }
   }
 }
 
@@ -75,14 +103,20 @@ class TORCH_HIP_CPP_API TensorDescriptor : public Descriptor<
     set(t, pad);
   }
 
+  // See Note [CuDNN broadcast padding]
   void set(const at::Tensor &t, size_t pad = 0);
+  void set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad = 0);
   void set(miopenDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0);
 
   void print();
 
 private:
-  void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
-    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
+  void set(miopenDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
+
+  void set(miopenDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
+    std::vector<int> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<int>(dim, size, strides_copy.data(), nhwc);
+    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 
@@ -100,8 +134,10 @@ class TORCH_HIP_CPP_API FilterDescriptor : public Descriptor<
   void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
 private:
-  void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
-    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
+  void set(miopenDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
+    std::vector<int> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<int>(dim, size, strides_copy.data(), nhwc);
+    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 
@@ -166,4 +202,4 @@ union Constant
   }
 };
 
-}}  // namespace
+}} // namespace

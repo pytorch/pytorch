@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 9)
+SCHEMA_VERSION = (8, 14)
 TREESPEC_VERSION = 1
 
 
@@ -176,6 +176,12 @@ class CustomObjArgument:
     class_fqn: Annotated[str, 20]
 
 
+@dataclass
+class ComplexValue:
+    real: Annotated[float, 10]
+    imag: Annotated[float, 20]
+
+
 # This is actually a union type
 @_union_dataclass
 class Argument(_Union):
@@ -205,6 +211,7 @@ class Argument(_Union):
     as_sym_float: Annotated[SymFloatArgument, 230]
     as_sym_floats: Annotated[list[SymFloatArgument], 240]
     as_optional_tensor: Annotated[OptionalTensorArgument, 250]
+    as_complex: Annotated[ComplexValue, 260]
 
 
 class ArgumentKind(IntEnum):
@@ -328,6 +335,12 @@ class BufferMutationSpec:
 
 
 @dataclass
+class ParameterMutationSpec:
+    arg: Annotated[TensorArgument, 10]
+    parameter_name: Annotated[str, 20]
+
+
+@dataclass
 class GradientToParameterSpec:
     arg: Annotated[TensorArgument, 10]
     parameter_name: Annotated[str, 20]
@@ -359,6 +372,7 @@ class OutputSpec(_Union):
     gradient_to_user_input: Annotated[GradientToUserInputSpec, 50]
     user_input_mutation: Annotated[UserInputMutationSpec, 60]
     token: Annotated[OutputTokenSpec, 70]
+    parameter_mutation: Annotated[ParameterMutationSpec, 80]
 
 
 @dataclass
@@ -435,6 +449,7 @@ class ExportedProgram:
     schema_version: Annotated[SchemaVersion, 60]
     verifiers: Annotated[list[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"
+    guards_code: Annotated[list[str], 90] = field(default_factory=list)
 
 
 #########################################################################
@@ -442,29 +457,25 @@ class ExportedProgram:
 #########################################################################
 
 
+# The metadata for payload saved in PT2 archive.
+# payload includes params, buffers, tensor constants, and custom objects.
 @dataclass
-class Program:
-    methods: Annotated[dict[str, ExportedProgram], 200]
+class PayloadMeta:
+    # the path of the payload in the archive file, e.g. "weight_0"
+    path_name: Annotated[str, 10]
+    is_param: Annotated[bool, 20]
+    # whether the payload is serialized using pickle.
+    # Only custom objects and tensor subclasses that are not fake tensors
+    # are serialized using pickle.
+    use_pickle: Annotated[bool, 30]
+    # Custom Objects don't have tensor_meta and will be serialized using pickle
+    tensor_meta: Annotated[Optional[TensorMeta], 40]
 
 
-# This is the top-level model definition that be will serialized into the package
+# The mapping from payload FQN to its metadata.
 @dataclass
-class Model:
-    # unique identifier of the model in the package, e.g. local, remote, merge
-    name: Annotated[str, 10]
-    # key is the FQN of tensor in exported program
-    # value is the archive path of tensor payloads
-    # e.g. "L__self__linear.weight" : "/data/tensor/L__self__linear.weight"
-    tensorPaths: Annotated[dict[str, str], 20]
-    # program exported from torch.export()
-    program: Annotated[Program, 40]
-    # Backend-specialized Lowered GraphModule
-    # e.g. "aotinductor-a100" : ExportedProgram_with_AOTInductor_delegate
-    delegates: Annotated[dict[str, Program], 50]
-    deviceAllocationMap: Annotated[dict[str, str], 60]
-    # key is the FQN of constant in exported program (constant tensor or torchbind objs)
-    # value is the archive path of serialized constants
-    constantPaths: Annotated[dict[str, str], 70]
+class PayloadConfig:
+    config: Annotated[dict[str, PayloadMeta], 10]
 
 
 #

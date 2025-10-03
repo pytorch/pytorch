@@ -8,9 +8,7 @@
 
 #include <fmt/format.h>
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <tensorpipe/tensorpipe.h>
-C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
 #include <torch/csrc/distributed/rpc/agent_utils.h>
@@ -265,10 +263,12 @@ constexpr static int kNumUvThreads = 16;
 
 std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
+  contexts.reserve(kNumUvThreads);
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
+  listeners.reserve(kNumUvThreads);
   for ([[maybe_unused]] const auto laneIdx : c10::irange(kNumUvThreads)) {
     auto context = tensorpipe::transport::uv::create();
-    std::string address = TensorPipeAgent::guessAddress();
+    const std::string& address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
     listeners.push_back(contexts.back()->listen(address));
   }

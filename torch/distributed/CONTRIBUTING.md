@@ -8,7 +8,7 @@ In this document, we mostly focus on some of the code structure for PyTorch dist
 
 ### Onboarding Tasks
 
-A list of onboarding tasks can be found [here](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+distributed%22+label%3A%22topic%3A+bootcamp%22) and [here](https://github.com/pytorch/pytorch/issues?q=is%3Aopen+is%3Aissue+label%3A%22module%3A+distributed%22+label%3Apt_distributed_rampup).
+A list of onboarding tasks can be found [here](https://github.com/pytorch/pytorch/issues?q=is%3Aopen%20is%3Aissue%20label%3A%22pt_distributed_rampup%22).
 
 
 ## Code Pointers

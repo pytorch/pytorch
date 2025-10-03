@@ -275,7 +275,7 @@ def aot_compile(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,
-) -> Union[str, list[Union[str, Weights]]]:
+) -> Union[str, list[Union[str, Weights]], torch.fx.GraphModule]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 
@@ -291,6 +291,15 @@ def aot_compile(
         TODO: make it return a list by default
     """
     from .compile_fx import _aoti_flatten_inputs, compile_fx_aot
+
+    if hasattr(gm, "_guards_fn"):
+        # Do not compile the guards function, since it may contain checks
+        # that are not currently supported by AOTI. In particular, non-Tensor
+        # arguments are converted to None and will fail specialization checks.
+        node = next(iter(gm.graph.find_nodes(op="call_module", target="_guards_fn")))
+        gm.graph.erase_node(node)
+        delattr(gm, "_guards_fn")
+        gm.recompile()
 
     flat_example_inputs, options = _aoti_flatten_inputs(
         gm, args, kwargs, options=options

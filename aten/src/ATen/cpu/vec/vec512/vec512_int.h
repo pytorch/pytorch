@@ -53,7 +53,9 @@ class Vectorized<int64_t> : public Vectorizedi {
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
+  Vectorized() {
+    values = _mm512_setzero_si512();
+  }
   Vectorized(int64_t v) {
     values = _mm512_set1_epi64(v);
   }

@@ -261,12 +261,9 @@ void Unpickler::run() {
 void Unpickler::setInput(size_t memo_id) {
   AT_ASSERT(!stack_.empty());
   if (memo_id >= memo_table_.size()) {
-    memo_table_.insert(
-        memo_table_.end(), memo_id - memo_table_.size(), IValue());
-    memo_table_.push_back(stack_.back());
-  } else {
-    memo_table_[memo_id] = stack_.back();
+    memo_table_.resize(memo_id + 1);
   }
+  memo_table_[memo_id] = stack_.back();
 }
 
 static std::vector<int64_t> tupleToIntList(const IValue& v) {
@@ -669,6 +666,16 @@ void Unpickler::readGlobal(
     // See [NOTE] skip_next_read_global
     this->skip_next_read_global--;
     if (this->skip_next_read_global == 1) {
+      if (module_name == "torch" && class_name == "Tensor") {
+        // This is a special case when we are unpickling a subclassed tensor
+        // with type torch.nn.Buffer. We didn't frequently run into this because
+        // torch.nn.Buffer is introduced later in PyTorch 2 and this type IValue
+        // will not be used in C++.
+        rebuildTensor(false);
+        stack_.emplace_back(int64_t(globals_.size() - 1));
+        this->skip_next_read_global = 0;
+        return;
+      }
       // Pass through to the correct handler
     } else if (this->skip_next_read_global == 0) {
       // Corresponds to the type of `Tensor` being unpickled
@@ -773,6 +780,10 @@ void Unpickler::readGlobal(
     // Unpickle a Tensor with Python attributes or
     // a Subclassed Tensor.
     rebuildTensorFromTypeV2();
+  } else if (
+      module_name == "torch._utils" && (class_name == "_rebuild_parameter")) {
+    // Unpickle a Parameter
+    rebuildParameter();
   } else if (
       module_name == "torch._utils" && class_name == "_rebuild_sparse_tensor") {
     rebuildSparseTensor();
@@ -1021,6 +1032,18 @@ void Unpickler::rebuildTensorFromTypeV2() {
     stack_.emplace_back(base_tensor_args);
     globals_[curr_globals_idx + 1]();
     stack_.emplace_back(pop(stack_));
+  });
+}
+
+void Unpickler::rebuildParameter() {
+  globals_.emplace_back([this] {
+    auto args = pop(stack_).toTuple();
+    size_t tup_idx = 0;
+    const auto args_elems = args->elements();
+    auto result = args_elems.at(tup_idx++).toTensor();
+    auto requires_grad = args_elems.at(tup_idx++).toBool();
+    result.requires_grad_(requires_grad);
+    stack_.emplace_back(std::move(result));
   });
 }
 

@@ -11,17 +11,17 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from typing import (
     Any,
-    Callable,
     ClassVar,
     Generic,
     NewType,
     Optional,
     Protocol,
     TYPE_CHECKING,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import override, TypedDict, TypeGuard, TypeIs, Unpack
+from typing_extensions import override, TypedDict, TypeIs, Unpack
 
 import torch
 from torch._C._autograd import CreationMeta
@@ -46,7 +46,7 @@ from torch.utils.weak import WeakIdKeyDictionary
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
     from torch._C._functorch import CInterpreter
     from torch._guards import Source
@@ -417,6 +417,7 @@ class MetaTensorDescriber:
             stride=stride,
             storage_offset=storage_offset,
             dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", set())),
+            dynamo_hint_overrides=getattr(t, "_dynamo_hint_overrides", {}),
             sparse_dim=(
                 t.sparse_dim() if t.is_sparse or is_sparse_compressed(t) else None
             ),
@@ -614,6 +615,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     # defined on NJT
     size: tuple[int, ...]
     dynamo_dynamic_indices: list[int]
+    dynamo_hint_overrides: dict[int, int]
 
     layout: torch.layout = torch.strided
     is_inference: bool = False
@@ -885,13 +887,15 @@ class MetaConverter(Generic[_TensorT]):
                 f"__meta_utils_unknown_tensor{len(self.tensor_memo)}"
             )
 
-        # This indicates you set no_dispatch() before calling into this
-        # function.  This is an error: we may be creating fake tensors and
-        # will perform operations on them which need fake tensor mode to
-        # be active.  You will segfault if you are in a no_dispatch() block.
+        msg = (
+            " This indicates you set no_dispatch() before calling into this"
+            " function.  This is an error: we may be creating fake tensors and"
+            " will perform operations on them which need fake tensor mode to"
+            " be active.  You will segfault if you are in a no_dispatch() block."
+        )
         assert not torch._C._dispatch_tls_local_exclude_set().has(
             torch._C.DispatchKey.Python
-        )
+        ), msg
         self.arg_cnt += 1
 
         # When we make as_strided calls, we end up generating a guard
@@ -956,6 +960,7 @@ class MetaConverter(Generic[_TensorT]):
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
                         symbolic_context=symbolic_context,
+                        hint_overrides=t.dynamo_hint_overrides,
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)

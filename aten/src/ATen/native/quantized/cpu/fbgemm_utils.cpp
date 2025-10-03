@@ -83,10 +83,8 @@ void CopyICFirst3dTensorToChannelsLast3dTensor(
   for (int64_t i = 0; i < G * OC_G; ++i) {
     for (const auto j : c10::irange(inner_size)) {
       for (const auto ic : c10::irange(IC_G)) {
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-        int g = i / OC_G;
-        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-        int oc = i % OC_G;
+        int g = static_cast<int>(i / OC_G);
+        int oc = static_cast<int>(i % OC_G);
         dst[(i * inner_size + j) * IC_G + ic] =
             src[((g * IC_G + ic) * OC_G + oc) * inner_size + j];
       }
@@ -112,24 +110,26 @@ fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
   std::array<int, kSpatialDim> image_shape_{};
   std::array<int, kSpatialDim> kernels_{};
   std::array<int, kSpatialDim> strides_{};
-  std::array<int, kSpatialDim * 2> pads_{};
+  std::array<int, kSpatialDim * 2ull> pads_{};
   std::array<int, kSpatialDim> dilations_{};
   std::array<int, kSpatialDim> output_padding_{};
-  std::move(image_shape.begin(), image_shape.begin() + image_shape.size(), image_shape_.begin());
   std::move(
-      kernels.begin(), kernels.begin() + kernels.size(), kernels_.begin());
+      image_shape.begin(), image_shape.begin() + static_cast<int64_t>(image_shape.size()), image_shape_.begin());
   std::move(
-      strides.begin(), strides.begin() + strides.size(), strides_.begin());
+      kernels.begin(), kernels.begin() + static_cast<int64_t>(kernels.size()), kernels_.begin());
+  std::move(
+      strides.begin(), strides.begin() + static_cast<int64_t>(strides.size()), strides_.begin());
   std::move(
       dilations.begin(),
-      dilations.begin() + dilations.size(),
+      dilations.begin() + static_cast<int64_t>(dilations.size()),
       dilations_.begin());
   std::move(
       output_padding.begin(),
-      output_padding.begin() + output_padding.size(),
+      output_padding.begin() + static_cast<int64_t>(output_padding.size()),
       output_padding_.begin());
-  std::copy(pads.begin(), pads.begin() + pads.size(), pads_.begin());
-  std::move(pads.begin(), pads.begin() + pads.size(), pads_.begin() + pads.size());
+  std::copy(pads.begin(), pads.begin() + static_cast<int64_t>(pads.size()), pads_.begin());
+  const auto pads_size = static_cast<int64_t>(pads.size());
+  std::move(pads.begin(), pads.begin() + pads_size, pads_.begin() + pads_size);
 
   return fbgemm::conv_param_t<kSpatialDim>(
       N, // batch size
@@ -158,7 +158,7 @@ Tensor MakeStridedQTensorCPU(
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
       "ScalarType is not supported in new_qtensor_cpu.");
-  int64_t size_bytes = nelements * dtype.itemsize();
+  int64_t size_bytes = static_cast<int64_t>(nelements * dtype.itemsize());
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
       size_bytes,
@@ -531,8 +531,8 @@ int register_embedding_params() {
             TORCH_INTERNAL_ASSERT(longs.size() == 1, "EmbeddingPackedParams: Expected bit_rate to be serialized");
             TORCH_CHECK(version == 1, "EmbeddingPackedParams: Currently only version 1 supported.");
 
-            at::Tensor weight = std::move(tensors[0]);
-            return PackedEmbeddingBagWeight::prepack(std::move(weight));
+            const auto& weight = tensors[0];
+            return PackedEmbeddingBagWeight::prepack(weight);
           })
       .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
       .def("unpack", &EmbeddingPackedParamsBase::unpack)

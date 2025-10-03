@@ -35,15 +35,14 @@ PyTypeObject* THPStorageClass = nullptr;
 PyObject* THPStorage_NewWithStorage(
     PyTypeObject* type,
     c10::Storage _storage,
-    c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj) {
   TORCH_CHECK(
       PyType_IsSubtype(type, &THPStorageType),
       "Creating a Storage subclass from a class that does not inherit from ",
       "Storage is not possible. Make sure your class inherits from Storage.");
 
-  auto maybe_pyobj = _storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
+  auto maybe_pyobj =
+      _storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj();
   if (maybe_pyobj.has_value() && maybe_pyobj.value()) {
     TORCH_CHECK(
         allow_preexisting_pyobj,
@@ -78,8 +77,7 @@ PyObject* THPStorage_NewWithStorage(
   if (!c10::impl::HermeticPyObjectTLS::get_state()) {
     s->is_hermetic = false;
     const auto& storage = THPStorage_Unpack(s);
-    storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(
-        getPyInterpreter(), obj, status);
+    storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(obj);
   } else {
     s->is_hermetic = true;
   }
@@ -91,28 +89,11 @@ PyObject* THPStorage_NewWithStorage(
 PyObject* THPStorage_Wrap(c10::Storage storage) {
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
   if (c10::impl::HermeticPyObjectTLS::get_state()) {
-    return THPStorage_NewWithStorage(
-        THPStorageClass,
-        std::move(storage),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+    return THPStorage_NewWithStorage(THPStorageClass, std::move(storage));
   }
   c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
 
-  // If the StorageImpl has a PyObject that is managed by a different
-  // interpreter than the current one, create a new StorageImpl that points to
-  // the same data and then create the Python storage from that.
-  // NOTE: This is only supposed to happen in MultiPy  // codespell:ignore
-  if (pyobj_slot->has_pyobj_nonhermetic() &&
-      !pyobj_slot->check_interpreter(getPyInterpreter())) {
-    return THPStorage_NewWithStorage(
-        THPStorageClass,
-        c10::newStorageImplFromRefcountedDataPtr(storage),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
-  }
-  std::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj(
-      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  c10::impl::PyInterpreterStatus status =
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US;
+  std::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj();
   if (maybe_pyobj.has_value()) {
     auto obj = *maybe_pyobj;
     if (obj) {
@@ -131,15 +112,8 @@ PyObject* THPStorage_Wrap(c10::Storage storage) {
         return obj;
       }
     }
-    status = c10::impl::PyInterpreterStatus::TAGGED_BY_US;
-  } else {
-    if (storage.use_count() <= 1) {
-      status = c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED;
-    } else {
-      status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
-    }
   }
-  return THPStorage_NewWithStorage(THPStorageClass, std::move(storage), status);
+  return THPStorage_NewWithStorage(THPStorageClass, std::move(storage));
 }
 
 static bool THPStorage_isPreservable(THPStorage* self) {
@@ -152,8 +126,7 @@ static bool THPStorage_isPreservable(THPStorage* self) {
     return false;
   }
 
-  if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/true) !=
+  if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj() !=
       (PyObject*)self) {
     return false;
   }
@@ -171,12 +144,10 @@ static bool THPStorage_tryPreserve(THPStorage* self) {
   const auto& storage = THPStorage_Unpack(self);
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
 
-  auto maybe_pyobj = storage_impl->pyobj_slot()->check_pyobj(
-      getPyInterpreter(),
-      /*ignore_hermetic_tls=*/true);
+  auto maybe_pyobj = storage_impl->pyobj_slot()->check_pyobj();
   // NOTE: It is possible to just set the PyObjectSlot here, but the point is
-  // that we should have already set PyObjectSlot when the storage PyObject was
-  // created.
+  // that we should have already set PyObjectSlot when the storage PyObject
+  // was created.
   TORCH_INTERNAL_ASSERT(
       maybe_pyobj.has_value(),
       "Trying to preserve a Python storage whose PyObjectSlot does not have a PyObject");
@@ -358,6 +329,7 @@ static PyObject* THPStorage_pynew(
       case at::DeviceType::Meta:
       case at::DeviceType::PrivateUse1:
       case at::DeviceType::MAIA:
+      case at::DeviceType::MTIA:
         allocator = c10::GetAllocator(device.type());
         break;
       default:
@@ -384,8 +356,7 @@ static PyObject* THPStorage_pynew(
             at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            device_opt),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+            device_opt));
 
     // torch.Storage(size, *, ...)
   } else if (r.idx == 1) {
@@ -398,8 +369,7 @@ static PyObject* THPStorage_pynew(
             at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            device_opt),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+            device_opt));
 
     // torch.Storage(sequence, *, ...)
   } else if (r.idx == 2) {
@@ -423,8 +393,7 @@ static PyObject* THPStorage_pynew(
             at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            device_opt),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+            device_opt));
     THPObjectPtr item;
     try {
       const auto& storage = THPStorage_Unpack(self);
@@ -479,7 +448,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
       return nullptr;
     }
     uint8_t value = storage_get(storage, nindex);
-    return THPByteUtils_newReal(value);
+    return THPUtils_packUInt32(value);
     /* Slice index */
   } else if (PySlice_Check(index)) {
     Py_ssize_t start = 0, stop = 0, slicelength = 0, step = 0;
@@ -520,10 +489,8 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
         /* resizable */ false,
         device_opt);
 
-    PyObject* _ret = THPStorage_NewWithStorage(
-        Py_TYPE(self),
-        std::move(new_storage_impl),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+    PyObject* _ret =
+        THPStorage_NewWithStorage(Py_TYPE(self), std::move(new_storage_impl));
 
     return _ret;
   }

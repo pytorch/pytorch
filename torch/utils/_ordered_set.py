@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import (
+    Hashable,
     Iterable,
     Iterator,
     MutableSet,
@@ -10,8 +11,8 @@ from collections.abc import (
 from typing import Any, cast, Optional, TypeVar
 
 
-T = TypeVar("T")
-T_co = TypeVar("T_co", covariant=True)
+T = TypeVar("T", bound=Hashable)
+T_co = TypeVar("T_co", bound=Hashable, covariant=True)
 
 __all__ = ["OrderedSet"]
 

@@ -7,45 +7,36 @@ input/output types, metadata, config, function signatures etc.
 from __future__ import annotations
 
 import collections
-import dataclasses
 import functools
 import itertools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import (
-    Any,
-    Callable,
-    NewType,
-    Optional,
-    Protocol,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
 
 import torch
 import torch.utils._pytree as pytree
-from torch import Tensor
+from torch import SymInt, Tensor
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
+from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-from .functional_utils import (
-    _check_if_mutation_can_be_in_graph,
-    FunctionalTensorMetadataEq,
-)
+from .functional_utils import _check_if_mutation_can_be_in_graph, ViewMetaSequence
 from .utils import strict_zip
 
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
     from torch._inductor.utils import InputType
     from torch._ops import OpOverload
+
+    from .descriptors import AOTInput, AOTOutput
+    from .graph_capture_wrappers import JointFnHandle
 
 
 zip = strict_zip
@@ -113,15 +104,14 @@ class OutputAliasInfo:
     dynamic_dims: Optional[set[int]]
     # requires_grad
     requires_grad: bool
-    # FunctionalTensorWrapper that represents this output.
+    # Sequence of ViewMeta objects.
     #
-    # Provides us the means to replay views from it.
+    # Provides us the means to re-run view functions on other tensors.
     #
-    # We need to wrap the actual FunctionalTensorWrapper with this class so that
-    # we only compare the tensor's metadata. That's because with the transformations
-    # of the model throughout AOTAutograd, the sequence of ViewMeta and the base
-    # tensor might change.
-    functional_tensor: Optional[FunctionalTensorMetadataEq] = None
+    # We need to wrap the actual list of ViewMeta with this class so that
+    # we compare the ViewMeta elements appropriately, i.e. their type and
+    # the elements returned by the `as_tuple()` call.
+    view_meta_sequence: Optional[ViewMetaSequence] = None
 
 
 class MutationType(Enum):
@@ -406,6 +396,9 @@ class ViewAndMutationMeta:
     # pass once, and reuse the output throughout AOTAutograd
     traced_tangents: list[Any]
 
+    # TODO doc
+    traced_tangents_descs: list[AOTInput]
+
     # Each of these is a list telling us about subclasses for the inputs/outputs/grad_outs
     # They are used throughout AOTDispatch to tell us how to generate a list of subclass tensors,
     # Given a (potentially larger) list of plain torch tensors.
@@ -658,17 +651,6 @@ class ViewAndMutationMeta:
         self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
         # Clear traced tangents at runtime
         self.traced_tangents = []
-        new_output_info = []
-        for out in self.output_info:
-            if config.view_replay_for_aliased_outputs:
-                new_out = out
-            else:
-                # If we're not using view_replay, remove the functional tensor.
-                # Functional tensors are unfortunately not serializable,
-                # so doing this is required for AOTAutograd caching.
-                new_out = dataclasses.replace(out, functional_tensor=None)
-            new_output_info.append(new_out)
-        self.output_info = new_output_info
         for inp_meta in self.subclass_inp_meta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
@@ -822,6 +804,7 @@ class GraphSignature:
     # "graph outputs that correspond to updated buffers"
     # to the FQN names of those mutated buffers.
     buffers_to_mutate: dict[GraphOutputName, FQN]
+    parameters_to_mutate: dict[GraphOutputName, FQN]
     user_inputs_to_mutate: dict[GraphOutputName, GraphInputName]
 
     in_spec: pytree.TreeSpec
@@ -845,6 +828,7 @@ class GraphSignature:
         named_buffers: list[str],
         num_user_inputs: int,
         num_user_outputs: int,
+        trace_joint: bool,
         loss_index: Optional[int],
         backward_signature: Optional[BackwardSignature],
     ) -> GraphSignature:
@@ -890,8 +874,9 @@ class GraphSignature:
         mutations = []
         for idx, input_info in enumerate(view_mutation_metadata.input_info):
             if input_info.mutates_data:
-                # Only buffers can be mutated, not parameters
-                assert idx >= len(parameters)
+                if trace_joint:
+                    # Only buffers can be mutated, not parameters
+                    assert idx >= len(parameters)
                 mutations.append(names[idx + num_tokens])
 
         assert len(mutations) == view_mutation_metadata.num_mutated_inp_runtime_indices
@@ -904,12 +889,16 @@ class GraphSignature:
 
         user_inputs_to_mutate = {}
         buffers_to_mutate = {}
+        parameters_to_mutate = {}
         for output_name, mutation_name in outputs_to_mutations.items():
             if mutation_name in user_inputs:
                 user_inputs_to_mutate[output_name] = mutation_name
             else:
-                assert mutation_name in buffers
-                buffers_to_mutate[output_name] = mutation_name
+                assert mutation_name in buffers or mutation_name in parameters
+                if mutation_name in buffers:
+                    buffers_to_mutate[output_name] = mutation_name
+                else:
+                    parameters_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
         user_outputs = graph_outputs[start:stop]
@@ -930,6 +919,7 @@ class GraphSignature:
             inputs_to_parameters=inputs_to_parameters,  # type: ignore[arg-type]
             user_inputs_to_mutate=user_inputs_to_mutate,
             buffers_to_mutate=buffers_to_mutate,  # type: ignore[arg-type]
+            parameters_to_mutate=parameters_to_mutate,  # type: ignore[arg-type]
             in_spec=in_spec,
             out_spec=out_spec,
             backward_signature=backward_signature,
@@ -975,15 +965,28 @@ class AOTConfig:
     # Used only by standalone_compile.
     ignore_shape_env: bool = False
     precompile_backend_id: Optional[str] = None
+    force_non_lazy_backward_lowering: bool = False
+    # This config makes sure to check certain things like
+    # mutating input with req_grad in export joint tracing.
+    export_trace_joint: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:
             assert self.is_export, "Can only have pre_dispatch IR for export."
 
 
+# TODO: types here
+# plain_tensor_trace_fn, when it is joint, has tuple structure on the trace
+# info too!
+# TODO: this needs to be generic, parameterized on AOTDescriptor
 SubclassTracingInfo = collections.namedtuple(
     "SubclassTracingInfo",
-    ["plain_tensor_trace_fn", "plain_tensor_args", "maybe_subclass_meta"],
+    [
+        "plain_tensor_trace_fn",
+        "plain_tensor_args",
+        "plain_tensor_args_descs",
+        "maybe_subclass_meta",
+    ],
 )
 
 
@@ -1015,7 +1018,10 @@ class AOTState:
     #
     # (By the way, this is NEVER the joint inputs!  Those only ever go in
     # AOTGraphCapture)
-    flat_args: list[Any]
+    flat_args: list[FxValue]
+
+    # The descriptor for each argument in flat_args.
+    flat_args_descs: list[AOTInput]
 
     # This contains view and mutation information about the function, which we
     # detected by doing an initial trace when we created this state.
@@ -1038,6 +1044,9 @@ class AOTState:
     # TODO: We potentially could offer a resumable context manager, where you
     # can cancel it and reenable it later when you need it.
     stack: contextlib.ExitStack
+
+
+FxValue = Union[Tensor, int, SymInt, BackwardState]
 
 
 class CompilerWrapper:
@@ -1070,11 +1079,12 @@ class CompilerWrapper:
     def pre_compile(
         self,
         flat_fn,
-        flat_args: list[Tensor],
+        flat_args: list[FxValue],
+        flat_args_descs: list[AOTInput],
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> tuple[Callable, list[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, list[FxValue], list[AOTInput], ViewAndMutationMeta]:
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -1083,7 +1093,7 @@ class CompilerWrapper:
         aot_config: AOTConfig passed in at compile time
         fw_metadata: ViewAndMutationMeta generated from flat_fn and flat_args
         """
-        return flat_fn, flat_args, fw_metadata
+        return flat_fn, flat_args, flat_args_descs, fw_metadata
 
     def post_compile(self, compiled_fn, aot_config, *, runtime_metadata) -> Callable:
         """
@@ -1169,17 +1179,21 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # graph, among other things!
     wrappers: list[CompilerWrapper]
 
-    # The actual captured graph.  In some circumstances (export) this graph
-    # has a specific calling convention that can be relied upon by external
-    # callers.  In other situations, the calling convention is unspecified and
-    # only aot_stage2_compile knows how to deal with them.
-    graph: torch.fx.GraphModule
+    # The actual captured graph module.  In some circumstances (export) this
+    # graph has a specific calling convention that can be relied upon by
+    # external callers.  In other situations, the calling convention is
+    # unspecified and only aot_stage2_compile knows how to deal with them.
+    graph_module: torch.fx.GraphModule
 
     # When compiling with autograd support, this is the joint_inputs, which is
     # larger than the original flat_args as all tangents get inputs.  The
     # tuple organizes into primals and tangents.  When not autograd it's just
     # a plain list.
     updated_flat_args: Union[list[Any], tuple[list[Any], list[Any]]]
+
+    updated_flat_args_descs: Union[
+        list[AOTInput], tuple[list[AOTInput], list[AOTInput]]
+    ]
 
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any
@@ -1226,3 +1240,51 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         example_inputs: Sequence[InputType],
     ) -> OutputCode:
         return self.compiler_fn(gm, example_inputs)
+
+
+class FlatFn(Protocol):
+    def __call__(self, *args: FxValue) -> list[FxValue]: ...
+
+
+class TraceFn(Protocol):
+    def __call__(self, *args: FxValue) -> tuple[list[FxValue], list[AOTOutput]]: ...
+
+
+class PreppedForAutogradTraceFn(Protocol):
+    def __call__(
+        self,
+        *args: FxValue,
+    ) -> tuple[tuple[list[FxValue], list[bool]], list[AOTOutput]]: ...
+
+
+class JointTraceFn(Protocol):
+    handle: JointFnHandle
+
+    def __call__(
+        self, primals: list[FxValue], tangents: list[FxValue]
+    ) -> tuple[
+        tuple[list[FxValue], list[Optional[Tensor]]],
+        tuple[list[AOTOutput], list[Optional[AOTOutput]]],
+    ]: ...
+
+
+@dataclass
+class JointWithDescriptors:
+    _aot_state: AOTState
+    _aot_graph_capture: AOTGraphCapture
+
+    # The exact order parameters and buffers are expected to be passed into
+    # the final compiled function.  Parameters before buffers.
+    params_spec: list[str]
+    buffers_spec: list[str]
+
+    in_spec: pytree.TreeSpec
+    out_spec: pytree.TreeSpec
+
+    @property
+    def graph_module(self):
+        return self._aot_graph_capture.graph_module
+
+    @graph_module.setter
+    def graph_module(self, value):
+        self._aot_graph_capture.graph_module = value

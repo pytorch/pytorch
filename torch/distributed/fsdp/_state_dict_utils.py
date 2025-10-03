@@ -3,8 +3,8 @@ import contextlib
 import logging
 import math
 import warnings
-from collections.abc import Generator, Iterator
-from typing import Any, Callable, cast, no_type_check
+from collections.abc import Callable, Generator, Iterator
+from typing import Any, cast, no_type_check
 
 import torch
 import torch.distributed as dist
@@ -330,7 +330,7 @@ def _full_post_state_dict_hook(
             try:
                 state_dict[fqn] = state_dict[fqn].detach().clone()
                 state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
-            except BaseException as e:
+            except BaseException as e:  # noqa: B036
                 warnings.warn(
                     f"Failed to clone() tensor with name {fqn} on rank {fsdp_state.rank}. "
                     "This may mean that this state_dict entry could point to invalid "

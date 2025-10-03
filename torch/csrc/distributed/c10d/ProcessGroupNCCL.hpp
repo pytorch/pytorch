@@ -545,7 +545,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
     int split_color{-2};
 #endif
-    std::vector<uint64_t> global_ranks_in_group;
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -960,6 +959,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void enableCollectivesTiming() override;
 
   c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
       const c10::intrusive_ptr<Backend::Options>& opts) override;
 
@@ -1002,7 +1002,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
-  void registerMemPool(c10::cuda::MemPool* pool);
+  void registerMemPool(c10::cuda::MemPool* pool, bool symm = false);
 
   // Performs NCCL user buffer de-registration for all buffers in
   // the given MemPool
@@ -1089,8 +1089,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool useNonblocking();
 
  protected:
-  int globalRankStart_;
-  int globalRankStride_;
+  int globalRankStart_{};
+  int globalRankStride_{};
 
  private:
   bool eagerInit_{false};
@@ -1201,7 +1201,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Returns the global rank of the device. This function assumes that users
   // always create a default global process group(PG) which includes all
   // devices. It is called in the constructor of ProcessGroupNCCL, so it always
-  // return the rank_ of the the very first PG created, aka, default global PG.
+  // return the rank_ of the very first PG created, aka, default global PG.
   const int& globalRank() const;
 
   const c10::intrusive_ptr<Store>& globalStore() const;
@@ -1380,7 +1380,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
 
   // Whether the coalesced calls are sync or async.
-  bool coalescedAsync_;
+  bool coalescedAsync_{};
 
   // keeps track of input and output tensors when coalescing is in flight.  Will
   // hand over these tensors to WorkNCCL's stash when coalescing is ended.

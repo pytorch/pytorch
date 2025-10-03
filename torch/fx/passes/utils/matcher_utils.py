@@ -95,7 +95,7 @@ class SubgraphMatcher:
             )
 
         for node in pattern.nodes:
-            if node.op != "output":
+            if node.op != "output" and not node.is_impure():
                 assert len(node.users) > 0, (
                     "SubgraphMatcher cannot be initialized with an pattern with dead code"
                 )

@@ -425,6 +425,49 @@ static void argmin_kernel_impl(TensorIterator &iter) {
   });
 }
 
+template <typename scalar_t, typename acc_t = uint64_t, typename out_t = acc_t>
+struct XorSumOps {
+  inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, int64_t /*idx*/) const {
+    if (std::is_same<scalar_t, bool>::value) {
+      return acc ^ (data ? 1 : 0);
+    } else if (
+        std::is_same<scalar_t, float>::value ||
+        std::is_same<scalar_t, double>::value ||
+        std::is_same<scalar_t, at::BFloat16>::value ||
+        std::is_same<scalar_t, at::Half>::value) {
+      union {
+        double d;
+        uint64_t u;
+      } converter;
+      converter.d = static_cast<double>(data);
+      return acc ^ converter.u;
+    } else {
+      return acc ^ static_cast<uint64_t>(data);
+    }
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return a ^ b;
+  }
+
+  inline C10_DEVICE out_t project(acc_t a) const {
+    return a;
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+};
+
+static void xor_sum_kernel_impl(TensorIterator& iter) {
+  // Use iter.dtype(1) to dispatch based on the type of the input tensor
+  AT_DISPATCH_ALL_TYPES_AND3(
+      kBFloat16, kHalf, kBool, iter.dtype(1), "xor_sum_cpu", [&] {
+        binary_kernel_reduce(
+            iter, XorSumOps<scalar_t>(), static_cast<uint64_t>(0));
+      });
+}
+
 }  // anonymous namespace
 
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl)
@@ -439,6 +482,7 @@ REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl)
 REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl)
 REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl)
 REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl)
+REGISTER_DISPATCH(xor_sum_stub, &xor_sum_kernel_impl)
 
 REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel)
 REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel)

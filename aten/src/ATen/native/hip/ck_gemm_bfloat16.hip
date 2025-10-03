@@ -1,6 +1,7 @@
 #undef __HIP_NO_HALF_CONVERSIONS__
-
 #include <ATen/native/hip/ck_gemm.h>
+
+#if defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_gemm_template.h>
 #include <ck/utility/sequence.hpp>
 
@@ -781,3 +782,4 @@ void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 }
 
 } // namespace at::native
+#endif // USE_ROCM_CK_GEMM

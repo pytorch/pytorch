@@ -3,7 +3,8 @@
 import importlib
 import math
 import warnings
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -338,9 +339,6 @@ avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_in
 Applies a 1D average pooling over an input signal composed of several
 input planes.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
 Args:
@@ -349,8 +347,9 @@ Args:
       tuple `(kW,)`
     stride: the stride of the window. Can be a single number or a tuple
       `(sW,)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padW,)`. Default: 0
+    padding: implicit zero paddings on both sides of the input. Can be a single
+      number or a tuple `(padW,)`. Should be at most half of effective kernel
+      size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` to compute the
         output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -376,9 +375,6 @@ Applies 2D average-pooling operation in :math:`kH \times kW` regions by step siz
 :math:`sH \times sW` steps. The number of output features is equal to the number of
 input planes.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
@@ -388,7 +384,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number, a single-element tuple or a tuple `(padH, padW)`. Default: 0
+      single number, a single-element tuple or a tuple `(padH, padW)`.
+      Should be at most half of effective kernel size, that
+      is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -407,9 +405,6 @@ Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions b
 size :math:`sT \times sH \times sW` steps. The number of output features is equal to
 :math:`\lfloor\frac{\text{input planes}}{sT}\rfloor`.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
@@ -419,7 +414,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`, Default: 0
+      single number or a tuple `(padT, padH, padW)`. Should be at most half
+      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
+      Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
     count_include_pad: when True, will include the zero-padding in the
@@ -1083,6 +1080,9 @@ def lp_pool3d(
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     See :class:`~torch.nn.LPPool3d` for details.
     """
     if has_torch_function_unary(input):
@@ -1121,6 +1121,9 @@ def lp_pool2d(
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     See :class:`~torch.nn.LPPool2d` for details.
     """
     if has_torch_function_unary(input):
@@ -1155,6 +1158,9 @@ def lp_pool1d(
 
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
+
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
@@ -3266,11 +3272,13 @@ def gaussian_nll_loss(
         if input.size()[:-1] == var.size():
             var = torch.unsqueeze(var, -1)
 
-        # This checks if the sizes match up to the final dimension, and the final dimension of var is of size 1.
+        # This checks if the var is broadcastable to the input and there is only one mismatched dimension.
         # This is also a homoscedastic case.
         # e.g. input.size = (10, 2, 3), var.size = (10, 2, 1)
+        # or  input.size = (4, 3, 32, 32), var.size = (4, 1, 32, 32)
         elif (
-            input.size()[:-1] == var.size()[:-1] and var.size(-1) == 1
+            input.ndim == var.ndim
+            and sum(y for x, y in zip(input.size(), var.size()) if x != y) == 1
         ):  # Heteroscedastic case
             pass
 
@@ -4710,7 +4718,7 @@ def interpolate(  # noqa: F811
             ]
         elif torch.jit.is_scripting():
             output_size = [
-                int(math.floor(float(input.size(i + 2)) * scale_factors[i]))
+                math.floor(float(input.size(i + 2)) * scale_factors[i])
                 for i in range(dim)
             ]
         else:
@@ -5827,7 +5835,6 @@ scaled_dot_product_attention = _add_docstr(
                 assert attn_mask is None
                 temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
                 attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-                attn_bias.to(query.dtype)
 
             if attn_mask is not None:
                 if attn_mask.dtype == torch.bool:

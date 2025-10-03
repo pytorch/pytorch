@@ -80,6 +80,7 @@ if TYPE_CHECKING:
     from torch._inductor.codegen.cpp_utils import LocalBufferContext
     from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
+    from torch._inductor.ir import ExternKernelNode
     from torch._inductor.loop_body import InterpreterShim
     from torch._subclasses import FakeTensorMode
 
@@ -183,6 +184,9 @@ _ops: Virtualized[OpsHandler[Any]] = Virtualized(
     "ops", cast(type[OpsHandler[Any]], MockHandler)
 )
 _graph: Virtualized[GraphLowering] = Virtualized("graph", NullHandler)
+_extern_kernel_nodes: Virtualized[list[ExternKernelNode]] = Virtualized(
+    "extern_kernel_nodes", NullHandler
+)
 _real_inputs: Virtualized[list[torch.Tensor]] = Virtualized("real_inputs", NullHandler)
 _fake_mode: Virtualized[FakeTensorMode] = Virtualized("fake_mode", NullHandler)
 _kernel: Virtualized[NullKernelHandler] = Virtualized(
@@ -343,6 +347,9 @@ class _V:
     )
     get_ops_handler: Callable[[], OpsHandler[Any]] = _ops._get_handler
     set_graph_handler: Callable[[GraphLowering], Any] = _graph._set_handler
+    set_extern_kernel_nodes: Callable[[list[ExternKernelNode]], Any] = (
+        _extern_kernel_nodes._set_handler
+    )
     set_real_inputs: Callable[[Any], Any] = _real_inputs._set_handler
     get_real_inputs: Callable[[], Any] = _real_inputs._get_handler
     set_fake_mode: Callable[[Any], Any] = _fake_mode._set_handler
@@ -367,6 +374,15 @@ class _V:
     def graph(self) -> GraphLowering:
         """The graph currently being generated"""
         return _graph._get_handler()
+
+    @property
+    def extern_kernel_nodes(self) -> list[ExternKernelNode]:
+        """
+        The extern_kernel_nodes needed for the entire graph, including the
+        subgraphs.
+        See `ProxyExecutor Design Note` in ir.py for more details
+        """
+        return _extern_kernel_nodes._get_handler()
 
     @property
     def real_inputs(self):

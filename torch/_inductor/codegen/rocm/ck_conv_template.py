@@ -2,8 +2,12 @@
 import copy
 import logging
 import random
+from typing import Any
+from typing_extensions import override
 
 from torch._inductor.virtualized import V
+
+from .rocm_template import ArgInfo
 
 
 try:
@@ -282,6 +286,8 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                 using BlockGemmPipelineVersion = ck::BlockGemmPipelineVersion;
 
                 using ConvolutionForwardSpecialization = ck::tensor_operation::device::ConvolutionForwardSpecialization;
+
+                using OutElementOp = PassThrough;
 
                 namespace ck {
                 namespace utils {
@@ -606,3 +612,14 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             right_pads_0,
             right_pads_1,
         )
+
+    @override
+    def get_runtime_arg_info(self) -> list[ArgInfo]:
+        return []
+
+    @override
+    def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
+        """
+        Helper method to retrieve runtime args from generate kwargs
+        """
+        return []
