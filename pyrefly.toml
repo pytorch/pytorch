@@ -34,12 +34,6 @@ project-excludes = [
   "torch/jit/**",
   "torch/optim/**",
   "torch/_higher_order_ops/**",
-  "torch/_functorch/**",
-  "torch/masked/**",
-  "torch/_subclasses/**",
-  "torch/autograd/**",
-  "torch/cuda/**",
-  "torch/export/**",
   # formatting issues
   "torch/linalg/__init__.py",
   "torch/package/importer.py",

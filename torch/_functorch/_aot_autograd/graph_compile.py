@@ -425,6 +425,7 @@ def collect_fw_donated_buffer_idxs(
     """
 
     storage_refs = set()
+    # pyrefly: ignore  # bad-assignment
     for t in itertools.chain(fw_ins, user_fw_outs, bw_outs):
         # Only access storage if a tensor has storage (not sparse)
         if t is not None and isinstance(t, FakeTensor) and not is_sparse_any(t):
@@ -494,6 +495,7 @@ def collect_bw_donated_buffer_idxs(
         fw_ins,
         user_fw_outs,
         bw_outs,
+        # pyrefly: ignore  # bad-argument-type
         saved_tensors,
     )
 
@@ -1762,6 +1764,7 @@ def aot_stage2_autograd(
                     # (2408448, 1, 21504, 192). The solution mentioned will
                     # decide a stride of (802816, 1, 7168, 64) for this
                     # tensor which is wrong.
+                    # pyrefly: ignore  # bad-argument-type
                     placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
             compiled_bw_func = None
