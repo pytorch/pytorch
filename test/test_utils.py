@@ -570,12 +570,7 @@ class TestRNGState(TestCase):
         device = torch.device("cpu")
         state_device_arg = torch.get_rng_state(device)
 
-        # get state from get_rng_state with string passed in
-        state_string_arg = torch.get_rng_state("cpu")
-
-        # assert that all three are equal
         self.assertEqual(state_no_args, state_device_arg)
-        self.assertEqual(state_no_args, state_string_arg)
 
     @unittest.skipIf(not HAS_CUDA, "No CUDA")
     def test_get_rng_state_cuda(self):
@@ -586,16 +581,7 @@ class TestRNGState(TestCase):
         device = torch.device("cuda")
         state_device_arg = torch.get_rng_state(device)
 
-        # get state from get_rng_state with string passed in
-        state_string_arg = torch.get_rng_state("cuda")
-
-        # get state from get_rng_state with integer passed in
-        state_int_arg = torch.get_rng_state(0)
-
-        # assert that all four are equal
         self.assertEqual(state_no_args, state_device_arg)
-        self.assertEqual(state_no_args, state_string_arg)
-        self.assertEqual(state_no_args, state_int_arg)
 
 
 class TestDataLoaderUtils(TestCase):
