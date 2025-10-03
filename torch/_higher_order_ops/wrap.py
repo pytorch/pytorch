@@ -313,6 +313,9 @@ def proxy_mode_key(
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor]:
+    import torch.fx.traceback as fx_traceback
+    from torch.fx import Interpreter
+
     assert proxy_mode.pre_dispatch, (
         "post-dispatch mode should have inlined in the Autograd key"
     )
@@ -323,7 +326,9 @@ def proxy_mode_key(
 
     # TODO (tmanlaibaatar) don't we need flat_apply here??
     flat_args, _ = pytree.tree_flatten((args, kwargs))
-    gmod_aten = reenter_make_fx(gmod)(*flat_args)
+    with fx_traceback.preserve_node_meta():
+        gmod_aten = reenter_make_fx(Interpreter(gmod).run)(*flat_args)
+        gmod_aten.meta["_checkpoint_context_fn"] = gmod.meta["_checkpoint_context_fn"]
     proxy_mode.tracer.root.register_module(qualname, gmod_aten)  # type: ignore[union-attr]
     proxy_gmod = proxy_mode.tracer.unwrap_proxy(gmod_aten)  # type: ignore[union-attr, call-overload]
     out_proxy = proxy_mode.tracer.create_proxy(

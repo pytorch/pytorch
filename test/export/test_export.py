@@ -720,6 +720,18 @@ class TestExport(TestCase):
                 self.assertEqual(node.meta["from_node"][-1].graph_id, graph_id)
 
     def test_tag_ac_export(self):
+        ops_to_save = [torch.ops.aten.addmm.default]
+
+        def policy_fn(ctx, op, *args, **wargs):
+            if op in ops_to_save:
+                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+            else:
+                return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
+        )
+
         class Block(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -737,7 +749,9 @@ class TestExport(TestCase):
                 self.block = Block()
 
             def forward(self, x):
-                return torch.utils.checkpoint.checkpoint(self.block, x)
+                return torch.utils.checkpoint.checkpoint(
+                    self.block, x, context_fn=context_fn
+                )
 
         model = CheckpointedBlock()
         x = torch.randn(16, 128, requires_grad=True)
@@ -777,6 +791,11 @@ graph():
 
         with stack:
             jwd = aot_export_joint_with_descriptors(stack, ep.module(), (x,))
+            for node in jwd.graph_module.graph.nodes:
+                if "recompute" in node.meta:
+                    actual = node.meta["recompute"]
+                    expected = policy_fn(None, node.target, None, None)
+                    self.assertEqual(actual, expected)
             self.assertExpectedInline(
                 str(jwd.graph_module.code).strip(),
                 """\
@@ -785,8 +804,9 @@ def forward(self, primals, tangents):
     t = torch.ops.aten.t.default(primals_1);  primals_1 = None
     addmm = torch.ops.aten.addmm.default(primals_2, primals_5, t);  primals_2 = None
     relu = torch.ops.aten.relu.default(addmm);  addmm = None
-    detach = torch.ops.aten.detach.default(relu)
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
+    detach_9 = torch.ops.aten.detach.default(relu)
+    detach_10 = torch.ops.aten.detach.default(detach_9);  detach_9 = None
+    detach_11 = torch.ops.aten.detach.default(detach_10);  detach_10 = None
     t_1 = torch.ops.aten.t.default(primals_3);  primals_3 = None
     addmm_1 = torch.ops.aten.addmm.default(primals_4, relu, t_1);  primals_4 = None
     t_2 = torch.ops.aten.t.default(t_1);  t_1 = None
@@ -797,9 +817,9 @@ def forward(self, primals, tangents):
     sum_1 = torch.ops.aten.sum.dim_IntList(tangents_1, [0], True);  tangents_1 = None
     view = torch.ops.aten.view.default(sum_1, [128]);  sum_1 = None
     t_5 = torch.ops.aten.t.default(t_4);  t_4 = None
-    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-    detach_3 = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-    threshold_backward = torch.ops.aten.threshold_backward.default(mm, detach_3, 0);  mm = detach_3 = None
+    detach_18 = torch.ops.aten.detach.default(detach_11);  detach_11 = None
+    detach_19 = torch.ops.aten.detach.default(detach_18);  detach_18 = None
+    threshold_backward = torch.ops.aten.threshold_backward.default(mm, detach_19, 0);  mm = detach_19 = None
     t_6 = torch.ops.aten.t.default(t);  t = None
     mm_2 = torch.ops.aten.mm.default(threshold_backward, t_6);  t_6 = None
     t_7 = torch.ops.aten.t.default(threshold_backward)
