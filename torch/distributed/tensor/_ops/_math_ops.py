@@ -1319,7 +1319,7 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
     else:
         # logsumexp.default: input only, reduce over all dimensions
         reduce_dims = list(range(input_strategy.ndim))
-    
+
     assert reduce_dims is not None
 
     keep_dim = cast(bool, op_schema.kwargs_schema.get("keepdim", False))

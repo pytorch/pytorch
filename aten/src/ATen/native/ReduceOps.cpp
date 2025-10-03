@@ -1516,7 +1516,7 @@ static void logsumexp_out_impl(const Tensor& result, const Tensor& self, IntArra
   // Create a mutable reference for operations that require non-const Tensor&
   // This is safe because Tensor is a handle type and we're modifying the underlying data
   Tensor& result_mut = const_cast<Tensor&>(result);
-  
+
   // can't take max of empty tensor
   if (self.numel() != 0) {
     // For complex numbers, use the real part to calculate the max. Based on

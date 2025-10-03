@@ -738,7 +738,8 @@ std::vector<Shape> compute_shape_logsumexp(
       /*layout=*/std::make_optional(self.layout()),
       /*device=*/std::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/std::nullopt);
-  auto result_meta = at::compositeexplicitautograd::logsumexp(self_meta, dim, keepdim);
+  auto result_meta =
+      at::compositeexplicitautograd::logsumexp(self_meta, dim, keepdim);
   return {Shape(result_meta.scalar_type(), result_meta.sizes().vec())};
 }
 
