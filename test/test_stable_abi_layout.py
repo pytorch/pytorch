@@ -108,16 +108,18 @@ def _compile_and_extract_layout(
                 if fallback_flag not in include_paths:
                     include_paths.append(fallback_flag)
 
-    # Use clang -cc1 with reduced include paths
+    # Use clang++ with -Xclang to pass frontend flags
     cmd = [
-        "clang",
-        "-cc1",
-        "-fdump-record-layouts",
-        "-emit-llvm",
+        "clang++",
+        "-Xclang",
+        "-fdump-record-layouts",  # Pass to clang frontend
+        "-c",  # Compile only, don't link
         f"-I{pytorch_root}",  # PyTorch headers
         *include_paths,
         "-std=c++17",
         test_file,
+        "-o",
+        "/dev/null",  # Discard object file output
     ]
 
     try:
