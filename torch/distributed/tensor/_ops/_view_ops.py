@@ -543,6 +543,8 @@ def propagate_shape_and_sharding(
                 if i > 0:
                     can_shard_dim = False
                     if strict_view and input_sharded:
+                        # import fbvscode
+                        # fbvscode.set_trace()
                         raise RuntimeError(
                             f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
                             "It cannot be performed without redistribution, which is disallowed by the current operator.",
@@ -554,6 +556,8 @@ def propagate_shape_and_sharding(
                     if tensor_dim_size % mesh_dim_size != 0:
                         can_shard_dim = False
                         if strict_view:
+                            import fbvscode
+                            fbvscode.set_trace()
                             raise RuntimeError(
                                 f"Attempted to flatten unevenly sharded dimension {i}, "
                                 "which would require resharding the input. "
@@ -672,6 +676,8 @@ def register_op_strategy_map(
 
     @register_op_strategy(aten_op_overload, schema_info=schema_info)
     def reshape_strategy(op_schema: OpSchema) -> StrategyType:
+        # import fbvscode
+        # fbvscode.set_trace()
         rules = dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
         input_strategy = cast(OpStrategy, op_schema.args_schema[0])
         mesh = op_schema.get_mesh_from_args(validate=False)

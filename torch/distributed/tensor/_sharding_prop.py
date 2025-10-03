@@ -337,7 +337,7 @@ class ShardingPropagator:
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
             output_sharding = cast(
-                OutputSharding, self.propagate_op_sharding(op_info.schema)
+                OutputSharding, self.propagate_op_sharding_non_cached(op_info.schema)
             )
         op_info.output_sharding = output_sharding
 
