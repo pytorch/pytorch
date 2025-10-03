@@ -17,7 +17,7 @@ import re
 import sys
 import threading
 import time
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 from typing import (
     Any,
     Callable,
@@ -30,7 +30,7 @@ from typing import (
 )
 
 import torch
-from torch._dynamo.utils import set_feature_use
+from torch._dynamo.utils import counters, set_feature_use
 from torch._environment import is_fbcode
 from torch._inductor import metrics
 from torch._prims_common import compute_required_storage_length
@@ -312,6 +312,8 @@ class CachingAutotuner(KernelInterface):
             "device_type": self.device_props.type,
         }
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
+        self.deterministic_mode = self.inductor_meta.get("deterministic", False)
+
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
         self.reset_to_zero_arg_names = (
@@ -483,7 +485,8 @@ class CachingAutotuner(KernelInterface):
         # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg.
         device_prop = self.device_props
         if (
-            self.inductor_meta.get("dynamic_scale_rblock", True)
+            not self.deterministic_mode
+            and self.inductor_meta.get("dynamic_scale_rblock", True)
             and not self.inductor_meta.get("persistent_reduction")
             and self.heuristic_type == HeuristicType.REDUCTION
             and self.size_hints is not None
@@ -1195,11 +1198,24 @@ class CachingAutotuner(KernelInterface):
         Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
-        if (
-            self.heuristic_type == HeuristicType.TEMPLATE
-            or self.heuristic_type == HeuristicType.USER_AUTOTUNE
+        if self.heuristic_type in (
+            HeuristicType.TEMPLATE,
+            HeuristicType.USER_AUTOTUNE,
+            HeuristicType.FIXED,
         ):
             # skip triton template
+            return launcher
+
+        if self.deterministic_mode and self.heuristic_type in (
+            HeuristicType.REDUCTION,
+            HeuristicType.PERSISTENT_REDUCTION,
+            HeuristicType.SPLIT_SCAN,
+        ):
+            # Not only RBLOCK size matters for numericals of reduction.
+            # num_warps also matters since that affect how much data
+            # is handled by each thread, how many warp-reduction we do
+            # in parallel and how much data is there for block
+            # reduction.
             return launcher
 
         with dynamo_timed(
@@ -1235,6 +1251,7 @@ class CachingAutotuner(KernelInterface):
             config2launcher[config] = launcher
 
             out = self.bench(launcher, *args, **kwargs)
+            counters["inductor"]["coordesc_tuning_bench"] += 1
             log.debug(
                 "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
                 launcher.config,
@@ -2862,6 +2879,144 @@ def adapt_config_for_tiling(
     )
 
 
+class ReductionConfigKey:
+    """
+    The part of reduction configs that affect determinism.
+    """
+
+    def __init__(self, config: Config):
+        # persistent reduction does not have a RBLOCK, use -1 as a flag
+        self.r0_block = config.kwargs.get("R0_BLOCK", -1)
+        self.r1_block = config.kwargs.get("R1_BLOCK", -1)
+        self.num_warps = config.num_warps
+        self.num_ctas = config.num_ctas
+
+    def __hash__(self) -> int:
+        return hash((self.r0_block, self.r1_block, self.num_warps, self.num_ctas))
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, ReductionConfigKey)
+            and self.r0_block == other.r0_block
+            and self.r1_block == other.r1_block
+            and self.num_warps == other.num_warps
+            and self.num_ctas == other.num_ctas
+        )
+
+
+def filter_reduction_configs_for_determinism(
+    inductor_meta: dict[str, Any], configs: list[Config]
+) -> list[Config]:
+    """
+    Filter configs for reduction so the numerics can be deterministic.
+
+    This function group configs by fields that affect determinism
+    - rblock size
+    - num warps
+    - num ctas
+    and return the most promising group based on heuristics.
+
+    Heuristics:
+    - skip reduction configs with too small RBLOCK
+    - skip reduction configs with XBLOCK==1 if we are confident it will not perform well
+    - pick the group with largest size: autotuning more configs may have more chance to give better perf
+    - if there is a tie, pick the group with second largest RBLOCK
+    - if there is still a tie, pick the group with second largest num_warps
+    """
+    configs = unique_configs(configs)
+    assert len(configs) > 0
+
+    def _do_filter_due_to_inductor_config():
+        return (
+            inductor_meta.get("deterministic", False)
+            or torch._inductor.config.test_configs.force_filter_reduction_configs
+        )
+
+    if not _do_filter_due_to_inductor_config() or len(configs) == 1:
+        # no filtering happening if NOT in deterministic mode
+        return configs
+
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("reduction configs before filtering:")
+        for c in configs:
+            log.debug("%s", c)
+            log.debug("")
+
+    def _has_too_small_rblock(config):
+        rblock = config.kwargs.get("R0_BLOCK")
+        # too small RBLOCK is likely to be bad
+        return rblock is not None and rblock <= 4
+
+    def _nonpromising_xblock_1(config):
+        # kernel like https://gist.github.com/shunting314/0b3281c087e79bc915fe45985ff9d7d5
+        # without a load/store having contiguous rdim is unlikely to perform well with XBLOCK==1
+        return config.kwargs["XBLOCK"] == 1 and not inductor_meta.get(
+            "has_loadstore_with_contiguous_rdim", True
+        )
+
+    newconfigs = [*filter(lambda x: not _has_too_small_rblock(x), configs)]
+    # accept the filtering only if there are configs left
+    if len(newconfigs) > 0:
+        configs = newconfigs
+
+    newconfigs = [*filter(lambda x: not _nonpromising_xblock_1(x), configs)]
+    if len(newconfigs) > 0:
+        configs = newconfigs
+
+    groups: defaultdict[ReductionConfigKey, list[Config]] = defaultdict(
+        list
+    )  # group configs by RBLOCK, num_warps, num_ctas
+
+    for c in configs:
+        key = ReductionConfigKey(c)
+        groups[key].append(c)
+
+    assert len(groups) > 0
+
+    def _pick_group():
+        grouplist = sorted(groups.items(), key=lambda x: len(x[1]), reverse=True)
+        max_group_size = len(grouplist[0][1])
+        grouplist = [*filter(lambda g: len(g[1]) == max_group_size, grouplist)]
+
+        assert len(grouplist) > 0
+        if len(grouplist) == 1:
+            return grouplist[0][1]
+
+        # break tie by R0_BLOCK
+        grouplist = sorted(grouplist, key=lambda x: x[0].r0_block)
+        if grouplist[0][0].r0_block != grouplist[-1][0].r0_block:
+            max_r0_block = grouplist[-1][0].r0_block
+            grouplist = [*filter(lambda x: x[0].r0_block != max_r0_block, grouplist)]
+            second_max_r0_block = grouplist[-1][0].r0_block
+            grouplist = [
+                *filter(lambda x: x[0].r0_block == second_max_r0_block, grouplist)
+            ]
+        if len(grouplist) == 1:
+            return grouplist[0][1]
+
+        # break tie by num_warps
+        grouplist = sorted(grouplist, key=lambda x: x[0].num_warps)
+        if grouplist[0][0].num_warps != grouplist[-1][0].num_warps:
+            max_num_warps = grouplist[-1][0].num_warps
+            grouplist = [*filter(lambda x: x[0].num_warps != max_num_warps, grouplist)]
+            second_max_num_warps = grouplist[-1][0].num_warps
+            grouplist = [
+                *filter(lambda x: x[0].num_warps == second_max_num_warps, grouplist)
+            ]
+
+        # there is still a tie, pick the first one
+        return grouplist[0][1]
+
+    configs = _pick_group()
+
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("reduction configs after filtering:")
+        for c in configs:
+            log.debug("%s", c)
+            log.debug("")
+    return configs
+
+
 def reduction(
     size_hints,
     reduction_hint=False,
@@ -2887,6 +3042,7 @@ def reduction(
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,
@@ -2934,6 +3090,7 @@ def cooperative_reduction(
     # TODO(jansel): add more configs in max_autotune
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,
@@ -3028,6 +3185,7 @@ def persistent_reduction(
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     inductor_meta.pop(persistent_reduction_key)
 
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs,
@@ -3065,6 +3223,7 @@ def split_scan(
                 cfg.kwargs[var] = min_rblock
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,
