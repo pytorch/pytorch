@@ -1170,10 +1170,6 @@ class _ContextParallel(ParallelStyle):
         self.seq_dim = seq_dim
         self.attention_type = attention_type
 
-        # Used by FlexAttention
-        self._block_mask: Optional[BlockMask] = None
-        self._orig_seq_lengths: Optional[tuple[int, int]] = None
-
     def _apply(self, module: nn.Module, mesh: DeviceMesh) -> nn.Module:
         if self.attention_type == self.AttentionType.FLEX:
             module.register_forward_pre_hook(
