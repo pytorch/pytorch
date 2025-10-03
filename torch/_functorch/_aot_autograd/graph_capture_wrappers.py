@@ -15,7 +15,7 @@ import warnings
 from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, cast, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -65,7 +65,6 @@ from .functional_utils import (
     has_data_mutation,
     has_metadata_mutation,
     is_fun,
-    sync_functional_tensor,
     to_fun,
     was_inductor_storage_resized,
 )
@@ -243,7 +242,7 @@ def fn_prepped_for_autograd(
         for arg in args_maybe_cloned:
             if not isinstance(arg, Tensor):
                 continue
-            sync_functional_tensor(arg)
+            # sync_functional_tensor(arg)
 
         return (fw_outs_to_return, out_grad_mask), (
             fw_outs_to_return_descs,
@@ -430,9 +429,14 @@ def create_joint(
             with torch.autograd.detect_anomaly(check_nan=False):
                 return inner_fn(primals, tangents)
 
-    inner_fn_with_anomaly.handle = joint_fn_handle  # type: ignore[attr-defined]
+    # inner_fn_with_anomaly.handle = joint_fn_handle  # type: ignore[attr-defined]
 
-    return cast(JointTraceFn, inner_fn_with_anomaly)  # deal with 'handle' property
+    # TODO: only need to skip this when turning off functionalization
+    # inner_fn_with_anomaly.handle = joint_fn_handle  # type: ignore[attr-defined]
+    def joint_helper(primals, tangents):
+        return inner_fn_with_anomaly(primals, tangents)
+
+    return joint_helper
 
 
 def create_functionalized_rng_ops_wrapper(
