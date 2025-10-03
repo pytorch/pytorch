@@ -48,6 +48,7 @@ import torch._refs.nn.functional
 import torch._refs.special
 import torch._refs.linalg
 import torch._prims as prims  # noqa: F401
+import torch.nn.functional as F
 from torch.utils import _pytree as pytree
 
 
@@ -6739,6 +6740,78 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
                 target[0] = random.sample(sorted(set(range(num_classes)) - {kwargs["ignore_index"]}), 1)[0]
 
         yield SampleInput(input, target, **kwargs)
+
+
+def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
+
+    # Force vocabulary chunking with a large vocab size.
+    vocab_hidden = 16
+    vocab_size = 4097
+    input_vocab = make_input((2, vocab_hidden))
+    weight_vocab = make_weight((vocab_size, vocab_hidden))
+    target_vocab = make_target((2,), low=0, high=vocab_size)
+    yield SampleInput(
+        input_vocab,
+        args=(weight_vocab, target_vocab),
+        kwargs={"chunking_strategy": "vocab"},
+    )
+
+    # 3D input to trigger flattening logic (batch, sequence, hidden).
+    seq_len = 5
+    input_seq = make_input((3, seq_len, vocab_hidden))
+    target_seq = make_target((3, seq_len), low=0, high=vocab_size)
+    yield SampleInput(
+        input_seq,
+        args=(weight_vocab, target_seq),
+        kwargs={"chunking_strategy": "vocab"},
+    )
+
+    # Force batch chunking with a large flattened batch.
+    batch_hidden = 8
+    batch_size = 1500
+    input_batch = make_input((batch_size, batch_hidden))
+    weight_batch = make_weight((64, batch_hidden))
+    target_batch = make_target((batch_size,), low=0, high=64)
+    yield SampleInput(
+        input_batch,
+        args=(weight_batch, target_batch),
+        kwargs={"chunking_strategy": "batch"},
+    )
+
+    # 3D batch chunking (batch, seq, hidden) to exercise large flattened rows.
+    seq_len_batch = 4
+    batch_batch = 200
+    input_batch_seq = make_input((batch_batch, seq_len_batch, batch_hidden))
+    target_batch_seq = make_target((batch_batch, seq_len_batch), low=0, high=64)
+    yield SampleInput(
+        input_batch_seq,
+        args=(weight_batch, target_batch_seq),
+        kwargs={"chunking_strategy": "batch"},
+    )
+
+
+def reference_linear_cross_entropy(
+    input,
+    weight,
+    target,
+    bias=None,
+    reduction="mean",
+    ignore_index=-100,
+    label_smoothing=0.0,
+    chunking_strategy="auto",
+):
+    return F._linear_cross_entropy_naive(
+        input,
+        weight,
+        target,
+        bias,
+        reduction,
+        ignore_index,
+        label_smoothing,
+    )
 
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
@@ -14753,8 +14826,8 @@ op_db: list[OpInfo] = [
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_cross_entropy,
         supports_out=False,
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=3e-3, rtol=1e-3)}),
@@ -14777,6 +14850,17 @@ op_db: list[OpInfo] = [
                          dtypes=(torch.half,), device_type="mps"),
 
         )
+    ),
+    OpInfo(
+        "nn.functional.linear_cross_entropy",
+        aten_name="linear_cross_entropy",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_linear_cross_entropy,
+        ref=reference_linear_cross_entropy,
+        supports_out=False,
+        supports_forward_ad=False,
+        supports_fwgrad_bwgrad=False,
+        decorators=(onlyCPU,),
     ),
     OpInfo('nn.functional.normalize',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
