@@ -1407,8 +1407,10 @@ class MultiheadAttention(Module):
                 why_not_fast_path = "some Tensor argument has_torch_function"
             elif _is_make_fx_tracing():
                 why_not_fast_path = "we are running make_fx tracing"
-            elif torch.compiler.is_exporting():
-                why_not_fast_path = "we are exporting"
+            elif not torch.jit.is_scripting():
+                # TS doesn't understand shortcircuiting.
+                if torch.compiler.is_exporting():
+                    why_not_fast_path = "we are exporting"
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = (
                     "some Tensor argument's device is neither one of "
