@@ -1924,9 +1924,9 @@ class FakeTensorMode(TorchDispatchMode):
         if isinstance(output, tuple):
             for out_element in output:
                 self._validate_output_for_cache_entry(
-                    # pyrefly: ignore  # bad-argument-type
                     state,
                     key,
+                    # pyrefly: ignore  # bad-argument-type
                     func,
                     args,
                     kwargs,
@@ -1934,9 +1934,9 @@ class FakeTensorMode(TorchDispatchMode):
                 )
         else:
             self._validate_output_for_cache_entry(
-                # pyrefly: ignore  # bad-argument-type
                 state,
                 key,
+                # pyrefly: ignore  # bad-argument-type
                 func,
                 args,
                 kwargs,
@@ -1946,9 +1946,9 @@ class FakeTensorMode(TorchDispatchMode):
         if isinstance(output, tuple):
             output_infos = [
                 self._get_output_info_for_cache_entry(
-                    # pyrefly: ignore  # bad-argument-type
                     state,
                     key,
+                    # pyrefly: ignore  # bad-argument-type
                     func,
                     args,
                     kwargs,
@@ -1964,9 +1964,9 @@ class FakeTensorMode(TorchDispatchMode):
 
         else:
             output_info = self._get_output_info_for_cache_entry(
-                # pyrefly: ignore  # bad-argument-type
                 state,
                 key,
+                # pyrefly: ignore  # bad-argument-type
                 func,
                 args,
                 kwargs,

@@ -33,11 +33,11 @@ class _DeconstructedSymNode:
     @staticmethod
     def from_node(node: SymNode) -> _DeconstructedSymNode:
         return _DeconstructedSymNode(
-            # pyrefly: ignore  # bad-argument-type
             node._expr,
             node.pytype,
             node._hint,
             node.constant,
+            # pyrefly: ignore  # bad-argument-type
             node.fx_node,
         )
 
