@@ -1097,9 +1097,6 @@ Most recent bytecode instructions traced (max 20):
         pattern = r"TRACE.*"
         s = munge_exc(records[-1].getMessage(), skip=0)
         matches = re.findall(pattern, s)
-        # The expected number of "TRACE" matches (13 and 20) depends on the Python version,
-        # as bytecode generation can differ between versions. These values are correct for
-        # currently supported Python versions. Update if bytecode changes in future versions.
         self.assertIn(len(matches), [13, 20])
 
         def post_munge(s):
