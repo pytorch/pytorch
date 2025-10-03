@@ -2777,3 +2777,5 @@ class _StaticCudaLauncher:
         args: tuple[Any, ...],
         stream: _int,
     ) -> None: ...
+
+invalid_syntax
