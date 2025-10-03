@@ -933,16 +933,6 @@ class TensorVariable(VariableTracker):
             proxy = tx.output.create_proxy(
                 "call_method", "view_as", *proxy_args_kwargs([self, self], {})
             )
-
-        # Add zero tensor check (similar to C++ implementation)
-        if not force or not force.as_python_constant():
-            # Check if this is a zero tensor
-            is_zero_tensor = self.call_method(tx, "_is_zerotensor", [], {})
-            if is_zero_tensor.as_python_constant():
-                raise RuntimeError(
-                    "Cannot convert a ZeroTensor to numpy. Set force=True if you need the zero array."
-                )
-
         return NumpyNdarrayVariable.create(tx, proxy)
 
     def method_tolist(self):

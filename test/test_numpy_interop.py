@@ -164,6 +164,9 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(y.dtype, np.bool_)
         self.assertEqual(x[0], y[0])
 
+    @skipIfTorchDynamo(
+        "can't check if value is ZeroTensor since _is_zerotensor returns a bool and not a TensorVariable"
+    )
     def test_to_numpy_zero_tensor(self, device) -> None:
         dtypes = [
             torch.uint8,
