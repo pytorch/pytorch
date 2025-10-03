@@ -45,7 +45,6 @@ class ControlDeps(HigherOrderOperator):
             raise TypeError(
                 f"additional_deps must be tuple/list, got {type(additional_deps).__name__}"
             )
-        breakpoint()
         if not (isinstance(subgraph, fx.GraphModule) or callable(subgraph)):
             raise TypeError(
                 f"subgraph must be GraphModule or callable, got {type(subgraph).__name__}"
