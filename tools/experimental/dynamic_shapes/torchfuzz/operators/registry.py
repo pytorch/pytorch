@@ -6,7 +6,20 @@ from torchfuzz.operators.arg import ArgOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.item import ItemOperator
+from torchfuzz.operators.layout import (
+    FlattenOperator,
+    ReshapeOperator,
+    SqueezeOperator,
+    UnsqueezeOperator,
+    ViewOperator,
+)
 from torchfuzz.operators.masked_select import MaskedSelectOperator
+from torchfuzz.operators.matrix_multiply import (
+    AddmmOperator,
+    BmmOperator,
+    MatmulOperator,
+    MMOperator,
+)
 from torchfuzz.operators.nonzero import NonzeroOperator
 from torchfuzz.operators.scalar_pointwise import (
     ScalarAddOperator,
@@ -45,13 +58,28 @@ class OperatorRegistry:
         self.register(ScalarSubOperator())
         self.register(ScalarDivOperator())
 
-        self.register(ItemOperator())
+        # Leaf Input operators
         self.register(ConstantOperator())
         self.register(ArgOperator())
-        # Data-dependent operators
+
+        # # Data-dependent operators
         self.register(NonzeroOperator())
         self.register(MaskedSelectOperator())
+        self.register(ItemOperator())
         self.register(UniqueOperator())
+
+        # Tensor layout operators
+        self.register(ViewOperator())
+        self.register(ReshapeOperator())
+        self.register(FlattenOperator())
+        self.register(SqueezeOperator())
+        self.register(UnsqueezeOperator())
+
+        # Matrix multiplication operators
+        self.register(MMOperator())
+        self.register(AddmmOperator())
+        self.register(BmmOperator())
+        self.register(MatmulOperator())
 
     def register(self, operator: Operator):
         """Register an operator in the registry."""
