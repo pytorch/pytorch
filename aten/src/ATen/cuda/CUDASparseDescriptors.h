@@ -123,8 +123,6 @@ class TORCH_CUDA_CPP_API CuSparseBsrsm2Info
 
 #endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
 
-#if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
-
 cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 
 #if AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS() || AT_USE_HIPSPARSE_NON_CONST_DESCRIPTORS()
@@ -282,7 +280,5 @@ class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
     descriptor_.reset(raw_descriptor);
   }
 };
-
-#endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 } // namespace at::cuda::sparse
