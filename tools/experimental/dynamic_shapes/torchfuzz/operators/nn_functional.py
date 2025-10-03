@@ -9,6 +9,16 @@ from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
 
 
+def is_float_dtype(dtype: torch.dtype) -> bool:
+    """Check if dtype is a floating point type."""
+    return dtype in [
+        torch.float32,
+        torch.float64,
+        torch.float16,
+        torch.bfloat16,
+    ]
+
+
 class EmbeddingOperator(Operator):
     """Operator for torch.nn.functional.embedding."""
 
@@ -28,12 +38,7 @@ class EmbeddingOperator(Operator):
         if len(output_spec.size) == 0:
             return False
         # Embedding outputs are typically float tensors
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for embedding operation.
@@ -114,12 +119,7 @@ class LinearOperator(Operator):
         # Linear needs at least 1 dimension (output features)
         if len(output_spec.size) == 0:
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for linear operation.
@@ -214,12 +214,7 @@ class ReLUOperator(Operator):
         """ReLU can produce tensor outputs with floating point dtypes."""
         if not isinstance(output_spec, TensorSpec):
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for ReLU operation.
@@ -265,12 +260,7 @@ class SoftmaxOperator(Operator):
         # Softmax needs at least 1 dimension to apply softmax along a dimension
         if len(output_spec.size) == 0:
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for softmax operation.
@@ -314,12 +304,7 @@ class DropoutOperator(Operator):
         """Dropout can produce tensor outputs with floating point dtypes."""
         if not isinstance(output_spec, TensorSpec):
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for dropout operation.
@@ -366,12 +351,7 @@ class LayerNormOperator(Operator):
         # LayerNorm needs at least 1 dimension to normalize over
         if len(output_spec.size) == 0:
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for layer_norm operation.
@@ -467,12 +447,7 @@ class RMSNormOperator(Operator):
         # RMSNorm needs at least 1 dimension to normalize over
         if len(output_spec.size) == 0:
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for RMSNorm operation.
@@ -543,12 +518,7 @@ class GELUOperator(Operator):
         """GELU can produce tensor outputs with floating point dtypes."""
         if not isinstance(output_spec, TensorSpec):
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for GELU operation.
@@ -590,12 +560,7 @@ class SigmoidOperator(Operator):
         """Sigmoid can produce tensor outputs with floating point dtypes."""
         if not isinstance(output_spec, TensorSpec):
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for sigmoid operation.
@@ -637,12 +602,7 @@ class TanhOperator(Operator):
         """Tanh can produce tensor outputs with floating point dtypes."""
         if not isinstance(output_spec, TensorSpec):
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for tanh operation.
@@ -687,12 +647,10 @@ class BatchNormOperator(Operator):
         # BatchNorm needs at least 2 dimensions (batch, features)
         if len(output_spec.size) < 2:
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        # Channel dimension (second dimension) must be greater than 0
+        if output_spec.size[1] == 0:
+            return False
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for batch_norm operation.
@@ -793,12 +751,7 @@ class GroupNormOperator(Operator):
         # GroupNorm needs at least 2 dimensions (batch, channels)
         if len(output_spec.size) < 2:
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for group_norm operation.
@@ -888,12 +841,7 @@ class LeakyReLUOperator(Operator):
         """LeakyReLU can produce tensor outputs with floating point dtypes."""
         if not isinstance(output_spec, TensorSpec):
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for LeakyReLU operation.
@@ -935,12 +883,7 @@ class ELUOperator(Operator):
         """ELU can produce tensor outputs with floating point dtypes."""
         if not isinstance(output_spec, TensorSpec):
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for ELU operation.
@@ -982,12 +925,7 @@ class SiLUOperator(Operator):
         """SiLU can produce tensor outputs with floating point dtypes."""
         if not isinstance(output_spec, TensorSpec):
             return False
-        return output_spec.dtype in [
-            torch.float32,
-            torch.float64,
-            torch.float16,
-            torch.bfloat16,
-        ]
+        return is_float_dtype(output_spec.dtype)
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """Generate input specs for SiLU operation.
