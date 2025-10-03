@@ -11,7 +11,11 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
+    IS_BIG_GPU,
+)
 
 
 @instantiate_parametrized_tests
@@ -44,6 +48,7 @@ class DeterministicTest(TestCase):
 
     @parametrize("deterministic", [False, True])
     @inductor_config.patch(max_autotune=True)
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_max_autotune(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
 
