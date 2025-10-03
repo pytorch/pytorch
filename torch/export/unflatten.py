@@ -5,11 +5,12 @@ import logging
 import operator
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch.fx._pytree as fx_pytree
