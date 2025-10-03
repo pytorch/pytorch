@@ -471,6 +471,15 @@ def _merge_output(
         mode.shape_env.constrain_symbol_range(merged_out.node.expr, *min_max(a, b))
         return merged_out
 
+    # FakeTensorMode dispatch is before tensor subclass dispatch
+    # so we end up seeing DTensor here, we unwrap the local tensor
+    # to do the fake propagation.
+    # DTensor spec will be created when we dispatch dtensor
+    if isinstance(a, torch.distributed.tensor.DTensor):
+        assert isinstance(b, torch.distributed.tensor.DTensor)
+        a = a._local_tensor
+        b = b._local_tensor
+
     assert type(a) is FakeTensor and type(b) is FakeTensor, (a, type(a), b, type(b))
 
     # Note: we don't check size, stride because

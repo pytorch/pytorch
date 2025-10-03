@@ -81,3 +81,17 @@ full.__module__ = "torch.distributed.tensor"
 rand.__module__ = "torch.distributed.tensor"
 randn.__module__ = "torch.distributed.tensor"
 zeros.__module__ = "torch.distributed.tensor"
+
+
+# Register DTensor handlers for higher order operations
+# This is done after DTensor is fully defined to avoid circular imports
+def _register_dtensor_higher_order_ops() -> None:
+    from torch._higher_order_ops.cond import cond_op
+    from torch.distributed.tensor._ops._control_flow_ops import cond_dtensor_handler
+
+    # Register the DTensor handler for cond operation
+    cond_op.py_impl(DTensor)(cond_dtensor_handler)
+
+
+# Call the registration function
+_register_dtensor_higher_order_ops()
