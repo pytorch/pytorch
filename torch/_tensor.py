@@ -902,26 +902,6 @@ class Tensor(torch._C.TensorBase):
             )
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
-    def solve(self, other):
-        from torch._linalg_utils import solve
-
-        return solve(self, other)
-
-    def lstsq(self, other):
-        from torch._linalg_utils import lstsq
-
-        return lstsq(self, other)
-
-    def eig(self, eigenvectors=False):
-        from torch._linalg_utils import eig
-
-        return eig(self, eigenvectors=eigenvectors)
-
-    def symeig(self, eigenvectors=False):
-        from torch._linalg_utils import _symeig
-
-        return _symeig(self, eigenvectors=eigenvectors)
-
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
