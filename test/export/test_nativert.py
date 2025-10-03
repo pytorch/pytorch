@@ -9,10 +9,10 @@ import unittest
 from parameterized import parameterized
 
 import torch
-from torch._environment import is_fbcode
 import torch._dynamo as torchdynamo
 from torch._C._nativert import PyModelRunner
 from torch._dynamo.test_case import TestCase
+from torch._environment import is_fbcode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nativert.backends._lower_utils import (
     lower_exported_program,
@@ -344,11 +344,12 @@ class TestNativeRT(TestCase):
             pathlib.Path(filename).unlink(missing_ok=True)
 
 
-tests = [ test_export.TestExport, ] if is_fbcode() else []
-for test in tests:
-    make_dynamic_cls(test, strict=True)
-    make_dynamic_cls(test, strict=False)
-del test
+if is_fbcode():
+    for test in [test_export.TestExport]:
+        make_dynamic_cls(test, strict=True)
+        make_dynamic_cls(test, strict=False)
+    del test
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
