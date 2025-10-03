@@ -1337,9 +1337,41 @@ class InstructionTranslatorBase(
                 return False
 
         if self.is_trace_bytecode_log_enabled:
-            trace_bytecode_log.debug(
+            #trace_bytecode_log.debug(
+            #    "TRACE %s %s %s", inst.opname, inst.argval, self.stack
+            #)
+
+            # LOOKUP
+
+            if self.stack:
+                vartracker = []
+                for var in self.stack:
+                    if isinstance(var, LazyVariableTracker):
+                        VariableInfo = 'LazyVariableTracker('
+                        if not var.is_realized():
+                            VariableInfo += f'type(value): {var.peek_type()})'
+                            #VariableInfo += f'<{var.peek_value()}>)'
+                        else:
+                            #real_var = var.unwrap()
+                            #VariableInfo += f'type({type(real_var)}): '
+                            # VariableInfo += f'<{real_var} realized>'
+                            # VariableInfo += f'{var.var_getattr}'
+                            VariableInfo += f'type (value):{type(var.original_value)}, '
+                            #VariableInfo += f'<{var.original_value} realized>'
+                            #VariableInfo += f'<{type(var.original_source)} type>'
+                            #VariableInfo += f'<{type(var.original_source)} type>'
+                            VariableInfo += f'realized: {var})'
+
+                        vartracker.append(VariableInfo)
+
+                    else:
+                        vartracker.append(var)
+                trace_bytecode_log.debug("TRACE %s %s %s", inst.opname, inst.argval, vartracker)
+
+            else:
+                trace_bytecode_log.debug(
                 "TRACE %s %s %s", inst.opname, inst.argval, self.stack
-            )
+                )
 
         self.update_block_stack(inst)
 
