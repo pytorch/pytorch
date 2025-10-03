@@ -165,10 +165,10 @@ class OpDispatcher:
                 return out
             else:
                 raise
-        except Exception as e:
-            raise RuntimeError(
-                f"Sharding propagation failed for {op_info.schema}"
-            ) from e
+        # except Exception as e:
+        #     raise RuntimeError(
+        #         f"Sharding propagation failed for {op_info.schema}"
+        #     ) from e
 
         output_sharding = op_info.output_sharding
         assert output_sharding is not None, "output sharding should not be None"
