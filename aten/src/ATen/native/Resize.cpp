@@ -110,7 +110,7 @@ void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes) {
 // Call the sparse implementation in SparseTensor.cpp directly.
 // A dynamic dispatch here is NOT necessary, so I didn't put
 // this function in native_functions.yaml
-const Tensor& resize_as_sparse_(const Tensor& self, const Tensor& src);
+
 
 // TODO(VitalyFedyunin): Move it to HTML docs.
 //
