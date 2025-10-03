@@ -307,8 +307,8 @@ class TestVarlenAttention(NNTestCase):
             allow_unused=False,
         )[0]
 
-        # print("sdpa_q.grad:", sdpa_q.grad)
-        # print("sdpa_kgrad:", sdpa_k.grad)
+        print("sdpa_q.grad:", sdpa_q.grad)
+        print("sdpa_kgrad:", sdpa_k.grad)
 
         # varlen_grad.backward()
         # sdpa_grad.backward()
