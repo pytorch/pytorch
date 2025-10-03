@@ -111,25 +111,41 @@ class DefaultFuzzTemplate(FuzzTemplate):
 
         super().__init__(
             supported_ops=[
+                # Basic arithmetic operations
                 "torch.add",
                 "torch.sub",
                 "torch.mul",
                 "torch.div",
+                # Tensor shape operations
                 "torch.Tensor.view",
                 "torch.reshape",
                 "torch.flatten",
                 "torch.squeeze",
                 "torch.unsqueeze",
+                # Matrix operations
                 "torch.mm",
                 "torch.addmm",
                 "torch.bmm",
                 "torch.matmul",
+                # Neural network operations
                 "torch.nn.functional.embedding",
                 "torch.nn.functional.linear",
+                # Activation functions
                 "torch.nn.functional.relu",
+                "torch.nn.functional.leaky_relu",
+                "torch.nn.functional.elu",
+                "torch.nn.functional.gelu",
+                "torch.nn.functional.silu",
+                "torch.sigmoid",
+                "torch.tanh",
                 "torch.nn.functional.softmax",
-                "torch.nn.functional.dropout",
+                # Normalization layers
                 "torch.nn.functional.layer_norm",
+                "torch.nn.functional.rms_norm",
+                "torch.nn.functional.batch_norm",
+                "torch.nn.functional.group_norm",
+                # Regularization
+                "torch.nn.functional.dropout",
             ],
             check=EagerVsFullGraphDynamicCompileWithNumericsCheck(),
         )
