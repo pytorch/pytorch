@@ -28,6 +28,7 @@ aspects of contributing to PyTorch.
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
+    - [Building a PDF](#building-a-pdf)
   - [Previewing changes locally](#previewing-changes-locally)
   - [Previewing documentation on PRs](#previewing-documentation-on-prs)
   - [Adding documentation tests](#adding-documentation-tests)
@@ -432,18 +433,14 @@ Once your PR is approved, you can merge it in by entering a comment with the con
 
 So you want to write some documentation and don't know where to start?
 PyTorch has two main types of documentation:
-- **User facing documentation**:
-These are the docs that you see over at [our docs website](https://pytorch.org/docs).
 - **Developer facing documentation**:
 Developer facing documentation is spread around our READMEs in our codebase and in
 the [PyTorch Developer Wiki](https://github.com/pytorch/pytorch/wiki).
 If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation) on our best practices for where to put it.
+- **User facing documentation**:
+These are the docs that you see over at [our docs website](https://pytorch.org/docs). They're generated based on the files in `docs/source` and docstrings throughout the codebase using [Sphinx](https://www.sphinx-doc.org/).
 
-The rest of this section is about user-facing documentation.
-
-PyTorch uses [Google style](https://www.sphinx-doc.org/en/master/usage/extensions/example_google.html)
-for formatting docstrings. Each line inside a docstrings block must be limited to 80 characters so that it fits into Jupyter documentation popups.
-
+The [Docstring Guidelines](https://github.com/pytorch/pytorch/wiki/Docstring-Guidelines) explain how you should document your code. PyTorch follows the docstring format described in [Google's Python Style Guide](https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings) - you can find [illustrative examples here](https://www.sphinx-doc.org/en/master/usage/extensions/example_google.html). Each line inside a docstrings block must be limited to 80 characters so that it fits into Jupyter documentation popups.
 
 ### Docstring type formatting
 
@@ -484,40 +481,44 @@ In addition to the standard Google Style docstring formatting rules, the followi
 
 ### Building documentation
 
-Note that the docs will only build with Python versions <3.13. To build the documentation:
+The docs can be built with Python 3.10 or later:
 
-1. Build and install PyTorch
+1. Set up a Python environment and install PyTorch.
 
-2. Install the prerequisites
+- To build the docs without changes, or reflecting changes to `.md`/`.rst` files in `docs/source`, [select "Preview (Nightly)" on this page](https://pytorch.org/get-started/locally/) and following its instructions.
+- To build the docs reflecting changes to Python source code (including docstrings), follow the instructions under [Nightly Checkout & Pull](#nightly-checkout--pull).
+- To build the docs reflecting more involved changes, or if you run into errors using the methods above, [install PyTorch from source](https://github.com/pytorch/pytorch#from-source).
 
+2. If `node` is not already on your system, [download and install Node.js](https://nodejs.org/en/download). Then, [install the KaTeX CLI](https://katex.org/docs/node) and ensure it's available in your `$PATH`:
+```bash
+# Installs KaTeX globally:
+npm install -g katex
+# If you would prefer to avoid the global installation, you can use:
+npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
+```
+
+> [!TIP]
+> If you are a Meta employee using a devserver, it may be more convenient to install KaTeX with `yarn global add katex`. You can install a specific version with e.g. `yarn global add katex@0.13.18`
+
+> [!CAUTION]
+> If you installed `node` and `npm` with different package managers (such as `conda` and `brew`), your `node` and `katex` versions may be incompatible. `node@6.13.1` and `katex@0.13.18` are known to be compatible with one another. To install the latter, you can use `npm install -g katex@0.13.18`.
+
+3. Install the docs' Python dependencies:
+```bash
+pip install -r docs/requirements.txt
+```
+
+4. Use `make` to build the docs. For example:
 ```bash
 cd docs
-pip install -r requirements.txt
-# `katex` must also be available in your PATH.
-# You can either install katex globally if you have properly configured npm:
-# npm install -g katex
-# Or if you prefer an uncontaminated global executable environment or do not want to go through the node configuration:
-# npm install katex && export PATH="$PATH:$(pwd)/node_modules/.bin"
+make html  # Generate HTML documentation in docs/build/html.
+make  # List available output formats.
 ```
-> Note: if you installed `nodejs` with a different package manager then `npm` will probably install a version of `katex` that is not
-compatible with your version of `nodejs` and doc builds will fail.
-A combination of versions that is known to work is `node@6.13.1` and
-`katex@0.13.18`. To install the latter with `npm` you can run
-```npm install -g katex@0.13.18```
 
+Other output formats may have additional dependencies. For example, `pdflatex` must be available in order to build a PDF with `make latexpdf`.
 
-> Note that if you are a Facebook employee using a devserver, yarn may be more convenient to install katex:
-
-```bash
-yarn global add katex
-```
-> If a specific version is required you can use for example `yarn global add katex@0.13.18`.
-
-3. Generate the documentation HTML files. The generated files will be in `docs/build/html`.
-
-```bash
-make html
-```
+> [!TIP]
+> To run some notebook examples, a C++ compiler such as `gcc` or `clang` must be available.
 
 #### Tips
 
@@ -530,7 +531,7 @@ missing file warnings but will still complete. For example, to work on `jit.rst`
 
 ```bash
 cd docs/source
-find . -type f | grep rst | grep -v index | grep -v jit | xargs rm
+find . -type f -iname "*.rst" | grep -v index | grep -v jit | xargs rm
 
 # Make your changes, build the docs, etc.
 
@@ -555,6 +556,16 @@ commands. To run this check locally, run `./check-doxygen.sh` from inside
 
 To build the documentation, follow the same steps as above, but run them from
 `docs/cpp` instead of `docs`.
+
+#### Building a PDF
+
+To build a PDF of the PyTorch docs:
+
+1. Install a LaTeX distribution that provides `pdflatex`. For example, you can use `brew install --cask mactex-no-gui` on MacOS.
+2. From the `docs` directory, run `make latexpdf`. This populates `docs/build/latex` with the LaTeX output.
+3. To build the PDF, `cd build/latex` and run `make LATEXOPTS="-interaction=nonstopmode"` twice. The first run builds a preliminary `pytorch.pdf`, and the second run resolves references and updates its table of contents and index.
+
+To navigate the document, use the table of contents view in your PDF reader.
 
 ### Previewing changes locally
 
