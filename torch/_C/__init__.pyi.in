@@ -26,6 +26,7 @@ import numpy
 import torch
 from torch import inf, SymInt, Tensor
 from torch._C import (
+    _acc,
     _aoti,
     _cpu,
     _dynamo,
@@ -1916,6 +1917,7 @@ class TensorBase(metaclass=_TensorMeta):
     names: list[str]
     device: _device
     dtype: _dtype
+    grad_dtype: _dtype | None
     layout: _layout
     real: Tensor
     imag: Tensor
