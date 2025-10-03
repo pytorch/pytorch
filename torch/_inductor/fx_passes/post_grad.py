@@ -190,7 +190,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
         mutable_custom_op_pass = False
         if check_mutable_custom_op(gm.graph):
-            unwrap_auto_functionalized_to_mutating_ops(gm)
+            decompose_auto_functionalized(gm.graph, preserve_meta=True)
             add_implict_edges(gm)
             gm.graph.lint()
             mutable_custom_op_pass = True
@@ -1242,23 +1242,121 @@ def decompose_triton_kernel_wrapper_functional(graph):
         raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
-def _maybe_resolve_constant_get_attr(graph, node):
-    # Resolve getattr node to its value because they don't always have meta["val"]
-    if (
-        isinstance(node, torch.fx.Node)
-        and node.op == "get_attr"
-        and "val" not in node.meta
-    ):
-        const_attr = getattr(graph.owning_module, node.target)  # type: ignore[arg-type]
-        assert isinstance(const_attr, (torch.fx.GraphModule, pytree.TreeSpec)), (
-            type(const_attr),
-            const_attr,
+def decompose_auto_functionalized(graph, preserve_meta=False):
+    """Decomposes auto_functionalized nodes into clones and the underlying
+    mutation node.
+
+    We assume that the reinplacing pass runs before this; the reinplacing pass
+    tells us (via rewriting the arguments or .meta to those nodes) which
+    Tensors we should clone and which Tensors are safe to reinplace.
+    """
+
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
+
+        only_clone_these_tensors = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
         )
-        return const_attr
-    return node
 
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
 
-def _remove_get_attr(graph):
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            assert len(args) == 1
+            mode = args[0]
+            return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
+
+        if preserve_meta:
+            from torch._inductor.pattern_matcher import is_mutation_op
+
+            original_metadata = match.nodes[0].meta.copy()
+            nodes_before = OrderedSet([node.name for node in graph.nodes])
+
+            match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+            for node in graph.nodes:
+                if (
+                    node.name not in nodes_before
+                    and node.op == "call_function"
+                    and hasattr(node.target, "_schema")
+                    and is_mutation_op(node)
+                ):
+                    node.meta.update(original_metadata)
+        else:
+            match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.auto_functionalize import (
+            auto_functionalized_v2_dense,
+        )
+
+        only_clone_these_bases = tuple(
+            match.nodes[0].meta.get("only_clone_these_tensors", [])
+        )
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        def _maybe_resolve_constant_get_attr(node):
+            # Resolve getattr node to its value because they don't always have meta["val"]
+            if (
+                isinstance(node, torch.fx.Node)
+                and node.op == "get_attr"
+                and "val" not in node.meta
+            ):
+                const_attr = getattr(graph.owning_module, node.target)  # type: ignore[arg-type]
+                assert isinstance(
+                    const_attr, (torch.fx.GraphModule, pytree.TreeSpec)
+                ), (type(const_attr), const_attr)
+                return const_attr
+            return node
+
+        flat_args = [_maybe_resolve_constant_get_attr(arg) for arg in flat_args]
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            assert len(args) == 1
+            mutable_op = args[0]
+            return auto_functionalized_v2_dense(
+                mutable_op, only_clone_these_bases, **kwargs
+            )
+
+        if preserve_meta:
+            from torch._inductor.pattern_matcher import is_mutation_op
+
+            original_metadata = match.nodes[0].meta.copy()
+            nodes_before = OrderedSet([node.name for node in graph.nodes])
+
+            match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+            for node in graph.nodes:
+                if (
+                    node.name not in nodes_before
+                    and node.op == "call_function"
+                    and hasattr(node.target, "_schema")
+                    and is_mutation_op(node)
+                ):
+                    node.meta.update(original_metadata)
+        else:
+            match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+    graph_pass.apply(graph)
+
     # Remove unused get_attr nodes and their corresponding attributes from the graph module.
     # When auto_functionalizing a hop, we need to clean up get_attr nodes for _constant_schema
     # and the auto_functionalized graph module that are no longer referenced.
@@ -1309,135 +1407,6 @@ def _remove_get_attr(graph):
         op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
     ):
         raise AssertionError("auto_functionalized_v2 was not removed")
-
-
-def decompose_auto_functionalized(graph):
-    """Decomposes auto_functionalized nodes into clones and the underlying
-    mutation node.
-
-    We assume that the reinplacing pass runs before this; the reinplacing pass
-    tells us (via rewriting the arguments or .meta to those nodes) which
-    Tensors we should clone and which Tensors are safe to reinplace.
-    """
-    graph_pass = PatternMatcherPass()
-
-    @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        from torch._higher_order_ops.auto_functionalize import auto_functionalized_dense
-
-        only_clone_these_tensors = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
-
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
-
-        # NB: we combine (args, kwargs) into flat args for replacing.
-        # This is replace_by_example uses make_fx which does not support
-        # tracing a function with kwargs.
-        def decomp(*flat_args):
-            args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            assert len(args) == 1
-            mode = args[0]
-            return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
-
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
-
-    @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        from torch._higher_order_ops.auto_functionalize import (
-            auto_functionalized_v2_dense,
-        )
-
-        only_clone_these_bases = tuple(
-            match.nodes[0].meta.get("only_clone_these_tensors", [])
-        )
-
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
-        flat_args = [_maybe_resolve_constant_get_attr(graph, arg) for arg in flat_args]
-
-        # NB: we combine (args, kwargs) into flat args for replacing.
-        # This is replace_by_example uses make_fx which does not support
-        # tracing a function with kwargs.
-        def decomp(*flat_args):
-            args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            assert len(args) == 1
-            mutable_op = args[0]
-            return auto_functionalized_v2_dense(
-                mutable_op, only_clone_these_bases, **kwargs
-            )
-
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
-
-    graph_pass.apply(graph)
-    _remove_get_attr(graph)
-
-
-def unwrap_auto_functionalized_to_mutating_ops(gm: torch.fx.GraphModule) -> None:
-    from torch._higher_order_ops.auto_functionalize import (
-        auto_functionalized_dense,
-        auto_functionalized_v2_dense,
-    )
-    from torch._inductor.pattern_matcher import is_mutation_op
-
-    graph_pass = PatternMatcherPass()
-
-    def auto_func_handler(match: Match, *args, **kwargs):
-        original_metadata = match.nodes[0].meta.copy()
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
-        flat_args = [
-            _maybe_resolve_constant_get_attr(gm.graph, arg) for arg in flat_args
-        ]
-
-        is_v2 = match.nodes[0].target == torch.ops.higher_order.auto_functionalized_v2
-
-        def decomp(*flat_args):
-            args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            mutable_op = args[0]
-
-            if is_v2:
-                return auto_functionalized_v2_dense(
-                    mutable_op, _only_clone_these_bases=tuple(), **kwargs
-                )
-            else:
-                return auto_functionalized_dense(
-                    mutable_op, _only_clone_these_tensors=tuple(), **kwargs
-                )
-
-        nodes_before = OrderedSet([node.name for node in gm.graph.nodes])
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
-
-        for node in gm.graph.nodes:
-            if (
-                node.name not in nodes_before
-                and node.op == "call_function"
-                and hasattr(node.target, "_schema")
-                and is_mutation_op(node)
-            ):
-                node.meta.update(original_metadata)
-
-    @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        return auto_func_handler(match, *args, **kwargs)
-
-    @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        return auto_func_handler(match, *args, **kwargs)
-
-    graph_pass.apply(gm.graph)
-    _remove_get_attr(gm.graph)
-    gm.graph.eliminate_dead_code()
 
 
 def make_autofunctionalize(gm: torch.fx.GraphModule):
