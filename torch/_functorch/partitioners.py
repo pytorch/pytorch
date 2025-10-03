@@ -11,8 +11,9 @@ import os
 import os.path
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -1561,6 +1562,8 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
             for user in node.users:
                 if (
                     must_recompute(user)
+                    and "ac_graph_id" in user.meta
+                    and "ac_graph_id" in node.meta
                     and user.meta["ac_graph_id"] > node.meta["ac_graph_id"]
                 ):
                     node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
@@ -2443,7 +2446,10 @@ def choose_saved_values_set(
                 saved_node_idxs=saved_node_idxs,
                 recomputable_node_idxs=recomputable_node_idxs,
                 expected_runtime=expected_runtime,
-                memories_banned_nodes=memories_banned_nodes,
+                memories_banned_nodes=[
+                    _size_of(i) for i in all_recomputable_banned_nodes
+                ],
+                normalized_memories_banned_nodes=memories_banned_nodes,
                 runtimes_banned_nodes=runtimes_banned_nodes,
                 min_cut_saved_values=saved_values,
             )
