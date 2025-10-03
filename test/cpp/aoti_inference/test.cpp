@@ -15,11 +15,12 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA)
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
 #endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
 #include <torch/script.h>
@@ -1077,7 +1078,7 @@ void test_multi_cuda_streams(const std::string& device) {
   // Set the processing function
   pool.process_function = [&](int i,
                               const std::vector<torch::Tensor>& inputs,
-                              c10::cuda::CUDAStream& stream) -> void {
+                              c10::cuda::CUDAStream& stream) {
     // Run inference with the task-specific input
     std::vector<torch::Tensor> outputs = loader.run(inputs, stream.stream());
     // Store results safely
