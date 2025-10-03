@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     is_privateuse1_backend_available,
     IS_REMOTE_GPU,
+    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     NATIVE_DEVICES,
@@ -1336,6 +1337,10 @@ def _has_sufficient_memory(device, size):
         effective_size = size * 10
     else:
         effective_size = size
+
+    # don't try using all RAM on s390x, leave some for service processes
+    if IS_S390X:
+        effective_size = effective_size * 2
 
     if psutil.virtual_memory().available < effective_size:
         gc.collect()
