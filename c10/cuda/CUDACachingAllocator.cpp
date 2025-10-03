@@ -1180,6 +1180,8 @@ class DeviceCachingAllocator {
   // device statistics
   DeviceStats stats;
 
+  c10::DeviceIndex device_id;
+
   // unallocated cached blocks larger than 1 MB
   BlockPool large_blocks;
 
@@ -1271,7 +1273,9 @@ class DeviceCachingAllocator {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit DeviceCachingAllocator(c10::DeviceIndex id)
-      : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
+      : device_id(id),
+        large_blocks(/*small=*/false),
+        small_blocks(/*small=*/true) {
     C10_CUDA_CHECK(cudaGetDeviceProperties(&device_prop, id));
 
     stats.max_split_size =
@@ -1359,10 +1363,7 @@ class DeviceCachingAllocator {
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
 
-  Block* malloc(
-      c10::DeviceIndex device,
-      size_t orig_size,
-      cudaStream_t stream) {
+  Block* malloc(size_t orig_size, cudaStream_t stream) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
@@ -1390,7 +1391,7 @@ class DeviceCachingAllocator {
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
-    AllocParams params(device, size, stream, &pool, alloc_size);
+    AllocParams params(device_id, size, stream, &pool, alloc_size);
     params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
@@ -1437,7 +1438,7 @@ class DeviceCachingAllocator {
           beginAllocateToPool(mempool_id, filter);
           auto& mempool = get_pool(size, stream);
           AllocParams mempool_params(
-              device, size, stream, &mempool, alloc_size);
+              device_id, size, stream, &mempool, alloc_size);
           mempool_params.stat_types = get_stat_types_for_pool(mempool);
           block_found = get_free_block(mempool_params);
           endAllocateToPool(mempool_id);
@@ -1483,7 +1484,7 @@ class DeviceCachingAllocator {
               .current,
           stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
-          c10::Device(c10::DeviceType::CUDA, device));
+          c10::Device(c10::DeviceType::CUDA, device_id));
 
       auto allocated_bytes =
           stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
@@ -1521,7 +1522,7 @@ class DeviceCachingAllocator {
       lock.unlock();
 
       for (const auto& obs : observers_local) {
-        obs(device,
+        obs(device_id,
             alloc_size,
             allowed_memory_maximum.value_or(device_total),
             device_free);
@@ -1551,7 +1552,7 @@ class DeviceCachingAllocator {
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
           ". GPU ",
-          static_cast<int>(device),
+          static_cast<int>(device_id),
           " has a total capacity of ",
           format_size(device_total),
           " of which ",
@@ -3829,7 +3830,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    Block* block = device_allocator[device]->malloc(device, size, stream);
+    Block* block = device_allocator[device]->malloc(size, stream);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
