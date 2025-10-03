@@ -642,13 +642,13 @@ class TestReductions(TestCase):
     def test_logsumexp_edge_cases_dim_none_complex(self, device, dtype):
         """Test edge cases for logsumexp with dim=None (complex dtypes)"""
         # Test with single complex element
-        single = torch.tensor([5.0+2.0j], device=device, dtype=dtype)
+        single = torch.tensor([5.0 + 2.0j], device=device, dtype=dtype)
         result_single = torch.logsumexp(single, dim=None)
         # For a single element, logsumexp should return that element
-        self.assertEqual(result_single.item(), (5.0+2.0j))
+        self.assertEqual(result_single.item(), (5.0 + 2.0j))
 
         # Test with multiple complex elements
-        a = torch.tensor([1.0+1.0j, 2.0+2.0j], device=device, dtype=dtype)
+        a = torch.tensor([1.0 + 1.0j, 2.0 + 2.0j], device=device, dtype=dtype)
         result = torch.logsumexp(a, dim=None)
         # Verify shape is scalar
         self.assertEqual(result.shape, torch.Size([]))
