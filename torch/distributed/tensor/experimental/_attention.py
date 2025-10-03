@@ -1002,17 +1002,18 @@ def _enable_context_parallel_dispatcher_impl(seq_dim: int, mesh: DeviceMesh) -> 
     elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
         _enable_cp_dtensor_dispatcher()
     else:
-        raise NotImplementedError
+        raise ValueError(f"Unknown dispatch mode: {_dispatch_mode}")
 
 
 def _disable_context_parallel_dispatcher_impl() -> None:
     if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
         _restore_function(F.scaled_dot_product_attention, F)
-        _disable_cp_dtensor_dispatcher()
     elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
-        _disable_cp_dtensor_dispatcher()
+        pass
     else:
         raise NotImplementedError
+
+    _disable_cp_dtensor_dispatcher()
 
 
 def _generate_round_robin_indices(
@@ -1197,10 +1198,6 @@ class _ContextParallel(ParallelStyle):
         self.seq_dim = seq_dim
         self.attention_type = attention_type
 
-        # Used by FlexAttention
-        self._block_mask: Optional[BlockMask] = None
-        self._orig_seq_lengths: Optional[tuple[int, int]] = None
-
     def _apply(self, module: nn.Module, mesh: DeviceMesh) -> nn.Module:
         if self.attention_type == self.AttentionType.FLEX:
             module.register_forward_pre_hook(
@@ -1294,6 +1291,10 @@ def _context_parallel_shard(
     seq_dims: list[int],
     load_balance_indices: Optional[torch.Tensor] = None,
 ) -> list[torch.Tensor | BlockMask]:
+    # For the new API, we only support the module wrapper mode.
+    global _dispatch_mode
+    _dispatch_mode = _DispatchMode.MODULE_WRAPPER
+
     if len(buffers) != len(seq_dims):
         raise ValueError(
             "`seq_dims` must have the same number of elements as `buffers`."
@@ -1380,6 +1381,11 @@ def context_parallel(
         `torch.distributed.tensor.experimental.context_parallel` is a
         prototype feature in PyTorch. The API is subject to change.
     """
+    # For the legacy API, we only support the monkey-patch mode.
+    # We will deprecate this API once the new API is widely used.
+    global _dispatch_mode
+    _dispatch_mode = _DispatchMode.MONKEY_PATCH
+
     buffers = [] if buffers is None else buffers
     buffer_seq_dims = [] if buffer_seq_dims is None else buffer_seq_dims
     no_restore_buffers = set() if no_restore_buffers is None else no_restore_buffers

@@ -19,7 +19,6 @@ from torch.distributed.tensor.experimental._attention import (
     _ContextParallel,
     _cp_options,
     _disable_context_parallel_dispatcher,
-    _DispatchMode,
     _enable_context_parallel_dispatcher,
     _is_causal_behavior,
     _RotateMethod,
@@ -108,10 +107,6 @@ class RingAttentionTest(DTensorTestBase):
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],
-                "dispatch_mode": [
-                    _DispatchMode.MONKEY_PATCH,
-                    _DispatchMode.MODULE_WRAPPER,
-                ],
                 "new_api": [True, False],
             },
             self._test_ring_attention_sdpa,
@@ -131,36 +126,35 @@ class RingAttentionTest(DTensorTestBase):
         backend: SDPBackend,
         rotater: _RotateMethod,
         test_forward_only: bool,
-        dispatch_mode: _DispatchMode,
         new_api: bool,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        if dispatch_mode == _DispatchMode.MODULE_WRAPPER:
+        if new_api:
             cp_plan = _ContextParallel(
                 seq_dim=seq_dim,
                 attention_type=_ContextParallel.AttentionType.SDPA,
             )
             attention = SDPAWrapper(compiled=compiled, backend=backend)
             attention = parallelize_module(attention, mesh, cp_plan)
-        else:
-            # This won't work for MONKEY_PATCH.
-            attention = F.scaled_dot_product_attention
-
-        if new_api:
             cp_q, cp_k, cp_v = _context_parallel_shard(
                 mesh, (cp_q, cp_k, cp_v), (seq_dim,) * 3
             )
             _enable_context_parallel_dispatcher(seq_dim, mesh)
         else:
+            # Theoretically, context_parallel() should not be used to shard
+            # parameters because when require_grad is True, resize_ is not
+            # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
+            # now. So we can just use context_parallel() to shard q, k, v.
+            # In reality, context_paralle() should be used to shard the input.
             cp_context = context_parallel(
                 mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(seq_dim,) * 3
             )
             cp_context.__enter__()
 
-        # NOTE: this some how proves that monkey patching is not stable.
-        # If we directly use SDPAWrapper, then the monkey patching
-        # dispatch mode wont work. When we refer to F.scaled_dot_product_attention,
-        # we have to be within the scope of context_parallel().
-        if dispatch_mode == _DispatchMode.MONKEY_PATCH:
+            # NOTE: This demonstrates that monkey patching is not fully reliable.
+            # If we use SDPAWrapper directly, the monkey patching dispatch mode
+            # does not function correctly. To ensure proper behavior,
+            # F.scaled_dot_product_attention must be referenced within the
+            # context_parallel() scope.
             attention = F.scaled_dot_product_attention
             if compiled:
                 attention = torch.compile(
@@ -210,11 +204,8 @@ class RingAttentionTest(DTensorTestBase):
         load_balance: bool,
         rotater: _RotateMethod,
         test_forward_only: bool,
-        dispatch_mode: _DispatchMode,
         new_api: bool,
     ) -> None:
-        torch.distributed.tensor.experimental._attention._dispatch_mode = dispatch_mode
-
         def fn_eval(fn, *args, **kwargs):
             if test_forward_only:
                 with torch.no_grad():
@@ -278,7 +269,6 @@ class RingAttentionTest(DTensorTestBase):
             backend=backend,
             rotater=rotater,
             test_forward_only=test_forward_only,
-            dispatch_mode=dispatch_mode,
             new_api=new_api,
         )
 
@@ -452,10 +442,6 @@ class CPFlexAttentionTest(DTensorTestBase):
         atol=1e-6,
         rtol=1e-2,
     ) -> None:
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.MODULE_WRAPPER
-        )
-
         torch.cuda.manual_seed(10)
         dtype = torch.float32
         bs = B if B > 1 else 8

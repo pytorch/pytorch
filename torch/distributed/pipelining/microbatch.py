@@ -121,6 +121,21 @@ def _split_block_mask(
     spec: TensorChunkSpec,
     num_chunks: int,
 ) -> list[BlockMask]:
+    """Given a block mask, and a chunking spec, split the block mask.
+
+    Args:
+        block_mask: Block mask to split
+        spec: Chunking spec
+        num_chunks: Number of chunks to split the block mask into
+
+    Returns:
+        chunk_block_masks: List of chunked block masks
+    """
+
+    assert block_mask.kv_num_blocks.size(0) >= num_chunks, (
+        "Block mask has fewer batch size than the number of chunks. "
+    )
+
     kv_num_blocks_chunks = torch.tensor_split(
         block_mask.kv_num_blocks, num_chunks, spec.split_dim
     )
@@ -149,6 +164,7 @@ def _split_block_mask(
 
             return mask_mod_wrapper
 
+        # `from_kv_blocks` is strictly faster than `create_block_mask`.
         chunk_block_masks.append(
             BlockMask.from_kv_blocks(
                 kv_num_blocks=kv_num_blocks_chunks[chunk_idx],
@@ -169,6 +185,20 @@ def _split_tensor(
     spec: TensorChunkSpec,
     num_chunks: int,
 ) -> Sequence[torch.Tensor]:
+    """Given a tensor, and a chunking spec, split the tensor.
+    Args:
+
+        tensor: Tensor to split
+        spec: Chunking spec
+        num_chunks: Number of chunks to split the tensor into
+
+    Returns:
+        chunk_tensors: List of chunked tensors
+    """
+
+    assert tensor.size(spec.split_dim) >= num_chunks, (
+        f"Tensor size {tensor.size(spec.split_dim)} is smaller than num_chunks"
+    )
     chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
 
     if not _debug_mask_minibatches:
@@ -213,13 +243,13 @@ def _shard_dict_of_args(
         return [{} for _ in range(num_chunks)]
 
     assert len(args_dict) == len(args_chunk_spec), (
-        f"args_dict.keys() = {list(args_dict.keys())} args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
+        f"args_dict.keys() = {list(args_dict.keys())} "
+        f"args_chunk_spec.keys() = {list(args_chunk_spec.keys())}"
     )
     assert args_chunk_spec is not None  # Should have been set by caller
 
     values, tree_spec = tree_flatten(args_dict)
     chunk_specs, _ = tree_flatten(args_chunk_spec)
-    assert len(values) == len(chunk_specs)
 
     # Fist check and find the actual number of chunks
     split_sizes = []
