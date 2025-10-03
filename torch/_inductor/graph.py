@@ -68,7 +68,6 @@ from .exc import (
 )
 from .fx_utils import count_flops_fx
 from .ir import (
-    assign_origin_node,
     Constant,
     DonatedBuffer,
     FixedLayout,
@@ -1835,7 +1834,31 @@ class GraphLowering(torch.fx.Interpreter):
                     if curr.has_large_inner_fn(threshold=100):
                         result.realize()
 
-        assign_origin_node(result, n)
+        # This is not complete, but it doesn't have to be: origin_node
+        # tracking is best effort.  The logic here critically relies on direct
+        # TensorBox -> StorageBox denoting a non-view; we don't bother trying
+        # to get views to work.  Feel free to add any extra cases as needed.
+        #
+        # Note: we can't YOLO tree_map over this result, because if there are
+        # buffers or a view involved, we might not be able to validly assign
+        # the origin_node here.
+        if isinstance(result, TensorBox) and isinstance(result.data, ir.StorageBox):
+            if isinstance(result.data.data, ir.Loops):
+                result.data.data._post_init_setattr("origin_node", n)
+            elif isinstance(result.data.data, ir.Buffer):
+                result.data.data._post_init_setattr("origin_node", n)
+                if isinstance(result.data.data, ir.ComputedBuffer) and isinstance(
+                    result.data.data.data, ir.Loops
+                ):
+                    result.data.data.data._post_init_setattr("origin_node", n)
+                # Not really multi-output, can straightforwardly recurse in
+                elif (
+                    isinstance(result.data.data, ir.MultiOutput)
+                    and not result.data.data.indices
+                ):
+                    if isinstance(result.data.data.inputs[0], ir.Buffer):
+                        result.data.data.inputs[0]._post_init_setattr("origin_node", n)
+
         self.register_users_of(result)
 
         new_unbacked_defs = OrderedSet[sympy.Symbol]()
@@ -2360,8 +2383,9 @@ class GraphLowering(torch.fx.Interpreter):
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
-        V.debug.output_code(mod.__file__)
-        V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
+        if isinstance(wrapper_code, FileBackedGraphModule):
+            V.debug.output_code(mod.__file__)
+            V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
 
         return mod
 
@@ -2397,6 +2421,9 @@ class GraphLowering(torch.fx.Interpreter):
             ]
             key, path = PyCodeCache.write(wrapper_code.value)
             output_code_log.debug("Output code written to: %s", path)
+
+            V.debug.output_code(path)
+            V.debug.copy(os.path.splitext(path)[0] + ".debug")
         except Exception:
             trace_structured(
                 "inductor_output_code",
