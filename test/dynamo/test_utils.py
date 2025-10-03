@@ -322,6 +322,34 @@ class TestDynamoTimed(TestCase):
         # Since the remaining logs are env specific, we just check if they are present instead of checking the exact string
         self.assertGreater(len(stack_strings), 1)
 
+    @dynamo_config.patch({"log_compilation_metrics": True})
+    @inductor_config.patch({"force_disable_caches": True})
+    def test_exception_stack_trace(self):
+        from torch._dynamo.exc import Unsupported
+
+        def backward(grad_output):
+            print("graph break!")  # This should trigger a Dynamo error
+            return grad_output
+
+        compiled_backward = torch.compile(backward, backend="eager", fullgraph=True)
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            with self.assertRaisesRegex(
+                Unsupported,
+                "Dynamo does not know how to trace builtin operator `print`",
+            ):
+                compiled_backward(torch.ones(3))
+
+        compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+
+        self.assertGreater(len(compilation_events), 0)
+        self.assertGreater(len(compilation_events[0].exception_stack_trace), 0)
+        self.assertIn(
+            "Dynamo does not know how to trace builtin operator `print`",
+            compilation_events[0].exception_stack_trace[0],
+            "exception_stack_trace does not contain the expected string: "
+            "'Dynamo does not know how to trace builtin operator `print`'",
+        )
+
     @dynamo_config.patch(
         {
             "log_compilation_metrics": True,
@@ -474,6 +502,7 @@ class TestDynamoTimed(TestCase):
             e.python_version = None
             e.stack_trace = None
             e.graph_node_shapes = None
+            e.exception_stack_trace = None
 
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
@@ -512,6 +541,7 @@ class TestDynamoTimed(TestCase):
  'dynamo_time_before_restart_s': 0.0,
  'end_time_us': 100,
  'entire_frame_compile_time_s': 0.0,
+ 'exception_stack_trace': None,
  'fail_reason': None,
  'fail_type': None,
  'fail_user_frame_filename': None,
@@ -596,6 +626,7 @@ class TestDynamoTimed(TestCase):
  'dynamo_time_before_restart_s': 0.0,
  'end_time_us': 100,
  'entire_frame_compile_time_s': 0.0,
+ 'exception_stack_trace': None,
  'fail_reason': None,
  'fail_type': None,
  'fail_user_frame_filename': None,
@@ -691,6 +722,7 @@ class TestDynamoTimed(TestCase):
  'dynamo_time_before_restart_s': None,
  'end_time_us': 100,
  'entire_frame_compile_time_s': None,
+ 'exception_stack_trace': None,
  'fail_reason': None,
  'fail_type': None,
  'fail_user_frame_filename': None,
@@ -775,6 +807,7 @@ class TestDynamoTimed(TestCase):
  'dynamo_time_before_restart_s': None,
  'end_time_us': 100,
  'entire_frame_compile_time_s': None,
+ 'exception_stack_trace': None,
  'fail_reason': None,
  'fail_type': None,
  'fail_user_frame_filename': None,

@@ -5,12 +5,12 @@ import itertools
 import numbers
 import operator
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch._meta_registrations
@@ -922,7 +922,7 @@ def im2col(
     def check_positive(param, param_name, strict=True):
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
         torch._check(
-            cond, lambda: "{param_name} should be greater {'than' zero, but got {param}"
+            cond, lambda: f"{param_name} should be greater than zero, but got {param}"
         )
 
     check_positive(kernel_size, "kernel_size")
@@ -1007,7 +1007,7 @@ def col2im(
     def check_positive(param, param_name, strict=True):
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
         torch._check(
-            cond, lambda: "{param_name} should be greater than zero, but got {param}"
+            cond, lambda: f"{param_name} should be greater than zero, but got {param}"
         )
 
     check_positive(kernel_size, "kernel_size")
@@ -1171,6 +1171,8 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
 @register_decomposition(aten._softmax)
 @out_wrapper()
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # eager softmax returns a contiguous tensor. Ensure that decomp also returns
     # a contiguous tensor.
     x = x.contiguous()
@@ -1180,7 +1182,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if x.numel() == 0:
+    if guard_or_false(x.numel() == 0):
         unnormalized = torch.exp(x)
     else:
         x_max = torch.amax(x, dim, keepdim=True)
@@ -1194,6 +1196,8 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 @register_decomposition(aten._log_softmax)
 @out_wrapper(exact_dtype=True)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
     x = x.contiguous()
@@ -1203,7 +1207,7 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if x.numel() == 0:
+    if guard_or_false(x.numel() == 0):
         shifted = x
     else:
         x_max = torch.amax(x, dim, keepdim=True)
@@ -1547,9 +1551,9 @@ def native_group_norm_backward(
         lambda: f"Expect gamma to have {C} elements but got {gamma.numel() if gamma is not None else -1}",
     )
 
-    cpg, _rem = divmod(C, group)
+    cpg = C // group
     torch._check(
-        _rem == 0,
+        C == cpg * group,
         lambda: f"Expect number of channels {C} to be evenly-divisible by number of groups {group}",
     )
 
@@ -1718,8 +1722,8 @@ def native_layer_norm_backward(
 
     return (
         _maybe_cast(d_input, input.dtype),
-        _maybe_cast(d_weight, input.dtype),
-        _maybe_cast(d_bias, input.dtype),
+        _maybe_cast(d_weight, weight.dtype if weight is not None else None),
+        _maybe_cast(d_bias, bias.dtype if bias is not None else None),
     )
 
 

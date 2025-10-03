@@ -168,15 +168,15 @@ def max_with_index(value, index, dim):
 @triton.jit
 def exp(x, use_fast_math: tl.constexpr):
     if use_fast_math:
-        return libdevice.exp2(x * _LOG_2_E)
-    else:
         return math.exp(x)
+    else:
+        return libdevice.exp(x)
 
 
 @triton.jit
 def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
     out_max = max2(lhs_max, dim)
-    out_max_keepdim = out_max[:, None]
+    out_max_keepdim = tl.expand_dims(out_max, dim)
     delta = tl.where(out_max_keepdim == float("-inf"), 0, lhs_max - out_max_keepdim)
     out_sum = tl.sum(lhs_sum * exp(delta, use_fast_math), dim)
     return out_max, out_sum
@@ -314,8 +314,8 @@ def bucketize_binary_search(
     while full_range > 1:
         mid = (high + low) // 2
         mask = (
-            mid * BOUNDARIES_STRIDE + boundary_indices
-        ) < BOUNDARIES_UNDERLYING_NUMEL and mid < BOUNDARIES_SIZE
+            (mid * BOUNDARIES_STRIDE + boundary_indices) < BOUNDARIES_UNDERLYING_NUMEL
+        ).logical_and(mid < BOUNDARIES_SIZE)
         mid_indices = (
             mid
             if sorter_ptr is None or SORTER_STRIDE is None

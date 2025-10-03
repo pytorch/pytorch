@@ -5,10 +5,10 @@ import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from typing_extensions import Self
 from warnings import warn
 
@@ -527,7 +527,6 @@ def tensorboard_trace_handler(
     ``worker_name`` should be unique for each worker in distributed scenario,
     it will be set to '[hostname]_[pid]' by default.
     """
-    import os
     import socket
     import time
 

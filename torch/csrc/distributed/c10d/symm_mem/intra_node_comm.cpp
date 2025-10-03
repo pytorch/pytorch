@@ -219,11 +219,7 @@ bool IntraNodeComm::rendezvous() {
       groupName, static_cast<int>(rank_), static_cast<int>(worldSize_), store_);
   auto allocator = get_allocator(c10::DeviceType::CUDA);
   symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, groupName);
-  // Rendezvous API now takes a tensor instead of raw pointer, thus we create a
-  // temporary wrapper here
-  auto tensor_wrap = at::from_blob(
-      symmetricMemoryPtr_, {static_cast<long>(bufferSize_)}, at::kByte);
-  symmetricMemory_ = allocator->rendezvous(tensor_wrap, std::nullopt);
+  symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_, std::nullopt);
   isInitialized_ = true;
   return true;
 }

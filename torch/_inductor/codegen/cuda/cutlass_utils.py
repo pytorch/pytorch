@@ -43,7 +43,7 @@ def move_cutlass_compiled_cache() -> None:
     if config.is_fbcode():
         import python_cutlass  # type: ignore[import-not-found]
     else:
-        import cutlass as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
 
     # Check if the CACHE_FILE attribute exists in python_cutlass and if the file exists
     if not hasattr(python_cutlass, "CACHE_FILE") or not os.path.exists(
@@ -112,13 +112,13 @@ def try_import_cutlass() -> bool:
     )
 
     cutlass_library_src_path = path_join(cutlass_python_path, "cutlass_library")
-    cutlass_src_path = path_join(cutlass_python_path, "cutlass")
+    cutlass_cppgen_src_path = path_join(cutlass_python_path, "cutlass_cppgen")
     pycute_src_path = path_join(cutlass_python_path, "pycute")
 
     tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
-    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
+    dst_link_cutlass_cppgen = path_join(tmp_cutlass_full_path, "cutlass_cppgen")
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
 
     # mock modules to import cutlass
@@ -145,7 +145,9 @@ def try_import_cutlass() -> bool:
             link_and_append(
                 dst_link_library, cutlass_library_src_path, tmp_cutlass_full_path
             )
-            link_and_append(dst_link_cutlass, cutlass_src_path, tmp_cutlass_full_path)
+            link_and_append(
+                dst_link_cutlass_cppgen, cutlass_cppgen_src_path, tmp_cutlass_full_path
+            )
             link_and_append(dst_link_pycute, pycute_src_path, tmp_cutlass_full_path)
 
             for module in mock_modules:
@@ -156,7 +158,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass  # noqa: F401, F811
+            import cutlass_cppgen  # noqa: F401, F811
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401

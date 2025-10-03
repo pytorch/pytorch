@@ -62,6 +62,11 @@ on:
         required: false
         type: number
         default: 1
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
@@ -76,10 +81,9 @@ jobs:
     strategy:
       matrix: ${{ fromJSON(inputs.test-matrix) }}
       fail-fast: false
-    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     steps:
-      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
@@ -131,6 +135,9 @@ jobs:
 
       - name: Start monitoring script
         id: monitor-script
+        if: ${{ !inputs.disable-monitor }}
+        shell: bash
+        continue-on-error: true
         env:
           JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
@@ -138,9 +145,6 @@ jobs:
           WORKFLOW_RUN_ID: ${{github.run_id}}
           MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
           MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
-        if: ${{ !inputs.disable-monitor }}
-        shell: bash
-        continue-on-error: true
         run: |
           python3 -m pip install psutil==5.9.8 dataclasses_json==0.6.7
           python3 -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
@@ -178,6 +182,12 @@ jobs:
         run: |
           echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
 
+      - name: Preserve github env variables for use in docker
+        shell: bash
+        run: |
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+
       - name: Test
         id: test
         env:
@@ -193,20 +203,22 @@ jobs:
           JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          TEST_CONFIG: ${{ matrix.config }}
+          SHARD_NUMBER: ${{ matrix.shard }}
+          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
+          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
-          TEST_CONFIG: ${{ matrix.config }}
-          SHARD_NUMBER: ${{ matrix.shard }}
-          NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-          REENABLED_ISSUES: ${{ steps.keep-going.outputs.reenabled-issues }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         run: |
           set -x
@@ -236,6 +248,7 @@ jobs:
             -e GITHUB_RUN_ATTEMPT \
             -e JOB_ID \
             -e JOB_NAME \
+            -e BASE_SHA \
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \
@@ -253,10 +266,12 @@ jobs:
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \
+            -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \
             --env-file="${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --ulimit core=0 \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --shm-size="8g" \
