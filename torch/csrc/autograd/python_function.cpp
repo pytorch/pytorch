@@ -815,7 +815,7 @@ static void _save_variables(
     THPFunction* self,
     PyObject* outputs,
     int64_t num_outputs) {
-  if (tensors_to_save.size() == 0)
+  if (tensors_to_save.empty())
     return;
   size_t num_saved = tensors_to_save.size();
   self->saved_variables.clear();

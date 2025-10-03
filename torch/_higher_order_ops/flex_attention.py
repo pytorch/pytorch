@@ -1,6 +1,6 @@
 import math
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -171,7 +171,7 @@ def _math_attention_inner(
 
     working_precision = torch.float64 if query.dtype == torch.float64 else torch.float32
 
-    scores = (query @ key.transpose(-2, -1)).to(dtype=working_precision)
+    scores = query.to(working_precision) @ key.to(working_precision).transpose(-2, -1)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
     h = torch.arange(0, scores.size(1), device=scores.device)
