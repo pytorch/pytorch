@@ -102,7 +102,7 @@ def is_functional_schema(schema: Any, *, view_ok: bool = False) -> bool:
                 num_tensor_outputs += 1
 
         if is_non_mutating_view:
-            return num_tensor_inputs == 1 and num_tensor_outputs == 1
+            return view_ok and (num_tensor_inputs == 1 and num_tensor_outputs == 1)
         if not schema.returns:
             return False
         return True
