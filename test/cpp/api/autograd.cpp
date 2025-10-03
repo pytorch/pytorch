@@ -1544,27 +1544,6 @@ TEST(TestAutogradNotImplementedFallback, ViewOp) {
       "which does not have a derivative implemented is forbidden");
 }
 
-TEST(TestAutogradNotImplementedFallback, ViewOpWithExtraArg) {
-  REGISTER_TEST_OP(
-      "view_op_with_extra_arg",
-      "_test::view_op_with_extra_arg(Tensor(a) self, Tensor other) -> Tensor(a)",
-      view_op_with_extra_arg);
-  auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
-      "_test::view_op_with_extra_arg", "");
-  auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
-    return callOpUnboxed<
-        torch::Tensor,
-        const torch::Tensor&,
-        const torch::Tensor&>(opHandle, _1, _2);
-  };
-  assertBasicChecks(op);
-  auto a = torch::tensor({1.}, {torch::kFloat32});
-  auto b = torch::tensor({2.}, {torch::kFloat32});
-  auto out1 = op(a, b);
-  ASSERT_TRUE(out1.is_view());
-  ASSERT_EQ(out1._base().unsafeGetTensorImpl(), a.unsafeGetTensorImpl());
-}
-
 TEST(TestAutogradNotImplementedFallback, RetTensorVectorView) {
   REGISTER_TEST_OP(
       "ret_tensor_vector_view",

@@ -18,7 +18,6 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_new.h>
 
@@ -35,9 +34,6 @@
 #include <utility>
 
 namespace py = pybind11;
-
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10::DispatchKey)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10::impl::TorchDispatchModeKey)
 
 namespace torch::impl::dispatch {
 
@@ -501,19 +497,18 @@ void initDispatchBindings(PyObject* module) {
           py::arg("func"),
           py::arg("with_keyset") = false)
       .def(
-         "register_ad_inplace_or_view_fallback",
-         [](const py::object& self,
-            const char* name) {
+          "register_ad_inplace_or_view_fallback",
+          [](const py::object& self, const char* name) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
             lib.impl(
-               name,
-               c10::DispatchKey::ADInplaceOrView,                                   \
-               torch::autograd::autogradNotImplementedInplaceOrViewFallback());
+                name,
+                c10::DispatchKey::ADInplaceOrView,
+                torch::autograd::autogradNotImplementedInplaceOrViewFallback());
             END_HANDLE_TH_ERRORS_PYBIND
-         },
-         "",
-         py::arg("name"));
+          },
+          "",
+          py::arg("name"));
 
   m.def(
       "_dispatch_library",
