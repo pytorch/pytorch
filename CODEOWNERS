@@ -181,15 +181,15 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/csrc/jit/python/init.cpp @mikaylagawarecki
 
 # CUDA and CUDA math libraries
-aten/src/ATen/cuda/ @eqy @syed-ahmed
-aten/src/ATen/cudnn/ @eqy @syed-ahmed
-aten/src/ATen/native/cuda/ @eqy @syed-ahmed
-aten/src/ATen/native/cudnn/ @eqy @syed-ahmed
-c10/cuda @eqy @syed-ahmed
-torch/cuda/ @eqy @syed-ahmed
-torch/csrc/cuda/ @eqy @syed-ahmed
-torch/backends/cuda/ @eqy @syed-ahmed
-torch/backends/cudnn/ @eqy @syed-ahmed
+aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
+aten/src/ATen/cudnn/ @eqy @syed-ahmed @Aidyn-A
+aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
+aten/src/ATen/native/cudnn/ @eqy @syed-ahmed @Aidyn-A
+c10/cuda @eqy @syed-ahmed @Aidyn-A
+torch/cuda/ @eqy @syed-ahmed @Aidyn-A
+torch/csrc/cuda/ @eqy @syed-ahmed @Aidyn-A
+torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
+torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 
 # PyTree utilities
 /torch/utils/_pytree.py @XuehaiPan
