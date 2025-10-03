@@ -96,19 +96,8 @@ def _maybe_run_with_interpreter(fn):
 
 def _maybe_compile_and_run_fn(fn, *args):
     if not torch.compiler.is_dynamo_compiling():
-        from torch._dynamo.backends.debugging import (
-            make_eager_backend_with_torch_function_mode,
-        )
-
-        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-                if metadata_mode:
-                    backend: Union[str, Callable[..., Any]] = (
-                        make_eager_backend_with_torch_function_mode(metadata_mode)
-                    )
-                else:
-                    backend = "eager"
-                return torch.compile(fn, backend=backend, fullgraph=True)(*args)
+        with setup_compilation_env() as backend:  # type: ignore[attr-defined]
+            return torch.compile(fn, backend=backend, fullgraph=True)(*args)
     else:
         return fn(*args)
 
@@ -234,6 +223,34 @@ def check_meta_consistency(
         raise torch._dynamo.exc.UncapturedHigherOrderOpError(
             f"Expected {lhs_name} and {rhs_name} to have same metadata but found:\n{diff_str}"
         )
+
+
+@contextmanager
+def setup_compilation_env():
+    """
+    Context manager that sets up proper environment and backend when invoking torch.compile
+    inside torch.export region or inside HOP.
+    """
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_modes,
+    )
+    from torch.fx.experimental.proxy_tensor import (
+        _temp_remove_pre_dispatch_torch_function_mode,
+    )
+
+    with (
+        _set_compilation_env(),
+        torch._dynamo.utils.disable_cache_limit(),
+        _temp_remove_pre_dispatch_torch_function_mode() as pre_dispatch_mode,
+        _temp_remove_metadata_torch_function_mode() as metadata_mode,
+    ):
+        modes = [
+            mode for mode in (pre_dispatch_mode, metadata_mode) if mode is not None
+        ]
+        if modes:
+            yield make_eager_backend_with_torch_function_modes(modes)
+        else:
+            yield "eager"
 
 
 @contextmanager
