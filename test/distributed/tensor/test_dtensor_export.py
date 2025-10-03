@@ -160,7 +160,7 @@ class DTensorExportTest(TestCase):
         self._run_test(strict_export_and_aot_export_joint_with_descriptors)
 
     @parametrize(
-        "run_mode", [RunMode.CODEGEN, RunMode.GRAPH_MODULE, RunMode.FX_INTERPRETER]
+        "run_mode", [RunMode.CODEGEN_AUTOGRAD, RunMode.CODEGEN, RunMode.GRAPH_MODULE, RunMode.FX_INTERPRETER]
     )
     def test_joint_graph_runner(self, run_mode):
         class Model(torch.nn.Module):
