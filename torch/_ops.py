@@ -803,7 +803,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
-        for a in self._schema.arguments:
+        for a in self._schema.arguments:  # pyrefly: ignore  # bad-assignment
             if a.alias_info is None:
                 continue
             if is_write is None:
@@ -885,7 +885,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         elif torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
             return self._op_dk(dk, *args, **kwargs)
         else:
-            return NotImplemented
+            return NotImplemented  # pyrefly: ignore  # bad-return
 
     # Remove a dispatch key from the dispatch cache.  This will force it to get
     # recomputed the next time.  Does nothing
@@ -990,9 +990,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         r = self.py_kernels.get(final_key, final_key)
         if cache_result:
-            self._dispatch_cache[key] = r
+            self._dispatch_cache[key] = r  # pyrefly: ignore  # unsupported-operation
             add_cached_op(self)
-        return r
+        return r  # pyrefly: ignore  # bad-return
 
     def name(self):
         return self._name
@@ -1122,7 +1122,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             )
 
         assert isinstance(handler, Callable)  # type: ignore[arg-type]
-        return handler(*args, **kwargs)
+        return handler(*args, **kwargs)  # pyrefly: ignore  # bad-return
 
 
 def _must_dispatch_in_python(args, kwargs):
@@ -1251,6 +1251,7 @@ class OpOverloadPacket(Generic[_P, _T]):
         # the schema and cause an error for torchbind op when inputs consist of FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
         if self._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
+            # pyrefly: ignore  # bad-argument-type
             return _call_overload_packet_from_python(self, *args, **kwargs)
         return self._op(*args, **kwargs)
 
