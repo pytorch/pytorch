@@ -28,7 +28,7 @@ from .immutable_collections import immutable_dict
 from .node import _get_qualified_name, _type_repr, Argument, Node, Target
 
 
-__all__ = ["PythonCode", "CodeGen", "Graph", "_BoxedCodeGen"]
+__all__ = ["PythonCode", "CodeGen", "Graph"]
 
 if TYPE_CHECKING:
     from ._symbolic_trace import Tracer  # noqa: F401
@@ -857,21 +857,6 @@ class _BoxedCodeGen(CodeGen):
     input tensors.
     """
 
-    def __init__(self):
-        super().__init__()
-
-    def process_inputs(self, args_list: Any) -> Any:
-        """
-        Process boxed inputs. Expects a list of arguments.
-        """
-        return args_list
-
-    def process_outputs(self, out: Any) -> Any:
-        """
-        Process outputs - just return as-is for boxed calling convention.
-        """
-        return out
-
     def gen_fn_def(
         self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
     ):
@@ -885,7 +870,7 @@ class _BoxedCodeGen(CodeGen):
         # Generate the function signature with args_list parameter
         fn_def = f"def {self._func_name}(self, args_list){maybe_return_annotation}:"
 
-        if len(free_vars) > 0:
+        if free_vars:
             # This is horribly manual but we don't get the "raw" free vars
             # without a bigger refactor.
             placeholder_vars = [
