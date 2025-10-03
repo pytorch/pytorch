@@ -23,7 +23,6 @@ from torch.nn.attention.flex_attention import (
     BlockMask,
     create_block_mask,
 )
-from torch.overrides import TorchFunctionMode
 
 from ._cp_custom_ops import flex_cp_forward
 
@@ -48,8 +47,6 @@ logger = logging.getLogger(__name__)
 
 class _DispatchMode(Enum):
     MONKEY_PATCH = auto()
-    TORCH_FUNCTION = auto()
-    TORCH_DISPATCH = auto()
     MODULE_WRAPPER = auto()
 
 
@@ -67,16 +64,6 @@ class _ContextParallelOptions:
 
 
 _cp_options = _ContextParallelOptions()
-
-
-@dataclass
-class _ContextParallelGlobalVars:
-    # This variable stores the TorchFunctionMode singleton because using multiple TF
-    # instances for dispatching may trigger recompilations
-    torch_function_mode: Optional[TorchFunctionMode] = None
-
-
-_cp_global_vars = _ContextParallelGlobalVars()
 
 
 def _is_causal_behavior(
