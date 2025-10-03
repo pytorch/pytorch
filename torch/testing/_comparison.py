@@ -3,8 +3,8 @@ import abc
 import cmath
 import collections.abc
 import contextlib
-from collections.abc import Collection, Sequence
-from typing import Any, Callable, NoReturn, Optional, Union
+from collections.abc import Callable, Collection, Sequence
+from typing import Any, NoReturn, Optional, Union
 from typing_extensions import deprecated
 
 import torch
