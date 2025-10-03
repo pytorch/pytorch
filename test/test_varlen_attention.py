@@ -194,7 +194,7 @@ class TestVarlenAttention(NNTestCase):
         )
 
         compiled_forward = torch.compile(
-            attention_block.forward_varlen, backend="eager"
+            attention_block.forward_varlen, backend="eager", fullgraph=True
         )
         with OpLoggingMode() as mode:
             output = compiled_forward(
