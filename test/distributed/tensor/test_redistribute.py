@@ -953,7 +953,7 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
             self.assertEqual(len(all_combinations), expected_total_combination)
 
     @with_comms
-    def test_ordered_redistribute_all_combination(self):
+    def test_ordered_distribute_all_combination(self):
         """Exhaustively test all possible sharding combinations and verify correctness"""
         torch.manual_seed(21)
         mesh = init_device_mesh(self.device_type, (2, 2, 2))
@@ -997,6 +997,53 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
                     )
                     self.assertEqual(sharded_dt.full_tensor(), input_data)
                     prev_sharded_dt = sharded_dt
+
+    @with_comms
+    def test_ordered_redistribute_with_partial(self):
+        """Test mixing Partial in the original placements and do redistribute."""
+        # This test takes 123s to complete on 8XA100...
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_tensor_shape = [
+            # even sharding
+            (16, 8),
+            (8, 16, 32),
+            (8, 32, 16, 16),
+            # uneven sharding with padding
+            (17, 5),
+            (13, 2, 13),
+            (33, 16, 8, 1),
+        ]
+        placement_choice = [
+            Shard(0),
+            Shard(1),
+            Shard(2),
+            Partial("sum"),
+            Partial("min"),
+            Replicate(),
+        ]
+        # pick 3 for the 3D mesh
+        partial_placement_comb = list(itertools.combinations(placement_choice, 3))
+
+        def _is_valid_placement(placements, tensor_rank):
+            # Check if placements is valid for tensor with rank `tensor_rank`
+            for placement in placements:
+                if isinstance(placement, Shard):
+                    if placement.dim >= tensor_rank:
+                        return False
+            return True
+
+        for shape in input_tensor_shape:
+            for placements in partial_placement_comb:
+                if not _is_valid_placement(placements, len(shape)):
+                    continue
+                local_tensor = torch.randn(shape, device=self.device_type)
+                full_tensor = DTensor.from_local(local_tensor, mesh, placements)
+                for shard_order in self.generate_shard_orders(mesh, len(shape)):
+                    sharded_dt = full_tensor.redistribute(mesh, shard_order=shard_order)
+                    self.assertEqual(
+                        sharded_dt.full_tensor(), full_tensor.full_tensor()
+                    )
 
 
 if __name__ == "__main__":
