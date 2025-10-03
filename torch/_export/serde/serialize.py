@@ -14,11 +14,11 @@ import operator
 import traceback
 import typing
 from collections import namedtuple, OrderedDict
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Annotated, Any, Callable, cast, final, Optional, Union
+from typing import Annotated, Any, cast, final, Optional, Union
 
 import sympy
 
@@ -2499,9 +2499,9 @@ class GraphModuleDeserializer(metaclass=Final):
             # TODO(pianpwk): if we can clean up unused symbols in range_constraints,
             # then this logic can just be handled with self.unbacked_symbols alone
             for _ in range(count_unbacked_symfloat + 1):
-                next(self.shape_env.unbacked_symfloat_counter)
+                self.shape_env.unbacked_symfloat_counter += 1
             for _ in range(count_unbacked_symint + 1):
-                next(self.shape_env.unbacked_symint_counter)
+                self.shape_env.unbacked_symint_counter += 1
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)

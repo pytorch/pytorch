@@ -1077,7 +1077,7 @@ void test_multi_cuda_streams(const std::string& device) {
   // Set the processing function
   pool.process_function = [&](int i,
                               const std::vector<torch::Tensor>& inputs,
-                              c10::cuda::CUDAStream& stream) {
+                              c10::cuda::CUDAStream& stream) -> void {
     // Run inference with the task-specific input
     std::vector<torch::Tensor> outputs = loader.run(inputs, stream.stream());
     // Store results safely

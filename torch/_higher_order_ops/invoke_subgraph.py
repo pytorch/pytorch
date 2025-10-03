@@ -3,7 +3,7 @@
 import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,6 +34,10 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 invoke_subgraph_counter = 0
