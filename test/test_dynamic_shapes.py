@@ -1949,6 +1949,19 @@ class TestFloorDiv(TestCase):
                 TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y)
             )
 
+    def test_floordiv_div_does_not_generate_non_int_rational(self):
+        s14 = sympy.Symbol("s14", integer=True, positive=True)
+        s37 = sympy.Symbol("s37", integer=True, positive=True)
+
+        inner_expr = FloorDiv(s14, 2016)
+        middle_expr = (24 * s37 + 672) * inner_expr
+        numerator = middle_expr + 21
+        denominator = 22
+        result = FloorDiv(numerator, denominator)
+        rationals = result.atoms(sympy.Rational)
+        all_rationals_ints = all(r.q == 1 for r in rationals)
+        self.assertTrue(all_rationals_ints)
+
     def test_floordiv_simplify(self):
         # Tests how we simplify or evaluate FloorDiv without free variables
         shape_env = ShapeEnv()
