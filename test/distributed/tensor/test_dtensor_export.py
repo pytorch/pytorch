@@ -16,6 +16,8 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.fx.passes.operator_support import OperatorSupport
+from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -149,6 +151,155 @@ class DTensorExportTest(TestCase):
     @unittest.expectedFailure
     def test_strict_export_parallelize_module_with_dtensor_input(self):
         self._run_test(strict_export_and_aot_export_joint_with_descriptors)
+
+    def test_aot_eager_regional_inductor(self):
+        def fn(x: torch.Tensor):
+            a = torch.cos(x)
+            b = torch.sin(a)
+            c = torch.cos(b)
+            return c
+
+        x = torch.randn(4)
+        joint_gm = graph_capture_and_aot_export_joint_with_descriptors(fn, x)
+        fw_gm, bw_gm = min_cut_rematerialization_partition(
+            joint_gm, None, num_fwd_outputs=1
+        )
+
+        class FlexOperatorSupport(OperatorSupport):
+            def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+                return (
+                    node.op == "call_function"
+                    and node.target is torch.ops.aten.sin.default
+                )
+
+        from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+
+        partitioner = CapabilityBasedPartitioner(
+            fw_gm, FlexOperatorSupport(), allows_single_node_partition=True
+        )
+
+        candidate_partitions = partitioner.propose_partitions()
+
+        partitioned_gm = fuse_by_partitions(
+            partitioner.graph_module,
+            [candidate_partitions[0].nodes],
+            prefix="submod_",
+            always_return_tuple=True,
+        )
+
+        partitioned_gm.print_readable()
+        for node in partitioned_gm.graph.nodes:
+            if node.op == "call_module":
+                fake_inputs = []
+                for inp_node in node.all_input_nodes:
+                    if hasattr(inp_node, "meta") and "val" in inp_node.meta:
+                        fake_inputs.append(inp_node.meta["val"])
+                    elif inp_node.op == "get_attr":
+                        fake_inputs.append(getattr(partitioned_gm, inp_node.target))
+
+                scooped_gm = getattr(partitioned_gm, node.target)
+                # Ensure that it runs in eager
+                scooped_gm(*fake_inputs)
+
+                # Calling torch.compile on the subgraph. This is not ideal, but
+                # torch.compile respects the input output signature so its
+                # something we can test out easily.
+                scooped_gm = torch.compile(scooped_gm)
+                # Hacky - we should delete the call_module and install a call_function directly
+                object.__setattr__(partitioned_gm, node.target, scooped_gm)
+
+        self.assertEqual(fw_gm(x)[0], fn(x))
+
+    # # @requires_gpu
+    # def test_aot_eager_compiled_flex(self):
+    #     from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+    #     def _squared(score, b, h, m, n):
+    #         """Joint graph needed for correctness"""
+    #         return score * score
+
+    #     def mask_mod(b, h, q, k):
+    #         return q >= 0
+
+    #     a = 12
+    #     b = 64
+    #     block_mask = create_block_mask(mask_mod, None, None, a * b, a * b)
+    #     def fn(x: torch.Tensor):
+    #         a = torch.cos(x)
+    #         b = flex_attention(a, a, a, block_mask=block_mask, score_mod=_squared)
+    #         c = torch.cos(b)
+    #         return c
+
+    #     v = torch.zeros(
+    #         1,
+    #         1,
+    #         a * b,
+    #         b,
+    #         dtype=torch.bfloat16,
+    #         device="cuda",
+    #         requires_grad=True,
+    #     )
+    #     joint_gm = graph_capture_and_aot_export_joint_with_descriptors(fn, v)
+    #     fw_gm, bw_gm = min_cut_rematerialization_partition(
+    #         joint_gm, None, num_fwd_outputs=1
+    #     )
+
+    #     class FlexOperatorSupport(OperatorSupport):
+    #         def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+    #             # In the real prototype, this will be replaced by the fx annotation str comparison
+    #             # return (node.op == "call_function" and node.target is torch.ops.higher_order.flex_attention)
+    #             return (node.op == "call_function" and node.target is torch.ops.aten.cos.default)
+
+    #     from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+    #     partitioner = CapabilityBasedPartitioner(
+    #         fw_gm, FlexOperatorSupport(), allows_single_node_partition=True
+    #     )
+
+    #     candidate_partitions = partitioner.propose_partitions()
+
+    #     partitioned_gm = fuse_by_partitions(
+    #         partitioner.graph_module,
+    #         [candidate_partitions[0].nodes],
+    #         prefix="submod_",
+    #         always_return_tuple=True,
+    #     )
+
+    #     partitioned_gm.print_readable()
+    #     for node in partitioned_gm.graph.nodes:
+    #         if node.op == "call_module":
+    #             fake_inputs = []
+    #             for inp_node in node.all_input_nodes:
+    #                 if hasattr(inp_node, "meta") and "val" in inp_node.meta:
+    #                     fake_inputs.append(inp_node.meta["val"])
+    #                 elif inp_node.op == "get_attr":
+    #                     fake_inputs.append(getattr(partitioned_gm, inp_node.target))
+
+    #             scooped_gm = getattr(partitioned_gm, node.target)
+    #             # Ensure that it runs in eager
+    #             scooped_gm(*fake_inputs)
+
+    #             scooped_gm = compile_fx_inner(scooped_gm, fake_inputs)
+    #             object.__setattr__(partitioned_gm, node.target, scooped_gm)
+    #             # breakpoint()
+    #             # # ALERT - Do not unpack - boxed function blah blah
+
+    #             # # def noop(gm, *example_imputs):
+    #             # #     return gm
+    #             # # scooped_gm = aot_module_simplified(scooped_gm, fake_inputs, fw_compiler=noop)
+    #             # # scooped_gm(*fake_inputs)
+
+    #             # # compiled_node = torch.compile(, backend="eager")
+    #             # # compiled_node(*fake_inputs)
+    #             # breakpoint()
+    #             # print(node.meta)
+
+    #             # with partitioned_gm.graph.inserting_before(node):
+    #             #     new_node = graph.call_module(
+    #             #         scooped
+    #             #     )
+
+    #     out = fw_gm()
+
+    #     print(out)
 
 
 instantiate_parametrized_tests(DTensorExportTest)
