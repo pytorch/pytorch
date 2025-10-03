@@ -20,6 +20,17 @@ from torch.utils._config_module import Config, install_config_module
 
 __all__ = [
     "job_id",
+    "dynamic_shapes",
+    "assume_static_by_default", 
+    "automatic_dynamic_shapes",
+    "recompile_limit",
+    "accumulated_recompile_limit",
+    "verbose",
+    "capture_scalar_outputs",
+    "capture_dynamic_output_shape_ops",
+    "suppress_errors", 
+    "verify_correctness",
+    "log_file_name",
 ]
 
 
@@ -118,6 +129,95 @@ force_cudagraph_gc: bool = Config(env_name_default="TORCH_CUDAGRAPH_GC", default
 """
 If True (the backward-compatible behavior) then gc.collect() before recording
 any cudagraph.
+"""
+
+
+# Cross-cutting configuration options that affect the entire compilation pipeline
+
+dynamic_shapes: bool = Config(alias="torch._dynamo.config.dynamic_shapes")
+"""
+Controls whether the compilation pipeline supports dynamic tensor shapes.
+When enabled, the compiler can handle tensors with varying dimensions across
+different invocations. This is a cross-cutting setting that affects shape
+inference, guard generation, and code generation across the entire compilation
+stack.
+"""
+
+assume_static_by_default: bool = Config(alias="torch._dynamo.config.assume_static_by_default")
+"""
+When enabled, all tensor dimensions are assumed to be static unless explicitly
+marked as dynamic or detected as changing. This compilation-wide behavior affects
+how the entire stack handles shape specialization and can improve performance
+for static workloads.
+"""
+
+automatic_dynamic_shapes: bool = Config(alias="torch._dynamo.config.automatic_dynamic_shapes")
+"""
+Enables automatic detection and handling of dynamic shapes. When a tensor's
+shape changes between compilations, the system automatically marks those
+dimensions as dynamic rather than requiring manual specification. This
+cross-cutting optimization improves the user experience by reducing recompilations.
+"""
+
+recompile_limit: int = Config(alias="torch._dynamo.config.recompile_limit")
+"""
+Maximum number of recompilations allowed for a single function before falling
+back to eager execution. This compilation performance control prevents excessive
+recompilation overhead that can degrade overall performance.
+"""
+
+accumulated_recompile_limit: int = Config(alias="torch._dynamo.config.accumulated_recompile_limit")
+"""
+Global limit on total recompilations across all compiled functions to prevent
+runaway recompilation scenarios. This safeguard protects against compilation
+performance issues that could affect the entire program.
+"""
+
+verbose: bool = Config(alias="torch._dynamo.config.verbose")
+"""
+Enables verbose debugging output across the entire compilation stack. When enabled,
+provides detailed information about compilation decisions, optimizations, and
+potential issues. This user-facing option helps with debugging compilation problems.
+"""
+
+
+# TorchDynamo-specific configuration options
+
+capture_scalar_outputs: bool = Config(alias="torch._dynamo.config.capture_scalar_outputs")
+"""
+Controls whether TorchDynamo captures operations that return scalar values (like .item())
+into the FX graph. When disabled, these operations cause graph breaks. This is a
+TorchDynamo-specific tracing behavior that affects how the tracer handles
+scalar-returning operations.
+"""
+
+capture_dynamic_output_shape_ops: bool = Config(alias="torch._dynamo.config.capture_dynamic_output_shape_ops")
+"""
+Controls whether TorchDynamo captures operations with dynamic output shapes (like
+nonzero, unique) into the FX graph. When disabled, these operations cause graph breaks.
+This is a TorchDynamo-specific setting for handling operations with unpredictable
+output shapes during tracing.
+"""
+
+suppress_errors: bool = Config(alias="torch._dynamo.config.suppress_errors")
+"""
+Suppresses TorchDynamo errors and forces fallback to eager execution when compilation
+fails. This is a TorchDynamo-specific error handling mechanism that can mask
+compilation issues but ensures the program continues running.
+"""
+
+verify_correctness: bool = Config(alias="torch._dynamo.config.verify_correctness")
+"""
+Enables correctness verification by comparing compiled and eager execution results.
+This internal validation mechanism helps detect bugs in TorchDynamo's tracing and
+compilation process by running both versions and checking for differences.
+"""
+
+log_file_name: Optional[str] = Config(alias="torch._dynamo.config.log_file_name")
+"""
+Specifies a file path for TorchDynamo-specific logging output. When set, internal
+TorchDynamo debug information is written to this file rather than stdout. This is
+useful for debugging TorchDynamo's internal tracing behavior.
 """
 
 
