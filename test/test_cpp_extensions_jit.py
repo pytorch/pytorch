@@ -141,8 +141,6 @@ class TestCppExtensionJIT(common.TestCase):
                 sources=[sycl_file],
                 extra_sycl_cflags=extra_sycl_cflags,
                 verbose=True,
-                keep_intermediates=True,
-                build_directory=temp_dir,
             )
 
             x = torch.zeros(100, device="xpu", dtype=torch.float32)
