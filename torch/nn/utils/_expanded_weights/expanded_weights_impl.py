@@ -182,3 +182,6 @@ class ExpandedWeight(torch.Tensor):
 
     def set_batch_first(self, is_batch_first=True):
         self.batch_first = is_batch_first
+
+    def untyped_storage(self):
+        return self.orig_weight.untyped_storage()
