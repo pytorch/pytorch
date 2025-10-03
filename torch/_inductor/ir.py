@@ -7254,6 +7254,7 @@ class DynamicSelectStorageOffset(ExternKernel):
         base_offset: Union[sympy.Symbol, int],
         base_dim_stride: Union[sympy.Symbol, int],
         size: Union[sympy.Symbol, int],
+        clamp: bool,
     ) -> None:
         super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
         # This node codegen the following:
@@ -7263,6 +7264,7 @@ class DynamicSelectStorageOffset(ExternKernel):
         self.base_offset = base_offset
         self.base_dim_stride = base_dim_stride
         self.size = size
+        self.clamp = clamp
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.unbacked_offset_symbol])
@@ -7273,7 +7275,59 @@ class DynamicSelectStorageOffset(ExternKernel):
         return get_free_symbols(self.index, unbacked_only)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        wrapper.codegen_dynamic_select_index(self)
+        wrapper.codegen_dynamic_select_index(self, clamp=self.clamp)
+
+
+class DynamicSliceSize(ExternKernel):
+    """
+    Computes the output size of a slice call, handling the correct semantics in codegen.
+    We do this for flexible handling for unbacked indices (to not data-dependent error).
+
+    Slicing has 4 semantics for indices, i.e. x[start:] could be:
+    1) start < -x.size(0)            -> x[0:]                    # negative out-of-bounds
+    2) start in [-x.size(0), 0)      -> x[x.size(0) + start:]    # negative slicing
+    3) start in [0, x.size(0))       -> x[start:]                # standard slicing
+    4) start >= x.size(0)            -> empty slice              # positive out-of-bounds
+
+    If the appropriate semantics are known beforehand, the output size is computed based on
+    the start & end indices. If not (with unbacked indices), a new unbacked symbol is created
+    to represent the output size, and codegen handles computing the correct case.
+    """
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
+
+    def should_allocate(self) -> bool:
+        return False
+
+    def __init__(
+        self,
+        unbacked_size_symbol: sympy.Symbol,
+        start: Union[sympy.Symbol, int],
+        end: Union[sympy.Symbol, int],
+        step: Union[sympy.Symbol, int],
+        size: Union[sympy.Symbol, int],
+    ):
+        super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
+        # This node codegen
+        self.unbacked_size_symbol = unbacked_size_symbol
+        self.start = start
+        self.end = end
+        self.step = step
+        self.size = size
+
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet([self.unbacked_size_symbol])
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return get_free_symbols(self.start, unbacked_only).union(
+            get_free_symbols(self.end, unbacked_only)
+        )
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        wrapper.codegen_dynamic_slice_size(self)
 
 
 class DynamicScalar(ExternKernel):
@@ -9058,6 +9112,7 @@ class _CollectiveKernel(FallbackKernel):
         assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
+            V.graph.mark_buffer_mutated(tensor_arg.get_name())
 
         device = tensor_args[0].get_device()
         packed = cls(
@@ -9344,3 +9399,30 @@ def maybe_free_symbols(s: object) -> OrderedSet[Symbol]:
         return free_symbols(s)
     else:
         return OrderedSet()
+
+
+def assign_origin_node(result: Any, n: torch.fx.Node) -> None:
+    # This is not complete, but it doesn't have to be: origin_node
+    # tracking is best effort.  The logic here critically relies on direct
+    # TensorBox -> StorageBox denoting a non-view; we don't bother trying
+    # to get views to work.  Feel free to add any extra cases as needed.
+    #
+    # Note: we can't YOLO tree_map over this result, because if there are
+    # buffers or a view involved, we might not be able to validly assign
+    # the origin_node here.
+    if isinstance(result, TensorBox) and isinstance(result.data, StorageBox):
+        if isinstance(result.data.data, Loops):
+            result.data.data._post_init_setattr("origin_node", n)
+        elif isinstance(result.data.data, Buffer):
+            result.data.data._post_init_setattr("origin_node", n)
+            if isinstance(result.data.data, ComputedBuffer) and isinstance(
+                result.data.data.data, Loops
+            ):
+                result.data.data.data._post_init_setattr("origin_node", n)
+            # Not really multi-output, can straightforwardly recurse in
+            elif (
+                isinstance(result.data.data, MultiOutput)
+                and not result.data.data.indices
+            ):
+                if isinstance(result.data.data.inputs[0], Buffer):
+                    result.data.data.inputs[0]._post_init_setattr("origin_node", n)
