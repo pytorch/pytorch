@@ -844,7 +844,8 @@ class FSDPParam:
         # TODO: need to support tensor subclass
         if type(self._sharded_param_data) is torch.Tensor:
             same_local_tensor = (
-                self._sharded_param_data.untyped_storage().data_ptr()
+                self._sharded_param_data.untyped_storage().data_ptr() > 0
+                and self._sharded_param_data.untyped_storage().data_ptr()
                 == local_tensor.untyped_storage().data_ptr()
             )
         padded_sharded_size = self.padded_sharded_param_size
