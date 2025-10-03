@@ -1083,7 +1083,7 @@ Most recent bytecode instructions traced (max 20):
         )
 
     @torch._dynamo.config.patch(verbose=True)
-    @make_logging_test(graph_breaks=True)  # , bytecode=True)
+    @make_logging_test(graph_breaks=True)
     def test_variable_tracker_bytecode_to_graph_break(self, records):
         @torch.compile(backend="eager")
         def fn(x):
@@ -1098,12 +1098,12 @@ Most recent bytecode instructions traced (max 20):
         s = munge_exc(records[-1].getMessage(), skip=0)
         matches = re.findall(pattern, s)
         self.assertIn(len(matches), [13, 20])
+        # TODO: Checking inconsistent logging output
 
         def post_munge(s):
             s = re.sub(r"TRACE.*\n", "", s, flags=re.MULTILINE)
             return re.sub(r"TRACE.*", "", s)
 
-        # check the log for the 2nd torch._dynamo.graph_break()
         self.assertExpectedInline(
             post_munge(s),
             """\

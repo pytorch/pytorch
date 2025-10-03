@@ -211,9 +211,6 @@ compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
 compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
     tx, [handle_contains(tx, [*reversed(args)], {})], {}
 )
-latest_bytecode_queue: deque[str] = deque(
-    maxlen=20
-)  # Store the latest bytecode before graph_break() call by user
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
@@ -942,7 +939,7 @@ def break_graph_if_unsupported(
                     exc_info=True,
                     reason=str(excp),
                     user_stack=excp.real_stack,
-                    latest_bytecode_log="\n".join(latest_bytecode_queue),
+                    latest_bytecode_log="\n".join(self.latest_bytecode_queue),
                 )
 
                 if self.maybe_has_backedge():
@@ -1194,6 +1191,8 @@ class InstructionTranslatorBase(
     parent: Optional[InstructionTranslatorBase]
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
     package: Optional[CompilePackage]
+    latest_bytecode_queue: deque[str] = deque(maxlen=20)
+    # Store the latest bytecode before graph_break() call by user
 
     def mark_inconsistent_side_effects(self) -> None:
         """
@@ -1362,7 +1361,7 @@ class InstructionTranslatorBase(
             )
 
         # Store the latest 20 bytecode execution for the process
-        latest_bytecode_queue.append(f"TRACE {inst.opname} {inst.argval} {self.stack}")
+        self.latest_bytecode_queue.append(f"TRACE {inst.opname} {inst.argval} {self.stack}")
 
         self.update_block_stack(inst)
 
