@@ -4,6 +4,19 @@ from torchfuzz.operators.arg import ArgOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
 from torchfuzz.operators.item import ItemOperator
+from torchfuzz.operators.layout import (
+    FlattenOperator,
+    ReshapeOperator,
+    SqueezeOperator,
+    UnsqueezeOperator,
+    ViewOperator,
+)
+from torchfuzz.operators.matrix_multiply import (
+    AddmmOperator,
+    BmmOperator,
+    MatmulOperator,
+    MMOperator,
+)
 from torchfuzz.operators.registry import get_operator, list_operators, register_operator
 from torchfuzz.operators.scalar_pointwise import (
     ScalarAddOperator,
@@ -36,6 +49,15 @@ __all__ = [
     "ItemOperator",
     "ConstantOperator",
     "ArgOperator",
+    "ViewOperator",
+    "ReshapeOperator",
+    "FlattenOperator",
+    "SqueezeOperator",
+    "UnsqueezeOperator",
+    "MMOperator",
+    "AddmmOperator",
+    "BmmOperator",
+    "MatmulOperator",
     "get_operator",
     "register_operator",
     "list_operators",
