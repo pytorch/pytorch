@@ -11,6 +11,7 @@ import sys
 import threading
 import traceback
 import typing
+import gc
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum, IntEnum
@@ -29,6 +30,7 @@ from torch._inductor.compile_worker.tracked_process_pool import (
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path, python_subprocess_env
 from torch._utils_internal import find_compile_subproc_binary
+from torch.monitor import _WaitCounter
 
 
 log = logging.getLogger(__name__)
@@ -192,9 +194,13 @@ class SubprocPool:
 
         self.futures_lock = threading.Lock()
         self.pending_futures: dict[int, Future[Any]] = {}
+        self.pending_waitcounters: dict[int, Any] = {}
         self.job_id_count = itertools.count()
 
         self.running = True
+        self.running_waitcounter =  _WaitCounter( "pytorch.wait_counter.subproc_pool.running").guard()
+        self.running_waitcounter.__enter__()
+        self.firstjob = True
 
         # Start thread last to ensure all member variables are initialized
         # before any access.
@@ -210,6 +216,13 @@ class SubprocPool:
         with self.futures_lock:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
+            self.pending_waitcounters[job_id] = _WaitCounter( "pytorch.wait_counter.subproc_pool.job").guard()
+            self.pending_waitcounters[job_id].__enter__()
+            if self.firstjob:
+                self.firstjob_id = job_id
+                self.firstjob_waitcounter = _WaitCounter( "pytorch.wait_counter.subproc_pool.first_job").guard()
+                self.firstjob_waitcounter.__enter__()
+                self.firstjob = False
         future.set_running_or_notify_cancel()
         self._send(MsgHeader.JOB, job_id, job_data)
         return future
@@ -237,6 +250,7 @@ class SubprocPool:
                 if self.running:
                     log.warning("SubprocPool unclean exit")
                     self.running = False
+                    self.running_waitcounter.__exit__()
                 self.read_pipe.close()
                 # Cancel all the pending futures.
                 self.shutdown()
@@ -263,13 +277,23 @@ class SubprocPool:
                     self.pending_futures[job_id].set_exception(result)
                 else:
                     self.pending_futures[job_id].set_result(result)
+
+                self.pending_waitcounters[job_id].__exit__()
+                del self.pending_waitcounters[job_id]
+                if self.firstjob_id == job_id:
+                    self.firstjob_waitcounter.__exit__()
+
                 del self.pending_futures[job_id]
 
     def quiesce(self) -> None:
         self._send(MsgHeader.QUIESCE)
+        self.quiesce_waitcounter =  _WaitCounter( "pytorch.wait_counter.subproc_pool.running").guard()
+        self.quiesce_waitcounter.__enter__()
 
     def wakeup(self) -> None:
         self._send(MsgHeader.WAKEUP)
+        self.quiesce_waitcounter.__exit__()
+        self.firstjob = True
 
     def shutdown(self) -> None:
         try:
@@ -277,6 +301,7 @@ class SubprocPool:
                 if not self.running:
                     return
                 self.running = False
+                self.running_waitcounter.__exit__()
                 _send_msg(self.write_pipe, MsgHeader.SHUTDOWN)
                 self.write_pipe.close()
             self.process.wait(300)
