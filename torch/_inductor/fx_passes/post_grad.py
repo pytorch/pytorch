@@ -1242,7 +1242,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
         raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
-def _maybe_resolve_constant_get_attr(node):
+def _maybe_resolve_constant_get_attr(graph, node):
     # Resolve getattr node to its value because they don't always have meta["val"]
     if (
         isinstance(node, torch.fx.Node)
@@ -1359,7 +1359,7 @@ def decompose_auto_functionalized(graph):
         )
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
-        flat_args = [_maybe_resolve_constant_get_attr(arg) for arg in flat_args]
+        flat_args = [_maybe_resolve_constant_get_attr(graph, arg) for arg in flat_args]
 
         # NB: we combine (args, kwargs) into flat args for replacing.
         # This is replace_by_example uses make_fx which does not support
@@ -1390,7 +1390,9 @@ def unwrap_auto_functionalized_to_mutating_ops(gm: torch.fx.GraphModule) -> None
     def auto_func_handler(match: Match, *args, **kwargs):
         original_metadata = match.nodes[0].meta.copy()
         flat_args, spec = pytree.tree_flatten((args, kwargs))
-        flat_args = [_maybe_resolve_constant_get_attr(arg) for arg in flat_args]
+        flat_args = [
+            _maybe_resolve_constant_get_attr(gm.graph, arg) for arg in flat_args
+        ]
 
         is_v2 = match.nodes[0].target == torch.ops.higher_order.auto_functionalized_v2
 

@@ -52,6 +52,7 @@ from collections import defaultdict
 from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable, NoReturn, Optional, Protocol, TypeVar, Union
+from typing_extensions import Self, TypeIs
 
 import torch
 import torch._guards
@@ -1126,6 +1127,10 @@ class GraphPatternEntry(PatternEntry):
 
 @dataclasses.dataclass
 class ReplacementPatternEntry(PatternEntry):
+    """
+    Pattern entry that supports replacing matched patterns with replacement graphs.
+    """
+
     normalize_args: Callable[..., list[Any]]
 
     @staticmethod
@@ -1135,6 +1140,10 @@ class ReplacementPatternEntry(PatternEntry):
         replacement_graph: Union[torch.fx.Graph, torch.fx.GraphModule],
         args: Sequence[torch.fx.Node],
     ) -> None:
+        """
+        Replace matched pattern nodes with a replacement graph.
+        """
+
         class Replacer(torch.fx.Interpreter):
             call_method = None  # type: ignore[assignment]
             call_module = None  # type: ignore[assignment]
@@ -1205,7 +1214,9 @@ class ReplacementPatternEntry(PatternEntry):
                 if isinstance(n, torch.fx.Node)
             ]
             has_op_for_dep = any(
-                n.op == "call_function" and n.target == DEP_OP for n in output_nodes
+                n.op == "call_function" and n.target == DEP_OP
+                for n in output_nodes
+                if isinstance(n, torch.fx.Node)
             )
             if has_op_for_dep:
                 # Todo: alternate approach graph walk and find proper index instead of max
@@ -2305,7 +2316,6 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
     return node.target
 
 
-
 @torch.library.custom_op(
     "pattern_matcher::op_for_dependencies", mutates_args=OrderedSet(["t"])
 )
@@ -2377,6 +2387,8 @@ def add_implict_edges(gm: torch.fx.GraphModule) -> None:
     def mutated_arg_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
         if not is_mutation_op(node):
             return []
+        if not hasattr(node.target, "_schema"):
+            return []
 
         mutable_names, _ = get_mutable_args_from_schema(node.target._schema)
         if not mutable_names:
@@ -2385,11 +2397,14 @@ def add_implict_edges(gm: torch.fx.GraphModule) -> None:
         mutated = []
         for idx, arg in enumerate(node.target._schema.arguments):
             if arg.name in mutable_names:
-                val = node.args[idx] if idx < len(node.args) else node.kwargs.get(arg.name)
+                val = (
+                    node.args[idx]
+                    if idx < len(node.args)
+                    else node.kwargs.get(arg.name)
+                )
                 if isinstance(val, torch.fx.Node):
                     mutated.append(val)
         return mutated
-
 
     def topo_index() -> dict[torch.fx.Node, int]:
         return {n: i for i, n in enumerate(gm.graph.nodes)}
