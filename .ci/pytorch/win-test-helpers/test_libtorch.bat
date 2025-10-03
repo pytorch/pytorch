@@ -29,6 +29,9 @@ for /r "." %%a in (*.exe) do (
   set EXE_LIST=!EXE_LIST! cpp/%%~na
 )
 
+cd %CWD%
+set CPP_TESTS_DIR=%TMP_DIR_WIN%\build\torch\test
+
 :: Run python test\run_test.py on the list
 python test\run_test.py --cpp --verbose -i !EXE_LIST! ^
   --exclude ^
