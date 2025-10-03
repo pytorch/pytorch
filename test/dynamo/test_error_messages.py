@@ -1743,6 +1743,43 @@ class ErrorMessageClarityTest(TestCase):
                 make_tensor(self.N, dtype=torch.float32, device=device),
             )
 
+    def test_iterable_with_failing_iter_error_message(self, device):
+        class FailingIterator:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise RuntimeError("Iterator access failed")
+
+        class IterableWithFailingIter:
+            def __iter__(self):
+                return FailingIterator()
+
+        lib_name = "test_clarity_failing_iter"
+        self.opSetup(lib_name)
+
+        @torch.compile
+        def f(sz, x, obj):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.test_clarity_failing_iter.iterator_mismatch.default(
+                x, obj
+            )
+            return torch.ops.aten.sort.default(r1)
+
+        failing_obj = IterableWithFailingIter()
+
+        with self.assertRaisesRegex(
+            Exception,
+            re.escape(
+                """test_clarity_failing_iter::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'IterableWithFailingIter(empty)'."""
+            ),
+        ):
+            f(
+                torch.tensor([self.S0, self.S1], device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
+                failing_obj,
+            )
+
     def test_noniter_contents_error_message(self, device):
         lib_name = "test_clarity_noniter"
         self.opSetup(lib_name)
