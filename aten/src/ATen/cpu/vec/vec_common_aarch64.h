@@ -10,11 +10,15 @@
 
 #ifdef CPU_CAPABILITY_SVE128
 
-#include <ATen/cpu/vec/vec128/vec128_float_neon.h>
+#include <ATen/cpu/vec/vec128/vec128_float_sve.h>
 
+#include <ATen/cpu/vec/vec128/vec128_half_sve.h>
+
+#ifdef __ARM_FEATURE_BF16
+#include <ATen/cpu/vec/vec128/vec128_bfloat16_sve.h>
+#else
 #include <ATen/cpu/vec/vec128/vec128_bfloat16_neon.h>
-
-#include <ATen/cpu/vec/vec128/vec128_half_neon.h>
+#endif
 
 #include <ATen/cpu/vec/vec128/vec128_convert.h>
 
