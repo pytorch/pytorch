@@ -990,15 +990,22 @@ def load_pt2(
 
     from torch._inductor.cpp_builder import normalize_path_separator
 
-    if not (
-        (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
-        or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
-    ):
-        # TODO: turn this into an error in 2.9
-        logger.warning(
-            "Unable to load package. f must be a buffer or a file ending in "
-            ".pt2. Instead got {%s}",
-            f,
+    if isinstance(f, (io.IOBase, IO)):
+        if not (f.readable() and f.seekable()):
+            raise TypeError(
+                "Unable to load package. `f` must be a buffer (i.e. a readable and "
+                "seekable file-like object) or a string path. "
+                f"Instead got {type(f).__name__}."
+            )
+    elif isinstance(f, (str, os.PathLike)):
+        if not os.fspath(f).endswith(".pt2"):
+            logger.warning("Path does not end with .pt2; proceeding anyway: {%s}", f)
+        f = os.fspath(f)
+    else:
+        raise TypeError(
+            "Unable to load package. `f` must be a buffer (i.e. a readable and "
+            "seekable file-like object) or a string path. "
+            f"Instead got {type(f).__name__}."
         )
 
     if isinstance(f, (str, os.PathLike)):
