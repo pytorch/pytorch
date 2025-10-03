@@ -104,11 +104,11 @@ int64_t _nnz_sparse(const SparseTensor& self) {
 // native_functions.yaml
 
 Tensor _indices_sparse(const SparseTensor& self) {
-  return get_sparse_impl(self)->indices();
+  return get_sparse_impl(self)->indices().alias();
 }
 
 Tensor _values_sparse(const SparseTensor& self) {
-  return get_sparse_impl(self)->values();
+  return get_sparse_impl(self)->values().alias();
 }
 
 Tensor& _coalesced_sparse_(SparseTensor& self, bool coalesced) {
