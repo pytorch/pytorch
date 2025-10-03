@@ -8,7 +8,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
+from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
@@ -36,7 +36,7 @@ from .wrapper import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from ..graph import GraphLowering
 

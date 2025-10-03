@@ -2,8 +2,8 @@
 import functools
 import itertools
 import logging
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, cast, Optional, Union
 
 import sympy
 from sympy import Expr

@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 import itertools
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import auto, Enum
 from typing import Optional, TYPE_CHECKING

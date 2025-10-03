@@ -6,20 +6,11 @@ import random
 import signal
 import string
 import traceback
-from collections.abc import KeysView, Sequence
+from collections.abc import Callable, KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
-from typing import (
-    Any,
-    Callable,
-    get_args,
-    get_origin,
-    Literal,
-    Optional,
-    TypeVar,
-    Union,
-)
+from typing import Any, get_args, get_origin, Literal, Optional, TypeVar, Union
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition

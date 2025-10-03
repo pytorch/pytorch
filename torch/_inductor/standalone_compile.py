@@ -6,7 +6,7 @@ import os
 import pickle
 import shutil
 from contextlib import AbstractContextManager, nullcontext
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING
+from typing import Any, Literal, Optional, TYPE_CHECKING
 
 import torch.fx
 from torch._dynamo.utils import dynamo_timed
@@ -21,7 +21,7 @@ from . import config
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.compiler._cache import CacheInfo
     from torch.fx import GraphModule

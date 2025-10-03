@@ -5,7 +5,8 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, Optional, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

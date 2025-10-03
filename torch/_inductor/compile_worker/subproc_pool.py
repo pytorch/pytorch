@@ -11,10 +11,11 @@ import sys
 import threading
 import traceback
 import typing
+from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from enum import Enum, IntEnum
-from typing import Any, Callable, IO, Optional, TypeVar
+from typing import Any, IO, Optional, TypeVar
 from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read

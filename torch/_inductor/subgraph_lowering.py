@@ -2,10 +2,10 @@
 
 import functools
 import operator
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch

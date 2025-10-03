@@ -13,8 +13,8 @@ import pickle
 import pstats
 import shutil
 import traceback
-from collections.abc import Iterator, Sequence
-from typing import Any, Callable, IO, Optional, Union
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any, IO, Optional, Union
 from unittest.mock import patch
 
 import torch

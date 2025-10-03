@@ -8,9 +8,9 @@ import operator
 import re
 import sys
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import sympy
 

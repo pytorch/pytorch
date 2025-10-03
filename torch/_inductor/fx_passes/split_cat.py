@@ -4,9 +4,8 @@ import logging
 import operator
 import os
 from collections import defaultdict
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
-from typing_extensions import TypeAlias
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TypeAlias, Union
 
 import torch
 from torch._dynamo.utils import counters

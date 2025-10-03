@@ -1,7 +1,8 @@
 import collections
 import logging
 from collections import defaultdict
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 import torch.distributed as dist

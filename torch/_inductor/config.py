@@ -1,6 +1,7 @@
 import os
 import sys
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass

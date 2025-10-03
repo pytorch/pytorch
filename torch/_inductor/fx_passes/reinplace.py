@@ -3,9 +3,9 @@ import itertools
 import logging
 import operator
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Union
+from typing import Any, cast, Union
 
 import torch
 import torch.fx.node

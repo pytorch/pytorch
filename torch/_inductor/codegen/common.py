@@ -17,7 +17,6 @@ from enum import auto, Enum
 from itertools import chain
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Generic,
@@ -63,7 +62,7 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, MutableMapping, Sequence
+    from collections.abc import Callable, Iterator, MutableMapping, Sequence
 
     from torch.fx import GraphModule
 
