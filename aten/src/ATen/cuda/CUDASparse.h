@@ -6,13 +6,6 @@
 #define HIPSPARSE_VERSION ((hipsparseVersionMajor*100000) + (hipsparseVersionMinor*100) + hipsparseVersionPatch)
 #endif
 
-// cuSparse Generic API added in CUDA 10.1
-// Windows support added in CUDA 11.0
-#if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && ((CUSPARSE_VERSION >= 10300) || (CUSPARSE_VERSION >= 11000 && defined(_WIN32)))
-#define AT_USE_CUSPARSE_GENERIC_API() 1
-#else
-#define AT_USE_CUSPARSE_GENERIC_API() 0
-#endif
 
 // cuSparse Generic API descriptor pointers were changed to const in CUDA 12.0
 #if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && \
