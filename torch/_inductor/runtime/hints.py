@@ -113,6 +113,14 @@ class HeuristicType(Enum):
     FIXED = auto()
 
 
+def is_reduction_heuristic(heuristic: HeuristicType):
+    return heuristic in (
+        HeuristicType.REDUCTION,
+        HeuristicType.PERSISTENT_REDUCTION,
+        HeuristicType.SPLIT_SCAN,
+    )
+
+
 class AutotuneHint(Enum):
     ONE_ELEMENT_PER_THREAD = 0
 
