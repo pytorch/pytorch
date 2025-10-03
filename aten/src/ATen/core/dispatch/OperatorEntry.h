@@ -217,6 +217,8 @@ class TORCH_API OperatorEntry final {
   const KernelFunction& kernelForDispatchKey(DispatchKey k) const;
   // Returns true if the "computed table" has an entry for a particular key.
   bool hasComputedKernelForDispatchKey(DispatchKey k) const;
+  // Returns a KernelFunction corresponding to the kernel in dispatchTable
+  SafeKernelFunction getComputedKernelForDispatchKey(DispatchKey k) const;
   // Returns all the operator tags added at the time of registration
   const std::vector<at::Tag>& getTags() const;
   void setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> callback);

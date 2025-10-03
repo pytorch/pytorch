@@ -219,6 +219,7 @@ may skip CUDAGraph when necessary. Here, we list common reasons for skipping CUD
   [dynamic shapes](https://pytorch.org/docs/stable/torch.compiler_dynamic_shapes.html).
   CUDAGraph Trees currently record a CUDAGraph for every unique input tensor shapes.
   Please see *Dynamic Shape Support* for more details.
+- **CUDAGraph-unsafe custom ops**: Some custom ops may include cudagraph unsafe ops, which causes cudagraph to be skipped. Please see *CUDAGraph Unsafe Custom Ops* for more details.
 - **Incompatible operators**: CUDAGraph Trees skip a function if it contain incompatible
   operators. Please replace these operators in a function with supported operators. We
   show an exhaustive list of incompatible operators:
@@ -248,6 +249,49 @@ run_with_rng_state
 aten._local_scalar_dense
 aten._assert_scalar
 ```
+
+### CUDAGraph Unsafe Custom Ops
+Custom ops are assumed to be safe for CUDAGraph by default. However, some custom ops may include unsupported ops such as cpu ops. Since custom op are treated as black boxes by the compiler, users must explicitly mark these ops as unsafe for CUDAGraph by setting the `torch._C.Tag.cudagraph_unsafe` tag, as demonstrated in the example below. When a function contains cudagraph-unsafe custom ops, it will be skipped by CUDAGraph unless *CUDAGraph partition* is enabled.
+
+```python
+@torch.library.custom_op(
+    "mylib::modify",
+    mutates_args=(),
+    tags=(torch._C.Tag.cudagraph_unsafe,),
+)
+def modify(pic: torch.Tensor) -> torch.Tensor:
+    pic1 = pic + 1
+    pic1_cpu = (pic1.cpu() + 1) * 2
+    return pic1_cpu.cuda() + pic
+
+@modify.register_fake
+def _(pic):
+    return torch.empty_like(pic)
+```
+
+### CUDAGraph Partition
+
+As we discussed earlier, CUDAGraph does not support some ops (e.g., cpu ops) which may limit its adoption. CUDAGraph partition is a compiler solution that automatically splits off these ops, reorders ops to reduce the number of partitions, and applies CUDAGraph to each partition individually. Please set `torch._inductor.config.graph_partition=True` to enable CUDAGraph partition.
+
+Consider the following example where `x` and `y` are gpu inputs but `y_cpu` is a cpu tensor. Without graph partition, this function must be skipped due to cpu ops. With graph partition, the CPU ops are split off, and the remaining GPU ops are cudagraphified, resulting in two separate separate CUDAGraphs.
+
+```python
+def f(x, y):
+    x1 = x + 1
+    y1 = y + 1
+    y_cpu = y1.cpu() + 1
+    z = x @ y
+    return x1 + y1 + z + y_cpu.cuda()
+```
+
+Currently, CUDAGraph partition supports splitting off the following types of ops:
+
+- **Non-GPU Ops**: Popular examples include computation on cpu tensors.
+- **Device Copy Ops**: Data transfers between devices, such as the `y1.cpu()` in the example above.
+- **Control Flow Ops**: [Control flow ops](https://docs.pytorch.org/docs/stable/cond.html) are split off since they are not yet supported by CUDAGraph.
+- **CUDAGraph Unsafe Custom Ops**: Custom ops tagged with `torch._C.Tag.cudagraph_unsafe` are split off. See *CUDAGraph Unsafe Custom Ops* section for details.
+- **Unbacked Symints**: Please refer to *Dynamic Shape Support* section for more information.
+
 
 ### Limitations
 

@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -16,10 +15,7 @@ from torch.testing._internal.common_device_type import (
     onlyHPU,
 )
 from torch.testing._internal.common_utils import skipIfHpu
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 class Seq(torch.nn.Module):
@@ -133,7 +129,7 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_ts(self, device):
         self._check_backend_works("aot_ts", device)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_aot_cudagraphs(self, device):
         self._check_backend_works("cudagraphs", device)
 
@@ -308,23 +304,15 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         backends_group = "torch_dynamo_backends"
         name = "mycustombackend"
 
-        mock_3_9 = MagicMock()
-        mock_3_9.load.return_value = lambda: "mocked 3.9"
-        mock_3_9.name = name
-
         mock_3_10 = MagicMock()
         mock_3_10.load.return_value = lambda: "mocked 3.10"
 
         def mock_eps(group=None):
-            if sys.version_info < (3, 10):
-                return {backends_group: [mock_3_9]}
-            else:
-                assert group == backends_group, group
-                mock_group = MagicMock()
-                mock_group.names = [name]
-                mock_group[name] = mock_3_10
-                # mock_group[name].load.return_value = lambda: "mocked 3.10"
-                return mock_group
+            assert group == backends_group, group
+            mock_group = MagicMock()
+            mock_group.names = [name]
+            mock_group[name] = mock_3_10
+            return mock_group
 
         with patch("importlib.metadata.entry_points", mock_eps):
             from torch._dynamo.backends import registry
@@ -389,7 +377,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
 
-devices = ["cpu", "cuda", "hpu"]
+devices = ["cpu", "cuda", "hpu", "xpu"]
 instantiate_device_type_tests(TestOptimizations, globals(), only_for=devices)
 
 if __name__ == "__main__":

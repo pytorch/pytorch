@@ -827,7 +827,7 @@ class TestFuseFx(QuantizationTestCase):
         named_modules = dict(m.named_modules())
         for node in m.graph.nodes:
             if node.op == "call_module" and type(named_modules[node.target]) == torch.nn.Conv2d:
-                self.assertTrue(len(node.args) == 2), "Expecting the fused op to have two arguments"
+                self.assertTrue(len(node.args) == 2, msg="Expecting the fused op to have two arguments")
 
     def test_fusion_pattern_with_matchallnode(self):
         """This test tests that the node matched by MatchAllNode will be regared as an input

@@ -294,7 +294,7 @@ def preferred_rocm_fa_library(
     [ROCm-only]
     Override the backend PyTorch uses in ROCm environments for Flash Attention. Choose between AOTriton and CK
 
-    .. warning:: This flag is experimeental and subject to change.
+    .. warning:: This flag is experimental and subject to change.
 
     When Flash Attention is enabled and desired, PyTorch defaults to using AOTriton as the backend.
     This flag (a :class:`str`) allows users to override this backend to use composable_kernel

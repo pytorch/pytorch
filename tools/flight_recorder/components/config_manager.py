@@ -67,6 +67,13 @@ class JobConfig:
         )
         self.parser.add_argument("-j", "--just_print_entries", action="store_true")
         self.parser.add_argument("-v", "--verbose", action="store_true")
+        self.parser.add_argument("--print_stack_trace", action="store_true")
+        self.parser.add_argument(
+            "--mismatch_cap",
+            type=int,
+            default=10,
+            help="Maximum number of mismatches we print (from earliest).",
+        )
 
     def parse_args(
         self: "JobConfig", args: Optional[Sequence[str]]

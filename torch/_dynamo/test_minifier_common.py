@@ -111,6 +111,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     def _maybe_subprocess_run(
         self, args: Sequence[Any], *, isolate: bool, cwd: Optional[str] = None
     ) -> subprocess.CompletedProcess[bytes]:
+        from torch._inductor.cpp_builder import normalize_path_separator
+
         if not isolate:
             assert len(args) >= 2, args
             assert args[0] == "python3", args
@@ -121,7 +123,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
             else:
                 assert len(args) >= 2, args
                 with open(args[1]) as f:
-                    code = f.read()
+                    # Need normalize path of the code.
+                    code = normalize_path_separator(f.read())
                 args = args[1:]
 
             # WARNING: This is not a perfect simulation of running

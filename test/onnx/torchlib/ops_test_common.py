@@ -12,8 +12,8 @@ import pprint
 import sys
 import unittest
 import warnings
-from collections.abc import Collection, Iterable, Mapping, Sequence
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from typing import Any, Optional, TypeVar
 
 import error_reproduction
 import numpy as np
@@ -246,7 +246,7 @@ def duplicate_opinfo_for_prims(
             new_opinfo = copy.deepcopy(opinfo)
             new_opinfo.name = new_name
             new_opinfo.op = getattr(torch.ops.prims, prims_name)
-            opinfos.append(new_opinfo)
+            opinfos.append(new_opinfo)  # noqa: B909
             return
     raise RuntimeError(f"OpInfo '{name}' not found in the database.")
 

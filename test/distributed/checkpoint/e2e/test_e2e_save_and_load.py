@@ -279,7 +279,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
                     use_async_staging=zoc,
                     use_shared_memory=use_shared_memory,
                     use_pinned_memory=zoc,
-                    use_cuda_non_blocking_copy=zoc,
+                    use_non_blocking_copy=zoc,
                 )
                 stager = DefaultStager(staging_options)
             async_save_response_or_future = saver.async_save(

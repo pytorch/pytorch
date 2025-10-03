@@ -6,8 +6,8 @@ import itertools
 import warnings
 import weakref
 from collections import namedtuple, OrderedDict
-from collections.abc import Iterator, Mapping
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import Self
 
 import torch
@@ -476,7 +476,7 @@ class Module:
     call_super_init: bool = False
     _compiled_call_impl: Optional[Callable] = None
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Initialize internal Module state, shared by both nn.Module and ScriptModule."""
         torch._C._log_api_usage_once("python.nn_module")
 
@@ -568,7 +568,9 @@ class Module:
             raise KeyError('buffer name can\'t be empty string ""')
         elif hasattr(self, name) and name not in self._buffers:
             raise KeyError(f"attribute '{name}' already exists")
-        elif tensor is not None and not isinstance(tensor, torch.Tensor):
+        elif tensor is not None and not (
+            isinstance(tensor, torch.Tensor) or hasattr(tensor, "__torch_function__")
+        ):
             raise TypeError(
                 f"cannot assign '{torch.typename(tensor)}' object to buffer '{name}' "
                 "(torch Tensor or None required)"
@@ -927,8 +929,12 @@ class Module:
             for module in self.children():
                 module._apply(fn)
 
+        from torch._subclasses.fake_tensor import FakeTensor
+
         def compute_should_use_set_data(tensor, tensor_applied) -> bool:
-            if torch._has_compatible_shallow_copy_type(tensor, tensor_applied):
+            if torch._has_compatible_shallow_copy_type(
+                tensor, tensor_applied
+            ) and not isinstance(tensor_applied, FakeTensor):
                 # If the new tensor has compatible tensor type as the existing tensor,
                 # the current behavior is to change the tensor in-place using `.data =`,
                 # and the future behavior is to overwrite the existing tensor. However,
@@ -954,8 +960,6 @@ class Module:
             with torch.no_grad():
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
-
-            from torch._subclasses.fake_tensor import FakeTensor
 
             # subclasses may have multiple child tensors so we need to use swap_tensors
             p_should_use_swap_tensors = (
@@ -2024,7 +2028,10 @@ class Module:
             else:
                 buffers = self.__dict__.get("_buffers")
                 if isinstance(value, Buffer) or buffers is not None and name in buffers:
-                    if value is not None and not isinstance(value, torch.Tensor):
+                    if value is not None and not (
+                        isinstance(value, torch.Tensor)
+                        or hasattr(value, "__torch_function__")
+                    ):
                         raise TypeError(
                             f"cannot assign '{torch.typename(value)}' as buffer '{name}' "
                             "(torch.nn.Buffer, torch.Tensor or None expected)"

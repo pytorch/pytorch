@@ -100,9 +100,7 @@ kernel void triul(
 
 INSTANTIATE_TRIUL_KERNELS(float, int);
 INSTANTIATE_TRIUL_KERNELS(half, int);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_TRIUL_KERNELS(bfloat, int);
-#endif
 
 INSTANTIATE_TRIUL_KERNELS(float2, int);
 INSTANTIATE_TRIUL_KERNELS(half2, int);

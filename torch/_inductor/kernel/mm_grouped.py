@@ -135,7 +135,7 @@ triton_grouped_mm_source = r"""
 {{def_kernel("a_ptr", "b_ptr")}}
 {%- endif %}
 {%- endif %}
-    tidx = tl.program_id(0)
+    tidx = tl.program_id(0).to(INDEX_DTYPE)
 
 {%- set M_IS_VARYING = A_IS_2D and not B_IS_2D %}
 {%- set N_IS_VARYING = not A_IS_2D and B_IS_2D %}
@@ -316,30 +316,29 @@ triton_grouped_mm_source = r"""
 {%- else %}
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
-                offs_k = k_start_offset + tl.arange(0, BLOCK_K)
-                a_ptrs = (
-                    a_ptr
-{%- if not A_IS_2D %}
-                    + g * A_STRIDE_G
-{%- endif %}
-                    + (m_start_offset + offs_am[:, None]) * A_STRIDE_M
-                    + offs_k[None, :] * A_STRIDE_K
-                )
-                b_ptrs = (
-                    b_ptr
-{%- if not B_IS_2D %}
-                    + g * B_STRIDE_G
-{%- endif %}
-                    + (n_start_offset + offs_bn[:, None]) * B_STRIDE_N
-                    + offs_k[None, :] * B_STRIDE_K
-                )
                 for k_offset in range(0, k_size, BLOCK_K):
-                    a = tl.load(a_ptrs, mask=offs_am[:, None] < m_size)
-                    b = tl.load(b_ptrs, mask=offs_bn[:, None] < n_size)
-                    if k_offset + BLOCK_K > k_size:
-                        group_offs_k = k_offset + tl.arange(0, BLOCK_K)
-                        a = tl.where(group_offs_k < k_size, a, 0)
-                        b = tl.where(group_offs_k < k_size, b, 0)
+                    group_offs_k = k_offset + tl.arange(0, BLOCK_K)
+                    offs_k = group_offs_k + k_start_offset
+                    a_ptrs = (
+                        a_ptr
+{%- if not A_IS_2D %}
+                        + g * A_STRIDE_G
+{%- endif %}
+                        + (m_start_offset + offs_am[:, None]) * A_STRIDE_M
+                        + offs_k[None, :] * A_STRIDE_K
+                    )
+                    b_ptrs = (
+                        b_ptr
+{%- if not B_IS_2D %}
+                        + g * B_STRIDE_G
+{%- endif %}
+                        + (n_start_offset + offs_bn[:, None]) * B_STRIDE_N
+                        + offs_k[None, :] * B_STRIDE_K
+                    )
+                    a_mask = (offs_am[:, None] < m_size) & (group_offs_k[None, :] < k_size)
+                    b_mask = (offs_bn[:, None] < n_size) & (group_offs_k[None, :] < k_size)
+                    a = tl.load(a_ptrs, mask=a_mask, other=0)
+                    b = tl.load(b_ptrs, mask=b_mask, other=0)
 {%- if USE_FAST_ACCUM %}
                     accumulator = tl.dot(a, b.T, accumulator)
 {%- else %}
@@ -361,6 +360,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_am[:, None],
                     mask=offs_am[:, None] < m_size,
+                    other=0,
                 )
                 scale_b = tl.load(
                     scale_b_ptr
@@ -371,6 +371,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_bn[None, :],
                     mask=offs_bn[None, :] < n_size,
+                    other=0,
                 )
                 c = accumulator.to(tl.float32) * scale_a * scale_b
 {%- else %}
@@ -387,11 +388,11 @@ triton_grouped_mm_source = r"""
 {%- else %}
                 idx_n = offs_bn[None, :]
 {%- endif %}
-                mask = offs_am[:, None] < m_size and offs_bn[None, :] < n_size
+                mask = (offs_am[:, None] < m_size) & (offs_bn[None, :] < n_size)
 {%- if M_IS_VARYING or N_IS_VARYING %}
-                {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16)}}
+                {{store_output(("idx_m", "idx_n"), "c", "mask", indent_width=16, val_shape=("BLOCK_M", "BLOCK_N"))}}
 {%- else %}
-                {{store_output(("g", "idx_m", "idx_n"), "c", "mask", indent_width=16)}}
+                {{store_output(("g", "idx_m", "idx_n"), "c", "mask", indent_width=16, val_shape=("BLOCK_M", "BLOCK_N"))}}
 {%- endif %}
                 tidx += NUM_SMS
 
@@ -469,7 +470,7 @@ def grouped_mm_args(
 aten__grouped_mm = ExternKernelChoice(
     torch._grouped_mm,
     "at::_grouped_mm",
-    op_overload=aten._grouped_mm,
+    op_overload=aten._grouped_mm.default,
     has_out_variant=False,
 )
 
@@ -477,7 +478,7 @@ aten__grouped_mm = ExternKernelChoice(
 aten__scaled_grouped_mm = ExternKernelChoice(
     torch._scaled_grouped_mm,
     "at::_scaled_grouped_mm",
-    op_overload=aten._scaled_grouped_mm,
+    op_overload=aten._scaled_grouped_mm.default,
     has_out_variant=False,
 )
 
@@ -734,6 +735,9 @@ def tuned_scaled_grouped_mm(
     layout: Optional[Layout] = None,
 ) -> TensorBox:
     """Auto-tuning for _scaled_grouped_mm() operator."""
+
+    # matching _scaled_grouped_mm_cuda Blas.cpp implementation
+    out_dtype = out_dtype or torch.bfloat16
 
     return _tuned_grouped_mm_common(
         "aten._scaled_grouped_mm.default",

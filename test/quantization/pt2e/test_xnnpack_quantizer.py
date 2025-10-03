@@ -29,7 +29,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
     XNNPACKQuantizer,
 )
-from torch.export import export_for_training
+from torch.export import export
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     PT2EQuantizationTestCase,
@@ -362,7 +362,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         )
         example_inputs = (torch.randn(2, 2),)
         m = M().eval()
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export(m, example_inputs, strict=True).module()
         m = prepare_pt2e(m, quantizer)
         # Use a linear count instead of names because the names might change, but
         # the order should be the same.
@@ -498,7 +498,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
         # program capture
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export(m, example_inputs, strict=True).module()
 
         m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
@@ -763,9 +763,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             model_fx = _convert_to_reference_decomposed_fx(model_fx)
 
             with torchdynamo.config.patch(allow_rnn=True):
-                model_graph = export_for_training(
-                    model_graph, example_inputs, strict=True
-                ).module()
+                model_graph = export(model_graph, example_inputs, strict=True).module()
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(
                 is_per_channel=False, is_dynamic=False
@@ -825,9 +823,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             model_fx = _convert_to_reference_decomposed_fx(model_fx)
 
             with torchdynamo.config.patch(allow_rnn=True):
-                model_graph = export_for_training(
-                    model_graph, example_inputs, strict=True
-                ).module()
+                model_graph = export(model_graph, example_inputs, strict=True).module()
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(
                 is_per_channel=False, is_dynamic=False
@@ -1035,7 +1031,7 @@ class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
             m = torchvision.models.resnet18().eval()
             m_copy = copy.deepcopy(m)
             # program capture
-            m = export_for_training(m, example_inputs, strict=True).module()
+            m = export(m, example_inputs, strict=True).module()
 
             quantizer = XNNPACKQuantizer()
             quantization_config = get_symmetric_quantization_config(is_per_channel=True)

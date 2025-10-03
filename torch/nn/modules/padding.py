@@ -722,6 +722,9 @@ class ZeroPad1d(ConstantPad1d):
         super().__init__(padding, 0.0)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"{self.padding}"
 
 
@@ -776,6 +779,9 @@ class ZeroPad2d(ConstantPad2d):
         super().__init__(padding, 0.0)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"{self.padding}"
 
 
@@ -818,4 +824,7 @@ class ZeroPad3d(ConstantPad3d):
         super().__init__(padding, 0.0)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"{self.padding}"

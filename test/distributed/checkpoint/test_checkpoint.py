@@ -2,7 +2,7 @@
 
 import os
 import sys
-from typing import cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -170,7 +170,9 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
     def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
         return
 
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
+    def set_up_storage_writer(
+        self, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
         self._fail_rank("fail_set_up_storage_writer")
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
@@ -356,13 +358,18 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_load(state_dict)
         self._test_load(state_dict, fail_set_up_storage_reader=[0])
         self._test_load(state_dict, fail_prepare_global_plan=[0])
-        self._test_load(state_dict, fail_read_metadata=[0])
+        self._test_load(state_dict, fail_read_metadata=[0], ignore_exception_type=True)
         self._test_load(state_dict, fail_prepare_local_plan=[1])
         self._test_load(state_dict, fail_read_data=[3])
         self._test_load(state_dict, fail_read_data_async=[1])
 
         self._test_load(state_dict, coordinator=3, fail_set_up_storage_reader=[0])
-        self._test_load(state_dict, coordinator=1, fail_read_metadata=[3])
+        self._test_load(
+            state_dict,
+            coordinator=1,
+            fail_read_metadata=[3],
+            ignore_exception_type=True,
+        )
         self._test_load(state_dict, coordinator=2, fail_read_data=[0])
         self._test_load(state_dict, coordinator=3, fail_read_data_async=[2])
         self._test_load(state_dict, coordinator=1, fail_prepare_global_plan=[1])
@@ -371,7 +378,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         state_dict = {"replicated": torch.rand(10, 10), "bytes": [1, 2, 3, 4]}
         self._test_load(state_dict)
         self._test_load(state_dict, fail_set_up_storage_reader=[0])
-        self._test_load(state_dict, fail_read_metadata=[0])
+        self._test_load(state_dict, fail_read_metadata=[0], ignore_exception_type=True)
         self._test_load(state_dict, fail_prepare_local_plan=[0])
         self._test_load(state_dict, fail_prepare_global_plan=[0])
         self._test_load(state_dict, fail_read_data=[0])

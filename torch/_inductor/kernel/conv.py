@@ -29,7 +29,6 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import mm_config_kwargs
 
 
 if TYPE_CHECKING:
@@ -59,13 +58,6 @@ def conv3d_grid(n, c, d, h, w, meta, *, cdiv):
         cdiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
-
-
-def _is_large_block_for_cpu(m, n, k):
-    # Thresholds are experimentally determined to reduce Triton CPU compile times
-    if m > 256 or n > 256 or k > 256:
-        return True
-    return m * n * k > 2**17
 
 
 LOOP_BODY_2D = """
@@ -125,19 +117,19 @@ conv2d_template = TritonTemplate(
     stride_wh = {{stride("W", 2)}}
     stride_ww = {{stride("W", 3)}}
 
-    nhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    nhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     idx_y_w = nhw % OUT_W
     nh = nhw // OUT_W
     idx_y_h = nh % OUT_H
     idx_n = nh // OUT_H
-    idx_y_c = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    idx_y_c = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C = IN_C // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
@@ -188,7 +180,7 @@ conv2d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -253,21 +245,21 @@ conv3d_template = TritonTemplate(
     stride_wh = {{stride("W", 3)}}
     stride_ww = {{stride("W", 4)}}
 
-    ndhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    ndhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     idx_y_w = ndhw % OUT_W
     ndh = ndhw // OUT_W
     idx_y_h = ndh % OUT_H
     nd = ndh // OUT_H
     idx_y_d = nd % OUT_D
     idx_n = nd // OUT_D
-    idx_y_c = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    idx_y_c = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C = IN_C // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
@@ -326,7 +318,7 @@ conv3d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -587,7 +579,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])  # type: ignore[arg-type]
+        and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)
@@ -599,11 +591,12 @@ def convolution(
 
         conv_configs = V.choices.get_conv_configs(device_type)
 
+        dtype_size = x.get_dtype().itemsize
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+            dtype_size=dtype_size,
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(

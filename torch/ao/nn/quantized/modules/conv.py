@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Quantized convolution modules."""
 
-from typing import ClassVar, Optional
+from typing import ClassVar, Literal, Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -401,7 +401,7 @@ class Conv1d(_ConvNd):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
     ):

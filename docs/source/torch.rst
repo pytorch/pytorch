@@ -146,7 +146,7 @@ Indexing, Slicing, Joining, Mutating Ops
 Accelerators
 ----------------------------------
 Within the PyTorch repo, we define an "Accelerator" as a :class:`torch.device` that is being used
-alongside a CPU to speed up computation. These device use an asynchronous execution scheme,
+alongside a CPU to speed up computation. These devices use an asynchronous execution scheme,
 using :class:`torch.Stream` and :class:`torch.Event` as their main way to perform synchronization.
 We also assume that only one such accelerator can be available at once on a given host. This allows
 us to use the current accelerator as the default device for relevant concepts such as pinned memory,
@@ -475,6 +475,7 @@ Reduction Ops
     var
     var_mean
     count_nonzero
+    hash_tensor
 
 Comparison Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -805,7 +806,6 @@ Operator Tags
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
 .. py:module:: torch.utils.viz
-.. py:module:: torch.functional
 .. py:module:: torch.quasirandom
 .. py:module:: torch.return_types
 .. py:module:: torch.serialization
@@ -815,3 +815,10 @@ Operator Tags
 .. py:module:: torch.torch_version
 .. py:module:: torch.types
 .. py:module:: torch.version
+
+.. Hidden aliases (e.g. torch.functional.broadcast_tensors()). We want `torch.broadcast_tensors()` to
+   be visible only.
+.. toctree::
+    :hidden:
+
+    torch.aliases.md

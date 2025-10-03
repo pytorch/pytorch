@@ -18,7 +18,7 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     IS_BIG_GPU,
@@ -27,6 +27,16 @@ from torch.testing._internal.inductor_utils import (
     RUN_CPU,
     RUN_GPU,
 )
+
+
+if IS_WINDOWS and IS_CI:
+    # TODO(xuhancn) : Debug and confirm pass_fds status on Windows.
+    sys.stderr.write(
+        "Almost UTs failed: pass_fds not supported on Windows, skip them on Windows.\n"
+    )
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise unittest.SkipTest("pass_fds not supported on Windows")
 
 
 # Make the helper files in test/ importable
@@ -52,9 +62,6 @@ test_failures = {
     "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
-    # TODO:remove test_upsample_bicubic2d after the following issue resolved:
-    # https://github.com/intel/intel-xpu-backend-for-triton/issues/4184
-    "test_upsample_bicubic2d": TestFailure(("xpu"), is_skip=False),
 }
 
 
@@ -199,7 +206,8 @@ class TestSubprocess(TestCase):
 
             start = time.time()
             last_report = start
-            while _AsyncFxCompile._stat_compiled_runs < 4:
+            while True:
+                start_stat_compiled_runs = _AsyncFxCompile._stat_compiled_runs
                 # Sleep a bit so we don't drive the CPU unnecessarily.
                 time.sleep(0.25)
 
@@ -211,6 +219,9 @@ class TestSubprocess(TestCase):
 
                 # Backward pass
                 output.sum().backward()
+
+                if _AsyncFxCompile._stat_compiled_runs - start_stat_compiled_runs == 2:
+                    break
 
                 # DEBUGGING: Print a periodic message so we know we're still
                 # running...
@@ -224,12 +235,12 @@ class TestSubprocess(TestCase):
                         "Test timed out before producing a compiled artifact."
                     )
 
-            self.assertEqual(_AsyncFxCompile._stat_compiled_runs, 4)
+            self.assertGreater(_AsyncFxCompile._stat_compiled_runs, 1)
             # Make sure we ran eager at least once. Normally this will be
             # something like 80.
             self.assertGreater(_AsyncFxCompile._stat_eager_runs, 0)
-            self.assertEqual(_AsyncFxCompile._stat_bg_started, 1)
-            self.assertEqual(_AsyncFxCompile._stat_bg_finished, 1)
+            self.assertEqual(_AsyncFxCompile._stat_bg_started, 2)
+            self.assertEqual(_AsyncFxCompile._stat_bg_finished, 2)
 
 
 if RUN_CPU:

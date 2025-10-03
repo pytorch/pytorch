@@ -188,13 +188,15 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
   }
 
   // Now the number of gradients should match
-  if (num_outputs != num_forward_inputs) {
-    std::string msg("function ");
-    msg += name() + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(num_forward_inputs) + ", got ";
-    msg += std::to_string(num_outputs) + ")";
-    throw std::runtime_error(msg);
-  }
+  TORCH_CHECK(
+      num_outputs == num_forward_inputs,
+      "function ",
+      name(),
+      " returned an incorrect number of gradients (expected ",
+      num_forward_inputs,
+      ", got ",
+      num_outputs,
+      ")");
 
   // Massage the Python results tuple back into a C++ variable_list
   return to_variable_list(r.get(), is_variable_input);
@@ -435,24 +437,24 @@ variable_list PyNode::to_variable_list(
     PyObject* output = PyTuple_GET_ITEM(outputs, i);
     bool was_variable = is_variable_input[i];
     if (!was_variable) {
-      if (output != Py_None) {
-        std::string msg("function ");
-        msg += name() + " returned a gradient different than None at position ";
-        msg += std::to_string(i + 1) +
-            ", but the corresponding forward input was not a Variable";
-        throw std::runtime_error(msg);
-      }
+      TORCH_CHECK(
+          output == Py_None,
+          "function ",
+          name(),
+          " returned a gradient different than None at position ",
+          i + 1,
+          ", but the corresponding forward input was not a Variable");
       continue;
     }
     if (output == Py_None) {
       results.emplace_back();
     } else {
-      if (!THPVariable_Check(output)) {
-        std::string msg("expected Variable or None (got ");
-        msg += THPUtils_typename(output);
-        msg += ")";
-        throw std::runtime_error(msg);
-      }
+      TORCH_CHECK(
+          THPVariable_Check(output),
+          "expected Variable or None (got ",
+          THPUtils_typename(output),
+          ")");
+
       results.emplace_back(THPVariable_Unpack(output));
     }
   }
@@ -803,6 +805,7 @@ static void _get_tensors_to_save(
         }
       }
     }
+    Py_CLEAR(self->to_save);
   }
 }
 // Save any variables that requested by to_save
@@ -810,7 +813,7 @@ static void _save_variables(
     const std::vector<std::optional<at::Tensor>>& tensors_to_save,
     const std::shared_ptr<PyNode>& cdata_ptr,
     THPFunction* self) {
-  if (!self->to_save)
+  if (tensors_to_save.empty())
     return;
   size_t num_saved = tensors_to_save.size();
   self->saved_variables.clear();
@@ -823,8 +826,6 @@ static void _save_variables(
       self->saved_variables.emplace_back(opt_tensor.value(), is_output);
     }
   }
-  // Free .to_save
-  Py_CLEAR(self->to_save);
 }
 
 // Mark requires_grad = 0 on non-differentiable variables (as per
@@ -1054,7 +1055,8 @@ void _trace_post_record(
       }
     }
   }
-  py::object onnx_globals = py::module::import("torch.onnx._globals");
+  py::object onnx_globals =
+      py::module::import("torch.onnx._internal.torchscript_exporter._globals");
   py::bool_ is_in_onnx_export =
       py::module::import("torch.onnx.__init__").attr("is_in_onnx_export");
   py::bool_ is_autograd_inlining_enabled =

@@ -2,3 +2,14 @@
 skip:
   all:
     - ~
+  device:
+    cpu:
+      - ~
+    # Skip these additional models when running on aarch64
+    cpu_aarch64:
+      # timeout on aarch64
+      - dm_nfnet_f0
+      - nfnet_l0
+      - resnest101e
+      - swsl_resnext101_32x16d
+      - visformer_small

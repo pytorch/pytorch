@@ -109,6 +109,10 @@ def graph_desc(fn):
 
 
 class TestAutograd(TestCase):
+    def tearDown(self):
+        torch.autograd._force_original_view_tracking(False)
+        super(TestCase, self).tearDown()
+
     def test_copy_slices_graph_task_updates(self):
         def f1(x, y):
             out = x.clone().view(-1)
@@ -1191,6 +1195,33 @@ class TestAutograd(TestCase):
             torch.autograd.backward(
                 tmp_edge, inputs=(x,), grad_tensors=torch.tensor([1.0, 2.0, 3.0, 4.0])
             )
+
+    def test_gradient_edge_graph_ownership(self):
+        # Ensure we own the graph properly
+        class Clone(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gX):
+                return gX.clone()
+
+        inp = torch.rand(1, requires_grad=True).clone()
+
+        # C++ Node
+        out = inp.clone()
+        edge = torch.autograd.graph.get_gradient_edge(out)
+        torch.autograd.backward(edge)
+        del out
+        torch.autograd.backward(edge)
+
+        # python Node
+        out = Clone.apply(inp)
+        edge = torch.autograd.graph.get_gradient_edge(out)
+        torch.autograd.backward(edge)
+        del out
+        torch.autograd.backward(edge)
 
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
@@ -3663,6 +3694,130 @@ class TestAutograd(TestCase):
     def test_sparse_gather_both_scalar(self):
         self._test_sparse_gather((), (), 0)
 
+    @skipIfTorchDynamo("grad_dtype not supported in compile")
+    def test_grad_dtype(self):
+        leaf = torch.tensor([1.0, 2.0], requires_grad=True)
+        # Default to tensor's dtype
+        self.assertEqual(leaf.grad_dtype, torch.float32)
+        leaf.grad_dtype = torch.float16
+        self.assertEqual(leaf.grad_dtype, torch.float16)
+        leaf.grad_dtype = None  # Allow any dtype
+        self.assertIsNone(leaf.grad_dtype)
+
+        # get/set grad_dtype is only allowed on leaf tensors
+        non_leaf = leaf * 2
+        self.assertFalse(non_leaf.is_leaf)
+        with self.assertRaisesRegex(
+            RuntimeError, "grad_dtype can only be accessed on leaf tensors"
+        ):
+            _ = non_leaf.grad_dtype
+        with self.assertRaisesRegex(
+            RuntimeError, "grad_dtype can only be set on leaf tensors"
+        ):
+            non_leaf.grad_dtype = torch.float16
+
+        # Manual setting
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        grad_match = torch.tensor([1.0, 1.0])
+        x.grad = grad_match
+        self.assertEqual(x.grad.dtype, torch.float32)
+
+        x.grad = None
+        x.grad_dtype = torch.float16
+        grad_mismatch = torch.tensor([1.0, 1.0])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "attempting to assign a gradient with dtype.*float.*to a tensor with grad_dtype.*Half",
+        ):
+            x.grad = grad_mismatch
+
+        # When grad_dtype is None, any dtype is allowed
+        x.grad = None
+        x.grad_dtype = None
+        grad_any = torch.tensor([1.0, 1.0], dtype=torch.float64)
+        x.grad = grad_any
+        self.assertEqual(x.grad.dtype, torch.float64)
+
+        # Incoming gradient case
+        class MismatchedGradientFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, inp):
+                return inp * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output.to(torch.float64)
+
+        d = torch.tensor([1.0, 2.0], requires_grad=True)
+        output = MismatchedGradientFunction.apply(d)
+        loss = output.sum()
+        loss.backward()
+        # Default behavior is to cast to tensor dtype
+        self.assertEqual(d.grad.dtype, torch.float32)
+        self.assertTrue(torch.allclose(d.grad, torch.tensor([1.0, 1.0])))
+
+        e = torch.tensor([3.0, 4.0], requires_grad=True)
+        e.grad_dtype = None
+        output_e = MismatchedGradientFunction.apply(e)
+        loss_e = output_e.sum()
+        loss_e.backward()
+        # No casting is done if set to None.
+        self.assertTrue(
+            torch.allclose(e.grad, torch.tensor([1.0, 1.0], dtype=torch.float64))
+        )
+
+        f = torch.tensor([5.0, 6.0], requires_grad=True)
+        f.grad_dtype = torch.float16  # Expect float16 gradients
+        output_f = MismatchedGradientFunction.apply(f)
+        loss_f = output_f.sum()
+        loss_f.backward()
+        self.assertTrue(
+            torch.allclose(f.grad, torch.tensor([1.0, 1.0], dtype=torch.float16))
+        )
+
+        # Setting grad_dtype when gradient already exists
+        g = torch.tensor([1.0, 2.0], requires_grad=True)
+        g.grad = torch.tensor([1.0, 1.0])
+        g.grad_dtype = torch.float32
+        self.assertEqual(g.grad_dtype, torch.float32)
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot set grad_dtype.*because there is already a gradient"
+        ):
+            g.grad_dtype = torch.float16
+        g.grad_dtype = None
+        self.assertIsNone(g.grad_dtype)
+        g.grad = None
+        g.grad_dtype = torch.float16
+        self.assertEqual(g.grad_dtype, torch.float16)
+
+        # Test the case where there is an existing accumulate grad
+        h = torch.tensor([1.0, 2.0], requires_grad=True)
+        _ = h.clone()
+        h.grad_dtype = None
+        output = MismatchedGradientFunction.apply(h)
+        output.sum().backward()
+        self.assertEqual(h.grad.dtype, torch.float64)
+
+        # Mixed accumulation cases
+        k = torch.tensor([1.0, 2.0], requires_grad=True)
+        k.grad_dtype = None
+        y = k * 2
+        y.sum().backward()
+        k.grad = k.grad.to(torch.bfloat16)
+        y2 = k * 3
+        # Doesn't type promote to float32, always coerce to current .grad's dtype.
+        # This is because the accumulation is done in-place on the existing grad.
+        self.assertEqual(k.grad.dtype, torch.bfloat16)
+
+        l = torch.tensor([3.0, 4.0], requires_grad=True, dtype=torch.bfloat16)
+        l.grad_dtype = None
+        z = l * 2
+        z.sum().backward()
+        l.grad = l.grad.to(torch.float32)
+        z2 = l * 3
+        z2.sum().backward()
+        self.assertEqual(l.grad.dtype, torch.float32)
+
     def test_gc_in_destructor(self):
         """
         Previously, if a Function destructor triggered a garbage collection,
@@ -3856,6 +4011,38 @@ class TestAutograd(TestCase):
         y = double2(x)
         torch.autograd.grad(y, x, create_graph=True)
         torch.autograd.grad(y, x)  # should not error!
+
+    def test_custom_autograd_ac_early_stop(self):
+        refs = []
+
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x.clone()
+                ctx.save_for_backward(y)
+                refs.append(weakref.ref(y))
+                return y
+
+            @staticmethod
+            def backward(ctx, *args):
+                _ = ctx.saved_tensors
+                return None
+
+        def fn(inp):
+            return Test.apply(inp)
+
+        inp = torch.randn(5, 5, requires_grad=True)
+
+        def scope():
+            # Early-stop is true by default in non-reentrant torch.utils.checkpoint
+            out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=False)
+            out.sum().backward()
+
+        with disable_gc():
+            scope()
+
+            for ref in refs:
+                self.assertIsNone(ref())
 
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
@@ -7888,6 +8075,35 @@ for shape in [(1,), ()]:
         results = torch._foreach_maximum(input_tensors, scalars)
         for t in results:
             self.assertEqual(t.grad_fn._saved_scalars, scalars)
+
+    def test_get_data_and_hooks_from_raw_saved_variable(self):
+        def pack_hook(t):
+            return t
+
+        def unpack_hook(t):
+            return t
+
+        a = torch.tensor(2.0, requires_grad=True)
+
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            b = a**2
+
+        c = b.exp()
+        d = c**2
+
+        pow_sv = b.grad_fn._raw_saved_self
+        exp_sv = c.grad_fn._raw_saved_result
+        pow2_sv = d.grad_fn._raw_saved_self
+
+        # Returns the packed object as-is
+        self.assertTrue(pow_sv.data is a)
+        self.assertTrue(pow_sv.unpack_hook is unpack_hook)
+        # Returns the detached data when the output/leaf is saved
+        self.assertFalse(exp_sv.data is c)
+        self.assertIsNone(exp_sv.unpack_hook)
+        # Returns the un-detached data when input is saved
+        self.assertTrue(pow2_sv.data is c)
+        self.assertIsNone(pow2_sv.unpack_hook)
 
     def test_cant_create_saved_tensors(self):
         with self.assertRaisesRegex(
@@ -12392,6 +12608,29 @@ class TestAutogradDeviceType(TestCase):
         x.resize_as_(y)
         self.assertEqual(x._version, 2)
 
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    def test_zero_dim_param_mixed_device_grad(self, device):
+        # cpu 0-dim params with an accelerator device grad
+        # https://github.com/pytorch/pytorch/issues/160084
+        class RegressionModel(torch.nn.Module):
+            def __init__(self, a=0, b=0):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.tensor(a).float())
+                self.b = torch.nn.Parameter(torch.tensor(b).float())
+
+            def forward(self, x):
+                return x * self.a + self.b
+
+        # Keep the model on cpu as we do want to test the mixed cpu/accelerator behavior here
+        model = RegressionModel()
+        inputs = torch.randn(4, 10, device=device)
+        out = model(inputs)
+        out.sum().backward()
+        self.assertIsNotNone(model.a.grad)
+        self.assertIsNotNone(model.b.grad)
+        self.assertEqual(model.a.grad.device, torch.device("cpu"))
+        self.assertEqual(model.b.grad.device, torch.device("cpu"))
+
 
 class TestAllowMutationOnSaved(TestCase):
     def assertClonedLenEqual(self, ctx, n):
@@ -14087,13 +14326,27 @@ class TestNestedCheckpoint(TestCase):
             # early stop is enabled.
             return clone(x.sin().cos())
 
+        # Test default
         # Early stopping is enabled by default
         a = torch.tensor(1.0, requires_grad=True)
         out = checkpoint(fn, a, use_reentrant=False)
         out.backward()
         self.assertEqual(counter[0], 1)
 
-        # Try using the context manager to set early stopping to False.
+        # Test local setting
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        out = checkpoint(fn, a, use_reentrant=False, early_stop=False)
+        out.backward()
+        self.assertEqual(counter[0], 2)
+
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        out = checkpoint(fn, a, use_reentrant=False, early_stop=True)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Test context manager
         # Expect early stopping to be disabled for all checkpoints ran under
         # the context manager, even though context manager is no longer active
         # when backward/recomputation is performed.
@@ -14101,9 +14354,39 @@ class TestNestedCheckpoint(TestCase):
         a = torch.tensor(1.0, requires_grad=True)
         with torch.utils.checkpoint.set_checkpoint_early_stop(False):
             out = checkpoint(fn, a, use_reentrant=False)
-
         out.backward()
         self.assertEqual(counter[0], 2)
+
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(True):
+            out = checkpoint(fn, a, use_reentrant=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Test context manager nesting
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            with torch.utils.checkpoint.set_checkpoint_early_stop(True):
+                out = checkpoint(fn, a, use_reentrant=False, early_stop=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Test precedence
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            out = checkpoint(fn, a, use_reentrant=False, early_stop=True)
+        out.backward()
+        self.assertEqual(counter[0], 2)
+
+        counter = [0]
+        a = torch.tensor(1.0, requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(True):
+            out = checkpoint(fn, a, use_reentrant=False, early_stop=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
 
     def test_nested_checkpoint_set_early_stop_no_recompution_needed(self):
         # Case 1: We have one tensor saved and its the input

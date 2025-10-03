@@ -8,9 +8,9 @@ import linecache
 import os
 import sys
 import types
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 from weakref import WeakValueDictionary
 
 import torch
@@ -108,6 +108,7 @@ class PackageImporter(Importer):
             self.filename = "<pytorch_file_reader>"
             self.zip_reader = file_or_buffer
         elif isinstance(file_or_buffer, (os.PathLike, str)):
+            # pyrefly: ignore  # no-matching-overload
             self.filename = os.fspath(file_or_buffer)
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
@@ -423,7 +424,12 @@ class PackageImporter(Importer):
                         module.__dict__.setdefault(old_name, new_name)
 
                 return module
-        return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore[attr-defined]
+        return self._make_module(
+            name,
+            cur.source_file,  # type: ignore[attr-defined]
+            isinstance(cur, _PackageNode),
+            parent,
+        )
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
         source = self.zip_reader.get_record(fullpath)
