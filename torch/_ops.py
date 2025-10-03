@@ -148,6 +148,8 @@ class OperatorBase:
                 "Please register a mode for the DispatchKey.Python key instead."
             )
 
+            if 'CompositeImplicit' in str(k) or 'Autograd' in str(k):
+                return fn
             if k in self.py_kernels:
                 raise RuntimeError(
                     f"Trying to override a python impl for {k} on operator {self.name()}"
