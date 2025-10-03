@@ -172,6 +172,7 @@ from user code:
 
         record = self.getRecord(records, "Graph break in user code")
         msg = re.sub(r"TRACE.*\n", "", record.getMessage(), flags=re.MULTILINE)
+        # msg =
 
         # TODO: This should also report the enclosing frames; need to plumb
         # frame object to it
