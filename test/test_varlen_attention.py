@@ -163,7 +163,7 @@ class TestVarlenAttention(NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    def test_custom_op_registration_with_logging(self, device, dtype):
+    def test_custom_op_registration(self, device, dtype):
         torch.manual_seed(42)
 
         shape = VarlenShape(batch_size=2, max_seq_len=512, embed_dim=1024, num_heads=16)
@@ -180,8 +180,11 @@ class TestVarlenAttention(NNTestCase):
             [0, shape.max_seq_len, total_tokens], device=device, dtype=torch.int32
         )
 
+        compiled_forward = torch.compile(
+            attention_block.forward_varlen, backend="eager"
+        )
         with OpLoggingMode() as mode:
-            output = attention_block.forward_varlen(
+            output = compiled_forward(
                 x_packed, cu_seq, shape.max_seq_len, is_causal=False
             )
             self.assertEqual(output.shape, (total_tokens, shape.embed_dim))
@@ -194,6 +197,7 @@ class TestVarlenAttention(NNTestCase):
             "torch_nn_attention._varlen_attn" in op for op in called_ops
         )
         assert custom_op_called
+
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
