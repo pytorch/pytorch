@@ -301,6 +301,151 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.backward()
         print("Compile Success! ✅")
 
+    @pytest.mark.xfail(reason="Issue #164256")
+    def test_fuzzer_issue_164256(self):
+        """Test case for Triton grouped MM kernel TMA loads issue."""
+        torch.manual_seed(4321)
+
+        def foo(arg0, arg1, arg2):
+            t0 = arg0  # size=(8, 16, 64), stride=(1024, 64, 1), dtype=float16, device=cuda
+            t1 = arg1  # size=(8, 64, 32), stride=(2048, 32, 1), dtype=float16, device=cuda
+            t2 = arg2  # size=(8, 16, 32), stride=(512, 32, 1), dtype=float16, device=cuda
+
+            # Grouped matrix multiplication that triggers TMA load issues
+            t3 = torch.bmm(
+                t0, t1
+            )  # size=(8, 16, 32), stride=(512, 32, 1), dtype=float16, device=cuda
+            t4 = (
+                t3 + t2
+            )  # size=(8, 16, 32), stride=(512, 32, 1), dtype=float16, device=cuda
+            t5 = torch.nn.functional.gelu(
+                t4
+            )  # size=(8, 16, 32), stride=(512, 32, 1), dtype=float16, device=cuda
+
+            # Additional operations that stress the kernel
+            t6 = t5.transpose(
+                1, 2
+            )  # size=(8, 32, 16), stride=(512, 1, 32), dtype=float16, device=cuda
+            t7 = torch.bmm(
+                t6, t0
+            )  # size=(8, 32, 64), stride=(2048, 64, 1), dtype=float16, device=cuda
+            output = torch.sum(t7)  # scalar output
+            return output
+
+        arg0 = torch.rand(
+            [8, 16, 64], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg1 = torch.rand(
+            [8, 64, 32], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg2 = torch.rand(
+            [8, 16, 32], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+
+        out_eager = foo(arg0, arg1, arg2)
+        out_eager.backward()
+        print("Eager Success! ✅")
+
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1, arg2)
+        out_compiled.backward()
+        print("Compile Success! ✅")
+
+    @pytest.mark.xfail(reason="Issue #163994")
+    def test_fuzzer_issue_163994(self):
+        """Test case for input/output nodes being the same pattern issue."""
+        torch.manual_seed(7890)
+
+        def foo(arg0, arg1):
+            t0 = arg0  # size=(24, 48), stride=(48, 1), dtype=float32, device=cuda
+            t1 = arg1  # size=(48,), stride=(1,), dtype=float32, device=cuda
+
+            # Pattern where input and output nodes can be the same
+            t2 = t0 * t1.unsqueeze(
+                0
+            )  # size=(24, 48), stride=(48, 1), dtype=float32, device=cuda
+            t3 = torch.relu(
+                t2
+            )  # size=(24, 48), stride=(48, 1), dtype=float32, device=cuda
+            t4 = t3.sum(
+                dim=1, keepdim=True
+            )  # size=(24, 1), stride=(1, 1), dtype=float32, device=cuda
+            t5 = t4.expand_as(
+                t0
+            )  # size=(24, 48), stride=(1, 0), dtype=float32, device=cuda
+
+            # This creates a pattern where the same tensor appears as input and output
+            t6 = t0 + t5  # size=(24, 48), stride=(48, 1), dtype=float32, device=cuda
+            t7 = t6 / (
+                t5 + 1e-8
+            )  # size=(24, 48), stride=(48, 1), dtype=float32, device=cuda
+            output = torch.mean(t7)  # scalar output
+            return output
+
+        arg0 = torch.rand(
+            [24, 48], dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        arg1 = torch.rand([48], dtype=torch.float32, device="cuda", requires_grad=True)
+
+        out_eager = foo(arg0, arg1)
+        out_eager.backward()
+        print("Eager Success! ✅")
+
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1)
+        out_compiled.backward()
+        print("Compile Success! ✅")
+
+    @pytest.mark.xfail(reason="Issue #164280")
+    def test_fuzzer_issue_164280(self):
+        """Test case for aot_eager bitwise equivalence issue with rms_norm."""
+        torch.manual_seed(1111)
+
+        def foo(arg0, arg1):
+            t0 = arg0  # size=(4, 128, 768), stride=(98304, 768, 1), dtype=float32, device=cuda
+            t1 = arg1  # size=(768,), stride=(1,), dtype=float32, device=cuda
+
+            # RMS normalization pattern that triggers bitwise equivalence issues
+            t2 = t0.pow(
+                2
+            )  # size=(4, 128, 768), stride=(98304, 768, 1), dtype=float32, device=cuda
+            t3 = t2.mean(
+                dim=-1, keepdim=True
+            )  # size=(4, 128, 1), stride=(128, 1, 1), dtype=float32, device=cuda
+            t4 = torch.sqrt(
+                t3 + 1e-5
+            )  # size=(4, 128, 1), stride=(128, 1, 1), dtype=float32, device=cuda
+            t5 = (
+                t0 / t4
+            )  # size=(4, 128, 768), stride=(98304, 768, 1), dtype=float32, device=cuda
+            t6 = t5 * t1.unsqueeze(0).unsqueeze(
+                0
+            )  # size=(4, 128, 768), stride=(98304, 768, 1), dtype=float32, device=cuda
+
+            # Additional operations that stress the equivalence
+            t7 = torch.nn.functional.dropout(
+                t6, p=0.1, training=True
+            )  # size=(4, 128, 768), stride=(98304, 768, 1), dtype=float32, device=cuda
+            t8 = torch.layer_norm(
+                t7, (768,)
+            )  # size=(4, 128, 768), stride=(98304, 768, 1), dtype=float32, device=cuda
+            output = torch.sum(t8)  # scalar output
+            return output
+
+        arg0 = torch.rand(
+            [4, 128, 768], dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        arg1 = torch.rand([768], dtype=torch.float32, device="cuda", requires_grad=True)
+
+        out_eager = foo(arg0, arg1)
+        out_eager.backward()
+        print("Eager Success! ✅")
+
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1)
+        out_compiled.backward()
+        print("Compile Success! ✅")
+
 
 if __name__ == "__main__":
     run_tests()
