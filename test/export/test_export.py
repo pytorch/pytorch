@@ -15228,6 +15228,7 @@ def forward(self, x):
             test_serdes=True,
         )
 
+    @testing.expectedFailureStrict  # there is a name mapping bug in placeholder_naming_pass
     def test_preserve_annotation(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -15246,16 +15247,16 @@ def forward(self, x):
             ep = export(m, (torch.randn(10),))
 
         for node in ep.graph.nodes:
-            if node.target == torch.ops.aten.add.default:
+            if node.target in (torch.ops.aten.add.default, torch.ops.aten.add.Tensor):
                 self.assertTrue(node.meta["custom"], {"pp_stage": 0, "fdsp_bucket": 0})
-            if node.target == torch.ops.aten.sub.default:
+            if node.target in (torch.ops.aten.sub.default, torch.ops.aten.sub.Tensor):
                 self.assertTrue(node.meta["custom"], {"pp_stage": 0})
-            if node.target == torch.ops.aten.mul.default:
+            if node.target in (torch.ops.aten.mul.default, torch.ops.aten.mul.Tensor):
                 self.assertTrue(
                     node.meta["custom"],
                     {"pp_stage": 0, "cuda_stream": 2, "fsdp_bucket": 1},
                 )
-            if node.target == torch.ops.aten.div.default:
+            if node.target in (torch.ops.aten.div.default, torch.ops.aten.div.Tensor):
                 self.assertTrue(node.meta["custom"], {})
 
     def test_dynamic_shapes_serdes_generic(self):

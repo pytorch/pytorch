@@ -8,6 +8,7 @@ import sympy
 
 import torch
 import torch.fx
+import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names
@@ -308,7 +309,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         # Copy important metadata
         if hasattr(result, "node") and result.node is not node:
-            for key in ["val", "example_value", "unbacked_bindings"]:
+            for key in ["val", "example_value", "unbacked_bindings", "custom"]:
                 if key in node.meta:
                     result.node.meta[key] = node.meta[key]
 
@@ -458,6 +459,7 @@ def _dynamo_graph_capture_for_export(
                 get_metrics_context(),
                 dynamo_timed("fullgraph_capture"),
                 dynamo_config_ctx,
+                fx_traceback.preserve_node_meta(),
             ):
                 out = fullgraph_capture(
                     module_to_trace,

@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
+import torch.fx.traceback as fx_traceback
 
 
 class SimpleModel(torch.nn.Module):
@@ -35,6 +36,17 @@ class SimpleModel(torch.nn.Module):
 
     def forward(self, input):
         return self.mlp_1(self.mlp_0(input))
+
+class SimpleModelAnnotated(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.mlp_0 = MLPModule(device)
+        self.mlp_1 = MLPModule(device)
+
+    def forward(self, input):
+        with fx_traceback.annotate({"pp_stage": 0}):
+            x = self.mlp_0(input)
+        return self.mlp_1(x)
 
 
 def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
@@ -101,35 +113,45 @@ class DTensorExportTest(TestCase):
             mesh_dim_names=["dp", "tp"],
         )
 
-        model = SimpleModel(self.device_type)
-        parallelize_plan = {
-            "mlp_0.net1": ColwiseParallel(),
-            "mlp_0.net2": RowwiseParallel(),
-            "mlp_1.net1": ColwiseParallel(),
-            "mlp_1.net2": RowwiseParallel(),
-        }
-        tp_model = parallelize_module(model, mesh_2d["tp"], parallelize_plan)
+        for annotation in [True, False]:
+            model = None
+            if annotation:
+                model = SimpleModelAnnotated(self.device_type)
+            else:
+                model = SimpleModel(self.device_type)
+            parallelize_plan = {
+                "mlp_0.net1": ColwiseParallel(),
+                "mlp_0.net2": RowwiseParallel(),
+                "mlp_1.net1": ColwiseParallel(),
+                "mlp_1.net2": RowwiseParallel(),
+            }
+            tp_model = parallelize_module(model, mesh_2d["tp"], parallelize_plan)
 
-        inputs = torch.rand(20, 10, device=self.device_type)
-        inputs = distribute_tensor(inputs, mesh_2d["tp"], placements=[Replicate()])
+            inputs = torch.rand(20, 10, device=self.device_type)
+            inputs = distribute_tensor(inputs, mesh_2d["tp"], placements=[Replicate()])
 
-        joint_gm = export_fn(tp_model, inputs)
-        fw_gm, bw_gm = min_cut_rematerialization_partition(
-            joint_gm, None, num_fwd_outputs=1
-        )
+            joint_gm = export_fn(tp_model, inputs)
+            fw_gm, bw_gm = min_cut_rematerialization_partition(
+                joint_gm, None, num_fwd_outputs=1
+            )
 
-        self.assertTrue(
-            _count_op(joint_gm, torch.ops._c10d_functional.all_reduce.default),
-            3,
-        )
-        self.assertTrue(
-            _count_op(fw_gm, torch.ops._c10d_functional.all_reduce.default),
-            2,
-        )
-        self.assertTrue(
-            _count_op(bw_gm, torch.ops._c10d_functional.all_reduce.default),
-            1,
-        )
+            self.assertTrue(
+                _count_op(joint_gm, torch.ops._c10d_functional.all_reduce.default),
+                3,
+            )
+            self.assertTrue(
+                _count_op(fw_gm, torch.ops._c10d_functional.all_reduce.default),
+                2,
+            )
+            self.assertTrue(
+                _count_op(bw_gm, torch.ops._c10d_functional.all_reduce.default),
+                1,
+            )
+
+            if annotation:
+                for node in fw_gm.graph.nodes if node.op == "call_function":
+                    self.assertTrue(node.meta["custom"], {"pp_stage": 0})
+                breakpoint()
 
     @parametrize(
         "export_fn",

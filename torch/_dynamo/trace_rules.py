@@ -156,6 +156,8 @@ manual_torch_name_rule_map: dict[
     ],
 ] = {
     "torch.fx.traceback.annotate": UserFunctionVariable,
+    "torch.fx.traceback._enter_annotation_context": UserFunctionVariable,
+    "torch.fx.traceback._exit_annotation_context": UserFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
