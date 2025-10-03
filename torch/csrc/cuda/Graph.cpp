@@ -18,7 +18,7 @@
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-void THCPGraph_init(PyObject* module) {
+static void THCPGraph_init(PyObject* module) {
   // Pybind11 patch notes say "py::module_" is more up-to-date syntax,
   // but CI linter and some builds prefer "module".
   auto torch_C_m = py::handle(module).cast<py::module>();

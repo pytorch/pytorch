@@ -20,7 +20,7 @@ hipError_t hipReturnSuccess() {
 } // namespace
 #endif
 
-void initCudartBindings(PyObject* module) {
+static void initCudartBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   auto cudart = m.def_submodule("_cudart", "libcudart.so bindings");

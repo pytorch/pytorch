@@ -217,7 +217,7 @@ struct cublasCommonArgs {
 };
 } // namespace
 
-c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
+static c10::MaybeOwned<Tensor> prepare_batch_matrix_for_cublas(const Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
   IntArrayRef tensor_strides = tensor.strides();
   c10::MaybeOwned<Tensor> tensor_;
   int fast_dim = transpose_result ? 2 : 1;
@@ -1005,7 +1005,7 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
   }
 }
 
-Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
+static Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   // NOTE: cuBLAS is currently broken for some combination of transposed inputs.
   TORCH_CHECK(self.dim() == 2, "Expected self to be of dimension 2 but got ", self.dim());
   TORCH_CHECK(mat2.dim() == 2, "Expected mat2 to be of dimension 2 but got ", mat2.dim());
@@ -1052,7 +1052,7 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   return result;
 }
 
-Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
+static Tensor _int_mm_cuda(const Tensor& self, const Tensor& mat2) {
   Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
   return _int_mm_out_cuda(self, mat2, result);
 }
@@ -1683,7 +1683,7 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 }
 
 
-Tensor
+static Tensor
 _scaled_grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 const Tensor& scale_a, const Tensor& scale_b,
 const std::optional<at::Tensor>& offs,
@@ -1803,7 +1803,7 @@ bool use_fast_accum) {
 
 }
 
-Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
+static Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 const std::optional<at::Tensor>& bias,
 std::optional<c10::ScalarType> out_dtype) {

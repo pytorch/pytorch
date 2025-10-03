@@ -74,7 +74,7 @@ size_t getVersionInt() {
 
 namespace torch::cuda::shared {
 
-void initCudnnBindings(PyObject* module) {
+static void initCudnnBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   auto cudnn = m.def_submodule("_cudnn", "libcudnn.so bindings");

@@ -158,7 +158,7 @@ Tensor& addmm_out_sparse_compressed_cuda(
   return result;
 }
 
-Tensor& baddbmm_out_sparse_csr_cuda(
+static Tensor& baddbmm_out_sparse_csr_cuda(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
@@ -195,7 +195,7 @@ Tensor& baddbmm_out_sparse_csr_cuda(
   return result;
 }
 
-Tensor& bmm_out_sparse_csr_cuda(
+static Tensor& bmm_out_sparse_csr_cuda(
     const Tensor& mat1,
     const Tensor& mat2,
     Tensor& result) {

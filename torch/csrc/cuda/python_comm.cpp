@@ -13,7 +13,7 @@
 #include <torch/csrc/profiler/unwind/unwind.h>
 
 namespace torch::cuda::python {
-void initCommMethods(PyObject* module) {
+static void initCommMethods(PyObject* module) {
   auto m = py::cast<py::module>(module);
   m.def(
        "_broadcast_coalesced",

@@ -77,7 +77,7 @@ static Tensor get_device_pointers(const Tensor& input) {
 }
 
 template <typename scalar_t>
-void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
+static void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
   auto batch_size = cuda_int_cast(batchCount(input), "batch_size");
   auto m = cuda_int_cast(input.size(-2), "m");
   auto n = cuda_int_cast(input.size(-1), "n");
@@ -89,7 +89,7 @@ void apply_geqrf_batched(const Tensor& input, const Tensor& tau) {
   auto input_ptr_array_data = reinterpret_cast<scalar_t**>(input_ptr_array.data_ptr());
   auto tau_ptr_array_data = reinterpret_cast<scalar_t**>(tau_ptr_array.data_ptr());
 
-  int info;
+  int info = 0;
   auto handle = at::cuda::getCurrentCUDABlasHandle();
   at::cuda::blas::geqrfBatched(handle, m, n, input_ptr_array_data, lda, tau_ptr_array_data, &info, batch_size);
 
@@ -238,7 +238,7 @@ void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left
 }
 
 template <typename scalar_t>
-inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
+static inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
   auto trans = CUBLAS_OP_N;
   auto m = cuda_int_cast(A.size(-2), "m");
   auto n = cuda_int_cast(A.size(-1), "n");
@@ -277,7 +277,7 @@ inline void apply_gels_batched(const Tensor& A, Tensor& B, Tensor& infos) {
 
   auto infos_data = infos.data_ptr<int>();
   auto handle = at::cuda::getCurrentCUDABlasHandle();
-  int info;
+  int info = 0;
 
   at::cuda::blas::gelsBatched<scalar_t>(
     handle, trans, m, n, nrhs,

@@ -12,7 +12,7 @@
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 namespace c10d {
-control_plane::RegisterHandler dumpHandler{
+static control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
     [](const control_plane::Request& req, control_plane::Response& res) {
       const auto& params = req.params();
@@ -60,7 +60,7 @@ control_plane::RegisterHandler dumpHandler{
           "application/octet-stream");
     }};
 
-control_plane::RegisterHandler jsonDumpHandler{
+static control_plane::RegisterHandler jsonDumpHandler{
     "dump_nccl_trace_json",
     [](const control_plane::Request& req, control_plane::Response& res) {
       const auto& params = req.params();
