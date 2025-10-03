@@ -20,6 +20,8 @@ from sympy.core.traversal import walk
 from sympy.printing.precedence import PRECEDENCE
 from sympy.utilities.iterables import sift
 
+from torch.torch_version import TorchVersion
+
 from .numbers import int_oo
 
 
@@ -268,7 +270,20 @@ class FloorDiv(sympy.Function):
             for term in sympy.Add.make_args(base):
                 quotient = term / divisor
 
-                if quotient.is_integer:
+                # This is a sympy bug fixed in https://github.com/sympy/sympy/pull/28442
+                # sympy can generate a quotient with (1/22)*.... such that quotient.is_integer is True
+                # FloorDiv should not allow that as output. see
+                quotient_is_integer = None
+                if isinstance(quotient, sympy.Mul) and TorchVersion(
+                    sympy.__version__
+                ) < TorchVersion("1.15.0"):
+                    rationals = quotient.atoms(sympy.Rational)
+                    all_rationals_ints = all(r.q == 1 for r in rationals)
+                    quotient_is_integer = quotient.is_integer and all_rationals_ints
+                else:
+                    quotient_is_integer = quotient.is_integer
+
+                if quotient_is_integer:
                     terms.append(term)
                     quotients += quotient
 
@@ -308,7 +323,6 @@ class ModularIndexing(sympy.Function):
     ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
             return sympy.S.Zero
-
         if (
             isinstance(base, sympy.Integer)
             and isinstance(divisor, sympy.Integer)
