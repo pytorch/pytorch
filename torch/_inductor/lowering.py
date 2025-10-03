@@ -7255,29 +7255,34 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
 
     output = None
 
+    operation_len = len(V.graph.operations)
     assert len(subgraph_fn.graph_module.graph.find_nodes(op="placeholder")) == len(args)
     for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
         if node.op == "placeholder":
+            assert node not in V.graph.env
             V.graph.env[node] = args[i]
             continue
         elif node.op == "output":
             args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
             output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
         else:
+            assert node not in V.graph.env
             V.graph.env[node] = V.graph.run_node(node)
 
     assert output is not None and additional_deps
-    output_list = output if isinstance(output, (list, tuple)) else [output]
 
-    for out in output_list:
-        if not isinstance(out, IRNode):
-            continue
-
-        # need to realize in order to add the dep
-        out.realize()
-        out_name = out.get_name()
+    # some operators, like wait_tensor, just return their input,
+    # so its more robust to add dep to the operation itself,
+    # otherwise you can have a cycle of
+    # a = coll
+    # b = control_deps(a, mm, ...)
+    # c = control_deps(b, wait, ...)
+    # if c == a, then you have a cycle.
+    for op in V.graph.operations[operation_len:]:
         for dep_name in dep_names:
-            V.graph.additional_buffer_deps[out_name].add(dep_name)
+            op_name = op.operation_name
+            assert op_name is not None
+            V.graph.additional_buffer_deps[op_name].add(dep_name)
 
     return output
 
