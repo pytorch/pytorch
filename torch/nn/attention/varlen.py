@@ -60,7 +60,8 @@ def _varlen_attn(
             False,  # return_debug_mask
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
-        output, softmax_lse = result[0], result[1]
+        # output, softmax_lse, rng_state = result[0], result[1], result[6]
+        output, softmax_lse, rng_state = result[0], result[1]
     else:
         log.info("Using Flash Attention backend for varlen_attn")
         output, softmax_lse, rng_state, _, _ = torch.ops.aten._flash_attention_forward(
@@ -75,7 +76,7 @@ def _varlen_attn(
             is_causal,
             return_debug_mask=False,
         )
-
+    # return output, softmax_lse, rng_state
     return output, softmax_lse
 
 
@@ -136,7 +137,7 @@ def varlen_attn(
     Returns:
         Tensor: Output tensor from attention computation
     """
-    out, lse = _varlen_attn(
+    out, lse = torch.ops.torch_nn_attention._varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
 
@@ -147,6 +148,7 @@ def varlen_attn(
 
 def setup_context(ctx, inputs, output):
     query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
+    # out, lse, rng_state = output
     out, lse = output
     ctx.query = query
     ctx.key = key
@@ -158,6 +160,7 @@ def setup_context(ctx, inputs, output):
     ctx.is_causal = is_causal
     ctx.output = out
     ctx.lse = lse
+    # ctx.rng_state = rng_state
 
 
 def backward(ctx, grad_out, grad_lse):

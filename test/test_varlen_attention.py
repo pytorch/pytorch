@@ -82,6 +82,11 @@ class AttentionBlock(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
+        # device = x_padded.device
+        # mask = torch.arange(seq_len, device=device).unsqueeze(0) >= seq_lengths.unsqueeze(1)
+        # attn_mask = mask[:, None, None, :]
+        # attn_mask = attn_mask.to(torch.bool)
+
         attn_out = F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
         attn_out = (
             attn_out.transpose(1, 2)
@@ -171,7 +176,7 @@ class TestVarlenAttention(NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    def test_custom_op_registration_with_logging(self, device, dtype):
+    def test_custom_op_registration(self, device, dtype):
         torch.manual_seed(42)
 
         shape = VarlenShape(batch_size=2, max_seq_len=512, embed_dim=1024, num_heads=16)
@@ -188,8 +193,11 @@ class TestVarlenAttention(NNTestCase):
             [0, shape.max_seq_len, total_tokens], device=device, dtype=torch.int32
         )
 
+        compiled_forward = torch.compile(
+            attention_block.forward_varlen, backend="eager"
+        )
         with OpLoggingMode() as mode:
-            output = attention_block.forward_varlen(
+            output = compiled_forward(
                 x_packed, cu_seq, shape.max_seq_len, is_causal=False
             )
             self.assertEqual(output.shape, (total_tokens, shape.embed_dim))
@@ -202,6 +210,7 @@ class TestVarlenAttention(NNTestCase):
             "torch_nn_attention._varlen_attn" in op for op in called_ops
         )
         assert custom_op_called
+
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
@@ -241,12 +250,23 @@ class TestVarlenAttention(NNTestCase):
 
             varlen_seq = varlen_output[start_idx:end_idx]
             sdpa_seq = sdpa_output[i, :seq_len]
-
+            print(f"varlen_seq: {varlen_seq}")
+            print(f"sdpa_seq: {sdpa_seq}")
             torch.testing.assert_close(varlen_seq, sdpa_seq, **tolerances)
             start_idx = end_idx
 
         varlen_loss = varlen_output.sum()
-        sdpa_loss = sdpa_output.sum()
+        # sdpa_loss = sdpa_output.sum()
+
+        sdpa_loss = 0
+        for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
+            sdpa_loss = sdpa_loss + sdpa_output[i, :seq_len].sum()
+
+        print(f"varlen_loss: {varlen_loss}")
+        print(f"sdpa_loss: {sdpa_loss}")
+
+        torch.testing.assert_close(varlen_loss, sdpa_loss, **tolerances)
+
         varlen_loss.backward()
         sdpa_loss.backward()
 
@@ -255,8 +275,8 @@ class TestVarlenAttention(NNTestCase):
             end_idx = start_idx + seq_len
             varlen_grad_seq = x_packed.grad[start_idx:end_idx]
             sdpa_grad_seq = x_padded.grad[i, :seq_len]
-            print(f"varlen_grad_seq: {varlen_grad_seq}")
-            print(f"sdpa_grad_seq: {sdpa_grad_seq}")
+            # print(f"varlen_grad_seq: {varlen_grad_seq}")
+            # print(f"sdpa_grad_seq: {sdpa_grad_seq}")
             torch.testing.assert_close(varlen_grad_seq, sdpa_grad_seq, **tolerances)
             start_idx = end_idx
 
