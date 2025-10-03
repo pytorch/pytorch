@@ -67,10 +67,11 @@ static PyObject* THPDevice_pynew(
     auto as_device = r.device(0); // this works, because device can take strings
     if (as_device.has_index()) {
       auto device_type = r.string(0);
-      throw std::runtime_error(
+      TORCH_CHECK(
+          false,
           "type (string) must not include an index because index "
           "was passed explicitly: " +
-          device_type);
+              device_type);
     }
     int64_t device_index = -1;
     if (!r.isNone(1)) {

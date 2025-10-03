@@ -48,6 +48,7 @@ struct TORCH_API PythonTracerBase {
 
   virtual void stop() = 0;
   virtual void restart() = 0;
+  virtual void register_gc_callback() = 0;
   virtual std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::vector<CompressedEvent>& enters,

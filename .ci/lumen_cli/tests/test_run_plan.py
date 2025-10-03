@@ -45,6 +45,10 @@ def patch_module(monkeypatch):
         workdir_calls.append(path)
         return nullcontext()
 
+    def fake_temp_env(map: dict[str, str]):
+        temp_calls.append(map)
+        return nullcontext()
+
     logger = SimpleNamespace(
         info=MagicMock(name="logger.info"),
         error=MagicMock(name="logger.error"),
@@ -58,6 +62,7 @@ def patch_module(monkeypatch):
     monkeypatch.setattr(
         module, "working_directory", fake_working_directory, raising=True
     )
+    monkeypatch.setattr(module, "temp_environ", fake_temp_env, raising=True)
     monkeypatch.setattr(module, "logger", logger, raising=True)
 
     return SimpleNamespace(
@@ -79,8 +84,8 @@ def test_success_runs_all_steps_and_uses_env_and_workdir(monkeypatch, patch_modu
             "title": "Basic suite",
             "package_install": [],
             "working_directory": "tests",
+            "env_vars": {"GLOBAL_FLAG": "1"},
             "steps": [
-                "export GLOBAL_FLAG=1",
                 "export A=x && pytest -q",
                 "export B=y && pytest -q tests/unit",
             ],
@@ -97,14 +102,13 @@ def test_success_runs_all_steps_and_uses_env_and_workdir(monkeypatch, patch_modu
     checks = [_get_check(c) for c in calls]
 
     assert cmds == [
-        "export GLOBAL_FLAG=1",
         "export A=x && pytest -q",
         "export B=y && pytest -q tests/unit",
     ]
     assert all(chk is False for chk in checks)
 
-    # No temp_env assertions anymore
     assert patch_module.workdir_calls == ["tests"]
+    assert patch_module.temp_calls == [{"GLOBAL_FLAG": "1"}]
 
 
 def test_installs_packages_when_present(monkeypatch, patch_module):
