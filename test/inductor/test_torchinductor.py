@@ -10001,6 +10001,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # This test is CPU-only to avoid backend-specific failures unrelated to the core fix
         if self.device != "cpu":
             self.skipTest("CPU-only test for argreduce index semantics on views")
+
         def fn(x):
             y = x.transpose(0, 1)
             # mutate the base; y shares storage so values change
