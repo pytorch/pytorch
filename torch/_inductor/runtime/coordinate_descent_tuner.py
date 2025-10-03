@@ -222,7 +222,7 @@ class CoordescTuner:
         Return a tuple of (compare_result, candidate_timing).
         compare_result is true iff candidate_config is better.
         """
-        print("Try config %s", candidate_config)
+        log.debug("Try config %s", candidate_config)
         try:
             candidate_timing = self.call_func(func, candidate_config)
         except Exception as e:
