@@ -7,6 +7,7 @@ from typing import Any, Literal, Optional, overload, Union
 
 import torch
 import torch.utils._pytree as pytree
+import torchgen
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
 
@@ -92,14 +93,25 @@ def is_functional_schema(schema: Any, *, view_ok: bool = False) -> bool:
         )
 
         num_tensor_inputs = 0
-        for arg in schema.arguments:
-            if isinstance(arg.type, torch.TensorType):
-                num_tensor_inputs += 1
-
         num_tensor_outputs = 0
-        for ret in schema.returns:
-            if isinstance(ret.type, torch.TensorType):
-                num_tensor_outputs += 1
+
+        if isinstance(schema, torch.FunctionSchema):
+            for arg in schema.arguments:
+                if isinstance(arg.type, torch.TensorType):
+                    num_tensor_inputs += 1
+
+            for ret in schema.returns:
+                if isinstance(ret.type, torch.TensorType):
+                    num_tensor_outputs += 1
+
+        elif isinstance(schema, torchgen.model.FunctionSchema):
+            for arg in schema.arguments.flat_non_out:
+                if arg.type.is_tensor_like():
+                    num_tensor_inputs += 1
+
+            for ret in schema.returns:
+                if ret.type.is_tensor_like():
+                    num_tensor_outputs += 1
 
         if is_non_mutating_view:
             return view_ok and (num_tensor_inputs == 1 and num_tensor_outputs == 1)
