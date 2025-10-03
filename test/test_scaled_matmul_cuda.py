@@ -1501,7 +1501,8 @@ class TestFP8Matmul(TestCase):
 
         device = "cuda"
         M, K, N = 128, 128, 128
-        BLOCK_SIZE = 16
+        BLOCK_SIZE = 32 if torch.version.hip else 16
+        fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
 
         A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
         B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
@@ -1509,8 +1510,8 @@ class TestFP8Matmul(TestCase):
         A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
         B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
 
-        A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
-        B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+        A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
+        B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
         C_ref = A_ref @ B_ref.t()
 
         compiled_scaled_mm = torch.compile(torch._scaled_mm, backend="inductor")

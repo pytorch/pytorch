@@ -296,6 +296,16 @@ class TestMatmulCuda(InductorTestCase):
         # cross comparison
         self.assertEqual(out1_gpu, out2_gpu[0])
 
+    @onlyCUDA
+    @skipIfRocm
+    @parametrize("shape", [2**i for i in range(5, 14)])
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    def test_cublas_deterministic(self, device, shape, dtype):
+        inp = torch.randn(shape, shape, device=device, dtype=dtype)
+        first = torch.matmul(inp, inp)
+        for _ in range(10):
+            self.assertEqual(first, torch.matmul(inp, inp), atol=0., rtol=0.)
+
     def grouped_mm_helper(self, alist, blist, gOlist, agradlist, bgradlist, outlist):
         for a, b, gO, agrad, bgrad, out in zip(alist, blist, gOlist, agradlist, bgradlist, outlist):
             a = a.clone().detach().requires_grad_()
