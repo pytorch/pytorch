@@ -378,9 +378,39 @@ class OverlapScheduler:
                 self._handle_other(node)
 
         self._reorder_graph()
+
         if torch._inductor.config.test_configs.aten_fx_overlap_preserving_bucketing:
             self._bucket_collectives()
+        elif torch._inductor.config.test_configs.aten_fx_overlap_insert_overlap_deps:
+            # If not bucketing, add effect tokens to preserve hiding dependencies
+            self._add_effect_tokens_for_overlap()
+
         return self.gm
+
+    def _add_effect_tokens_for_overlap(self) -> None:
+        """
+        Add effect tokens to preserve hiding dependency relationships when not bucketing.
+
+        This ensures that communication-compute overlap is preserved through effect tokens
+        when overlap preserving bucketing is not enabled.
+        """
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering,
+        )
+
+        # Collect hiding dependencies: hiding_node -> collective_start, wait -> hiding_node
+        additional_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+
+        for start_node, info in self.collective_info.items():
+            if info.hiding_node and not info.is_exposed:
+                # Compute depends on collective start (compute must wait for collective to start)
+                additional_deps[info.hiding_node].add(start_node)
+                # Wait depends on compute (wait must wait for compute to finish)
+                additional_deps[info.wait_node].add(info.hiding_node)
+
+        # Apply effect tokens to preserve these dependencies
+        if additional_deps:
+            preserve_node_ordering(self.graph, additional_deps)
 
     def _handle_other(self, node: fx.Node) -> None:
         self._schedule(node)
