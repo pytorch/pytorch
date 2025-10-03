@@ -1096,6 +1096,7 @@ Most recent bytecode instructions traced (max 20):
 
         pattern = r"TRACE.*"
         s = munge_exc(records[-1].getMessage(), skip=0)
+        breakpoint()
         matches = re.findall(pattern, s)
         self.assertIn(len(matches), [13, 20])
         # TODO: Checking inconsistent logging output
