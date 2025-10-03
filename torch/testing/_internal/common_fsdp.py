@@ -58,7 +58,6 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_cycles_per_ms,
-    set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
     TEST_XPU,
@@ -1229,7 +1228,6 @@ class FSDPTest(MultiProcessTestCase):
         dist.barrier(device_ids=device_ids)
 
         torch._dynamo.reset()
-        set_rng_seed()
         self.run_test(test_name, pipe)
         torch._dynamo.reset()
 
