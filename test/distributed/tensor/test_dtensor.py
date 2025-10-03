@@ -1112,19 +1112,42 @@ class DTensorMeshTest(DTensorTestBase):
             )
 
     @with_comms
-    def test_from_local_run_check(self):
+    def test_metadata_consistency_check(self):
         device_mesh = self.build_device_mesh()
         placements = [Shard(0)]
-        global_tensor = torch.randn(self.world_size, 3)
 
-        local_tensor = global_tensor[self.rank : self.rank + 1]
-        if self.device_type == "cuda":
-            local_tensor = local_tensor.cuda()
+        # Create a local tensor with specific metadata and check dtype change
+        local_tensor = torch.randn(3, 3, requires_grad=True, dtype=torch.float32)
 
-        DTensor.from_local(local_tensor, device_mesh, placements, run_check=True)
+        if self.rank == 0:
+            local_tensor = local_tensor.to(dtype=torch.float64)
 
-        # Verify that from_local_run_check catches inconsistent stride
-        if self.world_size > 1:
+        with self.assertRaises(ValueError):
+            DTensor.from_local(local_tensor, device_mesh, placements, run_check=True)
+
+        try:
+            DTensor.from_local(local_tensor, device_mesh, placements, run_check=False)
+        except ValueError:
+            self.fail("Unexpected ValueError raised with run_check=False")
+
+        # Create a local tensor with specific metadata and check requires_grad change
+        local_tensor = torch.randn(3, 3, requires_grad=True, dtype=torch.float32)
+
+        if self.rank == 0:
+            local_tensor.requires_grad = False
+
+        with self.assertRaises(ValueError):
+            DTensor.from_local(local_tensor, device_mesh, placements, run_check=True)
+
+        try:
+            DTensor.from_local(local_tensor, device_mesh, placements, run_check=False)
+        except ValueError:
+            self.fail("Unexpected ValueError raised with run_check=False")
+
+        # Create a local tensor with specific metadata and check stride change
+        local_tensor = torch.randn(3, 4, requires_grad=True, dtype=torch.float32)
+
+        if self.rank == 0:
             local_tensor = local_tensor.t()  # transpose changes the stride
 
         with self.assertRaises(ValueError):
