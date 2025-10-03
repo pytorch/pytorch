@@ -294,8 +294,8 @@ class TestVarlenAttention(NNTestCase):
             allow_unused=False,
         )[0]
 
-        # print("varlen_q.grad:", varlen_q.grad)
-        # print("varlen_k.grad:", varlen_k.grad)
+        print("varlen_q.grad:", varlen_q.grad)
+        print("varlen_k.grad:", varlen_k.grad)
 
         sdpa_grad = torch.autograd.grad(
             outputs=sdpa_output,
