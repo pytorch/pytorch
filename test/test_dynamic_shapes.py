@@ -915,7 +915,7 @@ def forward(self, x_1):
             )
         )
 
-    def test_is_non_overlapping_and_dense_or_false(self):
+    def test_prims_is_non_overlapping_and_dense_or_false(self):
         shape_env = ShapeEnv()
         cf = torch._prims_common.is_non_overlapping_and_dense_or_false
 
