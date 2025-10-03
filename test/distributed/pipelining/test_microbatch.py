@@ -63,9 +63,9 @@ class MicrobatchTests(TestCase):
     def test_split_block_mask(self, device):
         B = 6
         H = 1
-        Q_LEN = 512
-        KV_LEN = 512
+        SEQ_LEN = 512
         DIM = 32
+        DOC_LEN = 30
 
         def create_block_causal_mask(batch, eos_id: int):
             mask = batch == eos_id
@@ -84,18 +84,19 @@ class MicrobatchTests(TestCase):
 
             return block_causal_mask
 
-        batch = list(range(30)) * 1024
-        batch = torch.tensor(batch[: B * Q_LEN], device=device).reshape(B, Q_LEN)
-        q = torch.randn(B, H, Q_LEN, DIM, device=device, requires_grad=True)
-        k = torch.randn(B, H, KV_LEN, DIM, device=device, requires_grad=True)
-        v = torch.randn(B, H, KV_LEN, DIM, device=device, requires_grad=True)
+        batch = list(range(DOC_LEN)) * 1024
+        batch = torch.tensor(batch[: B * SEQ_LEN], device=device).reshape(B, SEQ_LEN)
+        q, k, v = (
+            torch.randn(B, H, SEQ_LEN, DIM, device=device, requires_grad=True)
+            for i in range(3)
+        )
         block_mask_fn = torch.compile(create_block_mask)
         block_mask = block_mask_fn(
-            create_block_causal_mask(batch, 29),
+            create_block_causal_mask(batch, DOC_LEN - 1),
             B=B,
             H=H,
-            Q_LEN=Q_LEN,
-            KV_LEN=KV_LEN,
+            Q_LEN=SEQ_LEN,
+            KV_LEN=SEQ_LEN,
             device=device,
         )
         if device == "cuda":
@@ -106,9 +107,7 @@ class MicrobatchTests(TestCase):
         out = flex_fn(q, k, v, block_mask=block_mask)
         out.sum().backward()
 
-        q_clone = q.clone().detach()
-        k_clone = k.clone().detach()
-        v_clone = v.clone().detach()
+        q_clone, k_clone, v_clone = (target.clone().detach() for target in (q, k, v))
         arg_split, _ = split_args_kwargs_into_chunks(
             (q_clone, k_clone, v_clone, {"block_mask": block_mask}),
             {},
@@ -127,18 +126,19 @@ class MicrobatchTests(TestCase):
         out_chunks = []
         for i in range(len(arg_split)):
             q_chunk, k_chunk, v_chunk, block_mask_chunk = arg_split[i]
-            q_chunk.requires_grad = True
-            k_chunk.requires_grad = True
-            v_chunk.requires_grad = True
+            for chunk, chunks in zip(
+                (q_chunk, k_chunk, v_chunk), (q_chunks, k_chunks, v_chunks)
+            ):
+                chunk.requires_grad = True
+                chunks.append(chunk)
+
             out_chunk = flex_fn(
                 q_chunk, k_chunk, v_chunk, block_mask=block_mask_chunk["block_mask"]
             )
+
             out_chunk.sum().backward()
-            q_chunks.append(q_chunk)
             dq_chunks.append(q_chunk.grad)
-            k_chunks.append(k_chunk)
             dk_chunks.append(k_chunk.grad)
-            v_chunks.append(v_chunk)
             dv_chunks.append(v_chunk.grad)
             block_mask_chunks.append(block_mask_chunk["block_mask"])
             out_chunks.append(out_chunk)
