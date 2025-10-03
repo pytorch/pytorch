@@ -321,7 +321,7 @@ class ConcatDataset(Dataset[_T_co]):
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super().__init__()
         self.datasets = list(datasets)
-        assert len(self.datasets) > 0, "datasets should not be an empty iterable"
+        assert len(self.datasets) > 0, "datasets should not be an empty iterable"  # type: ignore[arg-type]
         for d in self.datasets:
             assert not isinstance(d, IterableDataset), (
                 "ConcatDataset does not support IterableDataset"
@@ -390,6 +390,14 @@ class Subset(Dataset[_T_co]):
     r"""
     Subset of a dataset at specified indices.
 
+    .. note::
+        When subclassing `Subset` to create a custom implementation, overriding the
+        `__getitem__` method will cause the `DataLoader` to access samples one by one.
+        This may bypass batch-level optimizations (like `__getitems__`) present in
+        the underlying dataset, potentially leading to a performance degradation.
+        For performance-critical applications, consider overriding `__getitems__` as
+        well to implement your custom batch-aware logic.
+
     Args:
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
@@ -408,6 +416,9 @@ class Subset(Dataset[_T_co]):
         return self.dataset[self.indices[idx]]
 
     def __getitems__(self, indices: list[int]) -> list[_T_co]:
+        if type(self).__getitem__ is not Subset.__getitem__:
+            return [self.__getitem__(idx) for idx in indices]
+
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
         if callable(getattr(self.dataset, "__getitems__", None)):
