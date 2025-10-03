@@ -543,8 +543,8 @@ def propagate_shape_and_sharding(
                 if i > 0:
                     can_shard_dim = False
                     if strict_view and input_sharded:
-                        # import fbvscode
-                        # fbvscode.set_trace()
+                        import fbvscode
+                        fbvscode.set_trace()
                         raise RuntimeError(
                             f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
                             "It cannot be performed without redistribution, which is disallowed by the current operator.",

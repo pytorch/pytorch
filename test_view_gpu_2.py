@@ -26,30 +26,12 @@ def main():
     device = f"cuda:{gpu_id}"
     torch.cuda.set_device(device)
     mesh_shape = (2, )
-    mesh_dim_names = ("dp_shard", )
-    mesh = init_device_mesh(
-        "cuda", mesh_shape, mesh_dim_names=mesh_dim_names,
-    )
-    input_dim, output_dim = 4, 6
-    global_linear = nn.Linear(input_dim, output_dim, bias=False)
-    weight_sharding = (Replicate(), )
-    def _partition_linear_fn(name, module, device_mesh):
-        module.register_parameter(
-            "weight",
-            nn.Parameter(
-                distribute_tensor(
-                    module.weight,
-                    device_mesh,
-                    weight_sharding,
-                )
-            ),
-        )
-    distributed_linear = distribute_module(global_linear, mesh, partition_fn=_partition_linear_fn)
-    batch_size, seq_len = 8, 8
+    mesh = init_device_mesh("cuda", mesh_shape)
+    input_dim, batch_size, seq_len = 4, 8, 8
     global_input = torch.randn([batch_size, seq_len, input_dim])
     input_sharding = (Shard(1), )
     distributed_input = distribute_tensor(global_input, mesh, input_sharding)
-    print("results: ", distributed_linear(distributed_input))
+    distributed_input.view(batch_size * seq_len, input_dim)
 
 
 if __name__ == "__main__":
