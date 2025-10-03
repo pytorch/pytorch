@@ -62,6 +62,19 @@ def _(additional_deps, subgraph, *args, **kwargs):
     return subgraph(*args, **kwargs)
 
 
+def get_subgraph_name(gm: fx.GraphModule, name):
+    name = f"subgraph_{name}"
+
+    if not hasattr(gm, name):
+        return name
+
+    i = 0
+    while hasattr(gm, f"{name}_{i}"):
+        i += 1
+
+    return f"{name}_{i}"
+
+
 def preserve_node_ordering(
     graph: fx.Graph,
     additional_deps_map: dict[fx.Node, OrderedSet[fx.Node]],
@@ -88,7 +101,7 @@ def preserve_node_ordering(
 
     # Process each node that needs additional dependencies
     for dependent_node, dep_nodes in additional_deps_map.items():
-        assert dependent_node.op == "call_function"
+        assert dependent_node.op == "call_function", dependent_node.op
 
         original_name = dependent_node.name
         original_args = dependent_node.args
@@ -100,7 +113,9 @@ def preserve_node_ordering(
         # Create a subgraph that preserves the exact original operation
         subgraph_module = _create_subgraph_for_node(graph, dependent_node)
 
-        subgraph_attr_name = f"subgraph_{original_name}"
+        owning_mod = graph.owning_module
+        assert owning_mod is not None
+        subgraph_attr_name = get_subgraph_name(owning_mod, original_name)
         setattr(graph.owning_module, subgraph_attr_name, subgraph_module)
 
         # Create control_deps call with:
