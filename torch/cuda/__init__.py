@@ -260,7 +260,7 @@ def _check_capability():
     CUDA_ARCHES_SUPPORTED = {
         "12.6": {"min": 50, "max": 90},
         "12.8": {"min": 70, "max": 120},
-        "13.0": {"min": 75, "max": 120},
+        "13.0": {"min": 75, "max": 121},
     }
 
     if (
