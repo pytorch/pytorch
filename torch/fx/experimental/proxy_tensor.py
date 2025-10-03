@@ -901,12 +901,29 @@ def proxy_call(
         _maybe_record_pointwise_barrier(func, proxy_mode)
         return r
 
+    def should_decompose(func, flat_args):
+        has_backend_registration = False
+        for a in flat_args:
+            if isinstance(a, torch.Tensor):
+                backend_key = torch._C._dispatch_key_for_device(a.device.type)
+                has_backend_registration = func.has_kernel_for_dispatch_key(backend_key)
+                # in theory we should take all backend keys and take the highest priority one
+                # to properly mimic the disaptcher,
+                # this just grabs the first tensor and takes its device key
+                break
+        return not has_backend_registration
+
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
-        torch.ops.aten.size.default,
-        torch.ops.aten.stride.default,
-        torch.ops.aten.storage_offset.default,
-    ]:
+    if (
+        not pre_dispatch
+        and func
+        not in [
+            torch.ops.aten.size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.storage_offset.default,
+        ]
+        and should_decompose(func, flat_args_kwargs)
+    ):
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
