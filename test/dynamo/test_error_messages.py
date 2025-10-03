@@ -869,6 +869,49 @@ from user code:
     if x.sum() > 0:""",
         )
 
+    # Test that the bytecode source attribution is correct with VariableTracker
+    # @make_logging_test(dynamo=logging.DEBUG, trace_bytecode=True)
+    @make_logging_test(trace_bytecode=True)
+    def test_variable_tracker_source_attribution(self, records):
+        def inner(x):
+            return x + 1
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = inner(x)
+            return inner(x)
+
+        fn(torch.ones(3))
+
+        def find_trace_bytecode_lines(long_string):
+            # Split the string into lines
+            lines = long_string.split("\n")
+            # More comprehensive pattern to capture LazyVariableTracker info
+            pattern = r"LazyVariableTracker\([^)]*\)"
+            # Find all lines containing the pattern
+            result = [line for line in lines if re.search(pattern, line)]
+            return result
+
+        # Get all log messages, not just the last one
+        all_messages = []
+        for record in records:
+            msg = munge_exc(record.getMessage(), skip=0)
+            all_messages.append(msg)
+
+        # Combine all messages to search through
+        combined_msg = "\n".join(all_messages)
+
+        all_lines = find_trace_bytecode_lines(combined_msg)
+
+        # For now, just check that we found some lines
+        self.assertGreater(
+            len(all_lines), 0, "Should find at least one LazyVariableTracker line"
+        )
+
+        for line in all_lines:
+            self.assertIn("type", line)
+            self.assertIn("class", line)
+
     @make_logging_test(graph_breaks=True)
     def test_data_dependent_branching_gb(self, records):
         def fn(x):
@@ -1419,59 +1462,6 @@ from user code:
     return fn(x)""",
             post_munge=post_munge,
         )
-
-    # Test that the bytecode source attribution is correct with VariableTracker
-    # @torch._dynamo.config.patch(verbose=True)
-    @make_logging_test(dynamo=logging.DEBUG, trace_bytecode=True)
-    def test_variable_tracker_source_attribution(self, records):
-        def inner(x):
-            return x + 1
-
-        @torch.compile(backend="eager")
-        def fn(x):
-            x = inner(x)
-            return inner(x)
-
-        fn(torch.ones(3))
-
-        def find_trace_bytecode_lines(long_string):
-            # Split the string into lines
-            lines = long_string.split("\\n")
-            # Compile the regex pattern for exact match
-            pattern = re.compile(r"\[__trace_bytecode\]")
-            # Find all lines containing the pattern
-            result = [line for line in lines if pattern.search(line)]
-            return result
-
-        msg = munge_exc(records[-1].getMessage(), skip=0)
-
-        for line in find_trace_bytecode_lines(msg):
-            self.assertIn("function", line)
-
-    #         self.assertExpectedInline(
-    #             ,
-    #             """
-    # TRACE RESUME 0 []
-    # TRACE LOAD_GLOBAL inner []
-    # TRACE LOAD_FAST x [LazyVariableTracker(type(value): <class 'function'>), NullVariable]
-    # TRACE CALL 1 [LazyVariableTracker(type(value): <class 'function'>), NullVariable, LazyVariableTracker()]
-    # TRACE RESUME 0 []
-    # TRACE LOAD_FAST x []
-    # TRACE LOAD_CONST 1 [TensorVariable()]
-    # TRACE BINARY_OP 0 [TensorVariable(), ConstantVariable(int: 1)]
-    # TRACE RETURN_VALUE None [TensorVariable()]
-    # TRACE STORE_FAST x [TensorVariable()]
-    # TRACE LOAD_GLOBAL inner []
-    # TRACE LOAD_FAST x [LazyVariableTracker(type(value): <class 'function'>, realized:UserFunctionVariable), NullVariable]
-    # TRACE CALL 1 [LazyVariableTracker(type(value): <class 'function'>, realized:UserFunctionVariable), NullVariable, TensorVariable()]
-    # TRACE RESUME 0 []
-    # TRACE LOAD_FAST x []
-    # TRACE LOAD_CONST 1 [TensorVariable()]
-    # TRACE BINARY_OP 0 [TensorVariable(), ConstantVariable(int: 1)]
-    # TRACE RETURN_VALUE None [TensorVariable()]
-    # TRACE RETURN_VALUE None [TensorVariable()]
-    # """,
-    #         )
 
     # Test that errors while tracing resume function prologues do not get suppressed
     def test_graph_break_in_buggy_resume_prologue(self):
