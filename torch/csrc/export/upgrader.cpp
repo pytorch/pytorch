@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/export/upgrader.h>
 #include <limits>
 #include <map>
@@ -23,13 +24,11 @@ static const std::multiset<Upgrader>& getUpgrader(int current_version) {
 }
 
 static nlohmann::json getFieldByKeypath(
-    const nlohmann::json& obj,
+    nlohmann::json obj,
     const std::vector<std::string>& keypath) {
-  nlohmann::json current = obj;
+  nlohmann::json current = std::move(obj);
   for (const auto& key : keypath) {
-    if (!current.contains(key)) {
-      throw std::runtime_error("Keypath not found: " + key);
-    }
+    TORCH_CHECK(current.contains(key), "Keypath not found: " + key);
     current = current[key];
   }
   return current;
@@ -38,19 +37,17 @@ static nlohmann::json getFieldByKeypath(
 static void setFieldByKeypath(
     nlohmann::json& obj,
     const std::vector<std::string>& keypath,
-    const nlohmann::json& value) {
+    nlohmann::json value) {
   nlohmann::json* current = &obj;
   for (size_t i = 0; i < keypath.size() - 1; ++i) {
     const auto& key = keypath[i];
-    if (!current->contains(key)) {
-      throw std::runtime_error("Keypath not found: " + key);
-    }
+    TORCH_CHECK(current->contains(key), "Keypath not found: " + key);
     current = &((*current)[key]);
   }
-  if (!current->contains(keypath.back())) {
-    throw std::runtime_error("Keypath not found: " + keypath.back());
-  }
-  (*current)[keypath.back()] = value;
+  TORCH_CHECK(
+      current->contains(keypath.back()),
+      "Keypath not found: " + keypath.back());
+  (*current)[keypath.back()] = std::move(value);
 }
 
 Upgrader::Upgrader(std::vector<std::string> kp, UpgraderFunction func)
@@ -67,8 +64,8 @@ bool Upgrader::operator<(const Upgrader& other) const {
 
 void registerUpgrader(
     int version,
-    const std::vector<std::string>& keypath,
-    const UpgraderFunction& upgrade_func) {
+    std::vector<std::string> keypath,
+    UpgraderFunction upgrade_func) {
   // Check if an upgrader already exists for this version and keypath
   auto version_it = upgrader_registry.find(version);
   if (version_it != upgrader_registry.end()) {
@@ -85,12 +82,13 @@ void registerUpgrader(
             error_stream << ".";
           error_stream << keypath[i];
         }
-        throw std::runtime_error(error_stream.str());
+        TORCH_CHECK(false, error_stream.str());
       }
     }
   }
 
-  upgrader_registry[version].emplace(keypath, upgrade_func);
+  upgrader_registry[version].emplace(
+      std::move(keypath), std::move(upgrade_func));
 }
 
 void registerUpgrader(
@@ -113,7 +111,7 @@ void registerUpgrader(
     throw std::invalid_argument("Empty keypath provided");
   }
 
-  registerUpgrader(version, keypath_vector, upgrade_func);
+  registerUpgrader(version, std::move(keypath_vector), upgrade_func);
 }
 
 bool deregisterUpgrader(int version, const std::vector<std::string>& keypath) {
@@ -176,16 +174,16 @@ void throwUpgraderError(
     error_stream << "\nProblematic object: " << problematic_object.dump(2);
   }
 
-  throw std::runtime_error(error_stream.str());
+  TORCH_CHECK(false, error_stream.str());
 }
 
-nlohmann::json upgrade(const nlohmann::json& artifact, int target_version) {
-  auto current_artifact = artifact;
+nlohmann::json upgrade(nlohmann::json artifact, int target_version) {
+  auto current_artifact = std::move(artifact);
 
   // Validate that the artifact contains required schema version information
-  if (!current_artifact.contains("schema_version")) {
-    throw std::runtime_error("Missing schema_version field in artifact");
-  }
+  TORCH_CHECK(
+      current_artifact.contains("schema_version"),
+      "Missing schema_version field in artifact");
 
   int current_version = current_artifact["schema_version"]["major"];
 
@@ -208,7 +206,7 @@ nlohmann::json upgrade(const nlohmann::json& artifact, int target_version) {
           getFieldByKeypath(current_artifact, upgrader.keypath);
 
       // Apply the upgrade transformation
-      auto upgraded_field = upgrader.upgrade_func(field_to_upgrade);
+      auto upgraded_field = upgrader.upgrade_func(std::move(field_to_upgrade));
 
       // Update the artifact with the upgraded field
       setFieldByKeypath(current_artifact, upgrader.keypath, upgraded_field);
@@ -233,7 +231,7 @@ nlohmann::json upgrade(const nlohmann::json& artifact, int target_version) {
         << "Failed to upgrade to target version " << target_version
         << ". Final version reached: " << current_version
         << ". This may indicate missing upgraders for intermediate versions.";
-    throw std::runtime_error(error_stream.str());
+    TORCH_CHECK(false, error_stream.str());
   }
 
   return current_artifact;
