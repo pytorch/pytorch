@@ -18,7 +18,9 @@ from torch.distributed.tensor.experimental._attention import (
     _context_parallel_shard,
     _ContextParallel,
     _cp_options,
+    _disable_context_parallel_dispatcher,
     _DispatchMode,
+    _enable_context_parallel_dispatcher,
     _is_causal_behavior,
     _RotateMethod,
     context_parallel,
@@ -63,6 +65,24 @@ rotater_enum_to_str = {
 }  # mapping from _RotateMethod enum to string
 
 
+class SDPAWrapper(torch.nn.Module):
+    def __init__(self, compiled: bool, backend: SDPBackend) -> None:
+        super().__init__()
+        if compiled:
+            self.sdpa = torch.compile(
+                F.scaled_dot_product_attention,
+                fullgraph=True,
+                backend="aot_eager",
+            )
+        else:
+            self.sdpa = F.scaled_dot_product_attention
+        self.backend = backend
+
+    def forward(self, *args: object, **kwargs: object) -> torch.Tensor:
+        with sdpa_kernel(self.backend):
+            return self.sdpa(*args, **kwargs)
+
+
 class RingAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
@@ -88,9 +108,99 @@ class RingAttentionTest(DTensorTestBase):
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],
+                "dispatch_mode": [
+                    _DispatchMode.MONKEY_PATCH,
+                    _DispatchMode.MODULE_WRAPPER,
+                ],
+                "new_api": [True, False],
             },
             self._test_ring_attention_sdpa,
         )
+
+    def _ring_attention_sdpa(
+        self,
+        cp_q: torch.Tensor,
+        cp_k: torch.Tensor,
+        cp_v: torch.Tensor,
+        *,
+        fn_eval: Callable,
+        mesh: DeviceMesh,
+        seq_dim: int,
+        is_causal: bool,
+        compiled: bool,
+        backend: SDPBackend,
+        rotater: _RotateMethod,
+        test_forward_only: bool,
+        dispatch_mode: _DispatchMode,
+        new_api: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if dispatch_mode == _DispatchMode.MODULE_WRAPPER:
+            cp_plan = _ContextParallel(
+                seq_dim=seq_dim,
+                attention_type=_ContextParallel.AttentionType.SDPA,
+            )
+            attention = SDPAWrapper(compiled=compiled, backend=backend)
+            attention = parallelize_module(attention, mesh, cp_plan)
+        else:
+            # This won't work for MONKEY_PATCH.
+            attention = F.scaled_dot_product_attention
+
+        if new_api:
+            cp_q, cp_k, cp_v = _context_parallel_shard(
+                mesh, (cp_q, cp_k, cp_v), (seq_dim,) * 3
+            )
+            _enable_context_parallel_dispatcher(seq_dim, mesh)
+        else:
+            cp_context = context_parallel(
+                mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(seq_dim,) * 3
+            )
+            cp_context.__enter__()
+
+        # NOTE: this some how proves that monkey patching is not stable.
+        # If we directly use SDPAWrapper, then the monkey patching
+        # dispatch mode wont work. When we refer to F.scaled_dot_product_attention,
+        # we have to be within the scope of context_parallel().
+        if dispatch_mode == _DispatchMode.MONKEY_PATCH:
+            attention = F.scaled_dot_product_attention
+            if compiled:
+                attention = torch.compile(
+                    attention, fullgraph=True, backend="aot_eager"
+                )
+
+        for target in [cp_q, cp_k, cp_v]:
+            target.requires_grad = True
+
+        with CommDebugMode() as comm_mode:
+            with sdpa_kernel(backend):
+                cp_out = fn_eval(
+                    attention,
+                    cp_q,
+                    cp_k,
+                    cp_v,
+                    is_causal=is_causal,
+                )
+
+            if not compiled and rotater == _RotateMethod.ALL_TO_ALL:
+                # Compiler and CommDebugMode do not work well together.
+                expect_all2all_count = (
+                    self.world_size - 1
+                    if test_forward_only
+                    else self.world_size * 3 - 2
+                )
+                self.assertDictEqual(
+                    comm_mode.get_comm_counts(),
+                    {c10d_functional.all_to_all_single: expect_all2all_count},
+                )
+        cp_dq, cp_dk, cp_dv = cp_q.grad, cp_k.grad, cp_v.grad
+        for target in [cp_q, cp_k, cp_v]:
+            target.requires_grad = False
+
+        if new_api:
+            _disable_context_parallel_dispatcher()
+        else:
+            cp_context.__exit__(None, None, None)
+
+        return cp_out, cp_dq, cp_dk, cp_dv
 
     def _test_ring_attention_sdpa(
         self,
@@ -100,10 +210,10 @@ class RingAttentionTest(DTensorTestBase):
         load_balance: bool,
         rotater: _RotateMethod,
         test_forward_only: bool,
+        dispatch_mode: _DispatchMode,
+        new_api: bool,
     ) -> None:
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.MONKEY_PATCH
-        )
+        torch.distributed.tensor.experimental._attention._dispatch_mode = dispatch_mode
 
         def fn_eval(fn, *args, **kwargs):
             if test_forward_only:
@@ -122,8 +232,8 @@ class RingAttentionTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
         dtype = torch.bfloat16
         bs = 8
-        query_tokens = 64
-        context_tokens = 64
+        seq_length = 1024
+        seq_dim = 2
         dim = 32
         nheads = 8
         torch.manual_seed(10)
@@ -136,24 +246,15 @@ class RingAttentionTest(DTensorTestBase):
 
         _cp_options.enable_load_balance = load_balance
 
-        q = torch.rand(
-            (bs, nheads, self.world_size * query_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        k = torch.rand(
-            (bs, nheads, self.world_size * context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        v = torch.rand(
-            (bs, nheads, self.world_size * context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
+        q, k, v = [
+            torch.rand(
+                (bs, nheads, seq_length * self.world_size, dim),
+                device=self.device_type,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        ]
 
         # Ensure all ranks have the same initialization data.
         with torch.no_grad():
@@ -164,77 +265,49 @@ class RingAttentionTest(DTensorTestBase):
         with sdpa_kernel(backend):
             out = fn_eval(F.scaled_dot_product_attention, q, k, v, is_causal=is_causal)
 
-        cp_q = q.detach().clone()
-        cp_k = k.detach().clone()
-        cp_v = v.detach().clone()
-        # Theoretically, context_parallel() should not be used to shard
-        # parameters because when require_grad is True, resize_ is not
-        # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
-        # now. So we can just use context_parallel() to shard q, k, v.
-        # In reality, context_paralle() should be used to shard the input.
-        with context_parallel(
-            device_mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(2, 2, 2)
-        ):
-            cp_q.requires_grad = True
-            cp_k.requires_grad = True
-            cp_v.requires_grad = True
-            with CommDebugMode() as comm_mode:
-                with sdpa_kernel(backend):
-                    if compiled:
-                        fn = torch.compile(
-                            F.scaled_dot_product_attention,
-                            fullgraph=True,
-                            backend="aot_eager",
-                        )
-                    else:
-                        fn = F.scaled_dot_product_attention
+        cp_q, cp_k, cp_v = [target.detach().clone() for target in [q, k, v]]
+        cp_out, cp_dq, cp_dk, cp_dv = self._ring_attention_sdpa(
+            cp_q,
+            cp_k,
+            cp_v,
+            fn_eval=fn_eval,
+            mesh=device_mesh,
+            seq_dim=seq_dim,
+            is_causal=is_causal,
+            compiled=compiled,
+            backend=backend,
+            rotater=rotater,
+            test_forward_only=test_forward_only,
+            dispatch_mode=dispatch_mode,
+            new_api=new_api,
+        )
 
-                    cp_out = fn_eval(fn, cp_q, cp_k, cp_v, is_causal=is_causal)
+        # Due to numerical error, we need to choose different atol for different
+        # attention kernels
+        (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [seq_dim])
+        atol = (
+            1e-08
+            if backend == SDPBackend.EFFICIENT_ATTENTION
+            else 1e-3 * self.world_size
+        )
+        self.assertTrue(torch.allclose(out, cp_out, atol=atol))
 
-                    if not compiled and rotater == _RotateMethod.ALL_TO_ALL:
-                        # Compiler and CommDebugMode do not work well together.
-                        expect_all2all_count = (
-                            self.world_size - 1
-                            if test_forward_only
-                            else self.world_size * 3 - 2
-                        )
-                        self.assertDictEqual(
-                            comm_mode.get_comm_counts(),
-                            {c10d_functional.all_to_all_single: expect_all2all_count},
-                        )
+        if test_forward_only:
+            return
 
-            # Due to numerical error, we need to choose different atol for different
-            # attention kernels
-            (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [2])
-            atol = (
-                1e-08
-                if backend == SDPBackend.EFFICIENT_ATTENTION
-                else 1e-3 * self.world_size
-            )
-            self.assertTrue(torch.allclose(out, cp_out, atol=atol))
-
-            if not test_forward_only:
-                cp_dq, cp_dk, cp_dv = context_parallel_unshard(
-                    device_mesh,
-                    [cp_q.grad, cp_k.grad, cp_v.grad],
-                    [2, 2, 2],
-                )
-                atol = (
-                    2e-06
-                    if backend == SDPBackend.EFFICIENT_ATTENTION
-                    else 8e-3 * self.world_size
-                )
-                self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
-                self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
-                self.assertTrue(torch.allclose(v.grad, cp_dv, atol=atol))
-
-                cp_q.grad = None
-                cp_k.grad = None
-                cp_v.grad = None
-
-            cp_q.requires_grad = False
-            cp_k.requires_grad = False
-            cp_v.requires_grad = False
+        cp_dq, cp_dk, cp_dv = context_parallel_unshard(
+            device_mesh,
+            [cp_dq, cp_dk, cp_dv],
+            [seq_dim] * 3,
+        )
+        atol = (
+            2e-06
+            if backend == SDPBackend.EFFICIENT_ATTENTION
+            else 8e-3 * self.world_size
+        )
+        self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
+        self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
+        self.assertTrue(torch.allclose(v.grad, cp_dv, atol=atol))
 
     def test_is_causal_behavior(self) -> None:
         _cp_options.enable_load_balance = False
@@ -357,7 +430,9 @@ class FlexAttentionWrapper(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, *args: object, **kwargs: object) -> [
+    def forward(
+        self, *args: object, **kwargs: object
+    ) -> [
         torch.Tensor | tuple[torch.Tensor, torch.Tensor],
         tuple[torch.Tensor, AuxOutput],
     ]:
@@ -384,35 +459,26 @@ class CPFlexAttentionTest(DTensorTestBase):
         torch.cuda.manual_seed(10)
         dtype = torch.float32
         bs = B if B > 1 else 8
-        query_tokens = context_tokens = qkv_size
         dim = 32
         nheads = 8
+        seq_dim = 2
 
-        q = torch.rand(
-            (bs, nheads, query_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        k = torch.rand(
-            (bs, nheads, context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        v = torch.rand(
-            (bs, nheads, context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
+        q, k, v = [
+            torch.rand(
+                (bs, nheads, qkv_size, dim),
+                device=self.device_type,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        ]
 
         block_mask = compiled_create_block_mask(
             mask_func,
             B=B,
             H=1,
-            Q_LEN=query_tokens,
-            KV_LEN=context_tokens,
+            Q_LEN=qkv_size,
+            KV_LEN=qkv_size,
             device=self.device_type,
         )
 
@@ -432,31 +498,25 @@ class CPFlexAttentionTest(DTensorTestBase):
         _cp_options.enable_load_balance = False
 
         # prepare input buffer
-        cp_q = q.detach().clone()
-        cp_k = k.detach().clone()
-        cp_v = v.detach().clone()
-
-        # shard qkv on seq_dim
-        shard_dim = 2
+        cp_q, cp_k, cp_v = [target.detach().clone() for target in [q, k, v]]
 
         flex_attention_wrapper_module = FlexAttentionWrapper()
-        flex_cp = _ContextParallel(
-            seq_dim=shard_dim,
+        cp_plan = _ContextParallel(
+            seq_dim=seq_dim,
             attention_type=_ContextParallel.AttentionType.FLEX,
         )
         parallelize_module(
             flex_attention_wrapper_module,
             device_mesh,
-            flex_cp,
+            cp_plan,
         )
 
         cp_q, cp_k, cp_v, cp_block_mask = _context_parallel_shard(
-            device_mesh, [cp_q, cp_k, cp_v, block_mask], [shard_dim] * 4
+            device_mesh, [cp_q, cp_k, cp_v, block_mask], [seq_dim] * 4
         )
 
-        cp_q.requires_grad = True
-        cp_k.requires_grad = True
-        cp_v.requires_grad = True
+        for target in [cp_q, cp_k, cp_v]:
+            target.requires_grad = True
 
         cp_out, cp_aux = flex_attention_wrapper_module(
             cp_q,
@@ -466,28 +526,15 @@ class CPFlexAttentionTest(DTensorTestBase):
             return_aux=AuxRequest(lse=True),
         )
 
-        # check block_mask rewrite doesn't escape to the outside
-        """
-        assert cp_block_mask.seq_lengths == (
-            cp_q.size(dim=shard_dim),
-            cp_k.size(dim=shard_dim),
-        ), (
-            block_mask.seq_lengths,
-            cp_block_mask.seq_lengths,
-            (cp_q.size(dim=shard_dim), cp_k.size(dim=shard_dim)),
-        )
-        """
-
         # backward run
         cp_out.sum().backward()
 
-        cp_q.requires_grad = False
-        cp_k.requires_grad = False
-        cp_v.requires_grad = False
+        for target in [cp_q, cp_k, cp_v]:
+            target.requires_grad = False
 
         # unshard the output
         cp_out, cp_lse = context_parallel_unshard(
-            device_mesh, [cp_out, cp_aux.lse], [2, 2]
+            device_mesh, [cp_out, cp_aux.lse], [seq_dim, seq_dim]
         )
         torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
@@ -496,7 +543,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
             device_mesh,
             [cp_q.grad, cp_k.grad, cp_v.grad],
-            [2, 2, 2],
+            [seq_dim] * 3,
         )
         torch.testing.assert_close(cp_q_grad, q.grad, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_k_grad, k.grad, atol=atol, rtol=rtol)
@@ -509,18 +556,14 @@ class CPFlexAttentionTest(DTensorTestBase):
     )
     def test_cp_flex_attention(self) -> None:
         self.run_subtests(
-            {
-                "qkv_size": [128 * self.world_size, 2048],
-            },
+            {"qkv_size": [128 * self.world_size, 2048]},
             self._test_cp_flex_attention,
         )
 
         # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
         with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
             self.run_subtests(
-                {
-                    "qkv_size": [64 * self.world_size],
-                },
+                {"qkv_size": [64 * self.world_size]},
                 self._test_cp_flex_attention,
             )
 
