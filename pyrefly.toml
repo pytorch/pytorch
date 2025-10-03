@@ -33,6 +33,7 @@ project-excludes = [
   "torch/linalg/__init__.py",
   "torch/package/importer.py",
   "torch/package/_package_pickler.py",
+  "torch/jit/annotations.py",
   # ====
   "benchmarks/instruction_counts/main.py",
   "benchmarks/instruction_counts/definitions/setup.py",

@@ -170,6 +170,7 @@ def _backport_for_mobile(f_input, f_output, to_version):
         return torch._C._backport_for_mobile(
             # pyrefly: ignore  # no-matching-overload
             os.fspath(f_input),
+            # pyrefly: ignore  # no-matching-overload
             os.fspath(f_output),
             to_version,
         )

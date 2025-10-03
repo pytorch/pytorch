@@ -168,18 +168,22 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
         cpp_module = torch._C.import_ir_module(
             # pyrefly: ignore  # no-matching-overload, bad-argument-count
             cu,
+            # pyrefly: ignore  # no-matching-overload
             os.fspath(f),
             map_location,
             _extra_files,
+            # pyrefly: ignore  # bad-argument-count
             _restore_shapes,
         )  # type: ignore[call-arg]
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(
             # pyrefly: ignore  # missing-attribute, bad-argument-count
             cu,
+            # pyrefly: ignore  # missing-attribute
             f.read(),
             map_location,
             _extra_files,
+            # pyrefly: ignore  # bad-argument-count
             _restore_shapes,
         )  # type: ignore[call-arg]
 

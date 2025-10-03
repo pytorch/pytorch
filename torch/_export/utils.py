@@ -472,6 +472,7 @@ def _check_input_constraints_for_graph(
             _check_symint(
                 # pyrefly: ignore  # bad-argument-type
                 node_val,
+                # pyrefly: ignore  # bad-argument-type
                 arg,
                 range_constraints,
                 unification_map,

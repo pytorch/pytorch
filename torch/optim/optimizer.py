@@ -961,7 +961,9 @@ class Optimizer:
                     # pyrefly: ignore  # bad-argument-type
                     param,
                     value,
+                    # pyrefly: ignore  # bad-argument-type
                     param_id,
+                    # pyrefly: ignore  # bad-argument-type
                     param_groups,
                     key,
                 )

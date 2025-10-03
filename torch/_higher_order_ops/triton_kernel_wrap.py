@@ -901,6 +901,7 @@ def analyze_kernel_mutations(
                 mutations = analyze_kernel_mutations(
                     # pyrefly: ignore  # bad-argument-type
                     functions,
+                    # pyrefly: ignore  # bad-argument-type
                     op.fn_call_name,
                     len(op.args),
                 )
@@ -1061,6 +1062,7 @@ def triton_kernel_wrapper_mutation_dense(
         fn_name, code = user_defined_kernel_grid_fn_code(
             # pyrefly: ignore  # missing-attribute
             kernel.fn.__name__,
+            # pyrefly: ignore  # missing-attribute
             kernel.configs,
             grid,
         )
