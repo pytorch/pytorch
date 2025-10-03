@@ -164,6 +164,7 @@ def setup_context(ctx, inputs, output):
 
 
 def backward(ctx, grad_out, grad_lse):
+    print("in bwd")
     query = ctx.query
     key = ctx.key
     value = ctx.value
