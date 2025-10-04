@@ -6,6 +6,17 @@ to pass that finds flex region and compiles it.
 - Uses CapabilityBasedPartitioner to find the flex region
 - Calls compile_fx_inner to compile the flex region
 - Replaces the flex region (call_module) with the compiled callable (call_function)
+
+
+Things learnt or not tried out yet
+
+1) I think aot_eager_hackable is wrong, we need fx_traceback.annotate. This will
+require me to change the operator support object.
+2) No symbolic shapes yet.
+3) Need to run a model with multiple attention layers to see how partitioner
+works.
+4) Need to compose with AC (or maybe SAC)
+5) Stretch - make it work with SimpleFSDP playground.
 """
 
 import functools
