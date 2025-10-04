@@ -3705,6 +3705,10 @@ class SourcelessBuilder:
             value, (torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec)
         ):
             return UserDefinedObjectVariable(value)
+        elif isinstance(value, (inspect.Signature, inspect.Parameter)):
+            return UserDefinedObjectVariable(value)
+        elif isinstance(value, types.MappingProxyType):
+            return VariableTracker.build(tx, dict(value))
         elif PlacementVariable.is_placement(value):
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
