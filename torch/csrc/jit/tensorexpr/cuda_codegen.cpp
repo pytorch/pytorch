@@ -1083,7 +1083,7 @@ void CudaCodeGen::call_with_numel(void** args, int64_t numel) {
   std::vector<void*> ptr_to_args(buffer_args.size());
   for (size_t i = 0; i < buffer_args.size(); i++) {
     ptr_to_args[i] =
-        buffer_args[i].isVar() ? args[i] : const_cast<void**>(&args[i]);
+        buffer_args[i].isVar() ? args[i] : (&args[i]);
   }
 
   const auto device = this->device().index();
