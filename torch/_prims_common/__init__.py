@@ -307,7 +307,10 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         guard_size_oblivious,
     )
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
+    def eval_eager(x):
+        return bool(x)
+
+    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
 
     if maybe_guard_or_false(a.numel() < 2):
         return True
