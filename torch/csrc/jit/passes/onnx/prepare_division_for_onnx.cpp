@@ -23,9 +23,10 @@ static void PrepareDivisionForONNXOnBlock(Block* block) {
                 subgraph->insertNode(subgraph->createNumToTensor(input))
                     ->output();
             longtensor->node()->copyMetadata(input->node());
+            auto* dtype = subgraph->insertConstant(c10::kFloat);
             auto* nonblocking = subgraph->insertConstant(0);
             auto* cast =
-                subgraph->create(aten::_cast_Float, {longtensor, nonblocking});
+                subgraph->create(aten::to, {longtensor, dtype, nonblocking});
             cast->copyMetadata(*it);
             return subgraph->insertNode(cast)->output();
           });

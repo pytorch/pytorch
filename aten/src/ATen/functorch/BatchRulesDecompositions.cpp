@@ -213,9 +213,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(nanmean);
   m.impl("narrow", native::narrow_symint);
   OP_DECOMPOSE(negative);
-  OP_DECOMPOSE2(frobenius_norm, dim);
-  OP_DECOMPOSE2(nuclear_norm, dim);
-  OP_DECOMPOSE(nuclear_norm);
   m.impl("nll_loss_nd", native::nll_loss_nd_symint);
   m.impl("nll_loss", native::nll_loss_symint);
   m.impl("nll_loss2d", native::nll_loss2d_symint);

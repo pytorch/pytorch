@@ -181,7 +181,6 @@ struct RHSTemplate {
 static std::string encodeRHS(const Node* n) {
   static std::unordered_map<NodeKind, RHSTemplate> simple_map_ops = {
       // unary
-      {aten::_cast_Float, "static_cast<float>(${0})"},
       {aten::abs, "fabs(${0})"},
       {aten::sigmoid, {"1.f / (1.f + expf(-${0}))", "1. / (1. + exp(-${0}))"}},
       {aten::relu, "${0} < 0 ? 0.f : ${0} "},
