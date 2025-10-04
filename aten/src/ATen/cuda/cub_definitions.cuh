@@ -10,14 +10,6 @@
 #define CUB_VERSION 200001
 #endif
 
-// cub sort support for __nv_bfloat16 is added to cub 1.13 in:
-// https://github.com/NVIDIA/cub/pull/306
-#if CUB_VERSION >= 101300
-#define CUB_SUPPORTS_NV_BFLOAT16() true
-#else
-#define CUB_SUPPORTS_NV_BFLOAT16() false
-#endif
-
 // cub support for CUB_WRAPPED_NAMESPACE is added to cub 1.13.1 in:
 // https://github.com/NVIDIA/cub/pull/326
 // CUB_WRAPPED_NAMESPACE is defined globally in cmake/Dependencies.cmake
