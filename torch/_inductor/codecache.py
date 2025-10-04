@@ -2198,15 +2198,28 @@ end
 
             consts_size = len(serialized_weights)
 
-            # TODO: Fix mmap weights with cuda
-            use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
+            # mmap's weights are stored in the .so
+            # windows PE file doesn't support appending weights bianry at the end of the .dll file
+            use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000 and config.aot_inductor.cross_target_platform != "windows"
+            # external weights are stored separated, but they're also mmap'd at loading time
+            use_external_weights = config.aot_inductor.cross_target_platform == "windows" and consts_size > 2_000_000_000
+            external_weights_path = None
+
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
+
+            external_weights_filename = None
+            if use_external_weights:
+                external_weights_filename = f"{wrapper_path_operator.stem}_weights.bin"
+                external_weights_path = str(
+                    wrapper_path_operator.with_name(external_weights_filename)
+                )
 
             compile_command: dict[str, Any] = {
                 "aot_mode": graph.aot_mode,
                 "device_type": device_type,
                 "use_mmap_weights": use_mmap_weights,
+                "use_mmap_weights_external": use_external_weights,
                 "use_relative_path": use_relative_path,
                 "vec_isa": picked_vec_isa,
             }
@@ -2285,7 +2298,14 @@ end
             if not use_mmap_weights:
                 aot_constants = serialized_weights
                 magic_number = 0
+                if use_external_weights:
+                    aot_constants = struct.pack("q", consts_size)
+                    # For external weights, write weights to separate file and embed minimal placeholder
+                    with open(external_weights_path, "wb") as f_weights:
+                        f_weights.write(serialized_weights)
+                    generated_files.append(external_weights_path)
             else:
+                # we'll append weights binary to the end of .so file and mmap it when loading
                 magic_number = cast(
                     int, torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
                 )

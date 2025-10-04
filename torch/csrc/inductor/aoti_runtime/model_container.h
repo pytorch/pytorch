@@ -42,7 +42,8 @@ class AOTInductorModelContainer {
   AOTInductorModelContainer(
       size_t num_models,
       const std::string& device_str,
-      const std::optional<std::string>& cubin_dir = std::nullopt) {
+      const std::optional<std::string>& cubin_dir = std::nullopt,
+      const std::optional<std::string>& weight_path = std::nullopt) {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
 
@@ -50,7 +51,7 @@ class AOTInductorModelContainer {
     available_models_.reserve(num_models);
     for (size_t i = 0; i < num_models; ++i) {
       models_.push_back(AOTInductorModel::Create(
-          constants_map_, constants_array_, device_str, cubin_dir));
+          constants_map_, constants_array_, device_str, cubin_dir, weight_path));
       available_models_.push_back(models_.back().get());
     }
 

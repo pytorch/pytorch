@@ -774,13 +774,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             {self.aoti_model_class_name}::{self.aoti_model_class_name}(std::shared_ptr<ConstantMap> constants_map,
                                                std::shared_ptr<std::vector<ConstantHandle>> constants_array,
                                                const std::string& device_str,
-                                               std::optional<std::string> cubin_dir)
+                                               std::optional<std::string> cubin_dir,
+                                               std::optional<std::string> weight_dir)
                 : AOTInductorModelBase({num_inputs},
                                        {num_outputs},
                                        {num_constants},
                                        device_str,
                                        std::move(cubin_dir),
-                                       {include_weights}) {{
+                                       {include_weights},
+                                       std::move(weight_dir)) {{
             """
         )
 

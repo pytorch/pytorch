@@ -14,7 +14,8 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::shared_ptr<ConstantMap> constants_map,
       std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       const std::string& device_str,
-      std::optional<std::string> cubin_dir);
+      std::optional<std::string> cubin_dir,
+      std::optional<std::string> weight_path = std::nullopt);
 
   std::unordered_map<std::string, AtenTensorHandle> const_run_impl(
       DeviceStreamType stream,
@@ -47,12 +48,15 @@ class AOTInductorModel : public AOTInductorModelBase<AOTInductorModel> {
       std::shared_ptr<ConstantMap> constants_map,
       std::shared_ptr<std::vector<ConstantHandle>> constants_array,
       const std::string& device_str,
-      std::optional<std::string> cubin_dir) {
+      std::optional<std::string> cubin_dir,
+      std::optional<std::string> weight_path = std::nullopt) {
     return std::make_unique<AOTInductorModel>(
         std::move(constants_map),
         std::move(constants_array),
         device_str,
-        std::move(cubin_dir));
+        std::move(cubin_dir),
+        std::move(weight_path)
+    );
   }
 
  private:

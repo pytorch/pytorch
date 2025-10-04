@@ -66,6 +66,20 @@ AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     size_t num_models,
     const char* device_str,
     const char* cubin_dir) {
+  return AOTInductorModelContainerCreateWithDeviceAndWeight(
+        container_handle,
+        num_models,
+        device_str,
+        cubin_dir,
+        nullptr);
+}
+
+AOTIRuntimeError AOTInductorModelContainerCreateWithDeviceAndWeight(
+    AOTInductorModelContainerHandle* container_handle,
+    size_t num_models,
+    const char* device_str,
+    const char* cubin_dir,
+    const char* weight_path){
   if (num_models == 0) {
     std::cerr << "Error: num_models must be positive, but got 0\n";
     return AOTI_RUNTIME_FAILURE;
@@ -75,12 +89,18 @@ AOTIRuntimeError AOTInductorModelContainerCreateWithDevice(
     if (cubin_dir != nullptr) {
       cubin_dir_opt.emplace(cubin_dir);
     }
+    std::optional<std::string> weight_path_opt;
+    if (weight_path != nullptr) {
+      weight_path_opt.emplace(weight_path);
+    }
+
     auto* container = new torch::aot_inductor::AOTInductorModelContainer(
-        num_models, std::string(device_str), cubin_dir_opt);
+        num_models, std::string(device_str), cubin_dir_opt, weight_path_opt);
     *container_handle =
         reinterpret_cast<AOTInductorModelContainerHandle>(container);
   })
 }
+
 
 AOTIRuntimeError AOTInductorModelContainerDelete(
     AOTInductorModelContainerHandle container_handle) {

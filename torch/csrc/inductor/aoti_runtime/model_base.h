@@ -2,7 +2,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <functional> // std::function
-#ifdef USE_MMAP_SELF
+#if defined(USE_MMAP_SELF) || defined(USE_MMAP_EXTERNAL)
 #include <errno.h>
 #include <fcntl.h>
 #include <io.h>
@@ -88,10 +88,18 @@ static DWORD get_creation_disposition(int flags) {
   return OPEN_EXISTING;
 }
 
+#ifndef O_ACCMODE
 #define O_ACCMODE 03
+#endif
+#ifndef O_RDONLY
 #define O_RDONLY 00
+#endif
+#ifndef O_WRONLY
 #define O_WRONLY 01
+#endif
+#ifndef O_RDWR
 #define O_RDWR 02
+#endif
 
 static DWORD get_access_mode(int flags) {
   switch (flags & O_ACCMODE) {
@@ -259,7 +267,7 @@ int munmap(void* addr, size_t length) {
   }
   return 0;
 }
-#endif // USE_MMAP_SELF
+#endif // defined(USE_MMAP_SELF) || defined(USE_MMAP_EXTERNAL)
 #else // !_WIN32
 #include <dlfcn.h>
 #include <sys/mman.h>
@@ -431,12 +439,14 @@ class AOTInductorModelBase {
       size_t num_constants,
       const std::string& device_str,
       std::optional<std::string> cubin_dir,
-      bool include_weights = true)
+      bool include_weights = true,
+      std::optional<std::string> weight_path = std::nullopt)
       : inputs_info_(num_inputs),
         outputs_info_(num_outputs),
         constants_info_(num_constants),
         cubin_dir_(std::move(cubin_dir)),
-        include_weights(include_weights) {
+        include_weights(include_weights),
+        external_weight_path_(std::move(weight_path)) {
     parse_device_str(device_str, device_type_, device_idx_);
 
 #ifdef USE_CUDA
@@ -610,9 +620,9 @@ class AOTInductorModelBase {
       size_t data_size = this->constant_data_size(i);
       uint8_t* internal_ptr = (data_size != 0)
           ? constant_ptr(
-                constants_internal_offset[non_folded_idx],
-                bytes_read,
-                data_size,
+            constants_internal_offset[non_folded_idx],
+            bytes_read,
+            data_size,
                 /* skip_copy = */ false)
           : nullptr;
       bytes_read += data_size;
@@ -904,8 +914,15 @@ class AOTInductorModelBase {
  protected:
   uint8_t* _get_constants_start() {
 #ifndef USE_MMAP_SELF
+#ifdef USE_MMAP_EXTERNAL
+  if (self_mmap) {
+    return self_mmap;
+  }
+  return _load_external_weights();
+#else
     // NOLINTNEXTLINE(*const-cast*)
     return const_cast<uint8_t*>(_binary_constants_bin_start);
+#endif
 #else
     if (self_mmap) {
       return self_mmap;
@@ -942,6 +959,82 @@ class AOTInductorModelBase {
     return self_mmap;
 #endif
   }
+
+#ifdef USE_MMAP_EXTERNAL
+  uint8_t* _load_external_weights() {
+
+    AOTI_RUNTIME_CHECK(external_weight_path_.has_value(),
+        "external_weight_path is not provided.");
+
+    // The external_weight_path_ should be an absolute path as specified by the user
+    std::string weights_path = *external_weight_path_;
+    AOTI_RUNTIME_CHECK(!weights_path.empty(), "External weight path cannot be empty");
+
+    auto weights_size =
+        reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
+
+#ifdef _WIN32
+    // Proper Windows file mapping implementation
+
+    HANDLE hFile = CreateFileA(
+        weights_path.c_str(),
+        GENERIC_READ,
+        FILE_SHARE_READ,
+        NULL,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL);
+
+    if (hFile == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("Failed to open external weights file: " + weights_path);
+    }
+
+    // Get actual file size for validation
+    LARGE_INTEGER fileSize;
+    if (!GetFileSizeEx(hFile, &fileSize)) {
+        CloseHandle(hFile);
+        throw std::runtime_error("Failed to get file size");
+    }
+
+    if (static_cast<uint64_t>(fileSize.QuadPart) < weights_size) {
+        CloseHandle(hFile);
+        throw std::runtime_error("File size smaller than expected weights size");
+    }
+
+    HANDLE hMapping = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+    CloseHandle(hFile);  // Close file handle, keep mapping handle
+
+    if (hMapping == NULL) {
+        throw std::runtime_error("CreateFileMapping failed");
+    }
+
+    uint8_t* ptr = static_cast<uint8_t*>(MapViewOfFile(
+        hMapping, FILE_MAP_READ, 0, 0, weights_size));
+
+    if (ptr == NULL) {
+        CloseHandle(hMapping);
+        throw std::runtime_error("MapViewOfFile failed");
+    }
+
+    // TODO: Store hMapping for proper cleanup in destructor
+
+#else
+    // Unix/Linux implementation
+    int fd = open(weights_path.c_str(), O_RDONLY);
+    AOTI_RUNTIME_CHECK(fd >= 0, "Failed to open external weights file: " + weights_path);
+
+    uint8_t* ptr = static_cast<uint8_t*>(mmap(
+        NULL, weights_size, PROT_READ, MAP_PRIVATE, fd, 0));
+
+    close(fd);
+    AOTI_RUNTIME_CHECK(ptr != MAP_FAILED, "mmap() failed");
+#endif
+
+    self_mmap = static_cast<uint8_t*>(ptr);
+    return self_mmap;
+  }
+#endif
+
   struct ParamInfo {
     const char* name = nullptr;
   };
@@ -973,7 +1066,8 @@ class AOTInductorModelBase {
   // Holds the blob storage for constants' at::Tensor.
   RAIIDataPtr constant_blob_;
 
-#ifdef USE_MMAP_SELF
+#if defined(USE_MMAP_SELF) || defined(USE_MMAP_EXTERNAL)
+  // Mapped memory for weights
   uint8_t* self_mmap = NULL;
 #endif
 
@@ -984,6 +1078,9 @@ class AOTInductorModelBase {
   // If True, we would prepare the weight when loading the model, otherwise the
   // model will be loaded without weights, and need to be provided by the user.
   bool include_weights;
+
+  // Path for external weights file
+  const std::optional<std::string> external_weight_path_;
 
   // Record if the model finishes an inference run so that its owning
   // AOTModelContainer can reuse this instance.
