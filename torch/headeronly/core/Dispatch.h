@@ -28,7 +28,7 @@
 #include <torch/headeronly/util/Exception.h>
 #define AT_DISPATCH_DEFAULT(DISPATCHNAME, ENUMTYPE) \
   STD_TORCH_CHECK(                                  \
-      false, '"', DISPATCHNAME, "\" not implemented for '", ENUMTYPE, '"')
+      false, '"', DISPATCHNAME, "\" not implemented for '", ENUMTYPE, "'")
 #endif
 
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...)     \

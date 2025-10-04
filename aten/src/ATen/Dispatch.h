@@ -67,7 +67,7 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   RECORD_KERNEL_FUNCTION_DTYPE(DISPATCHNAME, ENUMTYPE)
 #define AT_DISPATCH_DEFAULT(DISPATCHNAME, ENUMTYPE) \
   TORCH_CHECK_NOT_IMPLEMENTED(                      \
-      false, '"', DISPATCHNAME, "\" not implemented for '", ENUMTYPE, '"')
+      false, '"', DISPATCHNAME, "\" not implemented for '", ENUMTYPE, "'")
 /* Include of torch/headeronly/Dispatch.h must follow the definitions
    of AT_DISPATCH_SWITCH_PRELUDE, AT_DISPATCH_CASE_PRELUDE, and
    AT_DISPATCH_DEFAULT macros. */
