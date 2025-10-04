@@ -581,8 +581,8 @@ def get_score(addr: sympy.Expr, var_ranges: dict[sympy.Symbol, int]) -> int:
             var_sizes.append(v_size)
     from .virtualized import V
 
-    return V.graph.sizevars.atomically_apply_size_hint(
-        sympy_product(var_sizes), fallback=config.unbacked_symint_fallback
+    return V.graph.sizevars.size_hint(
+        sympy_product(var_sizes), hint_override=config.unbacked_symint_fallback
     )
 
 

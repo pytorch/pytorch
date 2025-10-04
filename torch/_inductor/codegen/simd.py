@@ -1733,9 +1733,7 @@ class SIMDScheduling(BaseScheduling):
         shapes = self._get_multikernel_shapes(node)
         return tuple(
             tuple(
-                hint
-                if isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer)
-                else s
+                V.graph.sizevars.size_hint(s, hint_override=hint)
                 for s in shape
             )
             for shape in shapes
