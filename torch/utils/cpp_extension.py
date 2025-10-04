@@ -2456,13 +2456,11 @@ def _get_cuda_arch_flags(cflags: Optional[list[str]] = None) -> list[str]:
         arch_list[-1] += '+PTX'
 
         if not _arch_list:
-            # Only log on rank 0 in distributed settings to avoid spam
-            if not torch.distributed.is_available() or not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
-                arch_list_str = ';'.join(arch_list)
-                logger.debug(
-                    "TORCH_CUDA_ARCH_LIST is not set, using TORCH_CUDA_ARCH_LIST='%s' "
-                    "for visible GPU architectures. Set os.environ['TORCH_CUDA_ARCH_LIST'] to override.",
-                    arch_list_str)
+            arch_list_str = ';'.join(arch_list)
+            logger.debug(
+                "TORCH_CUDA_ARCH_LIST is not set, using TORCH_CUDA_ARCH_LIST='%s' "
+                "for visible GPU architectures. Set os.environ['TORCH_CUDA_ARCH_LIST'] to override.",
+                arch_list_str)
     else:
         # Deal with lists that are ' ' separated (only deal with ';' after)
         _arch_list = _arch_list.replace(' ', ';')
