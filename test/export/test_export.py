@@ -223,7 +223,7 @@ STRICT_EXPORT_V2_SUFFIX = "_strict_export_v2"
 # Now default mode is non strict, so original unammended test names
 # should be treated as non-strict
 def is_non_strict_test(test_name):
-    return not test_name.endswith(STRICT_SUFFIX) and not test_name.endswith(
+    return test_name.endswith(STRICT_SUFFIX) and not test_name.endswith(
         STRICT_EXPORT_V2_SUFFIX
     )
 
