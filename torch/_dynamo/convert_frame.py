@@ -1929,6 +1929,7 @@ class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
         self._torchdynamo_orig_backend = callback
+        breakpoint()
         self.hooks = hooks
 
     def __call__(
