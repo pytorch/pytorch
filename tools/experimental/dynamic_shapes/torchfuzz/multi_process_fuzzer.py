@@ -90,7 +90,12 @@ def is_ignored_output(output: str) -> int:
     return -1
 
 
-def run_fuzzer_with_seed(seed: int, template: str = "default") -> FuzzerResult:
+def run_fuzzer_with_seed(
+    seed: int,
+    template: str = "default",
+    supported_ops: Optional[list[str]] = None,
+    op_weights: Optional[dict[str, float]] = None,
+) -> FuzzerResult:
     """
     Run fuzzer.py with a specific seed.
 
@@ -114,6 +119,13 @@ def run_fuzzer_with_seed(seed: int, template: str = "default") -> FuzzerResult:
             "--template",
             template,
         ]
+
+        # Append supported ops and weights if provided
+        if supported_ops:
+            cmd.extend(["--supported-ops", ",".join(supported_ops)])
+        if op_weights:
+            weights_str = ",".join(f"{k}={v}" for k, v in op_weights.items())
+            cmd.extend(["--op-weights", weights_str])
 
         result = subprocess.run(
             cmd,
@@ -213,6 +225,8 @@ def run_multi_process_fuzzer(
     seed_count: int = 100,
     verbose: bool = False,
     template: str = "default",
+    supported_ops: Optional[list[str]] = None,
+    op_weights: Optional[dict[str, float]] = None,
 ) -> None:
     """
     Run the multi-process fuzzer.
@@ -250,7 +264,9 @@ def run_multi_process_fuzzer(
             # Submit all seeds to the process pool
             future_results = []
             for seed in seeds:
-                future = pool.apply_async(run_fuzzer_with_seed, (seed, template))
+                future = pool.apply_async(
+                    run_fuzzer_with_seed, (seed, template, supported_ops, op_weights)
+                )
                 future_results.append(future)
 
             # Set up progress bar
