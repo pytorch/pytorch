@@ -2,7 +2,8 @@ import inspect
 import logging
 import traceback
 from collections import namedtuple
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 

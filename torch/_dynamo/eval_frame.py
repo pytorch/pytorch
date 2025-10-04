@@ -39,10 +39,11 @@ import types
 import unittest
 import warnings
 import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy

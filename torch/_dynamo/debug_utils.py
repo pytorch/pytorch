@@ -33,8 +33,9 @@ import sys
 import tempfile
 import textwrap
 from collections import Counter
+from collections.abc import Callable
 from importlib import import_module
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._prims_common as utils

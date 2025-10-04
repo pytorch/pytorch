@@ -43,9 +43,10 @@ import threading
 import traceback
 import types
 import weakref
+from collections.abc import Callable
 from traceback import StackSummary
-from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias, TypeIs
+from typing import Any, cast, NoReturn, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing_extensions import TypeIs
 from unittest.mock import patch
 
 import torch

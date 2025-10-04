@@ -42,10 +42,11 @@ import traceback
 import types
 import typing
 import weakref
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 

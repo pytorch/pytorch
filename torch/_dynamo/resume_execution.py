@@ -17,9 +17,9 @@ import copy
 import dataclasses
 import sys
 import types
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import AbstractContextManager
-from typing import Any, Callable, cast, Optional
+from typing import Any, cast, Optional
 
 from .bytecode_transformation import (
     add_push_null,

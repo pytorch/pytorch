@@ -16,7 +16,8 @@ import os
 import re
 import sys
 import unittest
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch.testing

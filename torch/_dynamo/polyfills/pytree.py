@@ -5,8 +5,9 @@ Python polyfills for torch.utils.pytree
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree

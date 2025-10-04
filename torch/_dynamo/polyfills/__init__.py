@@ -10,9 +10,9 @@ Python polyfills for common builtins.
 
 import types
 from collections import OrderedDict
-from collections.abc import Hashable, Iterable, MutableMapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 

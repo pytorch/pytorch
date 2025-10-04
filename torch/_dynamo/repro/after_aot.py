@@ -30,9 +30,10 @@ import subprocess
 import sys
 import textwrap
 import uuid
+from collections.abc import Callable
 from importlib import import_module
 from tempfile import TemporaryFile
-from typing import Any, Callable, IO, Optional, TYPE_CHECKING, Union
+from typing import Any, IO, Optional, TYPE_CHECKING, Union
 from typing_extensions import Unpack
 
 

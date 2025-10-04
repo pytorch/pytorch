@@ -23,8 +23,8 @@ import re
 import sys
 import types
 import unittest
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 

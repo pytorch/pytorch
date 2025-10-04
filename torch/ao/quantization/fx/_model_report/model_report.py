@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from collections import OrderedDict
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch.ao.quantization.fx._equalize import EqualizationQConfig

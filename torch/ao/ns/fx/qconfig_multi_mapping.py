@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Callable, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any, TYPE_CHECKING, Union
 
 import torch
 from torch.ao.quantization import QConfigMapping

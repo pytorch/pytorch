@@ -2,7 +2,8 @@
 # mypy: allow-untyped-defs
 import enum
 import operator
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 import torch
 import torch.ao.nn.intrinsic.quantized as nniq

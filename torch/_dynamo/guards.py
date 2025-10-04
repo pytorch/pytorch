@@ -35,10 +35,11 @@ import traceback
 import types
 import warnings
 import weakref
+from collections.abc import Callable
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, Callable, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
 
 
 try:

@@ -45,22 +45,25 @@ import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
+from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
 from types import CodeType, MethodWrapperType
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Generic,
+    Literal,
     Optional,
     overload,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, ParamSpec, TypeAlias, TypeGuard, TypeIs
+from typing_extensions import ParamSpec, TypeIs
 
 import torch
 import torch._functorch.config
