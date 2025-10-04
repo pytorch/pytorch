@@ -106,14 +106,16 @@ class DTensorSpec:
         if len(self.placements) == 1:
             placement_str = str(self.placements[0])
         else:
-            placement_str = str(self.placements)
+            placement_str = f"({', '.join(str(p) for p in self.placements)})"
 
         if self.tensor_meta is not None:
             tensor_shape = str(tuple(self.tensor_meta.shape))
+            tensor_dtype = str(self.tensor_meta.dtype)
         else:
             tensor_shape = "unknown shape"
+            tensor_dtype = "unknown dtype"
 
-        return f"Spec({placement_str} on {tensor_shape})"
+        return f"DTensorSpec(size:{tensor_shape}, dtype:{tensor_dtype}, placement:{placement_str})"
 
     @property
     def shape(self) -> torch.Size:

@@ -205,7 +205,7 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.mesh_shape
-        return f"[{strategy_list_str}] @ mesh: {mesh_shape}"
+        return f"OpStragety[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -374,22 +374,38 @@ class OpSchema:
     def __str__(self) -> str:
         args_schema: list[str] = []
         mesh_shape = None
+
+        def get_named_mesh(mesh_shape, mesh_dim_names):
+            named_mesh = []
+            for dim_name, dim_len in zip(mesh_dim_names, mesh_shape):
+                named_mesh.append(f"'{dim_name}'={dim_len}")
+            return ", ".join(named_mesh)
+
         for arg in self.args_schema:
             if isinstance(arg, DTensorSpec):
                 args_schema.append(str(arg))
                 mesh_shape = arg.mesh.shape
+                if arg.mesh.mesh_dim_names:
+                    mesh_shape = get_named_mesh(mesh_shape, arg.mesh.mesh_dim_names)
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
                 mesh_shape = arg.mesh_shape
+                if arg.mesh.mesh_dim_names:
+                    mesh_shape = get_named_mesh(mesh_shape, arg.mesh.mesh_dim_names)
             elif isinstance(arg, TupleStrategy):
                 first_op_strategy = arg.children[0]
                 assert isinstance(first_op_strategy, OpStrategy)
                 mesh_shape = first_op_strategy.mesh_shape
+                if first_op_strategy.mesh.mesh_dim_names:
+                    mesh_shape = get_named_mesh(
+                        mesh_shape, first_op_strategy.mesh.mesh_dim_names
+                    )
                 args_schema.append(str(arg))
             else:
                 args_schema.append(str(arg))
-        return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
+
+        return f"{self.op}({', '.join(args_schema)}) on mesh({mesh_shape})"
 
     def __post_init__(self) -> None:
         _DTensor_OpSchema_post_init(self)
