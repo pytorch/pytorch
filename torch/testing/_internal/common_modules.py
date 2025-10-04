@@ -912,7 +912,10 @@ def module_inputs_torch_nn_BatchNorm1d(module_info, device, dtype, requires_grad
                     desc='3d_input_not_affine'),
         ModuleInput(constructor_input=FunctionInput(5, 1e-3, 0.3, False),
                     forward_input=FunctionInput(make_input((0, 5, 9))),
-                    desc='zero_batch')]
+                    desc='zero_batch'),
+        ModuleInput(constructor_input=FunctionInput(10, bias=False),
+                    forward_input=FunctionInput(make_input((4, 10))),
+                    desc='affine_not_bias'),]
 
 
 def module_inputs_torch_nn_BatchNorm2d(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -935,7 +938,10 @@ def module_inputs_torch_nn_BatchNorm2d(module_info, device, dtype, requires_grad
                     desc='not_tracking_stats'),
         ModuleInput(constructor_input=FunctionInput(5, 1e-3, 0.3, False),
                     forward_input=FunctionInput(make_input((0, 5, 2, 2))),
-                    desc='zero_batch')]
+                    desc='zero_batch'),
+        ModuleInput(constructor_input=FunctionInput(3, bias=False),
+                    forward_input=FunctionInput(make_input((2, 3, 6, 6))),
+                    desc='affine_not_bias'),]
 
 
 def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -958,7 +964,10 @@ def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad
                     desc='not_tracking_stats'),
         ModuleInput(constructor_input=FunctionInput(5, 1e-3, 0.3, False),
                     forward_input=FunctionInput(make_input((0, 5, 2, 2, 2))),
-                    desc='zero_batch')]
+                    desc='zero_batch'),
+        ModuleInput(constructor_input=FunctionInput(3, bias=False),
+                    forward_input=FunctionInput(make_input((2, 3, 4, 4, 4))),
+                    desc='affine_not_bias'),]
 
 
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -1707,6 +1716,10 @@ def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, 
             forward_input=FunctionInput(make_input((4, 6, 5))),
             desc='1d_affine'),
         ModuleInput(
+            constructor_input=FunctionInput(3, 6, 1e-3, bias=False),
+            forward_input=FunctionInput(make_input((4, 6, 5))),
+            desc='1d_affine_not_bias'),
+        ModuleInput(
             constructor_input=FunctionInput(3, 12, 1e-3),
             forward_input=FunctionInput(make_input((4, 12))),
             desc='1d_affine_GN'),
@@ -1727,14 +1740,17 @@ def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, 
             forward_input=FunctionInput(make_input((4, 6, 2, 3))),
             desc='2d_affine'),
         ModuleInput(
+            constructor_input=FunctionInput(3, 9, 1e-3, bias=False),
+            forward_input=FunctionInput(make_input((4, 9, 2, 3))),
+            desc='2d_affine_not_bias'),
+        ModuleInput(
             constructor_input=FunctionInput(3, 3, 1e-3, False),
             forward_input=FunctionInput(make_input((4, 3, 2, 3))),
             desc='2d_no_affine_IN'),
         ModuleInput(
             constructor_input=FunctionInput(1, 3, 1e-3, False),
             forward_input=FunctionInput(make_input((4, 3, 2, 3))),
-            desc='2d_no_affine_LN'),
-    ]
+            desc='2d_no_affine_LN'),]
 
 
 def module_inputs_torch_nn_Hardshrink(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -1897,8 +1913,21 @@ def module_inputs_torch_nn_InstanceNormNd(module_info, device, dtype, requires_g
             ),
             forward_input=FunctionInput(make_input(input_no_batch_shape)),
             reference_fn=no_batch_dim_reference_fn,
-            desc='no_batch_dim')
-    ]
+            desc='no_batch_dim'),
+        ModuleInput(
+            constructor_input=(
+                FunctionInput(eps, momentum, affine=True) if lazy else
+                FunctionInput(num_features, eps, momentum, affine=True)
+            ),
+            forward_input=FunctionInput(make_input(input_batch_shape)),
+            desc='affine'),
+        ModuleInput(
+            constructor_input=(
+                FunctionInput(eps, momentum, affine=True, bias=False) if lazy else
+                FunctionInput(num_features, eps, momentum, affine=True, bias=False)
+            ),
+            forward_input=FunctionInput(make_input(input_batch_shape)),
+            desc='affine_not_bias'),]
 
 def module_inputs_torch_nn_LayerNorm(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
