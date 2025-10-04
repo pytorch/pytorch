@@ -8,9 +8,9 @@ import operator
 import types
 import warnings
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, final, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, final, NamedTuple, Optional, TYPE_CHECKING, Union
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -1500,6 +1500,7 @@ class ExportedProgram:
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
+        # pyrefly: ignore  # missing-attribute
         if transformed_gm is self.graph_module and not res.modified:
             return self
 
@@ -1578,6 +1579,7 @@ class ExportedProgram:
             verifiers=self.verifiers,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
+        # pyrefly: ignore  # missing-attribute
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 

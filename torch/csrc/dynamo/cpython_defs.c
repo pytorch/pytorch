@@ -385,7 +385,7 @@ void* THP_PyObject_VirtualAlloc(size_t size) {
 void THP_PyObject_VirtualFree(void* obj, size_t size) {
   PyObjectArenaAllocator arena;
   PyObject_GetArenaAllocator(&arena);
-  return arena.free(arena.ctx, obj, size);
+  arena.free(arena.ctx, obj, size);
 }
 
 // https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L728

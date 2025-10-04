@@ -2,13 +2,15 @@
 import collections
 import functools
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from itertools import product
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 from typing_extensions import deprecated
 
 import torch
 import torch.testing
+
+# pyrefly: ignore  # deprecated
 from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrTensors

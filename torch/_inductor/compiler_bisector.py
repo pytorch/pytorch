@@ -58,6 +58,7 @@ BACKENDS: dict[str, list[Subsystem]] = {
     # applies CrossRefFakeMode on invocation
     "aot_eager_decomp_partition_crossref": [],
     "inductor": [
+        BisectSubsystem("pre_grad_passes"),  # passes applied on pre-grad IR
         BisectSubsystem("joint_graph_passes"),  # passes applied on joint graph
         BisectSubsystem(
             "post_grad_passes"

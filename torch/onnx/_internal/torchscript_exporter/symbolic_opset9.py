@@ -14,7 +14,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -33,7 +33,7 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.types import Number
 
