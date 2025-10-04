@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 from collections.abc import Iterable, Sequence
+from contextlib import contextmanager
 from typing import Any, Callable, cast, Optional, Union
 
 import sympy
@@ -55,6 +56,9 @@ def statically_known_true(
     return False
 
 
+SET_COUNT = 0
+REACHED_3200 = False
+
 # This class is a little awkward, because ShapeEnv is doing most of the heavy
 # lifting and in some cases we should be directly passing through to ShapeEnv,
 # but there is some extra inductor logic that needs to be handled here
@@ -76,7 +80,8 @@ class SizeVarAllocator:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
         self.var_to_val = self.shape_env.var_to_val
-        self.var_to_hint_override = self.shape_env.var_to_hint_override
+        self.var_to_hint_override_ = self.shape_env.var_to_hint_override
+        self.var_to_hint_override = {}
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.unbacked_replacements: Optional[dict[Expr, Expr]] = None
         # Maps of dynamic sizes that have to be precomputed on the host to the kernel args.
@@ -94,6 +99,30 @@ class SizeVarAllocator:
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
+        self.active_hint_override = False
+
+    @contextmanager
+    def set_hint_overrides(self, overrides):
+        # global SET_COUNT, REACHED_3200
+        # if SET_COUNT == 3200:
+        #     REACHED_3200 = True
+        # SET_COUNT += 1
+        # print(f"set_hint_overrides: {overrides}")
+        old_overrides = self.var_to_hint_override
+        new_overrides = {}
+        for k, v in overrides.items():
+            new_overrides[k] = v
+            if k in self.replacements:
+                kr = self.replacements[k]
+                if isinstance(kr, sympy.Symbol):
+                    new_overrides[kr] = v
+        try:
+            self.active_hint_override = True
+            self.var_to_hint_override = {**old_overrides, **new_overrides}
+            yield
+        finally:
+            self.active_hint_override = False
+            self.var_to_hint_override = old_overrides
 
     def simplify(self, expr: Expr):
         return sympy.expand(expr).xreplace(self.replacements)
@@ -559,6 +588,8 @@ class SizeVarAllocator:
             return expr
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
+        expr = self.remove_precomputed_replacements(expr)
+        # print(f"symbolic_hint (processed): {expr}")
         if not isinstance(expr, Expr):
             assert isinstance(expr, int)
             return expr
@@ -570,9 +601,9 @@ class SizeVarAllocator:
                 return expr  # inf/nan/I
 
         if hint_override:
-            return hint_override
-
-        expr = self.remove_precomputed_replacements(expr)
+            out = expr.subs({symbol: hint_override for symbol in free_symbols})
+            assert isinstance(out, sympy.Integer)
+            return out
 
         if use_user_provided_hint_override:
             expr = sympy_subs(expr, self.var_to_hint_override)
@@ -586,10 +617,18 @@ class SizeVarAllocator:
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
     ) -> int:
+        # print(f"size_hint {expr}, fallback={fallback}, hint_override={hint_override}")
+        # print(f"var_to_val: {self.var_to_val}")
+        # print(f"var_to_hint_override: {self.var_to_hint_override}, active: {self.active_hint_override}")
+        # if REACHED_3200:
+        #     print(f"size_hint {expr}, fallback={fallback}, hint_override={hint_override}")
+        #     print(f"var_to_val: {self.var_to_val}")
+        #     print(f"var_to_hint_override: {self.var_to_hint_override}, active: {self.active_hint_override}")
+        #     breakpoint()
         out = self.symbolic_hint(
             expr,
             hint_override=hint_override,
-            use_user_provided_hint_override=fallback is not None,
+            use_user_provided_hint_override=fallback is not None or self.active_hint_override,
         )
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint

@@ -1702,7 +1702,11 @@ class SIMDScheduling(BaseScheduling):
         from ..ir import IRNode
 
         def get_size(arg):
-            if not isinstance(arg, IRNode) or (size := arg.maybe_get_size()) is None:
+            if not isinstance(arg, IRNode):
+                return None
+            if isinstance(arg, ir.BaseView):  # triton templates want the base tensor.
+                arg = arg.unwrap_view()
+            if (size := arg.maybe_get_size()) is None:
                 return None
             return tuple(s for s in size)
 
@@ -1725,21 +1729,21 @@ class SIMDScheduling(BaseScheduling):
         )
 
     def _make_shape_cache_key(
-        self, node: MultiTemplateBuffer, hint: int
+        self, node: MultiTemplateBuffer, hint_key: Any
     ) -> tuple[tuple[int, ...], ...]:
         """
         Returns cache key for hint-based multi-graph; key is tuple of shapes with hint filled in.
         """
         shapes = self._get_multikernel_shapes(node)
-        return tuple(
+        hints = {k: v for k, v in hint_key}
+        out = tuple(
             tuple(
-                hint
-                if isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer)
-                else s
+                V.graph.sizevars.size_hint(s.subs(hints))
                 for s in shape
             )
             for shape in shapes
         )
+        return out
 
     def codegen_template(
         self,
@@ -1770,41 +1774,47 @@ class SIMDScheduling(BaseScheduling):
             src_codes = []
 
             for (
-                size_hint,
+                size_hint_key,
                 make_kernel_render,
             ) in template_node.node._make_kernel_renders.items():
-                kernel, render = make_kernel_render(
-                    template_node.node, hint_override=hint_override
-                )
-
-                if only_gen_src_code:
-                    src_code = self._codegen_single_template(
-                        kernel,
-                        render,
-                        template_node,
-                        epilogue_nodes,
-                        prologue_nodes,
-                        only_gen_src_code=True,
-                    )
-                    assert isinstance(src_code, str)
-                    src_codes.append(src_code)
+                if size_hint_key is None:
+                    ctx = contextlib.nullcontext()
                 else:
-                    if size_hint is None:
-                        continue  # skip kernel generation based on real runtime value; only use hints
-                    kernel = self._codegen_single_template(
-                        kernel,
-                        render,
-                        template_node,
-                        epilogue_nodes,
-                        prologue_nodes,
-                        only_gen_src_code=False,
+                    size_hint_overrides = {k: v for k, v in size_hint_key}
+                    ctx = V.graph.sizevars.set_hint_overrides(size_hint_overrides)
+                with ctx:
+                    kernel, render = make_kernel_render(
+                        template_node.node, hint_override=hint_override
                     )
-                    shape_cache_key = (
-                        None
-                        if size_hint is None
-                        else self._make_shape_cache_key(template_node.node, size_hint)
-                    )
-                    kernels[shape_cache_key] = kernel
+
+                    if only_gen_src_code:
+                        src_code = self._codegen_single_template(
+                            kernel,
+                            render,
+                            template_node,
+                            epilogue_nodes,
+                            prologue_nodes,
+                            only_gen_src_code=True,
+                        )
+                        assert isinstance(src_code, str)
+                        src_codes.append(src_code)
+                    else:
+                        if size_hint_key is None:
+                            continue  # skip kernel generation based on real runtime value; only use hints
+                        kernel = self._codegen_single_template(
+                            kernel,
+                            render,
+                            template_node,
+                            epilogue_nodes,
+                            prologue_nodes,
+                            only_gen_src_code=False,
+                        )
+                        shape_cache_key = (
+                            None
+                            if size_hint_key is None
+                            else self._make_shape_cache_key(template_node.node, size_hint_key)
+                        )
+                        kernels[shape_cache_key] = kernel
 
             if only_gen_src_code:
                 return "\n\n".join(src_codes)
