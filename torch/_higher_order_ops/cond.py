@@ -4,7 +4,8 @@ import contextlib
 import functools
 import logging
 import warnings
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree

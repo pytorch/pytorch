@@ -74,9 +74,13 @@ PyObject* THPStorage_NewWithStorage(
 
   s->cdata = c10::MaybeOwned<c10::Storage>::owned(std::move(_storage));
 
-  s->is_hermetic = false;
-  const auto& storage = THPStorage_Unpack(s);
-  storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(obj);
+  if (!c10::impl::HermeticPyObjectTLS::get_state()) {
+    s->is_hermetic = false;
+    const auto& storage = THPStorage_Unpack(s);
+    storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(obj);
+  } else {
+    s->is_hermetic = true;
+  }
 
   return obj;
 }
@@ -84,6 +88,9 @@ PyObject* THPStorage_NewWithStorage(
 // Wraps the c10::Storage with a storage PyObject
 PyObject* THPStorage_Wrap(c10::Storage storage) {
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
+  if (c10::impl::HermeticPyObjectTLS::get_state()) {
+    return THPStorage_NewWithStorage(THPStorageClass, std::move(storage));
+  }
   c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
 
   std::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj();
@@ -322,6 +329,7 @@ static PyObject* THPStorage_pynew(
       case at::DeviceType::Meta:
       case at::DeviceType::PrivateUse1:
       case at::DeviceType::MAIA:
+      case at::DeviceType::MTIA:
         allocator = c10::GetAllocator(device.type());
         break;
       default:
