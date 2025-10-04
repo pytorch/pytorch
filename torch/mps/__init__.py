@@ -81,9 +81,90 @@ def seed() -> None:
 
 def empty_cache() -> None:
     r"""Releases all unoccupied cached memory currently held by the caching
-    allocator so that those can be used in other GPU applications.
+    allocator so that those can be used in other GPU applications and clears
+    the MPS graph cache.
+
+    .. note::
+       This function performs comprehensive cleanup including:
+       - Synchronizes all command buffers (waits for GPU to finish)
+       - Frees buffers pending completion (buffers_pending_free)
+       - Clears the buffer allocator cache
+       - Clears the MPSEvent pool
+       - Clears graph and kernel caches (if called)
+
+       This is the recommended way to prevent memory leaks between epochs.
+
+    .. warning::
+       Calling this frequently during training can impact performance as graphs
+       will need to be recompiled. It's recommended to call this between epochs
+       or when memory pressure is high.
+
+    Example::
+        >>> # At the end of each training epoch
+        >>> for epoch in range(num_epochs):
+        ...     # training loop
+        ...     for batch in dataloader:
+        ...         # forward, backward, optimizer step
+        ...         pass
+        ...     # Clear all caches at end of epoch
+        ...     torch.mps.empty_cache()
+
+    or at the end of a batch of training::
+    >>> # At the end of each training batch
+        >>> for epoch in range(num_epochs):
+        ...     # training loop
+        ...     for batch in dataloader:
+        ...         # forward, backward, optimizer step
+        ...         torch.mps.empty_cache()
+        ...         pass
+        ...     # Clear all caches at end of epoch
+    Ideal placement should be at the end of the call for `optimizer.step()`
     """
+    # Synchronization, buffer freeing, and event pool clearing
+    # now handled internally in the C++ implementation
     torch._C._mps_emptyCache()
+
+    # Clear graph and kernel caches
+    if hasattr(torch._C, '_mps_emptyGraphCache'):
+        torch._C._mps_emptyGraphCache()
+
+
+def empty_graph_cache() -> None:
+    r"""Clears the cached MPSGraph and MPSKernel objects.
+
+    This function clears the internal graph and kernel caches used by the MPS backend.
+    These caches can accumulate during training, especially when using varying tensor
+    shapes, leading to memory leaks between epochs.
+
+    .. warning::
+       This is an advanced function. Clearing the graph cache will cause graph
+       recompilation on the next operation, which may impact performance temporarily.
+       For most use cases, :func:`empty_cache` is sufficient as it includes graph
+       cache clearing.
+
+    .. note::
+       This function only clears the graph/kernel caches, not the buffer allocator
+       cache. To clear both, use :func:`empty_cache` instead.
+
+    Example::
+        >>> # Clear only graph caches (advanced usage)
+        >>> torch.mps.synchronize()
+        >>> torch.mps.empty_graph_cache()
+        >>>
+        >>> # Clear both graph and buffer caches (recommended)
+        >>> torch.mps.empty_cache()  # Preferred approach
+    """
+    if hasattr(torch._C, '_mps_emptyGraphCache'):
+        torch._C._mps_emptyGraphCache()
+    else:
+        # Fallback for older PyTorch versions
+        import warnings
+        warnings.warn(
+            "empty_graph_cache() is not available in this PyTorch build. "
+            "Falling back to empty_cache().",
+            RuntimeWarning
+        )
+        empty_cache()
 
 
 def set_per_process_memory_fraction(fraction) -> None:
@@ -184,6 +265,7 @@ __all__ = [
     "set_rng_state",
     "synchronize",
     "empty_cache",
+    "empty_graph_cache",
     "set_per_process_memory_fraction",
     "current_allocated_memory",
     "driver_allocated_memory",

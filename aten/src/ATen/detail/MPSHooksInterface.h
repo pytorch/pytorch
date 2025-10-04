@@ -57,6 +57,9 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual void emptyCache() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual void emptyGraphCache() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
   virtual size_t getCurrentAllocatedMemory() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
