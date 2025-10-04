@@ -405,9 +405,12 @@ TuningContext::TuningContext() :
     icache_flush_{true},
     rotating_buffer_size_{-1},
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 
 >>>>>>> bd9b54ceff0 (Fix clang-tidy readability checks)
+=======
+>>>>>>> bb9f4751984 (Remove unnecessary comments)
     results_count_from_input_file_{0},
     is_shutting_down_{false}
 {
