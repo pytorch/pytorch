@@ -1023,6 +1023,16 @@ class Module:
             if buf is not None:
                 self._buffers[key] = fn(buf)
 
+                if torch.nn.parameter.is_lazy(self._buffers[key]):
+                    continue
+
+                preserved_attributes = set(dir(self._buffers[key]))
+
+                for attr in dir(buf):
+                    if attr in preserved_attributes:
+                        continue
+                    setattr(self._buffers[key], attr, getattr(buf, attr))
+
         return self
 
     def apply(self, fn: Callable[["Module"], None]) -> Self:
