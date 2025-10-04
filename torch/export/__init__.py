@@ -2,8 +2,8 @@ import logging
 import os
 import warnings
 import zipfile
-from collections.abc import Mapping
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Mapping
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -540,6 +540,7 @@ def draft_export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any, ...], list[Any]]] = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> ExportedProgram:
     """
     A version of torch.export.export which is designed to consistently produce
@@ -555,6 +556,7 @@ def draft_export(
         dynamic_shapes=dynamic_shapes,
         preserve_module_call_signature=preserve_module_call_signature,
         strict=strict,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
     )
 
 

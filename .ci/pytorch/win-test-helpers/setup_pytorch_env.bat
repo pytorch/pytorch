@@ -14,7 +14,7 @@ if not errorlevel 0 exit /b
 :: build\torch. Rather than changing all these references, making a copy of torch folder
 :: from conda to the current workspace is easier. The workspace will be cleaned up after
 :: the job anyway
-xcopy /s %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %TMP_DIR_WIN%\build\torch\
+xcopy /s %CONDA_ROOT_DIR%\envs\py_tmp\Lib\site-packages\torch %TMP_DIR_WIN%\build\torch\
 
 pushd .
 if "%VC_VERSION%" == "" (
