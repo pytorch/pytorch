@@ -3522,7 +3522,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             nn.RNN(10, 20, batch_first=True)
         ]
         # ROCm RNN does not issue warning about single contig chunk of memory, so don't assert it
-        first_warn = False if torch.version.hip else True
+        first_warn = not torch.version.hip
         for rnn in rnns:
             rnn.cuda()
             input = torch.randn(5, 4, 10, requires_grad=True, device="cuda")

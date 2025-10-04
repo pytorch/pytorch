@@ -162,10 +162,7 @@ class EventList(list):
             if p is not None:
                 assert p.fwd_thread is not None
                 t = (p.sequence_nr, p.fwd_thread)
-                if t in fwd_stacks:
-                    evt.stack = fwd_stacks[t]
-                else:
-                    evt.stack = []
+                evt.stack = fwd_stacks.get(t, [])
 
     @property
     def self_cpu_time_total(self):

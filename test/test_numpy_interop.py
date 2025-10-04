@@ -205,7 +205,7 @@ class TestNumPyInterop(TestCase):
                             x = x.conj()
                             y = x.resolve_conj()
                         expect_error = (
-                            requires_grad or sparse or conj or not device == "cpu"
+                            requires_grad or sparse or conj or device != "cpu"
                         )
                         error_msg = r"Use (t|T)ensor\..*(\.numpy\(\))?"
                         if not force and expect_error:
