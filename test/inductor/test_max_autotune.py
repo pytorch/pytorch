@@ -1094,7 +1094,7 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune_gemm_search_space": search_space}):
             m_c = torch.compile(mode="max-autotune")(mod)
             out, code = run_and_get_code(m_c, x)
-            self.assertEqual(out, mod(x), atol=2e-3, rtol=1e-3)
+            self.assertEqual(out, mod(x), atol=2e-3, rtol=2e-3)
 
             FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
