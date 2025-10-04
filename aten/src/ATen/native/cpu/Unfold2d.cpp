@@ -240,7 +240,7 @@ static void unfolded2d_copy(
     int64_t output_height,
     int64_t output_width) {
   at::parallel_for(
-      0, (int64_t)n_input_plane * kH * kW, 0, [&](int64_t start, int64_t end) {
+      0, n_input_plane * kH * kW, 0, [&](int64_t start, int64_t end) {
         for (const auto k : c10::irange(start, end)) {
           int64_t nip = k / (kH * kW);
           int64_t rest = k % (kH * kW);
@@ -316,7 +316,7 @@ static void unfolded2d_copy(
                 for (int64_t x = 0; x < output_width; x++)
                   memcpy(
                       dst + (size_t)y * output_width + x,
-                      src + (size_t)iy * input_width + ix + (int64_t)x * dW,
+                      src + (size_t)iy * input_width + ix + x * dW,
                       sizeof(scalar_t) * (1));
               }
             }

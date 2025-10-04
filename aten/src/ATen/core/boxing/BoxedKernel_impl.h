@@ -2,7 +2,7 @@
 
 namespace c10 {
 
-inline BoxedKernel::BoxedKernel() : functor_(), boxed_kernel_func_(nullptr) {}
+inline BoxedKernel::BoxedKernel() : boxed_kernel_func_(nullptr) {}
 
 inline BoxedKernel::BoxedKernel(
     std::unique_ptr<OperatorKernel> functor,

@@ -214,7 +214,7 @@ inline Tensor applySlice(
       "step must be greater than zero");
 
   // See NOTE [nested tensor size for indexing]
-  if (self_sizes.has_value() && self_sizes.value().size() > 0) {
+  if (self_sizes.has_value() && !self_sizes.value().empty()) {
     // Skip this optimization if we are tracing, as the trace may be polymorphic
     // over the shape of the `self` tensor, and we still want to record
     // the slice.

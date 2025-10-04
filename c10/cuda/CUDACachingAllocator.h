@@ -137,7 +137,7 @@ struct TraceEntry {
   size_t size_;
   MempoolId_t mempool_;
   trace_time_ time_{};
-  std::string compile_context_{};
+  std::string compile_context_;
 };
 
 // Calls made by record_function will save annotations

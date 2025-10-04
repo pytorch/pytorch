@@ -1769,7 +1769,7 @@ Node* Graph::createTupleSlice(
 
   int64_t i = beg;
   for ([[maybe_unused]] const auto j : c10::irange(num_values)) {
-    auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+    auto idx = insertConstant(IValue(i));
     auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
 
     new_vals.push_back(tupleIndex->output());

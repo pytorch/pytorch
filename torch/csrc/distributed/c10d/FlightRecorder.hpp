@@ -176,9 +176,9 @@ struct FlightRecorder {
   size_t max_entries_ = 0;
   size_t next_ = 0;
   size_t id_ = 0;
-  std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_ = {};
+  std::map<size_t, std::shared_ptr<ProcessGroupStatus>> all_pg_status_;
   std::map<std::tuple<std::string, std::string>, std::vector<uint64_t>>
-      pg_name_to_ranks_ = {};
+      pg_name_to_ranks_;
   std::string comm_lib_version_;
 
   std::optional<size_t> record(
