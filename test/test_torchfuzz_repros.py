@@ -180,7 +180,9 @@ class TestFuzzerCompileIssues(TestCase):
             var_node_1 = torch.nn.functional.relu(var_node_2)
             var_node_6 = torch.full((14, 1), -0.94140625, dtype=torch.bfloat16)
             var_node_7 = arg0  # size=(1, 16), stride=(16, 1), dtype=bfloat16
-            var_node_5 = torch.matmul(var_node_6.to(torch.bfloat16), var_node_7.to(torch.bfloat16))
+            var_node_5 = torch.matmul(
+                var_node_6.to(torch.bfloat16), var_node_7.to(torch.bfloat16)
+            )
             var_node_9 = torch.full((16,), 0.76953125, dtype=torch.bfloat16)
             var_node_8 = torch.reshape(var_node_9, [16])
             var_node_11 = torch.full((16,), 2.4375, dtype=torch.bfloat16)
@@ -201,8 +203,12 @@ class TestFuzzerCompileIssues(TestCase):
         arg1 = torch.rand(
             [14, 48], dtype=torch.bfloat16, device="cuda", requires_grad=True
         )
-        arg2 = torch.tensor(0.0, dtype=torch.bfloat16, device="cuda", requires_grad=True)
-        arg3 = torch.tensor(0.0, dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        arg2 = torch.tensor(
+            0.0, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+        arg3 = torch.tensor(
+            0.0, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
 
         out_eager = foo(arg0, arg1, arg2, arg3)
         out_eager.sum().backward()
@@ -244,7 +250,9 @@ class TestFuzzerCompileIssues(TestCase):
 
         def foo(arg0, arg1, arg2):
             t0 = arg0  # size=(349200, 5), stride=(5, 1), dtype=bfloat16, device=cuda
-            t1 = t0.mean(dim=1)  # size=(349200,), stride=(1,), dtype=bfloat16, device=cuda
+            t1 = t0.mean(
+                dim=1
+            )  # size=(349200,), stride=(1,), dtype=bfloat16, device=cuda
             t2 = arg1  # size=(), stride=(), dtype=int64, device=cuda
             t3 = arg2  # size=(50000, 349200), stride=(50000, 1), dtype=bfloat16, device=cuda
             t4 = torch.nn.functional.embedding(
@@ -283,18 +291,24 @@ class TestFuzzerCompileIssues(TestCase):
             t4 = t2 * t3  # size=(), stride=(), dtype=int64, device=cuda
             t5 = t1.clone()
             t5.fill_(t4.item())
-            t6 = arg3  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
-            t7 = arg4  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
-            t8 = arg5  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
+            t6 = (
+                arg3  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
+            )
+            t7 = (
+                arg4  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
+            )
+            t8 = (
+                arg5  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
+            )
             t9 = torch.cat([t6, t6, t7, t8], dim=2)
             t10 = t9.std(dim=2)
-            t11 = torch.nn.functional.embedding(torch.clamp(t5, 0, t10.size(0) - 1), t10)
+            t11 = torch.nn.functional.embedding(
+                torch.clamp(t5, 0, t10.size(0) - 1), t10
+            )
             output = t11
             return output
 
-        arg0 = torch.randint(
-            0, 100, [47], dtype=torch.int64, device="cuda"
-        )
+        arg0 = torch.randint(0, 100, [47], dtype=torch.int64, device="cuda")
         arg1 = torch.randint(0, 10, [], dtype=torch.int64, device="cuda")
         arg2 = torch.randint(0, 10, [], dtype=torch.int64, device="cuda")
         arg3 = torch.rand(
@@ -374,13 +388,17 @@ class TestFuzzerCompileIssues(TestCase):
         torch.manual_seed(6804)
 
         def foo(arg0, arg1, arg2):
-            var_node_4 = arg0  # size=(7, 1, 32), stride=(1, 1, 0), dtype=float64, device=cuda
+            var_node_4 = (
+                arg0  # size=(7, 1, 32), stride=(1, 1, 0), dtype=float64, device=cuda
+            )
             var_node_5 = torch.full((7, 1, 32), -1.195053522845565, dtype=torch.float64)
             var_node_3 = torch.div(var_node_4, var_node_5)
             var_node_2 = torch.flatten(var_node_3)
             var_node_8 = torch.full((2,), -0.8316502130341195, dtype=torch.float64)
             var_node_9 = arg1  # size=(2, 224), stride=(224, 1), dtype=float64
-            var_node_7 = torch.matmul(var_node_8.to(torch.float64), var_node_9.to(torch.float64))
+            var_node_7 = torch.matmul(
+                var_node_8.to(torch.float64), var_node_9.to(torch.float64)
+            )
             var_node_10 = arg2  # size=(224,), stride=(1,), dtype=float64
             var_node_6 = torch.sub(var_node_7, var_node_10)
             var_node_1 = torch.sub(var_node_2, var_node_6)
@@ -393,9 +411,7 @@ class TestFuzzerCompileIssues(TestCase):
         arg1 = torch.rand(
             [2, 224], dtype=torch.float64, device="cuda", requires_grad=True
         )
-        arg2 = torch.rand(
-            [224], dtype=torch.float64, device="cuda", requires_grad=True
-        )
+        arg2 = torch.rand([224], dtype=torch.float64, device="cuda", requires_grad=True)
 
         out_eager = foo(arg0, arg1, arg2)
         out_eager.sum().backward()
@@ -411,17 +427,31 @@ class TestFuzzerCompileIssues(TestCase):
 
         def foo(arg0, arg1, arg2, arg3, arg4):
             t0 = arg0  # size=(36, 7112, 1, 1), stride=(7112, 1, 1, 1), dtype=bfloat16, device=cuda
-            t1 = t0.reshape((28, 24, 3, 127))  # size=(28, 24, 3, 127), stride=(9144, 381, 127, 1), dtype=bfloat16, device=cuda
-            t2 = t1.var(dim=2)  # size=(28, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
+            t1 = t0.reshape(
+                (28, 24, 3, 127)
+            )  # size=(28, 24, 3, 127), stride=(9144, 381, 127, 1), dtype=bfloat16, device=cuda
+            t2 = t1.var(
+                dim=2
+            )  # size=(28, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
             t3 = arg1  # size=(30, 24), stride=(30, 1), dtype=int64, device=cuda
             t4 = arg2  # size=(512, 127), stride=(512, 1), dtype=bfloat16, device=cuda
-            t5 = torch.nn.functional.embedding(torch.clamp(t3, 0, t4.size(0) - 1).to(torch.long), t4)  # size=(30, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
+            t5 = torch.nn.functional.embedding(
+                torch.clamp(t3, 0, t4.size(0) - 1).to(torch.long), t4
+            )  # size=(30, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
             t6 = arg3  # size=(30, 24, 15), stride=(720, 24, 1), dtype=bfloat16, device=cuda
-            t7 = torch.nn.functional.pad(t6, [0, 1], mode='constant', value=0.0)  # size=(30, 24, 16), stride=(384, 16, 1), dtype=bfloat16, device=cuda
+            t7 = torch.nn.functional.pad(
+                t6, [0, 1], mode="constant", value=0.0
+            )  # size=(30, 24, 16), stride=(384, 16, 1), dtype=bfloat16, device=cuda
             t8 = arg4  # size=(30, 4, 16, 127), stride=(8128, 2032, 127, 1), dtype=bfloat16, device=cuda
-            t9 = t8.sum(dim=1)  # size=(30, 16, 127), stride=(2032, 127, 1), dtype=bfloat16, device=cuda
-            t10 = torch.baddbmm(t5, t7, t9)  # size=(30, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
-            t11 = torch.cat([t2, t10], dim=0)  # size=(58, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
+            t9 = t8.sum(
+                dim=1
+            )  # size=(30, 16, 127), stride=(2032, 127, 1), dtype=bfloat16, device=cuda
+            t10 = torch.baddbmm(
+                t5, t7, t9
+            )  # size=(30, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
+            t11 = torch.cat(
+                [t2, t10], dim=0
+            )  # size=(58, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
             output = t11
             return output
 
@@ -453,19 +483,33 @@ class TestFuzzerCompileIssues(TestCase):
 
         def foo(arg0, arg1, arg2, arg3, arg4, arg5):
             t0 = arg0  # size=(42, 56), stride=(42, 1), dtype=int64, device=cuda
-            t1 = torch.tanh(t0)  # size=(42, 56), stride=(42, 1), dtype=int64, device=cuda
+            t1 = torch.tanh(
+                t0
+            )  # size=(42, 56), stride=(42, 1), dtype=int64, device=cuda
             t2 = t1.clone()
             t2.zero_()  # size=(42, 56), stride=(42, 1), dtype=int64, device=cuda
-            t3 = arg1  # size=(50000, 128), stride=(50000, 1), dtype=float16, device=cuda
+            t3 = (
+                arg1  # size=(50000, 128), stride=(50000, 1), dtype=float16, device=cuda
+            )
             t4 = arg2  # size=(46, 128), stride=(46, 1), dtype=float16, device=cuda
-            t5 = torch.nn.functional.linear(t3, t4)  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
+            t5 = torch.nn.functional.linear(
+                t3, t4
+            )  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
             t6 = arg3  # size=(50000, 4, 46), stride=(184, 46, 1), dtype=float16, device=cuda
-            t7 = t6.max(dim=1).values  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
+            t7 = t6.max(
+                dim=1
+            ).values  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
             t8 = arg4  # size=(25786, 46), stride=(46, 1), dtype=float16, device=cuda
             t9 = arg5  # size=(24214, 46), stride=(46, 1), dtype=float16, device=cuda
-            t10 = torch.cat([t8, t9], dim=0)  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
-            t11 = torch.pow(torch.pow(torch.pow(torch.pow(t5, t7), t10), t5), t7)  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
-            t12 = torch.nn.functional.embedding(torch.clamp(t2, 0, t11.size(0) - 1).to(torch.long), t11)  # size=(42, 56, 46), stride=(2576, 46, 1), dtype=float16, device=cuda
+            t10 = torch.cat(
+                [t8, t9], dim=0
+            )  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
+            t11 = torch.pow(
+                torch.pow(torch.pow(torch.pow(t5, t7), t10), t5), t7
+            )  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
+            t12 = torch.nn.functional.embedding(
+                torch.clamp(t2, 0, t11.size(0) - 1).to(torch.long), t11
+            )  # size=(42, 56, 46), stride=(2576, 46, 1), dtype=float16, device=cuda
             output = t12
             return output
 
@@ -502,22 +546,39 @@ class TestFuzzerCompileIssues(TestCase):
             t0 = arg0  # size=(29, 50, 32, 5), stride=(46400, 1600, 32, 1), dtype=float16, device=cuda
             t1 = arg1  # size=(29, 50, 32, 5), stride=(46400, 1600, 32, 1), dtype=float16, device=cuda
             t2 = arg2  # size=(29, 50, 32, 5), stride=(46400, 1600, 32, 1), dtype=float16, device=cuda
-            t3 = torch.nn.functional.scaled_dot_product_attention(t0, t1, t2)  # size=(29, 50, 32, 5), stride=(8000, 160, 5, 1), dtype=float16, device=cuda
-            t4 = t3.min(dim=3).values  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t3 = torch.nn.functional.scaled_dot_product_attention(
+                t0, t1, t2
+            )  # size=(29, 50, 32, 5), stride=(8000, 160, 5, 1), dtype=float16, device=cuda
+            t4 = (
+                t3.min(dim=3).values
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
             t5 = arg3  # size=(3, 10, 4640), stride=(46400, 4640, 1), dtype=float16, device=cuda
-            t6 = t5.var(dim=0)  # size=(10, 4640), stride=(4640, 1), dtype=float16, device=cuda
-            t7 = t6.reshape((29, 50, 32))  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t6 = t5.var(
+                dim=0
+            )  # size=(10, 4640), stride=(4640, 1), dtype=float16, device=cuda
+            t7 = t6.reshape(
+                (29, 50, 32)
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
             t8 = arg4  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
             t9 = arg5  # size=(32, 50, 29), stride=(1, 32, 1600), dtype=float16, device=cuda
             t10 = t9.clone()
             t10.zero_()  # size=(32, 50, 29), stride=(1, 32, 1600), dtype=float16, device=cuda
-            t11 = t10.transpose(0, 2)  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
-            t12 = torch.pow(torch.pow(t4, t8), t11)  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t11 = t10.transpose(
+                0, 2
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t12 = torch.pow(
+                torch.pow(t4, t8), t11
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
             t13 = arg6  # size=(29, 50, 32), stride=(1450, 50, 1), dtype=float16, device=cuda
-            t14 = arg7  # size=(1,), stride=(1,), dtype=int64, device=cuda
-            t15 = torch.nn.functional.layer_norm(t13, (32,))  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
-            t16 = (t12) / t15  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
-            t17 = ((((t4) - t7) - t16) - t11) - t16  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t15 = torch.nn.functional.layer_norm(
+                t13, (32,)
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t16 = (
+                (t12) / t15
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t17 = (
+                ((((t4) - t7) - t16) - t11) - t16
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
             output = t17
             return output
 
@@ -560,12 +621,18 @@ class TestFuzzerCompileIssues(TestCase):
             t0 = arg0  # size=(401120, 3), stride=(3, 1), dtype=float32, device=cuda
             t1 = t0.clone()
             t1.zero_()  # size=(401120, 3), stride=(3, 1), dtype=float32, device=cuda
-            t2 = t1.reshape((109, 115, 96))  # size=(109, 115, 96), stride=(11040, 96, 1), dtype=float32, device=cuda
+            t2 = t1.reshape(
+                (109, 115, 96)
+            )  # size=(109, 115, 96), stride=(11040, 96, 1), dtype=float32, device=cuda
             t3 = arg1  # size=(), stride=(), dtype=float32, device=cuda
             t4 = t3.contiguous()  # size=(), stride=(), dtype=float32, device=cuda
-            t5 = torch.nn.functional.relu(t4)  # size=(), stride=(), dtype=float32, device=cuda
+            t5 = torch.nn.functional.relu(
+                t4
+            )  # size=(), stride=(), dtype=float32, device=cuda
             t6 = t2.clone()
-            t6.fill_(t5.item())  # size=(109, 115, 96), stride=(11040, 96, 1), dtype=float32, device=cuda
+            t6.fill_(
+                t5.item()
+            )  # size=(109, 115, 96), stride=(11040, 96, 1), dtype=float32, device=cuda
             output = t6
             return output
 
@@ -589,11 +656,21 @@ class TestFuzzerCompileIssues(TestCase):
         def foo(arg0, arg1, arg2):
             t0 = arg0  # size=(91, 64, 52), stride=(5824, 64, 1), dtype=float32, device=cuda
             t1 = arg1  # size=(2,), stride=(1,), dtype=int64, device=cuda
-            t2 = torch.nn.functional.layer_norm(t0, (64, 52))  # size=(91, 64, 52), stride=(5824, 64, 1), dtype=float32, device=cuda
-            t3 = arg2  # size=(7, 5, 64), stride=(448, 1, 64), dtype=float32, device=cuda
-            t4 = t3.permute(0, 2, 1)  # size=(7, 64, 5), stride=(448, 64, 1), dtype=float32, device=cuda
-            t5 = torch.nn.functional.conv1d(t2, t4, stride=1, padding=0)  # size=(91, 7, 48), stride=(336, 48, 1), dtype=float32, device=cuda
-            t6 = torch.tanh(t5)  # size=(91, 7, 48), stride=(336, 48, 1), dtype=float32, device=cuda
+            t2 = torch.nn.functional.layer_norm(
+                t0, (64, 52)
+            )  # size=(91, 64, 52), stride=(5824, 64, 1), dtype=float32, device=cuda
+            t3 = (
+                arg2  # size=(7, 5, 64), stride=(448, 1, 64), dtype=float32, device=cuda
+            )
+            t4 = t3.permute(
+                0, 2, 1
+            )  # size=(7, 64, 5), stride=(448, 64, 1), dtype=float32, device=cuda
+            t5 = torch.nn.functional.conv1d(
+                t2, t4, stride=1, padding=0
+            )  # size=(91, 7, 48), stride=(336, 48, 1), dtype=float32, device=cuda
+            t6 = torch.tanh(
+                t5
+            )  # size=(91, 7, 48), stride=(336, 48, 1), dtype=float32, device=cuda
             output = t6
             return output
 
@@ -621,12 +698,20 @@ class TestFuzzerCompileIssues(TestCase):
             t0 = arg0  # size=(82, 72, 95), stride=(5904, 72, 1), dtype=bfloat16, device=cuda
             t1 = arg1  # size=(1,), stride=(1,), dtype=int64, device=cuda
             t2 = t1.permute(0)  # size=(1,), stride=(1,), dtype=int64, device=cuda
-            t3 = torch.nn.functional.group_norm(t0, 4)  # size=(82, 72, 95), stride=(5904, 72, 1), dtype=bfloat16, device=cuda
+            t3 = torch.nn.functional.group_norm(
+                t0, 4
+            )  # size=(82, 72, 95), stride=(5904, 72, 1), dtype=bfloat16, device=cuda
             t4 = arg2  # size=(82, 72, 95), stride=(5904, 72, 1), dtype=bfloat16, device=cuda
-            t5 = torch.nn.functional.gelu(t4)  # size=(82, 72, 95), stride=(5904, 72, 1), dtype=bfloat16, device=cuda
+            t5 = torch.nn.functional.gelu(
+                t4
+            )  # size=(82, 72, 95), stride=(5904, 72, 1), dtype=bfloat16, device=cuda
             t6 = arg3  # size=(72, 82, 95), stride=(72, 5904, 1), dtype=bfloat16, device=cuda
-            t7 = t6.transpose(1, 0)  # size=(82, 72, 95), stride=(5904, 72, 1), dtype=bfloat16, device=cuda
-            t8 = t3 * t5 * t5 * t7 * t5  # size=(82, 72, 95), stride=(5904, 72, 1), dtype=bfloat16, device=cuda
+            t7 = t6.transpose(
+                1, 0
+            )  # size=(82, 72, 95), stride=(5904, 72, 1), dtype=bfloat16, device=cuda
+            t8 = (
+                t3 * t5 * t5 * t7 * t5
+            )  # size=(82, 72, 95), stride=(5904, 72, 1), dtype=bfloat16, device=cuda
             output = t8
             return output
 
