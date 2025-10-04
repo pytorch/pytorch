@@ -92,30 +92,6 @@ bool TensorMetadata::operator==(const TensorMetadata& other) const {
   }
 }
 
-std::ostream& operator<<(
-    std::ostream& stream,
-    const TensorMetadata& tensor_metadata) {
-  stream << "is_symbolic_: " << tensor_metadata.is_symbolic_ << '\n';
-  stream << "dtype_: " << tensor_metadata.dtype_ << '\n';
-  stream << "device_: " << tensor_metadata.device_ << '\n';
-  stream << "sizes_: ";
-  for (const auto& size : tensor_metadata.sizes_) {
-    stream << size << " ";
-  }
-  stream << '\n';
-  stream << "strides_: ";
-  for (const auto& stride : tensor_metadata.strides_) {
-    stream << stride << " ";
-  }
-
-  stream << "requires_grad_: " << tensor_metadata.requires_grad_ << '\n';
-  stream << "dispatch_key_set_: " << tensor_metadata.dispatch_key_set_ << '\n';
-  stream << "tensor_check_: " << tensor_metadata.tensor_check_.has_value()
-         << '\n';
-  stream << '\n';
-  return stream;
-}
-
 ParameterMetadata::ParameterMetadata(
     TensorMetadata tensor_metadata,
     uint64_t input_order)
