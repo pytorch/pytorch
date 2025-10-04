@@ -394,7 +394,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_am[:, None],
                     mask=offs_am[:, None] < m_size,
-                    other=0,
+                    other=tl.zeros((), dtype=scale_a_ptr.dtype.element_ty),
                 )
                 scale_b = tl.load(
                     scale_b_ptr
@@ -405,7 +405,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_bn[None, :],
                     mask=offs_bn[None, :] < n_size,
-                    other=0,
+                    other=tl.zeros((), dtype=scale_b_ptr.dtype.element_ty),
                 )
                 c = accumulator.to(tl.float32) * scale_a * scale_b
 {%- else %}
