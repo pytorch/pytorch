@@ -2,9 +2,10 @@
 
 import contextlib
 import itertools
+from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from unittest.mock import patch
 
 import torch
