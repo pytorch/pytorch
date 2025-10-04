@@ -11,7 +11,6 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
   // clang-format off
  static const OperatorMap<std::string> tensorexpr_elementwise_set{
       {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
-      {"aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor", "unary"},
       {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
       {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
       {"aten::div.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
