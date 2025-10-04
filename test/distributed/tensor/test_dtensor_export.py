@@ -36,6 +36,17 @@ class SimpleModel(torch.nn.Module):
     def forward(self, input):
         return self.mlp_1(self.mlp_0(input))
 
+class SimpleModelDynamicShapes(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.mlp_0 = MLPModule(device)
+        self.mlp_1 = MLPModule(device)
+
+    def forward(self, input):
+        if input.shape[0] > 4:
+            return self.mlp_0(input.sin())
+        return self.mlp_1(input.cos())
+
 
 def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
     # needed for stric export
@@ -149,6 +160,37 @@ class DTensorExportTest(TestCase):
     @unittest.expectedFailure
     def test_strict_export_parallelize_module_with_dtensor_input(self):
         self._run_test(strict_export_and_aot_export_joint_with_descriptors)
+
+    def test_dynamic_shapes(self):
+        dp_degree = 2
+        tp_degree = self.world_size // dp_degree
+
+        # 2-D mesh is [dp, tp]
+        mesh_2d = init_device_mesh(
+            self.device_type,
+            mesh_shape=(dp_degree, tp_degree),
+            mesh_dim_names=["dp", "tp"],
+        )
+
+        model = SimpleModelDynamicShapes(self.device_type)
+        parallelize_plan = {
+            "mlp_0.net1": ColwiseParallel(),
+            "mlp_0.net2": RowwiseParallel(),
+            "mlp_1.net1": ColwiseParallel(),
+            "mlp_1.net2": RowwiseParallel(),
+        }
+        tp_model = parallelize_module(model, mesh_2d["tp"], parallelize_plan)
+
+        inputs = torch.rand(20, 10, device=self.device_type)
+        inputs = distribute_tensor(inputs, mesh_2d["tp"], placements=[Replicate()])
+        torch._dynamo.mark_dynamic(inputs, 0, min=5, max=100)
+        torch.compile(tp_model, fullgraph=True)(inputs)
+
+        # joint_gm = graph_capture_and_aot_export_joint_with_descriptors(tp_model, inputs)
+        # fw_gm, bw_gm = min_cut_rematerialization_partition(
+        #     joint_gm, None, num_fwd_outputs=1
+        # )
+        # print(fw_gm, bw_gm)
 
 
 instantiate_parametrized_tests(DTensorExportTest)
