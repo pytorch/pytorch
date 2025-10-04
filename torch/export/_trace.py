@@ -2,18 +2,19 @@
 # mypy: allow-untyped-defs
 import dataclasses
 import functools
-import gc
 import inspect
 import logging
-import os
 import re
 import sys
 import time
 import warnings
-import weakref
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
-from typing import Any, Callable, Optional, Union
-from typing_extensions import TypeAlias
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
+
+
+if TYPE_CHECKING:
+    import weakref
 
 import torch
 import torch._dynamo
@@ -111,9 +112,6 @@ from .graph_signature import _convert_to_export_graph_signature, ExportGraphSign
 
 log = logging.getLogger(__name__)
 
-NONSTRICT_EXPORT_SANITIZE_TRACE = "NONSTRICT_EXPORT_SANITIZE_TRACE"
-
-
 # Type alias for dynamic shapes specification
 _DynamicShapesSpec: TypeAlias = Union[dict[str, Any], tuple[Any, ...], list[Any]]
 
@@ -206,6 +204,14 @@ def _strip_root(x):
         stripped = x[len("_export_root") :]
         return stripped.removeprefix(".")
     return x
+
+
+def _is_bogus_const_name(name: str):
+    splitted_names = name.split(".")
+    if len(splitted_names) < 1:
+        return True
+
+    return splitted_names[-1].startswith("lifted_tensor")
 
 
 def _rewrite_tracepoint_node(gm: torch.fx.GraphModule):
@@ -798,7 +804,12 @@ def _export_to_torch_ir(
         (args, kwargs),
     )
 
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+    dynamo_cfg = dataclasses.replace(
+        DEFAULT_EXPORT_DYNAMO_CONFIG,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+    )
+
+    with torch._dynamo.config.patch(dataclasses.asdict(dynamo_cfg)):
         try:
             module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = (
                 _ExportModuleSpecTrackerDict()
@@ -809,20 +820,31 @@ def _export_to_torch_ir(
                     f, preserve_module_call_signature, module_call_specs
                 )
             with ctx, _ignore_backend_decomps():
-                gm_torch_level, _ = torch._dynamo.export(
-                    f,
-                    dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
-                    constraints=constraints,  # type: ignore[arg-type]
-                    assume_static_by_default=True,
-                    tracing_mode="symbolic",
-                    disable_constraint_solver=disable_constraint_solver,
-                    prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
-                    _log_export_usage=_log_export_usage,
-                    same_signature=same_signature,
-                )(
-                    *args,
-                    **kwargs,
-                )
+                if torch._export.config.use_new_tracer_experimental:
+                    from torch._dynamo.functional_export import (
+                        _dynamo_graph_capture_for_export,
+                    )
+
+                    gm_torch_level = _dynamo_graph_capture_for_export(
+                        f, constraints=constraints, dynamic_shapes=dynamic_shapes
+                    )(*args, **kwargs)
+
+                else:
+                    gm_torch_level, _ = torch._dynamo.export(
+                        f,
+                        dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
+                        constraints=constraints,  # type: ignore[arg-type]
+                        assume_static_by_default=True,
+                        tracing_mode="symbolic",
+                        disable_constraint_solver=disable_constraint_solver,
+                        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                        _log_export_usage=_log_export_usage,
+                        same_signature=same_signature,
+                    )(
+                        *args,
+                        **kwargs,
+                    )
+                    gm_torch_level.meta["module_call_specs"] = module_call_specs
         except (ConstraintViolationError, ValueRangeError) as e:
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, str(e))  # noqa: B904
         except GuardOnDataDependentSymNode as e:
@@ -831,8 +853,6 @@ def _export_to_torch_ir(
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
-
-    gm_torch_level.meta["module_call_specs"] = module_call_specs
 
     if isinstance(f, torch.nn.Module) and restore_fqn:
         _restore_state_dict(f, gm_torch_level)
@@ -893,7 +913,6 @@ def _export_to_aten_ir(
             # make sure we don't override any meta
             if "desc" in new_output_node.meta:
                 del new_output_node.meta["desc"]
-            assert len(new_output_node.meta) == 0
             new_output_node.meta.update(old_output_node.meta)
 
     # TODO unfortunately preserving graph-level metadata and output node's meta
@@ -1253,6 +1272,9 @@ def _process_export_inputs(
             f"Expecting `args` to be a tuple of example positional inputs, got {type(args)}",
         )
     kwargs = kwargs if kwargs is not None else {}
+    if pytree.is_namedtuple_instance(args):
+        args = tuple(args)
+
     _, original_in_spec = pytree.tree_flatten((args, kwargs))
 
     verify_additional_inputs: Callable[[ExportedProgram], None]
@@ -2055,18 +2077,18 @@ def _export_for_training(
 
     original_state_dict = _get_original_state_dict(mod)
 
+    has_ambient_mode = False
+    if not strict:
+        flat_args, _ = pytree.tree_flatten((args, kwargs))
+        has_ambient_mode = torch._guards.detect_fake_mode(flat_args) is not None
+
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
-    alive_fake_input_ids_before_export: list[int] = []
+    if not strict and torch._export.config.detect_non_strict_fake_tensor_leaks:
+        from torch._subclasses.fake_tensor import fake_tensor_tls
 
-    if not strict and os.environ.get(NONSTRICT_EXPORT_SANITIZE_TRACE, "0") == "1":
-        gc.collect()
-        alive_fake_input_ids_before_export = [
-            id(i)
-            for i in gc.get_objects()
-            if isinstance(i, torch._subclasses.fake_tensor.FakeTensor)
-        ]
+        fake_tensor_tls.non_strict_export_fake_tensor_tracker.clear()
 
     export_artifact = export_func(
         mod=mod,
@@ -2078,6 +2100,25 @@ def _export_for_training(
         prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         _to_aten_func=_export_to_aten_ir_make_fx,
     )
+
+    # If we are tracing with fake inputs, it is expected to
+    # see fake tensor constants.
+    if not strict and not has_ambient_mode:
+        for const, val in export_artifact.aten.constants.items():
+            if isinstance(
+                val, torch._subclasses.fake_tensor.FakeTensor
+            ) and _is_bogus_const_name(const):
+                error_msg = (
+                    f"We found a fake tensor in the exported program constant's list. "
+                    f"This typically means our tracing system encountered an op that "
+                    f"we can't trace through. For the potential source, you can refer to "
+                    f"following model attribute: {const}. "
+                    f"Please file an issue on github. "
+                )
+                if torch._export.config.error_on_lifted_constant_tensors:
+                    raise RuntimeError(error_msg)
+                else:
+                    warnings.warn(error_msg)
 
     export_graph_signature = export_artifact.aten.sig
 
@@ -2124,26 +2165,14 @@ def _export_for_training(
 
     verify_additional_inputs(exported_program)
 
-    if not strict and os.environ.get(NONSTRICT_EXPORT_SANITIZE_TRACE, "0") == "1":
+    if not strict and torch._export.config.detect_non_strict_fake_tensor_leaks:
         # See NOTE [export non-strict fake tensor leak detection]
+        from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.fx.experimental.proxy_tensor import (
             _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT,
         )
 
-        fakes_after: list[torch._subclasses.fake_tensor.FakeTensor] = [
-            i
-            for i in gc.get_objects()
-            if isinstance(i, torch._subclasses.fake_tensor.FakeTensor)
-        ]
-
-        active_fakes: weakref.WeakSet = weakref.WeakSet()
-        for fake_tensor in fakes_after:
-            if id(fake_tensor) not in alive_fake_input_ids_before_export:
-                active_fakes.add(fake_tensor)
-
-        del fakes_after
-        del alive_fake_input_ids_before_export
-
+        active_fakes = fake_tensor_tls.non_strict_export_fake_tensor_tracker
         legit_leak: weakref.WeakSet = find_legit_leaks_from_referrers(active_fakes)
         leak_sources: list[str] = []
         if len(legit_leak) > 0:

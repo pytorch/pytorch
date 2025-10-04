@@ -6,6 +6,7 @@ from typing import Any
 
 import torch
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
+from torch.distributed.checkpoint.metadata import TensorStorageMetadata
 from torch.distributed.checkpoint.planner import LoadPlanner, ReadItem
 
 from .hf_storage import HuggingFaceStorageReader
@@ -50,10 +51,20 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         self._weight_scale_mapping: dict[str, str] = {}
         # Track which file contains each tensor
         self._weight_map: dict[str, str] = {}
+        # Cache for full tensor shapes (fqn -> shape)
+        self._tensor_full_shapes: dict[str, torch.Size] = {}
 
     def read_metadata(self) -> Any:
+        metadata = super().read_metadata()
+        # Build a cache of FQN -> full tensor shape for faster lookups.
+        for fqn, tensor_metadata in metadata.state_dict_metadata.items():
+            # Only process TensorStorageMetadata which has size attribute
+            if isinstance(tensor_metadata, TensorStorageMetadata):
+                self._tensor_full_shapes[fqn] = tensor_metadata.size
+
         self._load_quantization_metadata()
-        return super().read_metadata()
+
+        return metadata
 
     def _load_quantization_metadata(self):
         """Load quantization metadata from the checkpoint."""
@@ -103,64 +114,121 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         target_tensor.copy_(tensor)
         planner.commit_tensor(req, target_tensor)
 
-    def _calculate_scale_shape(
-        self, weight: torch.Tensor, block_size: int
-    ) -> tuple[int, int]:
-        """Calculate expected scale tensor shape based on weight tensor and block size."""
-        rows, cols = weight.shape
-        block_rows = (rows + block_size - 1) // block_size  # Ceiling division
-        block_cols = (cols + block_size - 1) // block_size  # Ceiling division
-        return (block_rows, block_cols)
+    def _get_slice_to_block_mapping(
+        self, req: ReadItem
+    ) -> tuple[tuple[int, int], tuple[int, int], slice, slice]:
+        """
+        Calculate which blocks correspond to the requested slice.
+
+        Args:
+            req: Read request containing tensor info and required slices
+
+        Returns:
+            Tuple of (row_block_range, col_block_range, row_slice, col_slice)
+        """
+        # Get the slice information
+        row_slice = slice(
+            req.storage_offsets[0], req.storage_offsets[0] + req.lengths[0]
+        )
+        col_slice = slice(
+            req.storage_offsets[1], req.storage_offsets[1] + req.lengths[1]
+        )
+
+        # Calculate which blocks this slice spans
+        row_start_block = row_slice.start // self.block_size
+        row_end_block = (row_slice.stop - 1) // self.block_size + 1  # Inclusive end
+
+        col_start_block = col_slice.start // self.block_size
+        col_end_block = (col_slice.stop - 1) // self.block_size + 1  # Inclusive end
+
+        return (
+            (row_start_block, row_end_block),
+            (col_start_block, col_end_block),
+            row_slice,
+            col_slice,
+        )
 
     def _dequantize_tensor(
         self,
         weight: torch.Tensor,
         scale_inv: torch.Tensor,
+        full_tensor_shape: torch.Size,
+        slice_info: tuple[tuple[int, int], tuple[int, int], slice, slice],
     ) -> torch.Tensor:
         """
-        Dequantize tensor using block-wise scaling.
+        Dequantize a sliced tensor using the appropriate portion of the scale tensor.
 
         Args:
-            weight: Quantized weight tensor
-            scale_inv: Scale inverse tensor for dequantization
+            weight: Sliced quantized weight tensor
+            scale_inv: Full scale inverse tensor for dequantization
+            full_tensor_shape: Shape of the original full tensor
+            slice_info: Block mapping information from _get_slice_to_block_mapping
 
         Returns:
             Dequantized tensor
         """
+        (row_block_range, col_block_range, row_slice, col_slice) = slice_info
+
         # Convert to float32 for computation
         # Certain quantized dtypes like Float8_e4m3fn
         # don't support multiplication on CPU yet in PyTorch.
         upcasted_weight = weight.to(torch.float32)
 
-        # Get original dimensions
-        orig_shape = weight.shape
-
-        # Calculate block dimensions for the local shard
-        expected_scale_shape = self._calculate_scale_shape(weight, self.block_size)
-        block_rows, block_cols = expected_scale_shape
-
         # Create output tensor in target dtype
         dequantized = weight.detach().to(dtype=self.target_dtype, copy=True)
 
-        # Apply scaling factors to each block
-        for i in range(block_rows):
-            row_start = i * self.block_size
-            row_end = min(row_start + self.block_size, orig_shape[0])
+        # Get the actual slice boundaries
+        row_start_global = row_slice.start
+        row_end_global = row_slice.stop
+        col_start_global = col_slice.start
+        col_end_global = col_slice.stop
 
-            for j in range(block_cols):
-                col_start = j * self.block_size
-                col_end = min(col_start + self.block_size, orig_shape[1])
+        # Apply scaling factors to each block that intersects with our slice
+        for block_i in range(row_block_range[0], row_block_range[1]):
+            for block_j in range(col_block_range[0], col_block_range[1]):
+                # Calculate the block boundaries in global coordinates
+                block_row_start_global = block_i * self.block_size
+                block_row_end_global = min(
+                    block_row_start_global + self.block_size, full_tensor_shape[0]
+                )
+                block_col_start_global = block_j * self.block_size
+                block_col_end_global = min(
+                    block_col_start_global + self.block_size, full_tensor_shape[1]
+                )
 
-                # Get the block
-                block = upcasted_weight[row_start:row_end, col_start:col_end]
+                # Find the intersection of the block with our slice
+                intersect_row_start = max(block_row_start_global, row_start_global)
+                intersect_row_end = min(block_row_end_global, row_end_global)
+                intersect_col_start = max(block_col_start_global, col_start_global)
+                intersect_col_end = min(block_col_end_global, col_end_global)
 
-                scale = scale_inv[i, j]
+                # Skip if no intersection
+                if (
+                    intersect_row_start >= intersect_row_end
+                    or intersect_col_start >= intersect_col_end
+                ):
+                    continue
+
+                # Convert global coordinates to local coordinates in the sliced tensor
+                local_row_start = intersect_row_start - row_start_global
+                local_row_end = intersect_row_end - row_start_global
+                local_col_start = intersect_col_start - col_start_global
+                local_col_end = intersect_col_end - col_start_global
+
+                # Get the block from the sliced tensor
+                block = upcasted_weight[
+                    local_row_start:local_row_end, local_col_start:local_col_end
+                ]
+
+                # Apply the scale factor
+                scale = scale_inv[block_i, block_j]
                 block = block * scale
 
-                # Explicitly convert block to target dtype
+                # Convert block to target dtype and store
                 block_converted = block.to(dtype=self.target_dtype)
-                # Store the dequantized block
-                dequantized[row_start:row_end, col_start:col_end] = block_converted
+                dequantized[
+                    local_row_start:local_row_end, local_col_start:local_col_end
+                ] = block_converted
 
         return dequantized
 
@@ -202,15 +270,14 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         scale_fqn = self._weight_scale_mapping[tensor_fqn]
 
         try:
-            # Load the quantized weight
+            # Load the sliced quantized weight
             weight_slices = tuple(
                 slice(offset, offset + length)
                 for offset, length in zip(req.storage_offsets, req.lengths)
             )
             quantized_tensor = safetensor_file.get_slice(tensor_fqn)[weight_slices]
 
-            # Load the corresponding scale inverse tensor
-            # Use weight_map to find the correct file for the scale tensor
+            # Load the corresponding scale inverse tensor (full tensor)
             scale_file_name = self._weight_map.get(scale_fqn)
             if scale_file_name is None:
                 raise ValueError(f"Scale tensor {scale_fqn} not found in weight_map")
@@ -231,10 +298,20 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 ) as scale_file:
                     scale_inv = scale_file.get_tensor(scale_fqn)
 
-            # Perform dequantization
+            # Get the full tensor shape from our O(1) lookup cache
+            full_tensor_shape = self._tensor_full_shapes.get(tensor_fqn)
+            if full_tensor_shape is None:
+                raise ValueError(f"Could not find full tensor shape for {tensor_fqn}")
+
+            # Get slice to block mapping
+            slice_info = self._get_slice_to_block_mapping(req)
+
+            # Perform dequantization with proper block alignment
             dequantized_tensor = self._dequantize_tensor(
                 weight=quantized_tensor,
                 scale_inv=scale_inv,
+                full_tensor_shape=full_tensor_shape,
+                slice_info=slice_info,
             )
 
             return dequantized_tensor
