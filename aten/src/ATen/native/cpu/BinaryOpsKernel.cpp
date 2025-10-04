@@ -680,6 +680,10 @@ void maximum_kernel(TensorIteratorBase& iter) {
                 if (a != a || b != b) {
                   return std::numeric_limits<scalar_t>::quiet_NaN();
                 } else {
+                  // special handling for -0.0 vs +0.0, return +0.0
+                  if (a == 0 && b == 0 && std::signbit(a) != std::signbit(b)) {
+                    return 0;
+                  }
                   return std::max(a, b);
                 }
               },
