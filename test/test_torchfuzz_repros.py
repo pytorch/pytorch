@@ -1007,6 +1007,122 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
+    @pytest.mark.xfail(reason="Issue #163894")
+    def test_fuzzer_issue_163894(self):
+        torch.manual_seed(9)
+
+        def foo(arg0):
+            var_node_1 = arg0  # size=(1, 2), stride=(2, 1), dtype=int64, device=cuda
+            var_node_5 = torch.full(
+                (1, 2), -66, dtype=torch.int32
+            )  # size=(1, 2), stride=(2, 1), dtype=int32, device=cuda
+            var_node_6 = torch.full(
+                (1, 2), 77, dtype=torch.int64
+            )  # size=(1, 2), stride=(2, 1), dtype=int64, device=cuda
+            var_node_4 = torch.ops.aten.add(
+                var_node_5, var_node_6
+            )  # size=(1, 2), stride=(2, 1), dtype=int32, device=cuda
+            var_node_7 = torch.full(
+                (1, 2), -64, dtype=torch.int32
+            )  # size=(1, 2), stride=(2, 1), dtype=int32, device=cuda
+            var_node_3 = torch.ops.aten.mul(
+                var_node_4, var_node_7
+            )  # size=(1, 2), stride=(2, 1), dtype=int32, device=cuda
+            var_node_9 = torch.full(
+                (3, 4), False, dtype=torch.bool
+            )  # size=(3, 4), stride=(4, 1), dtype=bool, device=cuda
+            var_node_8 = torch.nonzero(
+                var_node_9
+            )  # size=(0, 2), stride=(2, 1), dtype=int64, device=cuda
+            if var_node_8.numel() == 0:
+                var_node_8 = torch.zeros((1, 2), dtype=torch.int64, device="cuda")
+            var_node_2 = torch.ops.aten.add(var_node_3, var_node_8)
+            output = var_node_2.float()
+            return output
+
+        arg0 = torch.randint(0, 10, [1, 2], dtype=torch.int64, device="cuda")
+
+        out_eager = foo(arg0)
+        out_eager.sum().backward()
+        print("Eager Success! ✅")
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0)
+        out_compiled.sum().backward()
+        print("Compile Success! ✅")
+
+    @pytest.mark.xfail(reason="Issue #164486")
+    def test_fuzzer_issue_164486(self):
+        torch.manual_seed(238)
+
+        def foo(arg0):
+            var_node_2 = torch.full(
+                (), 1, dtype=torch.int16
+            )  # size=(), stride=(), dtype=int16, device=cuda
+            var_node_3 = arg0  # size=(), stride=(), dtype=int16, device=cuda
+            var_node_1 = torch.add(
+                var_node_2, var_node_3
+            )  # size=(), stride=(), dtype=int16, device=cuda
+            var_node_5 = torch.full(
+                (1,), 3, dtype=torch.int16
+            )  # size=(1,), stride=(1,), dtype=int16, device=cuda
+            var_node_4 = torch.squeeze(
+                var_node_5
+            )  # size=(), stride=(), dtype=int16, device=cuda
+            var_node_0 = torch.div(
+                var_node_1, var_node_4
+            )  # size=(), stride=(), dtype=int16, device=cuda
+            result = var_node_0.float()
+            return result
+
+        arg0 = torch.randint(0, 10, [], dtype=torch.int16, device="cuda")
+
+        out_eager = foo(arg0)
+        out_eager.sum().backward()
+        print("Eager Success! ✅")
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0)
+        out_compiled.sum().backward()
+        print("Compile Success! ✅")
+
+    @pytest.mark.xfail(reason="Issue #163674")
+    def test_fuzzer_issue_163674(self):
+        torch.manual_seed(0)
+
+        def foo(arg0, arg1, arg2):
+            t0 = arg0  # size=(79488, 1, 3, 1), stride=(3, 3, 1, 1), dtype=float16, device=cuda
+            t1 = t0.clone()
+            t1.zero_()  # size=(79488, 1, 3, 1), stride=(3, 3, 1, 1), dtype=float16, device=cuda
+            t2 = arg1  # size=(79488, 1, 3, 1), stride=(3, 3, 1, 1), dtype=float32, device=cuda
+            t3 = arg2  # size=(), stride=(), dtype=float32, device=cuda
+            t4 = t2.clone()
+            t4.fill_(
+                t3.item()
+            )  # size=(79488, 1, 3, 1), stride=(3, 3, 1, 1), dtype=float32, device=cuda
+            t5 = torch.pow(
+                t1, t4
+            )  # size=(79488, 1, 3, 1), stride=(3, 3, 1, 1), dtype=float32, device=cuda
+            t6 = t5.reshape(
+                (96, 69, 36)
+            )  # size=(96, 69, 36), stride=(2484, 36, 1), dtype=float32, device=cuda
+            output = t6
+            return output
+
+        arg0 = torch.rand(
+            [79488, 1, 3, 1], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg1 = torch.rand(
+            [79488, 1, 3, 1], dtype=torch.float32, device="cuda", requires_grad=True
+        )
+        arg2 = torch.rand([], dtype=torch.float32, device="cuda", requires_grad=True)
+
+        out_eager = foo(arg0, arg1, arg2)
+        out_eager.sum().backward()
+        print("Eager Success! ✅")
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1, arg2)
+        out_compiled.sum().backward()
+        print("Compile Success! ✅")
+
 
 if __name__ == "__main__":
     run_tests()
