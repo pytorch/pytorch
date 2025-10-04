@@ -429,6 +429,14 @@ class TestTorchDeviceType(TestCase):
         _model_cuda = model.to('cuda')
         model.share_memory()
 
+    @onlyCUDA
+    def test_buffer_attribute_preservation(self):
+        model = torch.nn.Linear(1, 1)
+        model.register_buffer("test", torch.Tensor([0]))
+        model.test.test_attr = "test_attr"
+        model = model.to('cuda')
+        self.assertEqual(model.test.test_attr, "test_attr")
+
     @dtypes(torch.float32, torch.complex64)
     @slowTestIf(IS_WINDOWS)
     def test_deepcopy(self, device, dtype):
