@@ -481,16 +481,13 @@ void THP_PyThreadState_PopFrame(
 
 #endif
 
+uint8_t* THP_PyOpcode_Caches = NULL;
+int THP_PyOpcode_Caches_size = 0;
+void init_THPCaches(void) {
 #if IS_PYTHON_3_11_PLUS
-
-const uint8_t* THP_PyOpcode_Caches = _PyOpcode_Caches;
-const int THP_PyOpcode_Caches_size = sizeof(_PyOpcode_Caches) / sizeof(uint8_t);
-
-#else
-
-const uint8_t* THP_PyOpcode_Caches = NULL;
-const int THP_PyOpcode_Caches_size = 0;
-
+    THP_PyOpcode_Caches = _PyOpcode_Caches;
+    THP_PyOpcode_Caches_size = sizeof(_PyOpcode_Caches) / sizeof(uint8_t);
 #endif
+}
 
-#endif // IS_PYTHON_3_15_PLUS
+#endif // IS_PYTHON_3_14_PLUS

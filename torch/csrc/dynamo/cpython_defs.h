@@ -6,6 +6,8 @@
 // should go in cpython_defs.c. Copying is required when, e.g.,
 // we need to call internal CPython functions that are not exposed.
 
+void init_THPCaches();
+
 #if IS_PYTHON_3_11_PLUS
 
 typedef struct _PyInterpreterFrame _PyInterpreterFrame;
@@ -29,12 +31,12 @@ void THP_PyThreadState_PopFrame(
 // pointers to _PyOpcode_Caches for C++
 #ifdef __cplusplus
 
-extern "C" const uint8_t* THP_PyOpcode_Caches;
-extern "C" const int THP_PyOpcode_Caches_size;
+extern "C" uint8_t* THP_PyOpcode_Caches;
+extern "C" int THP_PyOpcode_Caches_size;
 
 #else
 
-extern const uint8_t* THP_PyOpcode_Caches;
-extern const int THP_PyOpcode_Caches_size;
+extern uint8_t* THP_PyOpcode_Caches;
+extern int THP_PyOpcode_Caches_size;
 
 #endif
