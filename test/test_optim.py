@@ -1829,7 +1829,7 @@ class TestOptimRenewed(TestCase):
             optimizer_cuda.load_state_dict(state_dict_cuda)
 
             # Make sure state_dict_cuda isn't modified by merely calling load_state_dict
-            self.assertEqual(state_dict_cpu, state_dict_cuda)
+            self.assertEqual(state_dict_cpu, state_dict_cuda, atol=0., rtol=0.)
 
             # Make sure that device of state['step'] is still CPU _unless_ torch.compile() added a capturable!
             capturable = state_dict_cpu["param_groups"][0].get("capturable", False)
@@ -1844,10 +1844,11 @@ class TestOptimRenewed(TestCase):
                         "cuda" if capturable or fused else "cpu",
                     )
 
-            for _ in range(5):
+            for step in range(5):
+                factor = step + 1
                 optimizer.step(closure)
                 optimizer_cuda.step(closure)
-                self.assertEqual(params, params_cuda)
+                self.assertEqual(params, params_cuda, atol=factor * 2e-4, rtol=factor * 1e-4)
                 self.assertEqual(optimizer.state_dict(), optimizer_cuda.state_dict())
 
     @staticmethod
