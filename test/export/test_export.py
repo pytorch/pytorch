@@ -11586,6 +11586,19 @@ graph():
         assert torch.allclose(epm(*inp), eager)
         assert torch.allclose(ufm(*inp), eager)
 
+    def test_slice_with_size_oblivious(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x[:, :5]
+
+        x = torch.randn(10, 10)
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            shapes = {"x": [Dim.DYNAMIC, Dim.DYNAMIC]}
+            ep = export(Foo(), (x,), dynamic_shapes=shapes)
+
+        for node in ep.graph.nodes:
+            self.assertTrue(node.meta.get("unbacked_bindings", None) is None)
+
     def test_unflatten_random_dag_mutating_buf_preserving_4(self):
         # {0: [2, 3], 1: [2], 2: [3], 3: []}
         # {0: [], 1: [3], 2: [3], 3: []}
