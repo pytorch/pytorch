@@ -1702,7 +1702,11 @@ class SIMDScheduling(BaseScheduling):
         from ..ir import IRNode
 
         def get_size(arg):
-            if not isinstance(arg, IRNode) or (size := arg.maybe_get_size()) is None:
+            if not isinstance(arg, IRNode):
+                return None
+            if isinstance(arg, ir.BaseView):  # triton templates want the base tensor.
+                arg = arg.unwrap_view()
+            if (size := arg.maybe_get_size()) is None:
                 return None
             return tuple(s for s in size)
 
