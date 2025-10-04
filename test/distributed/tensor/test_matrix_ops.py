@@ -24,6 +24,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_WITH_ROCM,
+    TEST_HPU
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -426,7 +427,8 @@ class DistMatrixOpsTest(DTensorTestBase):
             available_backends.append(SDPBackend.FLASH_ATTENTION)
         if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
             available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
-
+        if TEST_HPU: # extend to other platforms that support overrideable attention
+            available_backends.append(SDPBackend.OVERRIDEABLE)
         placement_specs = [(Replicate(),), (Shard(0),), (Shard(1),)]
         for backend, input_placements in itertools.product(
             available_backends, placement_specs
