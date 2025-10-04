@@ -106,7 +106,7 @@ def _run_torchbench_model(
     )
 
     dynamic = cmd_args.dynamic
-    dynamic_args = ["--dynamic-shapes", "--dynamic-batch-only"] if dynamic else []
+    dynamic_args = ["--dynamic-shapes"] if dynamic else []
 
     args = (
         [
