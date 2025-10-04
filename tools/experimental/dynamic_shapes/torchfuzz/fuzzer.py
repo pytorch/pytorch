@@ -15,7 +15,6 @@ if parent_dir not in sys.path:
 
 import torch
 from torchfuzz.codegen import convert_graph_to_python_code, create_program_file
-from torchfuzz.operators import set_operator_weights, set_operator_weight
 from torchfuzz.ops_fuzzer import fuzz_operation_graph, fuzz_spec
 from torchfuzz.runner import ProgramRunner
 from torchfuzz.visualize_graph import visualize_operation_graph
@@ -50,24 +49,6 @@ def _parse_supported_ops_with_weights(spec: str) -> tuple[list[str], dict[str, f
     return ops, weights
 
 
-def _parse_weights_infer_fq(spec: str) -> dict[str, float]:
-    """Parse name=weight pairs, allowing either registry names or fully-qualified torch ops.
-    Returns a dict mapping the provided key to weight; resolution to actual operator
-    happens in set_operator_weight(s), which supports both forms.
-    """
-    result: dict[str, float] = {}
-    if not spec:
-        return result
-    for entry in spec.split(","):
-        entry = entry.strip()
-        if not entry or "=" not in entry:
-            continue
-        name, w = entry.split("=", 1)
-        try:
-            result[name.strip()] = float(w.strip())
-        except ValueError:
-            continue
-    return result
 
 
 def fuzz_and_execute(
@@ -293,14 +274,6 @@ if __name__ == "__main__":
             "'torch.matmul=5,torch.nn.functional.rms_norm=5'. Overrides template supported ops."
         ),
     )
-    parser.add_argument(
-        "--op-weights",
-        type=str,
-        help=(
-            "Comma-separated weighted ops; supports fully-qualified torch ops and inference: "
-            "e.g., 'torch.matmul=5,torch.nn.functional.rms_norm=5' or 'add=2,torch.add=3'"
-        ),
-    )
 
     # Multi-process fuzzing arguments
     parser.add_argument(
@@ -349,22 +322,18 @@ if __name__ == "__main__":
         print("Running single fuzz_and_execute...")
         # Parse supported ops and any inline weights from that flag
         parsed_supported_ops: Optional[list[str]] = None
-        parsed_supported_weights: dict[str, float] = {}
+        parsed_weights: dict[str, float] = {}
         if args.supported_ops:
-            parsed_supported_ops, parsed_supported_weights = _parse_supported_ops_with_weights(
+            parsed_supported_ops, parsed_weights = _parse_supported_ops_with_weights(
                 args.supported_ops
             )
-
-        # Parse separate weights flag and merge (supported-ops takes precedence on conflicts)
-        parsed_weights = _parse_weights_infer_fq(args.op_weights) if args.op_weights else {}
-        merged_weights = {**parsed_weights, **parsed_supported_weights}
 
         fuzz_and_execute(
             seed=args.seed,
             max_depth=args.max_depth,
             template=args.template,
             supported_ops=parsed_supported_ops,
-            op_weights=(merged_weights if merged_weights else None),
+            op_weights=(parsed_weights if parsed_weights else None),
         )
     elif args.start is not None or args.count is not None:
         # Multi-process fuzzing mode
@@ -390,26 +359,13 @@ if __name__ == "__main__":
             sys.exit(1)
 
         try:
-            # Parse supported ops and any inline weights from that flag
-            parsed_supported_ops: Optional[list[str]] = None
-            parsed_supported_weights: dict[str, float] = {}
-            if args.supported_ops:
-                parsed_supported_ops, parsed_supported_weights = _parse_supported_ops_with_weights(
-                    args.supported_ops
-                )
-
-            # Parse separate weights flag and merge (supported-ops takes precedence on conflicts)
-            parsed_weights = _parse_weights_infer_fq(args.op_weights) if args.op_weights else {}
-            merged_weights = {**parsed_weights, **parsed_supported_weights}
-
             run_multi_process_fuzzer(
                 num_processes=args.processes,
                 seed_start=args.start,
                 seed_count=args.count,
                 verbose=args.verbose,
                 template=args.template,
-                supported_ops=parsed_supported_ops,
-                op_weights=(merged_weights if merged_weights else None),
+                supported_ops=args.supported_ops,
             )
         except Exception as e:
             print(f"❌ Unexpected error: {str(e)}")

@@ -93,8 +93,7 @@ def is_ignored_output(output: str) -> int:
 def run_fuzzer_with_seed(
     seed: int,
     template: str = "default",
-    supported_ops: Optional[list[str]] = None,
-    op_weights: Optional[dict[str, float]] = None,
+    supported_ops: Optional[str] = None,
 ) -> FuzzerResult:
     """
     Run fuzzer.py with a specific seed.
@@ -102,6 +101,7 @@ def run_fuzzer_with_seed(
     Args:
         seed: The seed value to pass to fuzzer.py
         template: The template to use for code generation
+        supported_ops: Comma-separated ops string with optional weights
 
     Returns:
         FuzzerResult dataclass instance
@@ -120,12 +120,9 @@ def run_fuzzer_with_seed(
             template,
         ]
 
-        # Append supported ops and weights if provided
+        # Append supported ops if provided
         if supported_ops:
-            cmd.extend(["--supported-ops", ",".join(supported_ops)])
-        if op_weights:
-            weights_str = ",".join(f"{k}={v}" for k, v in op_weights.items())
-            cmd.extend(["--op-weights", weights_str])
+            cmd.extend(["--supported-ops", supported_ops])
 
         result = subprocess.run(
             cmd,
@@ -225,8 +222,7 @@ def run_multi_process_fuzzer(
     seed_count: int = 100,
     verbose: bool = False,
     template: str = "default",
-    supported_ops: Optional[list[str]] = None,
-    op_weights: Optional[dict[str, float]] = None,
+    supported_ops: Optional[str] = None,
 ) -> None:
     """
     Run the multi-process fuzzer.
@@ -236,6 +232,8 @@ def run_multi_process_fuzzer(
         seed_start: Starting seed value (inclusive)
         seed_count: Number of seeds to run
         verbose: Whether to print detailed output
+        template: The template to use for code generation
+        supported_ops: Comma-separated ops string with optional weights
     """
     seeds = list(range(seed_start, seed_start + seed_count))
 
@@ -265,7 +263,7 @@ def run_multi_process_fuzzer(
             future_results = []
             for seed in seeds:
                 future = pool.apply_async(
-                    run_fuzzer_with_seed, (seed, template, supported_ops, op_weights)
+                    run_fuzzer_with_seed, (seed, template, supported_ops)
                 )
                 future_results.append(future)
 
