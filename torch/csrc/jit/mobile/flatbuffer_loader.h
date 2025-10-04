@@ -121,8 +121,6 @@ TORCH_API mobile::Module parse_flatbuffer_no_object(
     size_t size,
     std::optional<at::Device> device);
 
-
-
 // no op, TODO(qihan) delete
 TORCH_API bool register_flatbuffer_loader();
 

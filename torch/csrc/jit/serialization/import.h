@@ -140,8 +140,6 @@ TORCH_API Module load_jit_module_from_stream(
     ExtraFilesMap& extra_files,
     std::optional<at::Device> device = std::nullopt);
 
-
-
 TORCH_API c10::intrusive_ptr<c10::ivalue::Object> ObjLoaderFunc(
     const at::StrongTypePtr& type,
     IValue input);

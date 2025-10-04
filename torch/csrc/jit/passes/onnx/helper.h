@@ -29,7 +29,6 @@ buildValueToParamsMap(Block* b, const ParamMap& paramsDict);
 TORCH_API void eraseUnusedValuesFromMap(ValueToParamPairMap& valsToParamsMap);
 TORCH_API void eraseUnusedBlockInputs(Block* b);
 
-
 TORCH_API Node* addNodeToBlock(
     Block* block,
     Symbol kind,
