@@ -9,6 +9,7 @@ import functools
 import inspect
 import io
 import operator
+import sys
 import unittest
 from collections.abc import Sequence
 from enum import Enum
@@ -4613,6 +4614,7 @@ def forward(self, x, b, y):
 
 
 class ExportTestsDevice(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(sys.version_info >= (3, 14), "cpython slot assert fail")
     def test_export_with_parameters(self, device):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:

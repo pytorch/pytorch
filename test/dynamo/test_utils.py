@@ -389,7 +389,8 @@ class TestDynamoTimed(TestCase):
         # directly inspect the dict it prints instead:
         self.assertExpectedInline(
             pprint.pformat(utils.compilation_time_metrics),
-            """\
+            (
+                """\
 {'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
  'GraphLowering.compile_to_module': [0.0, 0.0],
@@ -419,8 +420,8 @@ class TestDynamoTimed(TestCase):
  'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
  'min_cut_rematerialization_partition': [0.0]}"""
-            if _IS_WINDOWS
-            else """\
+                if _IS_WINDOWS
+                else """\
 {'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
  'GraphLowering.compile_to_module': [0.0, 0.0],
@@ -450,7 +451,8 @@ class TestDynamoTimed(TestCase):
  'create_aot_dispatcher_function': [0.0],
  'fx_codegen_and_compile': [0.0, 0.0],
  'gc': [0.0],
- 'min_cut_rematerialization_partition': [0.0]}""",  # noqa: B950
+ 'min_cut_rematerialization_partition': [0.0]}"""
+            ),  # noqa: B950
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -458,7 +460,8 @@ class TestDynamoTimed(TestCase):
         time_spent = utils.calculate_time_spent()
         self.assertExpectedInline(
             pprint.pformat(time_spent),
-            """\
+            (
+                """\
 {'_recursive_joint_graph_passes': 0.0,
  '_recursive_post_grad_passes': 0.0,
  '_recursive_pre_grad_passes': 0.0,
@@ -469,8 +472,8 @@ class TestDynamoTimed(TestCase):
  'gc': 0.0,
  'inductor_compile': 0.0,
  'total_wall_time': 0.0}"""
-            if _IS_WINDOWS
-            else """\
+                if _IS_WINDOWS
+                else """\
 {'_recursive_joint_graph_passes': 0.0,
  '_recursive_post_grad_passes': 0.0,
  '_recursive_pre_grad_passes': 0.0,
@@ -481,7 +484,8 @@ class TestDynamoTimed(TestCase):
  'entire_frame_compile': 0.0,
  'gc': 0.0,
  'inductor_compile': 0.0,
- 'total_wall_time': 0.0}""",  # noqa: B950
+ 'total_wall_time': 0.0}"""
+            ),  # noqa: B950
         )
 
         # Now validate the CompilationMetrics logs. We expect a log for the
@@ -516,7 +520,8 @@ class TestDynamoTimed(TestCase):
         del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
-            """\
+            (
+                """\
 {'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
  'backend_compile_time_s': 0.0,
@@ -600,8 +605,8 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': None,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
-            if _IS_WINDOWS
-            else """\
+                if _IS_WINDOWS
+                else """\
 {'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
  'backend_compile_time_s': 0.0,
@@ -684,7 +689,8 @@ class TestDynamoTimed(TestCase):
  'tensorify_float_success': None,
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
- 'triton_version': None}""",  # noqa: B950
+ 'triton_version': None}"""
+            ),  # noqa: B950
         )
 
         # Second event is for the backward
@@ -697,7 +703,8 @@ class TestDynamoTimed(TestCase):
         del raw["param_count"]
         self.assertExpectedInline(
             pprint.pformat(raw),
-            """\
+            (
+                """\
 {'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
  'backend_compile_time_s': None,
@@ -781,8 +788,8 @@ class TestDynamoTimed(TestCase):
  'triton_compile_time_us': None,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
-            if _IS_WINDOWS
-            else """\
+                if _IS_WINDOWS
+                else """\
 {'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
  'backend_compile_time_s': None,
@@ -865,7 +872,8 @@ class TestDynamoTimed(TestCase):
  'tensorify_float_success': None,
  'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
- 'triton_version': None}""",  # noqa: B950
+ 'triton_version': None}"""
+            ),  # noqa: B950
         )
 
     @dynamo_config.patch(
@@ -876,13 +884,14 @@ class TestDynamoTimed(TestCase):
     def test_ir_count(self):
         # Different python versions have different potential IR counts.
         version = (sys.version_info[0], sys.version_info[1])
-        self.assertIn(version, ((3, 9), (3, 10), (3, 11), (3, 12), (3, 13)))
+        self.assertIn(version, ((3, 9), (3, 10), (3, 11), (3, 12), (3, 13), (3, 14)))
         first, second = {
             (3, 9): (10, 6),
             (3, 10): (10, 6),
             (3, 11): (10, 6),
             (3, 12): (11, 7),
             (3, 13): (11, 7),
+            (3, 14): (11, 7),
         }[version]
 
         def test1(x):
