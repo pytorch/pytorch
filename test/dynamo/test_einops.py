@@ -37,9 +37,6 @@ class TestEinops(TestCase):
     in PyTorch.
     """
 
-    @unittest.skipIf(
-        einops_version == "0.6.1", "https://github.com/pytorch/pytorch/issues/157417"
-    )
     @parametrize("version", [einops_version_sanitized])
     def test_functions(self, version):
         from einops import einsum, pack, rearrange, reduce, repeat, unpack
