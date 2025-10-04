@@ -408,8 +408,8 @@ triton_grouped_mm_source = r"""
                     )
                     a_mask = (offs_am[:, None] < m_size) & (block_offs_k[None, :] < k_size)
                     b_mask = (offs_bn[:, None] < n_size) & (block_offs_k[None, :] < k_size)
-                    a = tl.load(a_ptrs, mask=a_mask, other=0)
-                    b = tl.load(b_ptrs, mask=b_mask, other=0)
+                    a = tl.load(a_ptrs, mask=a_mask, other=tl.zeros((), dtype=a_ptrs.dtype.element_ty))
+                    b = tl.load(b_ptrs, mask=b_mask, other=tl.zeros((), dtype=b_ptrs.dtype.element_ty))
 {%- if USE_FAST_ACCUM %}
                     accumulator = tl.dot(a, b.T, accumulator)
 {%- else %}
@@ -431,7 +431,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_am[:, None],
                     mask=offs_am[:, None] < m_size,
-                    other=0,
+                    other=tl.zeros((), dtype=scale_a_ptr.dtype.element_ty),
                 )
                 scale_b = tl.load(
                     scale_b_ptr
@@ -442,7 +442,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_bn[None, :],
                     mask=offs_bn[None, :] < n_size,
-                    other=0,
+                    other=tl.zeros((), dtype=scale_b_ptr.dtype.element_ty),
                 )
                 c = accumulator.to(tl.float32) * scale_a * scale_b
 {%- else %}
