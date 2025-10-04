@@ -83,6 +83,61 @@ if TYPE_CHECKING:
     from torch.fx._symbolic_trace import PHBase
     from torch.types import IntLikeType
 
+import copy
+import functools
+import json
+import os
+import orjson
+LOG_PATH = "/tmp/log.txt"
+
+import functools, os, orjson
+
+LOG_PATH = "/tmp/log.txt"
+
+def summarize(obj):
+    """Summarize heavy / non-JSON objects."""
+    t = type(obj)
+    if hasattr(obj, "shape") and hasattr(obj, "dtype"):  # tensor-like
+        return f"<Tensor shape={tuple(obj.shape)} dtype={getattr(obj, 'dtype', None)}>"
+    return f"<{t.__name__} at {hex(id(obj))}>"
+
+def safe_for_json(obj, depth=0, max_depth=2):
+    """Convert object into JSON-safe structure with limited recursion."""
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if depth >= max_depth:
+        return summarize(obj)
+    if isinstance(obj, dict):
+        return {str(k): safe_for_json(v, depth+1, max_depth) for k,v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [safe_for_json(v, depth+1, max_depth) for v in obj]
+    return summarize(obj)
+
+def snapshot_class(cls):
+    def wrap_method(name, func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            before = {k: safe_for_json(v) for k,v in self.__dict__.items()}
+            result = func(self, *args, **kwargs)
+            after = {k: safe_for_json(v) for k,v in self.__dict__.items()}
+
+            changes = {}
+            for k in set(before)|set(after):
+                if before.get(k) != after.get(k):
+                    changes[str(k)] = {"before": before.get(k), "after": after.get(k)}
+
+            if changes:
+                record = {"class": cls.__name__, "method": name, "changes": changes}
+                with open(LOG_PATH, "ab") as f:
+                    f.write(orjson.dumps(record) + b"\n")
+            return result
+        return wrapper
+
+    for attr_name, attr_value in list(vars(cls).items()):
+        if callable(attr_value):
+            setattr(cls, attr_name, wrap_method(attr_name, attr_value))
+    return cls
+
 __all__ = [
     "PythonKeyTracer",
     "dispatch_trace",
@@ -1096,6 +1151,7 @@ class _SymNodeDict:
         return len(self.sym_node_dict)
 
 
+@snapshot_class
 class PythonKeyTracer(Tracer):
     script_object_tracker: MutableMapping[_AnyScriptObjectType, Proxy]
     symnode_tracker: _SymNodeDict
