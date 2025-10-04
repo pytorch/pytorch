@@ -168,10 +168,6 @@ and supported quantized modules and functions.
 .. py:module:: torch.nn.intrinsic.quantized.modules.bn_relu
 .. py:module:: torch.nn.intrinsic.quantized.modules.conv_relu
 .. py:module:: torch.nn.intrinsic.quantized.modules.linear_relu
-.. py:module:: torch.nn.qat.dynamic.modules.linear
-.. py:module:: torch.nn.qat.modules.conv
-.. py:module:: torch.nn.qat.modules.embedding_ops
-.. py:module:: torch.nn.qat.modules.linear
 .. py:module:: torch.nn.quantizable.modules.activation
 .. py:module:: torch.nn.quantizable.modules.rnn
 .. py:module:: torch.nn.quantized.dynamic.modules.conv
