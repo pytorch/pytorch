@@ -1222,7 +1222,7 @@ cudnnRNNAlgo_t get_algo(
 }
 
 cudnnDataType_t promote_rnn_math_type(cudnnDataType_t dtype) {
-  if (dtype == CUDNN_DATA_HALF) {
+  if (dtype == CUDNN_DATA_HALF || dtype == CUDNN_DATA_BFLOAT16) {
     return CUDNN_DATA_FLOAT;
   }
   return dtype;
