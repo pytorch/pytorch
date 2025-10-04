@@ -5803,6 +5803,113 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   return tensor;
 }
 
+#ifdef NCCL_HAS_COMM_SHRINK
+// Define the function only if NCCL supports shrink
+c10::intrusive_ptr<ProcessGroupNCCL> ProcessGroupNCCL::shrink_process_group(
+    const std::vector<int64_t>& ranks_to_exclude,
+    int shrink_flags) {
+
+  // Runtime version check with better error message
+#ifndef NCCL_MIN_VERSION_FOR_SHRINK
+#define NCCL_MIN_VERSION_FOR_SHRINK NCCL_VERSION(2, 27, 0)
+#endif
+  auto runtime_version = torch::cuda::nccl::version();
+  TORCH_CHECK(
+      runtime_version >= NCCL_MIN_VERSION_FOR_SHRINK,
+      "ProcessGroupNCCL::shrink_process_group requires NCCL version 2.27.0 or later. "
+      "Found version: ", runtime_version);
+
+  // Early validation with detailed error messages
+  TORCH_CHECK(!ranks_to_exclude.empty(),
+      "ranks_to_exclude cannot be empty");
+  TORCH_CHECK(static_cast<int>(ranks_to_exclude.size()) < size_,
+      "Cannot exclude all ranks (", ranks_to_exclude.size(), " >= ", size_, ")");
+
+  // Validate ranks and convert to int efficiently
+  std::vector<int> int_ranks_to_exclude;
+  int_ranks_to_exclude.reserve(ranks_to_exclude.size());
+  for (int64_t rank : ranks_to_exclude) {
+    TORCH_CHECK(rank >= 0 && rank < size_,
+        "Invalid rank ", rank, " for group size ", size_);
+    int_ranks_to_exclude.push_back(static_cast<int>(rank));
+  }
+
+  // Get primary communicator with better error context
+  auto primary_device_index = guessDeviceId();
+  auto primary_device = at::Device(at::kCUDA, primary_device_index);
+  const auto primary_key = getKeyFromDevice(primary_device);
+
+  std::shared_ptr<NCCLComm> primary_comm = getNCCLComm(primary_key);
+  TORCH_CHECK(primary_comm,
+      "Primary NCCL communicator for device ", primary_device,
+      " (key: ", primary_key, ") is not initialized");
+
+  // Cache device index before shrink operation
+  at::DeviceIndex parent_device_index = primary_comm->getDeviceIndex();
+
+  // Perform shrink operation with optimized config
+  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+
+  std::shared_ptr<NCCLComm> shrunk_comm = NCCLComm::shrink(
+      primary_comm.get(),
+      int_ranks_to_exclude,
+      config,
+      shrink_flags);
+
+  // Calculate new size and get NCCL-assigned rank
+  int new_size = size_ - static_cast<int>(ranks_to_exclude.size());
+  int new_rank = shrunk_comm->rank_;
+
+  // Create new ProcessGroupNCCL with optimized options cloning
+  auto new_store = store_->clone();
+  auto new_opts = ProcessGroupNCCL::Options::create(options_->is_high_priority_stream);
+  new_opts->timeout = options_->timeout;
+#ifdef NCCL_HAS_CONFIG
+  new_opts->config = options_->config;
+#endif
+
+  auto new_pg = c10::make_intrusive<ProcessGroupNCCL>(new_store, new_rank, new_size, new_opts);
+
+  // Set up the new process group with optimized device setup
+  {
+      at::Device new_pg_device = at::Device(at::kCUDA, parent_device_index);
+      const auto key = getKeyFromDevice(new_pg_device);
+      std::unique_lock<std::mutex> lock(new_pg->mutex_);
+      at::cuda::OptionalCUDAGuard gpuGuard(new_pg_device);
+
+      // Note: rank is already set by NCCL during shrink operation
+
+      // Optimize: create stream only once
+      bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
+      auto new_stream = at::cuda::getStreamFromPool(new_opts->is_high_priority_stream || force_high);
+
+      // Batch the map operations
+      new_pg->devNCCLCommMap_[key] = shrunk_comm;
+      new_pg->ncclStreams_.emplace(key, new_stream);
+      new_pg->ncclEvents_.emplace(key, at::cuda::CUDAEvent(cudaEventDisableTiming));
+      new_pg->usedDeviceIdxs_.insert(new_pg_device.index());
+
+      // Register in global map if using allocator hooks (optimized check)
+      if (shouldAllCommunicatorsRegisterAllTensors()) {
+          std::lock_guard<std::mutex> map_lock(ncclCommMemPoolMapMutex);
+          ncclCommMemPoolMap.emplace(shrunk_comm, MemPoolSet{});
+      }
+  }
+
+  return new_pg;
+}
+#else // !NCCL_HAS_COMM_SHRINK
+// Stub implementation if NCCL doesn't support shrink
+c10::intrusive_ptr<ProcessGroupNCCL> ProcessGroupNCCL::shrink_process_group(
+    const std::vector<int64_t>& /* ranks_to_exclude */,
+    int /* shrink_flags */) {
+  TORCH_CHECK(false,
+      "ProcessGroupNCCL::shrink_process_group requires NCCL version 2.27.0 or later, "
+      "but PyTorch was built with an older version or without NCCL shrink support.");
+  return c10::intrusive_ptr<ProcessGroupNCCL>(nullptr); // Should not be reached
+}
+#endif // NCCL_HAS_COMM_SHRINK
+
 } // namespace c10d
 
 #endif // USE_C10D_NCCL

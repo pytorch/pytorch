@@ -1027,6 +1027,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::chrono::milliseconds& timeout);
 
   void setEnableNanCheck(bool enableNanCheck);
+#ifdef NCCL_HAS_COMM_SHRINK
+  // Declaration only exists if NCCL supports shrink
+  c10::intrusive_ptr<ProcessGroupNCCL> shrink_process_group(
+      const std::vector<int64_t>& ranks_to_exclude,
+      int shrink_flags = 0x00 /* NCCL_SHRINK_DEFAULT */ );
+#endif // NCCL_HAS_COMM_SHRINK
 
  protected:
   uint64_t getWatchdogHeartbt() const;
