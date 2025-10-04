@@ -874,10 +874,19 @@ std::optional<py::object> _maybe_handle_torch_function(
   std::vector<PyObject*> overloaded_args;
   const auto args_size = args.size();
   size_t total_arg_num = args_size + kwargs.size();
+  PyObject* const args_ptr = args.ptr();
   for (const auto i : c10::irange(args_size)) {
-    is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
+    // Because pybind object indexing is implemented generically for
+    // all objects, operator[] returns py::object instead of
+    // py::handle, so args[i].ptr() would cause a reference count
+    // round trip. This has enough overhead that I noticed it while
+    // profiling and came here to fix it. For tuples in particular,
+    // PyTuple_GET_ITEM returns a borrowed reference, so no counting
+    // overhead.
+    auto* const args_i_ptr = PyTuple_GET_ITEM(args_ptr, i);
+    is_tensor_and_append_overloaded(args_i_ptr, &overloaded_args);
     is_tensor_list_and_append_overloaded(
-        args[i].ptr(),
+        args_i_ptr,
         &overloaded_args,
         static_cast<int>(total_arg_num),
         false /* throw_error */);
