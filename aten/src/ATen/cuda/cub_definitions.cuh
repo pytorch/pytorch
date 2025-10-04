@@ -36,14 +36,6 @@
 #define CUB_SUPPORTS_UNIQUE_BY_KEY() false
 #endif
 
-// cub support for scan by key is added to cub 1.15
-// in https://github.com/NVIDIA/cub/pull/376
-#if CUB_VERSION >= 101500
-#define CUB_SUPPORTS_SCAN_BY_KEY() 1
-#else
-#define CUB_SUPPORTS_SCAN_BY_KEY() 0
-#endif
-
 // cub support for cub::FutureValue is added to cub 1.15 in:
 // https://github.com/NVIDIA/cub/pull/305
 #if CUB_VERSION >= 101500
