@@ -23,7 +23,7 @@ void Xcoo2csr(const int *coorowind, int64_t nnz, int64_t m, int *csrrowptr) {
   TORCH_CUDASPARSE_CHECK(cusparseXcoo2csr(handle, coorowind, i_nnz, i_m, csrrowptr, CUSPARSE_INDEX_BASE_ZERO));
 }
 
-cusparseOperation_t convertTransToCusparseOperation(char trans) {
+static cusparseOperation_t convertTransToCusparseOperation(char trans) {
   if (trans == 't') return CUSPARSE_OPERATION_TRANSPOSE;
   else if (trans == 'n') return CUSPARSE_OPERATION_NON_TRANSPOSE;
   else if (trans == 'c') return CUSPARSE_OPERATION_CONJUGATE_TRANSPOSE;
@@ -56,7 +56,7 @@ void _csrmm2(
   int64_t ma = m, ka = k;
   if (transa != 'n') std::swap(ma, ka);
 
-  cusparseSpMatDescr_t descA;
+  cusparseSpMatDescr_t descA = nullptr;
   TORCH_CUDASPARSE_CHECK(cusparseCreateCsr(
     &descA,                     /* output */
     ma, ka, nnz,                /* rows, cols, number of non zero elements */
@@ -72,7 +72,7 @@ void _csrmm2(
   int64_t kb = k, nb = n;
   if (transb != 'n') std::swap(kb, nb);
 
-  cusparseDnMatDescr_t descB;
+  cusparseDnMatDescr_t descB = nullptr;
   TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
     &descB,               /* output */
     kb, nb, ldb,          /* rows, cols, leading dimension */
@@ -81,7 +81,7 @@ void _csrmm2(
     CUSPARSE_ORDER_COL    /* memory layout, ONLY column-major is supported now */
   ));
 
-  cusparseDnMatDescr_t descC;
+  cusparseDnMatDescr_t descC = nullptr;
   TORCH_CUDASPARSE_CHECK(cusparseCreateDnMat(
     &descC,               /* output */
     m, n, ldc,            /* rows, cols, leading dimension */
@@ -101,7 +101,7 @@ void _csrmm2(
 #endif
 
   // cusparseSpMM_bufferSize returns the bufferSize that can be used by cusparseSpMM
-  size_t bufferSize;
+  size_t bufferSize = 0;
   TORCH_CUDASPARSE_CHECK(cusparseSpMM_bufferSize(
     handle, opa, opb,
     alpha,
@@ -231,7 +231,7 @@ void Xcsrsort(int64_t m, int64_t n, int64_t nnz, const int *csrRowPtr, int *csrC
   int i_nnz = (int)nnz;
 
   auto handle = at::cuda::getCurrentCUDASparseHandle();
-  cusparseMatDescr_t desc;
+  cusparseMatDescr_t desc = nullptr;
   cusparseCreateMatDescr(&desc);
   TORCH_CUDASPARSE_CHECK(cusparseXcsrsort(handle, i_m, i_n, i_nnz, desc, csrRowPtr, csrColInd, P, pBuffer));
   TORCH_CUDASPARSE_CHECK(cusparseDestroyMatDescr(desc));

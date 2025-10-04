@@ -51,7 +51,7 @@ static void* device_nvtxRangeStart(const char* msg, std::intptr_t stream) {
   return handle;
 }
 
-void initNvtxBindings(PyObject* module) {
+static void initNvtxBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
 #ifdef TORCH_CUDA_USE_NVTX3

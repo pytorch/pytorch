@@ -470,7 +470,7 @@ static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
  c10::OptionalArrayRef<int64_t> input_size) {
 
   std::vector<int64_t> input_size_value;
-  int64_t time_step, batch_size;
+  int64_t time_step = 0, batch_size = 0;
   if (input_size.has_value()) {
     input_size_value = input_size.value().vec();
     int64_t time_index = batch_first ? 1: 0;

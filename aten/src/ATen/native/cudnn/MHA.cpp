@@ -148,7 +148,7 @@ constexpr uint8_t MAX_MHA_DIM = 4;
 
 // Whether we will use ragged offsets in the dense (non-nested) path
 // to avoid recompilation
-bool use_ragged_in_dense(
+static bool use_ragged_in_dense(
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
@@ -182,7 +182,7 @@ bool use_ragged_in_dense(
   return all_bshd;
 }
 
-int roundup_power2(int dim) {
+static int roundup_power2(int dim) {
   if (!dim) {
     return 1;
   }
@@ -222,7 +222,7 @@ struct MHAParams {
   bool use_ragged;
 };
 
-void setMHAParams(
+static void setMHAParams(
     MHAParams& params,
     int64_t b,
     int64_t h,
@@ -381,14 +381,14 @@ struct MHAGraphCache {
 // https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
 // We also leak the caches to workaround potential teardown race issues.
 
-auto& getMHAGraphCache_() {
-  thread_local auto& instance =
+static auto& getMHAGraphCache_() {
+  static thread_local auto& instance =
       *new MHAGraphCache<std::shared_ptr<fe::graph::Graph>, MHACacheKeyWrapper>;
   return instance;
 }
 
-auto& getMHAGraphBackwardCache_() {
-  thread_local auto& instance =
+static auto& getMHAGraphBackwardCache_() {
+  static thread_local auto& instance =
       *new MHAGraphCache<std::shared_ptr<fe::graph::Graph>, MHACacheKeyWrapper>;
   return instance;
 }
@@ -438,7 +438,7 @@ auto fixSizeOneDimStrideSDPA(
 
 } // namespace
 
-auto build_graph(
+static auto build_graph(
     int64_t b,
     int64_t h,
     int64_t s_q,
@@ -641,7 +641,7 @@ auto build_graph(
   return mha_graph;
 }
 
-auto build_graph_nestedtensor(
+static auto build_graph_nestedtensor(
     int64_t b,
     int64_t h_q,
     int64_t h_k,
@@ -848,7 +848,7 @@ auto build_graph_nestedtensor(
   return mha_graph;
 }
 
-auto build_graph_backward(
+static auto build_graph_backward(
     int64_t b,
     int64_t h,
     int64_t s_q,
@@ -1062,7 +1062,7 @@ auto build_graph_backward(
   return mha_graph;
 }
 
-auto build_graph_backward_nestedtensor(
+static auto build_graph_backward_nestedtensor(
     int64_t b,
     int64_t h_q,
     int64_t h_k,

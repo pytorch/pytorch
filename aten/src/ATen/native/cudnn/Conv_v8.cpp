@@ -45,7 +45,7 @@ namespace native {
 namespace {
 
 // TODO: remove duplicate code in Conv_v7.cpp
-constexpr int64_t operator"" _TiB(unsigned long long n) {
+constexpr int64_t operator""_TiB(unsigned long long n) {
   return size_t(n) << 40;
 }
 
@@ -355,7 +355,7 @@ thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>
 
 } // namespace
 
-void run_conv_plan(
+static void run_conv_plan(
     cudnnHandle_t handle,
     const Tensor& x,
     const Tensor& y,
@@ -401,7 +401,7 @@ void run_conv_plan(
       handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
-void run_conv_plan_fused(
+static void run_conv_plan_fused(
     cudnnHandle_t handle,
     const Tensor& x,
     const Tensor& y,
@@ -426,7 +426,7 @@ void run_conv_plan_fused(
       handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
 }
 
-auto build_opgraph(
+static auto build_opgraph(
     const cudnnHandle_t handle,
     const cudnnBackendDescriptorType_t desc,
     const Tensor& x,
@@ -458,7 +458,7 @@ auto build_opgraph(
   return opGraph;
 }
 
-auto build_opgraph_fused(
+static auto build_opgraph_fused(
     const cudnnHandle_t handle,
     const Tensor& x,
     const Tensor& y,
@@ -559,7 +559,7 @@ auto build_opgraph_fused(
   return opGraph;
 }
 
-auto get_generator_sources(
+static auto get_generator_sources(
     const cudnnBackendDescriptorType_t& desc,
     const Tensor& x,
     const bool deterministic,
@@ -618,7 +618,7 @@ auto get_generator_sources(
   }
 }
 
-int64_t get_available_workspace() {
+static int64_t get_available_workspace() {
   c10::DeviceIndex device = 0;
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   size_t max_block_size = 0;
@@ -628,7 +628,7 @@ int64_t get_available_workspace() {
 
 static nlohmann::json errata_json_handle;
 
-bool plan_errata_exception(
+static bool plan_errata_exception(
     const cudnnHandle_t handle,
     const std::string& executionPlanTag) {
   static bool has_json =
@@ -641,7 +641,7 @@ bool plan_errata_exception(
   }
 }
 
-void generate_and_filter_plans(
+static void generate_and_filter_plans(
     const cudnnHandle_t handle,
     cudnn_frontend::OperationGraph& opGraph,
     cudnn_frontend::EngineConfigGenerator& generator,
@@ -693,7 +693,7 @@ void generate_and_filter_plans(
   }
 }
 
-auto get_plans_from_find(
+static auto get_plans_from_find(
     const cudnnHandle_t handle,
     const cudnnBackendDescriptorType_t desc,
     const Tensor& x,
@@ -740,7 +740,7 @@ auto get_plans_from_find(
   return sorted_plans;
 }
 
-auto get_plans_from_find_fused(
+static auto get_plans_from_find_fused(
     const cudnnHandle_t handle,
     const Tensor& x,
     const Tensor& y,
@@ -797,7 +797,7 @@ auto get_plans_from_find_fused(
 
 // We only get configs from this stage to avoid building unnecessary plans that
 // are never executed
-auto get_configs_from_heuristics(
+static auto get_configs_from_heuristics(
     const cudnnHandle_t handle,
     const cudnnBackendDescriptorType_t desc,
     std::string& opgraph_tag,
@@ -826,7 +826,7 @@ auto get_configs_from_heuristics(
   return configs;
 }
 
-auto get_configs_from_heuristics_fused(
+static auto get_configs_from_heuristics_fused(
     const cudnnHandle_t handle,
     std::string& opgraph_tag,
     const Tensor& x,
@@ -863,7 +863,7 @@ auto get_configs_from_heuristics_fused(
   return configs;
 }
 
-void try_plans(
+static void try_plans(
     cudnn_frontend::executionPlans_t& plans,
     const CacheKeyWrapper& key,
     const cudnnHandle_t handle,
@@ -886,7 +886,7 @@ void try_plans(
       false, "FIND was unable to find an engine to execute this computation");
 }
 
-void try_plans_fused(
+static void try_plans_fused(
     cudnn_frontend::executionPlans_t& plans,
     const CacheKeyFusedWrapper& key,
     const cudnnHandle_t handle,
@@ -910,7 +910,7 @@ void try_plans_fused(
       false, "FIND was unable to find an engine to execute this computation");
 }
 
-bool try_configs(
+static bool try_configs(
     cudnn_frontend::EngineConfigList& configs,
     const std::string& opgraph_tag,
     const CacheKeyWrapper& key,
@@ -940,7 +940,7 @@ bool try_configs(
   return false;
 }
 
-bool try_configs_fused(
+static bool try_configs_fused(
     cudnn_frontend::EngineConfigList& configs,
     const std::string& opgraph_tag,
     const CacheKeyFusedWrapper& key,
@@ -971,7 +971,7 @@ bool try_configs_fused(
   return false;
 }
 
-void run_single_conv(
+static void run_single_conv(
     const cudnnBackendDescriptorType_t operation,
     const Tensor& x,
     const Tensor& y,
@@ -1067,7 +1067,7 @@ void run_single_conv(
   }
 }
 
-void run_fused_conv(
+static void run_fused_conv(
     const Tensor& x,
     const Tensor& y,
     const Tensor& w,
