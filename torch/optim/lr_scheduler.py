@@ -1665,6 +1665,7 @@ class ReduceLROnPlateau(LRScheduler):
             self.default_min_lr = None
             self.min_lrs = list(min_lr)
         else:
+            # pyrefly: ignore  # bad-assignment
             self.default_min_lr = min_lr
             self.min_lrs = [min_lr] * len(optimizer.param_groups)
 
@@ -1724,6 +1725,7 @@ class ReduceLROnPlateau(LRScheduler):
                     "of the `optimizer` param groups."
                 )
             else:
+                # pyrefly: ignore  # bad-assignment
                 self.min_lrs = [self.default_min_lr] * len(self.optimizer.param_groups)
 
         for i, param_group in enumerate(self.optimizer.param_groups):
@@ -1903,10 +1905,13 @@ class CyclicLR(LRScheduler):
 
         self.max_lrs = _format_param("max_lr", optimizer, max_lr)
 
+        # pyrefly: ignore  # bad-assignment
         step_size_up = float(step_size_up)
         step_size_down = (
+            # pyrefly: ignore  # bad-assignment
             float(step_size_down) if step_size_down is not None else step_size_up
         )
+        # pyrefly: ignore  # unsupported-operation
         self.total_size = step_size_up + step_size_down
         self.step_ratio = step_size_up / self.total_size
 

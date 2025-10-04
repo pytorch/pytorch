@@ -14,6 +14,8 @@ import torch
 _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
+
+    # pyrefly: ignore  # import-error
     from monkeytype import trace as monkeytype_trace
     from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.db.base import (  # type: ignore[import]
@@ -87,6 +89,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             super().__init__(store)
 
         def log(self, trace: CallTrace) -> None:
+            # pyrefly: ignore  # missing-attribute
             self.traces.append(trace)
 
     class JitTypeTraceStore(CallTraceStore):
@@ -148,6 +151,7 @@ if _IS_MONKEYTYPE_INSTALLED:
 
         def trace_logger(self) -> JitTypeTraceStoreLogger:
             """Return a JitCallTraceStoreLogger that logs to the configured trace store."""
+            # pyrefly: ignore  # bad-argument-count
             return JitTypeTraceStoreLogger(self.trace_store())
 
         def trace_store(self) -> CallTraceStore:

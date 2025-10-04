@@ -113,9 +113,11 @@ def _strong_wolfe(
 
         # compute new trial value
         t = _cubic_interpolate(
+            # pyrefly: ignore  # index-error
             bracket[0],
             bracket_f[0],
             bracket_gtd[0],  # type: ignore[possibly-undefined]
+            # pyrefly: ignore  # index-error
             bracket[1],
             bracket_f[1],
             bracket_gtd[1],
@@ -151,6 +153,7 @@ def _strong_wolfe(
 
         if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
+            # pyrefly: ignore  # unsupported-operation
             bracket[high_pos] = t
             bracket_f[high_pos] = f_new
             bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
@@ -160,14 +163,17 @@ def _strong_wolfe(
             if abs(gtd_new) <= -c2 * gtd:
                 # Wolfe conditions satisfied
                 done = True
+            # pyrefly: ignore  # index-error
             elif gtd_new * (bracket[high_pos] - bracket[low_pos]) >= 0:
                 # old high becomes new low
+                # pyrefly: ignore  # unsupported-operation
                 bracket[high_pos] = bracket[low_pos]
                 bracket_f[high_pos] = bracket_f[low_pos]
                 bracket_g[high_pos] = bracket_g[low_pos]  # type: ignore[possibly-undefined]
                 bracket_gtd[high_pos] = bracket_gtd[low_pos]
 
             # new point becomes new low
+            # pyrefly: ignore  # unsupported-operation
             bracket[low_pos] = t
             bracket_f[low_pos] = f_new
             bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
@@ -252,6 +258,7 @@ class LBFGS(Optimizer):
 
     def _numel(self):
         if self._numel_cache is None:
+            # pyrefly: ignore  # bad-assignment
             self._numel_cache = sum(
                 2 * p.numel() if torch.is_complex(p) else p.numel()
                 for p in self._params
