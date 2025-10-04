@@ -457,6 +457,10 @@ nested_graph_breaks = False
 # produces a consistent number of inputs to the graph.
 install_free_tensors = False
 
+# Temporary flag to control the turning of install_free_tensors to True for
+# export. We will remove this flag in a few weeks when stable.
+install_free_tensors_for_export = True
+
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
 

@@ -611,6 +611,9 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(32, 64, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @unittest.skip(
+        "install_free_tensors leads to OOM - https://github.com/pytorch/pytorch/issues/164062"
+    )
     def test_large_weight(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
