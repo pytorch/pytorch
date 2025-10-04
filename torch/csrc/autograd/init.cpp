@@ -1113,7 +1113,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!t.storage()) {
       return false;
     }
-    auto* cp = t.storage().unsafeGetStorageImpl();
+    auto* cp = t.storage().data_ptr().get_context();
     if (cp) {
       s.insert(cp);
     }
@@ -1124,7 +1124,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!t.storage()) {
       return false;
     }
-    auto* cp = t.storage().unsafeGetStorageImpl();
+    auto* cp = t.storage().data_ptr().get_context();
     if (!cp) {
       return false;
     }
