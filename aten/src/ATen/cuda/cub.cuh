@@ -177,7 +177,6 @@ inline void segmented_sort_pairs(
   }
 }
 
-#if CUB_SUPPORTS_UNIQUE_BY_KEY()
 template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename NumSelectedIteratorT>
 inline void unique_by_key(
   KeysInputIteratorT keys_in, ValuesInputIteratorT values_in,
@@ -193,7 +192,6 @@ inline void unique_by_key(
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::UniqueByKey,
     keys_in, values_in, keys_out_, values_out, num_selected, num_input_items, c10::cuda::getCurrentCUDAStream());
 }
-#endif
 
 namespace impl {
 
