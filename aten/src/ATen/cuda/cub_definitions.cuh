@@ -20,14 +20,6 @@
 #define USE_GLOBAL_CUB_WRAPPED_NAMESPACE() false
 #endif
 
-// cub support for cub::FutureValue is added to cub 1.15 in:
-// https://github.com/NVIDIA/cub/pull/305
-#if CUB_VERSION >= 101500
-#define CUB_SUPPORTS_FUTURE_VALUE() true
-#else
-#define CUB_SUPPORTS_FUTURE_VALUE() false
-#endif
-
 // There were many bc-breaking changes in major version release of CCCL v3.0.0
 // Please see https://nvidia.github.io/cccl/cccl/3.0_migration_guide.html
 #if CUB_VERSION >= 200800
