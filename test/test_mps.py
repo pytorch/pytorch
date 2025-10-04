@@ -8957,9 +8957,9 @@ class TestPad(TestCaseMPS):
         # pad dims == input dims
         helper((1, 3), (0, 2, 0, 1), nn.ConstantPad2d)
         # input.numel() == 0 but output.numel() > 0
-        helper((0, 3, 3), (1, 1, 1, 1, 1, 1), nn.ConstantPad2d)
+        helper((0, 3, 3), 1, nn.ConstantPad2d)
         # pad dims < input dims - 2
-        helper((1, 2, 3, 4), (1, 2), nn.ConstantPad2d)
+        helper((1, 2, 3, 4, 5), (1, 2, 0, 0), nn.ConstantPad2d)
 
         # 3D Padding
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
@@ -8972,7 +8972,7 @@ class TestPad(TestCaseMPS):
         # input size < pad size
         helper((2, 4, 6), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
         # check the workaround for the right padding bug in Monterey
-        helper((1, 2, 2, 2, 2), (0, 1), nn.ConstantPad3d)
+        helper((1, 2, 2, 2, 2), (0, 1, 0, 1, 0, 1), nn.ConstantPad3d)
 
     def test_constant_pad_nd_preserves_memory_format(self):
         nchw_tensor = torch.rand((1, 2, 5, 3))
