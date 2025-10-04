@@ -25,17 +25,27 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
+#include <c10/util/hash.h>
 #include <c10/util/irange.h>
 
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <unordered_map>
 
 namespace at {
 
 class Tensor;
 
 enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
+enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
+enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
+enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
+
+TORCH_API Float32Backend str2backend(const std::string& name);
+TORCH_API Float32Op str2op(const std::string& name);
+TORCH_API Float32Precision str2precision(const std::string& name);
+TORCH_API std::string precision2str(Float32Precision prec);
 
 class TORCH_API Context {
  public:
@@ -336,19 +346,17 @@ class TORCH_API Context {
 
   void setFloat32MatmulPrecision(const std::string& s);
   void setFloat32Precision(
-      const std::string& backend,
-      const std::string& op,
-      const std::string& s);
-  bool allowTF32CuDNN(const std::string& op = std::string()) const;
+      Float32Backend backend,
+      Float32Op op,
+      Float32Precision p);
+  bool allowTF32CuDNN(std::optional<Float32Op> op = std::nullopt) const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32OneDNN() const;
   void setAllowTF32OneDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
-  std::string float32Precision(
-      const std::string& backend,
-      const std::string& op) const;
+  Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
   bool allowFP16ReductionCuBLAS() const;
   void setAllowFP16ReductionCuBLAS(bool);
   bool allowBF16ReductionCuBLAS() const;
@@ -475,21 +483,20 @@ class TORCH_API Context {
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 
-  std::map<std::string, std::map<std::string, std::string>> fp32_precision = {
-      {"generic", {{"all", "none"}}},
-      {"mkldnn",
-       {{"matmul", "none"},
-        {"conv", "none"},
-        {"rnn", "none"},
-        {"all", "none"}}},
-      {"cuda",
-       {{"matmul",
-         float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
-             ? "none"
-             : "tf32"},
-        {"conv", "tf32"},
-        {"rnn", "tf32"},
-        {"all", "none"}}},
+  using Key = std::pair<Float32Backend, Float32Op>;
+  std::unordered_map<Key, Float32Precision, c10::hash<Key>> fp32_precision = {
+      {{Float32Backend::GENERIC, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::CONV}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
+      {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::MATMUL},
+       float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+           ? Float32Precision::NONE
+           : Float32Precision::TF32},
   };
 
   Allocator* prev_allocator_ptr_{nullptr};
@@ -671,5 +678,4 @@ struct TORCH_API ROCmBackwardPassGuard {
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
 };
-
 } // namespace at
