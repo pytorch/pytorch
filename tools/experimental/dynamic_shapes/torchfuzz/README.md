@@ -123,6 +123,28 @@ python fuzzer.py --seed 42 --log-level DEBUG --max-depth 5
 | `--verbose` | Print detailed output for all runs | `--verbose` |
 | `--template NAME` | Template to use for all runs | `--template default` |
 
+## Restricting supported ops and weighting examples
+
+You can restrict the fuzzer to a specific set of fully-qualified torch ops and optionally weight them to bias sampling.
+
+- Restrict to only torch.add and torch.matmul (equal likelihood):
+
+```bash
+python fuzzer.py --seed 42 \
+  --supported-ops "torch.add,torch.matmul"
+```
+
+- Restrict to only torch.add and torch.matmul, and make matmul 5x more likely than add:
+
+```bash
+python fuzzer.py --seed 42 \
+  --supported-ops "torch.add,torch.matmul=5"
+```
+
+Notes:
+- Use fully-qualified torch op names (e.g., torch.matmul, torch.nn.functional.rms_norm).
+- Weights must be > 0. If both --supported-ops and --op-weights specify a weight for the same op, the value from --supported-ops takes precedence.
+
 ## Architecture
 
 ### Core Components

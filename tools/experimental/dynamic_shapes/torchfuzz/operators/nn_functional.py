@@ -434,6 +434,7 @@ class RMSNormOperator(Operator):
 
     def __init__(self):
         super().__init__("torch.nn.functional.rms_norm")
+        self.weight = 5.0
 
     @property
     def torch_op_name(self) -> Optional[str]:

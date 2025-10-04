@@ -30,8 +30,15 @@ def _get_cached_operators():
     return _CACHED_OPERATORS
 
 
-def _get_template_filtered_operators(template: str = "default"):
-    """Get operators filtered by template's supported_ops."""
+def _get_template_filtered_operators(
+    template: str = "default", supported_ops: Optional[list[str]] = None
+):
+    """Get operators filtered by template's supported_ops, with user override.
+
+    If supported_ops is provided, it takes precedence and is used to filter the
+    registry. Otherwise, the template's supported_ops are used. If neither are
+    specified, all operators are returned.
+    """
     # Instantiate template
     if template == "dtensor":
         from torchfuzz.codegen import DTensorFuzzTemplate
@@ -48,11 +55,14 @@ def _get_template_filtered_operators(template: str = "default"):
 
     all_operators = _get_cached_operators()
 
+    # Determine allowed ops list
+    allowed_ops = supported_ops if supported_ops else fuzz_template.supported_ops
+
     # If no supported_ops specified, return all operators
-    if not fuzz_template.supported_ops:
+    if not allowed_ops:
         return all_operators
 
-    # Filter operators based on supported_ops
+    # Filter operators based on allowed_ops
     filtered_ops = {}
 
     for op_name, operator in all_operators.items():
@@ -66,9 +76,9 @@ def _get_template_filtered_operators(template: str = "default"):
             filtered_ops[op_name] = operator
             continue
 
-        # Check if the operator supports any of the template's operations
+        # Check if the operator supports any of the allowed operations
         should_include = False
-        for supported_op in fuzz_template.supported_ops:
+        for supported_op in allowed_ops:
             # Direct torch operation matching
             if torch_op == supported_op:
                 should_include = True
@@ -260,7 +270,11 @@ def fuzz_spec(template: str = "default") -> Spec:
 
 
 def fuzz_op(
-    target_spec: Spec, depth, stack_size, template: str = "default"
+    target_spec: Spec,
+    depth,
+    stack_size,
+    template: str = "default",
+    supported_ops: Optional[list[str]] = None,
 ) -> tuple[str, list[Spec]]:
     """
     Given an output specification, returns an operation that can
@@ -277,7 +291,7 @@ def fuzz_op(
         describes the layout requirements for the operation's inputs
     """
     # Get template-filtered operators
-    available_operators = _get_template_filtered_operators(template)
+    available_operators = _get_template_filtered_operators(template, supported_ops)
 
     # Filter operators that can produce the target spec
     compatible_ops = []
@@ -306,24 +320,84 @@ def fuzz_op(
         if not leaf_ops:
             # If no leaf ops can produce this spec, fallback to arg
             return _get_arg_args_specs(target_spec)
-        chosen_op_name, chosen_operator = random.choice(leaf_ops)
+        # Weighted choice among leaf ops
+        leaf_weights = [
+            op.get_weight(
+                target_spec=target_spec,
+                depth=depth,
+                stack_size=stack_size,
+                template=template,
+            )
+            for _, op in leaf_ops
+        ]
+        idx = random.choices(range(len(leaf_ops)), weights=leaf_weights, k=1)[0]
+        chosen_op_name, chosen_operator = leaf_ops[idx]
     else:
         # At higher depths, choose between leaf and non-leaf operations
         # Reduce probability of leaf operations when stack_size < 10
         if (stack_size < 10 or depth > 7) and non_leaf_ops:
             # 80% chance of non-leaf, 20% chance of leaf
             if random.random() < 0.8:
-                chosen_op_name, chosen_operator = random.choice(non_leaf_ops)
+                # Weighted choice among non-leaf ops
+                nonleaf_weights = [
+                    op.get_weight(
+                        target_spec=target_spec,
+                        depth=depth,
+                        stack_size=stack_size,
+                        template=template,
+                    )
+                    for _, op in non_leaf_ops
+                ]
+                idx = random.choices(
+                    range(len(non_leaf_ops)), weights=nonleaf_weights, k=1
+                )[0]
+                chosen_op_name, chosen_operator = non_leaf_ops[idx]
             else:
-                chosen_op_name, chosen_operator = (
-                    random.choice(leaf_ops) if leaf_ops else random.choice(non_leaf_ops)
-                )
+                if leaf_ops:
+                    leaf_weights = [
+                        op.get_weight(
+                            target_spec=target_spec,
+                            depth=depth,
+                            stack_size=stack_size,
+                            template=template,
+                        )
+                        for _, op in leaf_ops
+                    ]
+                    idx = random.choices(
+                        range(len(leaf_ops)), weights=leaf_weights, k=1
+                    )[0]
+                    chosen_op_name, chosen_operator = leaf_ops[idx]
+                else:
+                    nonleaf_weights = [
+                        op.get_weight(
+                            target_spec=target_spec,
+                            depth=depth,
+                            stack_size=stack_size,
+                            template=template,
+                        )
+                        for _, op in non_leaf_ops
+                    ]
+                    idx = random.choices(
+                        range(len(non_leaf_ops)), weights=nonleaf_weights, k=1
+                    )[0]
+                    chosen_op_name, chosen_operator = non_leaf_ops[idx]
         else:
-            # Normal probability distribution
+            # Normal probability distribution over all ops
             all_ops = non_leaf_ops + leaf_ops
-            chosen_op_name, chosen_operator = (
-                random.choice(all_ops) if all_ops else ("arg", get_operator("arg"))
-            )
+            if all_ops:
+                all_weights = [
+                    op.get_weight(
+                        target_spec=target_spec,
+                        depth=depth,
+                        stack_size=stack_size,
+                        template=template,
+                    )
+                    for _, op in all_ops
+                ]
+                idx = random.choices(range(len(all_ops)), weights=all_weights, k=1)[0]
+                chosen_op_name, chosen_operator = all_ops[idx]
+            else:
+                chosen_op_name, chosen_operator = ("arg", get_operator("arg"))
 
     if chosen_operator is None:
         # If no operator found, fallback to arg
@@ -354,6 +428,7 @@ def fuzz_operation_graph(
     max_depth: int = 7,
     seed: Optional[int] = None,
     template: str = "default",
+    supported_ops: Optional[list[str]] = None,
 ) -> OperationGraph:
     """
     Generate a graph of operations that produces the target specification.
@@ -394,7 +469,7 @@ def fuzz_operation_graph(
         nonlocal node_counter
 
         # Generate new operation
-        op_name, input_specs = fuzz_op(spec, depth, stack_size, template)
+        op_name, input_specs = fuzz_op(spec, depth, stack_size, template, supported_ops)
 
         # Create unique node ID
         node_id = f"node_{node_counter}"
