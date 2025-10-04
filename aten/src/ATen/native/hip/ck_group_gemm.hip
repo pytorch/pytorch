@@ -59,62 +59,89 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     std::vector<void*> p_e_ptrs;
     std::vector<std::array<const void*, 0>> d_ptrs(p_a_ptrs.size());
 
-    TORCH_CHECK(mat_a.dim() == 2 && mat_b.dim() == 2, "Only 2D x 2D supported");
-    TORCH_CHECK(offs.has_value(), "Offsets tensor required");
+    const int mat_a_dim = mat_a.dim();
+    const int mat_b_dim = mat_b.dim();
 
     auto offs_accessor = offs->accessor<int, 1>();
     int num_groups = offs_accessor.size(0);
     const char* a_ptr_base = reinterpret_cast<const char*>(mat_a.data_ptr());
     const char* b_ptr_base = reinterpret_cast<const char*>(mat_b.data_ptr());
     char* out_ptr_base = reinterpret_cast<char*>(out.data_ptr());
-    int m = mat_a.size(0); // number of rows in A
-    int n = mat_b.size(1); // number of columns in B
+    const int M = mat_a.size(0); // number of rows in A
+    const int N = mat_b.size(1); // number of columns in B
+    const int K = mat_a.size(1); // columns in A == rows in B
     const size_t a_element_size = mat_a.element_size();
     const size_t b_element_size = mat_b.element_size();
     const size_t out_element_size = out.element_size();
 
-    for (int i = 0; i < num_groups; ++i) {
-        int start_k = (i == 0) ? 0 : offs_accessor[i-1];
-        int end_k = offs_accessor[i];
-        int k = end_k - start_k;
+    // for each group, calculate m,n,k,lda,ldb,ldc and A,B,out pointer base addresses.
+    if (mat_a_dim == 2 && mat_b_dim == 2) {
+        // for 2d*2d input, output is 3d.
+        // for each group, A columns (K) are sliced. M and N dimensions are not sliced.
+        for (int i = 0; i < num_groups; ++i) {
+            int start_k = (i == 0) ? 0 : offs_accessor[i-1];
+            int end_k = offs_accessor[i];
+            int k = end_k - start_k;
 
-        const void* group_a_ptr = a_ptr_base + start_k * mat_a.stride(1) * a_element_size;
-        const void* group_b_ptr;
-        int ldb;
+            //K dimension are sliced, hence select stride(1) always.
+            //K dimension is always dimension 1, regardless of memory layout (row/column major)
+            const void* group_a_ptr = a_ptr_base + start_k * mat_a.stride(1) * a_element_size;
+            const void* group_b_ptr;
+            int ldb;
 
-        if (std::is_same<BLayout, ck::tensor_layout::gemm::RowMajor>::value) {
-            group_b_ptr = b_ptr_base + start_k * mat_b.stride(1) * b_element_size;
-            ldb = mat_b.stride(0);
-        } else {
-            group_b_ptr = b_ptr_base + start_k * mat_b.stride(0) * b_element_size;
-            ldb = mat_b.stride(1);
+            if (std::is_same<BLayout, ck::tensor_layout::gemm::RowMajor>::value) {
+                // Row-major B [K,N]: K values are horizontally adjacent, use stride(1) for K offset
+                group_b_ptr = b_ptr_base + start_k * mat_b.stride(1) * b_element_size;
+                // Leading dimension = distance between rows = stride(0)
+                ldb = mat_b.stride(0);
+            } else {
+                // Column-major B [K,N]: K values are vertically adjacent, use stride(0) for K offset
+                group_b_ptr = b_ptr_base + start_k * mat_b.stride(0) * b_element_size;
+                // Leading dimension = distance between columns = stride(1)
+                ldb = mat_b.stride(1);
+            }
+
+            // Calculate output pointer for group i in 3D tensor [num_groups, M, N]
+            // stride(0) = M*N elements between groups, so skip i*stride(0) elements to reach group i
+            void* group_e_ptr = out_ptr_base + i * out.stride(0) * out_element_size;
+            int lda, ldc;
+            if (std::is_same<ALayout, ck::tensor_layout::gemm::RowMajor>::value) {
+                // Row-major A [M,K]: leading dimension = distance between rows = stride(0)
+                lda = mat_a.stride(0);
+            } else {
+                // Column-major A [M,K]: leading dimension = distance between columns = stride(1)
+                lda = mat_a.stride(1);
+            }
+            // Output is always row-major in 3D tensor [num_groups, M, N]
+            // Leading dimension for each group's [M,N] slice = stride(1) = N
+            ldc = out.stride(1);
+            size_t output_group_bytes = M * N * out_element_size;
+            void* group_e_ptr_end = (char*)group_e_ptr + output_group_bytes;
+
+            gemm_descs.push_back({
+                static_cast<ck::index_t>(M),
+                static_cast<ck::index_t>(N),
+                static_cast<ck::index_t>(k),
+                static_cast<ck::index_t>(lda),
+                static_cast<ck::index_t>(ldb),
+                static_cast<ck::index_t>(ldc)
+            });
+            p_a_ptrs.push_back(group_a_ptr);
+            p_b_ptrs.push_back(group_b_ptr);
+            p_e_ptrs.push_back(group_e_ptr);
         }
-
-        void* group_e_ptr = out_ptr_base + i * out.stride(0) * out_element_size;
-        int lda = mat_a.stride(0), ldc = out.stride(1);
-        size_t output_group_bytes = m * n * out_element_size;
-        void* group_e_ptr_end = (char*)group_e_ptr + output_group_bytes;
-
-        gemm_descs.push_back({
-            static_cast<ck::index_t>(m),
-            static_cast<ck::index_t>(n),
-            static_cast<ck::index_t>(k),
-            static_cast<ck::index_t>(lda),
-            static_cast<ck::index_t>(ldb),
-            static_cast<ck::index_t>(ldc)
-        });
-        p_a_ptrs.push_back(group_a_ptr);
-        p_b_ptrs.push_back(group_b_ptr);
-        p_e_ptrs.push_back(group_e_ptr);
+    } else {
+        TORCH_CHECK(false, "CK Group GEMM: Unsupported dimensions");
     }
-    TORCH_INTERNAL_ASSERT(p_a_ptrs.size() > 0, "No valid groups!");
+
+    TORCH_INTERNAL_ASSERT(p_a_ptrs.size() > 0, "CK Group GEMM: No valid groups");
     static DeviceOp gemm_instance;
     auto argument = gemm_instance.MakeArgument(
         p_a_ptrs, p_b_ptrs, d_ptrs, p_e_ptrs,
         gemm_descs, PassThrough{}, PassThrough{}, PassThrough{}
     );
     TORCH_INTERNAL_ASSERT(gemm_instance.IsSupportedArgument(argument),
-        "CK GEMM argument unsupported (shape/strides/type config)");
+        "CK Group GEMM: argument unsupported (shape/strides/type config)");
     size_t arg_buf_size = gemm_instance.GetDeviceKernelArgSize(&argument);
     size_t ws_size = gemm_instance.GetWorkSpaceSize(&argument);
 
@@ -178,11 +205,10 @@ void group_gemm_ck(
             launch_grouped_bgemm_ck_impl_dispatch<ck::tensor_layout::gemm::ColumnMajor, ck::tensor_layout::gemm::ColumnMajor, CkTypes::F32>(mat_a, mat_b, offs, out);
         }
     } else {
-        TORCH_CHECK(false, "Unsupported mat_a dtype for grouped MM");
+        TORCH_CHECK(false, "CK Group GEMM: Unsupported mat_a dtype");
     }
 }
 
 } // namespace detail
 } // namespace hip
 } // namespace at
-
