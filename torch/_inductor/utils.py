@@ -2452,27 +2452,29 @@ def get_device_tflops(dtype: torch.dtype) -> float:
     )
 
     assert dtype in (torch.float16, torch.bfloat16, torch.float32)
+    try:
+        if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
+            # Triton API change in https://github.com/triton-lang/triton/pull/2293
+            from torch._utils_internal import max_clock_rate
 
-    if inspect.signature(get_max_simd_tflops).parameters.get("clock_rate"):
-        # Triton API change in https://github.com/triton-lang/triton/pull/2293
-        from torch._utils_internal import max_clock_rate
+            sm_clock = max_clock_rate()
+            if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
+                return get_max_tensorcore_tflops(dtype, sm_clock)
 
-        sm_clock = max_clock_rate()
-        if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-            return get_max_tensorcore_tflops(dtype, sm_clock)
-
-        if torch.backends.cuda.matmul.allow_tf32:
-            return get_max_tensorcore_tflops(torch.float32, sm_clock)
+            if torch.backends.cuda.matmul.allow_tf32:
+                return get_max_tensorcore_tflops(torch.float32, sm_clock)
+            else:
+                return get_max_simd_tflops(torch.float32, sm_clock)
         else:
-            return get_max_simd_tflops(torch.float32, sm_clock)
-    else:
-        if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-            return get_max_tensorcore_tflops(dtype)
+            if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
+                return get_max_tensorcore_tflops(dtype)
 
-        if torch.backends.cuda.matmul.allow_tf32:
-            return get_max_tensorcore_tflops(torch.float32)
-        else:
-            return get_max_simd_tflops(torch.float32)
+            if torch.backends.cuda.matmul.allow_tf32:
+                return get_max_tensorcore_tflops(torch.float32)
+            else:
+                return get_max_simd_tflops(torch.float32)
+    except ValueError:
+        return 0.0
 
 
 @functools.cache
