@@ -505,6 +505,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # Handle patch_dynamo_config call
+
+        if self.fn in (
+            torch.fx.traceback._enter_annotation_context,
+            torch.fx.traceback._exit_annotation_context,
+        ):
+            args_const = [arg.as_python_constant() for arg in args]
+            self.fn(*args_const)
+
         if self.fn is torch._dynamo.patch_dynamo_config:
             try:
                 args_const = [arg.as_python_constant() for arg in args]

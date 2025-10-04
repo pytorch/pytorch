@@ -243,6 +243,52 @@ def set_stack_trace(stack: list[str]):
 
 
 @compatibility(is_backward_compatible=False)
+def _enter_annotation_context(annotation_dict: dict, context_state: dict):
+    """
+    Apply annotations to the current meta context.
+
+    Args:
+        annotation_dict (dict): The annotations to apply.
+        context_state (dict): Dictionary to store the context state for restoration.
+
+    Returns:
+        dict: The context state that was updated.
+    """
+    global current_meta
+
+    context_state["has_custom"] = "custom" in current_meta
+    context_state["old_custom"] = {}
+    # cannot use `old_custom = copy.copy(current_meta.get("custom", {}))` here,
+    # as dynamo doesn't support copy.copy()
+    for k, v in current_meta.get("custom", {}).items():
+        context_state["old_custom"][k] = v  # noqa: PERF403
+
+    if not context_state["has_custom"]:
+        current_meta["custom"] = {}
+
+    # Update with all key-value pairs from the input dict
+    current_meta["custom"].update(annotation_dict)
+    return context_state
+
+
+@compatibility(is_backward_compatible=False)
+def _exit_annotation_context(context_state: dict):
+    """
+    Restore the original meta context state.
+
+    Args:
+        context_state (dict): The context state to restore from.
+    """
+    global current_meta
+
+    if context_state["has_custom"]:
+        # Restore the original custom dict
+        current_meta["custom"] = context_state["old_custom"]
+    else:
+        del current_meta["custom"]
+
+
+@compatibility(is_backward_compatible=False)
 @contextmanager
 def annotate(annotation_dict: dict):
     """
@@ -267,6 +313,7 @@ def annotate(annotation_dict: dict):
     Args:
         annotation_dict (dict): A dictionary of custom key-value pairs to inject
             into the FX trace metadata.
+            If you want to dynamo trace to work, the `annotation_dict` can only contain constants
 
     Example:
         >>> with annotate({"source": "custom_pass", "tag": 42}):
@@ -276,26 +323,14 @@ def annotate(annotation_dict: dict):
 
     global current_meta
 
-    has_custom = "custom" in current_meta
-    old_custom = {}
-    # cannot use `old_custom = copy.copy(current_meta.get("custom", {}))` here,
-    # as dynamo doesn't support copy.copy()
-    for k, v in current_meta.get("custom", {}).items():
-        old_custom[k] = v  # noqa: PERF403
-
+    # Note: we need the two functions below for dynamo to intercept them.
+    # If you want to add any logic, please add to the _enter and _exit functions
+    old_custom: dict[str, Any] = {}
     try:
-        if not has_custom:
-            current_meta["custom"] = {}
-
-        # Update with all key-value pairs from the input dict
-        current_meta["custom"].update(annotation_dict)
+        _enter_annotation_context(annotation_dict, old_custom)
         yield
     finally:
-        if has_custom:
-            # Restore the original custom dict
-            current_meta["custom"] = old_custom
-        else:
-            del current_meta["custom"]
+        _exit_annotation_context(old_custom)
 
 
 @compatibility(is_backward_compatible=False)
