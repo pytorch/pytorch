@@ -95,7 +95,10 @@ class ProgramRunner:
                 import torch
 
                 num_gpus = torch.cuda.device_count()
-                devices = [str(i) for i in range(num_gpus)]
+                if num_gpus > 1:
+                    devices = [str(i) for i in range(1, num_gpus)]
+                else:
+                    devices = [str(i) for i in range(num_gpus)]
             except ImportError:
                 devices = []
         if devices:
