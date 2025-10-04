@@ -421,6 +421,198 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
+    @pytest.mark.xfail(reason="Issue #164063")
+    def test_fuzzer_issue_164063(self):
+        torch.manual_seed(0)
+
+        def foo(arg0, arg1, arg2, arg3, arg4):
+            t0 = arg0  # size=(36, 7112, 1, 1), stride=(7112, 1, 1, 1), dtype=bfloat16, device=cuda
+            t1 = t0.reshape(
+                (28, 24, 3, 127)
+            )  # size=(28, 24, 3, 127), stride=(9144, 381, 127, 1), dtype=bfloat16, device=cuda
+            t2 = t1.var(
+                dim=2
+            )  # size=(28, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
+            t3 = arg1  # size=(30, 24), stride=(30, 1), dtype=int64, device=cuda
+            t4 = arg2  # size=(512, 127), stride=(512, 1), dtype=bfloat16, device=cuda
+            t5 = torch.nn.functional.embedding(
+                torch.clamp(t3, 0, t4.size(0) - 1).to(torch.long), t4
+            )  # size=(30, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
+            t6 = arg3  # size=(30, 24, 15), stride=(720, 24, 1), dtype=bfloat16, device=cuda
+            t7 = torch.nn.functional.pad(
+                t6, [0, 1], mode="constant", value=0.0
+            )  # size=(30, 24, 16), stride=(384, 16, 1), dtype=bfloat16, device=cuda
+            t8 = arg4  # size=(30, 4, 16, 127), stride=(8128, 2032, 127, 1), dtype=bfloat16, device=cuda
+            t9 = t8.sum(
+                dim=1
+            )  # size=(30, 16, 127), stride=(2032, 127, 1), dtype=bfloat16, device=cuda
+            t10 = torch.baddbmm(
+                t5, t7, t9
+            )  # size=(30, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
+            t11 = torch.cat(
+                [t2, t10], dim=0
+            )  # size=(58, 24, 127), stride=(3048, 127, 1), dtype=bfloat16, device=cuda
+            output = t11
+            return output
+
+        arg0 = torch.rand(
+            [36, 7112, 1, 1], dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+        arg1 = torch.randint(0, 512, [30, 24], dtype=torch.int64, device="cuda")
+        arg2 = torch.rand(
+            [512, 127], dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+        arg3 = torch.rand(
+            [30, 24, 15], dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+        arg4 = torch.rand(
+            [30, 4, 16, 127], dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+
+        out_eager = foo(arg0, arg1, arg2, arg3, arg4)
+        out_eager.sum().backward()
+        print("Eager Success! ✅")
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4)
+        out_compiled.sum().backward()
+        print("Compile Success! ✅")
+
+    @pytest.mark.xfail(reason="Issue #164086")
+    def test_fuzzer_issue_164086(self):
+        torch.manual_seed(0)
+
+        def foo(arg0, arg1, arg2, arg3, arg4, arg5):
+            t0 = arg0  # size=(42, 56), stride=(42, 1), dtype=int64, device=cuda
+            t1 = torch.tanh(
+                t0
+            )  # size=(42, 56), stride=(42, 1), dtype=int64, device=cuda
+            t2 = t1.clone()
+            t2.zero_()  # size=(42, 56), stride=(42, 1), dtype=int64, device=cuda
+            t3 = (
+                arg1  # size=(50000, 128), stride=(50000, 1), dtype=float16, device=cuda
+            )
+            t4 = arg2  # size=(46, 128), stride=(46, 1), dtype=float16, device=cuda
+            t5 = torch.nn.functional.linear(
+                t3, t4
+            )  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
+            t6 = arg3  # size=(50000, 4, 46), stride=(184, 46, 1), dtype=float16, device=cuda
+            t7 = t6.max(
+                dim=1
+            ).values  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
+            t8 = arg4  # size=(25786, 46), stride=(46, 1), dtype=float16, device=cuda
+            t9 = arg5  # size=(24214, 46), stride=(46, 1), dtype=float16, device=cuda
+            t10 = torch.cat(
+                [t8, t9], dim=0
+            )  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
+            t11 = torch.pow(
+                torch.pow(torch.pow(torch.pow(t5, t7), t10), t5), t7
+            )  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
+            t12 = torch.nn.functional.embedding(
+                torch.clamp(t2, 0, t11.size(0) - 1).to(torch.long), t11
+            )  # size=(42, 56, 46), stride=(2576, 46, 1), dtype=float16, device=cuda
+            output = t12
+            return output
+
+        arg0 = torch.randint(0, 1000, [42, 56], dtype=torch.int64, device="cuda")
+        arg1 = torch.rand(
+            [50000, 128], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg2 = torch.rand(
+            [46, 128], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg3 = torch.rand(
+            [50000, 4, 46], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg4 = torch.rand(
+            [25786, 46], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg5 = torch.rand(
+            [24214, 46], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+
+        out_eager = foo(arg0, arg1, arg2, arg3, arg4, arg5)
+        out_eager.sum().backward()
+        print("Eager Success! ✅")
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, arg5)
+        out_compiled.sum().backward()
+        print("Compile Success! ✅")
+
+    @pytest.mark.xfail(reason="Issue #163876")
+    def test_fuzzer_issue_163876(self):
+        torch.manual_seed(0)
+
+        def foo(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7):
+            t0 = arg0  # size=(29, 50, 32, 5), stride=(46400, 1600, 32, 1), dtype=float16, device=cuda
+            t1 = arg1  # size=(29, 50, 32, 5), stride=(46400, 1600, 32, 1), dtype=float16, device=cuda
+            t2 = arg2  # size=(29, 50, 32, 5), stride=(46400, 1600, 32, 1), dtype=float16, device=cuda
+            t3 = torch.nn.functional.scaled_dot_product_attention(
+                t0, t1, t2
+            )  # size=(29, 50, 32, 5), stride=(8000, 160, 5, 1), dtype=float16, device=cuda
+            t4 = (
+                t3.min(dim=3).values
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t5 = arg3  # size=(3, 10, 4640), stride=(46400, 4640, 1), dtype=float16, device=cuda
+            t6 = t5.var(
+                dim=0
+            )  # size=(10, 4640), stride=(4640, 1), dtype=float16, device=cuda
+            t7 = t6.reshape(
+                (29, 50, 32)
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t8 = arg4  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t9 = arg5  # size=(32, 50, 29), stride=(1, 32, 1600), dtype=float16, device=cuda
+            t10 = t9.clone()
+            t10.zero_()  # size=(32, 50, 29), stride=(1, 32, 1600), dtype=float16, device=cuda
+            t11 = t10.transpose(
+                0, 2
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t12 = torch.pow(
+                torch.pow(t4, t8), t11
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t13 = arg6  # size=(29, 50, 32), stride=(1450, 50, 1), dtype=float16, device=cuda
+            t15 = torch.nn.functional.layer_norm(
+                t13, (32,)
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t16 = (
+                (t12) / t15
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            t17 = (
+                ((((t4) - t7) - t16) - t11) - t16
+            )  # size=(29, 50, 32), stride=(1600, 32, 1), dtype=float16, device=cuda
+            output = t17
+            return output
+
+        arg0 = torch.rand(
+            [29, 50, 32, 5], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg1 = torch.rand(
+            [29, 50, 32, 5], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg2 = torch.rand(
+            [29, 50, 32, 5], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg3 = torch.rand(
+            [3, 10, 4640], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg4 = torch.rand(
+            [29, 50, 32], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg5 = torch.rand(
+            [32, 50, 29], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg6 = torch.rand(
+            [29, 50, 32], dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        arg7 = torch.randint(0, 1000, [1], dtype=torch.int64, device="cuda")
+
+        out_eager = foo(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7)
+        out_eager.sum().backward()
+        print("Eager Success! ✅")
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7)
+        out_compiled.sum().backward()
+        print("Compile Success! ✅")
+
 
 if __name__ == "__main__":
     run_tests()
