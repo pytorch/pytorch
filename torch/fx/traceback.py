@@ -5,6 +5,7 @@ import traceback
 from contextlib import contextmanager
 from enum import Enum
 from typing import Any, Optional, Union
+import json 
 
 from torch._utils_internal import signpost_event
 
@@ -396,3 +397,49 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
             },
         )
         return {}
+
+
+def populate_stack_traces_to_kineto_trace(file_name: str, update_file = True):
+    """
+    Process traces by attaching stack traces to user_annotation entries.
+    
+    Args:
+        file_name (str): The filename of the exported kineto trace json.
+        update_file (bool): Whether to update the kineto trace json file with the stack traces.
+    
+    Returns:
+        dict: Modified trace data with stack traces attached to matching entries
+    """
+
+    trace_data = json.load(open(file_name, 'r'))
+
+    all_stack_traces = {}
+    # Get the trace events
+
+    for key in trace_data.keys():
+        if not key.startswith("node_stack_traces"):
+            continue
+
+        # Get the node stack traces mapping
+        node_stack_traces = trace_data.get(key, {})
+        all_stack_traces.update(node_stack_traces)
+
+    if len(all_stack_traces) == 0:
+        log.warning("No stack traces found in kineto trace data")
+        return trace_data
+        
+    trace_events = trace_data.get("traceEvents", [])
+    
+    # Process each trace event
+    for event in trace_events:
+        # Check if this is a user_annotation event
+        if event.get("cat") == "user_annotation":
+            event_name = event.get("name")
+            
+            # If the event name matches a node in node_stack_traces, attach the stack trace
+            if event_name in all_stack_traces:
+                event["args"]["stack_trace"] = all_stack_traces[event_name]
+    
+    if update_file:
+        json.dump(trace_data, open(file_name, 'w'))
+    return trace_data
