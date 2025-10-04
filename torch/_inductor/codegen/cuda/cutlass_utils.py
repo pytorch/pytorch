@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+from typing_extensions import TypeIs
 
 import sympy
 
@@ -40,23 +41,20 @@ def move_cutlass_compiled_cache() -> None:
     if not try_import_cutlass.cache_info().currsize > 0:
         return
 
-    if config.is_fbcode():
-        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]
-    else:
-        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
+    import cutlass_cppgen  # type: ignore[import-not-found]
 
-    # Check if the CACHE_FILE attribute exists in python_cutlass and if the file exists
-    if not hasattr(python_cutlass, "CACHE_FILE") or not os.path.exists(
-        python_cutlass.CACHE_FILE
+    # Check if the CACHE_FILE attribute exists in cutlass_cppgen and if the file exists
+    if not hasattr(cutlass_cppgen, "CACHE_FILE") or not os.path.exists(
+        cutlass_cppgen.CACHE_FILE
     ):
         return
 
     try:
-        filename = os.path.basename(python_cutlass.CACHE_FILE)
-        shutil.move(python_cutlass.CACHE_FILE, os.path.join(cache_dir(), filename))
+        filename = os.path.basename(cutlass_cppgen.CACHE_FILE)
+        shutil.move(cutlass_cppgen.CACHE_FILE, os.path.join(cache_dir(), filename))
         log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
     except OSError as e:
-        log.warning("Failed to move CUTLASS compiled cache file: %s", str(e))
+        log.warning("Failed to move CUTLASS compiled cache file: %s", e)
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
@@ -158,7 +156,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass_cppgen  # noqa: F401, F811
+            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401, F811
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
@@ -422,7 +420,7 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     size = inductor_layout.size
     offset = inductor_layout.offset
 
-    def is_static_int(number):
+    def is_static_int(number: object) -> TypeIs[int | sympy.Integer]:
         return isinstance(number, (int | sympy.Integer))
 
     def a_factor_of(x, alignment):
