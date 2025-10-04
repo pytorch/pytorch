@@ -469,9 +469,7 @@ def significant_strides_equal(
 
         if not V.graph.sizevars.statically_known_equals(
             s1, s2
-        ) and not V.graph.sizevars.symbolic_hint(s1) == V.graph.sizevars.symbolic_hint(
-            s2
-        ):
+        ) and V.graph.sizevars.symbolic_hint(s1) != V.graph.sizevars.symbolic_hint(s2):
             return False
 
     return True
@@ -5443,7 +5441,7 @@ class ConcatKernel(NopKernel):
                 return True
 
             # otherwise, check equality of layouts
-            if not len(src.get_stride()) == len(dst.get_stride()):
+            if len(src.get_stride()) != len(dst.get_stride()):
                 return False
 
             return all(

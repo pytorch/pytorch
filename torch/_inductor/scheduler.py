@@ -4976,7 +4976,7 @@ class Scheduler:
                 if name in name_to_node
             }
             input_deallocation = {
-                name: True if name in buffer_names_to_free else False
+                name: name in buffer_names_to_free
                 for name in partition_input_names
                 if name in name_to_node
             }

@@ -142,7 +142,7 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
         return
 
     next_module_node = next(iter(unflatten_getitem_getitem_users))
-    if not (next_module_node.op == "call_module"):
+    if next_module_node.op != "call_module":
         log.debug(
             "Unflatten node %s's user is not a call_module. "
             "Instead it is: %s. Passing...",

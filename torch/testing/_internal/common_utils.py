@@ -1470,7 +1470,7 @@ TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
-TEST_HPU = True if (hasattr(torch, "hpu") and torch.hpu.is_available()) else False
+TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = is_privateuse1_backend_available()
@@ -3195,7 +3195,7 @@ class TestCase(expecttest.TestCase):
 
     def remove_empty_lines(self, input_string):
         lines = input_string.split('\n')
-        filtered_lines = [line for line in lines if not line.strip() == '']
+        filtered_lines = [line for line in lines if line.strip() != '']
         return '\n'.join(filtered_lines)
 
     # ignore comments will ignore lines that starts with # after being stripped

@@ -500,8 +500,7 @@ def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
         return fw_out, [
-            True if isinstance(ret, torch.Tensor) and ret.requires_grad else False
-            for ret in fw_out
+            bool(isinstance(ret, torch.Tensor) and ret.requires_grad) for ret in fw_out
         ]
 
     return fw_with_masks
@@ -857,7 +856,7 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
 
 # Returns a mask whether a list element is a tensor or not
 def get_tensor_mask(tensor_list: Iterable[Any]) -> list[bool]:
-    return [True if isinstance(v, torch.Tensor) else False for v in tensor_list]
+    return [bool(isinstance(v, torch.Tensor)) for v in tensor_list]
 
 
 def mask_list(
