@@ -180,7 +180,9 @@ class TestFuzzerCompileIssues(TestCase):
             var_node_1 = torch.nn.functional.relu(var_node_2)
             var_node_6 = torch.full((14, 1), -0.94140625, dtype=torch.bfloat16)
             var_node_7 = arg0  # size=(1, 16), stride=(16, 1), dtype=bfloat16
-            var_node_5 = torch.matmul(var_node_6.to(torch.bfloat16), var_node_7.to(torch.bfloat16))
+            var_node_5 = torch.matmul(
+                var_node_6.to(torch.bfloat16), var_node_7.to(torch.bfloat16)
+            )
             var_node_9 = torch.full((16,), 0.76953125, dtype=torch.bfloat16)
             var_node_8 = torch.reshape(var_node_9, [16])
             var_node_11 = torch.full((16,), 2.4375, dtype=torch.bfloat16)
@@ -201,8 +203,12 @@ class TestFuzzerCompileIssues(TestCase):
         arg1 = torch.rand(
             [14, 48], dtype=torch.bfloat16, device="cuda", requires_grad=True
         )
-        arg2 = torch.tensor(0.0, dtype=torch.bfloat16, device="cuda", requires_grad=True)
-        arg3 = torch.tensor(0.0, dtype=torch.bfloat16, device="cuda", requires_grad=True)
+        arg2 = torch.tensor(
+            0.0, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
+        arg3 = torch.tensor(
+            0.0, dtype=torch.bfloat16, device="cuda", requires_grad=True
+        )
 
         out_eager = foo(arg0, arg1, arg2, arg3)
         out_eager.sum().backward()
@@ -244,7 +250,9 @@ class TestFuzzerCompileIssues(TestCase):
 
         def foo(arg0, arg1, arg2):
             t0 = arg0  # size=(349200, 5), stride=(5, 1), dtype=bfloat16, device=cuda
-            t1 = t0.mean(dim=1)  # size=(349200,), stride=(1,), dtype=bfloat16, device=cuda
+            t1 = t0.mean(
+                dim=1
+            )  # size=(349200,), stride=(1,), dtype=bfloat16, device=cuda
             t2 = arg1  # size=(), stride=(), dtype=int64, device=cuda
             t3 = arg2  # size=(50000, 349200), stride=(50000, 1), dtype=bfloat16, device=cuda
             t4 = torch.nn.functional.embedding(
@@ -283,18 +291,24 @@ class TestFuzzerCompileIssues(TestCase):
             t4 = t2 * t3  # size=(), stride=(), dtype=int64, device=cuda
             t5 = t1.clone()
             t5.fill_(t4.item())
-            t6 = arg3  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
-            t7 = arg4  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
-            t8 = arg5  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
+            t6 = (
+                arg3  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
+            )
+            t7 = (
+                arg4  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
+            )
+            t8 = (
+                arg5  # size=(256, 88, 1), stride=(88, 1, 1), dtype=float16, device=cuda
+            )
             t9 = torch.cat([t6, t6, t7, t8], dim=2)
             t10 = t9.std(dim=2)
-            t11 = torch.nn.functional.embedding(torch.clamp(t5, 0, t10.size(0) - 1), t10)
+            t11 = torch.nn.functional.embedding(
+                torch.clamp(t5, 0, t10.size(0) - 1), t10
+            )
             output = t11
             return output
 
-        arg0 = torch.randint(
-            0, 100, [47], dtype=torch.int64, device="cuda"
-        )
+        arg0 = torch.randint(0, 100, [47], dtype=torch.int64, device="cuda")
         arg1 = torch.randint(0, 10, [], dtype=torch.int64, device="cuda")
         arg2 = torch.randint(0, 10, [], dtype=torch.int64, device="cuda")
         arg3 = torch.rand(
@@ -374,13 +388,17 @@ class TestFuzzerCompileIssues(TestCase):
         torch.manual_seed(6804)
 
         def foo(arg0, arg1, arg2):
-            var_node_4 = arg0  # size=(7, 1, 32), stride=(1, 1, 0), dtype=float64, device=cuda
+            var_node_4 = (
+                arg0  # size=(7, 1, 32), stride=(1, 1, 0), dtype=float64, device=cuda
+            )
             var_node_5 = torch.full((7, 1, 32), -1.195053522845565, dtype=torch.float64)
             var_node_3 = torch.div(var_node_4, var_node_5)
             var_node_2 = torch.flatten(var_node_3)
             var_node_8 = torch.full((2,), -0.8316502130341195, dtype=torch.float64)
             var_node_9 = arg1  # size=(2, 224), stride=(224, 1), dtype=float64
-            var_node_7 = torch.matmul(var_node_8.to(torch.float64), var_node_9.to(torch.float64))
+            var_node_7 = torch.matmul(
+                var_node_8.to(torch.float64), var_node_9.to(torch.float64)
+            )
             var_node_10 = arg2  # size=(224,), stride=(1,), dtype=float64
             var_node_6 = torch.sub(var_node_7, var_node_10)
             var_node_1 = torch.sub(var_node_2, var_node_6)
@@ -393,9 +411,7 @@ class TestFuzzerCompileIssues(TestCase):
         arg1 = torch.rand(
             [2, 224], dtype=torch.float64, device="cuda", requires_grad=True
         )
-        arg2 = torch.rand(
-            [224], dtype=torch.float64, device="cuda", requires_grad=True
-        )
+        arg2 = torch.rand([224], dtype=torch.float64, device="cuda", requires_grad=True)
 
         out_eager = foo(arg0, arg1, arg2)
         out_eager.sum().backward()
