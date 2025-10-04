@@ -167,7 +167,7 @@ def use_matmul_fuse_lce_replace_first_LCE(graph):
 
 
 @init_once_fakemode
-def lazy_init():
+def lazy_init(input_device: Optional[torch.device] = None):
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401
 
     if config.is_fbcode():
