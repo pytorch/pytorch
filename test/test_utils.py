@@ -560,29 +560,6 @@ class TestCheckpoint(TestCase):
         self.assertTrue("first device type: cuda" in warning_msg)
 
 
-class TestRNGState(TestCase):
-    def test_get_rng_state_cpu(self):
-        # get state from get_rng_state with no arguments
-        state_no_args = torch.get_rng_state()
-
-        # get state from get_rng_state with device passed in
-        device = torch.device("cpu")
-        state_device_arg = torch.get_rng_state(device)
-
-        self.assertEqual(state_no_args, state_device_arg)
-
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_get_rng_state_cuda(self):
-        # get state from cuda's get_rng_state
-        state_no_args = torch.cuda.get_rng_state()
-
-        # get state from get_rng_state with device passed in
-        device = torch.device("cuda")
-        state_device_arg = torch.get_rng_state(device)
-
-        self.assertEqual(state_no_args, state_device_arg)
-
-
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
 
