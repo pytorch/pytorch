@@ -579,7 +579,6 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
 #endif
 }
 
-#if CUB_SUPPORTS_SCAN_BY_KEY()
 
 template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT>
 inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, int64_t num_items) {
@@ -607,7 +606,6 @@ inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT 
 #endif
 }
 
-#endif
 
 template <typename InputIteratorT, typename OutputIteratorT, typename NumSelectedIteratorT>
 void unique(InputIteratorT input, OutputIteratorT output,
