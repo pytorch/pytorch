@@ -15573,6 +15573,11 @@ def forward(self, x):
             test_serdes=True,
         )
 
+    @testing.expectedFailureTrainingIRToRunDecomp
+    @testing.expectedFailureRetraceability
+    @testing.expectedFailureStrictV2
+    @testing.expectedFailureStrict  # annotation needs to be handled in dynamo
+    @testing.expectedFailureSerDer
     def test_preserve_annotation(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -15591,17 +15596,22 @@ def forward(self, x):
             ep = export(m, (torch.randn(10),))
 
         for node in ep.graph.nodes:
-            if node.target == torch.ops.aten.add.default:
+            if node.op in ("placeholder", "output"):
+                continue
+            if node.target == torch.ops.aten.add.Tensor:
                 self.assertTrue(node.meta["custom"], {"pp_stage": 0, "fdsp_bucket": 0})
-            if node.target == torch.ops.aten.sub.default:
+            elif node.target == torch.ops.aten.sub.Tensor:
                 self.assertTrue(node.meta["custom"], {"pp_stage": 0})
-            if node.target == torch.ops.aten.mul.default:
+            elif node.target == torch.ops.aten.mul.Tensor:
                 self.assertTrue(
                     node.meta["custom"],
                     {"pp_stage": 0, "cuda_stream": 2, "fsdp_bucket": 1},
                 )
-            if node.target == torch.ops.aten.div.default:
-                self.assertTrue(node.meta["custom"], {})
+            elif node.target == torch.ops.aten.div.Tensor:
+                if "custom" in node.meta:
+                    self.assertTrue(node.meta["custom"], {})
+            else:
+                raise AssertionError(f"Node not checked: {node}, {node.target}")
 
     def test_dynamic_shapes_serdes_generic(self):
         from torch._export.serde.dynamic_shapes import (
