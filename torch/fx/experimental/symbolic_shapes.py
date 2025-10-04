@@ -82,7 +82,6 @@ from torch.utils._sympy.functions import (
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
-    Min,
     Mod,
     PythonMod,
     TruncToInt,
@@ -6384,23 +6383,6 @@ class ShapeEnv:
                     min_max_replacements[atom] = b
                 if a == 0 and self._maybe_evaluate_static(sympy.Ge(b, 0)):
                     min_max_replacements[atom] = b
-            if min_max_replacements:
-                expr = expr.xreplace(min_max_replacements)
-
-        if size_oblivious and (expr.has(Max) or expr.has(Min)):  # type: ignore[has-type]
-            min_max_replacements = {}
-            for atom in (*expr.atoms(Max), *expr.atoms(Min)):  # type: ignore[has-type]
-                if len(atom.args) > 2:
-                    continue
-                a, b = atom.args
-                if b == 1 or b == 0:
-                    a, b = b, a
-                if a == 1 or a == 0:
-                    vr = self.bound_sympy(b, size_oblivious=True)
-                    if vr.lower >= a:
-                        min_max_replacements[atom] = b if atom.func is Max else a
-                    elif vr.upper <= a:
-                        min_max_replacements[atom] = a if atom.func is Max else b
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
 
