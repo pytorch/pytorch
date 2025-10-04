@@ -87,8 +87,6 @@ using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
-
-
 TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
     const std::shared_ptr<CompilationUnit>& compilation_unit) {

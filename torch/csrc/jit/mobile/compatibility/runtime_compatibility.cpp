@@ -7,10 +7,6 @@
 #include <torch/custom_class.h>
 #include <unordered_map>
 
-
-
-
-
 namespace torch::jit {
 
 uint64_t _get_runtime_bytecode_version() {

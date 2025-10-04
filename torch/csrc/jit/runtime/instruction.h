@@ -96,5 +96,4 @@ bool isOpSupportedInMobile(OpCode op);
 char const* toString(OpCode op);
 OpCode parseOpCode(const char* str);
 
-
 } // namespace torch::jit

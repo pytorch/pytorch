@@ -16,10 +16,6 @@
 #include <unordered_set>
 #include <vector>
 
-
-
-
-
 namespace torch::jit {
 
 using caffe2::serialize::FileAdapter;
@@ -249,7 +245,6 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 /********************** Get Type Table **********************/
 
 // Forward declare
-
 
 std::unordered_set<std::string> _get_mobile_model_contained_types(
     std::istream& in) {
