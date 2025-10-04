@@ -9,9 +9,16 @@ from torchfuzz.tensor_fuzzer import Spec
 class Operator(ABC):
     """Base class for all operators in torchfuzz."""
 
-    def __init__(self, name: str):
-        """Initialize operator with name."""
+    def __init__(self, name: str, weight: float = 1.0):
+        """Initialize operator with name and optional selection weight.
+
+        Args:
+            name: Unique operator name used in the registry
+            weight: Relative selection weight when sampling among compatible operators
+                    (default 1.0). Higher values increase selection likelihood.
+        """
         self.name = name
+        self.weight: float = float(weight)
 
     @property
     @abstractmethod
@@ -32,10 +39,13 @@ class Operator(ABC):
 
     def fuzz_inputs_specs(self, output_spec: Spec) -> list[Spec]:
         """
-        Get input specifications for fuzzing. By default, delegates to decompose.
-        Leaf operators should override this to return an empty list.
+        Get input specifications for fuzzing.
+
+        Subclasses must implement this to return a list of input Specs that,
+        when used with this operator, can produce the given output_spec. Leaf
+        operators should return an empty list.
         """
-        return self.decompose(output_spec)
+        raise NotImplementedError("Subclasses must implement fuzz_inputs_specs()")
 
     @abstractmethod
     def codegen(
@@ -43,6 +53,22 @@ class Operator(ABC):
     ) -> str:
         """Generate code for this operation."""
         raise NotImplementedError("Subclasses must implement codegen()")
+
+    def get_weight(
+        self,
+        *,
+        target_spec: Optional[Spec] = None,
+        depth: Optional[int] = None,
+        stack_size: Optional[int] = None,
+        template: Optional[str] = None,
+    ) -> float:
+        """
+        Return the selection weight for this operator.
+
+        Subclasses may override to implement context-sensitive weighting.
+        The default implementation returns the static attribute `self.weight`.
+        """
+        return self.weight
 
     def __str__(self) -> str:
         """String representation of the operator."""
