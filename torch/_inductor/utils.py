@@ -3282,6 +3282,8 @@ def get_current_backend() -> str:
         return config.cpu_backend
     elif device_str == "mps":
         return "mps"
+    elif device_str == "xpu":
+        return config.xpu_backend
     else:
         return config.cuda_backend
 
