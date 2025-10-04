@@ -341,13 +341,13 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
     """
     custom operators' outputs must not alias any inputs or other outputs.
     """
-    storages = {id(t.untyped_storage()) for t in prev if isinstance(t, torch.Tensor)}
+    storages = {t.untyped_storage()._cdata for t in prev if isinstance(t, torch.Tensor)}
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
     for tensor in iter_tensors(tuple_result, {}):
-        key = id(tensor.untyped_storage())
-        if id(tensor.untyped_storage()) in storages:
+        key = tensor.untyped_storage()._cdata
+        if tensor.untyped_storage()._cdata in storages:
             raise RuntimeError(
                 f"{name} (with implementation in {get_module()}): "
                 f"The output of this custom operator (1) must not "
