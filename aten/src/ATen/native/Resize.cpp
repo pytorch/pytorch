@@ -107,17 +107,6 @@ void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes) {
   storage->set_nbytes(size_bytes);
 }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-// Call the sparse implementation in SparseTensor.cpp directly.
-// A dynamic dispatch here is NOT necessary, so I didn't put
-// this function in native_functions.yaml
-
-
->>>>>>> bd9b54ceff0 (Fix clang-tidy readability checks)
-=======
->>>>>>> bb9f4751984 (Remove unnecessary comments)
 // TODO(VitalyFedyunin): Move it to HTML docs.
 //
 // Strides of the output tensor of `resize_as_` operator is defined by input

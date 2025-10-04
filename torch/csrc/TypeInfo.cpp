@@ -18,15 +18,7 @@
 #include <sstream>
 
 static PyObject* THPFInfo_New(const at::ScalarType& type) {
-<<<<<<< HEAD
-<<<<<<< HEAD
   auto finfo = &THPFInfoType;
-=======
-  auto finfo = (&THPFInfoType);
->>>>>>> bd9b54ceff0 (Fix clang-tidy readability checks)
-=======
-  auto finfo = &THPFInfoType;
->>>>>>> bd3bb57cc64 (Remove unnecessary parenthesis)
   auto self = THPObjectPtr{finfo->tp_alloc(finfo, 0)};
   if (!self)
     throw python_error();
@@ -36,15 +28,7 @@ static PyObject* THPFInfo_New(const at::ScalarType& type) {
 }
 
 static PyObject* THPIInfo_New(const at::ScalarType& type) {
-<<<<<<< HEAD
-<<<<<<< HEAD
   auto iinfo = &THPIInfoType;
-=======
-  auto iinfo = (&THPIInfoType);
->>>>>>> bd9b54ceff0 (Fix clang-tidy readability checks)
-=======
-  auto iinfo = &THPIInfoType;
->>>>>>> bd3bb57cc64 (Remove unnecessary parenthesis)
   auto self = THPObjectPtr{iinfo->tp_alloc(iinfo, 0)};
   if (!self)
     throw python_error();
