@@ -8,6 +8,7 @@ values during compilation, ensuring proper handling of Python literals and
 maintaining type safety through the compilation process.
 """
 
+import inspect
 import operator
 from typing import TYPE_CHECKING
 
@@ -113,7 +114,11 @@ its type to `common_constant_types`.
 
     @staticmethod
     def is_base_literal(obj):
-        return type(obj) in common_constant_types
+        return (
+            type(obj) in common_constant_types
+            or obj is inspect._empty
+            or obj is inspect._void
+        )
 
     @staticmethod
     def is_literal(obj):
