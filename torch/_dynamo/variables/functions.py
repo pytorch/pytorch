@@ -1232,6 +1232,53 @@ def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kw
     )
 
 
+def _signature_from_code(code: types.CodeType) -> inspect.Signature:
+    positional_only_arg_count: int = code.co_posonlyargcount
+    keyword_arg_count: int = code.co_argcount - positional_only_arg_count
+    keyword_only_arg_count: int = code.co_kwonlyargcount
+    flags: int = code.co_flags
+
+    names = list(code.co_varnames)
+    i = 0
+    parameters: list[inspect.Parameter] = []
+
+    for _ in range(positional_only_arg_count):
+        parameters.append(
+            inspect.Parameter(names[i], kind=inspect.Parameter.POSITIONAL_ONLY)
+        )
+        i += 1
+
+    for _ in range(keyword_arg_count):
+        parameters.append(
+            inspect.Parameter(names[i], kind=inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        )
+        i += 1
+
+    if flags & inspect.CO_VARARGS:
+        parameters.append(
+            inspect.Parameter(names[i], kind=inspect.Parameter.VAR_POSITIONAL)
+        )
+        i += 1
+
+    for _ in range(keyword_only_arg_count):
+        parameters.append(
+            inspect.Parameter(names[i], kind=inspect.Parameter.KEYWORD_ONLY)
+        )
+        i += 1
+
+    if flags & inspect.CO_VARKEYWORDS:
+        parameters.append(
+            inspect.Parameter(names[i], kind=inspect.Parameter.VAR_KEYWORD)
+        )
+        i += 1
+
+    assert i <= len(names), (
+        f"Too few co_varnames or too much parameters: {i} parameters, {len(names)} co_varnames"
+    )
+
+    return inspect.Signature(parameters=parameters)
+
+
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
         "f_globals",
@@ -1409,6 +1456,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 codegen(value)
                 codegen.extend_output(create_rot_n(2))
                 codegen.store_attr(name)
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        code = self.get_code()
+        sig = _signature_from_code(code)
+        return VariableTracker.build(tx, sig, source=self.source)
 
 
 class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
