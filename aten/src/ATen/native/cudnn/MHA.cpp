@@ -142,8 +142,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
 namespace at {
 namespace native {
 
-#include <cudnn_frontend.h>
-
 namespace fe = cudnn_frontend;
 
 constexpr uint8_t MAX_MHA_DIM = 4;
