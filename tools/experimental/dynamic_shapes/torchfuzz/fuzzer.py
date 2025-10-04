@@ -49,8 +49,6 @@ def _parse_supported_ops_with_weights(spec: str) -> tuple[list[str], dict[str, f
     return ops, weights
 
 
-
-
 def fuzz_and_execute(
     seed: Optional[int] = None,
     max_depth: Optional[int] = None,
@@ -159,7 +157,11 @@ def fuzz_and_execute(
         logger.debug("⏱️  Step 2: Generating operation graph...")
         start_time = time.time()
         operation_graph = fuzz_operation_graph(
-            target_spec, max_depth=max_depth, seed=seed, template=template, supported_ops=supported_ops
+            target_spec,
+            max_depth=max_depth,
+            seed=seed,
+            template=template,
+            supported_ops=supported_ops,
         )
 
         # Extract and print operation statistics

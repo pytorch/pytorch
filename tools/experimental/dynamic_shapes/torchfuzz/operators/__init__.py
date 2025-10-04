@@ -30,8 +30,8 @@ from torchfuzz.operators.registry import (
     list_operators,
     register_operator,
     set_operator_weight,
-    set_operator_weights,
     set_operator_weight_by_torch_op,
+    set_operator_weights,
     set_operator_weights_by_torch_op,
 )
 from torchfuzz.operators.scalar_pointwise import (

@@ -30,7 +30,9 @@ def _get_cached_operators():
     return _CACHED_OPERATORS
 
 
-def _get_template_filtered_operators(template: str = "default", supported_ops: Optional[list[str]] = None):
+def _get_template_filtered_operators(
+    template: str = "default", supported_ops: Optional[list[str]] = None
+):
     """Get operators filtered by template's supported_ops, with user override.
 
     If supported_ops is provided, it takes precedence and is used to filter the
@@ -268,7 +270,11 @@ def fuzz_spec(template: str = "default") -> Spec:
 
 
 def fuzz_op(
-    target_spec: Spec, depth, stack_size, template: str = "default", supported_ops: Optional[list[str]] = None
+    target_spec: Spec,
+    depth,
+    stack_size,
+    template: str = "default",
+    supported_ops: Optional[list[str]] = None,
 ) -> tuple[str, list[Spec]]:
     """
     Given an output specification, returns an operation that can
@@ -315,7 +321,15 @@ def fuzz_op(
             # If no leaf ops can produce this spec, fallback to arg
             return _get_arg_args_specs(target_spec)
         # Weighted choice among leaf ops
-        leaf_weights = [op.get_weight(target_spec=target_spec, depth=depth, stack_size=stack_size, template=template) for _, op in leaf_ops]
+        leaf_weights = [
+            op.get_weight(
+                target_spec=target_spec,
+                depth=depth,
+                stack_size=stack_size,
+                template=template,
+            )
+            for _, op in leaf_ops
+        ]
         idx = random.choices(range(len(leaf_ops)), weights=leaf_weights, k=1)[0]
         chosen_op_name, chosen_operator = leaf_ops[idx]
     else:
@@ -325,23 +339,61 @@ def fuzz_op(
             # 80% chance of non-leaf, 20% chance of leaf
             if random.random() < 0.8:
                 # Weighted choice among non-leaf ops
-                nonleaf_weights = [op.get_weight(target_spec=target_spec, depth=depth, stack_size=stack_size, template=template) for _, op in non_leaf_ops]
-                idx = random.choices(range(len(non_leaf_ops)), weights=nonleaf_weights, k=1)[0]
+                nonleaf_weights = [
+                    op.get_weight(
+                        target_spec=target_spec,
+                        depth=depth,
+                        stack_size=stack_size,
+                        template=template,
+                    )
+                    for _, op in non_leaf_ops
+                ]
+                idx = random.choices(
+                    range(len(non_leaf_ops)), weights=nonleaf_weights, k=1
+                )[0]
                 chosen_op_name, chosen_operator = non_leaf_ops[idx]
             else:
                 if leaf_ops:
-                    leaf_weights = [op.get_weight(target_spec=target_spec, depth=depth, stack_size=stack_size, template=template) for _, op in leaf_ops]
-                    idx = random.choices(range(len(leaf_ops)), weights=leaf_weights, k=1)[0]
+                    leaf_weights = [
+                        op.get_weight(
+                            target_spec=target_spec,
+                            depth=depth,
+                            stack_size=stack_size,
+                            template=template,
+                        )
+                        for _, op in leaf_ops
+                    ]
+                    idx = random.choices(
+                        range(len(leaf_ops)), weights=leaf_weights, k=1
+                    )[0]
                     chosen_op_name, chosen_operator = leaf_ops[idx]
                 else:
-                    nonleaf_weights = [op.get_weight(target_spec=target_spec, depth=depth, stack_size=stack_size, template=template) for _, op in non_leaf_ops]
-                    idx = random.choices(range(len(non_leaf_ops)), weights=nonleaf_weights, k=1)[0]
+                    nonleaf_weights = [
+                        op.get_weight(
+                            target_spec=target_spec,
+                            depth=depth,
+                            stack_size=stack_size,
+                            template=template,
+                        )
+                        for _, op in non_leaf_ops
+                    ]
+                    idx = random.choices(
+                        range(len(non_leaf_ops)), weights=nonleaf_weights, k=1
+                    )[0]
                     chosen_op_name, chosen_operator = non_leaf_ops[idx]
         else:
             # Normal probability distribution over all ops
             all_ops = non_leaf_ops + leaf_ops
             if all_ops:
-                all_weights = [op.get_weight(target_spec=target_spec, depth=depth, stack_size=stack_size, template=template) for _, op in all_ops]
+                all_weights = [
+                    op.get_weight(
+                        target_spec=target_spec,
+                        depth=depth,
+                        stack_size=stack_size,
+                        template=template,
+                    )
+                    for _, op in all_ops
+                ]
                 idx = random.choices(range(len(all_ops)), weights=all_weights, k=1)[0]
                 chosen_op_name, chosen_operator = all_ops[idx]
             else:
