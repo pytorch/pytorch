@@ -860,16 +860,14 @@ torch.cuda.synchronize()
     # https://github.com/pytorch/pytorch/issues/163409
     @onlyNativeDeviceTypes
     def test_MaxUnpool_invalid_output_size(self, device):
-        input2d = torch.randn(1, 1, 1)
-        input3d = torch.randn(1, 1, 1, 1, 1)
-        unpool2d = torch.nn.MaxUnpool2d(())
-        unpool3d = torch.nn.MaxUnpool3d(())
-
-        with self.assertRaisesRegex(RuntimeError, "There should be exactly"):
-            unpool2d(input2d, torch.zeros_like(input2d, dtype=torch.int64))
-
-        with self.assertRaisesRegex(RuntimeError, "There should be exactly"):
-            unpool3d(input3d, torch.zeros_like(input3d, dtype=torch.int64))
+        with self.assertRaisesRegex(
+            AssertionError, "Expected an iterable of length 2, but got length 0"
+        ):
+            torch.nn.MaxUnpool2d(())
+        with self.assertRaisesRegex(
+            AssertionError, "Expected an iterable of length 3, but got length 0"
+        ):
+            torch.nn.MaxUnpool3d(())
 
     @expectedFailureMPS
     @onlyNativeDeviceTypes
