@@ -2672,7 +2672,7 @@ def get_new_module_tests():
     non_linear_activations_no_batch = [
         'ELU', 'Hardshrink', 'Hardsigmoid', 'Hardtanh', 'Hardswish', 'LeakyReLU',
         'LogSigmoid', 'PReLU', 'ReLU', 'ReLU6', 'RReLU', 'SELU', 'CELU', 'GELU', 'GLU',
-        'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'Tanh',
+        'Sigmoid', 'SiLU', 'Mish', 'Softplus', 'Softshrink', 'Softsign', 'SwiGLU', 'Tanh',
         'Tanhshrink', 'Threshold'
     ]
     non_linear_activations_extra_info: dict[str, dict] = {
@@ -2700,6 +2700,7 @@ def get_new_module_tests():
         'Softplus': {'default_dtype': torch.double},
         'Softshrink': {'default_dtype': torch.double},
         'Softsign': {'default_dtype': torch.double},
+        'SwiGLU': {'default_dtype': torch.double},
         'Tanh': {'default_dtype': torch.double},
         'Tanhshrink': {'default_dtype': torch.double},
     }
