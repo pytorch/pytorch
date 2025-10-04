@@ -6,6 +6,11 @@
 
 #include <functional>
 
+#include <torch/csrc/utils/python_arg_parser.h>
+
+// Used for Python initialization
+#include <pybind11/embed.h>
+
 using namespace torch::test;
 
 void torch_warn_once_A() {
@@ -101,4 +106,62 @@ TEST(OptionalArrayRefTest, DanglingPointerFix) {
   // create a dangling pointer when given a single value
   ASSERT_TRUE(get_first_element(300) == 300);
   ASSERT_TRUE(get_first_element({400}) == 400);
+}
+
+TEST(TestPythonArgParser, ParseOneIntListArg) {
+  // Test PythonArgParser with one signature that has one argumen of type:
+  // INT_LIST || SYM_INT_LIST.
+
+  // Initialize Python using pybind11 scoped interpreter
+  pybind11::scoped_interpreter guard{};
+
+  // // Import torch module to initialize PyTorch Python bindings
+  py::module::import("torch");
+
+  // the reshape method was chosen at random
+  // What matters is there single SymIntArrayRef argument
+  torch::PythonArgParser parser({"reshape(SymIntArrayRef shape)"});
+
+  // Verify signature was parsed correctly
+  ASSERT_EQ(parser.get_signatures().size(), 1);
+
+  // construct test tensor to test reshape argparser with
+  at::Tensor tensor = at::ones({4, 3});
+  py::object tensor_obj = py::cast(tensor);
+
+  PyObject* kwargs = nullptr;
+  torch::ParsedArgs<1> dst;
+
+  // Test parse method with valid tuple argument: reshape((2, 6))
+  PyObject* shape_obj = PyTuple_New(2);
+  PyTuple_SetItem(shape_obj, 0, PyLong_FromLong(2));
+  PyTuple_SetItem(shape_obj, 1, PyLong_FromLong(6));
+
+  PyObject* args = PyTuple_New(1);
+  PyTuple_SetItem(args, 0, shape_obj);
+
+  auto result_tuple = parser.parse<1>(tensor_obj.ptr(), args, kwargs, dst);
+  ASSERT_EQ(typeid(result_tuple), typeid(torch::PythonArgs));
+
+  // Test parse method with valid variable int arguments: reshape(2, 6)
+  args = PyTuple_New(2);
+  PyTuple_SetItem(args, 0, PyLong_FromLong(2));
+  PyTuple_SetItem(args, 1, PyLong_FromLong(6));
+
+  auto result_vargs = parser.parse<1>(tensor_obj.ptr(), args, kwargs, dst);
+  ASSERT_EQ(typeid(result_vargs), typeid(torch::PythonArgs));
+
+  // Test failure of parse method with invalid variable arguments:
+  // reshape((2, 6), "string")
+  // This used to run without an error, causing 'silent bugs'.
+  shape_obj = PyTuple_New(2);
+  PyTuple_SetItem(shape_obj, 0, PyLong_FromLong(2));
+  PyTuple_SetItem(shape_obj, 1, PyLong_FromLong(6));
+
+  args = PyTuple_New(2);
+  PyTuple_SetItem(args, 0, shape_obj);
+  PyTuple_SetItem(args, 1, PyUnicode_FromString("This is an invalid argument"));
+
+  ASSERT_THROW(
+      parser.parse<1>(tensor_obj.ptr(), args, kwargs, dst), c10::Error);
 }
