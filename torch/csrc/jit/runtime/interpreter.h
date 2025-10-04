@@ -12,10 +12,6 @@
 TORCH_DECLARE_bool(torch_jit_disable_warning_prints);
 TORCH_DECLARE_bool(torch_jit_enable_rethrow_caught_exception);
 
-namespace at {
-class Tensor;
-TORCH_API void launch(std::function<void()> func);
-} // namespace at
 namespace c10 {
 struct IValue;
 struct OperatorName;
