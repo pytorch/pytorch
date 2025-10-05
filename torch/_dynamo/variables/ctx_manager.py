@@ -1278,10 +1278,16 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx, *args):
-        cm = torch.fx.traceback.annotate(self.target_values.as_python_constant())
+        cm = torch.fx.traceback.annotate(self.target_values)
         cm.__enter__()
         self.set_cleanup_hook(tx, lambda: cm.__exit__(None, None, None))
         return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "torch.fx.traceback"
+
+    def fn_name(self):
+        return "annotate"
 
 
 class StreamVariable(VariableTracker):

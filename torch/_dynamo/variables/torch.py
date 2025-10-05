@@ -363,7 +363,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return InferenceModeVariable.create(tx, inf_mode)
         elif self.value is torch.fx.traceback.annotate:
             assert len(args) <= 1 and len(kwargs) == 0
-            return FxTracebackAnnotateVariable(args[0])
+            return FxTracebackAnnotateVariable(
+                args[0].as_python_constant(), source=self.source
+            )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
