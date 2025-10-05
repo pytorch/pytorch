@@ -180,7 +180,9 @@ class TestCustomOpAutoTune(TestCase):
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
         @register_custom_op_autotuning(op_object.default)
-        def test_rmsnorm_autotuning(input_tensor, weight, eps: float = 1e-8):
+        def test_rmsnorm_autotuning(
+            input_tensor, weight, eps: float = 1e-8, default_impl=None
+        ):
             """RMSNorm autotuning with multiple implementation choices."""
             return autotune_custom_op(
                 name="test_rmsnorm_autotuned",
@@ -191,6 +193,7 @@ class TestCustomOpAutoTune(TestCase):
                 ],
                 inputs=[input_tensor, weight],
                 kwargs={"eps": eps},
+                default_impl=default_impl,
             )
 
         # Create test inputs
@@ -357,7 +360,9 @@ class TestCustomOpAutoTune(TestCase):
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
         @register_custom_op_autotuning(op_object.default)
-        def test_mlp_autotuning(input_tensor, gate_weight, up_weight, down_weight):
+        def test_mlp_autotuning(
+            input_tensor, gate_weight, up_weight, down_weight, default_impl=None
+        ):
             """MLP autotuning with multiple implementation choices."""
             return autotune_custom_op(
                 name="test_mlp_autotuned",
@@ -368,6 +373,7 @@ class TestCustomOpAutoTune(TestCase):
                 ],
                 inputs=[input_tensor, gate_weight, up_weight, down_weight],
                 kwargs={},
+                default_impl=default_impl,
             )
 
         # Create test inputs
@@ -400,6 +406,185 @@ class TestCustomOpAutoTune(TestCase):
             )
 
         # Verify correctness with relaxed tolerances for autotuning
+        self.assertEqual(compiled_result.shape, expected.shape)
+        torch.testing.assert_close(compiled_result, expected, rtol=2e-1, atol=5e-1)
+
+    @skipIfXpu
+    def test_custom_op_fallback_with_mixed_implementations(self):
+        """
+        Test that custom op autotuning works correctly when some decompositions fail
+        but others succeed, demonstrating graceful error handling.
+        """
+        test_op_name = f"test_lib::mixed_test_{id(self)}"
+
+        def failing_impl(
+            x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
+        ) -> torch.Tensor:
+            """Implementation that will fail during FX tracing."""
+            raise RuntimeError("Simulated failure in decomposition")
+
+        def working_impl(
+            x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
+        ) -> torch.Tensor:
+            """Working implementation."""
+            return rmsnorm_fused(x, weight, eps)
+
+        # Create custom op with working default implementation
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def test_mixed_op(
+            input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
+        ) -> torch.Tensor:
+            return rmsnorm_standard(input_tensor, weight, eps)
+
+        @test_mixed_op.register_fake
+        def _(input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8):
+            return torch.empty_like(input_tensor)
+
+        lib_name, op_name = test_op_name.split("::")
+        op_object = getattr(getattr(torch.ops, lib_name), op_name)
+
+        @register_custom_op_autotuning(op_object.default)
+        def test_mixed_autotuning(
+            input_tensor, weight, eps: float = 1e-8, default_impl=None
+        ):
+            """Autotuning with mixed failing/working decompositions."""
+            return autotune_custom_op(
+                name="test_mixed_autotuned",
+                decompositions=[
+                    failing_impl,  # Will fail during FX tracing - should be skipped
+                    working_impl,  # Should work and be used
+                ],
+                inputs=[input_tensor, weight],
+                kwargs={"eps": eps},
+                default_impl=default_impl,  # Also available as backup
+            )
+
+        # Create test inputs
+        input_tensor, weight = self.create_rmsnorm_test_inputs(
+            batch_size=1, seq_len=8, hidden_dim=16
+        )
+
+        # Test eager mode reference
+        expected = rmsnorm_standard(input_tensor, weight)
+
+        # Test compiled mode - should use working implementation
+        @torch.compile
+        def test_model(inp, w):
+            return op_object(inp, w)
+
+        # Clear cache to ensure fresh compilation
+        torch._dynamo.reset()
+
+        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends=autotune_backends,
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            # Should work - failing choice is skipped, working choice is used
+            compiled_result = test_model(input_tensor, weight)
+
+        # Verify correctness
+        self.assertEqual(compiled_result.shape, expected.shape)
+        torch.testing.assert_close(compiled_result, expected, rtol=1e-3, atol=1e-3)
+
+    @skipIfXpu
+    def test_custom_op_empty_decompositions_raises(self):
+        """
+        Test that empty decompositions list raises appropriate error.
+        """
+        test_op_name = f"test_lib::empty_choices_test_{id(self)}"
+
+        # Test that empty decompositions list raises ValueError
+        with self.assertRaises(ValueError, msg="decompositions list cannot be empty"):
+            from torch._inductor.kernel.custom_op import autotune_custom_op
+
+            input_tensor, weight = self.create_rmsnorm_test_inputs(
+                batch_size=1, seq_len=8, hidden_dim=16
+            )
+            autotune_custom_op(
+                name="test_empty_choices",
+                decompositions=[],  # Empty list should raise error
+                inputs=[input_tensor, weight],
+                kwargs={"eps": 1e-8},
+            )
+
+    @skipIfXpu
+    def test_custom_op_fallback_with_working_default_only(self):
+        """
+        Test custom op autotuning when only the default implementation works
+        and all other decompositions fail during autotuning/benchmarking.
+        """
+        test_op_name = f"test_lib::default_only_test_{id(self)}"
+
+        def benchmarking_failure_impl(
+            x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
+        ) -> torch.Tensor:
+            """Implementation that should work but may have performance issues."""
+            # This is a working implementation, just potentially slower
+            result = rmsnorm_explicit_rms(x, weight, eps)
+            return result
+
+        # Create custom op with working default implementation
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def test_default_only_op(
+            input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
+        ) -> torch.Tensor:
+            # Reliable default implementation
+            return rmsnorm_standard(input_tensor, weight, eps)
+
+        @test_default_only_op.register_fake
+        def _(input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8):
+            return torch.empty_like(input_tensor)
+
+        lib_name, op_name = test_op_name.split("::")
+        op_object = getattr(getattr(torch.ops, lib_name), op_name)
+
+        @register_custom_op_autotuning(op_object.default)
+        def test_default_only_autotuning(
+            input_tensor, weight, eps: float = 1e-8, default_impl=None
+        ):
+            """Autotuning with potentially failing decompositions."""
+            return autotune_custom_op(
+                name="test_default_only_autotuned",
+                decompositions=[
+                    benchmarking_failure_impl,  # May fail during benchmarking
+                ],
+                inputs=[input_tensor, weight],
+                kwargs={"eps": eps},
+                default_impl=default_impl,  # Should fallback to this
+            )
+
+        # Create test inputs
+        input_tensor, weight = self.create_rmsnorm_test_inputs(
+            batch_size=2, seq_len=16, hidden_dim=32
+        )
+
+        # Test eager mode reference
+        expected = rmsnorm_standard(input_tensor, weight)
+
+        # Test compiled mode
+        @torch.compile
+        def test_model(inp, w):
+            return op_object(inp, w)
+
+        # Clear cache to ensure fresh compilation
+        torch._dynamo.reset()
+
+        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends=autotune_backends,
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            # Should work and use either the decomposition or fallback to default
+            compiled_result = test_model(input_tensor, weight)
+
+        # Verify correctness
         self.assertEqual(compiled_result.shape, expected.shape)
         torch.testing.assert_close(compiled_result, expected, rtol=2e-1, atol=5e-1)
 

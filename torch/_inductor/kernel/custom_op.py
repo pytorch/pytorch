@@ -30,14 +30,11 @@ from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
-__all__ = ["autotune_custom_op", "register_custom_op_autotuning"]
-
-
 class CustomOpTemplate(SubgraphTemplate):
-    """Template for creating autotune choices from multiple custom op decompositions.
+    """Template for generating custom operation choices for autotuning.
 
-    Provides a clean interface for autotuning between different implementations
-    of custom operations, following PyTorch Inductor patterns.
+    This template manages multiple decomposition implementations of a custom operation
+    and generates appropriate choices for the autotuning system.
     """
 
     def __init__(
@@ -45,19 +42,23 @@ class CustomOpTemplate(SubgraphTemplate):
         name: str,
         decompositions: list[Callable[..., Any]],
         kwargs: dict[str, Any],
+        default_impl: Callable[..., Any],
     ) -> None:
-        super().__init__(name=name)
+        super().__init__(name)
         self.decompositions = decompositions
         self.kwargs = kwargs
+        self.default_impl = default_impl
 
     def _infer_output_layout(self, input_nodes: list[Buffer]) -> Layout:
-        """Infer output layout for custom ops by running first decomposition in fake mode."""
+        """Infer output layout for custom ops using the default implementation when available."""
         from torch._inductor.ir import ir_node_to_tensor
         from torch._inductor.virtualized import V
 
+        # If we have a default implementation, use it directly for layout inference
+        # since it's guaranteed to work
         with V.fake_mode:
             example_inputs = [ir_node_to_tensor(inp) for inp in input_nodes]
-            fn = functools.partial(self.decompositions[0], **self.kwargs)
+            fn = functools.partial(self.default_impl, **self.kwargs)
             output = fn(*example_inputs)
 
             return FixedLayout(
@@ -68,24 +69,32 @@ class CustomOpTemplate(SubgraphTemplate):
             )
 
     def generate_choices(self, input_nodes: list[Buffer]) -> list[SubgraphChoiceCaller]:
-        """Generate SubgraphChoiceCaller instances for all decompositions."""
+        """Generate SubgraphChoiceCaller instances for all working decompositions."""
         # Infer correct output layout once, use for all choices
         layout = self._infer_output_layout(input_nodes)
 
         choices = []
         for i, decomp_fn in enumerate(self.decompositions):
-            traced_fn = make_fx(functools.partial(decomp_fn, **self.kwargs))
+            try:
+                traced_fn = make_fx(functools.partial(decomp_fn, **self.kwargs))
+                func_name = getattr(decomp_fn, "__name__", f"impl_{i}")
 
-            choice = self.generate(
-                name=f"{self.name}_{getattr(decomp_fn, '__name__', f'impl_{i}')}",
-                input_nodes=input_nodes,
-                layout=layout,
-                description=f"CustomOp {getattr(decomp_fn, '__name__', f'impl_{i}')}",
-                make_fx_graph=traced_fn,
-            )
-            choices.append(choice)
+                choice = self.generate(
+                    name=f"{self.name}_{func_name}",
+                    input_nodes=input_nodes,
+                    layout=layout,
+                    description=f"CustomOp {func_name}",
+                    make_fx_graph=traced_fn,
+                )
+                choices.append(choice)
+            except Exception:
+                # Skip decompositions that fail during choice generation
+                continue
 
         return choices
+
+
+__all__ = ["autotune_custom_op", "register_custom_op_autotuning"]
 
 
 def autotune_custom_op(
@@ -94,12 +103,13 @@ def autotune_custom_op(
     inputs: list[Any],
     kwargs: Optional[dict[str, Any]] = None,
     layout: Optional[Layout] = None,
+    default_impl: Optional[Callable[..., Any]] = None,
 ) -> Union[TensorBox, Any]:
     """
     Autotune custom operations by comparing multiple decomposition implementations.
 
-    The default implementation of the custom operation (defined in @torch.library.custom_op)
-    is automatically included as a fallback choice if not already present in the decompositions list.
+    The default implementation from @torch.library.custom_op is automatically
+    added as a fallback choice if provided and not already present in the decompositions list.
 
     Args:
         name: Operation name for identification
@@ -107,6 +117,7 @@ def autotune_custom_op(
         inputs: Input tensors/nodes
         kwargs: Additional arguments for decomposition functions
         layout: Output layout (inferred if None)
+        default_impl: Default implementation to use as fallback (optional)
 
     Returns:
         Optimized implementation result
@@ -124,10 +135,20 @@ def autotune_custom_op(
     if not decompositions:
         raise ValueError("decompositions list cannot be empty")
 
+    # Add default implementation as fallback if provided and not already present
+    if default_impl and default_impl not in decompositions:
+        decompositions.append(default_impl)
+
     input_nodes = list(inputs)
 
-    # Create template and generate all choices
-    template = CustomOpTemplate(name=name, decompositions=decompositions, kwargs=kwargs)
+    # Create template and generate all choices at once
+    template = CustomOpTemplate(
+        name=name,
+        decompositions=decompositions,
+        kwargs=kwargs,
+        default_impl=default_impl,
+    )
+
     choices = template.generate_choices(input_nodes)
 
     if not choices:
@@ -153,6 +174,9 @@ def register_custom_op_autotuning(
     It registers the operation for inductor lowering so that multiple decomposition
     choices can be autotuned at the inductor level.
 
+    The default implementation from @torch.library.custom_op is automatically included
+    as a fallback choice and will be used if all other choices fail.
+
     Args:
         custom_op: The custom operation to register for autotuning
 
@@ -161,33 +185,24 @@ def register_custom_op_autotuning(
 
     Example:
         @register_custom_op_autotuning(my_ops.rmsnorm.default)
-        def tuned_rmsnorm(input_tensor, weight, eps=1e-6, layout=None):
+        def tuned_rmsnorm(input_tensor, weight, eps=1e-6):
             return autotune_custom_op(
                 "rmsnorm",
                 [rmsnorm_impl1, rmsnorm_impl2, rmsnorm_impl3],
                 [input_tensor, weight],
                 {"eps": eps},
-                layout,
             )
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(fn)
-        def wrapped(*args, **kwargs):
-            # Call the decorated function directly
-            out = fn(*args, **kwargs)
+        def wrapped(*args: Any, **kwargs: Any) -> Any:
+            out = fn(*args, **kwargs, default_impl=custom_op)
             validate_ir(out)
             return out
 
         # Register the wrapped function in the lowerings dictionary
-        # Handle both single ops and lists of ops (following the pattern from lowering.py)
-        if isinstance(custom_op, (list, tuple)):
-            ops_to_register = custom_op
-        else:
-            ops_to_register = [custom_op]
-
-        # Register the lowering for each operation
-        lowerings.update(dict.fromkeys(ops_to_register, wrapped))
+        lowerings[custom_op] = wrapped
         return wrapped
 
     return decorator
