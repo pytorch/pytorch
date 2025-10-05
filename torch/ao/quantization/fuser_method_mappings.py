@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch.ao.nn.intrinsic as nni
 import torch.nn as nn

@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Annotated, Optional, Union
+from typing import Annotated, Callable, Optional, Union
 
 import torch
 from torch import Tensor

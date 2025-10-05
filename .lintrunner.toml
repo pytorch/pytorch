@@ -18,7 +18,6 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
-    'test/test_torchfuzz_repros.py',
     # CPython tests
     'test/dynamo/cpython/**',
     # Tests from the NumPy test suite
@@ -28,7 +27,6 @@ exclude_patterns = [
     'torch/lib/**',
     'venv/**',
     '**/*.pyi',
-    "tools/experimental/dynamic_shapes/torchfuzz/**",
     'tools/test/test_selective_build.py',
 ]
 command = [

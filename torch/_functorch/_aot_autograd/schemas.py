@@ -11,7 +11,16 @@ import functools
 import itertools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    NewType,
+    Optional,
+    Protocol,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
@@ -28,7 +37,7 @@ from .utils import strict_zip
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Iterable, Sequence
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
@@ -1231,9 +1240,7 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         output_code_ty: type[TOutputCode],
         compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
     ):
-        # pyrefly: ignore  # invalid-type-var
         self.output_code_ty = output_code_ty
-        # pyrefly: ignore  # invalid-type-var
         self.compiler_fn = compiler_fn
 
     def __call__(

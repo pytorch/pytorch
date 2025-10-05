@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 from torch._export.utils import _disable_aten_to_metadata_assertions

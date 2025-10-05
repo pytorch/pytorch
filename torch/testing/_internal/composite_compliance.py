@@ -10,7 +10,7 @@ from torch.utils import _pytree as pytree
 from functools import partial
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 import torch.autograd.forward_ad as fwAD
-from collections.abc import Callable
+from typing import Callable
 import re
 
 

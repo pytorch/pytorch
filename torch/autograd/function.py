@@ -4,9 +4,8 @@ import inspect
 import itertools
 import warnings
 from collections import OrderedDict
-from collections.abc import Callable
-from typing import Any, Concatenate, Optional, TypeVar
-from typing_extensions import deprecated, ParamSpec
+from typing import Any, Callable, Optional, TypeVar
+from typing_extensions import Concatenate, deprecated, ParamSpec
 
 import torch
 import torch._C as _C

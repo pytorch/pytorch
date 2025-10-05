@@ -50,10 +50,11 @@ RUN git submodule update --init --recursive
 FROM conda as conda-installs
 ARG PYTHON_VERSION=3.11
 ARG CUDA_PATH=cu121
+ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=whl/nightly
 # Automatically set by buildx
-# pinning version of conda here see: https://github.com/pytorch/pytorch/issues/164574
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION} conda=25.7.0
+RUN /opt/conda/bin/conda update -y -n base -c defaults conda
+RUN /opt/conda/bin/conda install -y python=${PYTHON_VERSION}
 
 ARG TARGETPLATFORM
 
