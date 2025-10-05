@@ -294,11 +294,14 @@ def fuzz_op(
     available_operators = _get_template_filtered_operators(template, supported_ops)
 
     # Filter operators that can produce the target spec
+    # IMPORTANT: iterate in a deterministic order to avoid dict-order nondeterminism
     compatible_ops = []
-    for op_name, operator in available_operators.items():
+    for op_name in sorted(available_operators.keys()):
+        operator = available_operators[op_name]
         if operator.can_produce(target_spec):
             compatible_ops.append((op_name, operator))
 
+    # Shuffle with seeded RNG (caller seeds random), but from a deterministic base order
     random.shuffle(compatible_ops)
 
     if not compatible_ops:
