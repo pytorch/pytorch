@@ -16,7 +16,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.kernel.custom_op import (
     autotune_custom_op,
-    register_custom_op_lowering,
+    register_custom_op_autotuning,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import skipIfXpu
@@ -179,9 +179,9 @@ class TestCustomOpAutoTune(TestCase):
         lib_name, op_name = test_op_name.split("::")
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
-        @register_custom_op_lowering(op_object)
-        def test_rmsnorm_lowering(input_tensor, weight, eps: float = 1e-8):
-            """RMSNorm inductor lowering with multiple decomposition choices for autotuning."""
+        @register_custom_op_autotuning(op_object.default)
+        def test_rmsnorm_autotuning(input_tensor, weight, eps: float = 1e-8):
+            """RMSNorm autotuning with multiple implementation choices."""
             return autotune_custom_op(
                 name="test_rmsnorm_autotuned",
                 decompositions=[
@@ -356,9 +356,9 @@ class TestCustomOpAutoTune(TestCase):
         lib_name, op_name = test_op_name.split("::")
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
-        @register_custom_op_lowering(op_object)
-        def test_mlp_lowering(input_tensor, gate_weight, up_weight, down_weight):
-            """MLP inductor lowering with multiple decomposition choices for autotuning."""
+        @register_custom_op_autotuning(op_object.default)
+        def test_mlp_autotuning(input_tensor, gate_weight, up_weight, down_weight):
+            """MLP autotuning with multiple implementation choices."""
             return autotune_custom_op(
                 name="test_mlp_autotuned",
                 decompositions=[

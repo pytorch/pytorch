@@ -7,14 +7,15 @@ operations. Users can define ATen-based decompositions for their custom ops and
 automatically generate optimized implementations through Inductor's autotuning system.
 
 Example:
-    @register_custom_op_lowering(custom_ops.rmsnorm.default)
-    def tuned_rmsnorm(input_tensor, weight, eps=1e-6, *, layout=None):
+    from torch._inductor.kernel.custom_op import register_custom_op_autotuning
+
+    @register_custom_op_autotuning(custom_ops.rmsnorm.default)
+    def tuned_rmsnorm(input_tensor, weight, eps=1e-6):
         return autotune_custom_op(
             "rmsnorm",
-            rmsnorm_decomposition,
+            [rmsnorm_decomposition1, rmsnorm_decomposition2],
             [input_tensor, weight],
             {"eps": eps},
-            layout=layout,
         )
 """
 
@@ -24,12 +25,12 @@ from typing import Any, Callable, Optional, Union
 import torch
 from torch._inductor.codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from torch._inductor.ir import Buffer, FixedLayout, Layout, TensorBox
-from torch._inductor.lowering import register_lowering
+from torch._inductor.lowering import lowerings, validate_ir
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch.fx.experimental.proxy_tensor import make_fx
 
 
-__all__ = ["autotune_custom_op", "register_custom_op_lowering"]
+__all__ = ["autotune_custom_op", "register_custom_op_autotuning"]
 
 
 class CustomOpTemplate(SubgraphTemplate):
@@ -50,48 +51,21 @@ class CustomOpTemplate(SubgraphTemplate):
         self.kwargs = kwargs
 
     def _infer_output_layout(self, input_nodes: list[Buffer]) -> Layout:
-        """Infer correct output layout by tracing the first decomposition.
+        """Infer output layout for custom ops by running first decomposition in fake mode."""
+        from torch._inductor.ir import ir_node_to_tensor
+        from torch._inductor.virtualized import V
 
-        Uses PyTorch's ir_node_to_tensor for proper example input creation,
-        then runs the decomposition to determine the actual output properties.
-        """
-        if not input_nodes:
-            raise RuntimeError("Cannot infer layout without input nodes")
+        with V.fake_mode:
+            example_inputs = [ir_node_to_tensor(inp) for inp in input_nodes]
+            fn = functools.partial(self.decompositions[0], **self.kwargs)
+            output = fn(*example_inputs)
 
-        try:
-            # Create example inputs using PyTorch IR utilities
-            from torch._inductor.ir import ir_node_to_tensor
-            from torch._inductor.virtualized import V
-
-            example_inputs = []
-            with V.fake_mode:
-                for inp in input_nodes:
-                    example_inputs.append(ir_node_to_tensor(inp))
-
-            # Run first decomposition to determine output properties
-            with torch.no_grad():
-                fn = functools.partial(self.decompositions[0], **self.kwargs)
-                output = fn(*example_inputs)
-
-            # Extract layout from actual output tensor
-            if isinstance(output, torch.Tensor):
-                return FixedLayout(
-                    device=output.device,
-                    dtype=output.dtype,
-                    size=output.shape,
-                    stride=output.stride(),
-                )
-
-        except Exception:
-            pass
-
-        # Fallback to first input layout (guaranteed to exist)
-        first_input = input_nodes[0]
-        if hasattr(first_input, "get_layout"):
-            return first_input.get_layout()
-
-        # Last resort: create a basic layout if nothing else works
-        raise RuntimeError("Unable to infer output layout from decomposition or inputs")
+            return FixedLayout(
+                device=output.device,
+                dtype=output.dtype,
+                size=output.shape,
+                stride=output.stride(),
+            )
 
     def generate_choices(self, input_nodes: list[Buffer]) -> list[SubgraphChoiceCaller]:
         """Generate SubgraphChoiceCaller instances for all decompositions."""
@@ -116,7 +90,7 @@ class CustomOpTemplate(SubgraphTemplate):
 
 def autotune_custom_op(
     name: str,
-    decompositions: Union[Callable[..., Any], list[Callable[..., Any]]],
+    decompositions: list[Callable[..., Any]],
     inputs: list[Any],
     kwargs: Optional[dict[str, Any]] = None,
     layout: Optional[Layout] = None,
@@ -124,9 +98,12 @@ def autotune_custom_op(
     """
     Autotune custom operations by comparing multiple decomposition implementations.
 
+    The default implementation of the custom operation (defined in @torch.library.custom_op)
+    is automatically included as a fallback choice if not already present in the decompositions list.
+
     Args:
         name: Operation name for identification
-        decompositions: Single decomposition function or list of alternative implementations
+        decompositions: List of decomposition function implementations to compare
         inputs: Input tensors/nodes
         kwargs: Additional arguments for decomposition functions
         layout: Output layout (inferred if None)
@@ -137,19 +114,19 @@ def autotune_custom_op(
     if kwargs is None:
         kwargs = {}
 
-    # Normalize decompositions to list
-    if callable(decompositions):
-        decompositions = [decompositions]
-    elif isinstance(decompositions, (list, tuple)):
-        decompositions = list(decompositions)
-    else:
+    # Validate that decompositions is always a list
+    if not isinstance(decompositions, (list, tuple)):
         raise TypeError(
-            f"Expected callable or sequence of callables, got {type(decompositions)}"
+            f"decompositions must be a list or tuple of callables, got {type(decompositions)}"
         )
+
+    decompositions = list(decompositions)
+    if not decompositions:
+        raise ValueError("decompositions list cannot be empty")
 
     input_nodes = list(inputs)
 
-    # Create template and generate all choices at once
+    # Create template and generate all choices
     template = CustomOpTemplate(name=name, decompositions=decompositions, kwargs=kwargs)
     choices = template.generate_choices(input_nodes)
 
@@ -167,28 +144,50 @@ def autotune_custom_op(
     )
 
 
-def register_custom_op_lowering(custom_op: torch._ops.OpOverload) -> Callable[..., Any]:
-    """Register a custom operation for autotuning lowering.
+def register_custom_op_autotuning(
+    custom_op: torch._ops.OpOverload,
+) -> Callable[..., Any]:
+    """Register a custom operation for autotuning with multiple decomposition choices.
+
+    This function provides a clean API for registering custom operation autotuning.
+    It registers the operation for inductor lowering so that multiple decomposition
+    choices can be autotuned at the inductor level.
 
     Args:
-        custom_op: The custom operation to register
+        custom_op: The custom operation to register for autotuning
 
     Returns:
-        Decorator function for registering the lowering
+        Decorator function for registering the autotuning function
 
     Example:
-        @register_custom_op_lowering(my_ops.rmsnorm.default)
-        def tuned_rmsnorm(input_tensor, weight, eps=1e-6, *, layout=None):
+        @register_custom_op_autotuning(my_ops.rmsnorm.default)
+        def tuned_rmsnorm(input_tensor, weight, eps=1e-6, layout=None):
             return autotune_custom_op(
                 "rmsnorm",
-                rmsnorm_decomposition,
+                [rmsnorm_impl1, rmsnorm_impl2, rmsnorm_impl3],
                 [input_tensor, weight],
                 {"eps": eps},
-                layout=layout,
+                layout,
             )
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
-        return register_lowering(custom_op, type_promotion_kind=None)(fn)
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            # Call the decorated function directly
+            out = fn(*args, **kwargs)
+            validate_ir(out)
+            return out
+
+        # Register the wrapped function in the lowerings dictionary
+        # Handle both single ops and lists of ops (following the pattern from lowering.py)
+        if isinstance(custom_op, (list, tuple)):
+            ops_to_register = custom_op
+        else:
+            ops_to_register = [custom_op]
+
+        # Register the lowering for each operation
+        lowerings.update(dict.fromkeys(ops_to_register, wrapped))
+        return wrapped
 
     return decorator
