@@ -1,6 +1,5 @@
 import logging
-from collections.abc import Callable
-from typing import Any, Union
+from typing import Any, Callable, Union
 
 import torch
 from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph

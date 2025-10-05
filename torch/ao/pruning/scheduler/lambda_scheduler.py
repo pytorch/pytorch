@@ -1,6 +1,5 @@
 import warnings
-from collections.abc import Callable
-from typing import Union
+from typing import Callable, Union
 
 from torch.ao.pruning.sparsifier.base_sparsifier import BaseSparsifier
 

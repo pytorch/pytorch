@@ -9,9 +9,8 @@
 import contextlib
 import functools
 import itertools
-from collections.abc import Callable
 from functools import partial
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import Tensor

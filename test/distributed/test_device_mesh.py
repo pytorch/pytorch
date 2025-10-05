@@ -440,7 +440,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
         ep_mesh = ep_mesh_1 if self.rank < self.world_size // 2 else ep_mesh_2
         # ep_mesh is considered different from mesh_2d["TP"]
         self.assertEqual(mesh_2d["TP"]._flatten_mesh_list, ep_mesh._flatten_mesh_list)
-        self.assertEqual(mesh_2d["TP"]._layout, ep_mesh._layout)
         self.assertEqual(mesh_2d["TP"].mesh.shape, ep_mesh.mesh.shape)
         self.assertEqual(mesh_2d["TP"].device_type, ep_mesh.device_type)
         self.assertNotEqual(mesh_2d["TP"].mesh_dim_names, ep_mesh.mesh_dim_names)
@@ -455,7 +454,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
         )
         # another_mesh is considered the same as ep_mesh
         self.assertEqual(ep_mesh._flatten_mesh_list, another_mesh._flatten_mesh_list)
-        self.assertEqual(ep_mesh._layout, another_mesh._layout)
         self.assertEqual(ep_mesh.mesh.shape, another_mesh.mesh.shape)
         self.assertEqual(ep_mesh.device_type, another_mesh.device_type)
         self.assertEqual(ep_mesh.mesh_dim_names, another_mesh.mesh_dim_names)
@@ -541,6 +539,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )
 
+        # self.assertEqual(ref_mesh._dim_group_names, dp_mesh._dim_group_names)
         for mesh_dim_group, ref_mesh_dim_group in zip(
             dp_mesh.get_all_groups(), ref_mesh.get_all_groups()
         ):
@@ -801,10 +800,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         # Test slicing out 1D mesh from a sub-2D mesh.
         shard_mesh = hsdp_mesh_2["Shard"]
         self.assertEqual(shard_mesh.mesh.tolist(), shard_group[shard_group_idx])
-        replicate_mesh = hsdp_mesh_2["Replicate"]
-        self.assertEqual(
-            replicate_mesh.mesh.tolist(), replicate_group[replicate_group_idx]
-        )
 
     @with_comms
     def test_cache_and_reuse_submesh_slice_result(self):
@@ -878,17 +873,12 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         flattened_dp_cp_mesh = dp_cp_mesh._flatten()
         self.assertEqual(dp_cp_mesh.mesh.flatten(), flattened_dp_cp_mesh.mesh)
         self.assertEqual(flattened_dp_cp_mesh.mesh_dim_names[0], "dp_cp")
-        self.assertEqual(flattened_dp_cp_mesh.get_group().group_desc, "mesh_dp_cp")
         root_mesh = _mesh_resources.get_root_mesh(dp_cp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_layout = _mesh_resources.root_to_flatten_mapping[root_mesh][
+        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
             "dp_cp"
-        ]._layout
-        self.assertEqual(flatten_mesh_layout, flattened_dp_cp_mesh._layout)
-        self.assertEqual(
-            flattened_dp_cp_mesh._layout.global_ranks(8),
-            [[0, 2, 4, 6], [1, 3, 5, 7]],
-        )
+        ]
+        self.assertEqual(flatten_mesh_root_dims, (0, 1))
 
         ref_pg_count = _world.group_count
         # Calling flatten again should not create a new pg.
@@ -903,19 +893,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(flattened_dp_tp_mesh.mesh_dim_names[0], "dp_tp")
         root_mesh = _mesh_resources.get_root_mesh(dp_tp_mesh)
         self.assertEqual(root_mesh, mesh_3d)
-        flatten_mesh_root_layout = _mesh_resources.root_to_flatten_mapping[root_mesh][
+        flatten_mesh_root_dims = _mesh_resources.flatten_name_to_root_dims[root_mesh][
             "dp_tp"
-        ]._layout
-        self.assertEqual(flatten_mesh_root_layout, flattened_dp_tp_mesh._layout)
-        self.assertEqual(
-            flattened_dp_tp_mesh._layout.global_ranks(8),
-            [[0, 1, 4, 5], [2, 3, 6, 7]],
-        )
-        with self.assertRaisesRegex(
-            NotImplementedError,
-            "Currently, this only allows slicing out a contiguous flattened dim",
-        ):
-            mesh_3d["dp_tp", "cp"]
+        ]
+        self.assertEqual(flatten_mesh_root_dims, (0, 2))
 
         # Test flatten with a flattened mesh_dim_name
         cp_tp_mesh = mesh_3d["cp", "tp"]
@@ -1555,50 +1536,6 @@ class CuTeLayoutTest(TestCase):
         # Test 8: Valid layout - Interleaved but no overlap
         layout8 = _Layout((3, 2), (2, 3))
         self.assertTrue(layout8.check_non_overlap())
-
-    def test_remap_to_tensor(self):
-        """Test the remap_to_tensor method for various scenarios."""
-        # Test 1: Consecutive ranks, full world - should return logical groups directly
-        original_mesh = torch.tensor([[0, 1], [2, 3]], dtype=torch.int)
-        layout1 = _Layout((2, 2), (2, 1))  # row-major 2x2
-        result1 = layout1.remap_to_tensor(original_mesh)
-        expected1 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
-        self.assertEqual(result1, expected1)
-
-        # Test 2: Non-consecutive ranks - should map to actual ranks
-        original_mesh = torch.tensor([[10, 20], [30, 40]], dtype=torch.int)
-        layout2 = _Layout((2, 2), (2, 1))
-        result2 = layout2.remap_to_tensor(original_mesh)
-        expected2 = torch.tensor([[[10, 20], [30, 40]]], dtype=torch.int)
-        self.assertEqual(result2, expected2)
-
-        # Test 4: 1D layout with consecutive ranks
-        original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
-        layout4 = _Layout((4,), (1,))
-        result4 = layout4.remap_to_tensor(original_mesh)
-        expected4 = torch.tensor([[0, 1, 2, 3]], dtype=torch.int)
-        self.assertEqual(result4, expected4)
-
-        # Test 5: Complex strided layout with non-consecutive ranks
-        original_mesh = torch.tensor([5, 10, 15, 20], dtype=torch.int)
-        layout5 = _Layout((2, 2), (2, 1))
-        result5 = layout5.remap_to_tensor(original_mesh)
-        expected5 = torch.tensor([[[5, 10], [15, 20]]], dtype=torch.int)
-        self.assertEqual(result5, expected5)
-
-        # Test 6: Tensor Cute representation of a 2D mesh
-        original_mesh = torch.tensor([[0, 2], [1, 3]], dtype=torch.int)
-        layout6 = _Layout((2, 2), (1, 2))  # column-major style
-        result6 = layout6.remap_to_tensor(original_mesh)
-        expected6 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
-        self.assertEqual(result6, expected6)
-
-        # Test 7: Layout with different stride pattern
-        original_mesh = torch.tensor([0, 2, 1, 4], dtype=torch.int)
-        layout7 = _Layout((2, 2), (1, 2))  # column-major style
-        result7 = layout7.remap_to_tensor(original_mesh)
-        expected7 = torch.tensor([[[0, 1], [2, 4]]], dtype=torch.int)
-        self.assertEqual(result7, expected7)
 
 
 if __name__ == "__main__":

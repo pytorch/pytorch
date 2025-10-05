@@ -95,11 +95,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
                 transformed_code = code_map1[frame.f_code]
                 return wrap_guarded_code(
                     GuardedCode(
-                        transformed_code,
-                        empty_guard_manager,
-                        CompileId(
-                            frame_id=None, frame_compile_id=0, compiled_autograd_id=0
-                        ),
+                        transformed_code, empty_guard_manager, CompileId(None, 0, 0)
                     )
                 )
             return ConvertFrameReturn()
@@ -109,11 +105,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
                 transformed_code = code_map2[frame.f_code]
                 return wrap_guarded_code(
                     GuardedCode(
-                        transformed_code,
-                        empty_guard_manager,
-                        CompileId(
-                            frame_id=None, frame_compile_id=0, compiled_autograd_id=0
-                        ),
+                        transformed_code, empty_guard_manager, CompileId(None, 0, 0)
                     )
                 )
             return ConvertFrameReturn()

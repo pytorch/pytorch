@@ -18,23 +18,6 @@ __all__: list[Any] = []
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
 
-def _get_padding_value(dtype, padding_type):
-    if dtype.is_floating_point:
-        return (
-            torch.finfo(dtype).max if padding_type == "max" else torch.finfo(dtype).min
-        )
-    elif dtype == torch.int64:
-        # Largest int64 value exactly representable in float64 (IEEE 754 double precision).
-        # Avoids overflow when padding_value is passed as double to _jagged_to_padded_dense_forward.
-        int64_safe_max = (1 << 53) - 1
-        int64_safe_min = -int64_safe_max
-        return int64_safe_max if padding_type == "max" else int64_safe_min
-    else:
-        return (
-            torch.iinfo(dtype).max if padding_type == "max" else torch.iinfo(dtype).min
-        )
-
-
 def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     from torch._prims_common import canonicalize_dims
 
@@ -46,14 +29,11 @@ def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     if canonicalize:
         dim = canonicalize_dims(ndim, dim)
 
-    assert dim >= 0 and dim < ndim  # pyrefly: ignore  # unsupported-operation
+    assert dim >= 0 and dim < ndim
 
     # Map dim=0 (AKA batch dim) -> packed dim i.e. outer ragged dim - 1.
     # For other dims, subtract 1 to convert to inner space.
-    return (
-        # pyrefly: ignore  # unsupported-operation
-        ragged_dim - 1 if dim == 0 else dim - 1
-    )
+    return ragged_dim - 1 if dim == 0 else dim - 1
 
 
 def _wrap_jagged_dim(
@@ -2006,7 +1986,6 @@ def index_put_(func, *args, **kwargs):
     else:
         lengths = inp.lengths()
     torch._assert_async(
-        # pyrefly: ignore  # no-matching-overload
         torch.all(indices[inp._ragged_idx] < lengths),
         "Some indices in the ragged dimension are out of bounds!",
     )
@@ -2169,8 +2148,7 @@ def min_dim(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype = new_kwargs["input"].dtype
-    dtype_max = _get_padding_value(dtype, "max")
+    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
     return _apply_reduction(func, "min", dtype_max, *args, **kwargs)
 
 
@@ -2180,8 +2158,7 @@ def max_dim(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype = new_kwargs["input"].dtype
-    dtype_min = _get_padding_value(dtype, "min")
+    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
     return _apply_reduction(func, "max", dtype_min, *args, **kwargs)
 
 
@@ -2193,8 +2170,7 @@ def amin_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype = new_kwargs["input"].dtype
-    dtype_max = _get_padding_value(dtype, "max")
+    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
     return _apply_reduction(func, "amin", dtype_max, *args, **kwargs)
 
 
@@ -2206,8 +2182,7 @@ def amax_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype = new_kwargs["input"].dtype
-    dtype_min = _get_padding_value(dtype, "min")
+    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
     return _apply_reduction(func, "amax", dtype_min, *args, **kwargs)
 
 
@@ -2219,8 +2194,7 @@ def argmin_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype = new_kwargs["input"].dtype
-    dtype_max = _get_padding_value(dtype, "max")
+    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
     return _apply_reduction(func, "argmin", dtype_max, *args, **kwargs)
 
 
@@ -2232,8 +2206,7 @@ def argmax_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype = new_kwargs["input"].dtype
-    dtype_min = _get_padding_value(dtype, "min")
+    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
     return _apply_reduction(func, "argmax", dtype_min, *args, **kwargs)
 
 

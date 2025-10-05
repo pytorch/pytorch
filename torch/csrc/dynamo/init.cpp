@@ -19,6 +19,8 @@ static struct PyModuleDef _module =
 
 PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
 
+TORCH_MAKE_PYBIND_ENUM_FASTER(FrameAction)
+
 namespace torch::dynamo {
 
 #if IS_PYTHON_3_11_PLUS
