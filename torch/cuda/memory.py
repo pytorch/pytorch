@@ -770,7 +770,6 @@ def list_gpu_processes(device: "Device" = None) -> str:
             import pynvml  # type: ignore[import]
         except ModuleNotFoundError:
             return "pynvml module not found, please install pynvml"
-        # pyrefly: ignore  # import-error
         from pynvml import NVMLError_DriverNotLoaded
 
         try:
@@ -853,7 +852,6 @@ def _record_memory_history_legacy(
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
         record_context,
-        # pyrefly: ignore  # bad-argument-type
         trace_alloc_max_entries,
         trace_alloc_record_context,
         record_context_cpp,

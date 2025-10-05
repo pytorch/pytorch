@@ -77,8 +77,6 @@ class AOTCompiledFunction:
         return self._artifacts.guard_manager.check(f_locals)
 
     def __post_init__(self) -> None:
-        from .package import load_guards_state
-
         self._artifacts.check_compatibility()
 
         import_sources = {
@@ -94,7 +92,7 @@ class AOTCompiledFunction:
         )
 
         if self._artifacts.guard_manager is None:
-            guards_state = load_guards_state(self._artifacts.guards_state)
+            guards_state = pickle.loads(self._artifacts.guards_state)
             self._artifacts.guard_manager = torch._dynamo.guards.CheckFunctionManager(
                 self._artifacts.original_code,
                 guards_state.output_graph,

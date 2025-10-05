@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from collections.abc import Callable
+from typing import Callable
 
 import torch
 from torch._export.utils import (

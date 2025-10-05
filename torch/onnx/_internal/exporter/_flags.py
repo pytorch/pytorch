@@ -3,12 +3,8 @@
 from __future__ import annotations
 
 import functools
-from typing import TYPE_CHECKING, TypeVar
+from typing import Callable, TypeVar
 from typing_extensions import ParamSpec
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 _is_onnx_exporting = False

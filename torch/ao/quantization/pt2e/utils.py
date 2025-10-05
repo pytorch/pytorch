@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
 import types
-from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401

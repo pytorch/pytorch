@@ -14,29 +14,6 @@ from torchfuzz.operators.layout import (
     ViewOperator,
 )
 from torchfuzz.operators.masked_select import MaskedSelectOperator
-from torchfuzz.operators.matrix_multiply import (
-    AddmmOperator,
-    BmmOperator,
-    MatmulOperator,
-    MMOperator,
-)
-from torchfuzz.operators.nn_functional import (
-    BatchNormOperator,
-    DropoutOperator,
-    ELUOperator,
-    EmbeddingOperator,
-    GELUOperator,
-    GroupNormOperator,
-    LayerNormOperator,
-    LeakyReLUOperator,
-    LinearOperator,
-    ReLUOperator,
-    RMSNormOperator,
-    SigmoidOperator,
-    SiLUOperator,
-    SoftmaxOperator,
-    TanhOperator,
-)
 from torchfuzz.operators.nonzero import NonzeroOperator
 from torchfuzz.operators.scalar_pointwise import (
     ScalarAddOperator,
@@ -91,35 +68,6 @@ class OperatorRegistry:
         self.register(FlattenOperator())
         self.register(SqueezeOperator())
         self.register(UnsqueezeOperator())
-
-        # Matrix multiplication operators
-        self.register(MMOperator())
-        self.register(AddmmOperator())
-        self.register(BmmOperator())
-        self.register(MatmulOperator())
-
-        # Neural network functional operators
-        self.register(EmbeddingOperator())
-        self.register(LinearOperator())
-
-        # Activation functions
-        self.register(ReLUOperator())
-        self.register(LeakyReLUOperator())
-        self.register(ELUOperator())
-        self.register(GELUOperator())
-        self.register(SiLUOperator())
-        self.register(SigmoidOperator())
-        self.register(TanhOperator())
-        self.register(SoftmaxOperator())
-
-        # Normalization layers
-        self.register(LayerNormOperator())
-        self.register(RMSNormOperator())
-        self.register(BatchNormOperator())
-        self.register(GroupNormOperator())
-
-        # Regularization
-        self.register(DropoutOperator())
 
     def register(self, operator: Operator):
         """Register an operator in the registry."""

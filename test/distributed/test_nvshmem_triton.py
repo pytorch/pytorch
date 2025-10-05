@@ -61,13 +61,8 @@ def my_get_kernel(
     src,
     nelems,
     pe,
-    nbi: tl.constexpr,  # use nonblocking interface if True
 ):
-    if nbi:
-        nvshmem.get_nbi(dest, src, nelems, pe)
-        nvshmem.quiet()
-    else:
-        nvshmem.get(dest, src, nelems, pe)
+    nvshmem.get(dest, src, nelems, pe)
 
 
 @requires_nvshmem
@@ -332,8 +327,7 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
     @skipIfRocm
     @requires_triton()
     @requires_h100()
-    @parametrize("nbi", [False, True])  # Test both blocking and nonblocking interfaces
-    def test_triton_get(self, nbi: bool) -> None:
+    def test_triton_get(self) -> None:
         torch.manual_seed(42 + self.rank)
         self._init_device()
 
@@ -363,7 +357,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
                 inp,
                 numel,
                 peer,
-                nbi=nbi,
             )
         if rank == 1:
             torch.testing.assert_close(
@@ -404,7 +397,6 @@ class NVSHMEMTritonTest(MultiProcContinuousTest):
             inp,
             numel,
             peer,
-            nbi=False,
         )
 
         expected_value = peer
