@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import weakref
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.distributed as dist

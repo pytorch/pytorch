@@ -1,5 +1,4 @@
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .fake_impl import FakeImplHolder
 from .utils import RegistrationHandle

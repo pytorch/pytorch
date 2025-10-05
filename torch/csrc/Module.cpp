@@ -56,7 +56,6 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
-#include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <torch/csrc/autograd/generated/python_return_types.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
@@ -143,6 +142,14 @@
 #include <torch/nativert/python/Bindings.h>
 
 namespace py = pybind11;
+
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::ConvBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(sdp::SDPBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::LinalgBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::BlasBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::ROCmFABackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::native::BatchNormBackend)
+TORCH_MAKE_PYBIND_ENUM_FASTER(at::impl::TorchFunctionDisabledState)
 
 static PyObject* module;
 
@@ -2090,7 +2097,6 @@ PyObject* initModule() {
   torch::cpu::initModule(module);
   torch::accelerator::initModule(module);
   torch::instruction_counter::initModule(module);
-  torch::acc::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
   torch::functionalization::initModule(module);

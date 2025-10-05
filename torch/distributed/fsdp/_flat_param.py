@@ -4,10 +4,10 @@ import functools
 import logging
 import os
 import warnings
-from collections.abc import Callable, Generator, Iterator, Sequence
+from collections.abc import Generator, Iterator, Sequence
 from enum import auto, Enum
 from itertools import accumulate, chain
-from typing import Any, cast, NamedTuple, no_type_check, Optional, Union
+from typing import Any, Callable, cast, NamedTuple, no_type_check, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -543,7 +543,7 @@ class FlatParamHandle:
         self._device_handle = _FSDPDeviceHandle.from_device(self.device)
         self.process_group = process_group
         if self._use_fake_all_gather or self._use_fake_reduce:
-            self._fake_process_group = FakeProcessGroup._create_internal(
+            self._fake_process_group = FakeProcessGroup(
                 rank=process_group.rank(), world_size=process_group.size()
             )
         self.rank = process_group.rank()

@@ -87,8 +87,7 @@ import io
 import os
 
 import unittest
-from typing import Any, Optional, Union
-from collections.abc import Callable
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import torch._dynamo as torchdynamo
@@ -766,7 +765,7 @@ class QuantizationTestCase(TestCase):
             and not isinstance(module, _FusedModule)
         ):
             for child in module.children():
-                if type(child) is nn.Dropout:
+                if type(child) in [nn.Dropout]:
                     continue
                 self.checkObservers(
                     child, propagate_qconfig_list, prepare_custom_config_dict

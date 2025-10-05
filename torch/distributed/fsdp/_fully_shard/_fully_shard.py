@@ -4,7 +4,16 @@
 from __future__ import annotations
 
 import functools
-from typing import Any, cast, NoReturn, Optional, overload, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    NoReturn,
+    Optional,
+    overload,
+    TYPE_CHECKING,
+    Union,
+)
 from typing_extensions import deprecated
 
 import torch
@@ -27,7 +36,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
 
     from torch.distributed.tensor import DeviceMesh, Shard
 

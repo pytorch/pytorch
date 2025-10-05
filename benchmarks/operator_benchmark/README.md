@@ -20,7 +20,7 @@ Key Features:
 The instruction below installs a cpp\_extension for PyTorch and it is required to run the benchmark suite.
 ```bash
 cd pt_extension
-python -m pip install . -v --no-build-isolation
+python -m pip install .
 ```
 
 ## How to run the benchmarks:

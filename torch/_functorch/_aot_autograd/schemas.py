@@ -11,7 +11,16 @@ import functools
 import itertools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    NewType,
+    Optional,
+    Protocol,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import torch
 import torch.utils._pytree as pytree
@@ -28,7 +37,7 @@ from .utils import strict_zip
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Iterable, Sequence
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode

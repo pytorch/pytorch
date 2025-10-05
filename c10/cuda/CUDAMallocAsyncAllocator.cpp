@@ -495,13 +495,6 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // introduces performance nondeterminism.
   }
 
-  std::vector<StreamSegmentSize> getExpandableSegmentSizes(
-      c10::DeviceIndex device) override {
-    TORCH_CHECK(
-        false,
-        "CUDAMallocAsyncAllocator does not yet support getExpandableSegmentSizes.");
-  }
-
   void emptyCache(/*unused*/ MempoolId_t mempool_id) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 

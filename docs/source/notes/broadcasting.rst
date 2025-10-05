@@ -13,6 +13,7 @@ General semantics
 -----------------
 Two tensors are "broadcastable" if the following rules hold:
 
+- Each tensor has at least one dimension.
 - When iterating over the dimension sizes, starting at the trailing dimension,
   the dimension sizes must either be equal, one of them is 1, or one of them
   does not exist.
@@ -25,8 +26,7 @@ For Example::
 
     >>> x=torch.empty((0,))
     >>> y=torch.empty(2,2)
-    # x and y are not broadcastable, because the 0-sized dimension of x
-    # does not match the 2-sized dimension of y.
+    # x and y are not broadcastable, because x does not have at least 1 dimension
 
     # can line up trailing dimensions
     >>> x=torch.empty(5,3,4,1)

@@ -42,7 +42,7 @@ def make_sprite(label_img, save_path):
 
     # this ensures the sprite image has correct dimension as described in
     # https://www.tensorflow.org/get_started/embedding_viz
-    nrow = math.ceil((label_img.size(0)) ** 0.5)
+    nrow = int(math.ceil((label_img.size(0)) ** 0.5))
     arranged_img_CHW = make_grid(make_np(label_img), ncols=nrow)
 
     # augment images so that #images equals nrow*nrow

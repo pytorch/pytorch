@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
-from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec, TypeAlias
 
 import torch
 from torch import sym_float, Tensor
@@ -428,7 +427,7 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_signed(input) or dtype == torch.uint8:
             return torch.tensor(torch.iinfo(dtype).min, dtype=dtype, device=device)
-    elif op_name == "logsumexp":
+    elif op_name in {"logsumexp"}:
         if torch.is_floating_point(input):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_complex(input):

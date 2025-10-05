@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import collections
 from collections import defaultdict
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.utils._pytree as pytree

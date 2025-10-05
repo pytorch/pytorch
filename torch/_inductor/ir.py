@@ -7254,7 +7254,6 @@ class DynamicSelectStorageOffset(ExternKernel):
         base_offset: Union[sympy.Symbol, int],
         base_dim_stride: Union[sympy.Symbol, int],
         size: Union[sympy.Symbol, int],
-        clamp: bool,
     ) -> None:
         super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
         # This node codegen the following:
@@ -7264,7 +7263,6 @@ class DynamicSelectStorageOffset(ExternKernel):
         self.base_offset = base_offset
         self.base_dim_stride = base_dim_stride
         self.size = size
-        self.clamp = clamp
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.unbacked_offset_symbol])
@@ -7275,59 +7273,7 @@ class DynamicSelectStorageOffset(ExternKernel):
         return get_free_symbols(self.index, unbacked_only)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        wrapper.codegen_dynamic_select_index(self, clamp=self.clamp)
-
-
-class DynamicSliceSize(ExternKernel):
-    """
-    Computes the output size of a slice call, handling the correct semantics in codegen.
-    We do this for flexible handling for unbacked indices (to not data-dependent error).
-
-    Slicing has 4 semantics for indices, i.e. x[start:] could be:
-    1) start < -x.size(0)            -> x[0:]                    # negative out-of-bounds
-    2) start in [-x.size(0), 0)      -> x[x.size(0) + start:]    # negative slicing
-    3) start in [0, x.size(0))       -> x[start:]                # standard slicing
-    4) start >= x.size(0)            -> empty slice              # positive out-of-bounds
-
-    If the appropriate semantics are known beforehand, the output size is computed based on
-    the start & end indices. If not (with unbacked indices), a new unbacked symbol is created
-    to represent the output size, and codegen handles computing the correct case.
-    """
-
-    def get_reads(self) -> OrderedSet[Dep]:
-        return OrderedSet()
-
-    def should_allocate(self) -> bool:
-        return False
-
-    def __init__(
-        self,
-        unbacked_size_symbol: sympy.Symbol,
-        start: Union[sympy.Symbol, int],
-        end: Union[sympy.Symbol, int],
-        step: Union[sympy.Symbol, int],
-        size: Union[sympy.Symbol, int],
-    ):
-        super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
-        # This node codegen
-        self.unbacked_size_symbol = unbacked_size_symbol
-        self.start = start
-        self.end = end
-        self.step = step
-        self.size = size
-
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet([self.unbacked_size_symbol])
-
-    def get_free_symbol_uses(
-        self, unbacked_only: bool = False
-    ) -> OrderedSet[sympy.Symbol]:
-        return get_free_symbols(self.start, unbacked_only).union(
-            get_free_symbols(self.end, unbacked_only)
-        )
-
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        wrapper.codegen_dynamic_slice_size(self)
+        wrapper.codegen_dynamic_select_index(self)
 
 
 class DynamicScalar(ExternKernel):
@@ -9112,7 +9058,6 @@ class _CollectiveKernel(FallbackKernel):
         assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
-            V.graph.mark_buffer_mutated(tensor_arg.get_name())
 
         device = tensor_args[0].get_device()
         packed = cls(

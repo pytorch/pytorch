@@ -17,9 +17,8 @@ import sys
 import threading
 import traceback
 import warnings
-from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, cast, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C

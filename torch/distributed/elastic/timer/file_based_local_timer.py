@@ -13,8 +13,7 @@ import signal
 import sys
 import threading
 import time
-from collections.abc import Callable
-from typing import Optional, TypeVar
+from typing import Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest

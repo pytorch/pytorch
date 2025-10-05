@@ -11,9 +11,8 @@ import enum
 import inspect
 import io
 import logging
-from collections.abc import Callable
 from itertools import chain
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.distributed as dist

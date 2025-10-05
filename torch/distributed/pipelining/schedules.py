@@ -8,10 +8,9 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
-from collections.abc import Callable
 from enum import Enum
 from functools import lru_cache
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, Callable, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -1952,7 +1951,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             stage_idx,
                             mb_index,
                         ) not in bwd_recv_ops, (
-                            f"Recv twice for {stage_idx=} {mb_index=} without executing backward"
+                            "Recv twice for {stage_idx=} {mb_index=} without executing backward"
                         )
                         bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
                             stage.get_bwd_recv_ops(mb_index)

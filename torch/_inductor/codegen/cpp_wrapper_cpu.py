@@ -59,9 +59,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # must be initialized prior to calling super().__init__()
         self.included_devices: OrderedSet[str] = OrderedSet()
         self.model_class_name_suffix = (
-            ""
-            if config.aot_inductor.dynamic_linkage
-            else config.aot_inductor.model_name_for_generated_files
+            config.aot_inductor.model_name_for_generated_files
+            if config.aot_inductor.compile_standalone
+            else ""
         )
         self.aoti_model_class_name = f"AOTInductorModel{self.model_class_name_suffix}"
 
@@ -221,7 +221,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.add_device_include(self.device)
 
         if V.graph.aot_mode:
-            if config.aot_inductor.dynamic_linkage:
+            if not config.aot_inductor.compile_standalone:
                 with open(
                     os.path.join(
                         os.path.dirname(__file__), "aoti_runtime", "interface.cpp"
@@ -1501,58 +1501,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
         self.unbacked_symbol_decls.add(str(node.sym))
 
-    def codegen_dynamic_select_index(self, node, clamp):
+    def codegen_dynamic_select_index(self, node):
         index_cpp_str = self.val_to_arg_str_for_prim_type(node.index, int)
-        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
 
-        # codegen index
-        sym = node.unbacked_offset_symbol
-        index_str = (
+        index_compute_str = (
             f"{index_cpp_str} < 0 ? {index_cpp_str} + "
-            f"{self.val_to_arg_str_for_prim_type(node.size, int)}: {index_cpp_str}"
+            f"{self.val_to_arg_str_for_prim_type(node.size, int)}:  {index_cpp_str}"
         )
-        self.writeline(f"auto {sym}_index = {index_str};")
-        index_str_clamped = (
-            f"{sym}_index < 0 ? 0 : ({sym}_index > {size_cpp_str} ? {size_cpp_str} : {sym}_index)"
-            if clamp
-            else f"{sym}_index"
-        )
-        self.writeline(f"auto {sym}_index_clamped = {index_str_clamped};")
         self.writeline(
-            f"auto {sym} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
-            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * {sym}_index_clamped;"
+            f"auto {node.unbacked_offset_symbol} = {self.val_to_arg_str_for_prim_type(node.base_offset, int)} + "
+            f"{self.val_to_arg_str_for_prim_type(node.base_dim_stride, int)} * ({index_compute_str});"
         )
         # record in unbacked_symbol_decls so we won't generate a declaration of the symbol again
-        self.unbacked_symbol_decls.add(str(sym))
-
-    def codegen_dynamic_slice_size(self, node):
-        start_cpp_str = self.val_to_arg_str_for_prim_type(node.start, int)
-        end_cpp_str = self.val_to_arg_str_for_prim_type(node.end, int)
-        size_cpp_str = self.val_to_arg_str_for_prim_type(node.size, int)
-        step_cpp_str = self.val_to_arg_str_for_prim_type(node.step, int)
-        sym = node.unbacked_size_symbol
-
-        def codegen_clamp(index_str, start=True):
-            suf = "st" if start else "en"
-            index_ = f"{sym}_{suf}_index"
-            self.writeline(
-                f"int64_t {index_} = {index_str} < 0 ? {index_str} + {size_cpp_str} : {index_str};"
-            )
-            self.writeline(
-                f"int64_t {sym}_{suf}_cl = {index_} < 0 ? 0 : ({index_} > {size_cpp_str} ? {size_cpp_str} : {index_});"
-            )
-
-        codegen_clamp(start_cpp_str, start=True)
-        codegen_clamp(end_cpp_str, start=False)
-        if node.step == 1:
-            step_str = f"{sym}_en_cl - {sym}_st_cl"
-        else:
-            step_str = (
-                f"({sym}_en_cl - {sym}_st_cl + {step_cpp_str} + 1) / {step_cpp_str}"
-            )
-        self.writeline(f"int64_t {sym}_with_step = {step_str};")
-        self.writeline(f"int64_t {sym} = {sym}_with_step < 0 ? 0 : {sym}_with_step;")
-        self.unbacked_symbol_decls.add(str(sym))
+        self.unbacked_symbol_decls.add(str(node.unbacked_offset_symbol))
 
     def make_buffer_free(self, buffer):
         return (

@@ -3,8 +3,7 @@ import copy
 import dataclasses
 import itertools
 import os
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable
 
 import torch
 import torch._lazy as lazy

@@ -4,8 +4,7 @@ import contextlib
 import functools
 import logging
 import warnings
-from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -739,4 +738,4 @@ def cond_batch_rule(interpreter, pred, true_fn, false_fn, inputs):
     if not isinstance(result, tuple):
         result = (result,)
     lvl = interpreter.level()
-    return tuple(_add_batch_dim(r, 0, lvl) for r in result)
+    return tuple([_add_batch_dim(r, 0, lvl) for r in result])

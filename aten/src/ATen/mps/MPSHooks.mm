@@ -70,10 +70,7 @@ void MPSHooks::commitStream() const {
 }
 
 void* MPSHooks::getCommandBuffer() const {
-  auto stream = at::mps::getDefaultMPSStream();
-  // Release pending computeCommandEncoder, as extensions is likely to allocate new one
-  stream->endKernelCoalescing();
-  return stream->commandBuffer();
+  return at::mps::getDefaultMPSStream()->commandBuffer();
 }
 
 void* MPSHooks::getDispatchQueue() const {

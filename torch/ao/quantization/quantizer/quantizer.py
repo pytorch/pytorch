@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Annotated, Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 from torch import Tensor
@@ -82,7 +81,7 @@ an input edge or an output value
 input edge is the connection between input node and the node consuming the input, so it's a Tuple[Node, Node]
 output value is an fx Node
 """
-EdgeOrNode = Annotated[Union[tuple[Node, Node], Node], None]
+EdgeOrNode = Union[tuple[Node, Node], Node]
 EdgeOrNode.__module__ = "torch.ao.quantization.quantizer.quantizer"
 
 

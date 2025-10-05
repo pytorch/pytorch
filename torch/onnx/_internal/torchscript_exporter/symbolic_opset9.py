@@ -14,7 +14,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -33,7 +33,7 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     from torch.types import Number
 
@@ -1365,7 +1365,8 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             "get_pool_ceil_padding", "input size not accessible", input
         )
     ceiled_output_dim = [
-        math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])) + 1
+        int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])))
+        + 1
         for i in range(0, len(padding))
     ]
     # ensure last pooling starts inside
@@ -4535,7 +4536,7 @@ def lstm_cell(g: jit_utils.GraphContext, self, hidden, w_ih, w_hh, b_ih, b_hh):
     weight = (
         (w_ih, w_hh, b_ih, b_hh) if symbolic_helper._is_tensor(b_ih) else (w_ih, w_hh)
     )
-    has_biases = bool(symbolic_helper._is_tensor(b_ih))
+    has_biases = True if symbolic_helper._is_tensor(b_ih) else False
     _, h_outs, c_outs = _generic_rnn(
         g,
         "LSTM",

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-from collections.abc import Callable
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 import torch
 import torch.distributed as dist
