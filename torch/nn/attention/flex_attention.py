@@ -981,7 +981,7 @@ def create_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: Optional[DeviceLikeType] = None,
+    device: DeviceLikeType = "cuda",
 ) -> Tensor:
     r"""This function creates a mask tensor from a mod_fn function.
 
@@ -996,8 +996,6 @@ def create_mask(
     Returns:
         mask (Tensor): A mask tensor with shape (B, H, M, N).
     """
-    if device is None:
-        device = torch.accelerator.current_accelerator() or "cpu"
     if B is None:
         B = 1
     if H is None:
@@ -1032,7 +1030,7 @@ def create_block_mask(
     H: Optional[int],
     Q_LEN: int,
     KV_LEN: int,
-    device: Optional[DeviceLikeType] = None,
+    device: DeviceLikeType = "cuda",
     BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
@@ -1067,8 +1065,6 @@ def create_block_mask(
             value = torch.randn(1, 1, 8192, 64, device="cuda", dtype=torch.float16)
             output = flex_attention(query, key, value, block_mask=block_mask)
     """
-    if device is None:
-        device = torch.accelerator.current_accelerator() or "cpu"
     mod_type = _get_mod_type(mask_mod)
     assert mod_type == _ModificationType.MASK_MOD, (
         f"create-block_mask requires a mask_mod function! Got {mask_mod}"

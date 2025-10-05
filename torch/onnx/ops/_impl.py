@@ -1,7 +1,6 @@
 # flake8: noqa: B950
 import math
-from collections.abc import Callable
-from typing import Optional, TypeVar
+from typing import Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch

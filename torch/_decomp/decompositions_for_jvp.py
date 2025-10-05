@@ -1,8 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
-from collections.abc import Callable
-from typing import Optional
+from typing import Callable, Optional
 
 import torch
 import torch._decomp

@@ -2,8 +2,8 @@
 import dataclasses
 import inspect
 import sys
-from collections.abc import Callable, Iterable, Iterator
-from typing import Any, Literal, Optional, overload, Union
+from collections.abc import Iterable, Iterator
+from typing import Any, Callable, Literal, Optional, overload, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -341,13 +341,13 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
     """
     custom operators' outputs must not alias any inputs or other outputs.
     """
-    storages = {t.untyped_storage()._cdata for t in prev if isinstance(t, torch.Tensor)}
+    storages = {id(t.untyped_storage()) for t in prev if isinstance(t, torch.Tensor)}
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
     for tensor in iter_tensors(tuple_result, {}):
-        key = tensor.untyped_storage()._cdata
-        if tensor.untyped_storage()._cdata in storages:
+        key = id(tensor.untyped_storage())
+        if id(tensor.untyped_storage()) in storages:
             raise RuntimeError(
                 f"{name} (with implementation in {get_module()}): "
                 f"The output of this custom operator (1) must not "

@@ -22,10 +22,9 @@ import platform
 import sys
 import textwrap
 import threading
-import warnings
-from collections.abc import Callable as _Callable
 from typing import (
     Any as _Any,
+    Callable as _Callable,
     get_origin as _get_origin,
     Optional as _Optional,
     overload as _overload,
@@ -1428,6 +1427,17 @@ def use_deterministic_algorithms(
     :attr:`torch.utils.deterministic.fill_uninitialized_memory` is turned on.
     See the documentation for that attribute for more information.
 
+    A handful of CUDA operations are nondeterministic if the CUDA version is
+    10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
+    or ``CUBLAS_WORKSPACE_CONFIG=:16:8`` is set. See the CUDA documentation for more
+    details: `<https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility>`_
+    If one of these environment variable configurations is not set, a :class:`RuntimeError`
+    will be raised from these operations when called with CUDA tensors:
+
+        * :func:`torch.mm`
+        * :func:`torch.mv`
+        * :func:`torch.bmm`
+
     Note that deterministic operations tend to have worse performance than
     nondeterministic operations.
 
@@ -1689,7 +1699,7 @@ def _check(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(RuntimeError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(RuntimeError, cond, message)
 
 
 def _check_is_size(i, message=None, *, max=None):
@@ -1738,7 +1748,7 @@ def _check_index(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(IndexError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(IndexError, cond, message)
 
 
 def _check_value(cond, message=None):  # noqa: F811
@@ -1756,7 +1766,7 @@ def _check_value(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(ValueError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(ValueError, cond, message)
 
 
 def _check_type(cond, message=None):  # noqa: F811
@@ -1774,7 +1784,7 @@ def _check_type(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(TypeError, cond, message)  # pyrefly: ignore  # bad-argument-type
+    _check_with(TypeError, cond, message)
 
 
 def _check_not_implemented(cond, message=None):  # noqa: F811
@@ -1792,12 +1802,7 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(
-        NotImplementedError,
-        cond,
-        # pyrefly: ignore  # bad-argument-type
-        message,
-    )
+    _check_with(NotImplementedError, cond, message)
 
 
 def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
@@ -2607,7 +2612,7 @@ def compile(
         def fn(model: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
             if model is None:
                 raise RuntimeError("Model can't be None")
-            return compile(  # pyrefly: ignore  # no-matching-overload
+            return compile(
                 model,
                 fullgraph=fullgraph,
                 dynamic=dynamic,
@@ -2634,29 +2639,6 @@ def compile(
     guard_filter_fn = None
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
-
-    if torch.compiler.is_exporting():
-        warnings.warn(
-            "You are calling torch.compile inside torch.export region. "
-            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)"
-        )
-        from torch._higher_order_ops.utils import setup_compilation_env
-
-        # Create wrapper that always uses eager backend during export
-        def export_wrapped_fn(*args, **kwargs):
-            with setup_compilation_env() as backend:  # type: ignore[attr-defined]
-                # Force eager backend regardless of original backend
-                backend_wrapper = _TorchCompileWrapper(backend, mode, options, dynamic)
-                return torch._dynamo.optimize(
-                    backend=backend_wrapper,
-                    nopython=fullgraph,
-                    dynamic=dynamic,
-                    disable=disable,
-                    guard_filter_fn=guard_filter_fn,
-                    # pyrefly: ignore  # bad-argument-type
-                )(model)(*args, **kwargs)
-
-        return export_wrapped_fn
 
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)

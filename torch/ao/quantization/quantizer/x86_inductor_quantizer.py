@@ -3,9 +3,10 @@ import functools
 import itertools
 import operator
 import warnings
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing_extensions import TypeAlias
 
 import torch
 import torch.nn.functional as F

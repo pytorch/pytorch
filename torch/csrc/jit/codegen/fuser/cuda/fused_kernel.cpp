@@ -8,7 +8,6 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/jit/resource_guard.h>
 
 #include <cuda_runtime.h>
@@ -149,7 +148,9 @@ FusedKernelCUDA::FusedKernelCUDA(
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
     std::vector<char> log(logsize);
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
-    TORCH_CHECK(false, std::string(log.data(), log.size()));
+    std::stringstream cu;
+    cu << log.data();
+    throw std::runtime_error(cu.str());
   }
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
