@@ -2,7 +2,7 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import defaultdict
-from collections.abc import Callable
+from typing import Callable
 
 import torch
 import torch._decomp as decomp

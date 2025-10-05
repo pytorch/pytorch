@@ -3,7 +3,7 @@ import math
 import operator
 import traceback
 from functools import partial
-from typing import NamedTuple, TYPE_CHECKING
+from typing import Callable, NamedTuple
 
 import sympy
 
@@ -13,10 +13,6 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 __all__ = ["InputDim"]

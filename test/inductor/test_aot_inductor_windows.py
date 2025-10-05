@@ -5,7 +5,6 @@ import zipfile
 
 import torch
 import torch._inductor.config
-from torch._environment import is_fbcode
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_CI
 from torch.testing._internal.inductor_utils import HAS_GPU, requires_gpu
@@ -30,7 +29,7 @@ class Simple(torch.nn.Module):
 class TestAOTInductorWindowsCrossCompilation(TestCase):
     @requires_gpu()
     def test_simple_so(self):
-        if is_fbcode() or IS_CI:
+        if IS_CI:
             raise unittest.SkipTest("requires x86_64-w64-mingw32-gcc")
 
         # TODO: enable in CI
