@@ -12,7 +12,11 @@ class PowOperator(Operator):
         super().__init__("pow")
 
     def can_produce(self, tensor):
-        """Pow can always produce a tensor by raising a tensor to a power."""
+        """Pow can only produce float tensors (power operation promotes integers to float)."""
+        # torch.pow promotes integer tensors to float, so it cannot produce integer tensors
+        from torchfuzz.type_promotion import is_integer_dtype
+        if is_integer_dtype(tensor.dtype):
+            return False
         return True
 
     def supports_variable_inputs(self):
@@ -62,6 +66,3 @@ class PowOperator(Operator):
             for name in input_names[1:]:
                 expr = f"torch.pow({expr}, {name})"
             return f"{output_name} = {expr}"
-
-    def supports_variable_inputs(self) -> bool:
-        return True

@@ -45,7 +45,17 @@ IGNORE_PATTERNS: List[re.Pattern] = [
     re.compile(r"AttributeError: 'Infinity' object has no attribute '_mpf_'"),
     re.compile(r"AssertionError: Node full_1 was invalid, but is output"),
     re.compile(r"Error in op: torch\.ops\.aten\.convolution\.default"),
+    re.compile(r"IndexError: list index out of range"),
+    re.compile(r"TypeError\('unexpected type fp32'\)"),
+    re.compile(r"Argument 'sym_size_int_\d+' of Node 'full_default' was used before it has been defined!"),
+    re.compile(r"IncompatibleTypeErrorImpl\('invalid operands of type pointer<fp16> and triton\.language\.float64'\)"),
+    re.compile(r"AssertionError: 'XBLOCK' too large"),
+    re.compile(r"AssertionError: Node add_\d+ was invalid, but is output"),
+    re.compile(r"assert not waiting and len\(ready\) == len\(graph\.nodes\)"),
     # Add more patterns here as needed, e.g.:
+
+
+
     # re.compile(r"Some other error message"),
 ]
 
@@ -164,7 +174,7 @@ def run_multi_process_fuzzer(
                     bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}] ✅/❌/❓={postfix}",
                     dynamic_ncols=True
                 )
-                pbar.set_postfix_str(f"{successful_count}/{failed_count}/{ignored_count} | throughput: 0.00 seeds/hr")
+                pbar.set_postfix_str(f"{successful_count}/{failed_count}/{ignored_count} | 0.00 seeds/hr")
             else:
                 persist_print("Progress: (install tqdm for better progress bar)")
                 pbar = None
@@ -191,7 +201,7 @@ def run_multi_process_fuzzer(
 
                     # Update progress bar
                     if HAS_TQDM and pbar:
-                        pbar.set_postfix_str(f"{successful_count}/{failed_count}/{ignored_count} | throughput: {throughput:.2f} seeds/hr")
+                        pbar.set_postfix_str(f"{successful_count}/{failed_count}/{ignored_count} | {throughput:.2f} seeds/hr")
                         # tqdm automatically shows ETA (estimated time remaining) in the bar_format above
                         pbar.update(1)
                     else:
@@ -276,10 +286,6 @@ def run_multi_process_fuzzer(
             persist_print(f"⚡ Throughput: {(len(results) / (total_time / 3600)):.2f} seeds/hr" if total_time > 0 else "⚡ Throughput: N/A")
         if failed:
             persist_print(f"\n❌ Failed seeds: {[r[0] for r in failed]}")
-        if successful:
-            persist_print(f"✅ Successful seeds: {[r[0] for r in successful]}")
-            avg_success_time = sum(r[3] for r in successful) / len(successful)
-            persist_print(f"⚡ Avg time for successful runs: {avg_success_time:.2f}s")
         if ignored:
             persist_print(f"\n🚫 Ignored seeds: {[r[0] for r in ignored]}")
             # Print ignore pattern stats
@@ -311,11 +317,6 @@ def run_multi_process_fuzzer(
 
     if failed:
         persist_print(f"\n❌ Failed seeds: {[r[0] for r in failed]}")
-
-    if successful:
-        persist_print(f"✅ Successful seeds: {[r[0] for r in successful]}")
-        avg_success_time = sum(r[3] for r in successful) / len(successful)
-        persist_print(f"⚡ Avg time for successful runs: {avg_success_time:.2f}s")
 
     if ignored:
         persist_print(f"\n🚫 Ignored seeds: {[r[0] for r in ignored]}")

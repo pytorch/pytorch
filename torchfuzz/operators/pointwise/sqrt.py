@@ -2,6 +2,7 @@
 
 from ..base import Operator
 from torchfuzz.tensor import Tensor
+from torchfuzz.type_promotion import is_integer_dtype
 
 
 class SqrtOperator(Operator):
@@ -11,14 +12,23 @@ class SqrtOperator(Operator):
         super().__init__("sqrt")
 
     def can_produce(self, tensor):
-        """Sqrt can be applied to any tensor (elementwise op)."""
+        """Sqrt can only produce float tensors (promotes integers to float)."""
+        # torch.sqrt promotes integer tensors to float, so it cannot produce integer tensors
+        if is_integer_dtype(tensor.dtype):
+            return False
         return True
 
     def decompose(self, tensor):
-        """Decompose tensor into input tensor for Sqrt."""
-        # The input to Sqrt must have the same shape, dtype, and device as the output
+        """Decompose tensor into input tensor for Sqrt with proper type promotion."""
+        # torch.sqrt can take any numeric input, but promotes integers to float
+        # Choose an input dtype that makes sense
+        if tensor.dtype == "float32":
+            input_dtype = "int64"  # This will be promoted to float32
+        else:
+            input_dtype = tensor.dtype  # Keep same dtype for other float types
+
         return [
-            Tensor(tensor.size, tensor.stride, tensor.dtype, tensor.device, tensor.supported_ops)
+            Tensor(tensor.size, tensor.stride, input_dtype, tensor.device, tensor.supported_ops)
         ]
 
     def codegen(self, output_name, input_names, output_tensor):
