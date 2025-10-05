@@ -675,8 +675,7 @@ class ScanAutogradImpl:
 
         grad_carry, grad_ys = grad_fw_outputs[:n_carry], grad_fw_outputs[n_carry:]
         additional_inputs_tensor_masks = [
-            True if isinstance(t, torch.Tensor) else False
-            for t in self.additional_inputs
+            bool(isinstance(t, torch.Tensor)) for t in self.additional_inputs
         ]
         grad_additional_inputs = [
             torch.zeros_like(t)

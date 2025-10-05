@@ -185,6 +185,7 @@ def _ignore_backend_decomps():
 def _disable_custom_triton_op_functional_decomposition():
     old = torch._functorch.config.decompose_custom_triton_ops
     try:
+        # pyrefly: ignore  # bad-assignment
         torch._functorch.config.decompose_custom_triton_ops = False
         yield torch._functorch.config.decompose_custom_triton_ops
     finally:
@@ -365,6 +366,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                                 return self
 
                             def __getitem__(self, idx):
+                                # pyrefly: ignore  # bad-argument-type
                                 parts.append(str(idx))
                                 return self
 
@@ -660,6 +662,7 @@ def _rename_constants_nodes(
         if spec.kind == InputKind.CONSTANT_TENSOR and not spec.arg.name.startswith(
             const_prefix
         ):
+            # pyrefly: ignore  # bad-argument-type
             if spec.arg.name.startswith(buffer_prefix):  # map from buffer to constants
                 c_name = rename_constant(
                     const_prefix + spec.arg.name[len(buffer_prefix) :]

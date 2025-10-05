@@ -1231,7 +1231,9 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         output_code_ty: type[TOutputCode],
         compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
     ):
+        # pyrefly: ignore  # invalid-type-var
         self.output_code_ty = output_code_ty
+        # pyrefly: ignore  # invalid-type-var
         self.compiler_fn = compiler_fn
 
     def __call__(

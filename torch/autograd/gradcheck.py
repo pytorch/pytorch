@@ -9,6 +9,8 @@ from typing_extensions import deprecated
 
 import torch
 import torch.testing
+
+# pyrefly: ignore  # deprecated
 from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrTensors
@@ -731,9 +733,7 @@ def _stack_and_check_tensors(
             if tensor is None:
                 out_jacobian[:, j].zero_()
             else:
-                dense = (
-                    tensor.to_dense() if not tensor.layout == torch.strided else tensor
-                )
+                dense = tensor.to_dense() if tensor.layout != torch.strided else tensor
                 assert out_jacobian[:, j].numel() == dense.numel()
                 out_jacobian[:, j] = dense.reshape(-1)
     return out_jacobians, correct_grad_sizes, correct_grad_types

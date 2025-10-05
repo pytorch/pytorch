@@ -767,11 +767,11 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         # inductor codegen, where we need to do a non-unform treatment for None and tensors.
         # So we set up masks and filter the None gradients so that only tensors are returned from each step.
         carries_tensor_masks = [
-            True if isinstance(t, torch.Tensor) and t.dtype.is_floating_point else False
+            bool(isinstance(t, torch.Tensor) and t.dtype.is_floating_point)
             for t in ctx.carries
         ]
         additional_inputs_tensor_masks = [
-            True if isinstance(t, torch.Tensor) and t.dtype.is_floating_point else False
+            bool(isinstance(t, torch.Tensor) and t.dtype.is_floating_point)
             for t in ctx.additional_inputs
         ]
 
