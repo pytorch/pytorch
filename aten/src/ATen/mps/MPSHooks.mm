@@ -162,6 +162,22 @@ double MPSHooks::elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event
   return at::mps::getMPSEventPool()->elapsedTime(start_event_id, end_event_id);
 }
 
+void MPSHooks::setCommandBufferFlushThreshold(size_t threshold) const {
+  at::mps::getDefaultMPSStream()->setCommandBufferFlushThreshold(threshold);
+}
+
+size_t MPSHooks::getCommandBufferFlushThreshold() const {
+  return at::mps::getDefaultMPSStream()->getCommandBufferFlushThreshold();
+}
+
+void MPSHooks::setMaxOperationCacheSize(size_t size) const {
+  at::mps::getDefaultMPSStream()->setMaxOperationCacheSize(size);
+}
+
+size_t MPSHooks::getMaxOperationCacheSize() const {
+  return at::mps::getDefaultMPSStream()->getMaxOperationCacheSize();
+}
+
 bool MPSHooks::isPinnedPtr(const void* data) const {
   return at::mps::isMPSPinnedPtr(data);
 }

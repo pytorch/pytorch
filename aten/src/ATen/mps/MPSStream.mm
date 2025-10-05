@@ -90,9 +90,50 @@ void MPSStream::synchronize(SyncType syncType) {
 }
 
 void MPSStream::commit() {
-  //Always flush to prevent command buffer accumulation during training
-  //commitAndContinue keeps the same buffer alive causing completion handlers and resources to accumulate across batches
-  flush();
+  // Check if we've exceeded the operation count threshold
+  if (_commandBufferOperationCount >= _commandBufferFlushThreshold) {
+    // Flush to prevent unbounded accumulation
+    flush();
+  } else if (_enableCommitAndContinue) {
+    // Below threshold: use commitAndContinue for performance
+    commitAndContinue();
+  } else {
+    // CommitAndContinue disabled (e.g., profiling mode)
+    flush();
+  }
+}
+
+bool MPSStream::isOperationCached(uintptr_t opSignature) {
+  auto it = _operationCache.find(opSignature);
+  if (it != _operationCache.end()) {
+    // Move to front of LRU (most recently used)
+    _operationLRUList.splice(_operationLRUList.begin(), _operationLRUList, it->second);
+    return true;
+  }
+  return false;
+}
+
+void MPSStream::addOperationToCache(uintptr_t opSignature) {
+  // Check if already in cache
+  if (_operationCache.find(opSignature) != _operationCache.end()) {
+    return;
+  }
+
+  // If cache is at max size, evict least recently used item (from back of list)
+  if (_operationCache.size() >= _maxOperationCacheSize) {
+    uintptr_t lruSignature = _operationLRUList.back();
+    _operationLRUList.pop_back();
+    _operationCache.erase(lruSignature);
+  }
+
+  // Add to front of LRU list (most recently used)
+  _operationLRUList.push_front(opSignature);
+  _operationCache[opSignature] = _operationLRUList.begin();
+}
+
+void MPSStream::clearOperationCache() {
+  _operationLRUList.clear();
+  _operationCache.clear();
 }
 
 void MPSStream::commitAndWait() {
@@ -140,6 +181,9 @@ void MPSStream::flush() {
       [_commandBuffer release];
     }
     _commandBuffer = nil;
+    // Reset operation count for new command buffer
+    // NOTE: LRU cache is NOT cleared - it persists across flushes for performance
+    _commandBufferOperationCount = 0;
   }
 }
 
@@ -147,6 +191,13 @@ void MPSStream::addCompletedHandler(MTLCommandBufferHandler block) {
   dispatch_sync(_serialQueue, ^() {
     @autoreleasepool {
       [commandBuffer() addCompletedHandler:block];
+      // Completion handlers are lightweight - track using a simple signature
+      uintptr_t opSignature = reinterpret_cast<uintptr_t>(block);
+      if (!isOperationCached(opSignature)) {
+        addOperationToCache(opSignature);
+      }
+      // Increment operation count for flush threshold
+      _commandBufferOperationCount++;
     }
   });
 }
@@ -162,6 +213,17 @@ void MPSStream::fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t 
 
       [blitEncoder fillBuffer:buffer range:NSMakeRange(offset, length) value:value];
       [blitEncoder endEncoding];
+
+      // Track this operation in LRU cache
+      // Create signature from buffer pointer (fill operations on same buffer are "same")
+      uintptr_t opSignature = reinterpret_cast<uintptr_t>(buffer) ^ 0x1; // XOR with constant to distinguish from copy
+      if (!isOperationCached(opSignature)) {
+        addOperationToCache(opSignature);
+      }
+
+      // Increment operation count for flush threshold
+      _commandBufferOperationCount++;
+
       synchronize(syncType);
     }
   });
@@ -196,6 +258,17 @@ void MPSStream::copy(id<MTLBuffer> srcBuffer,
         bytes_remains -= bytes_to_copy;
       }
       [blitEncoder endEncoding];
+
+      // Track this operation in LRU cache
+      // Create signature from src/dst buffer pair (copy between same buffers are "same")
+      uintptr_t opSignature = reinterpret_cast<uintptr_t>(srcBuffer) ^
+                             (reinterpret_cast<uintptr_t>(dstBuffer) << 1);
+      if (!isOperationCached(opSignature)) {
+        addOperationToCache(opSignature);
+      }
+
+      // Increment operation count for flush threshold
+      _commandBufferOperationCount++;
 
       // profilerId has a value only if copy profiling is enabled
       if (profileId) {
@@ -241,6 +314,18 @@ void MPSStream::executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDicti
                      targetOperations:nil
                     resultsDictionary:results
                   executionDescriptor:_executionDescriptor];
+
+      // Track this operation in LRU cache (persists across flushes for performance)
+      // Use MPSGraph pointer as operation signature
+      uintptr_t opSignature = reinterpret_cast<uintptr_t>(mpsGraph);
+      if (!isOperationCached(opSignature)) {
+        // New unique operation - add to cache
+        addOperationToCache(opSignature);
+      }
+      // If operation was already cached, it's moved to front of LRU automatically
+
+      // Increment operation count for flush threshold
+      _commandBufferOperationCount++;
 
       SyncType _syncType = syncType;
       // if commitAndContinue is disabled, we need to always commit manually after encoding

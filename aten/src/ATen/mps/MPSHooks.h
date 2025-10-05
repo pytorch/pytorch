@@ -57,6 +57,14 @@ struct MPSHooks : public at::MPSHooksInterface {
   double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id)
       const override;
 
+  // Command buffer flush threshold interface
+  void setCommandBufferFlushThreshold(size_t threshold) const override;
+  size_t getCommandBufferFlushThreshold() const override;
+
+  // LRU cache size interface
+  void setMaxOperationCacheSize(size_t size) const override;
+  size_t getMaxOperationCacheSize() const override;
+
   bool isBuilt() const override {
     return true;
   }

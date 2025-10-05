@@ -102,6 +102,18 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual void setCommandBufferFlushThreshold(size_t threshold) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual size_t getCommandBufferFlushThreshold() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual void setMaxOperationCacheSize(size_t size) const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  virtual size_t getMaxOperationCacheSize() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
   bool hasPrimaryContext(DeviceIndex device_index) const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
