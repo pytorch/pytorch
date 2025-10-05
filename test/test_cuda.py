@@ -4553,6 +4553,45 @@ class TestCudaMallocAsync(TestCase):
             # not supported with the cudaMallocAsync backend
             self.assertEqual(pow2_div2_mem - start_mem, power2_div(nbytes_big, 2))
 
+        # test roundup_power2_divisions:1 rounds to next power of 2
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:[>:1]")
+        start_mem = torch.cuda.memory_stats()[key_allocated]
+        # allocate 514 MiB, should round to 1 GiB
+        nelems_514mb = 514 * 1024 * 1024 // 4
+        t = torch.rand(nelems_514mb, device="cuda")
+        
+        mem_514mb = torch.cuda.memory_stats()[key_allocated]
+        if not TEST_CUDAMALLOCASYNC:
+            # should round to next power of 2 (1 GiB)
+            expected = 1024 * 1024 * 1024
+            self.assertEqual(mem_514mb - start_mem, expected)
+
+        # test that exact power of 2 is unchanged with divisions:1
+        del t
+        torch.cuda.memory.empty_cache()
+        start_mem = torch.cuda.memory_stats()[key_allocated]
+        nelems_1gb = 1024 * 1024 * 1024 // 4
+        t_1gb = torch.rand(nelems_1gb, device="cuda")
+        
+        mem_1gb = torch.cuda.memory_stats()[key_allocated]
+        if not TEST_CUDAMALLOCASYNC:
+            # already power of 2, should not round up
+            self.assertEqual(mem_1gb - start_mem, 1024 * 1024 * 1024)
+
+        # test roundup_power2_divisions:0 disables rounding
+        del t_1gb
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:[>:0]")
+        start_mem = torch.cuda.memory_stats()[key_allocated]
+        t = torch.rand(nelems_514mb, device="cuda")
+        
+        mem_no_round = torch.cuda.memory_stats()[key_allocated]
+        if not TEST_CUDAMALLOCASYNC:
+            # should not round up to 1 GiB
+            self.assertLess(mem_no_round - start_mem, 900 * 1024 * 1024)
+
+        del t
         torch.cuda.memory.empty_cache()
         torch.cuda.memory._set_allocator_settings("release_lock_on_cudamalloc:True")
         start_mem = torch.cuda.memory_stats()[key_allocated]
