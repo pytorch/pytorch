@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <torch/headeronly/core/Dispatch.h>
 #include <torch/headeronly/core/ScalarType.h>
 
 TEST(TestScalarType, AT_FORALL) {
@@ -61,4 +62,22 @@ TEST(TestScalarType, toString) {
 #define DEFINE_CHECK(_, name) EXPECT_EQ(toString(ScalarType::name), #name);
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CHECK);
 #undef DEFINE_CHECK
+}
+
+TEST(TestScalarType, AT_DISPATCH) {
+  using torch::headeronly::ScalarType;
+
+  bool success = false;
+  AT_DISPATCH_SWITCH(
+      ScalarType::Int, "test_dispatch", AT_DISPATCH_CASE(ScalarType::Int, [&] {
+        success = true;
+      }));
+  EXPECT_EQ(success, true);
+
+  EXPECT_THROW(
+      AT_DISPATCH_SWITCH(
+          ScalarType::Float,
+          "test_dispatch",
+          AT_DISPATCH_CASE(ScalarType::Int, [&] {})),
+      std::runtime_error);
 }
