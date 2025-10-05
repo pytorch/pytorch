@@ -26,7 +26,6 @@ import numpy
 import torch
 from torch import inf, SymInt, Tensor
 from torch._C import (
-    _acc,
     _aoti,
     _cpu,
     _dynamo,

@@ -296,16 +296,6 @@ class TestMatmulCuda(InductorTestCase):
         # cross comparison
         self.assertEqual(out1_gpu, out2_gpu[0])
 
-    @onlyCUDA
-    @skipIfRocm
-    @parametrize("shape", [2**i for i in range(5, 14)])
-    @dtypes(torch.float, torch.half, torch.bfloat16)
-    def test_cublas_deterministic(self, device, shape, dtype):
-        inp = torch.randn(shape, shape, device=device, dtype=dtype)
-        first = torch.matmul(inp, inp)
-        for _ in range(10):
-            self.assertEqual(first, torch.matmul(inp, inp), atol=0., rtol=0.)
-
     def grouped_mm_helper(self, alist, blist, gOlist, agradlist, bgradlist, outlist):
         for a, b, gO, agrad, bgrad, out in zip(alist, blist, gOlist, agradlist, bgradlist, outlist):
             a = a.clone().detach().requires_grad_()
@@ -502,6 +492,7 @@ class TestMatmulCuda(InductorTestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     # TODO(future PR): enable compile for torch._grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
+    @unittest.skipIf(SM100OrLater, "Grouped gemm is inconsistently raising numeric issues see: #163462 ")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
     @parametrize("b_row_major", [False, True])

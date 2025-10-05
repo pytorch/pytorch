@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
-from collections.abc import Callable
-from typing import Any, Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.nn as nn

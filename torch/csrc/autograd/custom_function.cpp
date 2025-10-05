@@ -261,8 +261,7 @@ static optional_variable_list _process_backward_mode_ad(
     const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view) {
+    const _view_as_self_fn_t& view_as_self_fn) {
   auto num_outputs = raw_outputs.size();
 
 #ifndef STRIP_ERROR_MESSAGES
@@ -405,8 +404,7 @@ static optional_variable_list _process_backward_mode_ad(
     if (!(is_input && is_modified) && var.is_view()) {
       // is_view() => diff_view_meta
       auto diff_view_meta = impl::get_view_autograd_meta(var);
-      diff_view_meta->set_creation_meta(
-          pure_view ? CreationMeta::DEFAULT : CreationMeta::IN_CUSTOM_FUNCTION);
+      diff_view_meta->set_creation_meta(CreationMeta::IN_CUSTOM_FUNCTION);
     }
 
     if (is_differentiable) {
@@ -450,19 +448,12 @@ optional_variable_list _wrap_outputs(
     const std::shared_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    const _view_as_self_fn_t& view_as_self_fn,
-    bool pure_view) {
+    const _view_as_self_fn_t& view_as_self_fn) {
   std::unordered_map<at::TensorImpl*, size_t> inputs_mapping;
   inputs_mapping.reserve(input_vars.size());
   for (const auto i : c10::irange(input_vars.size())) {
     inputs_mapping.emplace(input_vars[i].unsafeGetTensorImpl(), i);
   }
-
-  // Limit pure views to 1-1 mapping as it is unclear if it is even
-  // possible to have a pure view for N-1 or 1-N.
-  TORCH_CHECK(
-      !pure_view || (input_vars.size() == 1 && raw_outputs.size() == 1),
-      "Pure view custom Function can only have one input Tensor and one output Tensor. Open an issue if you need to support more.");
 
   auto outputs = _process_backward_mode_ad(
       inputs_mapping,
@@ -471,8 +462,7 @@ optional_variable_list _wrap_outputs(
       raw_outputs,
       cdata,
       to_save_if_setup_context,
-      view_as_self_fn,
-      pure_view);
+      view_as_self_fn);
 
   // This must happen after the backward processing as we expect the
   // computations happening here to track backward mode gradients.

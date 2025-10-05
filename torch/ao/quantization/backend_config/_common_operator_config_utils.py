@@ -2,8 +2,7 @@
 import copy
 import operator
 from collections import namedtuple
-from collections.abc import Callable
-from typing import Union
+from typing import Callable, Union
 
 import torch
 import torch.ao.nn.intrinsic as nni

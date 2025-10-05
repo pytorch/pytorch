@@ -2,8 +2,7 @@
 
 import functools
 import warnings
-from collections.abc import Callable
-from typing import Any, Union
+from typing import Any, Callable, Union
 
 import torch
 import torch.utils._pytree as pytree

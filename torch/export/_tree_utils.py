@@ -1,5 +1,4 @@
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from torch.utils._pytree import Context, TreeSpec
 
