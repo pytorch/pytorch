@@ -857,7 +857,7 @@ def parallel_compile_enabled_internally() -> bool:
 
     jk_name = "pytorch/inductor:enable_parallel_compile_version"
     version = torch._utils_internal.justknobs_getval_int(jk_name)
-    return ENABLE_PARALLEL_COMPILE_VERSION >= version
+    return version <= ENABLE_PARALLEL_COMPILE_VERSION
 
 
 def decide_compile_threads() -> int:
@@ -1259,7 +1259,7 @@ class triton:
     cudagraph_trees_history_recording = False
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
-    cudagraph_support_input_mutation = False if is_fbcode() else True
+    cudagraph_support_input_mutation = not is_fbcode()
 
     # Maximal number of allowed cudagraph re-record for a function and
     # a cudagraph node due to static input tensor address changes or

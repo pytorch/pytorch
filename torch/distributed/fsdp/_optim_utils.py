@@ -1267,7 +1267,7 @@ def _is_named_optimizer(optim_state_dict: dict[str, Any]) -> bool:
     (which usually are FQNs) versus integers (which usually refer to param_ids
     from a vanilla torch.optim.Optimizer).
     """
-    state = optim_state_dict.get("state", None)
+    state = optim_state_dict.get("state")
     if not state:
         # If we cannot find a state, assume it is not NamedOptimizer as
         # NamedOptimizer has eager initialization.
@@ -1715,7 +1715,7 @@ def _convert_state_with_orig_params(
     # across ranks
     for optim_state_key in all_optim_state_keys:
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
-            optim_state_key, None
+            optim_state_key
         )
 
         if param_key is None and not optim_state_key.is_fsdp_managed:
@@ -1723,7 +1723,7 @@ def _convert_state_with_orig_params(
 
         if optim_state_key.is_fsdp_managed:
             fqn = optim_state_key.unflat_param_names[0]
-            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn, None)
+            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn)
             if fsdp_param_info is None:
                 # This can happen if the not all FSDP instances have all the
                 # parameters. This can happen with FSDP + some MPMD style
@@ -1801,7 +1801,7 @@ def _convert_state_with_flat_params(
     # across ranks
     for optim_state_key in all_optim_state_keys:
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
-            optim_state_key, None
+            optim_state_key
         )
 
         assert param_key is not None, (

@@ -218,7 +218,7 @@ def _dump_DDP_relevant_env_vars():
     ]
     formatted_output = ""
     for var in relevant_env_vars:
-        value = os.environ[var] if var in os.environ else "N/A"
+        value = os.environ.get(var, "N/A")
         formatted_output += f"env:{var}={value}\n"
     print(formatted_output)
 

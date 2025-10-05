@@ -482,15 +482,11 @@ def get_wrapper_codegen_for_device(
 
 
 def get_custom_backend_pass_for_device(device: str) -> Optional[CustomGraphModulePass]:
-    return custom_backend_passes[device] if device in custom_backend_passes else None
+    return custom_backend_passes.get(device)
 
 
 def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
-    return (
-        custom_backend_codegen_configs[device]
-        if device in custom_backend_codegen_configs
-        else None
-    )
+    return custom_backend_codegen_configs.get(device)
 
 
 @functools.cache

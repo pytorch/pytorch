@@ -168,7 +168,7 @@ def _find_matches(
     for node in reversed(graph.nodes):
         if node.name not in match_map and node.name not in all_matched:
             for pattern, quantize_handler_cls in patterns.items():
-                root_node_getter = root_node_getter_mapping.get(pattern, None)
+                root_node_getter = root_node_getter_mapping.get(pattern)
                 if _is_match(modules, node, pattern) and node.name not in match_map:
                     matched_node_pattern: list[Node] = []
                     record_match(pattern, node, node, matched_node_pattern, match_map)

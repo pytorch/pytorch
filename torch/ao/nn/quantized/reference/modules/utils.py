@@ -84,12 +84,8 @@ class ReferenceQuantizedModule(torch.nn.Module):
         # store weight_axis as weight_axis_int due to some constraints of torchdynamo.export
         # for capturing `.item` operations
         self.weight_axis_int: int = self.weight_axis.item()  # type: ignore[operator, assignment]
-        self.weight_quant_min: typing.Optional[int] = weight_qparams.get(
-            "quant_min", None
-        )
-        self.weight_quant_max: typing.Optional[int] = weight_qparams.get(
-            "quant_max", None
-        )
+        self.weight_quant_min: typing.Optional[int] = weight_qparams.get("quant_min")
+        self.weight_quant_max: typing.Optional[int] = weight_qparams.get("quant_max")
 
     def get_weight(self):
         """

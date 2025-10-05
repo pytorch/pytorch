@@ -195,7 +195,7 @@ else:
             # A root mesh is not created through slicing.
             # We considers the root mesh of a root mesh is itself.
             root_mesh = self.child_to_root_mapping.get(device_mesh, None)
-            return device_mesh if not root_mesh else root_mesh
+            return root_mesh if root_mesh else device_mesh
 
         def get_root_mesh_dim(self, device_mesh: "DeviceMesh") -> Optional[int]:
             """
