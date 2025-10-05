@@ -9,13 +9,13 @@ automatically generate optimized implementations through Inductor's autotuning s
 Example:
     from torch._inductor.kernel.custom_op import register_custom_op_autotuning
 
-    @register_custom_op_autotuning(custom_ops.rmsnorm.default)
-    def tuned_rmsnorm(input_tensor, weight, eps=1e-6):
+    @register_custom_op_autotuning(my_custom_ops.my_op.default)
+    def tuned_my_op(input_tensor, other_tensor, param=1.0):
         return autotune_custom_op(
-            "rmsnorm",
-            [rmsnorm_decomposition1, rmsnorm_decomposition2],
-            [input_tensor, weight],
-            {"eps": eps},
+            "my_op_autotuned",
+            [impl_variant1, impl_variant2, impl_variant3],
+            [input_tensor, other_tensor],
+            {"param": param},
         )
 """
 
