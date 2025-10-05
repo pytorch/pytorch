@@ -230,6 +230,7 @@ class SchemaMatcher:
         for schema in cls.match_schemas(t):
             mutable = mutable or [False for _ in schema.arguments]
             for i, arg in enumerate(schema.arguments):
+                # pyrefly: ignore  # unsupported-operation
                 mutable[i] |= getattr(arg.alias_info, "is_write", False)
 
         return tuple(mutable or (None for _ in t.inputs))
@@ -671,6 +672,7 @@ class MemoryProfile:
         output: list[tuple[int, Action, KeyAndID, int]] = []
         allocation_times: dict[tuple[TensorKey, bool], int] = {}
         live_unknown: dict[tuple[int, torch.device], Literal[True]] = {}
+        # pyrefly: ignore  # bad-assignment
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
                 alloc_fields = event.typed[1]
@@ -772,11 +774,14 @@ class MemoryProfile:
                     for key, (_, version) in node.inputs.items()
                     if self._categories.get(key, version)
                     in (Category.GRADIENT, Category.PARAMETER)
+                    # pyrefly: ignore  # unsupported-operation
                     or key.id in depends_on_gradient
                 )
 
                 if ids:
+                    # pyrefly: ignore  # missing-attribute
                     depends_on_gradient.update(ids)
+                    # pyrefly: ignore  # missing-attribute
                     depends_on_gradient.update(key.id for key in node.outputs)
 
             # We are guaranteed to exit because there is a finite set of
@@ -785,6 +790,7 @@ class MemoryProfile:
             # once to fold the first step into that loop, and a third time
             # where no new elements are added.
             if len(depends_on_gradient) == start_size:
+                # pyrefly: ignore  # bad-return
                 return depends_on_gradient
 
     def _set_gradients_and_temporaries(self) -> None:
@@ -1081,6 +1087,7 @@ class MemoryProfileTimeline:
 
             if action in (Action.PREEXISTING, Action.CREATE):
                 raw_events.append(
+                    # pyrefly: ignore  # bad-argument-type
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1091,6 +1098,7 @@ class MemoryProfileTimeline:
 
             elif action == Action.INCREMENT_VERSION:
                 raw_events.append(
+                    # pyrefly: ignore  # bad-argument-type
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1099,6 +1107,7 @@ class MemoryProfileTimeline:
                     )
                 )
                 raw_events.append(
+                    # pyrefly: ignore  # bad-argument-type
                     (
                         t,
                         _ACTION_TO_INDEX[action],
@@ -1109,6 +1118,7 @@ class MemoryProfileTimeline:
 
             elif action == Action.DESTROY:
                 raw_events.append(
+                    # pyrefly: ignore  # bad-argument-type
                     (
                         t,
                         _ACTION_TO_INDEX[action],

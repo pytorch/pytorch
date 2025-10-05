@@ -1170,8 +1170,6 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
-    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
-    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1249,9 +1247,16 @@ def aot_export_joint_with_descriptors(
         mod,
         args,
         kwargs,
-        fw_compiler,
-        bw_compiler,
+        # Fill in default arguments for fw_compiler, bw_compiler, partition_fn.
+        # These arguments are not used here but we need them anyway to make
+        # aot_config happy for now. (TODO: refactor aot_config as a follow-up.)
+        # These arguments can be overridden in aot_compile_joint_with_descriptors,
+        # where they are actually used (to partition the joint graph into forward
+        # and backward graphs and then compile them individually).
+        boxed_nop_preserve_node_meta,
+        boxed_nop_preserve_node_meta,
         default_partition,
+        # In contrast, decompositions are needed at this stage.
         decompositions,
         keep_inference_input_mutations,
         None,
@@ -1295,7 +1300,13 @@ def aot_export_joint_with_descriptors(
     )
 
 
-def aot_compile_joint_with_descriptors(jd: JointWithDescriptors) -> callable:
+def aot_compile_joint_with_descriptors(
+    jd: JointWithDescriptors,
+    *,
+    partition_fn: Callable = default_partition,
+    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+) -> callable:
     """
     Companion function for aot_export_joint_with_descriptors which compiles the joint
     graph into a callable function that follows a standard calling convention.
@@ -1306,6 +1317,11 @@ def aot_compile_joint_with_descriptors(jd: JointWithDescriptors) -> callable:
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
+    # Update the AOTState with the provided compilers
+    jd._aot_state.aot_config.fw_compiler = fw_compiler
+    jd._aot_state.aot_config.bw_compiler = bw_compiler
+    jd._aot_state.aot_config.partition_fn = partition_fn
+
     compiled_fn, _ = aot_stage2_compile(jd._aot_state, jd._aot_graph_capture)
 
     # Cribbed from torch/export/pt2_archive/_package.py
