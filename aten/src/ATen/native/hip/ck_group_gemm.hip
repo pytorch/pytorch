@@ -57,7 +57,7 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     std::vector<ck::tensor_operation::device::GemmDesc> gemm_descs;
     std::vector<const void*> p_a_ptrs, p_b_ptrs;
     std::vector<void*> p_e_ptrs;
-    std::vector<std::array<const void*, 0>> d_ptrs(p_a_ptrs.size());
+    // Note: d_ptrs will be resized after we populate the other vectors
 
     const int mat_a_dim = mat_a.dim();
     const int mat_b_dim = mat_b.dim();
@@ -130,11 +130,92 @@ void launch_grouped_bgemm_ck_impl_dispatch(
             p_b_ptrs.push_back(group_b_ptr);
             p_e_ptrs.push_back(group_e_ptr);
         }
+    } else if (mat_a_dim == 2 && mat_b_dim == 3) {
+        // 2d*3d input, output is 2d.
+        // A: [m * n_groups, k], B: [n_groups, n, k] or [n_groups, k, n], Output: [m * n_groups, n]
+        // Offset divides M dimension (rows of A), each group gets different rows of A and different batch of B
+        const int K = mat_a.size(1); // columns in A
+        // For 2D-3D case: The output determines N (result width)
+        const int N = out.size(1); // N is the width of the output tensor
+
+        for (int i = 0; i < num_groups; ++i) {
+            int start_m = (i == 0) ? 0 : offs_accessor[i - 1];
+            int end_m = offs_accessor[i];
+            int m = end_m - start_m;
+
+            // Skip zero-sized groups but continue processing subsequent groups
+            if (m <= 0) {
+                continue;
+            }
+
+            // Select A rows for group i: skip start_m rows
+            const void* group_a_ptr;
+            int lda;
+            if (std::is_same<ALayout, ck::tensor_layout::gemm::RowMajor>::value) {
+                // Row-major A [total_m, K]: skip start_m rows, each row is stride(0) elements apart
+                group_a_ptr = a_ptr_base + start_m * mat_a.stride(0) * a_element_size;
+                lda = mat_a.stride(0); // distance between rows
+            } else {
+                // Column-major A [total_m, K]: skip start_m elements in the first dimension (stride(0) is between rows)
+                group_a_ptr = a_ptr_base + start_m * mat_a.stride(0) * a_element_size;
+
+                // Detect stride pattern for A tensor to determine appropriate lda calculation
+                bool a_is_strided_tensor = (mat_a.stride(0) > mat_a.size(0));
+
+                if (a_is_strided_tensor) {
+                    // For strided A tensors: stride(0) gives the actual leading dimension
+                    lda = mat_a.stride(0);
+                } else {
+                    // For non-strided A tensors: use the M dimension (total rows)
+                    lda = mat_a.size(0); // Total M dimension for column-major layout
+                }
+            }
+
+            // Select B batch for group i: B[i, :, :]
+            const void* group_b_ptr = b_ptr_base + i * mat_b.stride(0) * b_element_size;
+            int ldb;
+
+            if (std::is_same<BLayout, ck::tensor_layout::gemm::RowMajor>::value) {
+                // Row-major GEMM: expecting B as [K, N] but we have [N, K], so transpose needed
+                ldb = mat_b.stride(2); // Leading dimension for accessing as [K, N]
+            } else {
+                // Detect stride pattern to determine appropriate ldb calculation
+                bool is_strided_tensor = (mat_b.stride(2) > mat_b.size(2));
+
+                if (is_strided_tensor) {
+                    // For strided tensors: stride(2) gives the actual leading dimension
+                    ldb = mat_b.stride(2);
+                } else {
+                    // For non-strided tensors: use the N dimension
+                    ldb = mat_b.size(1);
+                }
+            }
+
+            // Output for this group: rows [start_m:end_m, :] in 2D output [total_m, N]
+            void* group_e_ptr = out_ptr_base + start_m * out.stride(0) * out_element_size;
+            int ldc = out.stride(0); // distance between rows in output (should be N for 2D case)
+
+            gemm_descs.push_back({
+                static_cast<ck::index_t>(m),
+                static_cast<ck::index_t>(N),
+                static_cast<ck::index_t>(K),
+                static_cast<ck::index_t>(lda),
+                static_cast<ck::index_t>(ldb),
+                static_cast<ck::index_t>(ldc)
+            });
+            p_a_ptrs.push_back(group_a_ptr);
+            p_b_ptrs.push_back(group_b_ptr);
+            p_e_ptrs.push_back(group_e_ptr);
+        }
     } else {
-        TORCH_CHECK(false, "CK Group GEMM: Unsupported dimensions");
+        TORCH_CHECK(false, "CK Group GEMM: Unsupported dimensions, mat A dim is ", mat_a_dim, "mat B dim is ", mat_b_dim);
     }
 
     TORCH_INTERNAL_ASSERT(p_a_ptrs.size() > 0, "CK Group GEMM: No valid groups");
+
+    // Initialize d_ptrs with the correct size
+    std::vector<std::array<const void*, 0>> d_ptrs(p_a_ptrs.size());
+
     static DeviceOp gemm_instance;
     auto argument = gemm_instance.MakeArgument(
         p_a_ptrs, p_b_ptrs, d_ptrs, p_e_ptrs,
@@ -169,7 +250,8 @@ void group_gemm_ck(
     at::Tensor& out)
 {
     bool a_row_major = mat_a.stride(1) == 1;
-    bool b_row_major = mat_b.stride(1) == 1;
+    // For 3D B tensor [batch, dim1, dim2], check if the last dimension is contiguous
+    bool b_row_major = (mat_b.dim() == 3) ? (mat_b.stride(2) == 1) : (mat_b.stride(1) == 1);
 
     if (mat_a.dtype() == at::kBFloat16) {
         // bf16 path
@@ -212,3 +294,4 @@ void group_gemm_ck(
 } // namespace detail
 } // namespace hip
 } // namespace at
+
