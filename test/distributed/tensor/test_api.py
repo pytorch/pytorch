@@ -487,6 +487,7 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
             [(Shard(1), Shard(2)), {1: [0], 2: [1]}],
             [(Replicate(), Shard(2)), {2: [1]}],
             [(Replicate(), Replicate()), {}],
+            [(Replicate(), Replicate()), {0: []}],  # allow empty_shard_order_sequences
         ],
     )
     def test_only_shard_order_provided(self, expected_placements, shard_order_dict):
@@ -607,6 +608,33 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
         with test_context:
             input_tensor_dt.redistribute(
                 mesh, placements=placements, shard_order=shard_order_dict
+            )
+
+    def test_placement_length_validation_edge_cases(self):
+        """Test edge cases for placement length validation."""
+        mesh = self.build_device_mesh((2, self.world_size // 2))
+        input_tensor = torch.randn(8, 6, 5, device=self.device)
+
+        # Empty placements
+        with self.assertRaisesRegex(
+            ValueError,
+            "`placements` must have the same length",
+        ):
+            distribute_tensor(input_tensor, mesh, placements=[])
+
+        # Too many placements
+        with self.assertRaisesRegex(
+            ValueError,
+            "`placements` must have the same length",
+        ):
+            distribute_tensor(
+                input_tensor,
+                mesh,
+                placements=[
+                    Shard(0),
+                    Shard(1),
+                    Replicate(),
+                ],  # mesh.ndim = 2, but 3 placements
             )
 
     @parametrize(
