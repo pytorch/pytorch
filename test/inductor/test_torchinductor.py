@@ -10013,7 +10013,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 y.argmin(1),
             )
 
-        t = torch.randn([16, 8])
+        t = torch.randn([16, 8], device=self.device)
         self.common(fn, (t,))
 
     def test_conv_backward(self):
