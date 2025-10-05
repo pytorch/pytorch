@@ -1442,9 +1442,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
+            predicate_vt = args[0]
+
+            if predicate_vt.is_python_constant():
+                self.value(predicate_vt.as_python_constant(), message)
+                return ConstantVariable.create(None)
+
             # emit missing proxy that was impossible to implement inside NestedUserFunctionVariable
             # but needed to fix the issue https://github.com/pytorch/pytorch/issues/163668
-            predicate_proxy = args[0].as_proxy()
+            predicate_proxy = predicate_vt.as_proxy()
             tx.output.create_proxy(
                 "call_function",
                 self.value,
