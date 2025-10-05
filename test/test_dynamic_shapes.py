@@ -1949,6 +1949,19 @@ class TestFloorDiv(TestCase):
                 TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y)
             )
 
+    def test_floordiv_div_does_not_generate_non_int_rational(self):
+        s14 = sympy.Symbol("s14", integer=True, positive=True)
+        s37 = sympy.Symbol("s37", integer=True, positive=True)
+
+        inner_expr = FloorDiv(s14, 2016)
+        middle_expr = (24 * s37 + 672) * inner_expr
+        numerator = middle_expr + 21
+        denominator = 22
+        result = FloorDiv(numerator, denominator)
+        rationals = result.atoms(sympy.Rational)
+        all_rationals_ints = all(r.q == 1 for r in rationals)
+        self.assertTrue(all_rationals_ints)
+
     def test_floordiv_simplify(self):
         # Tests how we simplify or evaluate FloorDiv without free variables
         shape_env = ShapeEnv()
@@ -4027,6 +4040,17 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(compiled_func2(x, neg), func2(x, neg))
         self.assertEqual(compiled_func2(x, zero), func2(x, zero))
         self.assertEqual(cnt.frame_count, 2)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_select_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                nz = x.nonzero()
+                return nz[-1]
+
+        mod = M()
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(mod)(x), mod(x))
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_select_index_with_check(self):

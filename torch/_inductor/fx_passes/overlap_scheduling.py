@@ -594,7 +594,7 @@ class OverlapScheduler:
 
             if is_wait_tensor(node):
                 info = self.collective_info[self.wait_to_start[node]]
-                assert not info.hiding_node == curr_compute_node
+                assert info.hiding_node != curr_compute_node
                 self._handle_wait(node)
                 continue
 

@@ -47,6 +47,7 @@ def _check_args_kwargs_length(
 
 class _MaskedContiguous(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, input):
         if not is_masked_tensor(input):
             raise ValueError("MaskedContiguous forward: input must be a MaskedTensor.")
@@ -60,12 +61,14 @@ class _MaskedContiguous(torch.autograd.Function):
         return MaskedTensor(data.contiguous(), mask.contiguous())
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
         return grad_output
 
 
 class _MaskedToDense(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, input):
         if not is_masked_tensor(input):
             raise ValueError("MaskedToDense forward: input must be a MaskedTensor.")
@@ -80,6 +83,7 @@ class _MaskedToDense(torch.autograd.Function):
         return MaskedTensor(data.to_dense(), mask.to_dense())
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
         layout = ctx.layout
 
@@ -94,6 +98,7 @@ class _MaskedToDense(torch.autograd.Function):
 
 class _MaskedToSparse(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, input):
         if not is_masked_tensor(input):
             raise ValueError("MaskedToSparse forward: input must be a MaskedTensor.")
@@ -110,12 +115,14 @@ class _MaskedToSparse(torch.autograd.Function):
         return MaskedTensor(sparse_data, sparse_mask)
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
         return grad_output.to_dense()
 
 
 class _MaskedToSparseCsr(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, input):
         if not is_masked_tensor(input):
             raise ValueError("MaskedToSparseCsr forward: input must be a MaskedTensor.")
@@ -136,18 +143,21 @@ class _MaskedToSparseCsr(torch.autograd.Function):
         return MaskedTensor(sparse_data, sparse_mask)
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
         return grad_output.to_dense()
 
 
 class _MaskedWhere(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, cond, self, other):
         ctx.mark_non_differentiable(cond)
         ctx.save_for_backward(cond)
         return torch.ops.aten.where(cond, self, other)
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def backward(ctx, grad_output):
         (cond,) = ctx.saved_tensors
 
