@@ -414,7 +414,10 @@ class JsonProfile:
         elif isinstance(dtype, torch.dtype):
             self.dtype = dtype
         else:
-            self.dtype = _dtype_map.get(dtype)
+            if dtype in _dtype_map:
+                self.dtype = _dtype_map[dtype]
+            else:
+                self.dtype = None
         self._create_devices()
 
     def convert_dtype(self, event: dict[str, Any]) -> Optional[torch.dtype]:

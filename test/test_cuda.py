@@ -577,7 +577,7 @@ print(t.is_pinned())
             src = torch.randn(
                 1000000,
                 device="cuda" if dst == "cpu" else "cpu",
-                pin_memory=dst == "cuda",
+                pin_memory=True if dst == "cuda" else False,
             )
             _test_to_non_blocking(src, try_non_blocking, dst)
 

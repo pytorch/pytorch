@@ -305,7 +305,7 @@ def _verify_options(
             continue
 
         fqns = _get_fqns(model, name)
-        fqn = fqn_param_mapping.get(param)
+        fqn = fqn_param_mapping.get(param, None)
         if fqn is not None:
             cast(set[str], fqn_param_mapping[param]).update(fqns)
             shared_params_mapping[param] = fqn_param_mapping[param]

@@ -3583,7 +3583,7 @@ class TestFX(JitTestCase):
 
         class LeafTracerNotB(Tracer):
             def is_leaf_module(self, module, name):
-                return "b" not in name
+                return False if "b" in name else True
 
         # Recompile calls added "for fun", since they
         # chain __call__ wrappers.

@@ -164,7 +164,9 @@ class B2BGEMMTest(TestCase):
         self.assertTrue("B2B_GEMM_LEFT_TRITON_ENTRANCE" not in code)
         self.assertTrue("B2B_GEMM_RIGHT_TRITON_ENTRANCE" not in code)
 
-    @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
+    @unittest.skipIf(
+        not (os.environ.get("DO_PERF_TEST") == "1"), "Perf test not enabled"
+    )
     @torch._dynamo.config.patch(recompile_limit=32)
     def test_plain_b2b_gemm_performance(self):
         """compare torch.compile(f, b2b_gemm = off) with torch.compile(f, b2b_gemm = on)"""
@@ -217,7 +219,9 @@ class B2BGEMMTest(TestCase):
         # flaky test assertion: disabled
         # self.assertTrue(average_speedup > 1)
 
-    @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
+    @unittest.skipIf(
+        not (os.environ.get("DO_PERF_TEST") == "1"), "Perf test not enabled"
+    )
     @torch._dynamo.config.patch(recompile_limit=32)
     def test_gelu_b2b_gemm_performance(self):
         """compare torch.compile(f, b2b_gemm = off) with torch.compile(f, b2b_gemm = on)"""
@@ -272,7 +276,9 @@ class B2BGEMMTest(TestCase):
         # flaky test assertion: disabled
         # self.assertTrue(average_speedup > 1)
 
-    @unittest.skipIf(os.environ.get("DO_PERF_TEST") != "1", "Perf test not enabled")
+    @unittest.skipIf(
+        not (os.environ.get("DO_PERF_TEST") == "1"), "Perf test not enabled"
+    )
     @torch._dynamo.config.patch(recompile_limit=32)
     def test_gelu_mlp_b2b_gemm_performance(self):
         """compare torch.compile(f, b2b_gemm = off) with torch.compile(f, b2b_gemm = on)"""

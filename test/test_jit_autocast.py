@@ -111,7 +111,7 @@ class TestAutocast(JitTestCase):
     def test_runtime_autocast_state_expr(self):
         @torch.jit.script
         def fn(a, b):
-            with autocast(enabled=bool((a[0][0] > 0.5).item())):
+            with autocast(enabled=True if a[0][0] > 0.5 else False):
                 return torch.mm(a, b)
         # runtime values for autocast enable argument are not supported
         with self.assertRaises(RuntimeError):

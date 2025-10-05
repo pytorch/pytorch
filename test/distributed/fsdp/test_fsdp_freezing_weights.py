@@ -155,7 +155,7 @@ class TestFreezingWeights(FSDPTest):
 
         ddp_kwargs = {
             "device_ids": [self.rank],
-            "find_unused_parameters": bool(disable_autograd),
+            "find_unused_parameters": True if disable_autograd else False,
         }
 
         model = self._create_model(

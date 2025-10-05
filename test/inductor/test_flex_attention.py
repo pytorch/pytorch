@@ -583,7 +583,9 @@ class TestFlexAttention(InductorTestCase):
             )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
-        sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=(Q_H != KV_H))
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
 
         compiled_sdpa = torch.compile(sdpa_partial)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
@@ -757,7 +759,7 @@ class TestFlexAttention(InductorTestCase):
                 return_lse=return_lse,
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
-                enable_gqa=(Q_H != KV_H),
+                enable_gqa=(not Q_H == KV_H),
                 kernel_options=kernel_options,
             )
         else:
@@ -770,7 +772,7 @@ class TestFlexAttention(InductorTestCase):
                 return_lse=return_lse,
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
-                enable_gqa=(Q_H != KV_H),
+                enable_gqa=(not Q_H == KV_H),
                 kernel_options=kernel_options,
             )
         return compiled_out, compiled_lse
@@ -815,7 +817,9 @@ class TestFlexAttention(InductorTestCase):
         if block_mask is None:
             block_mask = create_block_mask(noop_mask, Q_B, 1, Q_S, KV_S, device=device)
 
-        sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=(Q_H != KV_H))
+        sdpa_partial = create_attention(
+            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
+        )
         golden_out, golden_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
 
@@ -1460,7 +1464,7 @@ class TestFlexAttention(InductorTestCase):
 
         block_mask = create_block_mask(mask_mod, Bq, 1, S, S, device=device)
         attention = functools.partial(
-            flex_attention, block_mask=block_mask, enable_gqa=(Hq != Hkv)
+            flex_attention, block_mask=block_mask, enable_gqa=(not Hq == Hkv)
         )
 
         self.run_test_with_call(attention, dtype, device, Bq, Hq, S, D, Bkv, Hkv, S, D)
