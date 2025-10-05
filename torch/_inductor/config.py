@@ -865,7 +865,7 @@ def parallel_compile_enabled_internally() -> bool:
 
     jk_name = "pytorch/inductor:enable_parallel_compile_version"
     version = torch._utils_internal.justknobs_getval_int(jk_name)
-    return version <= ENABLE_PARALLEL_COMPILE_VERSION
+    return ENABLE_PARALLEL_COMPILE_VERSION >= version
 
 
 def decide_compile_threads() -> int:
