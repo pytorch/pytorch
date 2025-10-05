@@ -7,6 +7,7 @@ import torch.utils.checkpoint
 from torch._dynamo.test_case import run_tests
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def checkpoint_wrapper(fn):
@@ -157,6 +158,7 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'mul', {'stage': 0})""",  # noqa: B950
         )
 
+    @requires_cuda_and_triton
     def test_ac_flex_attention(self):
         def _squared(score, b, h, m, n):
             return score * score
