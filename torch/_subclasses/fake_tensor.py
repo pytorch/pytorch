@@ -15,8 +15,17 @@ import typing
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Literal, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self, TypeGuard
+from typing import (
+    Any,
+    cast,
+    Literal,
+    Optional,
+    TYPE_CHECKING,
+    TypeGuard,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Self
 from weakref import ReferenceType
 
 import torch
@@ -40,7 +49,6 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.types import IntLikeType, py_sym_types
-from torch.utils._backport_slots import dataclass_slots
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -54,7 +62,7 @@ from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputSt
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterable, Mapping, Sequence
+    from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
     from types import TracebackType
 
     from torch._guards import Source
@@ -1008,8 +1016,7 @@ class FakeTensor(Tensor):
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
 
 
-@dataclass_slots
-@dataclass
+@dataclass(slots=True)
 class TensorMetadata:
     """
     The Tensor metadata relevant to hashing FakeTensors when caching.
@@ -1093,8 +1100,7 @@ def extract_tensor_metadata(t: Tensor) -> TensorMetadata:
     )
 
 
-@dataclass_slots
-@dataclass
+@dataclass(slots=True)
 class _DispatchCacheKey:
     """
     Key for the FakeTensor dispatch cache.
@@ -1127,8 +1133,7 @@ class SingletonConstant:
     pass
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DispatchCacheEntryOutputInfo:
     """
     Entry type for the FakeTensor dispatch cache for an output. Accounts for three
@@ -1147,8 +1152,7 @@ class _DispatchCacheEntryOutputInfo:
     constant_value: Optional[Any] = SingletonConstant
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DispatchCacheValidEntry:
     """
     Entry type for the FakeTensor dispatch cache. It supports two types of outputs
@@ -1162,8 +1166,7 @@ class _DispatchCacheValidEntry:
     is_output_tuple: bool = False
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DispatchCacheBypassEntry:
     """
     Entry type for a negative cache entry.
@@ -1176,8 +1179,7 @@ if TYPE_CHECKING:
     _DispatchCacheEntry = Union[_DispatchCacheValidEntry, _DispatchCacheBypassEntry]
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _BypassDispatchCache(Exception):
     """
     Signals cases that should skip FakeTensor caching.
@@ -1186,8 +1188,7 @@ class _BypassDispatchCache(Exception):
     reason: str
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DispatchCacheInfo:
     """
     Information about the state of the FakeTensor dispatch cache.
@@ -2638,7 +2639,9 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             func not in meta_table
             and not self.cpp_meta_supports_symint(func)
-            and not (has_symbolic_sizes and func in self._view_fake_tensor_impl_ops)
+            and not (
+                has_symbolic_sizes and func in self._unbacked_special_fake_handling_ops
+            )
         ):
             from torch._decomp import decomposition_table
 
@@ -2947,8 +2950,10 @@ class FakeTensorMode(TorchDispatchMode):
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
     )
 
-    _view_fake_tensor_impl_ops = ordered_set(
-        aten.view.default, aten._unsafe_view.default
+    _unbacked_special_fake_handling_ops = ordered_set(
+        aten.view.default,
+        aten._unsafe_view.default,
+        aten.slice.Tensor,
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:
