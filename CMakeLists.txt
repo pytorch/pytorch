@@ -127,13 +127,9 @@ if(APPLE)
       OUTPUT_VARIABLE _macosx_sdk_version
       OUTPUT_STRIP_TRAILING_WHITESPACE)
     if(_exit_code EQUAL 0)
-      set(_MPS_supported_os_version OFF)
-      if(_macosx_sdk_version VERSION_GREATER_EQUAL 12.3)
-        set(_MPS_supported_os_version ON)
-      endif()
       message(
         STATUS
-          "sdk version: ${_macosx_sdk_version}, mps supported: ${_MPS_supported_os_version}"
+          "sdk version: ${_macosx_sdk_version}, mps supported: ON"
       )
       execute_process(
         COMMAND bash -c "xcrun --sdk macosx --show-sdk-path"
@@ -153,9 +149,7 @@ if(APPLE)
         PATHS ${_SDK_SEARCH_PATH}
         NO_DEFAULT_PATH)
 
-      if(_MPS_supported_os_version
-         AND _MPS_fwrk_path_
-         AND _MPS_sdk_path_)
+      if(_MPS_fwrk_path_ AND _MPS_sdk_path_)
         set(MPS_FOUND ON)
         message(STATUS "MPSGraph framework found")
       else()
