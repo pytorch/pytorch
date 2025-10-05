@@ -123,9 +123,21 @@ class FuzzTemplate:
 
                 if isinstance(spec, ScalarSpec):
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-                    code_lines.append(
-                        f"{arg_name} = torch.tensor(torch.randn(()), dtype={dtype_str}).item()"
-                    )
+                    if spec.dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
+                        # For integer scalars, use randint to avoid always getting 0
+                        code_lines.append(
+                            f"{arg_name} = int(torch.randint(5, 30, ()).item())"
+                        )
+                    elif spec.dtype == torch.bool:
+                        # For boolean scalars, use randint and cast to bool
+                        code_lines.append(
+                            f"{arg_name} = bool(torch.randint(0, 2, ()).item())"
+                        )
+                    else:
+                        # For float scalars, use randn
+                        code_lines.append(
+                            f"{arg_name} = float(torch.randn((), dtype={dtype_str}).item())"
+                        )
 
                 elif isinstance(spec, TensorSpec):
                     size_str = str(spec.size)
