@@ -236,7 +236,6 @@ class TestUnbackedSymints(InductorTestCase):
 
         def fn(x, w, repeats, is_bmm):
             u0 = repeats.item()
-            torch._check_is_size(u0)
 
             x_unbacked = x.expand(u0, 32)
             w_unbacked = w.expand(32, u0)
@@ -268,7 +267,6 @@ class TestUnbackedSymints(InductorTestCase):
     def test_unbacked_range_tree_divisor(self, device):
         def fn(x, num):
             u0 = num.item()
-            torch._check_is_size(u0)
             zeros = torch.zeros(u0, device=device, dtype=torch.int)
             return (torch.ops.aten.index(x, [None, zeros]),)
 
@@ -302,8 +300,6 @@ class TestUnbackedSymints(InductorTestCase):
     def test_unbacked_repeat(self, device):
         def fn(x, a, b):
             u0, u1 = a.item(), b.item()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
 
             return x.repeat(u0, 2).repeat(2, u1)
 
@@ -320,7 +316,8 @@ class TestUnbackedSymints(InductorTestCase):
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     @parametrize("dynamic", [False, True, None])
-    def test_unbacked_slice_on_subclass(self, device, dynamic):
+    @parametrize("with_checks", [False, True])
+    def test_unbacked_slice_on_subclass(self, device, dynamic, with_checks):
         from torch.testing._internal.common_subclass import WrapperTensor
         from torch.utils._pytree import tree_map
 
@@ -361,12 +358,15 @@ class TestUnbackedSymints(InductorTestCase):
                     inp = args[0]
 
                     start = inp.slice_bounds[0].item()
-                    torch._check_is_size(start)
-                    torch._check(start <= inp.size(0))
+                    # Test that it works with or without torch checks.
+                    if with_checks:
+                        torch._check_size(start)
+                        torch._check(start <= inp.size(0))
 
                     length = (args[0].slice_bounds[1] - args[0].slice_bounds[0]).item()
-                    torch._check_is_size(length)
-                    torch._check(start + length <= inp.size(0))
+                    if with_checks:
+                        torch._check_size(length)
+                        torch._check(start + length <= inp.size(0))
 
                     return CustomSliceSubclass(
                         func(args[0].t, dim=0, start=start, end=(start + length)),
