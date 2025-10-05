@@ -50,7 +50,6 @@ from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
 from .ir import (
-    assign_origin_node,
     get_device_type,
     GraphPartitionSignature,
     MultiOutput,
@@ -2360,7 +2359,10 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
-        if config.reorder_for_compute_comm_overlap:
+
+        # reorder_for_compute_comm_overlap may do benchmarking to estimate
+        # op runtime. Disable it for now in deterministic mode.
+        if not config.deterministic and config.reorder_for_compute_comm_overlap:
             if not config.reorder_for_peak_memory:
                 from .memory import assign_memory_planning_info_for_scheduler_buffers
 
@@ -3164,15 +3166,11 @@ class Scheduler:
                         node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
-                with ir.IRNode.current_origins(multi_node.origins):
-                    out_tensorbox = min_node_unfused.output_node()
+                out_tensorbox = min_node_unfused.output_node()
                 out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
-
-                if multi_node.origin_node:
-                    assign_origin_node(out_tensorbox, multi_node.origin_node)
 
                 out_buffer.layout = multi_node.layout
                 replace_operation_buffer(multi_node, out_buffer)
@@ -4978,7 +4976,7 @@ class Scheduler:
                 if name in name_to_node
             }
             input_deallocation = {
-                name: True if name in buffer_names_to_free else False
+                name: name in buffer_names_to_free
                 for name in partition_input_names
                 if name in name_to_node
             }

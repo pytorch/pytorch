@@ -28,6 +28,7 @@ exclude_patterns = [
     'torch/lib/**',
     'venv/**',
     '**/*.pyi',
+    "tools/experimental/dynamic_shapes/torchfuzz/**",
     'tools/test/test_selective_build.py',
 ]
 command = [
