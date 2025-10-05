@@ -8421,6 +8421,21 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_matrix_exp_backward_input_validation(self, device, dtype):
+
+        scalar_tensor = torch.tensor(1.0, dtype=dtype, device=device)
+        grad_1d = torch.randn(1, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
+            torch.ops.aten.matrix_exp_backward(scalar_tensor, grad_1d)
+
+        non_square = torch.randn(2, 3, dtype=dtype, device=device)
+        grad_non_square = torch.randn(2, 3, dtype=dtype, device=device)
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            torch.ops.aten.matrix_exp_backward(non_square, grad_non_square)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_linalg_matrix_exp_perverse_nan_values(self, device, dtype):
         expm = torch.linalg.matrix_exp
 

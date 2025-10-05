@@ -41,7 +41,7 @@ def move_cutlass_compiled_cache() -> None:
         return
 
     if config.is_fbcode():
-        import python_cutlass  # type: ignore[import-not-found]
+        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]
     else:
         import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
 
@@ -78,8 +78,8 @@ def try_import_cutlass() -> bool:
     """
     if config.is_fbcode():
         try:
+            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
             import cutlass_library  # type: ignore[import-not-found]
-            import python_cutlass  # type: ignore[import-not-found]  # noqa: F401
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
@@ -112,13 +112,13 @@ def try_import_cutlass() -> bool:
     )
 
     cutlass_library_src_path = path_join(cutlass_python_path, "cutlass_library")
-    cutlass_src_path = path_join(cutlass_python_path, "cutlass")
+    cutlass_cppgen_src_path = path_join(cutlass_python_path, "cutlass_cppgen")
     pycute_src_path = path_join(cutlass_python_path, "pycute")
 
     tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
-    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass_cppgen")
+    dst_link_cutlass_cppgen = path_join(tmp_cutlass_full_path, "cutlass_cppgen")
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
 
     # mock modules to import cutlass
@@ -145,7 +145,9 @@ def try_import_cutlass() -> bool:
             link_and_append(
                 dst_link_library, cutlass_library_src_path, tmp_cutlass_full_path
             )
-            link_and_append(dst_link_cutlass, cutlass_src_path, tmp_cutlass_full_path)
+            link_and_append(
+                dst_link_cutlass_cppgen, cutlass_cppgen_src_path, tmp_cutlass_full_path
+            )
             link_and_append(dst_link_pycute, pycute_src_path, tmp_cutlass_full_path)
 
             for module in mock_modules:
@@ -421,7 +423,7 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     offset = inductor_layout.offset
 
     def is_static_int(number):
-        return isinstance(number, (int, sympy.Integer))
+        return isinstance(number, (int | sympy.Integer))
 
     def a_factor_of(x, alignment):
         if is_static_int(x) and is_static_int(alignment):
