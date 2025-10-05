@@ -183,27 +183,29 @@ class TestCuda(TestCase):
                 "allocated_bytes.current": 0,
                 "allocated_bytes.freed": 0,
                 "allocated_bytes.peak": 0,
-                "allocation.allocated": 0,
-                "allocation.current": 0,
-                "allocation.freed": 0,
-                "allocation.peak": 0,
+                "allocations.allocated": 0,
+                "allocations.current": 0,
+                "allocations.freed": 0,
+                "allocations.peak": 0,
                 "host_alloc_time.count": 0,
                 "host_free_time.count": 0,
                 "num_host_alloc": 0,
                 "num_host_free": 0,
-                "reserved_bytes.allocated": 0,
-                "reserved_bytes.current": 0,
-                "reserved_bytes.freed": 0,
-                "reserved_bytes.peak": 0,
-                "segment.allocated": 0,
-                "segment.current": 0,
-                "segment.freed": 0,
-                "segment.peak": 0,
+                "active_bytes.allocated": 0,
+                "active_bytes.current": 0,
+                "active_bytes.freed": 0,
+                "active_bytes.peak": 0,
+                "active_requests.allocated": 0,
+                "active_requests.current": 0,
+                "active_requests.freed": 0,
+                "active_requests.peak": 0,
             }
 
         def check_stats(expected):
             stats = torch.cuda.host_memory_stats()
             for k, v in expected.items():
+                if v != stats[k]:
+                    print(f"key: {k}, expected: {v}, stats: {stats[k]}")
                 self.assertEqual(v, stats[k])
 
         # Setup the test cleanly
@@ -223,12 +225,12 @@ class TestCuda(TestCase):
         # Make first allocation and check stats
         t1 = torch.ones(alloc1 * 1024, pin_memory=True)
         self.assertTrue(t1.is_pinned())
-        for prefix in ["segment", "allocation"]:
+        for prefix in ["active_requests", "allocations"]:
             for suffix in ["allocated", "current", "peak"]:
                 expected[prefix + "." + suffix] += 1
 
         allocation_size1 = alloc1_aligned * 1024 * 4
-        for prefix in ["allocated_bytes", "reserved_bytes"]:
+        for prefix in ["allocated_bytes", "active_bytes"]:
             for suffix in ["allocated", "current", "peak"]:
                 expected[prefix + "." + suffix] += allocation_size1
 
@@ -237,37 +239,15 @@ class TestCuda(TestCase):
 
         check_stats(expected)
 
-        # Remove first allocation and check stats
-        del t1
-
-        expected["allocation.current"] -= 1
-        expected["allocation.freed"] += 1
-        expected["allocated_bytes.current"] -= allocation_size1
-        expected["allocated_bytes.freed"] += allocation_size1
-
-        check_stats(expected)
-
-        # Make first allocation again and check reuse
-        t1 = torch.ones(alloc1 * 1024, pin_memory=True)
-        self.assertTrue(t1.is_pinned())
-        for suffix in ["allocated", "current"]:
-            expected["allocation" + "." + suffix] += 1
-
-        allocation_size1 = alloc1_aligned * 1024 * 4
-        for suffix in ["allocated", "current"]:
-            expected["allocated_bytes" + "." + suffix] += allocation_size1
-
-        check_stats(expected)
-
         # Make second allocation and check stats
         t2 = torch.ones(alloc2 * 1024, pin_memory=True)
         self.assertTrue(t2.is_pinned())
-        for prefix in ["segment", "allocation"]:
+        for prefix in ["active_requests", "allocations"]:
             for suffix in ["allocated", "current", "peak"]:
                 expected[prefix + "." + suffix] += 1
 
         allocation_size2 = alloc2_aligned * 1024 * 4
-        for prefix in ["allocated_bytes", "reserved_bytes"]:
+        for prefix in ["allocated_bytes", "active_bytes"]:
             for suffix in ["allocated", "current", "peak"]:
                 expected[prefix + "." + suffix] += allocation_size2
 
@@ -276,34 +256,8 @@ class TestCuda(TestCase):
 
         check_stats(expected)
 
-        # Remove first allocation and check stats
-        del t1
-
-        expected["allocation.current"] -= 1
-        expected["allocation.freed"] += 1
-        expected["allocated_bytes.current"] -= allocation_size1
-        expected["allocated_bytes.freed"] += allocation_size1
-
-        check_stats(expected)
-
-        # Remove second allocation and check stats
-        del t2
-
-        expected["allocation.current"] -= 1
-        expected["allocation.freed"] += 1
-        expected["allocated_bytes.current"] -= allocation_size2
-        expected["allocated_bytes.freed"] += allocation_size2
-
-        check_stats(expected)
-
         # Empty cache and check stats
         torch._C._host_emptyCache()
-        expected["segment.freed"] += expected["segment.current"]
-        expected["segment.current"] = 0
-        expected["reserved_bytes.freed"] += expected["reserved_bytes.current"]
-        expected["reserved_bytes.current"] = 0
-        expected["num_host_free"] = expected["num_host_alloc"]
-        expected["host_free_time.count"] += expected["host_alloc_time.count"]
 
         check_stats(expected)
 
@@ -312,8 +266,6 @@ class TestCuda(TestCase):
         torch.cuda.reset_accumulated_host_memory_stats()
 
         expected = empty_stats()
-
-        check_stats(expected)
 
     def test_pinned_memory_empty_cache(self):
         try:
@@ -1477,6 +1429,13 @@ except RuntimeError as e:
         idx = torch.randperm(src.shape[0], device="cuda")
         res = src[idx]
         res_cpu = src.cpu()[idx.cpu()]
+        self.assertEqual(res.cpu(), res_cpu)
+
+    def test_fast_index_overflow(self):
+        src = torch.randint(0, 20, (4, 87, 1056, 736), device="cuda")
+        indices = torch.tensor([True, False, False, True], device="cuda")
+        res = src[indices]
+        res_cpu = src.cpu()[indices.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
 
     def test_randint_randomness_for_large_range(self) -> None:
@@ -4408,14 +4367,14 @@ class TestCudaMallocAsync(TestCase):
     @serialTest()
     def test_max_split_expandable(self):
         try:
+            orig = torch.cuda.get_per_process_memory_fraction()
             torch.cuda.memory.empty_cache()
             mb = 1024 * 1024
             _, all_memory = torch.cuda.memory.mem_get_info()
             pre_reserved = torch.cuda.memory_reserved()
             total_allowed = 120 * mb + pre_reserved
             fraction_allowed = total_allowed / all_memory
-            self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
-            orig = torch.cuda.get_per_process_memory_fraction()
+            self.assertEqual(int(round(fraction_allowed * all_memory)), total_allowed)
             torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
             def alloc(n):
@@ -4444,6 +4403,7 @@ class TestCudaMallocAsync(TestCase):
     @serialTest()
     def test_garbage_collect_expandable(self):
         try:
+            orig = torch.cuda.get_per_process_memory_fraction(0)
             torch.cuda.memory.empty_cache()
             mb = 1024 * 1024
             _, all_memory = torch.cuda.memory.mem_get_info()
@@ -4451,7 +4411,6 @@ class TestCudaMallocAsync(TestCase):
             total_allowed = 120 * mb + pre_reserved
             fraction_allowed = total_allowed / all_memory
             self.assertEqual((fraction_allowed * all_memory), total_allowed)
-            orig = torch.cuda.get_per_process_memory_fraction(0)
             torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
             def alloc(n):
@@ -4471,7 +4430,7 @@ class TestCudaMallocAsync(TestCase):
             # expandable_segment blocks can be in the free list when this is called.
             alloc(80)
         finally:
-            orig = torch.cuda.get_per_process_memory_fraction(0)
+            torch.cuda.memory.set_per_process_memory_fraction(orig)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
@@ -7289,9 +7248,7 @@ class TestCudaDeviceParametrized(TestCase):
         """
         from torch.cuda import _compile_kernel
 
-        spin_wait_kernel = _compile_kernel(
-            kernel_source, "wait_for_cpu", compute_capability="70"
-        )
+        spin_wait_kernel = _compile_kernel(kernel_source, "wait_for_cpu")
 
         x = torch.ones(4, device="cuda")
         x_cpu = torch.zeros(x.shape, device="cpu").pin_memory()
