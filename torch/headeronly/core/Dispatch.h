@@ -129,16 +129,24 @@
 // but we're just being safe (and it doesn't hurt.)  Note we must
 // use it to shut up warnings about unused store.
 
-#define AT_DISPATCH_SWITCH(TYPE, NAME, ...)                                  \
-  [&] {                                                                      \
-    const auto& the_type = TYPE;                                             \
-    constexpr const char* at_dispatch_name = NAME;                           \
-    /* don't use TYPE again in case it is an expensive or side-effect op */  \
-    torch::headeronly::ScalarType _st = [the_type]() { return the_type; }(); \
-    AT_DISPATCH_SWITCH_PRELUDE(at_dispatch_name, _st);                       \
-    switch (_st) {                                                           \
-      __VA_ARGS__                                                            \
-      default:                                                               \
-        AT_DISPATCH_DEFAULT(at_dispatch_name, _st);                          \
-    }                                                                        \
+namespace detail {
+
+inline at::ScalarType scalar_type(at::ScalarType s) {
+  return s;
+}
+
+} // namespace detail
+
+#define AT_DISPATCH_SWITCH(TYPE, NAME, ...)                                 \
+  [&] {                                                                     \
+    const auto& the_type = TYPE;                                            \
+    constexpr const char* at_dispatch_name = NAME;                          \
+    /* don't use TYPE again in case it is an expensive or side-effect op */ \
+    torch::headeronly::ScalarType _st = ::detail::scalar_type(the_type);    \
+    AT_DISPATCH_SWITCH_PRELUDE(at_dispatch_name, _st);                      \
+    switch (_st) {                                                          \
+      __VA_ARGS__                                                           \
+      default:                                                              \
+        AT_DISPATCH_DEFAULT(at_dispatch_name, _st);                         \
+    }                                                                       \
   }()
