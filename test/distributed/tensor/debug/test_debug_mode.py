@@ -248,6 +248,29 @@ class TestDTensorDebugMode(TestCase):
             "redistribute_input(1, [S(0)] -> [R])" in debug_mode.debug_string()
         )
 
+    def test_debug_mode_higher_order_cond(self):
+        """Test DebugMode with higher order operation."""
+        x = torch.randn(1, 8, requires_grad=True)
+
+        with DebugMode(record_torchfunction=True) as debug_mode:
+            # rewrite torch.conda as torch.ops.higher_order.cond to avoid compilation
+            torch.ops.higher_order.cond(
+                torch.tensor(True), lambda x: x + 1, lambda x: x - 1, (x,)
+            )
+
+        # Verify that cond operations are captured in debug mode
+        self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
+
+    def test_compile(self):
+        @torch.compile
+        def f(x):
+            return x.sin().cos()
+
+        x = torch.randn(8)
+        with DebugMode() as debug_mode:
+            f(x)
+        self.assertEqual(len(debug_mode.debug_string()), 0)
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 

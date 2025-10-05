@@ -15,7 +15,7 @@ class SqueezeOperator(Operator):
         """Squeeze can only produce tensors that are the result of removing dimensions of size 1."""
         # A tensor can be produced by squeeze if we can find a valid input tensor
         # that, when squeezed, results in the output tensor
-        # tensor parameter is needed for the interface but not used in this implementation
+        # This op can always produce a given shape by inserting a size-1 dim and then squeezing it.
         return True
 
     def decompose(self, tensor):
@@ -38,21 +38,16 @@ class SqueezeOperator(Operator):
         stride = tuple(stride)
 
         t_in = Tensor(input_shape, stride, tensor.dtype, tensor.device, tensor.supported_ops)
-        # Store which dimension to squeeze
-        t_in._squeeze_dim = insert_pos
-        self._last_input_tensor = t_in
+        # Store which dimension to squeeze on the OUTPUT tensor to avoid shared-operator state bugs
+        tensor._squeeze_dim = insert_pos
 
         return [t_in]
 
     def codegen(self, output_name, input_names, output_tensor):
         """Generate code for squeeze operation."""
-        # Get the dimension to squeeze from the stored metadata
-        input_tensor = self._last_input_tensor if hasattr(self, '_last_input_tensor') else None
-        
-        if input_tensor and hasattr(input_tensor, '_squeeze_dim'):
-            dim = input_tensor._squeeze_dim
-            # Use the specific dimension we calculated during decomposition
+        # Read the squeeze dim from the output tensor metadata (set during decompose)
+        dim = getattr(output_tensor, "_squeeze_dim", None)
+        if dim is not None:
             return f"{output_name} = torch.squeeze({input_names[0]}, {dim})"
-        else:
-            # Fallback: use parameterless squeeze (removes all size-1 dims)
-            return f"{output_name} = torch.squeeze({input_names[0]})"
+        # Fallback: parameterless squeeze (removes all size-1 dims)
+        return f"{output_name} = torch.squeeze({input_names[0]})"

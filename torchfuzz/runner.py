@@ -41,12 +41,15 @@ class ProgramRunner:
             except ImportError:
                 devices = []
         if devices:
+            if len(devices) > 1:
+                devices = devices[1:]  # Skip the first device
             selected_device = random.choice(devices)
             env = os.environ.copy()
             env["CUDA_VISIBLE_DEVICES"] = selected_device
             print(f"Selected CUDA_VISIBLE_DEVICES={selected_device}")
         else:
             env = None  # No GPU available or torch not installed
+
 
         try:
             result = subprocess.run(

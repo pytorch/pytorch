@@ -279,42 +279,6 @@ bool Context::userEnabledOverrideableSDP() const {
   return enabled_overrideable;
 }
 
-static constexpr const auto cublas_config_var_name = "CUBLAS_WORKSPACE_CONFIG";
-static constexpr const std::array<const char*, 2> cublas_deterministic_configs = {":4096:8", ":16:8"};
-
-bool Context::checkCuBLASConfigDeterministic() {
-  // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
-  // is set to deterministic setting
-  if (hasCUDART()) {
-    const auto workspace_config = c10::utils::get_env(cublas_config_var_name);
-    return (workspace_config == cublas_deterministic_configs[0] || workspace_config == cublas_deterministic_configs[1]);
-  }
-  return true;
-}
-
-void Context::alertCuBLASConfigNotDeterministic() const {
-  static const bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
-  if (C10_LIKELY(!deterministicAlgorithms() || cublas_config_deterministic)) {
-    return;
-  }
-
-  auto msg = c10::str(
-    "Deterministic behavior was enabled with either `torch.use_deterministic_algorithms(True)` or ",
-    "`at::Context::setDeterministicAlgorithms(true)`, but this operation is not deterministic because ",
-    "it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this ",
-    "case, you must set an environment variable before running your PyTorch application: ",
-    cublas_config_var_name, "=", cublas_deterministic_configs[0], " or ",
-    cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
-    "https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility"
-  );
-
-  if (deterministicAlgorithmsWarnOnly()) {
-    TORCH_WARN(msg);
-  } else {
-    TORCH_CHECK(false, msg);
-  }
-}
-
 bool Context::benchmarkCuDNN() const {
   return benchmark_cudnn;
 }
