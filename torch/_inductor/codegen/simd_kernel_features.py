@@ -290,8 +290,7 @@ class MemoryEstimator:
             )
 
             for dep in rw._reads:
-                if not isinstance(dep, MemoryDep):
-                    continue
+                assert isinstance(dep, MemoryDep)
                 dep = dep.simplify_with_ranges()
                 if not self.persistent.writes.get(dep.name):  # cache miss?
                     self.persistent.reads[dep.name].add(dep)
@@ -309,8 +308,7 @@ class MemoryEstimator:
                         self.must_keep_buffers.add(dep.name)
 
             for dep in rw._writes:
-                if not isinstance(dep, MemoryDep):
-                    continue
+                assert isinstance(dep, MemoryDep)
                 dep = dep.simplify_with_ranges()
                 self.store_buffer_names.add(dep.name)
                 self.persistent.writes[dep.name].add(dep)

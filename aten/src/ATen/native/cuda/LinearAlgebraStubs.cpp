@@ -8,6 +8,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/DynamicLibrary.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>

@@ -1,8 +1,7 @@
-from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, NamedTuple, Optional, TypeVar, Union
+from typing import Any, Callable, NamedTuple, Optional, TypeVar, Union
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch

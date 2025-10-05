@@ -373,9 +373,8 @@ import os
 import sys
 import uuid
 from argparse import ArgumentParser, REMAINDER
-from collections.abc import Callable
 from importlib import metadata
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env

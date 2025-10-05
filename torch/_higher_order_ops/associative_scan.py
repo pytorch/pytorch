@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
@@ -197,14 +196,14 @@ def associative_scan(
     def _validate_input(cfn, lxs, d, r, cm):
         # Basic arguments check
         if not callable(cfn):
-            raise ValueError(f"Combine_fn must be a callable, but got {cfn}")
+            raise ValueError("Combine_fn must be a callable, but got {cfn}")
         if not isinstance(d, int):
             raise ValueError("Dim must be an int, but got " + str(type(d)))
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
         if cm not in ["pointwise", "generic"]:
             raise ValueError(
-                f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
+                "Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
         if cm == "pointwise" and not all(l.device.type == "cuda" for l in lxs):
             raise ValueError(

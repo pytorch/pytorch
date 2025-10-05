@@ -7,8 +7,9 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 
 import collections
 import typing
-from collections.abc import Callable, Iterable
-from typing import Any, Optional, TypeGuard, TypeVar, Union
+from collections.abc import Iterable
+from typing import Any, Callable, Optional, TypeVar, Union
+from typing_extensions import TypeGuard
 
 import torch
 import torch.utils._pytree as pytree

@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable
 from functools import wraps
-from typing import Concatenate, Generic, Optional, Protocol
-from typing_extensions import ParamSpec, TypeVar
+from typing import Callable, Generic, Optional, Protocol
+from typing_extensions import Concatenate, ParamSpec, TypeVar
 
 import torch
 import torch.nn as nn

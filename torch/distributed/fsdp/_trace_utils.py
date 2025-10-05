@@ -1,9 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
-from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 import torch
 import torch.nn as nn

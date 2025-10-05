@@ -324,11 +324,10 @@ def _create_subgraph(
     return subgraph, external_node_usages, node_usage_to_tuple_elems, ind_to_tuple_spec
 
 
-def _stable_topological_sort_impl(
+def _stable_topological_sort(
     graph: torch.fx.Graph,
     node_to_additional_deps: dict[Node, OrderedSet[Node]],
-    do_sort: bool = True,
-) -> bool:
+) -> None:
     # Nodes are in exactly one of these four collections:
 
     # - Nodes in `pending` are waiting to be processed (in reverse order):
@@ -367,7 +366,7 @@ def _stable_topological_sort_impl(
             waiting[waiting_for[-1]].append(node)
         else:
             ready.add(node)
-            if cursor and cursor.next is not node and do_sort:
+            if cursor and cursor.next is not node:
                 cursor.append(node)
             cursor = node
             # Mark the nodes that have been waiting for this node to finish as
@@ -375,23 +374,7 @@ def _stable_topological_sort_impl(
             pending.extend(reversed(waiting.pop(node, ())))
 
     ready.update(outputs)
-    return not waiting and len(ready) == len(graph.nodes)
-
-
-def _stable_topological_sort(
-    graph: torch.fx.Graph,
-    node_to_additional_deps: dict[Node, OrderedSet[Node]],
-) -> None:
-    assert _stable_topological_sort_impl(graph, node_to_additional_deps)
-
-
-def _has_cycle(
-    graph: torch.fx.Graph,
-    node_to_additional_deps: dict[Node, OrderedSet[Node]],
-) -> bool:
-    return not _stable_topological_sort_impl(
-        graph, node_to_additional_deps, do_sort=False
-    )
+    assert not waiting and len(ready) == len(graph.nodes)
 
 
 def _populate_additional_deps(

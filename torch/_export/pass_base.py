@@ -2,9 +2,8 @@
 import operator
 import traceback
 import typing
-from collections.abc import Callable
 from contextlib import nullcontext
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 from torch import fx

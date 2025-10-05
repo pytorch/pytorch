@@ -89,7 +89,7 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export USE_MKLDNN=1
   export USE_MKLDNN_ACL=1
-  export ACL_ROOT_DIR=/acl
+  export ACL_ROOT_DIR=/ComputeLibrary
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
@@ -290,13 +290,13 @@ else
 
       WERROR=1 python setup.py clean
 
-      WERROR=1 python -m build --wheel --no-isolation
+      WERROR=1 python setup.py bdist_wheel
     else
       python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
-      python -m build --wheel --no-isolation
+      python setup.py bdist_wheel
     fi
     pip_install_whl "$(echo dist/*.whl)"
 

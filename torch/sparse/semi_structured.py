@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from collections import namedtuple
-from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 from torch.sparse._semi_structured_conversions import (

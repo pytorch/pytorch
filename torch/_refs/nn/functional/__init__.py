@@ -1,10 +1,9 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
-from collections.abc import Callable
 from functools import wraps
-from typing import Concatenate, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import Callable, Optional, TypeVar, Union
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._prims as prims

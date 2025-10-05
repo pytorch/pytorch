@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from enum import auto, Enum
 from functools import partial
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch
 import torch.nn as nn

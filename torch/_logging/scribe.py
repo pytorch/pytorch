@@ -1,5 +1,5 @@
-from collections.abc import Callable
-from typing import TypeAlias, Union
+from typing import Callable, Union
+from typing_extensions import TypeAlias
 
 
 try:

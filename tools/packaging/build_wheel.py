@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 ROOT_PATH = Path(__file__).absolute().parent.parent.parent
+SETUP_PY_PATH = ROOT_PATH / "setup.py"
 REQUIREMENTS_PATH = ROOT_PATH / "requirements.txt"
 PYPROJECT_TOML_PATH = ROOT_PATH / "pyproject.toml"
 
@@ -142,27 +143,18 @@ class Builder:
     def __init__(self, interpreter: str) -> None:
         self.interpreter = interpreter
 
-    def build_wheel(self, destination: str) -> bool:
-        logger.info("Running bdist_wheel -d %s", destination)
+    def setup_py(self, cmd_args: list[str]) -> bool:
         return (
-            run_cmd(
-                [
-                    self.interpreter,
-                    "-m",
-                    "build",
-                    "--wheel",
-                    "--no-isolation",
-                    "--outdir",
-                    destination,
-                    str(ROOT_PATH),
-                ]
-            ).returncode
-            == 0
+            run_cmd([self.interpreter, str(SETUP_PY_PATH), *cmd_args]).returncode == 0
         )
+
+    def bdist_wheel(self, destination: str) -> bool:
+        logger.info("Running bdist_wheel -d %s", destination)
+        return self.setup_py(["bdist_wheel", "-d", destination])
 
     def clean(self) -> bool:
         logger.info("Running clean")
-        return run_cmd([self.interpreter, "setup.py", "clean"]).returncode == 0
+        return self.setup_py(["clean"])
 
     def install_requirements(self) -> None:
         logger.info("Installing requirements")
@@ -242,7 +234,7 @@ def main() -> None:
 
             start_time = time.time()
 
-            builder.build_wheel(args.destination)
+            builder.bdist_wheel(args.destination)
 
             end_time = time.time()
 

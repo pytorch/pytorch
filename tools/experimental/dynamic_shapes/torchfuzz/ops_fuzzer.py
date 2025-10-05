@@ -216,47 +216,31 @@ class OperationGraph:
 
 def fuzz_spec(template: str = "default") -> Spec:
     """
-    Generate a random Spec (either TensorSpec or ScalarSpec) using template's distribution preferences.
+    Generate a random Spec (either TensorSpec or ScalarSpec) using tensor fuzzing functions.
+
+    Utilizes:
+    - fuzz_torch_tensor_type() for random dtype
+    - fuzz_tensor_size() for random tensor size
+    - fuzz_valid_stride() for random valid strides
 
     Args:
-        template: Template name to determine configuration and distribution
+        template: Template name to determine supported dtypes
 
     Returns:
-        Spec: Either a TensorSpec or ScalarSpec according to template's distribution
+        Spec: Either a TensorSpec (80% probability) or ScalarSpec (20% probability) with random properties
     """
-    # Try to use template's custom distribution if available
-    try:
-        # Instantiate template
-        if template == "dtensor":
-            from torchfuzz.codegen import DTensorFuzzTemplate
+    # Get random dtype based on template
+    dtype = fuzz_torch_tensor_type(template)
 
-            fuzz_template = DTensorFuzzTemplate()
-        elif template == "unbacked":
-            from torchfuzz.codegen import UnbackedFuzzTemplate
+    # 20% probability of returning ScalarSpec
+    if random.random() < 0.2:
+        return ScalarSpec(dtype=dtype)
 
-            fuzz_template = UnbackedFuzzTemplate()
-        else:
-            from torchfuzz.codegen import DefaultFuzzTemplate
-
-            fuzz_template = DefaultFuzzTemplate()
-
-        # Use template's custom spec generation
-        return fuzz_template.fuzz_spec_custom()
-
-    except Exception:
-        # Fallback to original hardcoded behavior if template fails
-        # Get random dtype based on template
-        dtype = fuzz_torch_tensor_type(template)
-
-        # 20% probability of returning ScalarSpec
-        if random.random() < 0.2:
-            return ScalarSpec(dtype=dtype)
-
-        # 80% probability of returning TensorSpec
-        # Get random size and corresponding stride
-        size = fuzz_tensor_size()
-        stride = fuzz_valid_stride(size)
-        return TensorSpec(size=size, stride=stride, dtype=dtype)
+    # 80% probability of returning TensorSpec
+    # Get random size and corresponding stride
+    size = fuzz_tensor_size()
+    stride = fuzz_valid_stride(size)
+    return TensorSpec(size=size, stride=stride, dtype=dtype)
 
 
 def fuzz_op(
@@ -377,11 +361,8 @@ def fuzz_operation_graph(
 
         random.seed(seed)
         torch.manual_seed(seed)
-        # Reset global arg counter for deterministic behavior
-        global _next_arg_id
-        _next_arg_id = 0
 
-    # Global counter for unique node IDs - start from 0 for deterministic behavior
+    # Global counter for unique node IDs
     node_counter = 0
 
     # Dictionary to store all nodes: node_id -> OperationNode

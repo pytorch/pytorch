@@ -15,17 +15,8 @@ import typing
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import (
-    Any,
-    cast,
-    Literal,
-    Optional,
-    TYPE_CHECKING,
-    TypeGuard,
-    TypeVar,
-    Union,
-)
-from typing_extensions import Self
+from typing import Any, Callable, cast, Literal, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
@@ -62,7 +53,7 @@ from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputSt
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
+    from collections.abc import Generator, Iterable, Mapping, Sequence
     from types import TracebackType
 
     from torch._guards import Source
@@ -2639,9 +2630,7 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             func not in meta_table
             and not self.cpp_meta_supports_symint(func)
-            and not (
-                has_symbolic_sizes and func in self._unbacked_special_fake_handling_ops
-            )
+            and not (has_symbolic_sizes and func in self._view_fake_tensor_impl_ops)
         ):
             from torch._decomp import decomposition_table
 
@@ -2950,10 +2939,8 @@ class FakeTensorMode(TorchDispatchMode):
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
     )
 
-    _unbacked_special_fake_handling_ops = ordered_set(
-        aten.view.default,
-        aten._unsafe_view.default,
-        aten.slice.Tensor,
+    _view_fake_tensor_impl_ops = ordered_set(
+        aten.view.default, aten._unsafe_view.default
     )
 
     def cpp_meta_supports_symint(self, func: OpOverload) -> bool:

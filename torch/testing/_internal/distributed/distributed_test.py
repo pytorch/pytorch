@@ -13,12 +13,11 @@ import tempfile
 import time
 import unittest
 from collections import defaultdict, namedtuple, OrderedDict
-from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import reduce
-from typing import Any, NamedTuple, Union
+from typing import Any, Callable, NamedTuple, Union
 
 import numpy as np
 
@@ -138,18 +137,16 @@ class Foo:
 f = Foo(10)
 f.bar = 1
 
+foo_cpu_tensor = Foo(torch.randn(3, 3))
 
-# Defer instantiation until the seed is set so that randn() returns the same
-# values in all processes.
-def create_collectives_object_test_list():
-    return [
-        {"key1": 3, "key2": 4, "key3": {"nested": True}},
-        f,
-        Foo(torch.randn(3, 3)),
-        "foo",
-        [1, 2, True, "string", [4, 5, "nested"]],
-    ]
 
+COLLECTIVES_OBJECT_TEST_LIST = [
+    {"key1": 3, "key2": 4, "key3": {"nested": True}},
+    f,
+    foo_cpu_tensor,
+    "foo",
+    [1, 2, True, "string", [4, 5, "nested"]],
+]
 
 # Allowlist of distributed backends where profiling collectives is supported.
 PROFILING_SUPPORTED_BACKENDS = [
@@ -397,6 +394,12 @@ class ControlFlowToyModel(nn.Module):
             return self.lin2(F.relu(self.lin1(x)))
         else:
             return F.relu(self.lin1(x))
+
+
+DDP_NET = Net()
+BN_NET = BatchNormNet()
+BN_NET_NO_AFFINE = BatchNormNet(affine=False)
+ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99)
 
 
 def get_timeout(test_id):
@@ -704,7 +707,7 @@ class DistributedTest:
                 self.assertNotEqual(args.get("dtype", ""), "")
 
                 per_coll_meta[collname].append(args)
-                if collname == "wait":
+                if collname in {"wait"}:
                     continue
 
                 self.assertEqual(args["Process Group Description"], "default_pg")
@@ -855,6 +858,8 @@ class DistributedTest:
                 with exception_ctx:
                     dist.barrier(group_id)
                 self.assertGreaterAlmostEqual(time.time(), expected_time, delta=0.1)
+            else:
+                pass
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo", "Only gloo backend supports timeouts"
@@ -4290,7 +4295,7 @@ class DistributedTest:
             # as baseline
 
             # cpu training setup
-            model = Net()
+            model = DDP_NET
 
             # single gpu training setup
             model_gpu = copy.deepcopy(model)
@@ -4345,7 +4350,7 @@ class DistributedTest:
             _group, _group_id, rank = self._init_global_test()
 
             # cpu training setup
-            model_base = Net()
+            model_base = DDP_NET
 
             # DDP-CPU training setup
             model_DDP = copy.deepcopy(model_base)
@@ -5494,7 +5499,7 @@ class DistributedTest:
         def _test_DistributedDataParallel_with_amp(self, grad_is_view=False):
             torch.manual_seed(31415)
             # Creates model and optimizer in default precision
-            model = Net().cuda()
+            model = copy.deepcopy(DDP_NET).cuda()
             optimizer = torch.optim.SGD(model.parameters(), lr=0.03)
 
             # Creates a GradScaler once at the beginning of training.
@@ -5579,7 +5584,7 @@ class DistributedTest:
             # as baseline
 
             # cpu training setup
-            model = BatchNormNet() if affine else BatchNormNet(affine=False)
+            model = BN_NET if affine else BN_NET_NO_AFFINE
 
             # single gpu training setup
             model_gpu = copy.deepcopy(model)
@@ -5629,7 +5634,6 @@ class DistributedTest:
         def _test_post_localSGD_optimizer_parity(self, create_averager, grad_is_view):
             learning_rate = 0.03
 
-            DDP_NET = Net()
             net = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
                 device_ids=[self.rank],
@@ -5696,7 +5700,7 @@ class DistributedTest:
             learning_rate = 0.03
 
             net_using_post_localSGD_opt = torch.nn.parallel.DistributedDataParallel(
-                Net().cuda(), device_ids=[self.rank]
+                copy.deepcopy(DDP_NET).cuda(), device_ids=[self.rank]
             )
 
             averager = create_averager()
@@ -5846,7 +5850,7 @@ class DistributedTest:
             bs_offset = int(rank * 2)
             global_bs = int(num_processes * 2)
 
-            model = nn.SyncBatchNorm(2, momentum=0.99)
+            model = ONLY_SBN_NET
             model_gpu = copy.deepcopy(model).cuda(rank)
             model_DDP = nn.parallel.DistributedDataParallel(
                 model_gpu, device_ids=[rank]
@@ -6056,7 +6060,6 @@ class DistributedTest:
         def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(
             self,
         ):
-            ONLY_SBN_NET = nn.SyncBatchNorm(2, momentum=0.99)
             _group, _group_id, rank = self._init_global_test()
             model = nn.parallel.DistributedDataParallel(
                 ONLY_SBN_NET.cuda(rank), device_ids=[rank]
@@ -6124,7 +6127,7 @@ class DistributedTest:
         def test_DistributedDataParallel_SyncBatchNorm_half(self):
             _group, _group_id, rank = self._init_global_test()
 
-            model = BatchNormNet()
+            model = copy.deepcopy(BN_NET)
             model = model.half()
             model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
             model = nn.parallel.DistributedDataParallel(
@@ -6140,7 +6143,7 @@ class DistributedTest:
 
         def _test_ddp_logging_data(self, is_gpu):
             rank = dist.get_rank()
-            model_DDP = Net()
+            model_DDP = copy.deepcopy(DDP_NET)
             if is_gpu:
                 model_DDP = nn.parallel.DistributedDataParallel(
                     model_DDP.cuda(rank), device_ids=[rank]
@@ -6416,7 +6419,7 @@ class DistributedTest:
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
         def test_static_graph_api_cpu(self):
-            model_DDP = nn.parallel.DistributedDataParallel(Net())
+            model_DDP = nn.parallel.DistributedDataParallel(DDP_NET)
             expected_err = "should be called before training loop starts"
             with self.assertRaisesRegex(RuntimeError, expected_err):
                 local_bs = 2
@@ -6649,7 +6652,7 @@ class DistributedTest:
         def _test_allgather_object(self, subgroup=None):
             # Only set device for NCCL backend since it must use GPUs.
 
-            gather_objects = create_collectives_object_test_list()
+            gather_objects = COLLECTIVES_OBJECT_TEST_LIST.copy()
 
             backend = os.environ["BACKEND"]
             if backend == "nccl":
@@ -6693,7 +6696,7 @@ class DistributedTest:
 
         def _test_gather_object(self, pg=None):
             # Ensure stateful objects can be gathered
-            gather_objects = create_collectives_object_test_list()
+            gather_objects = COLLECTIVES_OBJECT_TEST_LIST.copy()
             my_rank = dist.get_rank(pg)
 
             backend = os.environ["BACKEND"]
@@ -7026,7 +7029,7 @@ class DistributedTest:
                 self.assertNotEqual(attrs.get("dtype", ""), "")
 
                 per_coll_meta[collname].append(attrs)
-                if collname == "wait":
+                if collname in {"wait"}:
                     continue
 
                 self.assertEqual(attrs["pg_name"], "0")  # yes this is a string
@@ -7263,7 +7266,7 @@ class DistributedTest:
                     return x
 
             torch.cuda.set_device(self.rank)
-            model_bn = BatchNormNet()
+            model_bn = BN_NET
             model_bn = nn.SyncBatchNorm.convert_sync_batchnorm(
                 copy.deepcopy(model_bn)
             ).cuda(self.rank)
@@ -7559,7 +7562,7 @@ class DistributedTest:
                     loss.backward()
 
         def _test_broadcast_object_list(self, group=None):
-            gather_objects = create_collectives_object_test_list()
+            gather_objects = COLLECTIVES_OBJECT_TEST_LIST.copy()
 
             # Only set device for NCCL backend since it must use GPUs.
             # Case where rank != GPU device.
@@ -8283,11 +8286,10 @@ class DistributedTest:
         @require_backend_is_available({"gloo"})
         def test_scatter_object_list(self):
             src_rank = 0
-            collectives_object_test_list = create_collectives_object_test_list()
             scatter_list = (
-                collectives_object_test_list
+                COLLECTIVES_OBJECT_TEST_LIST
                 if self.rank == src_rank
-                else [None for _ in collectives_object_test_list]
+                else [None for _ in COLLECTIVES_OBJECT_TEST_LIST]
             )
             world_size = dist.get_world_size()
             scatter_list = scatter_list[:world_size]
@@ -8300,8 +8302,8 @@ class DistributedTest:
             dist.scatter_object_list(output_obj_list, scatter_list, src=src_rank)
             self.assertEqual(
                 output_obj_list[0],
-                collectives_object_test_list[
-                    self.rank % len(collectives_object_test_list)
+                COLLECTIVES_OBJECT_TEST_LIST[
+                    self.rank % len(COLLECTIVES_OBJECT_TEST_LIST)
                 ],
             )
             # Ensure errors are raised upon incorrect arguments.
@@ -9987,7 +9989,7 @@ class DistributedTest:
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
         def test_sync_bn_logged(self):
-            model = BatchNormNet()
+            model = BN_NET
             rank = self.rank
             # single gpu training setup
             model_gpu = model.cuda(rank)

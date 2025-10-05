@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 
 import sys
-from collections.abc import Callable
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 from torch import Tensor

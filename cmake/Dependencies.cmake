@@ -1541,11 +1541,6 @@ if(NOT INTERN_BUILD_MOBILE)
     if(HAVE_MALLOC_USABLE_SIZE)
       add_definitions(-DHAVE_MALLOC_USABLE_SIZE=1)
     endif(HAVE_MALLOC_USABLE_SIZE)
-    set(CMAKE_EXTRA_INCLUDE_FILES "fcntl.h")
-    CHECK_FUNCTION_EXISTS(posix_fallocate HAVE_POSIX_FALLOCATE)
-    if(HAVE_POSIX_FALLOCATE)
-      add_definitions(-DHAVE_POSIX_FALLOCATE=1)
-    endif(HAVE_POSIX_FALLOCATE)
   endif(UNIX)
 
   add_definitions(-DUSE_EXTERNAL_MZCRC)
@@ -1557,12 +1552,6 @@ endif()
 #
 # End ATen checks
 #
-
-# Install `fmtlib` header.
-# This was the default behavior before version 12.0.0.
-# Since PyTorch C API depends on it, make it available for projects that
-# depend on PyTorch.
-set(FMT_INSTALL ON)
 set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)

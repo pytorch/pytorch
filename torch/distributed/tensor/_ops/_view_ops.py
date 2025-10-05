@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import cast, Optional, Union
+from typing import Callable, cast, Optional, Union
 
 import torch
 from torch import Tensor

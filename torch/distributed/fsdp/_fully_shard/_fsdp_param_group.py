@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from collections.abc import Callable
-from typing import Any, cast, NamedTuple, Optional
+from typing import Any, Callable, cast, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -31,7 +30,6 @@ from ._fsdp_common import (
     compiled_autograd_enabled,
     FSDPMeshInfo,
     HSDPMeshInfo,
-    is_bw,
     TrainingState,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
@@ -273,7 +271,7 @@ class FSDPParamGroup:
         the staging buffers for collective comms.
         """
         assert isinstance(
-            self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
+            self._all_gather_comm, (DefaultAllGather, ProcessGroupAllocAllGather)
         ), (
             "cannot call set_allocate_memory_from_process_group() "
             f"when all gather comm is custom: {self._all_gather_comm.__class__.__name__}"
@@ -286,7 +284,7 @@ class FSDPParamGroup:
 
         assert isinstance(
             self._reduce_scatter_comm,
-            (DefaultReduceScatter | ProcessGroupAllocReduceScatter),
+            (DefaultReduceScatter, ProcessGroupAllocReduceScatter),
         ), (
             "cannot call set_allocate_memory_from_process_group() "
             f"when reduce scatter comm is custom: {self._reduce_scatter_comm.__class__.__name__}"
@@ -446,15 +444,8 @@ class FSDPParamGroup:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
-            if not compiled_autograd_enabled():
-                # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
-                # it shouldn't change post_forward_order
-                if not is_bw():
-                    self.reshard()
-                    self._record_post_forward()
-            else:
-                self.reshard()
-                self._record_post_forward()
+            self.reshard()
+            self._record_post_forward()
             self._training_state = TrainingState.IDLE
             return output
 

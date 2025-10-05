@@ -264,7 +264,7 @@ def _cuda_system_info_comment() -> str:
     try:
         cuda_version_out = subprocess.check_output(["nvcc", "--version"])
         cuda_version_lines = cuda_version_out.decode().split("\n")
-        comment = "".join([f"# {s} \n" for s in cuda_version_lines if s != ""])
+        comment = "".join([f"# {s} \n" for s in cuda_version_lines if s not in [""]])
         model_str += f"{comment}\n"
     except (FileNotFoundError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
@@ -341,7 +341,7 @@ def helper_for_dump_minify(contents: str) -> None:
 
     except OSError as e:
         log.exception("")
-        raise NotImplementedError(f"Could not write to {minified_repro_path}") from e
+        raise NotImplementedError("Could not write to {minified_repro_path}") from e
 
 
 class AccuracyError(Exception):
