@@ -3012,7 +3012,7 @@ class FakeTensorMode(TorchDispatchMode):
             t.numel() <= CONSTANT_NUMEL_LIMIT
             and not is_sparse_any(t)
             and not self.is_our_fake(t)
-            and not t.device.type == "meta"
+            and t.device.type != "meta"
         )
 
     def invalidate_written_to_constants(

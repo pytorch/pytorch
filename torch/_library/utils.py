@@ -135,7 +135,7 @@ def mutates_and_returns_first_arg(op: OpOverload):
     if op.namespace != "aten":
         return False
     schema = op._schema
-    if not len(schema.returns) == 1:
+    if len(schema.returns) != 1:
         return False
     if schema.returns[0].alias_info is None:
         return False
@@ -341,13 +341,13 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
     """
     custom operators' outputs must not alias any inputs or other outputs.
     """
-    storages = {t.untyped_storage()._cdata for t in prev if isinstance(t, torch.Tensor)}
+    storages = {id(t.untyped_storage()) for t in prev if isinstance(t, torch.Tensor)}
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
     for tensor in iter_tensors(tuple_result, {}):
-        key = tensor.untyped_storage()._cdata
-        if tensor.untyped_storage()._cdata in storages:
+        key = id(tensor.untyped_storage())
+        if id(tensor.untyped_storage()) in storages:
             raise RuntimeError(
                 f"{name} (with implementation in {get_module()}): "
                 f"The output of this custom operator (1) must not "

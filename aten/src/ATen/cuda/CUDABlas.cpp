@@ -323,7 +323,7 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
     descriptor_.reset(raw_descriptor);
   }
   template <typename T>
-  inline void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
+  void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
     // NOLINTNEXTLINE(bugprone-sizeof-expression)
     TORCH_CUDABLAS_CHECK(::cublasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(value)));
   }
@@ -345,7 +345,7 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
     descriptor_.reset(raw_descriptor);
   }
   template <typename T>
-  inline void setAttribute(cublasLtMatrixLayoutAttribute_t attr, const T value) {
+  void setAttribute(cublasLtMatrixLayoutAttribute_t attr, const T value) {
     TORCH_CUDABLAS_CHECK(::cublasLtMatrixLayoutSetAttribute(descriptor(), attr, &value, sizeof(T)));
   }
 };
@@ -360,7 +360,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
     descriptor_.reset(raw_descriptor);
   }
   template <typename T>
-  inline void setAttribute(cublasLtMatmulPreferenceAttributes_t attr, const T value) {
+  void setAttribute(cublasLtMatmulPreferenceAttributes_t attr, const T value) {
     TORCH_CUDABLAS_CHECK(::cublasLtMatmulPreferenceSetAttribute(descriptor(), attr, &value, sizeof(T)));
   }
 };

@@ -7056,7 +7056,7 @@ class ShapeEnv:
                 expr,
                 concrete_val,
                 # only print stack trace when debug mode is on (e.g. TORCH_LOGS="dynamic")
-                stack_info=True if log.getEffectiveLevel() < logging.WARNING else False,
+                stack_info=log.getEffectiveLevel() < logging.WARNING,
             )
 
     def _get_user_frame(self) -> Optional[types.FrameType]:

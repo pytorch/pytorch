@@ -237,7 +237,7 @@ def check_autotune_cache(
         not disabled
         and filename is not None
         and (len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning"))
-        and not os.environ.get("TRITON_INTERPRET", "0") == "1"
+        and os.environ.get("TRITON_INTERPRET", "0") != "1"
     ):
         configs_hash = hash_configs(configs)
 

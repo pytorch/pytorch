@@ -539,7 +539,6 @@ static PyObject* THPFunction_new(
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
   self->materialize_grads = true;
-  self->pure_view = false;
   self->materialize_non_diff_grads = true;
   return obj;
 }
@@ -717,8 +716,7 @@ static void _wrap_outputs(
       cdata_if_executable,
       jvp_user_function,
       to_save_if_setup_context,
-      view_as_self_fn,
-      self->pure_view);
+      view_as_self_fn);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -1458,20 +1456,6 @@ int THPFunction_set_materialize_grads(
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-int THPFunction_set_pure_view(
-    THPFunction* self,
-    PyObject* value,
-    void* unused) {
-  HANDLE_TH_ERRORS
-  if (!PyBool_Check(value)) {
-    THPUtils_invalidArguments(value, nullptr, "set_pure_view", 1, "(bool)");
-    return -1;
-  }
-  self->pure_view = (value == Py_True);
-  return 0;
-  END_HANDLE_TH_ERRORS_RET(-1)
-}
-
 PyObject* THPFunction_get_materialize_non_diff_grads(
     THPFunction* self,
     void* _unused) {
@@ -1744,11 +1728,6 @@ static struct PyGetSetDef THPFunction_properties[] = {
     {"materialize_grads",
      nullptr,
      (setter)THPFunction_set_materialize_grads,
-     nullptr,
-     nullptr},
-    {"_is_pure_view",
-     nullptr,
-     (setter)THPFunction_set_pure_view,
      nullptr,
      nullptr},
     {"_materialize_non_diff_grads",
