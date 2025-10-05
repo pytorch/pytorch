@@ -1,5 +1,6 @@
 from enum import Enum
-from typing import Literal, TypeAlias
+from typing import Literal
+from typing_extensions import TypeAlias
 
 from torch._C import device, dtype, layout
 

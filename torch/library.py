@@ -6,8 +6,8 @@ import re
 import sys
 import traceback
 import weakref
-from collections.abc import Callable, Sequence
-from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Sequence
+from typing import Any, Callable, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -242,7 +242,6 @@ class Library:
 
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
-        # pyrefly: ignore  # bad-argument-type
         assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
 
         if isinstance(op_name, str):
@@ -644,7 +643,6 @@ def impl(
         >>> y2 = torch.sin(x) + 1
         >>> assert torch.allclose(y1, y2)
     """
-    # pyrefly: ignore  # no-matching-overload
     return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
 
 
@@ -831,7 +829,6 @@ def register_kernel(
     if device_types is None:
         device_types = "CompositeExplicitAutograd"
 
-    # pyrefly: ignore  # no-matching-overload
     return _impl(op, device_types, func, lib=lib, disable_dynamo=True)
 
 

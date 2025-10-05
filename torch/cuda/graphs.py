@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import gc
 import typing
-from collections.abc import Callable
-from typing import Optional, overload, TYPE_CHECKING, TypeAlias, Union
-from typing_extensions import ParamSpec, Self, TypeVar
+from typing import Callable, Optional, overload, TYPE_CHECKING, Union
+from typing_extensions import ParamSpec, Self, TypeAlias, TypeVar
 
 import torch
 from torch import Tensor
@@ -259,7 +258,6 @@ class graph:
         self.cuda_graph.capture_begin(
             # type: ignore[misc]
             *self.pool,
-            # pyrefly: ignore  # bad-keyword-argument
             capture_error_mode=self.capture_error_mode,
         )
 
@@ -525,7 +523,6 @@ def make_graphed_callables(
     ) -> Callable[..., object]:
         class Graphed(torch.autograd.Function):
             @staticmethod
-            # pyrefly: ignore  # bad-override
             def forward(ctx: object, *inputs: Tensor) -> tuple[Tensor, ...]:
                 # At this stage, only the user args may (potentially) be new tensors.
                 for i in range(len_user_args):
@@ -537,7 +534,6 @@ def make_graphed_callables(
 
             @staticmethod
             @torch.autograd.function.once_differentiable
-            # pyrefly: ignore  # bad-override
             def backward(ctx: object, *grads: Tensor) -> tuple[Tensor, ...]:
                 assert len(grads) == len(static_grad_outputs)
                 for g, grad in zip(static_grad_outputs, grads):
@@ -551,9 +547,7 @@ def make_graphed_callables(
                 # Input args that didn't require grad expect a None gradient.
                 assert isinstance(static_grad_inputs, tuple)
                 return tuple(
-                    # pyrefly: ignore  # bad-argument-type
-                    b.detach() if b is not None else b
-                    for b in static_grad_inputs
+                    b.detach() if b is not None else b for b in static_grad_inputs
                 )
 
         def functionalized(*user_args: object) -> object:

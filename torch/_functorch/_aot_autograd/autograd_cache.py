@@ -16,10 +16,9 @@ import shutil
 import time
 import traceback
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from copy import copy
 from dataclasses import dataclass
-from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override
 
 import torch
@@ -384,7 +383,6 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self, gm: torch.fx.GraphModule):
         super().__init__(gm)
-        # pyrefly: ignore  # bad-override
         self.dispatch_table: dict
         self.dispatch_table.update(
             {
@@ -1199,7 +1197,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 cache_state = "miss"
                 if (
                     config.strict_autograd_cache
-                    or torch._dynamo.config.strict_precompile
+                    or torch._dynamo.config.caching_precompile
                 ):
                     raise e
             # Most often this is BypassAOTAutogradCache, but
@@ -1232,7 +1230,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     log_cache_bypass("bypass_aot_autograd", str(e))
                 if (
                     config.strict_autograd_cache
-                    or torch._dynamo.config.strict_precompile
+                    or torch._dynamo.config.caching_precompile
                 ):
                     raise e
             if compiled_fn is None:

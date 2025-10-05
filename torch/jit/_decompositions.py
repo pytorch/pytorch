@@ -6,8 +6,7 @@ from torch import Tensor
 aten = torch.ops.aten
 import inspect
 import warnings
-from collections.abc import Callable
-from typing import Optional, TypeVar
+from typing import Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.types import Number

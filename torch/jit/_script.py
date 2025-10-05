@@ -14,8 +14,7 @@ import functools
 import inspect
 import pickle
 import warnings
-from collections.abc import Callable
-from typing import Any, Union
+from typing import Any, Callable, Union
 from typing_extensions import deprecated
 
 import torch

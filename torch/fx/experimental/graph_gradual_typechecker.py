@@ -942,11 +942,15 @@ class Refine:
         if n.op == "call_function":
             if n.target in _REFINEMENT_RULES:
                 self.constraints += _REFINEMENT_RULES[n.target](n)
+            else:
+                pass
 
         if n.op == "call_module":
             module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _REFINEMENT_RULES:
                 self.constraints += _REFINEMENT_RULES[type(module_instance)](n)
+            else:
+                pass
 
         if n.op == "output":
 
@@ -955,17 +959,24 @@ class Refine:
 
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
+
+        else:
+            pass
 
     def infer_symbolic_relations(self, n: Node):
         n.type = self.convert_to_sympy_symbols(n.type)
         if n.op == "call_function":
             if n.target in _RULES:
                 return _RULES[n.target](n)
+            else:
+                pass
 
         if n.op == "call_module":
             module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _RULES:
                 return _RULES[type(module_instance)](n, module_instance)
+            else:
+                pass
 
         if n.op == "output":
 
@@ -974,6 +985,9 @@ class Refine:
 
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
+
+        else:
+            pass
 
 
 def get_parameter(traced, target: str):

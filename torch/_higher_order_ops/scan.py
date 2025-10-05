@@ -3,8 +3,7 @@ import enum
 import functools
 import itertools
 import logging
-from collections.abc import Callable
-from typing import Any
+from typing import Any, Callable
 
 import torch
 import torch._prims_common as utils
