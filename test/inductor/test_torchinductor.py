@@ -10016,8 +10016,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t = torch.randn([16, 8])
         self.common(fn, (t,))
 
-        # Keep this test focused on transposed view + mutation semantics only.
-
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
             out1 = aten.convolution_backward(
