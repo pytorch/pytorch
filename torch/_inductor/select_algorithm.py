@@ -19,6 +19,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from types import ModuleType
 from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing_extensions import Self
 from unittest.mock import patch
 
 import sympy
@@ -38,7 +39,6 @@ from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
-from typing_extensions import Self
 
 from ..utils._sympy.functions import CeilDiv
 from . import config, ir
@@ -197,9 +197,9 @@ class PartialRender:
         remaining_active_hooks = [
             key for key, fn in self.replacement_hooks.items() if fn is not None
         ]
-        assert (
-            len(remaining_active_hooks) == 0
-        ), f"The following hooks have not yet been finalized:\n {remaining_active_hooks=}"
+        assert len(remaining_active_hooks) == 0, (
+            f"The following hooks have not yet been finalized:\n {remaining_active_hooks=}"
+        )
         return self._code
 
     def finalize_hook(self, hook_key: str, strict: bool = True) -> None:
@@ -333,9 +333,9 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         This is used by flex_attention's backwards grad for captured buffers, see
         zeros_and_scatter lowering
         """
-        assert (
-            self.mask is not None
-        ), "Mask is required for inner stores in modifications"
+        assert self.mask is not None, (
+            "Mask is required for inner stores in modifications"
+        )
         assert mode == "atomic_add", "Only atomic_add is supported for inner stores"
 
         buf_name = self._add_kernel_input(name)
@@ -394,9 +394,9 @@ class TritonTemplateKernel(TritonKernel):
             pass
         numel = sympy_product(output_node.get_size())
         if tma_store:
-            assert (
-                len(output_node.get_size()) == 2
-            ), "TMA store only supported for 2D with templates"
+            assert len(output_node.get_size()) == 2, (
+                "TMA store only supported for 2D with templates"
+            )
             tiling = {
                 "x": output_node.get_size()[0],
                 "y": output_node.get_size()[1],
@@ -776,12 +776,12 @@ class TritonTemplateKernel(TritonKernel):
     def _get_subgraph(self, subgraph_number: int):
         assert isinstance(subgraph_number, int)
         assert isinstance(self.subgraphs, list)
-        assert subgraph_number < len(
-            self.subgraphs
-        ), f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
-        assert (
-            self.body.getvalue() == ""
-        ), "Body should be clear before adding a modification"
+        assert subgraph_number < len(self.subgraphs), (
+            f"Invalid subgraph number provided to create_modification, {subgraph_number} must be < {len(self.subgraphs)}"
+        )
+        assert self.body.getvalue() == "", (
+            "Body should be clear before adding a modification"
+        )
         return self.subgraphs[subgraph_number]
 
     def _handle_scatter_graph(self, scatter_graph):
@@ -790,9 +790,9 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             scatter_graph: The scatter graph to process
         """
-        assert isinstance(
-            scatter_graph, ir.ComputedBuffer
-        ), f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
+        assert isinstance(scatter_graph, ir.ComputedBuffer), (
+            f"scatter_graph must be an instance of ComputeBuffer but got {type(scatter_graph)}"
+        )
 
         def contiguous_strides(x):
             # We always create a fresh contiguous grad for scattering into
@@ -831,9 +831,9 @@ class TritonTemplateKernel(TritonKernel):
                 self, subgraph_number, fixed_inputs, mask
             )
             with V.set_ops_handler(modification_handler):
-                assert isinstance(
-                    subgraph, (ir.ComputedBuffer, list)
-                ), f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
+                assert isinstance(subgraph, (ir.ComputedBuffer, list)), (
+                    f"Expected the subgraph to be a ComputedBuffer or a List[ComputedBuffer], got {type(subgraph)}"
+                )
                 # Handle scatter stores
                 if isinstance(subgraph, list):
                     for scatter_graph in subgraph:
@@ -1073,9 +1073,9 @@ class TritonTemplateKernel(TritonKernel):
             # to the top of the kernel so we can safely extract the tensor
             # descriptor construction to the top of the kernel.
             if block_name in self.prologue_cache:
-                assert (
-                    self.prologue_cache[block_name] == block_size
-                ), f"Constant {block_name} must be used for all stores"
+                assert self.prologue_cache[block_name] == block_size, (
+                    f"Constant {block_name} must be used for all stores"
+                )
             else:
                 self.prologue_cache[block_name] = block_size
                 self.prologue.writeline(f"{block_name}: tl.constexpr = {block_size}")
@@ -1152,9 +1152,9 @@ class TritonTemplateKernel(TritonKernel):
             self.template_out = val
             if block_indexing:
                 assert val_shape, "Blocking indexing requires passing in val_shape"
-                assert (
-                    len(val_shape) == 2
-                ), "Blocking indexing only supports 2D data at this time"
+                assert len(val_shape) == 2, (
+                    "Blocking indexing only supports 2D data at this time"
+                )
                 assert not mask, "Mask is not supported with blocking indexing"
                 intermediate_lines: list[str] = []
                 epilogue_index_symbols: list[sympy.Symbol] = []
@@ -2325,9 +2325,9 @@ class ExternKernelCaller(ChoiceCaller):
 
     def output_node(self):
         if self.choice.use_fallback_kernel:
-            assert (
-                self.choice.op_overload is not None
-            ), "Please provide an op_overload to use ir.FallbackKernel"
+            assert self.choice.op_overload is not None, (
+                "Please provide an op_overload to use ir.FallbackKernel"
+            )
             inner: ir.IRNode = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )

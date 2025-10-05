@@ -75,21 +75,17 @@ class CustomOpTemplate(SubgraphTemplate):
 
         choices = []
         for i, decomp_fn in enumerate(self.decompositions):
-            try:
-                traced_fn = make_fx(functools.partial(decomp_fn, **self.kwargs))
-                func_name = getattr(decomp_fn, "__name__", f"impl_{i}")
+            traced_fn = make_fx(functools.partial(decomp_fn, **self.kwargs))
+            func_name = getattr(decomp_fn, "__name__", f"impl_{i}")
 
-                choice = self.generate(
-                    name=f"{self.name}_{func_name}",
-                    input_nodes=input_nodes,
-                    layout=layout,
-                    description=f"CustomOp {func_name}",
-                    make_fx_graph=traced_fn,
-                )
-                choices.append(choice)
-            except Exception:
-                # Skip decompositions that fail during choice generation
-                continue
+            choice = self.generate(
+                name=f"{self.name}_{func_name}",
+                input_nodes=input_nodes,
+                layout=layout,
+                description=f"CustomOp {func_name}",
+                make_fx_graph=traced_fn,
+            )
+            choices.append(choice)
 
         return choices
 
