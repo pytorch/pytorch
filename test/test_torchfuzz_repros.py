@@ -329,7 +329,6 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-
     @pytest.mark.xfail(reason="Issue #164428")
     def test_fuzzer_issue_164428_already_exists(self):
         torch.manual_seed(6804)
@@ -367,7 +366,6 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled = compiled_foo(arg0, arg1, arg2)
         out_compiled.sum().backward()
         print("Compile Success! ✅")
-
 
     @pytest.mark.xfail(reason="Issue #164086")
     def test_fuzzer_issue_164086(self):
@@ -541,8 +539,6 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-
-
     @pytest.mark.xfail(reason="Issue #163971")
     def test_fuzzer_issue_163971(self):
         torch.manual_seed(0)
@@ -656,9 +652,6 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4)
         out_compiled.sum().backward()
         print("Compile Success! ✅")
-
-
-
 
     @pytest.mark.xfail(reason="Issue #163894")
     def test_fuzzer_issue_163894(self):
