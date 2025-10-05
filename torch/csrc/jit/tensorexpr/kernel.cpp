@@ -1482,7 +1482,7 @@ std::vector<BufPtr> TensorExprKernel::preAllocIntermediateBufs(
       remaining_interm_bufs.push_back(buf);
       continue;
     }
-    auto bp = malloc(size);
+    auto bp = (void*)malloc(size);
     if (!bp) {
       remaining_interm_bufs.push_back(buf);
       continue;

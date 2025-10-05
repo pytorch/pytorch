@@ -96,7 +96,7 @@ class TORCH_API Dispatcher final {
   friend class TypedOperatorHandle;
 
   struct Guard final {
-    Guard() : alive(true) {}
+    Guard() : alive(true), mutex() {}
     std::atomic<bool> alive;
     std::mutex mutex;
   };

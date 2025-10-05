@@ -244,7 +244,7 @@ class RAIIC10IValueHandle {
 
 class MaybeOwningAtenTensorHandle {
  public:
-  MaybeOwningAtenTensorHandle() : handle_(nullptr) {}
+  MaybeOwningAtenTensorHandle() : handle_(nullptr), raii_handle_() {}
   // We skip copy constructor as MaybeOwningAtenTensorHandle might be RAII which
   // makes it undefined.
   MaybeOwningAtenTensorHandle(const MaybeOwningAtenTensorHandle& other) =

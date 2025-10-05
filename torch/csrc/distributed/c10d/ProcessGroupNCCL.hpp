@@ -732,7 +732,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::condition_variable workMetaListCV_;
 
     // Heartbeat of watchdog thread.
-    std::atomic_uint64_t heartbeat_;
+    std::atomic_uint64_t heartbeat_{};
 
     // Whether or not to propagate detected errors to all ranks in the same PG
     // through TCPStore.
@@ -1319,7 +1319,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int traceBufferSize_;
 
   // We gate the cudaEventCache so that we can roll it out gradually.
-  std::atomic<bool> cudaEventCacheEnabled_;
+  std::atomic<bool> cudaEventCacheEnabled_{};
 
   std::thread onCompletionHookThread_;
 
@@ -1327,7 +1327,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::atomic<bool> terminateProcessGroup_;
 
   // Whether there are hooks pending to be fired
-  std::atomic<bool> hasPendingHooks_;
+  std::atomic<bool> hasPendingHooks_{};
 
   // This is the signal from watchdog threads to indicate whether the monitor
   // thread should dump. Making it static so that it is accessible from all the
@@ -1416,11 +1416,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
   // is set to true.
-  std::atomic<bool> enableTiming_;
+  std::atomic<bool> enableTiming_{};
 
   // Flag to enable the print of hash value of input/output of collectives for
   // verification.
-  std::atomic<bool> enableCollectiveHashDebug_;
+  std::atomic<bool> enableCollectiveHashDebug_{};
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;

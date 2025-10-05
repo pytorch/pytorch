@@ -20,7 +20,9 @@ make_unique_base(Args&&... args) {
 } // namespace detail
 
 inline KernelFunction::KernelFunction()
-    : unboxed_kernel_func_(nullptr), sym_unboxed_kernel_func_(nullptr) {}
+    : boxed_kernel_func_(),
+      unboxed_kernel_func_(nullptr),
+      sym_unboxed_kernel_func_(nullptr) {}
 
 inline KernelFunction::~KernelFunction() {
   if (tokens_) {

@@ -7,6 +7,10 @@
 #include <torch/custom_class.h>
 #include <unordered_map>
 
+namespace c10 {
+TypePtr parseType(const std::string& pythonStr);
+} // namespace c10
+
 namespace torch::jit {
 
 uint64_t _get_runtime_bytecode_version() {
