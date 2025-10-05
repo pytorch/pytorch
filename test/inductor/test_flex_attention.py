@@ -4962,7 +4962,7 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_sliced_blockmask_mask_mod_error(self, device):
-        """Test that sliced BlockMask raises helpful error when mask_mod is called"""
+        """Test that sliced BlockMask raises helpful error when used with flex_attention"""
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
@@ -4971,15 +4971,15 @@ class TestBlockMask(InductorTestCase):
         )
         sliced_mask = base_mask[:, :, 0]
 
-        b = torch.tensor(0, device=device)
-        h = torch.tensor(0, device=device)
-        q = torch.tensor(10, device=device)
-        kv = torch.tensor(5, device=device)
+        q = torch.randn(1, 1, 1, 64, device=device)
+        k = torch.randn(1, 1, 256, 64, device=device)
+        v = torch.randn(1, 1, 256, 64, device=device)
 
+        compiled_fa = torch.compile(flex_attention)
         with self.assertRaisesRegex(
             RuntimeError, "Cannot use mask_mod from a sliced BlockMask"
         ):
-            sliced_mask.mask_mod(b, h, q, kv)
+            compiled_fa(q, k, v, block_mask=sliced_mask)
 
     @supported_platform
     def test_block_mask_device_change(self, device):
