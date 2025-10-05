@@ -18,6 +18,7 @@ from torch.package import Importer, PackageExporter, PackageImporter, sys_import
 
 from ._compatibility import compatibility
 from .graph import (
+    _BoxedCodeGen,
     _custom_builtins,
     _is_from_torch,
     _override_sym_repr,
@@ -553,6 +554,10 @@ class GraphModule(torch.nn.Module):
     #
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
     __jit_unused_properties__ = ["graph"]
+
+    @property
+    def _boxed_call(self) -> bool:
+        return isinstance(self._graph._codegen, _BoxedCodeGen)
 
     @property
     def graph(self) -> Graph:

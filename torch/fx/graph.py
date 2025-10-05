@@ -848,6 +848,44 @@ class CodeGen:
 # 2. In the FX graph, we need to access 2 attributes - in_spec and out_spec.
 #    Since we can't access .graph within the FX forward, we need to copy the attribute to the module.
 # 3. We currently can't register the pytree imports with `add_global` - not sure why.
+class _BoxedCodeGen(CodeGen):
+    """
+    CodeGen subclass that generates code using the "boxed" calling convention.
+
+    The boxed calling convention takes a single list argument and clears it
+    after extracting the arguments, which allows for early deallocation of
+    input tensors.
+    """
+
+    def gen_fn_def(
+        self, free_vars, maybe_return_annotation, *, expanded_def: bool = False
+    ):
+        """
+        Generate function definition for boxed calling convention.
+
+        Instead of taking individual arguments, the generated function takes
+        a single 'args_list' parameter, extracts placeholder values from it,
+        and clears the list.
+        """
+        # Generate the function signature with args_list parameter
+        fn_def = f"def {self._func_name}(self, args_list){maybe_return_annotation}:"
+
+        if free_vars:
+            # This is horribly manual but we don't get the "raw" free vars
+            # without a bigger refactor.
+            placeholder_vars = [
+                v.split(":")[0].split("=")[0].strip() for v in free_vars if v != "self"
+            ]
+
+            if placeholder_vars:
+                fn_def += "\n    args_iter = iter(args_list)"
+                for var in placeholder_vars:
+                    fn_def += f"\n    {var} = next(args_iter)"
+                fn_def += "\n    args_list.clear()"
+
+        return fn_def
+
+
 class _PyTreeCodeGen(CodeGen):
     def __init__(self, pytree_info: _PyTreeInfo):
         super().__init__()
