@@ -161,7 +161,9 @@ Contents
 
    installing
    frontend
-   api/library_root
+   api/aten/aten_root
+   api/c10/c10_root
+   api/csrc/csrc_root
 
 .. toctree::
   :glob:

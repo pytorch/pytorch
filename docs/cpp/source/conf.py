@@ -86,8 +86,12 @@ repo_root = os.path.dirname(  # {repo_root}
     )
 )
 
-breathe_projects = {"PyTorch": doxygen_xml_dir}
-breathe_default_project = "PyTorch"
+breathe_projects = {
+    "ATen": os.path.join(doxygen_xml_dir, "aten"),
+    "C10": os.path.join(doxygen_xml_dir, "c10"),
+    "CSRC": os.path.join(doxygen_xml_dir, "csrc"),
+}
+breathe_default_project = "ATen"
 
 # Setup the exhale extension
 exhale_args = {
@@ -102,7 +106,8 @@ exhale_args = {
     # Suggested optional arguments.                                            #
     ############################################################################
     "createTreeView": True,
-    "exhaleExecutesDoxygen": True,
+    "exhaleExecutesDoxygen": False,
+    "exhaleUseBreatheProjects": True,
     "exhaleUseDoxyfile": True,
     "verboseBuild": True,
     ############################################################################
@@ -144,6 +149,30 @@ exhale_args = {
     },
     "fullToctreeMaxDepth": 2,
 }
+
+exhale_args_chunks = [
+    {
+        **exhale_args,
+        "containmentFolder": "./api/aten",
+        "rootFileName": "aten_root.rst",
+        "rootFileTitle": "ATen API",
+        "breatheProjects": {"ATen": breathe_projects["ATen"]},
+    },
+    {
+        **exhale_args,
+        "containmentFolder": "./api/c10",
+        "rootFileName": "c10_root.rst",
+        "rootFileTitle": "C10 API",
+        "breatheProjects": {"C10": breathe_projects["C10"]},
+    },
+    {
+        **exhale_args,
+        "containmentFolder": "./api/csrc",
+        "rootFileName": "csrc_root.rst",
+        "rootFileTitle": "CSRC API",
+        "breatheProjects": {"CSRC": breathe_projects["CSRC"]},
+    },
+]
 
 # Tell sphinx what the primary language being documented is.
 primary_domain = "cpp"
@@ -329,3 +358,11 @@ texinfo_documents = [
         "Miscellaneous",
     ),
 ]
+
+
+# Function to run Exhale for each chunk
+def setup(app):
+    from exhale import setup as exhale_setup
+
+    for chunk in exhale_args_chunks:
+        exhale_setup(app, chunk)

@@ -365,20 +365,20 @@ def can_reuse_whl(args: argparse.Namespace) -> tuple[bool, str]:
 if __name__ == "__main__":
     args = parse_args()
 
-    reuse_whl, reason = can_reuse_whl(args)
+    # reuse_whl, reason = can_reuse_whl(args)
 
-    if reuse_whl:
+    if True:
         print("Reusing old whl")
         unzip_artifact_and_replace_files()
         set_output()
 
-    emit_metric(
-        "reuse_old_whl",
-        {
-            "reuse_whl": reuse_whl,
-            "reason": reason,
-            "build_environment": args.build_environment,
-            "merge_base": get_merge_base(),
-            "head_sha": get_head_sha(),
-        },
-    )
+    # emit_metric(
+    #     "reuse_old_whl",
+    #     {
+    #         "reuse_whl": reuse_whl,
+    #         "reason": reason,
+    #         "build_environment": args.build_environment,
+    #         "merge_base": get_merge_base(),
+    #         "head_sha": get_head_sha(),
+    #     },
+    # )

@@ -96,6 +96,13 @@ GENERATE_XML           = YES
 # NOTE: setting to NO may result in unrecovered file relationships
 #       (which file defined which compound)
 XML_PROGRAMLISTING     = YES
+
+# Turn off heavy cross-reference and source browser features, which cost memory
+# but add cross-linking data that Exhale doesn’t use
+REFERENCES_RELATION      = NO
+REFERENCED_BY_RELATION   = NO
+REFERENCES_LINK_SOURCE   = NO
+SOURCE_BROWSER           = NO
 ################################################################################
 # Doxygen preprocessor / parser control.                                       #
 ################################################################################
