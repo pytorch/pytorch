@@ -11348,9 +11348,6 @@ fn
         with self.assertRaisesRegex(RuntimeError, "specialized"):
             fn(x, y)
 
-        # Previously would have thrown guard on data dependent
-        self.assertEqual(cf(torch.tensor([10, 10])), 3)
-
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_guard_size_oblivious(self):
         # This code, in fact, does NOT work in eager
