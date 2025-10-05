@@ -30,7 +30,7 @@ from torch.utils._pytree import tree_map_only
 
 d_hid = 512
 batch_size = 256
-chunks = 8
+chunks = 4
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 backend = dist.get_default_backend_for_device(device_type)

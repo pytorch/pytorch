@@ -8,7 +8,7 @@ from torch.distributed.pipelining import pipe_split, SplitPoint
 
 class ExampleCode(torch.nn.Module):
     def __init__(self, d_hid, splits=2):
-        assert splits <= 8
+        assert splits <= 4
         super().__init__()
         self.splits = splits
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -17,10 +17,6 @@ class ExampleCode(torch.nn.Module):
         self.lin0 = torch.nn.Linear(d_hid, d_hid)
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
         self.lin2 = torch.nn.Linear(d_hid, d_hid)
-        self.lin3 = torch.nn.Linear(d_hid, d_hid)
-        self.lin4 = torch.nn.Linear(d_hid, d_hid)
-        self.lin5 = torch.nn.Linear(d_hid, d_hid)
-        self.lin6 = torch.nn.Linear(d_hid, d_hid)
 
     def forward(self, x):
         x = torch.mm(x, self.mm_param0)
@@ -39,22 +35,6 @@ class ExampleCode(torch.nn.Module):
             pipe_split()
             x = self.lin2(x)
             x = torch.relu(x)
-        if self.splits > 4:
-            pipe_split()
-            x = self.lin3(x)
-            x = torch.relu(x)
-        if self.splits > 5:
-            pipe_split()
-            x = self.lin4(x)
-            x = torch.relu(x)
-        if self.splits > 6:
-            pipe_split()
-            x = self.lin5(x)
-            x = torch.relu(x)
-        if self.splits > 7:
-            pipe_split()
-            x = self.lin6(x)
-            x = torch.relu(x)
         return x
 
 
@@ -63,7 +43,7 @@ class ModelWithKwargs(torch.nn.Module):
     DEFAULT_BATCH_SIZE = 256
 
     def __init__(self, d_hid: int = DEFAULT_DHID, splits=2):
-        assert splits <= 8
+        assert splits <= 4
         super().__init__()
         self.splits = splits
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -72,10 +52,6 @@ class ModelWithKwargs(torch.nn.Module):
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
         self.lin2 = torch.nn.Linear(d_hid, d_hid)
         self.lin3 = torch.nn.Linear(d_hid, d_hid)
-        self.lin4 = torch.nn.Linear(d_hid, d_hid)
-        self.lin5 = torch.nn.Linear(d_hid, d_hid)
-        self.lin6 = torch.nn.Linear(d_hid, d_hid)
-        self.lin7 = torch.nn.Linear(d_hid, d_hid)
 
     def forward(self, x, y=torch.zeros(DEFAULT_BATCH_SIZE, DEFAULT_DHID)):
         x = torch.mm(x, self.mm_param0)
@@ -93,22 +69,6 @@ class ModelWithKwargs(torch.nn.Module):
         if self.splits > 3:
             pipe_split()
             x = self.lin3(x)
-            x = torch.relu(x)
-        if self.splits > 4:
-            pipe_split()
-            x = self.lin4(x)
-            x = torch.relu(x)
-        if self.splits > 5:
-            pipe_split()
-            x = self.lin5(x)
-            x = torch.relu(x)
-        if self.splits > 6:
-            pipe_split()
-            x = self.lin6(x)
-            x = torch.relu(x)
-        if self.splits > 7:
-            pipe_split()
-            x = self.lin7(x)
             x = torch.relu(x)
         return x
 

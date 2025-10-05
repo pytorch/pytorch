@@ -214,7 +214,7 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
-def _is_static(x: object) -> TypeIs[Union[int, Integer]]:
+def _is_static(x: object) -> bool:
     return isinstance(x, (int, Integer))
 
 

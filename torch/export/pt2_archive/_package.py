@@ -6,7 +6,8 @@ import os
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import Any, IO, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, IO, Optional, TYPE_CHECKING, Union
+from typing_extensions import TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -172,10 +173,8 @@ class PT2ArchiveWriter:
             os.path.isfile, glob.glob(f"{folder_dir}/**", recursive=True)
         )
         for file_path in file_paths:
-            # pyrefly: ignore  # no-matching-overload
             filename = os.path.relpath(file_path, folder_dir)
             archive_path = os.path.join(archive_dir, filename)
-            # pyrefly: ignore  # bad-argument-type
             self.write_file(archive_path, file_path)
 
     def close(self) -> None:
@@ -595,7 +594,6 @@ def package_pt2(
 
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.writable() and f.seekable())
-        # pyrefly: ignore  # no-matching-overload
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
         or (isinstance(f, tempfile._TemporaryFileWrapper) and f.name.endswith(".pt2"))
     ):
@@ -607,10 +605,8 @@ def package_pt2(
         )
 
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
-    # pyrefly: ignore  # bad-argument-type
     with PT2ArchiveWriter(f) as archive_writer:
         _package_exported_programs(
             archive_writer, exported_programs, pickle_protocol=pickle_protocol
@@ -625,7 +621,6 @@ def package_pt2(
 
     if isinstance(f, (io.IOBase, IO)):
         f.seek(0)
-    # pyrefly: ignore  # bad-return
     return f
 
 
@@ -998,7 +993,6 @@ def load_pt2(
 
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
-        # pyrefly: ignore  # no-matching-overload
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
     ):
         # TODO: turn this into an error in 2.9
@@ -1009,12 +1003,10 @@ def load_pt2(
         )
 
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
     weights = {}
     weight_maps = {}
-    # pyrefly: ignore  # bad-argument-type
     with PT2ArchiveReader(f) as archive_reader:
         version = archive_reader.read_string(ARCHIVE_VERSION_PATH)
         if version != ARCHIVE_VERSION_VALUE:
@@ -1079,12 +1071,7 @@ def load_pt2(
     else:
         aoti_runners = {
             model_name: _load_aoti(
-                # pyrefly: ignore  # bad-argument-type
-                f,
-                model_name,
-                run_single_threaded,
-                num_runners,
-                device_index,
+                f, model_name, run_single_threaded, num_runners, device_index
             )
             for model_name in aoti_model_names
         }

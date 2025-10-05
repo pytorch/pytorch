@@ -5,8 +5,7 @@ import os
 import sys
 import tempfile
 import typing_extensions
-from collections.abc import Callable
-from typing import Any, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -84,11 +83,7 @@ def compile_time_strobelight_meta(
     ) -> Callable[_P, _T]:
         @functools.wraps(function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-            if "skip" in kwargs and isinstance(
-                # pyrefly: ignore  # unsupported-operation
-                skip := kwargs["skip"],
-                int,
-            ):
+            if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
                 kwargs["skip"] = skip + 1
 
             # This is not needed but we have it here to avoid having profile_compile_time
@@ -310,7 +305,7 @@ def deprecated():
     """
 
     def decorator(func: Callable[_P, _T]) -> Callable[_P, _T]:
-        # Validate naming convention - single leading underscore, not dunder
+        # Validate naming convention – single leading underscore, not dunder
         if not (func.__name__.startswith("_")):
             raise ValueError(
                 "@deprecate must decorate a function whose name "
@@ -331,10 +326,7 @@ def deprecated():
 
         # public deprecated alias
         alias = typing_extensions.deprecated(
-            # pyrefly: ignore  # bad-argument-type
-            warning_msg,
-            category=UserWarning,
-            stacklevel=1,
+            warning_msg, category=UserWarning, stacklevel=1
         )(func)
 
         alias.__name__ = public_name
