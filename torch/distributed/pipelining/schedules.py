@@ -1191,7 +1191,7 @@ def _add_send_recv(
         """
         if action is None:
             return True
-        elif action.computation_type == F and not action.stage_index == 0:
+        elif action.computation_type == F and action.stage_index != 0:
             if (
                 _Action(action.stage_index, RECV_F, action.microbatch_index)
                 in prev_actions
@@ -1205,7 +1205,7 @@ def _add_send_recv(
             return False
         elif (
             action.computation_type in (BACKWARD_INPUT, FULL_BACKWARD)
-            and not action.stage_index == num_stages - 1
+            and action.stage_index != num_stages - 1
         ):
             if (
                 _Action(action.stage_index, RECV_B, action.microbatch_index)
