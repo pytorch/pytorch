@@ -1131,7 +1131,8 @@ def unbind_int(func, *args, **kwargs):
         lengths_sum = 0
         ragged_dim_size = values.shape[ragged_idx - 1]
         for i in range(len(_lengths)):
-            torch._check_is_nonnegative(_lengths[i], max=ragged_dim_size)
+            torch._check(_lengths[i] >= 0)
+            torch._check(_lengths[i] <= ragged_dim_size)
 
             lengths_sum += _lengths[i]
             if _offsets is not None:
@@ -1143,7 +1144,8 @@ def unbind_int(func, *args, **kwargs):
 
         if _offsets is not None:
             for i in range(len(_offsets)):
-                torch._check_is_nonnegative(_offsets[i], max=ragged_dim_size)
+                torch._check(_offsets[i] >= 0)
+                torch._check(_offsets[i] <= ragged_dim_size)
 
     if lengths is None:
         lengths_scalars = offsets.diff().tolist()
