@@ -2,19 +2,13 @@ import functools
 import unittest
 import weakref
 from collections import Counter
-from typing import Callable, Dict, Optional
-
-from torchvision.models import resnet50
+from typing import Callable, Optional
 
 import torch
-import torch.fx as fx
 from torch._inductor.fx_passes.memory_estimator import build_memory_profile
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.utils._python_dispatch import (
-    is_traceable_wrapper_subclass,
-    TorchDispatchMode,
-)
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary
 
@@ -30,7 +24,7 @@ def device_filter(device):
 class FakeTensorMemoryProfilerMode(TorchDispatchMode):
     def __init__(self, device_filter: Optional[Callable[torch.device, bool]] = None):
         # counter of storage ids to live references
-        self.storage_count: Dict[int, int] = Counter()
+        self.storage_count: dict[int, int] = Counter()
         # live fake tensors
         self.live_tensors = WeakIdKeyDictionary()
         self.memory_use = 0
@@ -74,10 +68,8 @@ class FakeTensorMemoryProfilerMode(TorchDispatchMode):
             self.change_memory(-nbytes)
 
     def change_memory(self, delta):
-        before = self.memory_use
         self.memory_use += delta
         self.max_memory = max(self.memory_use, self.max_memory)
-        print("Changing mem use", "before", before, "after", self.memory_use)
 
 
 class TestMemoryProfilingResNet(unittest.TestCase):

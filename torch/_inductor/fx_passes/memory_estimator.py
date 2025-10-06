@@ -61,30 +61,29 @@ class AliasInfo:
         # Track all output storages for each node (for building usage graph)
         self.node_to_output_storages: dict[fx.Node, OrderedSet[StorageKey]] = {}
 
-        # First pass: build storage allocations
+        # First pass: build storage allocations and track uses
         for node in nodes:
+            # Get output storages
             output_storages = self._get_output_storages(node)
             self.node_to_output_storages[node] = output_storages
 
+            # Track fresh allocations
             fresh_allocations = OrderedSet()
             for storage_key in output_storages:
                 if storage_key not in self.storage_to_allocator:
                     self.storage_to_allocator[storage_key] = node
                     fresh_allocations.add(storage_key)
-
             self.node_to_fresh_allocations[node] = fresh_allocations
 
-        # Second pass: track storage uses (inputs)
-        for node in nodes:
+            # Track input storage uses (safe because inputs were already processed)
             input_storages = self._get_input_storages(node)
             self.node_to_storage_uses[node] = input_storages
-
             for storage_key in input_storages:
                 self.storage_to_uses[storage_key].add(node)
 
-        # Third pass: find last users (iterate in reverse)
+        # Second pass: find last users (iterate in reverse)
         for node in reversed(nodes):
-            input_storages = self._get_input_storages(node)
+            input_storages = self.node_to_storage_uses[node]
             for storage_key in input_storages:
                 if storage_key not in self.storage_to_last_user:
                     self.storage_to_last_user[storage_key] = node
