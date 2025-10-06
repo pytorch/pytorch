@@ -22,6 +22,8 @@
 
 #include <ATen/cpu/vec/vec128/vec128_convert.h>
 
+#include <ATen/cpu/vec/vec128/vec128_int_sve.h>
+
 #include <ATen/cpu/vec/sve/vec_qint.h>
 
 #elif defined(CPU_CAPABILITY_SVE)
