@@ -117,13 +117,13 @@ def round_up(x: int, y: int) -> int:
 def infer_scale_swizzle(mat, scale):
     # Tensor-wise
     if scale.numel() == 1:
-        return ScalingType.Tensorwise, SwizzleType.NoSwizzle
+        return ScalingType.TensorWise, SwizzleType.NO_SWIZZLE
 
     # Row-wise
     if (scale.shape[0] == mat.shape[0] and scale.shape[1] == 1) or (
         scale.shape[0] == 1 and scale.shape[1] == mat.shape[1]
     ):
-        return ScalingType.Rowwise, SwizzleType.NoSwizzle
+        return ScalingType.RowWise, SwizzleType.NO_SWIZZLE
 
     # deepgemm 1x128 / 128x1
     if len(scale.shape) > 1:
@@ -133,13 +133,13 @@ def infer_scale_swizzle(mat, scale):
             or scale.shape[1] == mat.shape[1]
             and scale.shape[0] == math.ceil(mat.shape[0] // 128)
         ):
-            return ScalingType.Blockwise_1x128, SwizzleType.NoSwizzle
+            return ScalingType.BlockWise1x128, SwizzleType.NO_SWIZZLE
 
         # deepgemm 128x128
         if scale.shape[0] == math.ceil(mat.shape[0] // 128) and scale.shape[
             1
         ] == math.ceil(mat.shape[1] // 128):
-            return ScalingType.Blockwise_128x128, SwizzleType.NoSwizzle
+            return ScalingType.Blockwise128x128, SwizzleType.NO_SWIZZLE
 
     # NVFP4
     if (
@@ -150,7 +150,7 @@ def infer_scale_swizzle(mat, scale):
         and mat.dtype == torch.float4_e2m1fn_x2
         and scale.dtype == torch.float8_e4m3fn
     ):
-        return ScalingType.Blockwise_1x16, SwizzleType.Swizzle_32_4_4
+        return ScalingType.Blockwise1x16, SwizzleType.SWIZZLE_32_4_4
 
     # MX
     if (
@@ -160,7 +160,7 @@ def infer_scale_swizzle(mat, scale):
         == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4)
         and scale.dtype == torch.float8_e8m0fnu
     ):
-        return ScalingType.Blockwise_1x32, SwizzleType.Swizzle_32_4_4
+        return ScalingType.Blockwise1x32, SwizzleType.SWIZZLE_32_4_4
 
     return None, None
 
@@ -174,8 +174,8 @@ def scaled_mm_wrap(
     scale_b,
     scale_recipe_a=None,
     scale_recipe_b=None,
-    swizzle_a=SwizzleType.NoSwizzle,
-    swizzle_b=SwizzleType.NoSwizzle,
+    swizzle_a=SwizzleType.NO_SWIZZLE,
+    swizzle_b=SwizzleType.NO_SWIZZLE,
     scale_result=None,
     out_dtype=torch.bfloat16,
     use_fast_accum=False,
@@ -838,8 +838,8 @@ class TestFP8Matmul(TestCase):
                 y_fp8,
                 scale_a=torch.ones((1, 1), device="cuda"),
                 scale_b=torch.ones((1, 2), device="cuda"),
-                scale_recipe_a=ScalingType.Tensorwise,
-                scale_recipe_b=ScalingType.Tensorwise,
+                scale_recipe_a=ScalingType.TensorWise,
+                scale_recipe_b=ScalingType.TensorWise,
                 out_dtype=torch.bfloat16,
             )
 
@@ -851,8 +851,8 @@ class TestFP8Matmul(TestCase):
                 y_fp8,
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N + 1), device="cuda"),
-                scale_recipe_a=ScalingType.Rowwise,
-                scale_recipe_b=ScalingType.Rowwise,
+                scale_recipe_a=ScalingType.RowWise,
+                scale_recipe_b=ScalingType.RowWise,
                 out_dtype=torch.bfloat16,
             )
         with self.assertRaisesRegex(
@@ -863,8 +863,8 @@ class TestFP8Matmul(TestCase):
                 y_fp8,
                 scale_a=torch.ones((M), device="cuda"),
                 scale_b=torch.ones((N, 1), device="cuda"),
-                scale_recipe_a=ScalingType.Rowwise,
-                scale_recipe_b=ScalingType.Rowwise,
+                scale_recipe_a=ScalingType.RowWise,
+                scale_recipe_b=ScalingType.RowWise,
                 out_dtype=torch.bfloat16,
             )
 
@@ -876,8 +876,8 @@ class TestFP8Matmul(TestCase):
                 y_fp8,
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N * 2), device="cuda")[:, ::2],
-                scale_recipe_a=ScalingType.Rowwise,
-                scale_recipe_b=ScalingType.Rowwise,
+                scale_recipe_a=ScalingType.RowWise,
+                scale_recipe_b=ScalingType.RowWise,
                 out_dtype=torch.bfloat16,
             )
 
@@ -979,14 +979,14 @@ class TestFP8Matmul(TestCase):
         # 1x128 blocks need scales to be outer-dim-major
         if lhs_block == 1:
             x_scales = x_scales.t().contiguous().t()
-            lhs_recipe = ScalingType.Blockwise_1x128
+            lhs_recipe = ScalingType.BlockWise1x128
         else:
-            lhs_recipe = ScalingType.Blockwise_128x128
+            lhs_recipe = ScalingType.BlockWise128x128
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
-            rhs_recipe = ScalingType.Blockwise_1x128
+            rhs_recipe = ScalingType.BlockWise1x128
         else:
-            rhs_recipe = ScalingType.Blockwise_128x128
+            rhs_recipe = ScalingType.BlockWise128x128
 
 
         # Calculate actual F8 mm

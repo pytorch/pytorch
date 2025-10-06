@@ -4,12 +4,16 @@ import importlib
 import math
 import warnings
 from collections.abc import Callable
-from enum import Enum as _Enum
 from typing import Any as _Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
-from torch._C import _add_docstr, _infer_size
+from torch._C import (
+    _add_docstr,
+    _infer_size,
+    _ScalingType as ScalingType,
+    _SwizzleType as SwizzleType,
+)
 from torch._jit_internal import (
     _overload,
     boolean_dispatch,
@@ -6510,26 +6514,6 @@ def multi_head_attention_forward(
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)
         return attn_output, None
-
-
-class ScalingType(_Enum):
-    """Enum class to hold type of scaling used"""
-
-    Tensorwise = 0
-    Rowwise = 1
-    Blockwise_1x16 = 2
-    Blockwise_1x32 = 3
-    Blockwise_1x128 = 4
-    Blockwise_128x128 = 5
-
-
-class SwizzleType(_Enum):
-    """Enum class to hold what (if any) swizzling done to scales"""
-
-    # No swizzling
-    NoSwizzle = 0
-    # NVIDIA Blockwell-style swizzle
-    Swizzle_32_4_4 = 1
 
 
 def scaled_mm(

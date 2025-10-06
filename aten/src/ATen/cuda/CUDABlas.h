@@ -145,6 +145,11 @@ enum class ScalingType : std::uint8_t {
   BlockWise128x128,  // fp32 scales
 };
 
+enum class SwizzleType : std::uint8_t {
+  NO_SWIZZLE = 0,
+  SWIZZLE_32_4_4 = 1
+};
+
 void scaled_gemm(
     char transa,
     char transb,

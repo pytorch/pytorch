@@ -107,6 +107,7 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
 }
 
 using at::cuda::blas::ScalingType;
+using at::cuda::blas::SwizzleType;
 
 /**
  * @brief Prepares matrices for CUBLAS operation
@@ -1683,11 +1684,6 @@ _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
 
   return _scaled_mm_out_cuda(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
 }
-
-enum class SwizzleType {
-  NO_SWIZZLE = 0,
-  SWIZZLE_32_4_4 = 1
-};
 
 /**
  * Track concrete implementations available

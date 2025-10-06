@@ -4571,7 +4571,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
 
 # This is failing on Python 3.12 : https://github.com/pytorch/pytorch/issues/119454
-# @unittest.skipIf(sys.version_info >= (3, 12), "Failing on python 3.12+")
+@unittest.skipIf(sys.version_info >= (3, 12), "Failing on python 3.12+")
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()

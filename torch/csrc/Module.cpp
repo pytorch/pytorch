@@ -113,6 +113,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/ROCmFABackend.h>
+#include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <torch/csrc/inductor/static_cuda_launcher.h>
@@ -2459,6 +2460,17 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_get_blas_preferred_backend", []() {
     return at::globalContext().blasPreferredBackend();
   });
+
+  py::enum_<at::cuda::blas::ScalingType>(py_module, "_ScalingType")
+      .value("TensorWise", at::cuda::blas::ScalingType::TensorWise)
+      .value("RowWise", at::cuda::blas::ScalingType::RowWise)
+      .value("BlockWise1x16", at::cuda::blas::ScalingType::BlockWise1x16)
+      .value("BlockWise1x128", at::cuda::blas::ScalingType::BlockWise1x128)
+      .value("BlockWise128x128", at::cuda::blas::ScalingType::BlockWise128x128);
+
+  py::enum_<at::cuda::blas::SwizzleType>(py_module, "_SwizzleType")
+      .value("NO_SWIZZLE", at::cuda::blas::SwizzleType::NO_SWIZZLE)
+      .value("SWIZZLE_32_4_4", at::cuda::blas::SwizzleType::SWIZZLE_32_4_4);
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
