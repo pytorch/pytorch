@@ -3,7 +3,7 @@
 import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -17,6 +17,7 @@ from torch._higher_order_ops.utils import (
     FunctionalizeCtxWrapper,
     get_dummy_aot_autograd_config,
     HopInstance,
+    maybe_ignore_fresh_unbacked_symbols,
     prepare_fw_with_masks,
     reenter_make_fx,
     register_fake,
@@ -34,6 +35,10 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 invoke_subgraph_counter = 0
@@ -82,6 +87,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
         return super().__call__(subgraph, identifier, *operands)
 
+    # pyrefly: ignore  # bad-override
     def gen_schema(self, subgraph, identifier, *operands):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import (
@@ -397,6 +403,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx,
         subgraph,
@@ -473,6 +480,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         for tangent in filtered_grad_outs:
             metadata = extract_tensor_metadata(tangent)
             metadata._flatten_into(tangent_metadata, fake_mode, state)
+        # pyrefly: ignore  # bad-assignment
         tangent_metadata = tuple(tangent_metadata)
 
         # bw_graph is a joint graph with signature (*primals_and_tangents) and
@@ -586,9 +594,17 @@ def _(ctx, subgraph, identifier, *operands):
 # Register the hop fake fn. This will be called in the fake_tensor _dispatch_impl.
 @register_fake(invoke_subgraph)
 def _(subgraph, identifier, *operands):
+    mode = torch.utils._python_dispatch._get_current_dispatch_mode()
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    assert isinstance(mode, FakeTensorMode)
+
     from torch._dynamo.utils import dynamo_timed
 
-    with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
+    with (
+        dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True),
+        maybe_ignore_fresh_unbacked_symbols(mode),
+    ):
         return subgraph(*operands)
 
 

@@ -668,7 +668,7 @@ class _MinimizerBase:
         final_start_idx: Optional[int] = start_idx
         final_end_idx: Optional[int] = end_idx
 
-        run_both = True if find_last_node is None else False
+        run_both = find_last_node is None
 
         # step 1: find (0, end_idx) of culprit block
         if run_both or find_last_node:

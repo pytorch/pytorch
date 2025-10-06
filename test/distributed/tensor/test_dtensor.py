@@ -171,9 +171,9 @@ class DTensorTest(DTensorTestBase):
     @with_comms
     def test_from_local(self):
         device_mesh = self.build_device_mesh()
-        placements = [Shard(0)]
+        shard_spec = [Shard(0)]
         local_tensor = torch.randn(3, 3)
-        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, placements)
+        sharded_tensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
         self.assertEqual(sharded_tensor.size(), torch.Size([self.world_size * 3, 3]))
 
         replica_spec = [Replicate()]
@@ -190,20 +190,30 @@ class DTensorTest(DTensorTestBase):
         local_tensor_temp = local_tensor_with_grad * 3
         # create the dist tensor with non leaf local tensor, dist tensor created
         # should also be non leaf node
-        dist_tensor = DTensor.from_local(local_tensor_temp, device_mesh, placements)
+        dist_tensor = DTensor.from_local(local_tensor_temp, device_mesh, shard_spec)
         self.assertFalse(dist_tensor.is_leaf)
         # do some random operations on dist tensor
         output = dist_tensor * 3
         self.assertIsInstance(output, DTensor)
         # trigger .backward() on dist tensor directly
         local_grad = torch.ones(3, 3)
-        grad_output = DTensor.from_local(local_grad, device_mesh, placements)
+        grad_output = DTensor.from_local(local_grad, device_mesh, shard_spec)
         # run backward directly on dist tensor
         output.backward(grad_output)
         # check it gradients flow back to original torch.Tensor
         self.assertIsNotNone(local_tensor_with_grad.grad)
         expected_grad = torch.ones(3, 3) * 9
         self.assertEqual(local_tensor_with_grad.grad, expected_grad)
+
+        # DTensor.from_local should raise error if the `local_tensor`
+        # argument is a DTensor
+        local_tensor = torch.ones(2, 2)
+        dtensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "the local_tensor argument only accepts torch.Tensor"
+        ):
+            DTensor.from_local(dtensor, device_mesh, shard_spec)
 
     @with_comms
     def test_from_local_uneven_sharding(self):
@@ -870,6 +880,19 @@ class DTensorMeshTest(DTensorTestBase):
         local_result = result.to_local()
         local_expected = expected.to_local()
         self.assertEqual(local_result, local_expected)
+
+    @unittest.expectedFailure
+    @with_comms
+    def test_inplace_on_local_tensor_view(self):
+        mesh = self.build_device_mesh()
+        seq = 8
+        vocab = 16
+        leaf = torch.randn((seq, vocab), device=self.device_type, requires_grad=True)
+        dtensor_leaf = DTensor.from_local(leaf, mesh, [Shard(1)])
+        dtensor_vocab_parallel_logits = dtensor_leaf * 2  # make this non-leaf
+        vocab_parallel_logits = dtensor_vocab_parallel_logits.to_local()
+        logits_max = torch.randn(seq, device=self.device_type)
+        vocab_parallel_logits -= logits_max.unsqueeze(dim=1)
 
     @with_comms
     def test_auto_implicit_replication(self):
