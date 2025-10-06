@@ -333,6 +333,7 @@ def create_hop_fw_bw(
         num_activations = (
             len(new_fw_gm.graph.find_nodes(op="output")[0].args[0]) - num_fw_outputs
         )
+        # tensors first, then symints
         assert num_activations >= 0
 
         # Validate Backward
@@ -396,6 +397,12 @@ class LocalMapAutogradOp(torch.autograd.Function):
             coerce_to_expected_memory_format,
         )
 
+        assert ctx.pos == sorted(ctx.pos), (
+            "Interleaving saved tensor activations and symints is not expected from min-cut partitioner."
+        )
+        ctx.pos = list(
+            reversed(ctx.pos)
+        )  # make saved_tensors_and_symints return symints first
         saved_activations = saved_tensors_and_symints(ctx)
         with torch._C._AutoDispatchBelowAutograd():
             # Filter out grads that are None or do not require_grad.
