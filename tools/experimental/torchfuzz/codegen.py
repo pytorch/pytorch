@@ -685,10 +685,19 @@ def generate_simple_operation_code(
 
     if operator is not None:
         # Use the class-based operator to generate code
-        code_line = operator.codegen(output_var, input_vars, output_spec)
-        # Add tensor descriptor comment
+        code = operator.codegen(output_var, input_vars, output_spec)
+        # Add tensor descriptor comment to the last emitted line
         descriptor_comment = f"# {format_tensor_descriptor(output_spec)}"
-        return [code_line + " " + descriptor_comment]
+        if "\n" in code:
+            lines = code.split("\n")
+            # Attach comment to the last non-empty line
+            for i in range(len(lines) - 1, -1, -1):
+                if lines[i].strip():
+                    lines[i] = lines[i] + " " + descriptor_comment
+                    break
+            return lines
+        else:
+            return [code + " " + descriptor_comment]
     else:
         # Fallback for unknown operations
         return [f"# Unknown operation: {op_name}"]
