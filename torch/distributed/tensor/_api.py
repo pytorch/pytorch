@@ -398,7 +398,7 @@ def _prepare_placements_and_shard_order(
 
         if shard_order is None:
             shard_order_tuple = DTensorSpec.compute_default_sparse_shard_order(
-                placement_tuple, device_mesh
+                placement_tuple
             )
         else:
             # both shard_order and placements are specified; need to validate their correctness

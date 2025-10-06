@@ -149,7 +149,6 @@ class DTensorRedistributePlanner:
             return DTensorSpec.format_shard_order_str(
                 self.placements,
                 self.tensor_dim_to_mesh_dim,
-                tensor_centric_format,
             )
 
         def __repr__(self):
@@ -870,7 +869,7 @@ class DTensorRedistributePlanner:
         assert len(src_placement) == mesh.ndim
         if src_shard_order is None:
             src_shard_order = DTensorSpec.compute_default_sparse_shard_order(
-                src_placement, mesh
+                src_placement
             )
         cur_placement = list(src_placement)
         shard_order_dict = DTensorRedistributePlanner._TensorDimTuple_to_dict(
@@ -1189,11 +1188,13 @@ class Redistribute(torch.autograd.Function):
                     stride=grad_output.stride(),
                     dtype=backward_dtype,
                 ),
+                shard_order=grad_output._spec.shard_order,
             )
             previous_spec = DTensorSpec(
                 mesh=previous_spec.device_mesh,
                 placements=previous_spec.placements,
                 tensor_meta=current_spec.tensor_meta,
+                shard_order=previous_spec.shard_order,
             )
         else:
             local_tensor = grad_output._local_tensor
@@ -1210,7 +1211,9 @@ class Redistribute(torch.autograd.Function):
         if output.dtype != ctx.original_dtype:
             output = output.to(ctx.original_dtype)
 
-        # normalize the target placement to replicate if it is partial
+        # Normalize the target placement to replicate if it is partial. This is
+        # because `redistribute_local_tensor()` skips converting from Replicate
+        # to Partial silently.
         normalized_placements: list[Placement] = []
         for previous_placement in previous_spec.placements:
             if previous_placement.is_partial():
@@ -1227,6 +1230,7 @@ class Redistribute(torch.autograd.Function):
                 stride=grad_output.stride(),
                 dtype=output.dtype,
             ),
+            shard_order=previous_spec.shard_order,
         )
         output_dtensor = dtensor.DTensor(
             output,
