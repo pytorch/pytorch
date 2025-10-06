@@ -2383,8 +2383,9 @@ class GraphLowering(torch.fx.Interpreter):
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
-        V.debug.output_code(mod.__file__)
-        V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
+        if isinstance(wrapper_code, FileBackedGraphModule):
+            V.debug.output_code(mod.__file__)
+            V.debug.copy(os.path.splitext(mod.__file__)[0] + ".debug")
 
         return mod
 
@@ -2420,6 +2421,9 @@ class GraphLowering(torch.fx.Interpreter):
             ]
             key, path = PyCodeCache.write(wrapper_code.value)
             output_code_log.debug("Output code written to: %s", path)
+
+            V.debug.output_code(path)
+            V.debug.copy(os.path.splitext(path)[0] + ".debug")
         except Exception:
             trace_structured(
                 "inductor_output_code",
