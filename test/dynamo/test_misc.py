@@ -1328,8 +1328,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         @torch.compile(backend=cnts, fullgraph=True)
         def f(x):
             y = x.item()
-            torch._check(b >= 0)
-            torch._check(b < y.shape[0])
+            torch._check(y >= 0)
             # Cannot conditional on unbacked SymInt
             if y == 0:
                 assert False
