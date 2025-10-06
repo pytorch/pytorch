@@ -7,11 +7,10 @@ from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from functools import partial, wraps
-from typing import Callable, Optional, Union, Literal
-
-from jsonargparse import CLI
+from typing import Callable, Literal, Optional, Union
 
 import numpy as np
+from jsonargparse import CLI
 from tabulate import tabulate
 from tqdm import tqdm
 
@@ -52,7 +51,9 @@ def safe_backend(backend_name=None):
             try:
                 return func(config, *args, **kwargs)
             except torch.OutOfMemoryError:
-                print(f"[SKIP] OOM for {backend_name or func.__name__} with shape {config.shape}")
+                print(
+                    f"[SKIP] OOM for {backend_name or func.__name__} with shape {config.shape}"
+                )
                 cleanup_memory()
             except Exception as e:
                 print(
@@ -70,7 +71,9 @@ def safe_backend(backend_name=None):
 
 
 # Type definitions
-Backend = Literal["math", "efficient", "cudnn", "fav2", "fav3", "fakv", "og-eager"]
+Backend = Literal[
+    "math", "efficient", "cudnn", "fav2", "fav3", "fakv", "flex", "og-eager"
+]
 AttentionType = Literal[
     "noop",
     "causal",
@@ -277,9 +280,29 @@ def run_single_backend_sdpa(
     backend_context = get_backend_context(backend)
     with backend_context:
         _device = torch.device("cuda")
-        eager_sdpa = generate_eager_sdpa(
-            config.attn_type, config.shape, config.dtype, block_mask, score_mod
-        )
+
+        # Special handling for flex attention backend
+        if backend == "flex":
+            # Create a compiled flex attention function
+            from torch.nn.attention.flex_attention import flex_attention
+
+            compiled_flex_attention = torch.compile(flex_attention)
+
+            def eager_flex_attention(query, key, value):
+                return compiled_flex_attention(
+                    query=query,
+                    key=key,
+                    value=value,
+                    score_mod=score_mod,
+                    block_mask=block_mask,
+                    enable_gqa=(query.shape[1] != key.shape[1]),
+                )
+
+            eager_sdpa = eager_flex_attention
+        else:
+            eager_sdpa = generate_eager_sdpa(
+                config.attn_type, config.shape, config.dtype, block_mask, score_mod
+            )
 
         if config.attn_type == "document_mask":
             q_eager, k_eager, v_eager = generate_jagged_inputs(
@@ -462,7 +485,7 @@ def run_single_experiment(
 
     results = {}
     for backend in config.backends:
-        if backend in ["fav2", "fav3", "fakv"]:
+        if backend in ["fav3", "fakv"]:
             results[backend] = run_single_backend_FA(
                 config,
                 query,
@@ -853,10 +876,11 @@ def get_backend_context(backend: str):
         ValueError: If an invalid backend is specified.
     """
     backends = {
-        "fav2": nullcontext(),
+        "fav2": sdpa_kernel(SDPBackend.FLASH_ATTENTION),
         "cudnn": sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
         "math": sdpa_kernel(SDPBackend.MATH),
         "efficient": sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+        "flex": nullcontext(),
         "fav3": nullcontext(),
         "fakv": nullcontext(),
         "og-eager": nullcontext(),
@@ -876,13 +900,9 @@ def generate_FA_callable(
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
     if backend == "fav2":
-        try:
-            from flash_attn import flash_attn_func, flash_attn_varlen_func
-        except ImportError:
-            print(
-                "Flash attention 2 is not installed. Please install it to run fav2 backend. "
-            )
-            raise
+        # Use PyTorch's built-in Flash Attention via SDPA
+        flash_attn_func = None  # We'll define this below using SDPA
+        flash_attn_varlen_func = None
     elif backend == "fav3":
         try:
             from flash_attn.flash_attn_interface import (
@@ -1137,6 +1157,7 @@ def generate_experiment_configs(
 
     return all_configs
 
+
 def _output_json_for_dashboard(
     experiments,
     output_file,
@@ -1151,31 +1172,36 @@ def _output_json_for_dashboard(
         return
 
     import platform
-    import json
-    from dataclasses import dataclass, asdict
+    from dataclasses import asdict, dataclass
     from typing import Any, Optional
 
     # Prepare headers and records for JSON output
     records = []
     for experiment in experiments:
         config = experiment.config
-        results_dict = experiment.results  # This is a dict: backend -> ExperimentResults
-        
+        results_dict = (
+            experiment.results
+        )  # This is a dict: backend -> ExperimentResults
+
         # Process each backend result
         for backend, results in results_dict.items():
             # Extract data from experiment
             test_name = f"{config.attn_type}_{backend}"
             input_config = f"shape: {config.shape}, dtype: {config.dtype}"
-            
+
             # Determine mode based on backward pass
             mode = "training" if config.calculate_bwd_time else "inference"
-            
+
             # Extract dtype
-            dtype = str(config.dtype).split(".")[1] if "." in str(config.dtype) else str(config.dtype)
-            
+            dtype = (
+                str(config.dtype).split(".")[1]
+                if "." in str(config.dtype)
+                else str(config.dtype)
+            )
+
             # Determine device
             device = "cuda"
-            
+
             # Get device architecture
             device_arch = (
                 torch.cuda.get_device_name(0)
@@ -1360,6 +1386,7 @@ def _output_json_for_dashboard(
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(records, f, indent=2)
 
+
 def main(
     dynamic: bool = False,
     calculate_bwd: bool = False,
@@ -1471,7 +1498,6 @@ def heads_input_type(s: str) -> tuple[int, int]:
         return hq, hkv
     except Exception as e:
         raise ValueError("Heads must be Hq,Hkv") from e
-
 
 
 if __name__ == "__main__":

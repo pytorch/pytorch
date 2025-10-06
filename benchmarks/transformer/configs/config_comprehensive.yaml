@@ -16,7 +16,7 @@ d: [64, 128, 256]  # head dimensions
 mods: ["noop", "causal", "rel", "head_bias", "alibi", "sliding_window", "prefix_lm", "softcap"]
 
 # Multiple backends for comparison (SDPA + Flash Attention + FlexAttention)
-backend: ["efficient", "math", "cudnn", "fav2", "fav3"]
+backend: ["efficient", "math", "cudnn", "fav2", "flex"]
 max_autotune: true  # Enable torch.compile with max-autotune for optimal performance
 
 # Decoding and cache settings
