@@ -226,6 +226,7 @@ class TestVarlenAttention(NNTestCase):
         )
         assert custom_op_called
 
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -244,17 +245,14 @@ class TestVarlenAttention(NNTestCase):
 
         variable_length_batch_data = create_variable_length_batch(shape, device, dtype)
 
-        x_packed = variable_length_batch_data["x_packed"]
-        x_padded = variable_length_batch_data["x_padded"]
-
         varlen_output = attention_block.forward_varlen(
-            x_packed,
+            variable_length_batch_data["x_packed"],
             variable_length_batch_data["cu_seq"],
             variable_length_batch_data["max_len"],
             is_causal=is_causal,
         )
         sdpa_output = attention_block.forward_sdpa(
-            x_padded,
+            variable_length_batch_data["x_padded"],
             variable_length_batch_data["seq_lengths"],
             dtype=dtype,
             is_causal=is_causal,
@@ -262,9 +260,9 @@ class TestVarlenAttention(NNTestCase):
 
         tolerances = default_tolerances[dtype]
         start_idx = 0
-
         for i, seq_len in enumerate(variable_length_batch_data["seq_lengths"]):
             end_idx = start_idx + seq_len
+
             varlen_seq = varlen_output[start_idx:end_idx]
             sdpa_seq = sdpa_output[i, :seq_len]
 
