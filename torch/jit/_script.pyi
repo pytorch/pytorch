@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="type-arg"
-from typing import Any, Callable, NamedTuple, overload, TypeVar
-from typing_extensions import Never, TypeAlias
+from collections.abc import Callable
+from typing import Any, NamedTuple, overload, TypeAlias, TypeVar
+from typing_extensions import Never
 
 from _typeshed import Incomplete
 
