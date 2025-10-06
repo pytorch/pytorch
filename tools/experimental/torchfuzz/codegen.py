@@ -180,6 +180,12 @@ class FuzzTemplate:
                         code_lines.append(
                             f"{arg_name} = torch.as_strided(torch.randint({min_val}, {max_val}, ({storage_size},)).to({dtype_str}), {size_str}, {stride_str})"
                         )
+                    elif spec.dtype == torch.bool:
+                        # For boolean tensors, use randint to generate True/False values
+                        # Using randn().to(bool) would yield almost all True due to non-zero floats
+                        code_lines.append(
+                            f"{arg_name} = torch.as_strided(torch.randint(0, 2, ({storage_size},), dtype=torch.int8).bool(), {size_str}, {stride_str})"
+                        )
                     else:
                         code_lines.append(
                             f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"

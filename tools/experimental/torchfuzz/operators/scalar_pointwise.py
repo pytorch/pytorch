@@ -78,3 +78,22 @@ class ScalarDivOperator(ScalarPointwiseOperator):
 
     def __init__(self):
         super().__init__("scalar_div", "/")
+
+    def codegen(
+        self, output_name: str, input_names: list[str], output_spec: Spec
+    ) -> str:
+        """Generate code for scalar division with zero-denominator guard."""
+        if len(input_names) != 2:
+            raise ValueError(f"{self.__class__.__name__} requires exactly two inputs")
+
+        # Prevent ZeroDivisionError at runtime by guarding the denominator.
+        # Use integer fallback 1 for integer dtypes, and 1.0 for floating types.
+        if isinstance(output_spec, ScalarSpec) and output_spec.dtype in [
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ]:
+            return f"{output_name} = {input_names[0]} / ({input_names[1]} if {input_names[1]} != 0 else 1)"
+        else:
+            return f"{output_name} = {input_names[0]} / ({input_names[1]} if {input_names[1]} != 0 else 1.0)"
