@@ -5,6 +5,7 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
+#include <ATen/cpu/vec/vec128/vec128_transpose.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 
@@ -637,6 +638,32 @@ inline Vectorized<float> Vectorized<float>::erf() const {
   auto tmp7 = fmadd(tmp6, r, one_vec);
   return tmp7 ^ sign_mask;
 }
+
+template <>
+inline void transpose_mxn<float>(
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst,
+    int M,
+    int N) {
+  transpose_float_neon(M, N, src, ld_src, dst, ld_dst);
+}
+
+template <
+    typename T,
+    int M,
+    int N,
+    typename std::enable_if_t<std::is_same_v<T, float>, int> = 0>
+inline void transpose_mxn(
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst) {
+  transpose_mxn<float>(src, ld_src, dst, ld_dst, M, N);
+}
+
+
 #undef DEFINE_SLEEF_COMPATIBLE_BINARY_ELEMENTWISE_FUNC
 #undef DEFINE_SLEEF_COMPATIBLE_UNARY_ELEMENTWISE_FUNC
 #endif /* defined(aarch64) */
