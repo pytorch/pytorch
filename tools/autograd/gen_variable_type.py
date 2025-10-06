@@ -1916,14 +1916,13 @@ def emit_body(
                             zeros_fn=zeros_fn,
                         )
                     )
-                if f.root_name in ['mul', 'add', 'div']:
+                if f.root_name in ["mul", "add", "div"]:
                     unpacked_arguments += (
                         FW_DERIVATIVE_ADD_WRAPPED_NUM_TEMPLATE.substitute(
-                            inp_name=inp.name,
-                            inp=inp_name + input_suffix
+                            inp_name=inp.name, inp=inp_name + input_suffix
                         )
                     )
-                    
+
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += (
                         FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(

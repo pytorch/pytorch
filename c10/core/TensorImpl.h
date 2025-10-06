@@ -3008,7 +3008,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   bool is_wrapped_number_ : 1;
 
-  bool was_wrapped_number_: 1;
+  bool was_wrapped_number_ : 1;
 
   // NOTE [ Metadata Change for a Detached Tensor ]
   //

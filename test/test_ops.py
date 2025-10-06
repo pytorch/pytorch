@@ -2866,12 +2866,15 @@ class TestFakeTensor(TestCase):
 
 
 class TestForwardADWithScalars(TestCase):
-    @ops([op for op in op_db if op.name in ['mul', 'add', 'div']], allowed_dtypes=(torch.float32,))
+    @ops(
+        [op for op in op_db if op.name in ["mul", "add", "div"]],
+        allowed_dtypes=(torch.float32,),
+    )
     def test_0d_tensor_with_python_scalar(self, device, dtype, op):
         """Test that forward AD preserves dtype when combining 0D tensors with Python scalars."""
         if torch.float not in op.supported_backward_dtypes(device):
             raise unittest.SkipTest("Does not support autograd")
-        
+
         # skip if operator doesnt support forward AD
         if not op.supports_forward_ad:
             raise unittest.SkipTest("Does not support forward_ad")
@@ -2887,13 +2890,17 @@ class TestForwardADWithScalars(TestCase):
             if op.supports_rhs_python_scalar:
                 result = op(dual0d, 2.0)
                 p, t = torch.autograd.forward_ad.unpack_dual(result)
-                self.assertEqual(p.dtype, t.dtype, f"{op.name} and scalar on RHS - dtype mismatch")
+                self.assertEqual(
+                    p.dtype, t.dtype, f"{op.name} and scalar on RHS - dtype mismatch"
+                )
             # Test with scalar on LHS
             if op.supports_one_python_scalar:
                 result = op(2.0, dual0d)
                 p, t = torch.autograd.forward_ad.unpack_dual(result)
-                self.assertEqual(p.dtype, t.dtype, f"{op.name} and scalar on LHS - dtype mismatch")
-            
+                self.assertEqual(
+                    p.dtype, t.dtype, f"{op.name} and scalar on LHS - dtype mismatch"
+                )
+
 
 instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals())
