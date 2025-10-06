@@ -66,7 +66,11 @@ IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r"torch\._inductor\.exc\.InductorError: CppCompileError: C\+\+ compile error"
     ),  # https://github.com/pytorch/pytorch/issues/164686
+    re.compile(
+        r"\.item\(\) # dtype=bool"
+    ),  # https://github.com/pytorch/pytorch/issues/164725
     # Add more patterns here as needed, e.g.:
+
     # re.compile(r"Some other error message"),
 ]
 
