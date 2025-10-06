@@ -7,7 +7,7 @@ def define_targets(rules):
         ],
         outs = ["version.h"],
         cmd = "$(execpath //tools/setup_helpers:gen_version_header) " +
-              "--template-path $(location version.h.in) " +
+              "--template-path version.h.in " +
               "--version-path $(location //:version.txt) --output-path $@ ",
         tools = ["//tools/setup_helpers:gen_version_header"],
     )

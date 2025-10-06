@@ -1038,7 +1038,7 @@ def define_buck_targets(
         name = "generated-version-header",
         header_namespace = "torch",
         exported_headers = {
-            "headeronly/version.h": ":generate-version-header[version.h]",
+            # "headeronly/version.h": ":generate-version-header[version.h]",
             "version.h": "torch/csrc/api/include/torch/version.h"
         },
         labels = labels,
