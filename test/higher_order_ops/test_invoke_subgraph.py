@@ -1627,7 +1627,8 @@ class GraphModule(torch.nn.Module):
         @nested_compile_region
         def gn(x, y):
             b = x.item()
-            torch._check_is_nonnegative(b, max=y.shape[0] - 1)
+            torch._check(b >= 0)
+            torch._check(b < y.shape[0])
             return y[:b].clone()
 
         def fn(x, y):
