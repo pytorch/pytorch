@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/dynamo/utils.h>
 
@@ -111,7 +112,7 @@ THPObjectPtr _unicode_dispatch(PyObject* str) {
       return F::apply(str, PyUnicode_4BYTE_DATA(str), length);
     default:
       // This should be impossible - throw to make the compiler happy.
-      throw std::runtime_error("unreachable");
+      TORCH_CHECK(false, "unreachable");
   }
 }
 
