@@ -142,11 +142,6 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
     )
 
-    # Alias to the version_h target in torch/headeronly subpackage
-    rules.alias(
-        name = "version_h",
-        actual = "//caffe2/torch/headeronly:version_h",
-    )
 
 #
 # ATen generated code
