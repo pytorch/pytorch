@@ -34,7 +34,7 @@ def _varlen_attn(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention using Flash Attention.
     This is the internal implementation that calls into the Flash Attention kernels.
@@ -60,8 +60,7 @@ def _varlen_attn(
             False,  # return_debug_mask
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
-        # output, softmax_lse, rng_state = result[0], result[1], result[6]
-        output, softmax_lse, rng_state = result[0], result[1]
+        output, softmax_lse, rng_state = result[0], result[1], result[6]
     else:
         log.info("Using Flash Attention backend for varlen_attn")
         output, softmax_lse, rng_state, _, _ = torch.ops.aten._flash_attention_forward(
@@ -76,8 +75,7 @@ def _varlen_attn(
             is_causal,
             return_debug_mask=False,
         )
-    # return output, softmax_lse, rng_state
-    return output, softmax_lse
+    return output, softmax_lse, rng_state
 
 
 # @_varlen_attn.register_fake
@@ -137,7 +135,7 @@ def varlen_attn(
     Returns:
         Tensor: Output tensor from attention computation
     """
-    out, lse = torch.ops.torch_nn_attention._varlen_attn(
+    out, lse, _ = torch.ops.torch_nn_attention._varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
 
@@ -148,8 +146,7 @@ def varlen_attn(
 
 def setup_context(ctx, inputs, output):
     query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
-    # out, lse, rng_state = output
-    out, lse = output
+    out, lse, rng_state = output
     ctx.query = query
     ctx.key = key
     ctx.value = value
@@ -160,11 +157,10 @@ def setup_context(ctx, inputs, output):
     ctx.is_causal = is_causal
     ctx.output = out
     ctx.lse = lse
-    # ctx.rng_state = rng_state
+    ctx.rng_state = rng_state
 
 
-def backward(ctx, grad_out, grad_lse):
-    print("in bwd")
+def backward(ctx, grad_out, grad_lse, grad_rng):
     query = ctx.query
     key = ctx.key
     value = ctx.value
@@ -195,7 +191,7 @@ def backward(ctx, grad_out, grad_lse):
             0.0,
             is_causal,
             rng_state,
-            unused
+            unused,
         )
     else:
         log.info("Using Flash Attention backend for varlen_attn")
@@ -213,8 +209,9 @@ def backward(ctx, grad_out, grad_lse):
             0.0,
             is_causal,
             rng_state,
-            unused
+            unused,
         )
     return dq, dk, dv, None, None, None, None, None, None
+
 
 _varlen_attn.register_autograd(backward, setup_context=setup_context)
