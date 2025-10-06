@@ -4,8 +4,8 @@ import importlib
 import math
 import warnings
 from collections.abc import Callable
-from enum import Enum
-from typing import Any, Optional, TYPE_CHECKING, Union
+from enum import Enum as _Enum
+from typing import Any as _Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -6512,7 +6512,7 @@ def multi_head_attention_forward(
         return attn_output, None
 
 
-class ScalingType(Enum):
+class ScalingType(_Enum):
     """Enum class to hold type of scaling used"""
 
     Tensorwise = 0
@@ -6523,7 +6523,7 @@ class ScalingType(Enum):
     Blockwise_128x128 = 5
 
 
-class SwizzleType(Enum):
+class SwizzleType(_Enum):
     """Enum class to hold what (if any) swizzling done to scales"""
 
     # No swizzling
@@ -6545,7 +6545,7 @@ def scaled_mm(
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
     contraction_dim: Optional[list[int]] = None,
     use_fast_accum: bool = False,
-    **kwargs: Any,
+    **kwargs: _Any,
 ) -> Tensor:
     r"""
     scaled_mm(mat_a, mat_b, scale_a, scale_recipe_a, scale_b, scale_recipe_b, swizzle_a, swizzle_b, bias, output_dtype,
@@ -6598,7 +6598,7 @@ def scaled_mm(
             use_fast_accum=use_fast_accum,
         )
 
-    def expand_single_value(v: Any | list[Any] | None) -> list[Any]:
+    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
         if v is None:
             return []
         elif not isinstance(v, (list)):
@@ -6622,10 +6622,10 @@ def scaled_mm(
     # *cannot* be passed, but an empty vector (list) can.
     # So, we need to convert None arguments for lists in python
     # explicitly into empty lists.
-    def list_or_empty(l: list[Any] | None) -> list[Any]:
+    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
         return [] if not l else l
 
-    def enum_list_as_int_list(l: Any | list[Any]) -> list[Any]:
+    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
         if not isinstance(l, list):
             l = [
                 l,

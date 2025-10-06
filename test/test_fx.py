@@ -4571,7 +4571,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
 
 # This is failing on Python 3.12 : https://github.com/pytorch/pytorch/issues/119454
-@unittest.skipIf(sys.version_info >= (3, 12), "Failing on python 3.12+")
+# @unittest.skipIf(sys.version_info >= (3, 12), "Failing on python 3.12+")
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
@@ -4657,6 +4657,7 @@ class TestFunctionalTracing(JitTestCase):
         "adaptive_avg_pool3d": LEN_ERROR,
         "adaptive_max_pool2d_with_indices": LEN_ERROR,
         "adaptive_max_pool3d_with_indices": LEN_ERROR,
+        "scaled_mm": LEN_ERROR,
         "instance_norm": CONTROL_FLOW,
         "adaptive_max_pool1d": PROXY_ITERABLE,
         "adaptive_max_pool2d": PROXY_ITERABLE,
