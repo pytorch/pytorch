@@ -834,8 +834,8 @@ def _export_to_torch_ir(
                     # We can't serialize entire fake mode yet, so this is to make sure
                     # things like copy.deepcopy(ep.graph_module) not crash.
                     # see test_export.py::test_custom_tag_metadata_re_export
-                    # Once we delete the old strict export, we can use this fake mode in the 
-                    # subsequent logic when lowering to aten IR. 
+                    # Once we delete the old strict export, we can use this fake mode in the
+                    # subsequent logic when lowering to aten IR.
                     del gm_torch_level.meta["fake_mode"]
 
                 else:
