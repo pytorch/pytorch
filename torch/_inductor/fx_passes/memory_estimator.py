@@ -19,14 +19,18 @@ class StorageKey:
     storage: torch.UntypedStorage
     device: torch.device
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return self.storage._cdata
 
-    def __eq__(self, other):
-        return self.storage._cdata == other.storage._cdata
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, StorageKey):
+            return False
+        return (
+            self.storage._cdata == other.storage._cdata and self.device == other.device
+        )
 
 
-class AliasInfo:
+class GraphAliasTracker:
     """
     Tracks storage allocation and usage relationships in an FX graph.
 
@@ -68,7 +72,7 @@ class AliasInfo:
             self.node_to_output_storages[node] = output_storages
 
             # Track fresh allocations
-            fresh_allocations = OrderedSet()
+            fresh_allocations: OrderedSet[StorageKey] = OrderedSet()
             for storage_key in output_storages:
                 if storage_key not in self.storage_to_allocator:
                     self.storage_to_allocator[storage_key] = node
@@ -89,7 +93,8 @@ class AliasInfo:
                     self.storage_to_last_user[storage_key] = node
                     self.node_to_storages_last_used[node].add(storage_key)
 
-    def _get_output_storages(self, node: fx.Node) -> OrderedSet[StorageKey]:
+    @staticmethod
+    def _get_output_storages(node: fx.Node) -> OrderedSet[StorageKey]:
         """
         Get all storages from a node's outputs.
 
@@ -99,11 +104,10 @@ class AliasInfo:
         if val is None:
             return OrderedSet()
 
-        storages = OrderedSet()
+        storages: OrderedSet[StorageKey] = OrderedSet()
 
-        def collect_storage(tensor):
-            if hasattr(tensor, "untyped_storage"):
-                storages.add(StorageKey(tensor.untyped_storage(), tensor.device))
+        def collect_storage(tensor: torch._subclasses.FakeTensor) -> None:
+            storages.add(StorageKey(tensor.untyped_storage(), tensor.device))
 
         # Use tree_map_only to handle FakeTensors in nested structures
         tree_map_only(torch._subclasses.FakeTensor, collect_storage, val)
@@ -114,7 +118,7 @@ class AliasInfo:
         """
         Get all storages from a node's inputs.
         """
-        input_storages = OrderedSet()
+        input_storages: OrderedSet[StorageKey] = OrderedSet()
 
         for input_node in node.all_input_nodes:
             input_storages.update(self.node_to_output_storages[input_node])
@@ -171,7 +175,7 @@ def build_memory_profile(
 
     size_of = size_of or _size_of_default
     nodes = list(graph.nodes)
-    alias_info = AliasInfo(nodes)
+    alias_info = GraphAliasTracker(nodes)
 
     # Build memory profile
     current_memory = 0
@@ -208,6 +212,77 @@ def build_memory_profile(
     return memory_profile
 
 
+def get_fwd_bwd_interactions(
+    fwd_graph: fx.Graph,
+    bwd_graph: fx.Graph,
+    size_of: Optional[Callable[[Union[int, torch.SymInt]], int]] = None,
+) -> tuple[int, OrderedSet[str]]:
+    """
+    Analyze the interactions between the forward (fwd) and backward (bwd) graphs
+    to determine memory usage characteristics.
+
+    Args:
+    - fwd_graph (fx.Graph): The forward graph representing the forward pass.
+    - bwd_graph (fx.Graph): The backward graph representing the backward pass.
+    - size_of (Callable[[Union[int, torch.SymInt]], int]): A function that converts
+      byte counts (possibly symbolic) to concrete integers.
+
+    Returns:
+    - tuple[int, OrderedSet[str]]: A tuple containing:
+        1. The baseline memory usage during the backward pass, accounting for
+           storages that persist from the forward pass (i.e., in fwd output but
+           not in bwd input).
+        2. A set of node names whose storage cannot be released during the bwd pass.
+           These include nodes that use storage from primals or are in bwd input
+           but not in fwd output.
+    """
+
+    size_of = size_of or _size_of_default
+
+    # Build alias info for forward graph
+    fwd_nodes = list(fwd_graph.nodes)
+    fwd_alias_info = GraphAliasTracker(fwd_nodes)
+
+    # Identify storages allocated by primal placeholder nodes
+    primal_storages: OrderedSet[StorageKey] = OrderedSet()
+    for node in fwd_graph.find_nodes(op="placeholder"):
+        if node.name.startswith("primals"):
+            primal_storages.update(fwd_alias_info.get_fresh_allocations(node))
+
+    # Get storages in forward output
+    fwd_output_node = next(iter(reversed(fwd_graph.nodes)))[-1]
+    assert fwd_output_node.op == "output"
+    fwd_output_storages = fwd_alias_info.get_storage_uses(fwd_output_node)
+
+    # Node names that should not be deleted during memory profile estimation of bwd_graph
+    do_not_delete: OrderedSet[str] = OrderedSet()
+
+    # Collect all storages in backward inputs and identify nodes to not delete
+    bwd_input_storages: OrderedSet[StorageKey] = OrderedSet()
+    for node in bwd_graph.find_nodes(op="placeholder"):
+        node_storages = GraphAliasTracker._get_output_storages(node)
+        bwd_input_storages.update(node_storages)
+
+        # Check if this node uses primal storage
+        if node_storages & primal_storages:
+            do_not_delete.add(node.name)
+
+        # Check if this node's storages are not in forward outputs
+        # (meaning it's an external input to backward pass)
+        if not (node_storages & fwd_output_storages):
+            do_not_delete.add(node.name)
+
+    # Calculate baseline memory: storages in fwd output but not in bwd input
+    # These storages persist throughout the backward pass
+    baseline_storages = fwd_output_storages - bwd_input_storages
+    bwd_baseline_memory = 0
+    for storage_key in baseline_storages:
+        if storage_key.device.type != "cpu":
+            bwd_baseline_memory += size_of(storage_key.storage.nbytes())
+
+    return bwd_baseline_memory, do_not_delete
+
+
 def get_peak_memory(
     fwd_graph: fx.Graph,
     bwd_graph: fx.Graph,
@@ -219,7 +294,8 @@ def get_peak_memory(
     fwd_peak_memory = max(build_memory_profile(fwd_graph, _is_releasable))
 
     bwd_baseline_memory, bwd_do_not_delete = get_fwd_bwd_interactions(
-        fwd_graph, bwd_graph, _size_of_default
+        fwd_graph,
+        bwd_graph,
     )
 
     def _is_bwd_releasable(n: fx.Node) -> bool:

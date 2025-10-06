@@ -1,3 +1,5 @@
+# Owner(s): ["module: inductor"]
+
 import functools
 import unittest
 import weakref
@@ -6,9 +8,11 @@ from typing import Callable, Optional
 
 import torch
 from torch._inductor.fx_passes.memory_estimator import build_memory_profile
+from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary
 
@@ -21,7 +25,7 @@ def device_filter(device):
     return device.type == "cuda"
 
 
-class FakeTensorMemoryProfilerMode(TorchDispatchMode):
+class FakeTensorMemoryProfilerMode(InductorTestCase):
     def __init__(self, device_filter: Optional[Callable[torch.device, bool]] = None):
         # counter of storage ids to live references
         self.storage_count: dict[int, int] = Counter()
@@ -92,7 +96,7 @@ class TestMemoryProfilingResNet(unittest.TestCase):
             out = torch.nn.functional.linear(h2, w3)
             return out
 
-        with FakeTensorMode() as fake_mode:
+        with FakeTensorMode():
             # Trace with make_fx
             x, w1, w2, w3 = create_inputs_and_weights()
             fx_graph = make_fx(fn)(x, w1, w2, w3)
@@ -112,7 +116,7 @@ class TestMemoryProfilingResNet(unittest.TestCase):
                     create_inputs_and_weights()
                 )
                 result = fn(x_runtime, w1_runtime, w2_runtime, w3_runtime)
-                result = None
+                del result
 
             runtime_peak = profiler.max_memory
 
@@ -140,7 +144,7 @@ class TestMemoryProfilingResNet(unittest.TestCase):
             out = torch.nn.functional.linear(h, linear_weight)
             return out
 
-        with FakeTensorMode() as fake_mode:
+        with FakeTensorMode():
             # Trace with make_fx
             x, conv1_weight, conv2_weight, linear_weight = create_inputs_and_weights()
             fx_graph = make_fx(fn)(x, conv1_weight, conv2_weight, linear_weight)
@@ -157,7 +161,7 @@ class TestMemoryProfilingResNet(unittest.TestCase):
             with profiler:
                 x_runtime, conv1_w, conv2_w, linear_w = create_inputs_and_weights()
                 result = fn(x_runtime, conv1_w, conv2_w, linear_w)
-                result = None
+                del result
 
             runtime_peak = profiler.max_memory
 
@@ -165,4 +169,5 @@ class TestMemoryProfilingResNet(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    if IS_LINUX and HAS_CUDA_AND_TRITON:
+        run_tests(needs="filelock")
