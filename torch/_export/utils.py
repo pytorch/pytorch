@@ -34,7 +34,7 @@ from torch.fx._pytree import (
     _deregister_pytree_flatten_spec,
     register_pytree_flatten_spec,
 )
-from torch.utils._pytree import (
+from torch.utils._pytree import (  # pyrefly: ignore  # deprecated
     _deregister_pytree_node,
     _register_pytree_node,
     Context,
@@ -470,7 +470,14 @@ def _check_input_constraints_for_graph(
                 )
         elif isinstance(node_val, torch.SymInt):
             _check_symint(
-                node_val, arg, range_constraints, unification_map, key_path, None
+                # pyrefly: ignore  # bad-argument-type
+                node_val,
+                # pyrefly: ignore  # bad-argument-type
+                arg,
+                range_constraints,
+                unification_map,
+                key_path,
+                None,
             )
 
 
@@ -1115,12 +1122,14 @@ def placeholder_naming_pass(
         if (  # handle targets for custom objects
             spec.kind == InputKind.CUSTOM_OBJ and spec.target in name_map
         ):
+            # pyrefly: ignore  # index-error
             spec.target = name_map[spec.target][4:]  # strip obj_ prefix
 
     for spec in export_graph_signature.output_specs:
         if spec.arg.name in name_map:
             spec.arg.name = name_map[spec.arg.name]
         if spec.kind == OutputKind.USER_INPUT_MUTATION and spec.target in name_map:
+            # pyrefly: ignore  # index-error
             spec.target = name_map[spec.target]
 
     # rename keys in constants dict for custom objects

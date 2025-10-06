@@ -135,7 +135,7 @@ def mutates_and_returns_first_arg(op: OpOverload):
     if op.namespace != "aten":
         return False
     schema = op._schema
-    if not len(schema.returns) == 1:
+    if len(schema.returns) != 1:
         return False
     if schema.returns[0].alias_info is None:
         return False
