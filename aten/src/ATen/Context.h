@@ -364,9 +364,13 @@ class TORCH_API Context {
   Float32MatmulPrecision float32MatmulPrecision() const;
   Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
   CuBLASReductionOption allowFP16ReductionCuBLAS() const;
-  void setAllowFP16ReductionCuBLAS(bool allow_reduced_precision, bool allow_splitk = true);
+  void setAllowFP16ReductionCuBLAS(
+      bool allow_reduced_precision,
+      bool allow_splitk = true);
   CuBLASReductionOption allowBF16ReductionCuBLAS() const;
-  void setAllowBF16ReductionCuBLAS(bool allow_reduced_precision, bool allow_splitk = true);
+  void setAllowBF16ReductionCuBLAS(
+      bool allow_reduced_precision,
+      bool allow_splitk = true);
   bool allowFP16AccumulationCuBLAS() const;
   void setAllowFP16AccumulationCuBLAS(bool);
 

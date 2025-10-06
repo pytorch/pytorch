@@ -1137,14 +1137,10 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
   if (prop->major >= 5) {
     cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
     auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
-    if (fp16_reduction ==
-        at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK) {
-      TORCH_CHECK(
-          at::globalContext().blasPreferredBackend() ==
-              at::BlasBackend::Cublaslt,
+    TORCH_CHECK(fp16_reduction !=
+        at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK,
           "torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction("
           "..., allow_splitk=False) requires the cuBLASLt backend");
-    }
     if (fp16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
       cublas_flags = static_cast<cublasMath_t>(
@@ -1208,14 +1204,10 @@ inline void gemm_internal_cublas_bfloat16_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DT
 #ifndef USE_ROCM
   cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
   auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
-  if (bf16_reduction ==
-      at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK) {
-    TORCH_CHECK(
-        at::globalContext().blasPreferredBackend() ==
-            at::BlasBackend::Cublaslt,
-        "torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction("
+  TORCH_CHECK(bf16_reduction !=
+      at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK,
+        "torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction("
         "..., allow_splitk=False) requires the cuBLASLt backend");
-  }
   if (bf16_reduction !=
       at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
     cublas_flags = static_cast<cublasMath_t>(

@@ -139,13 +139,9 @@ class cuBLASModule:
             return value, True
         if isinstance(value, (list, tuple)):
             if not value:
-                raise TypeError(
-                    f"{attr_name} expects at least one boolean argument"
-                )
+                raise TypeError(f"{attr_name} expects at least one boolean argument")
             if len(value) > 2:
-                raise TypeError(
-                    f"{attr_name} expects at most two boolean arguments"
-                )
+                raise TypeError(f"{attr_name} expects at most two boolean arguments")
             allow_reduced_precision = _ensure_bool(value[0], "allow_reduced_precision")
             if len(value) == 1:
                 return allow_reduced_precision, True
