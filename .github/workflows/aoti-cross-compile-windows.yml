@@ -3,7 +3,7 @@ name: aoti-cross-compile-windows
 on:
   push:
     tags:
-      - ciflow/inductor-periodic/*
+      - ciflow/inductor/*
   workflow_dispatch:
   schedule:
     # Run every 12 hours
