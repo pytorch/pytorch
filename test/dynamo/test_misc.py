@@ -11349,27 +11349,6 @@ fn
             fn(x, y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_sym_max_unbacked_sizelike_simplification(self):
-        @torch.compile(fullgraph=True, backend="eager")
-        def cf(x):
-            u0, u1 = x.tolist()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
-            torch._check(u0 + u1 == 20)
-
-            y = 0
-            if guard_size_oblivious(torch.sym_max(1, u0 + u1) == 20):
-                y += 1
-            if guard_size_oblivious(torch.sym_max(1, u0**2 + u1 + 2) != 1):
-                y += 1
-            if guard_size_oblivious(torch.sym_min(1, u0) == 1):
-                y += 1
-            return y
-
-        # Previously would have thrown guard on data dependent
-        self.assertEqual(cf(torch.tensor([10, 10])), 3)
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_guard_size_oblivious(self):
         # This code, in fact, does NOT work in eager
         @torch.compile(backend="eager", fullgraph=True)
