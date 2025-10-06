@@ -170,7 +170,7 @@ mobilenet_v2_quantized_qat,eager_fail_to_run,0
 
 
 
-mobilenet_v3_large,pass,7
+mobilenet_v3_large,pass,0
 
 
 
@@ -210,7 +210,7 @@ pytorch_unet,pass_due_to_skip,7
 
 
 
-resnet152,pass,7
+resnet152,pass,0
 
 
 
@@ -218,7 +218,7 @@ resnet18,pass,6
 
 
 
-resnet50,pass,6
+resnet50,pass,0
 
 
 
@@ -270,7 +270,7 @@ timm_nfnet,pass,0
 
 
 
-timm_regnet,pass,7
+timm_regnet,pass,0
 
 
 
