@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import functools
 from unittest import skipIf
 
 import torch
@@ -20,17 +21,28 @@ def normalize_graph(gm):
     return normalize_gm(gm.print_readable(print_output=False))
 
 
+def with_fake_comms(func=None, local_rank=None, world_size=None):
+    if func is None:
+        return functools.partial(
+            with_fake_comms, local_rank=local_rank, world_size=world_size
+        )
+
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        assert local_rank is not None
+        assert world_size is not None
+        dist.init_process_group(backend="fake", rank=local_rank, world_size=world_size)
+        try:
+            return func(self, *args, **kwargs)
+        finally:
+            dist.destroy_process_group()
+
+    return wrapper
+
+
 @skipIf(not dist.is_available(), "requires distributed")
 class TestFakeDistributed(DynamoTestCase):
-    def setUp(self):
-        # Use FakeProcessGroup to run tests on a single process
-        dist.init_process_group(backend="fake", rank=0, world_size=2)
-        self.local_rank = 0
-        self.world_size = 2
-
-    def tearDown(self):
-        dist.destroy_process_group()
-
+    @with_fake_comms(local_rank=0, world_size=8)
     def test_all_to_all_single_autograd(self):
         backend = AotEagerAndRecordGraphs()
 
@@ -55,11 +67,11 @@ class TestFakeDistributed(DynamoTestCase):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "Sym(s77)", primals_2: "Sym(s27)", primals_3: "f32[s77, s27]"):
-        floordiv: "Sym((s77//2))" = primals_1 // 2
+        floordiv: "Sym((s77//8))" = primals_1 // 8
 
-        all_to_all_single: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(primals_3, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_3 = None
+        all_to_all_single: "f32[8*((s77//8)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(primals_3, [floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv], [floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv], '0');  primals_3 = None
 
-        wait_tensor: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
+        wait_tensor: "f32[8*((s77//8)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
         return (wait_tensor, primals_1, primals_2, floordiv)
 """,  # noqa: B950
         )
@@ -67,9 +79,9 @@ class GraphModule(torch.nn.Module):
             normalize_graph(backend.bw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s77)", primals_2: "Sym(s27)", floordiv: "Sym((s77//2))", tangents_1: "f32[2*((s77//2)), s27]"):
-        all_to_all_single_1: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv], [floordiv, floordiv], '0');  tangents_1 = floordiv = None
-        wait_tensor_1: "f32[2*((s77//2)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
+    def forward(self, primals_1: "Sym(s77)", primals_2: "Sym(s27)", floordiv: "Sym((s77//8))", tangents_1: "f32[8*((s77//8)), s27]"):
+        all_to_all_single_1: "f32[8*((s77//8)), s27]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv], [floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv], '0');  tangents_1 = floordiv = None
+        wait_tensor_1: "f32[8*((s77//8)), s27]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
         return (None, None, wait_tensor_1)
 """,  # noqa: B950
         )
@@ -97,11 +109,11 @@ class GraphModule(torch.nn.Module):
         ge_5: "Sym(u2 >= 0)" = primals_3 >= 0
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_5 = _assert_scalar_2 = None
 
-        floordiv: "Sym((u0//2))" = primals_1 // 2
+        floordiv: "Sym((u0//8))" = primals_1 // 8
 
-        all_to_all_single: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(primals_4, [floordiv, floordiv], [floordiv, floordiv], '0');  primals_4 = None
+        all_to_all_single: "f32[8*((u0//8)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(primals_4, [floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv], [floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv], '0');  primals_4 = None
 
-        wait_tensor: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
+        wait_tensor: "f32[8*((u0//8)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single);  all_to_all_single = None
         return (wait_tensor, primals_1, primals_2, primals_3, floordiv)
 """,  # noqa: B950
         )
@@ -109,17 +121,18 @@ class GraphModule(torch.nn.Module):
             normalize_graph(backend.bw_graphs[0]),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(u0)", primals_2: "Sym(u1)", primals_3: "Sym(u2)", floordiv: "Sym((u0//2))", tangents_1: "f32[2*((u0//2)), u1, u2]"):
-        all_to_all_single_1: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv], [floordiv, floordiv], '0');  tangents_1 = floordiv = None
-        wait_tensor_1: "f32[2*((u0//2)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
+    def forward(self, primals_1: "Sym(u0)", primals_2: "Sym(u1)", primals_3: "Sym(u2)", floordiv: "Sym((u0//8))", tangents_1: "f32[8*((u0//8)), u1, u2]"):
+        all_to_all_single_1: "f32[8*((u0//8)), u1, u2]" = torch.ops._c10d_functional.all_to_all_single.default(tangents_1, [floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv], [floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv, floordiv], '0');  tangents_1 = floordiv = None
+        wait_tensor_1: "f32[8*((u0//8)), u1, u2]" = torch.ops._c10d_functional.wait_tensor.default(all_to_all_single_1);  all_to_all_single_1 = None
         return (None, None, None, wait_tensor_1)
 """,  # noqa: B950
         )
 
+    @with_fake_comms(local_rank=0, world_size=8)
     def test_device_mesh_get_local_rank(self):
         device_mesh = init_device_mesh(
             device_type="cpu",
-            mesh_shape=(self.world_size,),
+            mesh_shape=(8,),
             mesh_dim_names=("dp",),  # data parallel dimension
         )
 
@@ -132,6 +145,31 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(10)
         res = fn(x)
         self.assertEqual(res, x)
+
+    @with_fake_comms(local_rank=0, world_size=512)
+    def test_device_mesh_dim_names(self):
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(
+                8,
+                8,
+                8,
+            ),
+            mesh_dim_names=("dp", "tp", "ep"),  # data parallel dimension
+        )
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            dp_dim = device_mesh.mesh_dim_names.index("dp")
+            tp_dim = device_mesh.mesh_dim_names.index("tp")
+            ep_dim = device_mesh.mesh_dim_names.index("ep")
+            concat = str(dp_dim + 1) + str(tp_dim + 1) + str(ep_dim + 1)
+            return x + int(concat)
+
+        x = torch.zeros(10)
+        out = fn(x)
+        for val in out:
+            self.assertEqual(val, 123)
 
 
 instantiate_parametrized_tests(TestFakeDistributed)
