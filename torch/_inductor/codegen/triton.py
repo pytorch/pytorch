@@ -3891,39 +3891,85 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.inside_reduction:
             return False
         
-        # Only apply to pointwise heuristic type
-        heuristic = self._get_heuristic()
-        if heuristic != "pointwise":
-            return False
-        
-        # Don't apply to fixed config, template, or other special kernel types
+        # Only apply to non-template kernels
         if self.fixed_config or self.cooperative_reduction or self.persistent_reduction:
             return False
         
-        # CRITICAL: Reject ANY kernel with reduction dimensions (r0_, r1_, etc.)
-        # Even if numel=1, these can be reused for real reductions later
-        #from ..utils import prefix_is_reduction
-        #if any(prefix_is_reduction(t.prefix) for t in self.range_trees):
-        #    return False
+        # Separate trees by type
+        valid_prefixes = {'x', 'y', 'z'}
+        valid_trees = []
+        reduction_trees = []
         
-        # Only support 1D, 2D, and 3D kernels
-        if len(self.range_trees) == 0 or len(self.range_trees) > 3:
+        for tree in self.range_trees:
+            if tree.prefix in valid_prefixes:
+                valid_trees.append(tree)
+            elif tree.prefix.startswith('r') and (len(tree.prefix) == 1 or tree.prefix[1:].replace('_', '').isdigit()):
+                # This catches r, r0, r1, r0_, r1_, etc.
+                reduction_trees.append(tree)
+        
+        # Check if all reduction trees are trivial (numel=1 or very small)
+        # This happens with certain BatchNorm fusions
+        for tree in reduction_trees:
+            try:
+                size_hint = V.graph.sizevars.size_hint(tree.numel, fallback=999999)
+                # If any reduction dimension is > 1, this is not a pointwise kernel
+                if size_hint > 1:
+                    return False
+            except:
+                # If we can't determine size, conservatively assume it's non-trivial
+                return False
+        
+        # Need at least one valid dimension, max 2 for now
+        if len(valid_trees) == 0 or len(valid_trees) > 2:
             return False
         
-        # All dimensions must be x/y/z
-        #valid_prefixes = {'x', 'y', 'z'}
-        #if not all(t.prefix in valid_prefixes for t in self.range_trees):
-        #    return False
+        # Check that we have at least one dimension large enough to benefit
+        dimension_sizes = []
+        for tree in valid_trees:
+            try:
+                size_hint = V.graph.sizevars.size_hint(
+                    tree.numel, 
+                    fallback=config.unbacked_symint_fallback
+                )
+                dimension_sizes.append((tree.prefix, size_hint))
+            except:
+                return False
         
-        # The optimization only makes sense if we have a reasonably large dimension
-        #largest_numel = max(
-        #    V.graph.sizevars.size_hint(t.numel, fallback=config.unbacked_symint_fallback)
-        #    for t in self.range_trees
-        #)
-        #if largest_numel < 256:
-        #    return False
+        if dimension_sizes:
+            largest_size = max(size for _, size in dimension_sizes)
+            # Need sufficient work to hide memory latency
+            if largest_size < 512:
+                return False
+        else:
+            return False
+        
+        # Additional check
+        if hasattr(self, 'no_x_dim') and self.no_x_dim:
+            return False
         
         return True
+
+    def _get_split_dimension_info(self):
+        """Get information about which dimension to split for inner loop."""
+        # Only consider x, y, z dimensions (skip reduction dimensions)
+        valid_prefixes = {'x', 'y', 'z'}
+        non_reduction_trees = [
+            t for t in self.range_trees 
+            if t.prefix in valid_prefixes
+        ]
+        
+        if not non_reduction_trees:
+            return None, []
+        
+        # Find dimension with largest numel
+        split_tree = max(
+            non_reduction_trees,
+            key=lambda tree: V.graph.sizevars.size_hint(
+                tree.numel, fallback=config.unbacked_symint_fallback
+            )
+        )
+        
+        return split_tree, non_reduction_trees
 
     def _get_largest_dimension_for_inner_loop(self):
         """Determine which dimension to split based on largest numel."""
