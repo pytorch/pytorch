@@ -59,6 +59,19 @@ different profiles.  If you know your workload is truly SPMD, you can run with
 consistent profiles across all ranks.
 """
 
+pgo_extra_read_key: Optional[str] = Config(
+    env_name_default="TORCH_COMPILE_STICKY_PGO_READ", default=None
+)
+pgo_extra_write_key: Optional[str] = Config(
+    env_name_default="TORCH_COMPILE_STICKY_PGO_WRITE", default=None
+)
+"""
+Additional read/write keys for PGO.
+Write key: Besides writing to the default local/remote PGO state, this also writes to the specified key.
+Read key: Besides reading from the default state, this also reads from the specified key (if written to before)
+and merges it with the default state.
+"""
+
 
 cache_key_tag: str = Config(env_name_default="TORCH_COMPILE_CACHE_KEY_TAG", default="")
 """

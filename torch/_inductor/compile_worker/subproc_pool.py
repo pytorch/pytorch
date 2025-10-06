@@ -28,6 +28,7 @@ from torch._inductor.compile_worker.tracked_process_pool import (
 )
 from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.utils import get_ld_library_path, python_subprocess_env
+from torch._utils_internal import find_compile_subproc_binary
 
 
 log = logging.getLogger(__name__)
@@ -90,8 +91,14 @@ class SubprocException(Exception):
     Thrown when a job in a subprocess raises an Exception.
     """
 
-    def __init__(self, details: str) -> None:
-        super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
+    def __init__(self, details: str, name: str = "<unknown>") -> None:
+        self.details = details
+        super().__init__(
+            f"An exception occurred in a subprocess:\n\nName={name}\n{details}"
+        )
+
+    def with_name(self, name: str) -> "SubprocException":
+        return SubprocException(self.details, name)
 
 
 class SubprocPickler:
@@ -137,6 +144,11 @@ class SubprocPool:
         cmd = [
             sys.executable,
             entry,
+        ]
+        if (binary := find_compile_subproc_binary()) is not None:
+            cmd = [binary]
+
+        args = [
             f"--pickler={self.pickler.__class__.__module__}.{self.pickler.__class__.__name__}",
             f"--kind={self.kind.value}",
             f"--workers={nprocs}",
@@ -145,6 +157,7 @@ class SubprocPool:
             f"--write-fd={str(subproc_write_fd)}",
             f"--torch-key={torch_key_str}",
         ]
+        cmd.extend(args)
         log_path = None
         self.log_file = None
 

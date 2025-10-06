@@ -1,5 +1,5 @@
 Benchmarking Framework,Benchmarking Module Name,Case Name,tag,run_backward,Execution Time
-PyTorch,add,add_M1_N1_K1_cpu,short,FALSE,3.9497
+PyTorch,add,add_M1_N1_K1_cpu,short,FALSE,2.459
 PyTorch,add,add_M64_N64_K64_cpu,short,FALSE,14.3181
 PyTorch,add,add_M64_N64_K128_cpu,short,FALSE,14.6826
 PyTorch,add,add_M1_N1_K1_cpu_bwdall_BACKWARD,short,TRUE,58.1449
@@ -376,10 +376,10 @@ PyTorch,relu6,"relu6_dims(3,4,5)_contigFalse_inplaceFalse_dtypetorch.qint32",sho
 PyTorch,relu6,"relu6_dims(2,3,4,5)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,9.6588
 PyTorch,relu6,"relu6_dims(2,3,4,5)_contigFalse_inplaceFalse_dtypetorch.qint8",short,FALSE,9.5969
 PyTorch,relu6,"relu6_dims(2,3,4,5)_contigFalse_inplaceFalse_dtypetorch.qint32",short,FALSE,9.547
-PyTorch,relu6,"relu6_dims(512,512)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,68.739
+PyTorch,relu6,"relu6_dims(512,512)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,50.21375
 PyTorch,relu6,"relu6_dims(512,512)_contigFalse_inplaceFalse_dtypetorch.qint8",short,FALSE,45.14133333
 PyTorch,relu6,"relu6_dims(512,512)_contigFalse_inplaceFalse_dtypetorch.qint32",short,FALSE,52.6664
-PyTorch,relu6,"relu6_dims(256,1024)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,69.1875
+PyTorch,relu6,"relu6_dims(256,1024)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,51.49525
 PyTorch,relu6,"relu6_dims(256,1024)_contigFalse_inplaceFalse_dtypetorch.qint8",short,FALSE,48.3458
 PyTorch,relu6,"relu6_dims(256,1024)_contigFalse_inplaceFalse_dtypetorch.qint32",short,FALSE,62.0719
 PyTorch,functional.hardtanh,"functional.hardtanh_dims(3,4,5)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,7.5728
@@ -388,10 +388,10 @@ PyTorch,functional.hardtanh,"functional.hardtanh_dims(3,4,5)_contigFalse_inplace
 PyTorch,functional.hardtanh,"functional.hardtanh_dims(2,3,4,5)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,8.1647
 PyTorch,functional.hardtanh,"functional.hardtanh_dims(2,3,4,5)_contigFalse_inplaceFalse_dtypetorch.qint8",short,FALSE,8.1768
 PyTorch,functional.hardtanh,"functional.hardtanh_dims(2,3,4,5)_contigFalse_inplaceFalse_dtypetorch.qint32",short,FALSE,8.0619
-PyTorch,functional.hardtanh,"functional.hardtanh_dims(512,512)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,67.118
+PyTorch,functional.hardtanh,"functional.hardtanh_dims(512,512)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,48.88475
 PyTorch,functional.hardtanh,"functional.hardtanh_dims(512,512)_contigFalse_inplaceFalse_dtypetorch.qint8",short,FALSE,43.702
 PyTorch,functional.hardtanh,"functional.hardtanh_dims(512,512)_contigFalse_inplaceFalse_dtypetorch.qint32",short,FALSE,50.3613
-PyTorch,functional.hardtanh,"functional.hardtanh_dims(256,1024)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,67.436
+PyTorch,functional.hardtanh,"functional.hardtanh_dims(256,1024)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,50.3995
 PyTorch,functional.hardtanh,"functional.hardtanh_dims(256,1024)_contigFalse_inplaceFalse_dtypetorch.qint8",short,FALSE,46.9813
 PyTorch,functional.hardtanh,"functional.hardtanh_dims(256,1024)_contigFalse_inplaceFalse_dtypetorch.qint32",short,FALSE,59.2295
 PyTorch,functional.hardsigmoid,"functional.hardsigmoid_dims(3,4,5)_contigFalse_inplaceFalse_dtypetorch.quint8",short,FALSE,6.5189
