@@ -957,7 +957,7 @@ Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, boo
     // Find the first zero diagonal element
     auto zero_positions = zero_diag_mask.nonzero();
     int64_t first_zero_idx = zero_positions[0][-1].item<int64_t>() + 1;
-    TORCH_CHECK_LINALG(false, "cholesky_inverse", result.dim() == 2 ? "" : (": (Batch element ", zero_positions[0][0].item<int64_t>(), ")"),
+    TORCH_CHECK_LINALG(false, "cholesky_inverse", result.dim() == 2 ? "" : ": (Batch element " + std::to_string(zero_positions[0][0].item<int64_t>()) + ")",
         ": The diagonal element ", first_zero_idx, " is zero, the inversion could not be completed because the input matrix is singular.");
   }
 
