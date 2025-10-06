@@ -2081,11 +2081,19 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         if stage_uses_fsdp:
                             _assert_unsharded(stage_idx)
                         backward_counter[stage_idx] += 1
+                        last_backward = (
+                            backward_counter[stage_idx] == self._n_microbatches
+                        )
+                        grad_scale_factor = (
+                            self._n_microbatches if self.scale_grads else 1
+                        )
                         stage.backward_weight_one_chunk(
                             mb_index,
                             last_backward=backward_counter[stage_idx]
                             == self._n_microbatches,
                         )
+                        if last_backward:
+                            stage.scale_grads(grad_scale_factor)
                     else:
                         raise ValueError(f"{action=} is unknown or unsupported")
             except Exception as e:
