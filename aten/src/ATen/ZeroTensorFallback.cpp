@@ -86,7 +86,7 @@ namespace at {
 
       if (ivalue.isTensor()) {
         auto tensor = std::move(ivalue).toTensor();
-        bool was_wrapped_number;
+        bool was_wrapped_number = false;
         if (tensor.unsafeGetTensorImpl()->was_wrapped_number()) {
           was_wrapped_number = true;
         }
@@ -103,7 +103,7 @@ namespace at {
         auto tensors = std::move(ivalue).toTensorList();
         for(const auto j : c10::irange(tensors.size())) {
           const Tensor& tensor = tensors[j];
-          bool was_wrapped_number;
+          bool was_wrapped_number = false;
           if (tensor.unsafeGetTensorImpl()->was_wrapped_number()) {
             was_wrapped_number = true;
           }
