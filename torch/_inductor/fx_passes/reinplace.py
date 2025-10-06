@@ -4,7 +4,6 @@ import logging
 import operator
 from collections import defaultdict
 from collections.abc import Sequence
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable, cast, Union
 
@@ -13,7 +12,6 @@ import torch.fx.node
 from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
-from torch._guards import detect_fake_mode
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
@@ -80,15 +78,7 @@ def _inplace_generalized_scatter(
             lambda node: node.meta["val"] if isinstance(node, torch.fx.Node) else node,
             (view.args, view.kwargs),
         )
-        # slice and select can allocate new unbacked symints, but those won't be reflected
-        # in the output of this function, hence shall be ignored.
-        fake_mode = detect_fake_mode(fake_args)
-        with (
-            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-            if fake_mode and fake_mode.shape_env
-            else nullcontext()
-        ):
-            tmp = view.target(tmp, *fake_args, **fake_kwargs)
+        tmp = view.target(tmp, *fake_args, **fake_kwargs)
     try:
         tmp.copy_(src)
     except RuntimeError as e:
@@ -625,7 +615,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
-                if not trigger == ReInplaceTrigger.AUTO_FUNC_V2:
+                if trigger != ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
                         # output atindex size(out)+i.
