@@ -1432,14 +1432,17 @@ void ProcessGroupNCCL::dumpExtraDebuggingInfo() {
   bool dumpExtraOnExec_ = getCvarBool(TORCH_NCCL_EXTRA_DUMP_ON_EXEC, false);
   if (dumpExtraOnExec_) {
     bool should_dump_local = false;
-    bool succeded = shouldDump_.compare_exchange_strong(should_dump_local, true, std::memory_order_release, std::memory_order_acquire);
+    bool succeded = shouldDump_.compare_exchange_strong(
+        should_dump_local,
+        true,
+        std::memory_order_release,
+        std::memory_order_acquire);
     if (succeded) {
-      LOG(INFO) << logPrefix()
-                << "Sending extra dumping signal";
+      LOG(INFO) << logPrefix() << "Sending extra dumping signal";
       broadcastDumpSignal();
-      // When this routine is called, exception is captured so 
-      // dumping by default_pg is not guaranteed due to early termination of process
-      // So we call dumping manually here 
+      // When this routine is called, exception is captured so
+      // dumping by default_pg is not guaranteed due to early termination of
+      // process So we call dumping manually here
       bool onlyActive = getCvarBool(TORCH_NCCL_INCLUDE_ONLY_ACTIVE, false);
       // Stacktrace is not included at the moment to prevent deadlock due to GIL
       dumpDebuggingInfo(false, onlyActive);
@@ -1452,7 +1455,7 @@ void ProcessGroupNCCL::abort() {
   // This will log counter for how long the abort actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__abort);
 
-  dumpExtraDebuggingInfo(); 
+  dumpExtraDebuggingInfo();
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
@@ -1585,7 +1588,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   }
 }
 
-bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/, bool onlyActive /*=false*/) {
+bool ProcessGroupNCCL::dumpDebuggingInfo(
+    bool includeStackTrace /*=true*/,
+    bool onlyActive /*=false*/) {
   // This will log counter for how long dumpDebuggingInfo actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__dumpDebuggingInfo);
 
@@ -1596,7 +1601,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/, bool 
   LOG(ERROR)
       << logPrefix()
       << "ProcessGroupNCCL preparing to dump debug info. Include stack trace: "
-      << includeStackTrace << ", only active collectives: "<< onlyActive;
+      << includeStackTrace << ", only active collectives: " << onlyActive;
   if (traceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
@@ -2064,8 +2069,9 @@ void ProcessGroupNCCL::Watchdog::run() {
     VLOG(2) << pg_->logPrefix()
             << "Process group watchdog thread terminated normally";
   } catch (std::exception& e) {
-    // This condition is triggered when any routine in watchdog gets an exception
-    pg_->dumpExtraDebuggingInfo(); 
+    // This condition is triggered when any routine in watchdog gets an
+    // exception
+    pg_->dumpExtraDebuggingInfo();
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
       VLOG(2)
