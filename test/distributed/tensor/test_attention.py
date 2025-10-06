@@ -18,11 +18,12 @@ from torch.distributed.tensor.experimental._attention import (
     _cp_options,
     _DispatchMode,
     _is_causal_behavior,
+    _LoadBalancer,
+    _PerDocumentHeadTailLoadBalancer,
+    _PTRRLoadBalancer,
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
-    LoadBalancer,
-    PerDocumentHeadTailLoadBalancer,
     set_rotate_method,
 )
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -387,7 +388,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         qkv_size: int,
         B: int = 1,
         mask_func: _mask_mod_signature = causal_mask,
-        lb: Optional[LoadBalancer] = None,
+        lb: Optional[_LoadBalancer] = None,
         atol: float = 1e-6,
         rtol: float = 1e-2,
     ) -> None:
@@ -499,7 +500,24 @@ class CPFlexAttentionTest(DTensorTestBase):
             cp_k.requires_grad = False
             cp_v.requires_grad = False
 
+        # shard the output
+        from torch.distributed.tensor.experimental._attention import (
+            _context_parallel_buffers,
+        )
+
+        # check `restore=False` correctness
+        sharded_expect_out, sharded_expect_lse = _context_parallel_buffers(
+            device_mesh,
+            buffers=[expect_out.clone().detach(), expect_aux.lse.clone().detach()],
+            buffer_seq_dims=[2, 2],
+            load_balance_indices=lb.generate_indices() if lb is not None else None,
+        )
+
+        torch.testing.assert_close(cp_out, sharded_expect_out, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_aux.lse, sharded_expect_lse, atol=atol, rtol=rtol)
+
         # unshard the output
+        # check `restore=True` correctness
         cp_out, cp_lse = context_parallel_unshard(
             device_mesh,
             buffers=[cp_out, cp_aux.lse],
@@ -578,6 +596,7 @@ class CPFlexAttentionTest(DTensorTestBase):
             2048,
             # 128 * self.world_size  # NOTE: Mismatched elements: 8 / 131072 (0.0%),
         ]
+        load_balance_type = ["_PerDocumentHeadTailLoadBalancer", "_PTRRLoadBalancer"]
 
         # NOTE: Each (enable_load_balance, batch_size, seq_len) tuple introduces 2
         # create_block_mask compilations: 1 for single-rank flex_attention and 1 for
@@ -589,14 +608,18 @@ class CPFlexAttentionTest(DTensorTestBase):
             * len(enable_load_balance_list)
             * len(batch_size_list)
             * len(max_seq_len_list)
+            * len(load_balance_type)
         )
 
         # TODO: change this for-loop to run_subtests
         # Use a for-loop instead of run_subtests because we need to intialize the mask
         # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
-        for enable_load_balance, batch_size, max_seq_len in itertools.product(
-            enable_load_balance_list, batch_size_list, max_seq_len_list
+        for enable_load_balance, batch_size, max_seq_len, lb_type in itertools.product(
+            enable_load_balance_list,
+            batch_size_list,
+            max_seq_len_list,
+            load_balance_type,
         ):
             _cp_options.enable_load_balance = enable_load_balance
 
@@ -615,13 +638,26 @@ class CPFlexAttentionTest(DTensorTestBase):
             document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
 
             # generate load balancer
-            load_balancer = (
-                PerDocumentHeadTailLoadBalancer(
-                    lengths, self.world_size, torch.device(self.device_type)
-                )
-                if enable_load_balance
-                else None
-            )
+            load_balancer = None  # no load-balance
+            if enable_load_balance:
+                if lb_type == "_PerDocumentHeadTailLoadBalancer":
+                    load_balancer = _PerDocumentHeadTailLoadBalancer(
+                        lengths, self.world_size, torch.device(self.device_type)
+                    )
+                elif lb_type == "_PTRRLoadBalancer":
+                    load_balancer = _PTRRLoadBalancer(
+                        create_block_mask(
+                            document_causal_mask,
+                            B=batch_size,
+                            H=1,
+                            Q_LEN=max_seq_len,
+                            KV_LEN=max_seq_len,
+                        ),
+                        self.world_size,
+                        self.device_type,
+                    )
+                else:
+                    raise ValueError(f"load_balancer type {lb_type} is not supported!")
 
             # construct testing function
             test_func = functools.partial(
