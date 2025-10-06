@@ -59,6 +59,13 @@ IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r"BooleanAtom not allowed in this context"
     ),  # https://github.com/pytorch/pytorch/issues/160726
+    re.compile(
+        r"TypeError\(\"unsupported operand type\(s\) for \*: 'SymBool' and 'FakeTensor'\"\)"
+    ),  # https://github.com/pytorch/pytorch/issues/164684
+    re.compile(r"KeyError: u0"),  # https://github.com/pytorch/pytorch/issues/164685
+    re.compile(
+        r"torch\._inductor\.exc\.InductorError: CppCompileError: C\+\+ compile error"
+    ),  # https://github.com/pytorch/pytorch/issues/164686
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]
