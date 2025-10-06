@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import functools
-import unittest
 import weakref
 from collections import Counter
 from typing import Callable, Optional
@@ -13,6 +12,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary
 
@@ -25,7 +25,7 @@ def device_filter(device):
     return device.type == "cuda"
 
 
-class FakeTensorMemoryProfilerMode(InductorTestCase):
+class FakeTensorMemoryProfilerMode(TorchDispatchMode):
     def __init__(self, device_filter: Optional[Callable[torch.device, bool]] = None):
         # counter of storage ids to live references
         self.storage_count: dict[int, int] = Counter()
@@ -76,7 +76,7 @@ class FakeTensorMemoryProfilerMode(InductorTestCase):
         self.max_memory = max(self.memory_use, self.max_memory)
 
 
-class TestMemoryProfilingResNet(unittest.TestCase):
+class TestMemoryProfilingResNet(InductorTestCase):
     def test_simple_linear_layers(self):
         """Test with a simple sequential model with explicit weights on CUDA."""
 
