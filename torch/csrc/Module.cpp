@@ -2461,18 +2461,16 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().blasPreferredBackend();
   });
 
-#ifdef USE_CUDA
-  py::enum_<at::cuda::blas::ScalingType>(py_module, "_ScalingType")
-      .value("TensorWise", at::cuda::blas::ScalingType::TensorWise)
-      .value("RowWise", at::cuda::blas::ScalingType::RowWise)
-      .value("BlockWise1x16", at::cuda::blas::ScalingType::BlockWise1x16)
-      .value("BlockWise1x128", at::cuda::blas::ScalingType::BlockWise1x128)
-      .value("BlockWise128x128", at::cuda::blas::ScalingType::BlockWise128x128);
+  py::enum_<at::blas::ScalingType>(py_module, "_ScalingType")
+      .value("TensorWise", at::blas::ScalingType::TensorWise)
+      .value("RowWise", at::blas::ScalingType::RowWise)
+      .value("BlockWise1x16", at::blas::ScalingType::BlockWise1x16)
+      .value("BlockWise1x128", at::blas::ScalingType::BlockWise1x128)
+      .value("BlockWise128x128", at::blas::ScalingType::BlockWise128x128);
 
-  py::enum_<at::cuda::blas::SwizzleType>(py_module, "_SwizzleType")
-      .value("NO_SWIZZLE", at::cuda::blas::SwizzleType::NO_SWIZZLE)
-      .value("SWIZZLE_32_4_4", at::cuda::blas::SwizzleType::SWIZZLE_32_4_4);
-#endif
+  py::enum_<at::blas::SwizzleType>(py_module, "_SwizzleType")
+      .value("NO_SWIZZLE", at::blas::SwizzleType::NO_SWIZZLE)
+      .value("SWIZZLE_32_4_4", at::blas::SwizzleType::SWIZZLE_32_4_4);
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)

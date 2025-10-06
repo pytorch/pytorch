@@ -106,8 +106,8 @@ c10::MaybeOwned<Tensor> inline prepare_matrix_for_cublas(const Tensor& tensor, b
   }
 }
 
-using at::cuda::blas::ScalingType;
-using at::cuda::blas::SwizzleType;
+using at::blas::ScalingType;
+using at::blas::SwizzleType;
 
 /**
  * @brief Prepares matrices for CUBLAS operation
@@ -1114,7 +1114,7 @@ namespace{
  *   - Returns Error.
  */
 
-using at::cuda::blas::ScalingType;
+using at::blas::ScalingType;
 
 bool is_tensorwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
   return isFloat8Type(t.scalar_type()) && scale.scalar_type() == kFloat && scale.numel() == 1;
