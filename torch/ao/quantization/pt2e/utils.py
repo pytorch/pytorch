@@ -446,7 +446,7 @@ def _replace_literals_with_new_placeholders(
 
     example_inputs = (torch.randn(1, 3, 3, 3),)
     pattern_gm = _get_aten_graph_module_for_pattern(pattern, example_inputs)
-    replacement_gm = _get_aten_graph_module_for_pattern(pattern, example_inptus)
+    replacement_gm = _get_aten_graph_module_for_pattern(pattern, example_inputs)
 
     # 2. Before calling replace literals we'll see the following graph:
     def pattern(self, x):
@@ -463,7 +463,7 @@ def _replace_literals_with_new_placeholders(
     def pattern(self, x, new_ph):
         return x + new_ph
 
-    def pattern(self, x, new_ph):
+    def replacement(self, x, new_ph):
         return x - new_ph
 
     """
@@ -489,7 +489,7 @@ def _replace_literals_with_new_placeholders(
                     else:
                         ph_node = gm.graph.placeholder("arg" + str(cnt))
                         new_args.append(ph_node)
-                        args_spec.children_specs.append(LeafSpec())
+                        args_spec.children_specs_append(LeafSpec())
                         cnt += 1
                         if merge_dup:
                             literal_to_ph[arg] = ph_node
@@ -500,8 +500,7 @@ def _replace_literals_with_new_placeholders(
         node.args = new_args
 
     # Update `num_nodes`, `num_leaves`, `num_children`.
-    args_spec.__post_init__()
-    in_spec.__post_init__()
+    in_spec._recalculate()
     return gm
 
 

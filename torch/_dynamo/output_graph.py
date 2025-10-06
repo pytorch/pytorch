@@ -405,7 +405,7 @@ class ExportMetaData:
     output_return_type: dict[int, tuple[str, Any]] = dc_field(default_factory=dict)
     # output spec of the traced function
     out_spec: Union[torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec] = (
-        torch.utils._pytree._LEAF_SPEC
+        dc_field(default_factory=torch.utils._pytree.TreeSpec)
     )
     module_call_spec: dict[
         str,
