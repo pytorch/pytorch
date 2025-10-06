@@ -325,8 +325,8 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # USE TMA = false by default
-        cur_kernel_options.setdefault("USE_TMA", False)
+        # USE TMA = true by default
+        cur_kernel_options.setdefault("USE_TMA", True)
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)

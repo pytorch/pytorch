@@ -328,8 +328,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Set default to False
-        cur_kernel_options.setdefault("USE_TMA", False)
+        # Set default to True
+        cur_kernel_options.setdefault("USE_TMA", True)
 
         # Add ROCm-specific parameters if they exist in the config
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
