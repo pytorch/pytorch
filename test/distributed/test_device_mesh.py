@@ -197,6 +197,48 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertTrue(tp_mesh.get_group() in groups)
         self.assertTrue(dp_mesh.get_group() in groups)
 
+    @with_comms()
+    @skip_if_lt_x_gpu(4)
+    def test_get_mesh_by_name(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+        with self.assertRaisesRegex(ValueError, "No `mesh_dim_names` found"):
+            mesh_2d.get_mesh_dim_by_name("")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
+        )
+        self.assertEqual(mesh_2d.get_mesh_dim_by_name("dp"), 0)
+        self.assertEqual(mesh_2d.get_mesh_dim_by_name("tp"), 1)
+        tp_mesh = mesh_2d["tp"]
+        self.assertEqual(tp_mesh.get_mesh_dim_by_name("tp"), 0)
+        non_exist_mesh_name = "dp"
+        with self.assertRaisesRegex(
+            KeyError, f"Mesh dimension name {non_exist_mesh_name} not found"
+        ):
+            tp_mesh.get_mesh_dim_by_name(non_exist_mesh_name)
+
+    @with_comms()
+    @skip_if_lt_x_gpu(4)
+    def test_get_rank_from_coordinate(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
+        self.assertEqual(mesh_2d.get_rank([0, 0]), 0)
+        self.assertEqual(mesh_2d.get_rank([0, 1]), 1)
+        self.assertEqual(mesh_2d.get_rank([1, 1]), 3)
+        self.assertEqual(mesh_2d.get_rank(), torch.distributed.get_rank())
+        coordinate_3d = [0, 0, 0]
+        with self.assertRaisesRegex(
+            ValueError,
+            f"Coordinate length {len(coordinate_3d)} must match mesh dimensions",
+        ):
+            mesh_2d.get_rank(coordinate_3d)
+        coordinate_out_range = [0, 2]
+        with self.assertRaisesRegex(
+            ValueError,
+            f"Coordinate {coordinate_out_range} at dimension 1 is out of bounds",
+        ):
+            mesh_2d.get_rank(coordinate_out_range)
+
     @with_comms
     def test_get_local_rank_raises_exception(self):
         mesh_shape = (2, self.world_size // 2)
