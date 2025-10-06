@@ -9,6 +9,7 @@ import torch.fx.traceback as fx_traceback
 from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
+from torch._guards import tracing, TracingContext
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Replicate
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -70,8 +71,9 @@ def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
 def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
     with torch._dynamo.config.patch(install_free_tensors=True):
         # TODO: switch to use the official graph_capture API once it is ready
-        gm = _dynamo_graph_capture_for_export(model)(inputs)
-    return aot_export_joint_with_descriptors_alone(gm, inputs)
+        gm, fake_mode = _dynamo_graph_capture_for_export(model)(inputs)
+    with tracing(TracingContext(fake_mode)):
+        return aot_export_joint_with_descriptors_alone(gm, inputs)
 
 
 def aot_export_joint_with_descriptors_alone(model, inputs):

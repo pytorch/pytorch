@@ -828,7 +828,7 @@ def _export_to_torch_ir(
                         _dynamo_graph_capture_for_export,
                     )
 
-                    gm_torch_level = _dynamo_graph_capture_for_export(
+                    gm_torch_level, _ = _dynamo_graph_capture_for_export(
                         f, constraints=constraints, dynamic_shapes=dynamic_shapes
                     )(*args, **kwargs)
 

@@ -403,7 +403,9 @@ def _dynamo_graph_capture_for_export(
     *,
     constraints: Optional[list[Constraint]] = None,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
-) -> Callable[..., torch.fx.GraphModule]:
+) -> Callable[
+    ..., tuple[torch.fx.GraphModule, torch._subclasses.fake_tensor.FakeTensorMode]
+]:
     """
     Improved dynamo graph capture using transformer approach with proper fake tensor handling.
 
@@ -548,6 +550,6 @@ def _dynamo_graph_capture_for_export(
 
             transformed_graph.meta["module_call_specs"] = module_call_spec
 
-            return transformed_graph
+            return transformed_graph, fake_mode
 
     return inner
