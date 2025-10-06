@@ -2,13 +2,16 @@
 import threading
 from collections.abc import Callable, Sequence
 from functools import lru_cache
-from itertools import chain
+from itertools import chain, product
 from typing import cast, Optional, Union
 
 import torch
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed.tensor._collective_utils import (
+    redistribute_cost as _redistribute_cost,
+)
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -25,6 +28,11 @@ from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
 )
+from torch.distributed.tensor.placement_types import Replicate
+from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+from torch.utils._mode_utils import no_dispatch
+from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
 aten = torch.ops.aten
@@ -47,6 +55,447 @@ class LocalLRUCache(threading.local):
 
     def cache_info(self):
         return self.cache.cache_info()
+
+
+def flatten_inputs(args_schema, kwargs_schema):
+    flat_args, args_spec = tree_flatten(args_schema)
+    flat_kwargs, kwargs_spec = tree_flatten(kwargs_schema)
+    flat_all = flat_args + flat_kwargs
+    n_args = len(flat_args)
+    dt_indices = [i for i, v in enumerate(flat_all) if isinstance(v, DTensorSpec)]
+    return flat_all, args_spec, kwargs_spec, n_args, dt_indices
+
+
+def unflatten_inputs(flat_all, args_spec, kwargs_spec, n_args):
+    new_args = tree_unflatten(flat_all[:n_args], args_spec)
+    new_kwargs = tree_unflatten(flat_all[n_args:], kwargs_spec)
+    return new_args, new_kwargs
+
+
+def candidate_lists_per_dt_leaf(
+    flat_all, suggested_flat_all, dt_indices, make_replicate_like
+):
+    """
+    for each DTensorSpec leaf position, build a candidate list:
+      [original, suggested(if different), replicate-all].
+    non-DTensor leaves are implicitly fixed to their original.
+    returns a list of lists aligned to dt_indices.
+    """
+    cands = []
+    for idx in dt_indices:
+        orig = flat_all[idx]
+        assert isinstance(orig, DTensorSpec)
+        leaves = [orig.shallow_copy_with_tensor_meta(orig.tensor_meta)]
+
+        # suggested (if provided and different)
+        if suggested_flat_all is not None:
+            sugg = suggested_flat_all[idx]
+            if isinstance(sugg, DTensorSpec) and sugg.placements != orig.placements:
+                leaves.append(sugg.shallow_copy_with_tensor_meta(orig.tensor_meta))
+
+        # replicate-all
+        repl = make_replicate_like(orig)
+        if repl.placements != orig.placements:
+            leaves.append(repl.shallow_copy_with_tensor_meta(orig.tensor_meta))
+
+        # dedup by placement
+        seen, uniq = set(), []
+        for s in leaves:
+            key = s.placements
+            if key not in seen:
+                seen.add(key)
+                uniq.append(s)
+        cands.append(uniq)
+    return cands
+
+
+def apply_dt_choices(flat_all, dt_indices, choice_tuple):
+    """
+    build a new flat list from flat_all, replacing DTensorSpec leaves
+    at dt_indices with specs from choice_tuple (same length).
+    """
+    out = list(flat_all)
+    for pos, spec in zip(dt_indices, choice_tuple):
+        out[pos] = spec
+    return out
+
+
+def total_cost_flat(flat_old, flat_new, dt_indices) -> float:
+    total = 0.0
+    for i in dt_indices:
+        o, n = flat_old[i], flat_new[i]
+        if isinstance(o, DTensorSpec) and isinstance(n, DTensorSpec):
+            total += float(_redistribute_cost(o, n))
+    return total
+
+
+def shard_score_flat(flat_all, dt_indices) -> int:
+    # higher = more shards (we prefer retaining sharding on ties)
+    score = 0
+    for i in dt_indices:
+        s = flat_all[i]
+        if isinstance(s, DTensorSpec):
+            try:
+                if s.is_sharded():
+                    score += 1
+            except AttributeError:
+                if any(
+                    getattr(p, "is_shard", lambda **_: False)() for p in s.placements
+                ):
+                    score += 1
+    return score
+
+
+def sig_flat(flat_all, dt_indices):
+    # signature of placements for dedup
+    sig = []
+    for i in dt_indices:
+        s = flat_all[i]
+        if isinstance(s, DTensorSpec):
+            sig.append(tuple(type(p).__name__ for p in s.placements))
+        else:
+            sig.append(None)
+    return tuple(sig)
+
+
+def unique_shard_dim_across_inputs(args_schema, kwargs_schema):
+    """
+    return the unique shard dim if exactly one shard dim is present across
+    all DTensorSpec inputs
+    """
+    dims = set()
+
+    def visit(x):
+        if isinstance(x, DTensorSpec):
+            for p in x.placements:
+                if getattr(p, "is_shard", lambda **_: False)():
+                    d = getattr(p, "dim", None)
+                    if d is not None:
+                        dims.add(d)
+        elif isinstance(x, (list, tuple)):
+            for y in x:
+                visit(y)
+        elif isinstance(x, dict):
+            for y in x.values():
+                visit(y)
+
+    visit(args_schema)
+    visit(kwargs_schema)
+
+    if len(dims) == 1:
+        return next(iter(dims))
+    return None
+
+
+def align_all_inputs_to_dim(args_schema, kwargs_schema, dim):
+    """
+    return (args_aligned, kwargs_aligned) where each DTensorSpec leaf is sharded on `dim`.
+    only placements are changed.
+    """
+    from torch.distributed.tensor.placement_types import Shard as ShardPlacement
+
+    def align(x):
+        if isinstance(x, DTensorSpec):
+            return DTensorSpec(
+                mesh=x.mesh,
+                placements=tuple(ShardPlacement(dim) for _ in x.placements),
+                tensor_meta=x.tensor_meta,
+            )
+        if isinstance(x, list):
+            return [align(y) for y in x]
+        if isinstance(x, tuple):
+            return tuple(align(y) for y in x)
+        if isinstance(x, dict):
+            return {k: align(v) for k, v in x.items()}
+        return x
+
+    return align(args_schema), align(kwargs_schema)
+
+
+def _is_prim_op(op: OpOverload) -> bool:
+    try:
+        # e.g. "prim::device", "prim::dtype", ...
+        return op._schema.name.startswith("prim::")
+    except Exception:
+        return False
+
+
+def _iter_tensors(x):
+    if isinstance(x, torch.Tensor):
+        yield x
+    elif isinstance(x, (list, tuple)):
+        for y in x:
+            yield from _iter_tensors(y)
+    elif isinstance(x, dict):
+        for y in x.values():
+            yield from _iter_tensors(y)
+
+
+class _RedistributeNeeded(Exception):
+    """raised by _SpecMode when fail_on_redistribute is enabled and an
+    inner op returns needs_redistribute=True."""
+
+
+class _SpecMode(TorchDispatchMode):
+    """
+    intercepts aten ops during decomposition executed on FakeTensors,
+    maintaining a mapping FakeTensor(id) -> DTensorSpec (with TensorMeta).
+    each op call is converted to an OpSchema of DTensorSpecs, routed through
+    propagate_op_sharding, and returns fresh FakeTensors registered
+    with the output DTensorSpecs so downstream ops see the right specs.
+
+    - fail_on_redistribute=True: if any inner op requests a redistribute,
+      immediately stop propagation by raising _RedistributeNeeded.
+    - otherwise, drives redistribution suggestions to a fixed-point inside the
+      decomposition by rebinding FakeTensor -> DTensorSpec placements whenever
+      an inner op requests a redistribute, then re-running propagation.
+    """
+
+    def __init__(
+        self,
+        propagator: "ShardingPropagator",
+        *,
+        fail_on_redistribute: bool = False,
+    ):
+        super().__init__()
+        self.propagator = propagator
+        self._tensor_id_to_spec: dict[int, DTensorSpec] = {}
+        self._fail_on_redistribute = fail_on_redistribute
+
+    def register_tensor(self, t: torch.Tensor, spec: DTensorSpec) -> None:
+        self._tensor_id_to_spec[id(t)] = spec
+
+    def has_spec(self, t: torch.Tensor) -> bool:
+        return id(t) in self._tensor_id_to_spec
+
+    def _ensure_all_tensor_args_bound(self, op: OpOverload, args, kwargs) -> None:
+        """
+        for this op call, bind specs ONLY for unbound tensor args
+        that have an already-bound tensor of the EXACT SAME SHAPE in this call.
+        fail if any unbound tensor lacks a same-shape peer
+        """
+
+        # build shape -> reference spec map from already-bound peers
+        shape_to_spec: dict[tuple[int, ...], DTensorSpec] = {}
+        for t in _iter_tensors((args, kwargs)):
+            if isinstance(t, torch.Tensor):
+                spec = self._tensor_id_to_spec.get(id(t))
+                if isinstance(spec, DTensorSpec):
+                    shape_to_spec.setdefault(tuple(t.shape), spec)
+
+        if not shape_to_spec:
+            return
+
+        # bind unbound tensors iff exact shape matches
+        misses: list[tuple[int, ...]] = []
+        for t in _iter_tensors((args, kwargs)):
+            if isinstance(t, torch.Tensor) and not self.has_spec(t):
+                shape = tuple(t.shape)
+                spec = shape_to_spec.get(shape)
+
+                if spec is None:
+                    misses.append(shape)
+                    continue
+
+                self.register_tensor(
+                    t,
+                    DTensorSpec(
+                        mesh=spec.mesh,
+                        placements=spec.placements,
+                        tensor_meta=TensorMeta(
+                            shape=tuple(t.shape),
+                            stride=tuple(t.stride()),
+                            dtype=t.dtype,
+                        ),
+                    ),
+                )
+
+        if len(misses) > 0:
+            uniq_misses = sorted(set(misses))
+            uniq_peer_shapes = sorted(set(shape_to_spec.keys()))
+            raise RuntimeError(
+                f"unbound tensor(s) with shapes {uniq_misses} "
+                f"have no same-shape peer among {uniq_peer_shapes} in {op}"
+            )
+
+    def lookup_spec(self, t: torch.Tensor) -> DTensorSpec:
+        try:
+            return self._tensor_id_to_spec[id(t)]
+        except KeyError:
+            raise RuntimeError(
+                "Missing DTensorSpec for FakeTensor encountered in _SpecMode"
+            )
+
+    def extract_specs(self, obj):
+        if isinstance(obj, torch.Tensor):
+            return self.lookup_spec(obj)
+        elif isinstance(obj, list):
+            return [self.extract_specs(x) for x in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self.extract_specs(x) for x in obj)
+        else:
+            return obj
+
+    def _bind_expected_specs(self, fake_arg, expected_spec) -> None:
+        if isinstance(fake_arg, torch.Tensor) and isinstance(
+            expected_spec, DTensorSpec
+        ):
+            cur = self._tensor_id_to_spec.get(id(fake_arg))
+            if cur is None or cur.placements != expected_spec.placements:
+                self.register_tensor(fake_arg, expected_spec)
+        elif isinstance(fake_arg, (list, tuple)) and isinstance(
+            expected_spec, (list, tuple)
+        ):
+            for fa, es in zip(fake_arg, expected_spec):
+                self._bind_expected_specs(fa, es)
+
+    def __torch_dispatch__(self, op, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+
+        # call directly if prim
+        if _is_prim_op(op):
+            with no_dispatch(), disable_proxy_modes_tracing():
+                return op(*args, **kwargs)
+
+        # check for unbound args, bind to same-shape peers
+        # if possible
+        self._ensure_all_tensor_args_bound(op, args, kwargs)
+
+        def to_schema(x):
+            if isinstance(x, torch.Tensor):
+                return self.lookup_spec(x)
+            elif isinstance(x, list):
+                return [to_schema(i) for i in x]
+            elif isinstance(x, tuple):
+                return tuple(to_schema(i) for i in x)
+            else:
+                return x
+
+        args_schema = tuple(to_schema(a) for a in args)
+        kwargs_schema = {k: to_schema(v) for k, v in kwargs.items()}
+        schema_info = self.propagator.op_to_schema_info.get(op, None)
+        op_schema = OpSchema(op, args_schema, kwargs_schema, schema_info)
+
+        # try prop
+        out_sharding = self.propagator.propagate_op_sharding(op_schema)
+
+        # maybe bail if downstream op requires redistribute
+        if self._fail_on_redistribute and out_sharding.needs_redistribute:
+            raise _RedistributeNeeded
+
+        # keep trying prop until we don't need a redistribute
+        while (
+            out_sharding.needs_redistribute
+            and out_sharding.redistribute_schema is not None
+        ):
+            redist_schema = out_sharding.redistribute_schema
+
+            # bind expected specs for args + kwargs
+            for fa, es in zip(args, redist_schema.args_schema):
+                self._bind_expected_specs(fa, es)
+            for k, es in redist_schema.kwargs_schema.items():
+                if k in kwargs:
+                    self._bind_expected_specs(kwargs[k], es)
+
+            out_sharding = self.propagator.propagate_op_sharding(redist_schema)
+
+        out_specs = out_sharding.output_spec
+
+        def make_fake_from_spec(spec: DTensorSpec) -> torch.Tensor:
+            tm = spec.tensor_meta
+            if not isinstance(tm, TensorMeta):
+                raise RuntimeError(
+                    "Decomposition output DTensorSpec must have TensorMeta"
+                )
+
+            with no_dispatch():
+                t = (
+                    torch.empty_strided(
+                        tm.shape, tm.stride, dtype=tm.dtype, device="meta"
+                    )
+                    if tm.stride is not None
+                    else torch.empty(tm.shape, dtype=tm.dtype, device="meta")
+                )
+
+            self.register_tensor(t, spec)
+            return t
+
+        def wrap_outputs(specs):
+            if isinstance(specs, DTensorSpec):
+                return make_fake_from_spec(specs)
+            elif isinstance(specs, list):
+                return [
+                    make_fake_from_spec(s) if isinstance(s, DTensorSpec) else s
+                    for s in specs
+                ]
+            elif isinstance(specs, tuple):
+                return tuple(
+                    make_fake_from_spec(s) if isinstance(s, DTensorSpec) else s
+                    for s in specs
+                )
+            else:
+                return specs
+
+        return wrap_outputs(out_specs)
+
+
+def _fake_from_input_spec(spec: DTensorSpec) -> torch.Tensor:
+    tm = spec.tensor_meta
+    if not isinstance(tm, TensorMeta):
+        raise RuntimeError(
+            "Input DTensorSpec used for eager decomposition must have TensorMeta"
+        )
+
+    # create a meta tensor that FakeTensorMode will wrap into a FakeTensor
+    if tm.stride is not None:
+        return torch.empty_strided(tm.shape, tm.stride, dtype=tm.dtype, device="meta")
+    else:
+        return torch.empty(tm.shape, dtype=tm.dtype, device="meta")
+
+
+def _materialize_fake_args_from_schema(schema: OpSchema) -> tuple[tuple, dict]:
+    def conv_arg(x):
+        if isinstance(x, DTensorSpec):
+            return _fake_from_input_spec(x)
+        elif isinstance(x, list):
+            return [conv_arg(i) for i in x]
+        elif isinstance(x, tuple):
+            return tuple(conv_arg(i) for i in x)
+        else:
+            return x
+
+    args = tuple(conv_arg(a) for a in schema.args_schema)
+    kwargs = {k: conv_arg(v) for k, v in schema.kwargs_schema.items()}
+    return args, kwargs
+
+
+def _attach_specs_to_fakes(mode: _SpecMode, obj, spec_obj):
+    if isinstance(obj, torch.Tensor) and isinstance(spec_obj, DTensorSpec):
+        mode.register_tensor(obj, spec_obj)
+    elif (
+        isinstance(obj, (list, tuple))
+        and isinstance(spec_obj, (list, tuple))
+        and len(obj) == len(spec_obj)
+    ):
+        for o, s in zip(obj, spec_obj):
+            _attach_specs_to_fakes(mode, o, s)
+    elif isinstance(obj, (list, tuple)):
+        for o in obj:
+            _attach_specs_to_fakes(mode, o, spec_obj)
+
+
+def _make_replicate_like(spec: DTensorSpec) -> DTensorSpec:
+    return DTensorSpec(
+        mesh=spec.mesh,
+        placements=tuple(Replicate() for _ in spec.placements),
+        tensor_meta=spec.tensor_meta,
+    )
+
+
+def _argspecs_to_tuple(argspecs):
+    if isinstance(argspecs, list):
+        return tuple(argspecs)
+    return argspecs
 
 
 class ShardingPropagator:
@@ -81,6 +530,21 @@ class ShardingPropagator:
             aten.select_backward.default: 1,
             aten.slice_backward.default: 1,
         }
+        self.decomposition_fns: dict[OpOverload, Callable] = {}
+
+    def register_op_decomposition(
+        self,
+        op_overload: OpOverload,
+        decomposition_fn: Callable,
+        schema_info: Optional[RuntimeSchemaInfo] = None,
+    ):
+        """
+        register a decomposition function for an unsupported op so we can
+        shard-propagate by executing its decomposition body eagerly.
+        """
+        self.decomposition_fns[op_overload] = decomposition_fn
+        if schema_info is not None:
+            self.op_to_schema_info[op_overload] = schema_info
 
     def register_sharding_prop_rule(
         self,
@@ -164,7 +628,6 @@ class ShardingPropagator:
         # NOTE: We must call the tracing in fake tensor mode so that it avoids
         # materializing memory. Also disable the proxy mode tracing to prevent
         # these operators to be inserted in the fx graph.
-        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
         with FakeTensorMode(), disable_proxy_modes_tracing():
             fake_args = op_schema.gen_fake_args()
@@ -340,6 +803,183 @@ class ShardingPropagator:
                 OutputSharding, self.propagate_op_sharding(op_info.schema)
             )
         op_info.output_sharding = output_sharding
+
+    def _try_decomp_once(self, op_schema: OpSchema, *, fail_on_redistribute: bool):
+        """run the registered decomp exactly once with SpecMode, returning:
+        (out_specs, (observed_args, observed_kwargs)).
+        - if fail_on_redistribute=True and any inner op needs redistribution, raises _RedistributeNeeded.
+        - otherwise returns (out_specs, observed inputs after any internal rebinding).
+        """
+        with FakeTensorMode(), disable_proxy_modes_tracing():
+            fake_args, fake_kwargs = _materialize_fake_args_from_schema(op_schema)
+
+            with _SpecMode(self, fail_on_redistribute=fail_on_redistribute) as mode:
+                _attach_specs_to_fakes(mode, fake_args, op_schema.args_schema)
+                _attach_specs_to_fakes(mode, fake_kwargs, op_schema.kwargs_schema)
+
+                outs = self.decomposition_fns[op_schema.op](*fake_args, **fake_kwargs)
+                out_specs = mode.extract_specs(outs)
+
+                observed_inputs = (
+                    mode.extract_specs(fake_args),
+                    mode.extract_specs(fake_kwargs),
+                )
+                return out_specs, observed_inputs
+
+    def _outputs_with_tensor_meta(
+        self, op_schema: OpSchema, out_specs
+    ) -> OutputSpecType:
+        out_tensor_meta = self._propagate_tensor_meta(op_schema)
+        return self._create_output_spec_with_new_tensor_meta(
+            op_schema.op, out_specs, out_tensor_meta
+        )
+
+    def _try_eager_decomposition(self, op_schema: OpSchema) -> Optional[OutputSharding]:
+        decomp_fn = self.decomposition_fns.get(op_schema.op, None)
+        if decomp_fn is None:
+            return None
+
+        # try no-redistribute case, fail if any inner op requires redistribute
+        try:
+            out_specs_0, _ = self._try_decomp_once(op_schema, fail_on_redistribute=True)
+            out_specs_with_meta = self._outputs_with_tensor_meta(op_schema, out_specs_0)
+            return OutputSharding(
+                output_spec=out_specs_with_meta,
+                redistribute_schema=None,
+                needs_redistribute=False,
+                use_val_from_redistribute_schema=False,
+            )
+        except _RedistributeNeeded:
+            pass
+
+        # get minimally changed placements from decomp
+        out_specs_sugg, (suggested_args, suggested_kwargs) = self._try_decomp_once(
+            op_schema, fail_on_redistribute=False
+        )
+
+        udim = unique_shard_dim_across_inputs(
+            op_schema.args_schema, op_schema.kwargs_schema
+        )
+
+        # if there is a unique shard dim in the inputs
+        # try to apply local re-chunking (shard inputs
+        # consistently across the unique dim, no collective)
+        # allowing us to keep the output sharded
+        if udim is not None:
+            aligned_args, aligned_kwargs = align_all_inputs_to_dim(
+                op_schema.args_schema, op_schema.kwargs_schema, udim
+            )
+            align_schema = OpSchema(
+                op_schema.op, _argspecs_to_tuple(aligned_args), aligned_kwargs
+            )
+            align_schema._inplace_rewrap_schema_suggestion(op_schema)
+            try:
+                out_specs_align, _ = self._try_decomp_once(
+                    align_schema, fail_on_redistribute=True
+                )
+                out_specs_with_meta = self._outputs_with_tensor_meta(
+                    op_schema, out_specs_align
+                )
+                return OutputSharding(
+                    output_spec=out_specs_with_meta,
+                    redistribute_schema=align_schema,
+                    needs_redistribute=True,
+                    use_val_from_redistribute_schema=False,
+                )
+            except _RedistributeNeeded:
+                pass
+
+        flat_orig, args_spec, kwargs_spec, n_args, dt_idx = flatten_inputs(
+            op_schema.args_schema, op_schema.kwargs_schema
+        )
+
+        if suggested_args is not None or suggested_kwargs is not None:
+            flat_sugg, _, _, _, _ = flatten_inputs(
+                suggested_args if suggested_args is not None else op_schema.args_schema,
+                (
+                    suggested_kwargs
+                    if suggested_kwargs is not None
+                    else op_schema.kwargs_schema
+                ),
+            )
+        else:
+            flat_sugg = None
+
+        # try to see if minimal plan propagates all the way
+        tried = set()
+        sig_orig = sig_flat(flat_orig, dt_idx)
+        if flat_sugg is not None:
+            sig_min = sig_flat(flat_sugg, dt_idx)
+            if sig_min != sig_orig:
+                min_args, min_kwargs = unflatten_inputs(
+                    flat_sugg, args_spec, kwargs_spec, n_args
+                )
+                min_schema = OpSchema(
+                    op_schema.op, _argspecs_to_tuple(min_args), min_kwargs
+                )
+                min_schema._inplace_rewrap_schema_suggestion(op_schema)
+                try:
+                    out_specs_min, _ = self._try_decomp_once(
+                        min_schema, fail_on_redistribute=True
+                    )
+                    out_specs_with_meta = self._outputs_with_tensor_meta(
+                        op_schema, out_specs_min
+                    )
+                    return OutputSharding(
+                        output_spec=out_specs_with_meta,
+                        redistribute_schema=min_schema,
+                        needs_redistribute=True,
+                        use_val_from_redistribute_schema=False,
+                    )
+                except _RedistributeNeeded:
+                    tried.add(sig_min)
+
+        # get all possible input candidates and sort by (cost asc, keep-shard desc)
+        per_leaf = candidate_lists_per_dt_leaf(
+            flat_orig, flat_sugg, dt_idx, _make_replicate_like
+        )
+
+        scored = []
+        for combo in product(*per_leaf) if per_leaf else [()]:
+            flat_choice = apply_dt_choices(flat_orig, dt_idx, combo)
+            sig = sig_flat(flat_choice, dt_idx)
+            if sig == sig_orig or sig in tried:
+                continue
+            cost = total_cost_flat(flat_orig, flat_choice, dt_idx)
+            neg_shard_pref = -shard_score_flat(flat_choice, dt_idx)
+            scored.append((cost, neg_shard_pref, flat_choice, sig))
+
+        scored.sort(key=lambda x: (x[0], x[1]))
+
+        # try each sorted candidate until we find one that props
+        for _cost, _neg_score, flat_choice, sig in scored:
+            args_choice, kwargs_choice = unflatten_inputs(
+                flat_choice, args_spec, kwargs_spec, n_args
+            )
+            trial_schema = OpSchema(
+                op_schema.op, _argspecs_to_tuple(args_choice), kwargs_choice
+            )
+            trial_schema._inplace_rewrap_schema_suggestion(op_schema)
+            try:
+                out_specs_trial, _ = self._try_decomp_once(
+                    trial_schema, fail_on_redistribute=True
+                )
+                out_specs_with_meta = self._outputs_with_tensor_meta(
+                    op_schema, out_specs_trial
+                )
+                return OutputSharding(
+                    output_spec=out_specs_with_meta,
+                    redistribute_schema=trial_schema,
+                    needs_redistribute=True,
+                    use_val_from_redistribute_schema=False,
+                )
+            except _RedistributeNeeded:
+                tried.add(sig)
+                continue
+
+        raise RuntimeError(
+            f"eager decomposition failed to find a consistent redistribution for {op_schema.op.name()}."
+        )
 
     def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
         """
@@ -519,6 +1159,11 @@ class ShardingPropagator:
             )
             output_sharding.output_spec = new_output_spec
             return output_sharding
+        elif op_schema.op in self.decomposition_fns:
+            res = self._try_eager_decomposition(op_schema)
+            if res is not None:
+                return res
+            # fallthrough to error
         elif op_schema.op in self.op_to_rules:
             # propagate the sharding with rule
             sharding_prop_func = self.op_to_rules[op_schema.op]
