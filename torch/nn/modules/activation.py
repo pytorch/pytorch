@@ -1086,6 +1086,12 @@ def _is_make_fx_tracing():
         return False
 
 
+def _is_exporting():
+    if not torch.jit.is_scripting():
+        return torch.compiler.is_exporting()
+    return False
+
+
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information from different representation subspaces.
 
@@ -1411,6 +1417,8 @@ class MultiheadAttention(Module):
                 why_not_fast_path = "some Tensor argument has_torch_function"
             elif _is_make_fx_tracing():
                 why_not_fast_path = "we are running make_fx tracing"
+            elif _is_exporting():
+                why_not_fast_path = "we are running torch.export"
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = (
                     "some Tensor argument's device is neither one of "
