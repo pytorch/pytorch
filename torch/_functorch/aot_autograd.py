@@ -1274,6 +1274,9 @@ def aot_export_joint_with_descriptors(
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would
     # increase its scope
     stack.enter_context(compiled_autograd._disable())
+    from torch._export.utils import _compiling_state_context
+
+    stack.enter_context(_compiling_state_context())
 
     aot_state = create_aot_state(
         stack,
