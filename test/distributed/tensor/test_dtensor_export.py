@@ -83,7 +83,8 @@ def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
 def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
     with torch._dynamo.config.patch(install_free_tensors=True):
         # TODO: switch to use the official graph_capture API once it is ready
-        gm, fake_mode = _dynamo_graph_capture_for_export(model)(inputs)
+        gm = _dynamo_graph_capture_for_export(model)(inputs)
+        fake_mode = gm.meta.get("fake_mode", None)
     with tracing(TracingContext(fake_mode)):
         return aot_export_joint_with_descriptors_alone(gm, inputs)
 

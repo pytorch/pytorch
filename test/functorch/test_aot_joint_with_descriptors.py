@@ -791,7 +791,8 @@ class inner_f(torch.nn.Module):
                         torch._dynamo.config.patch(install_free_tensors=True)
                     )
                     # TODO: switch to use the official graph_capture API once it is ready
-                    model, fake_mode = _dynamo_graph_capture_for_export(model)(*inputs)
+                    model = _dynamo_graph_capture_for_export(model)(*inputs)
+                    fake_mode = model.meta.get("fake_mode", None)
 
                 stack.enter_context(tracing(TracingContext(fake_mode)))
                 joint_with_descriptors = aot_export_joint_with_descriptors(

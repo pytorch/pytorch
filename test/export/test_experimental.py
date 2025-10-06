@@ -382,7 +382,7 @@ def forward(self, x):
 
         from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 
-        graph_module, _ = _dynamo_graph_capture_for_export(Foo())(
+        graph_module = _dynamo_graph_capture_for_export(Foo())(
             *export_inputs[0], **export_inputs[1]
         )
 
@@ -401,7 +401,7 @@ def forward(self, x):
 
         from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 
-        graph_module, _ = _dynamo_graph_capture_for_export(Foo())(
+        graph_module = _dynamo_graph_capture_for_export(Foo())(
             *export_inputs[0], **export_inputs[1]
         )
 
