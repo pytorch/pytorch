@@ -622,7 +622,7 @@ struct AutocastState {
 struct GlobalStateGuard {
   PyObject_HEAD
 
-  inline void init() {
+  void init() {
     auto& ctx = at::globalContext();
     _grad_mode = at::GradMode::is_enabled();
     _autocast_state = AutocastState();
@@ -643,7 +643,7 @@ struct GlobalStateGuard {
     _default_dtype = at::get_default_dtype();
   }
 
-  inline bool check() const {
+  bool check() const {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
             _autocast_state == AutocastState() &&
@@ -663,7 +663,7 @@ struct GlobalStateGuard {
         _default_dtype == at::get_default_dtype();
   }
 
-  inline std::string reason() const {
+  std::string reason() const {
     std::ostringstream os;
     auto& ctx = at::globalContext();
     if (_grad_mode != at::GradMode::is_enabled())
