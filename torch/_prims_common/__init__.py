@@ -720,7 +720,7 @@ def validate_dim_length(length: int):
     """
 
     if isinstance(length, (int, torch.SymInt)):
-        torch._check_is_size(length)
+        torch._check_is_nonnegative(length)
     else:
         # sometimes called with sympy expression by inductor
         assert length >= 0
@@ -1073,7 +1073,7 @@ def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
         # by two the new range should be [1, inf].  But this is bad news
         # if you have an unbacked SymInt: we need to reapply the unsound
         # assumption that the size is >= 2.
-        torch._check_is_size(shape[dim])
+        torch._check_is_nonnegative(shape[dim])
     return tuple(shape)
 
 

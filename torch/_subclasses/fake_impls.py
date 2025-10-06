@@ -807,7 +807,7 @@ def slice_forward(
     # create unbacked if case unknown
     if new_size is None:
         new_size = shape_env.create_unbacked_symint()
-        torch._check_is_size(new_size, max=sizes[dim])
+        torch._check_is_nonnegative(new_size, max=sizes[dim])
 
     # stride
     new_stride = strides[dim] * step
