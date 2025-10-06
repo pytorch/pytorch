@@ -69,12 +69,12 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 namespace at::native {
 
 static bool use_mkldnn_bf32_linear() {
-  return at::globalContext().float32Precision("mkldnn", "matmul") == "bf16" &&
+  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::BF16 &&
       mkldnn_bf16_device_check();
 }
 
 static bool use_mkldnn_tf32_linear() {
-  return at::globalContext().float32Precision("mkldnn", "matmul") == "tf32" &&
+  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::TF32 &&
       cpuinfo_has_x86_amx_fp16();
 }
 
