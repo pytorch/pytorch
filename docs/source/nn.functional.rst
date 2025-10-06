@@ -228,4 +228,3 @@ Low-Precision functions
     ScalingType
     SwizzleType
     scaled_mm
-

@@ -1566,7 +1566,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         args.scale_result_ptr,
         args.result_ld,
         out_dtype_,
-        false /*use_fast_accum*/);
+        use_fast_accum);
   }
 
   return out;
@@ -1910,9 +1910,9 @@ std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 8> 
     ScaledGemmImplementation::BLOCK_128x128_1x128},
   { "block_1x128_1x128", std::bind(check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
     ScaledGemmImplementation::BLOCK_1x128_1x128},
-  { "nvfp4", check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4},
-  { "nvfp4_single_scale", check_nvfp4_recipe_single_scale, ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE },
-  { "mxfp8", check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8}}};
+  { "nvfp4_nvfp4", check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4},
+  { "nvfp4_nvfp4_single_scale", check_nvfp4_recipe_single_scale, ScaledGemmImplementation::NVFP4_NVFP4_SINGLE_SCALE },
+  { "mxfp8_mxfp8", check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8}}};
 
 Tensor&
 _cutlass_scaled_gemm(
