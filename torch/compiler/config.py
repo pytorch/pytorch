@@ -16,18 +16,19 @@ import sys
 from typing import Optional
 
 from torch.utils._config_module import Config, install_config_module
+
 __all__ = [
     "job_id",
     "dynamic_shapes",
-    "assume_static_by_default", 
+    "assume_static_by_default",
     "automatic_dynamic_shapes",
     "recompile_limit",
     "accumulated_recompile_limit",
-    "cache_size_limit", 
+    "cache_size_limit",
     "verbose",
     "capture_scalar_outputs",
     "capture_dynamic_output_shape_ops",
-    "suppress_errors", 
+    "suppress_errors",
     "verify_correctness",
     "log_file_name",
 ]
@@ -142,7 +143,9 @@ inference, guard generation, and code generation across the entire compilation
 stack.
 """
 
-assume_static_by_default: bool = Config(alias="torch._dynamo.config.assume_static_by_default")
+assume_static_by_default: bool = Config(
+    alias="torch._dynamo.config.assume_static_by_default"
+)
 """
 When enabled, all tensor dimensions are assumed to be static unless explicitly
 marked as dynamic or detected as changing. This compilation-wide behavior affects
@@ -150,7 +153,9 @@ how the entire stack handles shape specialization and can improve performance
 for static workloads.
 """
 
-automatic_dynamic_shapes: bool = Config(alias="torch._dynamo.config.automatic_dynamic_shapes")
+automatic_dynamic_shapes: bool = Config(
+    alias="torch._dynamo.config.automatic_dynamic_shapes"
+)
 """
 Enables automatic detection and handling of dynamic shapes. When a tensor's
 shape changes between compilations, the system automatically marks those
@@ -165,7 +170,9 @@ back to eager execution. This compilation performance control prevents excessive
 recompilation overhead that can degrade overall performance.
 """
 
-accumulated_recompile_limit: int = Config(alias="torch._dynamo.config.accumulated_recompile_limit")
+accumulated_recompile_limit: int = Config(
+    alias="torch._dynamo.config.accumulated_recompile_limit"
+)
 """
 Global limit on total recompilations across all compiled functions to prevent
 runaway recompilation scenarios. This safeguard protects against compilation
@@ -190,7 +197,9 @@ potential issues. This user-facing option helps with debugging compilation probl
 
 # TorchDynamo-specific configuration options
 
-capture_scalar_outputs: bool = Config(alias="torch._dynamo.config.capture_scalar_outputs")
+capture_scalar_outputs: bool = Config(
+    alias="torch._dynamo.config.capture_scalar_outputs"
+)
 """
 Controls whether TorchDynamo captures operations that return scalar values (like .item())
 into the FX graph. When disabled, these operations cause graph breaks. This is a
@@ -198,7 +207,9 @@ TorchDynamo-specific tracing behavior that affects how the tracer handles
 scalar-returning operations.
 """
 
-capture_dynamic_output_shape_ops: bool = Config(alias="torch._dynamo.config.capture_dynamic_output_shape_ops")
+capture_dynamic_output_shape_ops: bool = Config(
+    alias="torch._dynamo.config.capture_dynamic_output_shape_ops"
+)
 """
 Controls whether TorchDynamo captures operations with dynamic output shapes (like
 nonzero, unique) into the FX graph. When disabled, these operations cause graph breaks.

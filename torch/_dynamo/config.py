@@ -198,7 +198,7 @@ inlined during tracing. This configuration is deprecated and no longer used.
 :type: dict[Any, Any]
 :default: {}
 
-.. deprecated:: 
+.. deprecated::
    This configuration is deprecated and does nothing now.
 
 .. note::
