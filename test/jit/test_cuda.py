@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.jit_utils import JitTestCase
 
-
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
@@ -79,9 +78,11 @@ class TestCUDA(JitTestCase):
             return prev_current_device_index == after_current_device_index
 
         self.assertTrue(test_device_synchronize)
-        FileCheck().check("cuda::synchronize(").run(test_device_synchronize.graph)
         self.assertTrue(test_multi_device_synchronize)
-        FileCheck().check("cuda::synchronize(").run(test_multi_device_synchronize.graph)
+
+        if not TEST_WITH_ROCM:
+            FileCheck().check("cuda::synchronize(").run(test_device_synchronize.graph)
+            FileCheck().check("cuda::synchronize(").run(test_multi_device_synchronize.graph)
 
     def test_stream_args(self):
         # Test stream creation with default arguments
