@@ -354,12 +354,18 @@ def trace_flex_attention(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    # pyrefly: ignore  # missing-attribute
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", flex_attention, proxy_args, {}
     )
     return track_tensor_tree(
-        example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
+        # pyrefly: ignore  # bad-argument-type
+        example_out,
+        out_proxy,
+        constant=None,
+        # pyrefly: ignore  # bad-argument-type
+        tracer=proxy_mode.tracer,
     )
 
 
@@ -621,6 +627,7 @@ def create_fw_bw_graph(
 
 class FlexAttentionAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx: Any,
         query: Tensor,
@@ -1063,6 +1070,7 @@ def trace_flex_attention_backward(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    # pyrefly: ignore  # missing-attribute
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
@@ -1072,7 +1080,12 @@ def trace_flex_attention_backward(
         name="flex_attention_backward",
     )
     return track_tensor_tree(
-        example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
+        # pyrefly: ignore  # bad-argument-type
+        example_out,
+        out_proxy,
+        constant=None,
+        # pyrefly: ignore  # bad-argument-type
+        tracer=proxy_mode.tracer,
     )
 
 
