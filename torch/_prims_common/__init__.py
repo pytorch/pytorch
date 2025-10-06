@@ -90,7 +90,7 @@ torch_function_passthrough = {
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
     torch.Tensor.layout.__get__,  # type: ignore[attr-defined]
-    torch.Tensor.was_wrapped_number.__get__, # type: ignore[attr-defined]
+    torch.Tensor.was_wrapped_number.__get__,  # type: ignore[attr-defined]
     torch.Tensor.is_contiguous,
     # For TorchRefsMode only
     torch.Tensor.__format__,
@@ -1660,9 +1660,7 @@ def elementwise_dtypes(
                     _dtype = corresponding_complex_dtype(_dtype)
                 if x.ndim == 0:
                     if x.was_wrapped_number:
-                        wrapped_num_dtype = get_higher_dtype(
-                            wrapped_num_dtype, _dtype
-                        )
+                        wrapped_num_dtype = get_higher_dtype(wrapped_num_dtype, _dtype)
                     else:
                         zero_dim_tensor_dtype = get_higher_dtype(
                             zero_dim_tensor_dtype, _dtype
@@ -1678,10 +1676,10 @@ def elementwise_dtypes(
         if one_plus_dim_tensor_dtype is not None:
             # pyrefly: ignore  # bad-return
             return one_plus_dim_tensor_dtype
-        
+
         if zero_dim_tensor_dtype is not None:
             return zero_dim_tensor_dtype
-        
+
         return wrapped_num_dtype
 
     if highest_type is float:
