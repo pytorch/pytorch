@@ -410,9 +410,11 @@ def _collect_fake_inputs(inputs):
                             val = torch._C._functorch.get_unwrapped(val)
                         assert isinstance(val, FakeTensor)
                         inputs_fake.append(val)
+                    elif isinstance(val, torch.distributed.tensor.DTensor):
+                        inputs_fake.append(val._local_tensor)
                     else:
                         # This is the standard case of a TensorVariable
-                        assert isinstance(val, FakeTensor)
+                        assert isinstance(val, FakeTensor), val
                         inputs_fake.append(val)
                 else:
                     # This case is for SymInts and other non-Tensor elements

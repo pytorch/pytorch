@@ -920,7 +920,6 @@ class DTensorMeshTest(DTensorTestBase):
             (numel_1_tensor + sharded_dtensor).to_local(), numel_1_tensor + local_tensor
         )
 
-    @unittest.expectedFailure
     @with_comms
     def test_dtensor_cond(self):
         mesh = self.build_device_mesh()
@@ -932,14 +931,208 @@ class DTensorMeshTest(DTensorTestBase):
                 placements=None,
             )
 
-        x = make_dtensor(1, 1, dtype=torch.bfloat16, device="cuda")
+        x = make_dtensor(1, 1, dtype=torch.bfloat16, device=self.device_type)
 
-        # Fails with AssertionError: P1972527564
-        torch.cond(
-            x > 0,
-            lambda: 1.0 / x,
-            lambda: torch.zeros_like(x),
+        result = torch.cond(
+            x > 0, lambda x: 1.0 / x, lambda x: torch.zeros_like(x), (x,)
         )
+
+        self.assertIsInstance(result, DTensor)
+        self.assertEqual(result.device_mesh, x.device_mesh)
+        self.assertEqual(result.placements, x.placements)
+
+    @with_comms
+    def test_dtensor_cond_same_sharding(self):
+        mesh = self.build_device_mesh()
+
+        for requires_grad in [True, False]:
+            # Create input tensor - replicated
+            input_tensor = distribute_tensor(
+                torch.ones(4, 4, device=self.device_type, requires_grad=requires_grad),
+                device_mesh=mesh,
+                placements=[Replicate()],
+            )
+
+            def true_fn(x):
+                return x * 2
+
+            def false_fn(x):
+                return torch.mm(x, x.transpose(0, 1))
+
+            result = torch.cond(
+                input_tensor.sum() > 0, true_fn, false_fn, (input_tensor,)
+            )
+            self.assertIsInstance(result, DTensor)
+            self.assertEqual(result.device_mesh, input_tensor.device_mesh)
+            self.assertEqual(result.placements, input_tensor.placements)
+            self.assertEqual(result.requires_grad, input_tensor.requires_grad)
+
+    @with_comms
+    def test_dtensor_cond_same_sharding_different_shape(self):
+        mesh = self.build_device_mesh()
+
+        for requires_grad in [True, False]:
+            # Create input tensor - replicated
+            input_tensor = distribute_tensor(
+                torch.ones(4, 4, device=self.device_type, requires_grad=requires_grad),
+                device_mesh=mesh,
+                placements=[Replicate()],
+            )
+
+            def true_fn(x):
+                return (x * 2)[:2, :]
+
+            def false_fn(x):
+                return torch.mm(x, x.transpose(0, 1))
+
+            pred = input_tensor.sum() > 0
+            result = torch.cond(pred, true_fn, false_fn, (input_tensor,))
+            self.assertIsInstance(result, DTensor)
+            self.assertEqual(result.device_mesh, input_tensor.device_mesh)
+            self.assertEqual(result.placements, input_tensor.placements)
+            self.assertEqual(result.requires_grad, input_tensor.requires_grad)
+            # pred is always larger than 0, so the result should be the same as true_fn
+            # note that torch.cond is still compiled because pred is a tensor.
+            self.assertEqual(result.shape, torch.Size([2, 4]))
+
+    @with_comms
+    def test_dtensor_cond_aliasing_detection(self):
+        mesh = self.build_device_mesh()
+
+        # Create input tensor - replicated
+        input_tensor = distribute_tensor(
+            torch.ones(4, 4, device=self.device_type),
+            device_mesh=mesh,
+            placements=[Replicate()],
+        )
+
+        def fn(x):
+            return x.view(4, 4)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Encountered aliasing during higher order op tracing",
+        ):
+            torch.cond(input_tensor.sum() > 0, fn, fn, (input_tensor,))
+
+    @with_comms
+    def test_dtensor_cond_different_shard_outputs(self):
+        mesh = self.build_device_mesh()
+
+        input_tensor = distribute_tensor(
+            torch.randn(8, 8, device=self.device_type),
+            device_mesh=mesh,
+            placements=[Shard(0)],
+        )
+
+        def true_fn(x):
+            return x.sum(dim=0)
+
+        def false_fn(x):
+            return x.sum(dim=1)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "torch.cond expects two branches return the same placement but one of "
+            "true branch's return is Spec\\(P on \\(8,\\)\\) vs false branch's return Spec\\(S\\(0\\) on \\(8,\\)\\)",
+        ):
+            torch.cond(input_tensor.sum() > 0, true_fn, false_fn, (input_tensor,))
+
+    @with_comms
+    def test_dtensor_cond_shard_vs_replicate(self):
+        mesh = self.build_device_mesh()
+
+        # Create input tensor
+        input_tensor = distribute_tensor(
+            torch.randn(8, 4, device=self.device_type),
+            device_mesh=mesh,
+            placements=[Shard(0)],
+        )
+
+        def true_branch_sum(x):
+            return x.sum(dim=0, keepdim=True)
+
+        def false_branch_slice(x):
+            return x[:1, :].clone()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "torch.cond expects two branches return the same placement but one of "
+            "true branch's return is Spec\\(P on \\(1, 4\\)\\) vs false branch's return Spec\\(R on \\(1, 4\\)\\)",
+        ):
+            torch.cond(
+                input_tensor.sum() > 0,
+                true_branch_sum,
+                false_branch_slice,
+                (input_tensor,),
+            )
+
+    @with_comms
+    def test_dtensor_cond_multiple_inputs_outputs(self):
+        mesh = self.build_device_mesh()
+
+        input1 = distribute_tensor(
+            torch.randn(8, 4, device=self.device_type),
+            device_mesh=mesh,
+            placements=[Shard(0)],
+        )
+
+        input2 = distribute_tensor(
+            torch.randn(8, 4, device=self.device_type),
+            device_mesh=mesh,
+            placements=[Replicate()],
+        )
+
+        def true_branch_multi(x, y):
+            s = x.sum(dim=1, keepdim=True)  # Shape: (8, 1) -> Shard(0)
+            mul = y * 2  # Shape: (8, 4) -> Replicate()
+            return s, mul, s + mul  # Shape: (8, 4) -> Shard(0)
+
+        def false_branch_multi(x, y):
+            mean = x.mean(dim=1, keepdim=True)  # Shape: (8, 1) -> Shard(0)
+            add = y + 1  # Shape: (8, 4) -> Replicate()
+            return mean, add, mean + add  # Shape: (8, 4) -> Shard(0)
+
+        result1, result2, result3 = torch.cond(
+            input1.sum() > 0, true_branch_multi, false_branch_multi, (input1, input2)
+        )
+
+        self.assertIsInstance(result1, DTensor)
+        self.assertIsInstance(result2, DTensor)
+        self.assertIsInstance(result3, DTensor)
+        self.assertEqual(result1.device_mesh, mesh)
+        self.assertEqual(result2.device_mesh, mesh)
+        self.assertEqual(result3.device_mesh, mesh)
+
+        self.assertEqual(result1.shape, torch.Size([8, 1]))
+        self.assertEqual(result2.shape, torch.Size([8, 4]))
+        self.assertEqual(result3.shape, torch.Size([8, 4]))
+        self.assertEqual(result1.placements, input1.placements)
+        self.assertEqual(result2.placements, input2.placements)
+        self.assertEqual(result3.placements, input1.placements)
+
+        def true_branch_mismatch(x, y):
+            sum_result = x.sum(dim=0, keepdim=True)  # Shape: (1, 4) -> Partial
+            mul_result = y * 2  # Shape: (8, 4) -> Replicated
+            return sum_result, mul_result
+
+        def false_branch_mismatch(x, y):
+            slice_result = x[:1, :].clone()  # Shape: (1, 4) -> Replicated
+            add_result = y + 1  # Shape: (8, 4) -> Replicated
+            return slice_result, add_result
+
+        # This should fail because first output has mismatched sharding between branches
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "torch.cond expects two branches return the same placement but one of "
+            "true branch's return is Spec\\(P on \\(1, 4\\)\\) vs false branch's return Spec\\(R on \\(1, 4\\)\\)",
+        ):
+            torch.cond(
+                input1.sum() > 0,
+                true_branch_mismatch,
+                false_branch_mismatch,
+                (input1, input2),
+            )
 
     @with_comms
     def test_metadata_consistency_check(self):
