@@ -167,7 +167,7 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool IsNumericsCheckEnabled() const;
     void SetNumericalCheckConfig(bool enabled, double atol, double rtol);
     NumericalCheckConfig GetNumericalCheckConfig() const;
-    
+
     void SetMaxTuningDurationMs(int max_duration_ms);
     int GetMaxTuningDurationMs() const;
 

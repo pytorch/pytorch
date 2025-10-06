@@ -1877,39 +1877,54 @@ PyObject* THCPModule_cuda_tunableop_get_rotating_buffer_size(
 }
 
 PyObject* THCPModule_cuda_tunableop_set_numerical_check_tolerances(
-    PyObject* unused, 
+    PyObject* unused,
     PyObject* args) {
   HANDLE_TH_ERRORS
 
   PyObject* enabled_obj;
-  PyObject* atol_obj;  
+  PyObject* atol_obj;
   PyObject* rtol_obj;
 
   if (!PyArg_ParseTuple(args, "OOO", &enabled_obj, &atol_obj, &rtol_obj)) {
-    TORCH_CHECK(false, "cuda_tunableop_set_numerical_check_tolerances expects (bool, float, float)");
+    TORCH_CHECK(
+        false,
+        "cuda_tunableop_set_numerical_check_tolerances expects (bool, float, float)");
   }
 
-  TORCH_CHECK(PyBool_Check(enabled_obj), 
-          "First argument must be a boolean, got ", THPUtils_typename(enabled_obj));
+  TORCH_CHECK(
+      PyBool_Check(enabled_obj),
+      "First argument must be a boolean, got ",
+      THPUtils_typename(enabled_obj));
+
   bool enabled = THPUtils_unpackBool(enabled_obj);
 
-  TORCH_CHECK(PyFloat_Check(atol_obj), 
-          "Second argument (atol) must be a float, got ", THPUtils_typename(atol_obj));
+  TORCH_CHECK(
+      PyFloat_Check(atol_obj),
+      "Second argument (atol) must be a float, got ",
+      THPUtils_typename(atol_obj));
+
   double atol = PyFloat_AsDouble(atol_obj);
 
-  TORCH_CHECK(PyFloat_Check(rtol_obj),
-          "Third argument (rtol) must be a float, got ", THPUtils_typename(rtol_obj));
+  TORCH_CHECK(
+      PyFloat_Check(rtol_obj),
+      "Third argument (rtol) must be a float, got ",
+      THPUtils_typename(rtol_obj));
+
   double rtol = PyFloat_AsDouble(rtol_obj);
 
-  TORCH_CHECK(atol > 0.0 && rtol > 0.0,
-    "Numerical check tolerances must be positive. Got atol=", atol, ", rtol=", rtol);
+  TORCH_CHECK(
+      atol > 0.0 && rtol > 0.0,
+      "Numerical check tolerances must be positive. Got atol=",
+      atol,
+      ", rtol=",
+      rtol);
 
-  at::cuda::tunable::getTuningContext()->SetNumericalCheckConfig(enabled, atol, rtol);
+  at::cuda::tunable::getTuningContext()->SetNumericalCheckConfig(
+      enabled, atol, rtol);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-
 
 static PyObject* THCPModule_isCurrentStreamCapturing_wrap(
     PyObject* self,
@@ -2196,7 +2211,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_tunableop_set_numerical_check_tolerances",
      THCPModule_cuda_tunableop_set_numerical_check_tolerances,
      METH_VARARGS,
-    nullptr},
+     nullptr},
     {nullptr}};
 
 PyMethodDef* THCPModule_methods() {

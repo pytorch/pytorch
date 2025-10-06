@@ -13,7 +13,7 @@
 #include <c10/core/ScalarType.h>
 
 #include <ATen/cuda/tunable/TunableOp.h>
-#include <ATen/cuda/tunable/Tunable.h> 
+#include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/util/StringUtil.h>
@@ -137,7 +137,7 @@ inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
     }
     case c10::ScalarType::Float8_e5m2fnuz: {
       BLASType = "bf8_fnuz_r";
-      break;  
+      break;
     }
     case c10::ScalarType::ComplexFloat:{
       BLASType = "f32_c";
@@ -151,7 +151,7 @@ inline std::string ScalarTypeToBLASType(c10::ScalarType scalar_type) {
       BLASType = "unknown";
   }
   return BLASType;
-  
+
 }
 
 // Similar to Compute Type in GemmRocblas.h

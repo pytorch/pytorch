@@ -5180,7 +5180,6 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(torch.bfloat16)
     def test_numeric_check_leak_tunableop_rocm(self, device, dtype):
-        import os
         from torch.testing._internal.common_utils import CudaMemoryLeakCheck
         # run operator first without tuning to ensure all rocm libs are loaded,
         # otherwise false positive mem leak
@@ -5194,7 +5193,8 @@ class TestLinalg(TestCase):
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             # enable tunableop numeric check via env variable.
-            os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
+            # os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
+            torch.cuda.tunable.set_numerical_check_tolerances(True, 0.1, 0.1)
 
             ordinal = torch.cuda.current_device()
 
@@ -6006,7 +6006,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(torch.float16, torch.float32)
     def test_numerical_check_accuracy_tunableop(self, device, dtype):
-        shapes = [(127,193,61), (251,317,73), (89,149,41)]
+        shapes = [(127, 193, 61), (251, 317, 73), (89, 149, 41)]
         atol, rtol = 1e-2, 1e-1
 
         for (m, k, n) in shapes:

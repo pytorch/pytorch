@@ -267,6 +267,12 @@ class TunableOp {
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
 
+        auto status = candidate->Call(reusable_params[0]);
+        if (status != OK) {
+          TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+          continue;
+        }
+
         // collect a small profile
         int approx_num_iter = 3;
         auto s = ProfileStats(candidate, reusable_params, approx_num_iter, offset);
@@ -299,13 +305,6 @@ class TunableOp {
           numerical_params->Delete();
           if (status != OK) {
             TUNABLE_LOG3("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
-            continue;
-          }
-        }
-        else {
-          auto status = candidate->Call(reusable_params[0]);
-          if (status != OK) {
-            TUNABLE_LOG3("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
           }
         }
