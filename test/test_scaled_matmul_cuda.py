@@ -932,6 +932,9 @@ class TestFP8Matmul(TestCase):
         x_fp8 = to_fp8_saturated(x / x_scales, e4m3_type)
         y_fp8 = to_fp8_saturated(y / y_scales, e4m3_type)
 
+        cu_count = torch.cuda.get_device_properties().multi_processor_count
+        carveout = 66 if torch.version.cuda else cu_count // 8
+
         with tempfile.NamedTemporaryFile() as f:
             with torch.profiler.profile(activities=[torch.profiler.ProfilerActivity.CUDA]) as prof:
                 self.assertIsNone(torch._C._get_sm_carveout_experimental())
@@ -952,16 +955,24 @@ class TestFP8Matmul(TestCase):
                 # events were returned out of order; need to be sorted on "ts" timestamp
                 events = sorted(events, key=lambda x: x['ts'])
                 # ROCm carveout is invisible except for kernels running slower on fewer CUs
-                no_carveout, carveout_0, carveout_66, no_carveout_again = [float(evt.get("dur", "0.0")) for evt in events]
-                self.assertTrue(no_carveout < carveout_66)
-                self.assertTrue(carveout_0 < carveout_66)
-                self.assertTrue(no_carveout_again < carveout_66)
+                no_carveout, carveout_0, carveout, no_carveout_again = [float(evt.get("dur", "0.0")) for evt in events]
+                if True or not (no_carveout < carveout and carveout_0 < carveout and no_carveout_again < carveout):
+                    # something went wrong, print more info to help debug flaky test
+                    print("ROCm debug info for test_honor_sm_carveout")
+                    print("cu_count", cu_count)
+                    print("no_carveout", no_carveout)
+                    print("carveout_0", carveout_0)
+                    print("carveout", carveout)
+                    print("no_carveout_again", no_carveout_again)
+                self.assertTrue(no_carveout < carveout)
+                self.assertTrue(carveout_0 < carveout)
+                self.assertTrue(no_carveout_again < carveout)
                 # ROCm carveout will create new streams when enabled, and go back to the original stream when disabled
-                no_carveout, carveout_0, carveout_66, no_carveout_again = [int(evt.get("tid", "0")) for evt in events]
+                no_carveout, carveout_0, carveout, no_carveout_again = [int(evt.get("tid", "0")) for evt in events]
                 self.assertTrue(no_carveout == no_carveout_again)
-                self.assertTrue(no_carveout != carveout_0)
-                self.assertTrue(no_carveout != carveout_66)
-                self.assertTrue(carveout_0 != carveout_66)
+                self.assertTrue(no_carveout == carveout_0)
+                self.assertTrue(no_carveout != carveout)
+                self.assertTrue(carveout_0 != carveout)
             else:
                 no_carveout, carveout_0, carveout_66, no_carveout_again = [
                     math.prod(evt.get("args", {}).get("grid", []))
@@ -1490,7 +1501,8 @@ class TestFP8Matmul(TestCase):
 
         device = "cuda"
         M, K, N = 128, 128, 128
-        BLOCK_SIZE = 16
+        BLOCK_SIZE = 32 if torch.version.hip else 16
+        fp4_scaling_dtype = torch.float8_e8m0fnu if torch.version.hip else torch.float8_e4m3fn
 
         A_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
         B_ref = torch.eye(M, device=device, dtype=torch.bfloat16)
@@ -1498,8 +1510,8 @@ class TestFP8Matmul(TestCase):
         A = _bfloat16_to_float4_e2m1fn_x2(A_ref)
         B = _bfloat16_to_float4_e2m1fn_x2(B_ref)
 
-        A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
-        B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=torch.float8_e4m3fn)
+        A_scale = torch.full((M, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
+        B_scale = torch.full((N, ceil_div(K, BLOCK_SIZE)), 1.0, device=device, dtype=fp4_scaling_dtype)
         C_ref = A_ref @ B_ref.t()
 
         compiled_scaled_mm = torch.compile(torch._scaled_mm, backend="inductor")

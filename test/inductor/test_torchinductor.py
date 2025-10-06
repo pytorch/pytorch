@@ -6864,7 +6864,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with patch.object(
             CompileContext,
             "__init__",
-            lambda self, _: CompileContext_init(self, CompileId(999, 999)),
+            lambda self, _: CompileContext_init(
+                self, CompileId(frame_id=999, frame_compile_id=999)
+            ),
         ):
             _, (coda_a2,) = _run_and_get_stripped_kernels(a, x)
             _, (coda_c2,) = _run_and_get_stripped_kernels(c, x)

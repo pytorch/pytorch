@@ -675,6 +675,11 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
 
+# Does not graph break on torch.autograd._profiler_enabled if set to True. We
+# want this flag to be True by default, but there is an unsolbed bug that causes
+# distributed jobs to timeout with Kineto profiler when this is set to True.
+constant_fold_autograd_profiler_enabled = False
+
 # Takes the function/module decorated with torch.compile and passes it through a
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
 wrap_top_frame = False
