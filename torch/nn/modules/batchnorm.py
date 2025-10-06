@@ -44,6 +44,8 @@ class _NormBase(Module):
         track_running_stats: bool = True,
         device=None,
         dtype=None,
+        *,
+        bias: bool = True,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -54,7 +56,10 @@ class _NormBase(Module):
         self.track_running_stats = track_running_stats
         if self.affine:
             self.weight = Parameter(torch.empty(num_features, **factory_kwargs))
-            self.bias = Parameter(torch.empty(num_features, **factory_kwargs))
+            if bias:
+                self.bias = Parameter(torch.empty(num_features, **factory_kwargs))
+            else:
+                self.register_parameter("bias", None)
         else:
             self.register_parameter("weight", None)
             self.register_parameter("bias", None)
@@ -94,7 +99,8 @@ class _NormBase(Module):
         self.reset_running_stats()
         if self.affine:
             init.ones_(self.weight)
-            init.zeros_(self.bias)
+            if self.bias is not None:
+                init.zeros_(self.bias)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
@@ -150,10 +156,18 @@ class _BatchNorm(_NormBase):
         track_running_stats: bool = True,
         device=None,
         dtype=None,
+        *,
+        bias: bool = True,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
-            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
+            num_features,
+            eps,
+            momentum,
+            affine,
+            track_running_stats,
+            **factory_kwargs,
+            bias=bias,
         )
 
     def forward(self, input: Tensor) -> Tensor:
@@ -219,10 +233,12 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         track_running_stats=True,
         device=None,
         dtype=None,
+        *,
+        bias=True,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
-            # affine and track_running_stats are hardcoded to False to
+            # affine, bias and track_running_stats are hardcoded to False to
             # avoid creating tensors that will soon be overwritten.
             0,
             eps,
@@ -230,12 +246,14 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
             False,
             False,
             **factory_kwargs,
+            bias=False,
         )
         self.affine = affine
         self.track_running_stats = track_running_stats
         if self.affine:
             self.weight = UninitializedParameter(**factory_kwargs)
-            self.bias = UninitializedParameter(**factory_kwargs)
+            if bias:
+                self.bias = UninitializedParameter(**factory_kwargs)
         if self.track_running_stats:
             self.running_mean = UninitializedBuffer(**factory_kwargs)
             self.running_var = UninitializedBuffer(**factory_kwargs)
@@ -254,9 +272,10 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
             self.num_features = input.shape[1]
             if self.affine:
                 assert isinstance(self.weight, UninitializedParameter)
-                assert isinstance(self.bias, UninitializedParameter)
                 self.weight.materialize((self.num_features,))
-                self.bias.materialize((self.num_features,))
+                if self.bias is not None:
+                    assert isinstance(self.bias, UninitializedParameter)
+                    self.bias.materialize((self.num_features,))
             if self.track_running_stats:
                 self.running_mean.materialize(  # type:ignore[union-attr]
                     (self.num_features,)
@@ -322,6 +341,8 @@ class BatchNorm1d(_BatchNorm):
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
             When these buffers are ``None``, this module always uses batch statistics.
             in both training and eval modes. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
 
     Shape:
         - Input: :math:`(N, C)` or :math:`(N, C, L)`, where :math:`N` is the batch size,
@@ -368,6 +389,8 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
             When these buffers are ``None``, this module always uses batch statistics.
             in both training and eval modes. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
     """
 
     cls_to_become = BatchNorm1d  # type: ignore[assignment]
@@ -434,6 +457,8 @@ class BatchNorm2d(_BatchNorm):
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
             When these buffers are ``None``, this module always uses batch statistics.
             in both training and eval modes. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -479,6 +504,8 @@ class LazyBatchNorm2d(_LazyNormBase, _BatchNorm):
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
             When these buffers are ``None``, this module always uses batch statistics.
             in both training and eval modes. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
     """
 
     cls_to_become = BatchNorm2d  # type: ignore[assignment]
@@ -545,6 +572,8 @@ class BatchNorm3d(_BatchNorm):
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
             When these buffers are ``None``, this module always uses batch statistics.
             in both training and eval modes. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`
@@ -590,6 +619,8 @@ class LazyBatchNorm3d(_LazyNormBase, _BatchNorm):
             buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
             When these buffers are ``None``, this module always uses batch statistics.
             in both training and eval modes. Default: ``True``
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
     """
 
     cls_to_become = BatchNorm3d  # type: ignore[assignment]
@@ -664,6 +695,8 @@ class SyncBatchNorm(_BatchNorm):
         process_group: synchronization of stats happen within each process group
             individually. Default behavior is synchronization across the whole
             world
+        bias: If set to ``False``, the layer will not learn an additive bias (only relevant if
+            :attr:`affine` is ``True``). Default: ``True``
 
     Shape:
         - Input: :math:`(N, C, +)`
@@ -712,10 +745,18 @@ class SyncBatchNorm(_BatchNorm):
         process_group: Optional[Any] = None,
         device=None,
         dtype=None,
+        *,
+        bias: bool = True,
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
-            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
+            num_features,
+            eps,
+            momentum,
+            affine,
+            track_running_stats,
+            **factory_kwargs,
+            bias=bias,
         )
         self.process_group = process_group
 
@@ -871,6 +912,7 @@ class SyncBatchNorm(_BatchNorm):
                 module.affine,
                 module.track_running_stats,
                 process_group,
+                bias=module.bias is not None,
             )
             if module.affine:
                 with torch.no_grad():
