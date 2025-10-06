@@ -217,8 +217,3 @@ and supported quantized modules and functions.
 .. autofunction:: torch.ao.ns.fx.utils.compute_sqnr(x, y)
 .. autofunction:: torch.ao.ns.fx.utils.compute_normalized_l2_error(x, y)
 .. autofunction:: torch.ao.ns.fx.utils.compute_cosine_similarity(x, y)
-
-.. currentmodule:: torch.quantization.scaled_mm
-.. autofunction:: torch.quantization.scaled_mm.scaled_mm
-.. autoclass:: torch.quantization.scaled_mm.ScalingType
-.. autoclass:: torch.quantization.scaled_mm.SwizzleType
