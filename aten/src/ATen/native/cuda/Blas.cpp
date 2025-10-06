@@ -1375,7 +1375,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   if (scaling_choice_a == ScalingType::RowWise && scaling_choice_b == ScalingType::RowWise
       && ((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
       // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
-      ||  (dprops->major >= 10 && (scale_a.sizes().size() || scale_b.sizes().size())))) {
+      ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty())))) {
     TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat1,
@@ -1919,7 +1919,7 @@ Tensor& _mm_dtype_out_cuda(const Tensor& self, const Tensor& mat2, const at::Sca
   TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
 
 
-  addmm_out_cuda_impl(const_cast<Tensor&>(out), out, self, mat2, 0, 1);
+  addmm_out_cuda_impl(out, out, self, mat2, 0, 1);
 
   return out;
 }
