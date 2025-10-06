@@ -1,15 +1,20 @@
+import logging
 import operator
-from typing import Callable, List
+from typing import Any, Callable
 
 import torch.fx as fx
 from torch._functorch.partitioners import _size_of, get_default_op_list
+from torch.utils._ordered_set import OrderedSet
+
+
+log = logging.getLogger(__name__)
 
 
 def build_memory_profile(
     graph: fx.Graph,
     size_of: Callable[[fx.Node], int],
     is_releasable: Callable[[fx.Node], bool],
-):
+) -> list[int]:
     """
     Function to estimate the memory profile of an input FX graph.
 
@@ -44,12 +49,12 @@ def build_memory_profile(
           unclaimed by any getitem_nodes
         """
 
-        def __init__(self, nodes: List[fx.Node]):
+        def __init__(self, nodes: list[fx.Node]):
             """
             Initialize the AliasInfo class with a list of FX graph nodes.
 
             Args:
-            - nodes (List[fx.Node]): A list of nodes from an FX graph,
+            - nodes (list[fx.Node]): A list of nodes from an FX graph,
               ordered in execution order.
 
             The constructor analyzes the relationships between nodes in the FX graph
@@ -61,20 +66,20 @@ def build_memory_profile(
             """
             # For each view, we map it to its source.
             # Note that we treat getitems of a view (e.g. aten.split) as views.
-            self.view_to_source = {}
+            self.view_to_source: dict[fx.Node, fx.Node] = {}
 
             # For each remaining getitem, we map it to its source and key.
-            self.getitem_to_source = {}
+            self.getitem_to_source: dict[fx.Node, tuple[fx.Node, Any]] = {}
 
             # For each none-view source_node of getitems, we map it to a dictionary
             # in the form of {key: getitem_node, ..., "unclaimed": None}, where
             # "unclaimed" is a dummy key that represents all elements in the
             # source_node that is not claimed by any getitems.
-            self.source_to_getitems = {}
+            self.source_to_getitems: dict[fx.Node, dict[Any, fx.Node | None]] = {}
 
             # For each none-view source_node of getitems with at least one unclaimed
             # elements, we map it to its unclaimed storage size.
-            self.source_to_unclaimed_size = {}
+            self.source_to_unclaimed_size: dict[fx.Node, int] = {}
 
             for node in nodes:
                 is_view = op_types.is_view(node)
@@ -85,12 +90,12 @@ def build_memory_profile(
                 assert node.args and isinstance(node.args[0], fx.Node)
                 source = node.args[0]
                 if is_view:
-                    assert not isinstance(source.meta["val"], (list, tuple, dict))
+                    assert not isinstance(source.meta["val"], list | tuple | dict)
                     if source in self.view_to_source:
                         source = self.view_to_source[source]
                     self.view_to_source[node] = source
                 if is_getitem:
-                    assert isinstance(source.meta["val"], (list, tuple, dict))
+                    assert isinstance(source.meta["val"], list | tuple | dict)
                     # Source of getitem can be a view (e.g. aten.split).
                     if source in self.view_to_source:
                         if source in self.view_to_source:
@@ -111,82 +116,84 @@ def build_memory_profile(
                     if source not in self.source_to_getitems:
                         self.source_to_getitems[source] = {"unclaimed": None}
                     assert key not in self.source_to_getitems[source]
-                    self.source_to_getitems[source][key] = node
+                    self.source_to_getitems[source][key] = node  # type: ignore[index]
 
             for source, getitem_map in self.source_to_getitems.items():
                 unclaimed_source_size = size_of(source)
                 for key, getitem_node in getitem_map.items():
-                    if key != "unclaimed":
+                    if key != "unclaimed" and getitem_node is not None:
                         unclaimed_source_size -= size_of(getitem_node)
                 assert unclaimed_source_size >= 0
                 if unclaimed_source_size > 0:
                     self.source_to_unclaimed_size[source] = unclaimed_source_size
 
-        def is_view(self, node):
+        def is_view(self, node: fx.Node) -> bool:
             return node in self.view_to_source
 
-        def is_getitem(self, node):
+        def is_getitem(self, node: fx.Node) -> bool:
             return node in self.getitem_to_source
 
-        def get_source(self, node):
+        def get_source(self, node: fx.Node) -> fx.Node | tuple[fx.Node, Any]:
             if self.is_view(node):
                 return self.view_to_source[node]
             if self.is_getitem(node):
                 return self.getitem_to_source[node]
             return node
 
-        def is_source_of_getitems(self, node):
+        def is_source_of_getitems(self, node: fx.Node) -> bool:
             return node in self.source_to_getitems
 
-        def get_storage_keys(self, source_node):
+        def get_storage_keys(self, source_node: fx.Node) -> list[Any]:
             assert source_node in self.source_to_getitems
             return list(self.source_to_getitems[source_node].keys())
 
-        def get_unclaimed_storage_size(self, source_node):
+        def get_unclaimed_storage_size(self, source_node: fx.Node) -> int:
             return self.source_to_unclaimed_size.get(source_node, 0)
 
-        def get_getitem_by_key(self, source, key):
+        def get_getitem_by_key(self, source: fx.Node, key: Any) -> fx.Node | None:
             assert source in self.source_to_getitems
             assert key in self.source_to_getitems[source]
             return self.source_to_getitems[source][key]
 
-    def _get_last_usage(nodes: List[fx.Node], alias_info: AliasInfo):
+    def _get_last_usage(
+        nodes: list[fx.Node], alias_info: AliasInfo
+    ) -> dict[fx.Node, list[tuple[fx.Node, Any]]]:
         """
         Determine the last usage point of each storage. This information is used to
         identify when storages can be safely released.
 
         Args:
-        - nodes (List[fx.Node]): A list of nodes from the FX graph, ordered
+        - nodes (list[fx.Node]): A list of nodes from the FX graph, ordered
           in execution order.
         - alias_info (AliasInfo): An instance of AliasInfo containing aliasing
           relationships between nodes in the graph.
 
         Returns:
-        - Dict[fx.Node, List[Tuple[fx.Node, Optional[Any]]]]: A mapping
+        - Dict[fx.Node, list[tuple[fx.Node, Optional[Any]]]]: A mapping
           from each node to a list of storages (represented as tuples of source node
           and key) that are last used by that node. This helps in identifying which
           storages can be released after the node's execution.
 
         """
-        storage_to_last_user = {}
-        node_to_last_used_storages = {}
+        storage_to_last_user: dict[tuple[fx.Node, Any], fx.Node] = {}
+        node_to_last_used_storages: dict[fx.Node, list[tuple[fx.Node, Any]]] = {}
 
-        def register_last_uses(use: fx.Node, user: fx.Node):
-            keys = []
+        def register_last_uses(use: fx.Node, user: fx.Node) -> None:
+            keys: list[Any] = []
             if alias_info.is_view(use):
                 # When use is a view (or getitem of a view),
                 # user is essentially using the storage allocated at the
                 # creation of the source of use.
-                use = alias_info.get_source(use)
+                use = alias_info.get_source(use)  # type: ignore[assignment]
 
-            if alias_info.is_source_of_getitems(use):
+            if alias_info.is_source_of_getitems(use):  # type: ignore[arg-type]
                 # When use is a source of getitems, user is using all separate
                 # storages of use.
-                keys.extend(alias_info.get_storage_keys(use))
-            elif alias_info.is_getitem(use):
+                keys.extend(alias_info.get_storage_keys(use))  # type: ignore[arg-type]
+            elif alias_info.is_getitem(use):  # type: ignore[arg-type]
                 # When use is a getitem, user is essentially using a separate
                 # storage of the source of use specified by key.
-                use, key = alias_info.get_source(use)
+                use, key = alias_info.get_source(use)  # type: ignore[assignment,misc]
                 keys.append(key)
             else:
                 keys.append(None)
@@ -194,9 +201,9 @@ def build_memory_profile(
             assert keys
 
             for key in keys:
-                if (use, key) not in storage_to_last_user:
-                    storage_to_last_user[(use, key)] = user
-                    node_to_last_used_storages.setdefault(user, []).append((use, key))
+                if (use, key) not in storage_to_last_user:  # type: ignore[comparison-overlap]
+                    storage_to_last_user[(use, key)] = user  # type: ignore[index]
+                    node_to_last_used_storages.setdefault(user, []).append((use, key))  # type: ignore[arg-type]
 
         for node in reversed(nodes):
             fx.node.map_arg(node.args, lambda n: register_last_uses(n, node))
@@ -236,16 +243,18 @@ def build_memory_profile(
                 if is_releasable(use)
             ]
             freed_memory = 0
-            for node, key in storages_to_release:
+            for node_to_release, key in storages_to_release:
                 released_memory_size = 0
                 if key is None:
-                    released_memory_size = size_of(node)
+                    released_memory_size = size_of(node_to_release)
                 elif key == "unclaimed":
-                    released_memory_size = alias_info.get_unclaimed_storage_size(node)
-                else:
-                    released_memory_size = size_of(
-                        alias_info.get_getitem_by_key(node, key)
+                    released_memory_size = alias_info.get_unclaimed_storage_size(
+                        node_to_release
                     )
+                else:
+                    getitem_node = alias_info.get_getitem_by_key(node_to_release, key)
+                    if getitem_node is not None:
+                        released_memory_size = size_of(getitem_node)
                 freed_memory += released_memory_size
 
             assert freed_memory >= 0
@@ -257,7 +266,7 @@ def get_fwd_bwd_interactions(
     fwd_graph: fx.Graph,
     bwd_graph: fx.Graph,
     size_of: Callable[[fx.Node], int],
-):
+) -> tuple[int, OrderedSet[str]]:
     """
     Analyze the interactions between the forward (fwd) and backward (bwd) graphs
     to determine memory usage characteristics.
@@ -269,7 +278,7 @@ def get_fwd_bwd_interactions(
       of a given node.
 
     Returns:
-    - Tuple[int, Set[fx.Node]]: A tuple containing:
+    - tuple[int, Set[fx.Node]]: A tuple containing:
         1. The baseline memory usage during the backward pass, accounting for
            nodes that persist from the forward pass (i.e., in fwd output but
            not in bwd input).
@@ -278,7 +287,7 @@ def get_fwd_bwd_interactions(
            but not in fwd output.
     """
 
-    def get_nodes_in_output(graph: fx.Graph) -> List[fx.Node]:
+    def get_nodes_in_output(graph: fx.Graph) -> OrderedSet[fx.Node]:
         """
         Get the nodes in the output of a graph.
 
@@ -286,13 +295,13 @@ def get_fwd_bwd_interactions(
         - graph (fx.Graph): The input graph.
 
         Returns:
-        - List[fx.Node]: A list of nodes in the output of the graph.
+        - list[fx.Node]: A list of nodes in the output of the graph.
         """
         output_node = list(graph.nodes)[-1]
         assert output_node.op == "output"
-        nodes_in_output = set()
+        nodes_in_output: OrderedSet[fx.Node] = OrderedSet()
 
-        def add_node(node: fx.Node):
+        def add_node(node: fx.Node) -> None:
             nodes_in_output.add(node)
 
         # Using map_arg since output_node.args[0] can be of different types
@@ -305,17 +314,17 @@ def get_fwd_bwd_interactions(
     bwd_baseline_memory = 0
     # placeholder nodes besides primals of the bwd_graph that should also
     # not be deleted during memory profile estimation of the bwd_graph
-    do_not_delete = set()
+    do_not_delete: OrderedSet[str] = OrderedSet()
 
     fwd_outputs = {}
     for node in get_nodes_in_output(fwd_graph):
         is_view_of_primal = False
         if op_types.is_view(node):
             source = node.args[0]
-            if source.name.startswith("primals"):
+            if isinstance(source, fx.Node) and source.name.startswith("primals"):
                 is_view_of_primal = True
         fwd_outputs[node.name] = (size_of(node), is_view_of_primal)
-    bwd_inputs = set()
+    bwd_inputs: OrderedSet[str] = OrderedSet()
     for node in bwd_graph.nodes:
         if node.op == "placeholder":
             bwd_inputs.add(node.name)
@@ -344,16 +353,14 @@ def get_peak_memory(
     fwd_graph: fx.Graph,
     bwd_graph: fx.Graph,
 ) -> int:
-    import logging
-
-    def _safe_size_of(n):
+    def _safe_size_of(n: fx.Node) -> int:
         try:
             return _size_of(n)
         except Exception:
-            logging.warning(f"Failed size_of({n}). Returning 0 instead.")
+            log.warning("Failed size_of(%s). Returning 0 instead.", n)
             return 0
 
-    def _is_releasable(n):
+    def _is_releasable(n: fx.Node) -> bool:
         # Storages of primals cannot be released during fwd or bwd pass.
         return not n.name.startswith("primals")
 
@@ -365,7 +372,7 @@ def get_peak_memory(
         fwd_graph, bwd_graph, _safe_size_of
     )
 
-    def _is_bwd_releasable(n):
+    def _is_bwd_releasable(n: fx.Node) -> bool:
         # Storages of nodes in bwd_do_not_delete cannot be released
         # during the bwd pass.
         return _is_releasable(n) and n.name not in bwd_do_not_delete
