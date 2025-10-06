@@ -45,11 +45,12 @@ class UniqueOperator(Operator):
         """Generate code for unique with deterministic target size input (no guards)."""
         if len(input_names) != 1:
             raise ValueError("UniqueOperator requires exactly one input")
-        # Desired output length
+        # Desired output length and target dtype
         desired_len = output_spec.size[0] if isinstance(output_spec, TensorSpec) else 0
-        # Synthesize an input tensor with exactly desired_len distinct elements
-        # Use the input's device to avoid device mismatches
+        # Synthesize in a wide dtype (int64) to guarantee desired_len distinct values,
+        # apply unique, then cast to the target dtype. No conditionals or guards.
         return (
-            f"_inp_unique = torch.arange({desired_len}, device={input_names[0]}.device).to({input_names[0]}.dtype)\n"
-            f"{output_name} = torch.unique(_inp_unique)"
+            f"_inp_unique_wide = torch.arange({desired_len}, device={input_names[0]}.device, dtype=torch.int64)\n"
+            f"_uniq_wide = torch.unique(_inp_unique_wide)\n"
+            f"{output_name} = _uniq_wide.to({input_names[0]}.dtype)"
         )
