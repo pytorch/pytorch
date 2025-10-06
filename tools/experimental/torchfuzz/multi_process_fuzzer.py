@@ -62,7 +62,7 @@ IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r"TypeError\(\"unsupported operand type\(s\) for \*: 'SymBool' and 'FakeTensor'\"\)"
     ),  # https://github.com/pytorch/pytorch/issues/164684
-    re.compile(r"KeyError: u0"),  # https://github.com/pytorch/pytorch/issues/164685
+    re.compile(r"KeyError: u\d+"),  # https://github.com/pytorch/pytorch/issues/164685
     re.compile(
         r"torch\._inductor\.exc\.InductorError: CppCompileError: C\+\+ compile error"
     ),  # https://github.com/pytorch/pytorch/issues/164686
