@@ -435,9 +435,11 @@ def autograd_key(
         else:
             # from IPython import embed; embed(); exit()
             pass
-        fw_gm, bw_gm, num_fw_ins, num_fw_outs, filtered_grads_idx = create_hop_fw_bw(
-            fw_gm, *args
-        )
+        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
+        with disable_proxy_modes_tracing():
+            fw_gm, bw_gm, num_fw_ins, num_fw_outs, filtered_grads_idx = create_hop_fw_bw(
+                fw_gm, *args
+            )
         return LocalMapAutogradOp.apply(
             fw_gm, bw_gm, num_fw_ins, num_fw_outs, filtered_grads_idx, *args, **kwargs
         )
