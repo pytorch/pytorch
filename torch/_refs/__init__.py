@@ -880,10 +880,14 @@ def logsumexp(
     if not isinstance(dim, Iterable):
         dim = (dim,)
     if self.numel() == 0:
+        # pyrefly: ignore  # no-matching-overload
         return torch.sum(torch.exp(self), dim, keepdim).log()
+    # pyrefly: ignore  # bad-argument-type
     maxes = torch.amax(torch.real(self), dim, keepdim=True)
     maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
+    # pyrefly: ignore  # no-matching-overload
     maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)
+    # pyrefly: ignore  # no-matching-overload
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
 
@@ -1241,10 +1245,12 @@ def copysign(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ):
     if isinstance(b, Number) and isinstance(a, Tensor):
+        # pyrefly: ignore  # bad-argument-type
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
         msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
         raise RuntimeError(msg)
+    # pyrefly: ignore  # bad-argument-type
     return where(signbit(b), neg(abs(a)), abs(a))
 
 
@@ -1330,10 +1336,13 @@ def float_power(
 
     # Float power has the following contiguous cast behavior to be
     # consistent with its C++ impl
+    # pyrefly: ignore  # no-matching-overload
     a = _maybe_convert_to_dtype(a, dtype)
+    # pyrefly: ignore  # no-matching-overload
     b = _maybe_convert_to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
+    # pyrefly: ignore  # bad-return
     return pow(a, b)
 
 
@@ -1375,11 +1384,15 @@ def floor_divide(
 ):
     # Wrap scalars because some references only accept tensor arguments.
     if isinstance(a, Number) and isinstance(b, Number):
+        # pyrefly: ignore  # bad-argument-type
         a = scalar_tensor(a)
+        # pyrefly: ignore  # bad-argument-type
         b = scalar_tensor(b)
     elif isinstance(b, Number) and isinstance(a, Tensor):
+        # pyrefly: ignore  # bad-argument-type
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Number) and isinstance(b, Tensor):
+        # pyrefly: ignore  # bad-argument-type
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
         if a.device == torch.device("cpu"):
@@ -1856,8 +1869,10 @@ def xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberT
 
     # Operations like eq and log do not handle scalar values, so we convert them to scalar_tensors.
     if isinstance(b, TensorLike) and isinstance(a, Number):
+        # pyrefly: ignore  # bad-argument-type
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
     elif isinstance(a, TensorLike) and isinstance(b, Number):
+        # pyrefly: ignore  # bad-argument-type
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
 
     # mypy: expected "Tensor"
@@ -2333,6 +2348,7 @@ def all(
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
 ) -> TensorLikeType:
+    # pyrefly: ignore  # no-matching-overload
     result = torch.logical_not(torch.any(torch.logical_not(a), dim, keepdim=keepdim))
 
     if a.dtype == torch.uint8:
@@ -2850,6 +2866,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     # SymInts
 
     example = None
+    # pyrefly: ignore  # bad-assignment
     for i, t in enumerate(tensors):
         if example is None:
             if t.ndim != 1:
@@ -3228,6 +3245,7 @@ def _normalize(
         mean (Tensor): mean of the tensor along norm_dims.
         rstd (Tensor): 1/std of the tensor along norm_dims.
     """
+    # pyrefly: ignore  # no-matching-overload
     norm_dims = utils.canonicalize_dims(a.ndim, norm_dims)
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
@@ -3341,6 +3359,7 @@ def native_layer_norm(
     # while torch.Size([1, 2, 3]) == (1, 2, 3) is True
     # therefore we use tuple(normalized_shape)
     torch._check(
+        # pyrefly: ignore  # bad-argument-type
         weight is None or sym_eq(weight.shape, tuple(normalized_shape)),
         lambda: "Expected weight to be of same shape as normalized_shape, but got "
         + "weight of shape "
@@ -3349,6 +3368,7 @@ def native_layer_norm(
         + str(normalized_shape),
     )
     torch._check(
+        # pyrefly: ignore  # bad-argument-type
         bias is None or sym_eq(bias.shape, tuple(normalized_shape)),
         lambda: "Expected bias to be of same shape as normalized_shape, but got "
         + "bias of shape "
@@ -3359,7 +3379,10 @@ def native_layer_norm(
     torch._check(
         input.ndim >= normalized_ndim
         and sym_eq(
-            input.shape[(input.ndim - normalized_ndim) :], tuple(normalized_shape)
+            # pyrefly: ignore  # bad-argument-type
+            input.shape[(input.ndim - normalized_ndim) :],
+            # pyrefly: ignore  # bad-argument-type
+            tuple(normalized_shape),
         ),
         lambda: "Given normalized_shape="
         + str(normalized_shape)
@@ -3953,6 +3976,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 @out_wrapper()
 def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
+    # pyrefly: ignore  # no-matching-overload
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
     if not isinstance(shifts, Iterable):
@@ -3965,12 +3989,16 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLike
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
         return a.clone()
 
+    # pyrefly: ignore  # bad-argument-type
     if a.dim() == 0 and len(dims) > 0:
         raise IndexError(
+            # pyrefly: ignore  # index-error
             f"Dimension specified as {dims[0]} but tensor has no dimensions"
         )
 
+    # pyrefly: ignore  # bad-argument-type
     len_shifts = len(shifts)
+    # pyrefly: ignore  # bad-argument-type
     len_dims = len(dims)
     if len_shifts != 1 or len_dims != 1:
         if len_shifts == 0:
@@ -3978,21 +4006,27 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLike
         # Takes care of the case when dims is not specified (default)
         # By default, the tensor is flattened before shifting, after which the original shape is restored
         if len_dims == 0 and len_shifts == 1:
+            # pyrefly: ignore  # bad-argument-type
             return torch.roll(torch.flatten(a), shifts, 0).view(a.shape)
         if len_shifts != len_dims:
             raise RuntimeError(
                 f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
             )
         assert len_dims > 1
+        # pyrefly: ignore  # index-error
         tail_shifts = shifts[1:]
+        # pyrefly: ignore  # index-error
         tail_dims = dims[1:]
+        # pyrefly: ignore  # index-error
         first_dim_rolled = torch.roll(a, (shifts[0],), dims[0])
         return torch.roll(first_dim_rolled, tail_shifts, tail_dims)
 
     # This path is taken when only one dimension is rolled
     # For example to get `first_dim_rolled` above
+    # pyrefly: ignore  # index-error
     dim = dims[0]
     size = a.shape[dim]
+    # pyrefly: ignore  # index-error
     start = (size - shifts[0]) % size
     idx = torch.arange(size, device=a.device)
     return a.index_select(dim, torch.fmod(start + idx, size))
@@ -4074,7 +4108,9 @@ def softmax(
         a_max = amax(a_, dim, keepdim=True)
         a_exp = exp(a_ - a_max)
     return _maybe_convert_to_dtype(
-        true_divide(a_exp, sum(a_exp, dim, keepdim=True)), result_dtype
+        # pyrefly: ignore  # no-matching-overload
+        true_divide(a_exp, sum(a_exp, dim, keepdim=True)),
+        result_dtype,
     )  # type: ignore[return-value]
 
 
@@ -4251,6 +4287,7 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
         return prims.squeeze(a, dims) if dims else prims.view_of(a)
 
     ndim = a.ndim
+    # pyrefly: ignore  # no-matching-overload
     dim = utils.canonicalize_dims(ndim, dim)
     dims = (dim,) if isinstance(dim, Dim) else dim
     # Short-circuits if the tensor has no dimensions
@@ -4391,6 +4428,7 @@ def hsplit(
     if isinstance(indices_or_sections, IntLike):
         split_size = indices_or_sections
         torch._check(
+            # pyrefly: ignore  # unsupported-operation
             (split_size != 0 and a.shape[dim] % split_size == 0),
             lambda: (
                 "torch.hsplit attempted to split along dimension "
@@ -4402,6 +4440,7 @@ def hsplit(
                 + "!"
             ),
         )
+        # pyrefly: ignore  # bad-argument-type
         return tensor_split(a, split_size, dim)
 
     torch._check_type(
@@ -4432,6 +4471,7 @@ def vsplit(
     if isinstance(indices_or_sections, IntLike):
         split_size = indices_or_sections
         torch._check(
+            # pyrefly: ignore  # unsupported-operation
             (split_size != 0 and a.shape[0] % split_size == 0),
             lambda: (
                 f"torch.vsplit attempted to split along dimension 0"
@@ -4442,6 +4482,7 @@ def vsplit(
                 f"!"
             ),
         )
+        # pyrefly: ignore  # bad-argument-type
         return tensor_split(a, split_size, 0)
 
     torch._check_type(
@@ -4646,6 +4687,7 @@ def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
         raise RuntimeError(
             f"torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with {a.ndim} dimensions!"
         )
+    # pyrefly: ignore  # unsupported-operation
     if isinstance(sections, IntLike) and (sections == 0 or a.shape[2] % sections != 0):
         raise RuntimeError(
             "torch.dsplit attempted to split along dimension 2, "
@@ -5419,6 +5461,7 @@ def logspace(
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def meshgrid(tensors: Sequence[TensorLikeType], indexing: str):
     pass
 
@@ -5845,6 +5888,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
 
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
+    # pyrefly: ignore  # no-matching-overload
     value = _maybe_convert_to_dtype(value, a.dtype)
     r = torch.where(mask, value, a)  # type: ignore[arg-type]
 
@@ -6639,6 +6683,7 @@ def _infer_scalar_type(obj):
         # double.
         if length == 0:
             return torch.get_default_dtype()
+        # pyrefly: ignore  # bad-assignment
         for i in range(length):
             cur_item = obj[i]
             # TODO: test this
@@ -6676,6 +6721,7 @@ def _recursive_build(
         # torch.Size([1, 2])
         return obj.detach().to(dtype=scalarType, device="cpu", copy=True)
     elif isinstance(obj, Number):
+        # pyrefly: ignore  # bad-argument-type
         return torch.scalar_tensor(obj, dtype=scalarType)
 
     # seq can be a list of tensors
