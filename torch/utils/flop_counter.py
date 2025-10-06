@@ -60,6 +60,7 @@ def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for matmul."""
     # Inputs should be a list of length 2.
     # Inputs contains the shapes of two matrices.
+    # *args absorbs out_dtype
     m, k = a_shape
     k2, n = b_shape
     assert k == k2
@@ -67,12 +68,12 @@ def mm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     return m * n * 2 * k
 
 @register_flop_formula(aten.addmm)
-def addmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
+def addmm_flop(self_shape, a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for addmm."""
     return mm_flop(a_shape, b_shape)
 
 @register_flop_formula(aten.bmm)
-def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
+def bmm_flop(a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for the bmm operation."""
     # Inputs should be a list of length 2.
     # Inputs contains the shapes of two tensor.
@@ -85,7 +86,7 @@ def bmm_flop(a_shape, b_shape, out_shape=None, **kwargs) -> int:
     return flop
 
 @register_flop_formula(aten.baddbmm)
-def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
+def baddbmm_flop(self_shape, a_shape, b_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for the baddbmm operation."""
     # Inputs should be a list of length 3.
     # Inputs contains the shapes of three tensors.
