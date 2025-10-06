@@ -711,6 +711,18 @@ def check_dtype(
         buffer.writeline(f"static_assert({is_same_dt});")
 
 
+def check_shape(
+    buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
+) -> None:
+    backend = get_current_backend()
+    assert shape is not None
+    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+        shape_str = (
+            ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
+        )
+        buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
+
+
 class DataTypePropagation:
     def __init__(self, body: LoopBody) -> None:
         self.body = body
@@ -1014,6 +1026,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     ) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: store should be handled by CSEProxy"
+        )
+
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
         )
 
     def store_reduction(self, name: str, index: sympy.Expr, value: OpVarT) -> None:
@@ -2119,6 +2136,11 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
     ) -> None:
         raise NotImplementedError
 
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )
+
     def reduction(
         self,
         dtype: torch.dtype,
@@ -2245,6 +2267,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     name, fused_node_names
                 )
             ):
+                self.num_store -= 1
                 names_to_remove.add(name)
 
         for name in names_to_remove:
@@ -2478,6 +2501,10 @@ class KernelTemplate:
 
 
 class CSEProxy(DefaultHandler):
+    """A ops handler that proxies calls to `kernel` and its
+    handler and returns `CSEVariable`s with correct shape and dtype.
+    """
+
     name = "CSEProxy"
 
     def __init__(self, kernel: Kernel[Any], parent_handler: OpsHandler[Any]):
@@ -2561,6 +2588,11 @@ class CSEProxy(DefaultHandler):
             ):
                 assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
+
+            if config.test_configs.runtime_triton_shape_assert:
+                assert output_shape is not None
+                check_shape(V.kernel.compute, csevar, output_shape)
+
             return csevar
 
         return pytree.tree_map(do_cse, value)
@@ -2704,11 +2736,15 @@ class CSEProxy(DefaultHandler):
             self.kernel.store(name, index, value, mode=mode)
             self.kernel.num_store += 1
 
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        self.kernel.device_assert_async(cond, msg)
+
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
         self._update_store_cache(name, value)
 
         if name not in V.graph.removed_buffers:
+            self.kernel.num_store += 1
             return self.kernel.store_reduction(name, index, value)
 
     def reduction(
