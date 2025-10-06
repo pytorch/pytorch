@@ -880,31 +880,35 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
     Raises:
         AssertionError: If the value is of an unsupported type.
     """
-    if isinstance(val, SymTypes):
+    if isinstance(val, SymNode):
+        yield val.expr
+    elif isinstance(val, sympy.Basic):
+        yield val
+    else:
+        for node in _iterate_nodes(val):
+            yield from _iterate_exprs(node)
+
+
+def _iterate_nodes(val: Any) -> Iterator[SymNode]:
+    """
+    Recursively iterate through a value and yield all SymNodes contained
+    within it.
+    """
+    if isinstance(val, SymNode):
+        yield val
+    elif isinstance(val, py_sym_types):
         # This allow applies to the jagged layout NestedTensor case as
         # nested ints are not symbolic
         if is_symbolic(val):
-            yield val.node.expr
-    elif isinstance(val, sympy.Basic):
-        yield val
-    elif isinstance(val, (int, float, bool)):
-        pass
+            yield val.node
     elif isinstance(val, (tuple, list)):
         for s in val:
-            yield from _iterate_exprs(s)
-    elif is_sparse_any(val):
-        yield from _iterate_exprs(val.size())
+            yield from _iterate_nodes(s)
     elif isinstance(val, torch.Tensor):
-        yield from _iterate_exprs(val.size())
-        yield from _iterate_exprs(val.stride())
-        yield from _iterate_exprs(val.storage_offset())
-    elif val is None:
-        pass
-    # see Note: [Generator arguments in AOTDispatcher]
-    elif isinstance(val, torch.Generator):
-        pass
-    else:
-        raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
+        yield from _iterate_nodes(val.size())
+        if not is_sparse_any(val):
+            yield from _iterate_nodes(val.stride())
+            yield from _iterate_nodes(val.storage_offset())
 
 
 def free_symbols(val: IterateExprs) -> OrderedSet[sympy.Symbol]:

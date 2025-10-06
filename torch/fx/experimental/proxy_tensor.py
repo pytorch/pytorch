@@ -2494,6 +2494,10 @@ def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     return pre_dispatch_mode or mode
 
 
+def get_proxy_torch_dispatch_mode_sym_tracing() -> ProxyTorchDispatchMode | None:
+    return ProxyTorchDispatchMode._global_state.current_sym_mode
+
+
 class _NoSymDispatch:
     pass
 

@@ -13,8 +13,7 @@ from unittest.mock import patch
 
 class TestDynamic(DTensorTestBase):
     @with_comms
-    # FIXME: Currently broken for fake tensor cache
-    @parametrize("fake_tensor_cache_enabled", [False])
+    @parametrize("fake_tensor_cache_enabled", [False, True])
     def test_embedding(self, fake_tensor_cache_enabled):
         with patch.object(torch._dynamo.config, "fake_tensor_cache_enabled", fake_tensor_cache_enabled):
             device_mesh = self.build_device_mesh()
