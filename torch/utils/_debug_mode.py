@@ -30,11 +30,17 @@ def _stringify_placement(placement) -> str:
     return f"[{', '.join([str(p) for p in placement])}]"
 
 
+def _stringify_dtensor_spec(spec) -> str:
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+    return DTensorSpec.format_shard_order_str(spec.placements, spec.shard_order)
+
+
 def _tensor_debug_string(tensor) -> str:
     """Convert tensor to debug string representation."""
     if isinstance(tensor, torch.distributed.tensor.DTensor):
         # omitted device mesh
-        return f"dt: {dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}{_stringify_placement(tensor.placements)}"
+        return f"dt: {dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}{_stringify_dtensor_spec(tensor._spec)}"
     elif isinstance(tensor, FakeTensor):
         return f"ft: {dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}"
     elif isinstance(tensor, torch.Tensor):
@@ -50,7 +56,7 @@ def _arg_to_str(arg) -> str:
         if isinstance(x, torch.Tensor):
             return _tensor_debug_string(x)
         elif isinstance(x, DTensorSpec):
-            return _stringify_placement(x.placements)
+            return _stringify_dtensor_spec(x)
         return x
 
     arg = tree_map(to_str, arg)

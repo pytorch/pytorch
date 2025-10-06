@@ -844,12 +844,12 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0, 1, 2]->S(0)[0, 1]->S(0)[0]->RRR->S(0)[1]->S(0)[1, 2]""",
+                    """S(0)[0, 1, 2]->S(0)[0, 1]->S(0)[0]->R*->S(0)[1]->S(0)[1, 2]""",
                 )
             elif idx == 1:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0, 1, 2]->S(0)[0, 1]->S(0)[0]->RRR->S(0)[1]->S(0)[1, 2]""",
+                    """S(0)[0, 1, 2]->S(0)[0, 1]->S(0)[0]->R*->S(0)[1]->S(0)[1, 2]""",
                 )
             elif idx == 2:
                 self.assertExpectedInline(
@@ -1044,6 +1044,44 @@ class DeviceOrderRedistributeTest(DTensorTestBase):
                     self.assertEqual(
                         sharded_dt.full_tensor(), full_tensor.full_tensor()
                     )
+
+    @with_comms
+    def test_ordered_redistribute_with_backward(self):
+        """Test mixing Partial in the original placements and do redistribute."""
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        x_tensor_shape = (16, 32)
+        w_tensor_shape = (32, 16)
+        # TODO(zpcore): we should pass the test for any shard orders from
+        # generate_shard_orders(). However this will fail because we haven't
+        # supported DTensor dispatcher to correctly 1) redistribute when shard
+        # order is different between args. 2) propagate shard order through
+        # tensor ops.
+        shard_order_list = [
+            {0: [], 1: [1]},
+            {0: [], 1: [0, 1]},
+            {0: [], 1: [0, 1, 2]},
+            {0: [0, 1, 2]},
+            # {0: [0, 2, 1]},  # this fails for now because output_dt.sum() will drop shard order.
+        ]
+        # for shard_order in self.generate_shard_orders(mesh, len(x_tensor_shape)):
+        for shard_order in shard_order_list:
+            x = torch.randn(x_tensor_shape, device=self.device_type, requires_grad=True)
+            w = torch.randn(w_tensor_shape, device=self.device_type, requires_grad=True)
+            # backward with full tensor
+            output = torch.mm(x, w)
+            loss = output.sum()
+            loss.backward()
+            # NB: for now, we MUST force using the same `shard_order`` for all tensors, until
+            # we update the sharding strategy to handle ops with different `shard_order`.
+            x_dt = distribute_tensor(x, mesh, shard_order=shard_order)
+            w_dt = distribute_tensor(w, mesh, shard_order=shard_order)
+            # backward with sharded tensor
+            output_dt = torch.mm(x_dt, w_dt)
+            loss_dt = output_dt.sum()
+            loss_dt.backward()
+            for var, var_dt in [(x, x_dt), (w, w_dt)]:
+                self.assertEqual(var_dt.full_tensor(), var)
+                self.assertEqual(var_dt.grad.full_tensor(), var.grad)
 
 
 if __name__ == "__main__":
