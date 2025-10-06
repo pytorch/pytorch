@@ -279,7 +279,7 @@ class TestVarlenAttention(NNTestCase):
 
         varlen_grad = torch.autograd.grad(
             outputs=varlen_output,
-            inputs=x_packed,
+            inputs=variable_length_batch_data["x_packed"],
             grad_outputs=varlen_grad_out,
             retain_graph=True,
             create_graph=False,
@@ -288,7 +288,7 @@ class TestVarlenAttention(NNTestCase):
 
         sdpa_grad = torch.autograd.grad(
             outputs=sdpa_output,
-            inputs=x_padded,
+            inputs=variable_length_batch_data["x_padded"],
             grad_outputs=sdpa_grad_out,
             retain_graph=True,
             create_graph=False,
