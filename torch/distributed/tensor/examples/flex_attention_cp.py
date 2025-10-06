@@ -1,9 +1,6 @@
 """
 To run the example, use the following command:
 torchrun --standalone --nnodes=1 --nproc-per-node=4 flex_attention_cp.py
-
-Pre-requisite:
-pip install jsonargparse
 """
 
 import os
