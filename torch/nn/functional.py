@@ -6514,6 +6514,7 @@ def multi_head_attention_forward(
 
 class ScalingType(Enum):
     """Enum class to hold type of scaling used"""
+
     Tensorwise = 0
     Rowwise = 1
     Blockwise_1x16 = 2
@@ -6524,6 +6525,7 @@ class ScalingType(Enum):
 
 class SwizzleType(Enum):
     """Enum class to hold what (if any) swizzling done to scales"""
+
     # No swizzling
     NoSwizzle = 0
     # NVIDIA Blockwell-style swizzle
