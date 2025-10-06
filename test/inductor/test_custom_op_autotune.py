@@ -159,35 +159,34 @@ class TestCustomOpAutoTune(TestCase):
         """Test RMSNorm autotuning with multiple decomposition variants showcasing different performance characteristics."""
         test_op_name = f"test_lib::rmsnorm_{id(self)}"
 
-        # Define implementations with clearly different performance characteristics
-        def rmsnorm_standard(
+        def rmsnorm_decomposition1(
             x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
-            """Standard variance-based approach: most numerically stable."""
+            """Variance-based approach: compute variance then rsqrt."""
             variance = x.pow(2).mean(dim=-1, keepdim=True)
             rstd = torch.rsqrt(variance + eps)
             return x * rstd * weight
 
-        def rmsnorm_explicit_rms(
+        def rmsnorm_decomposition2(
             x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
-            """Manual RMS computation: potentially fewer ops but more memory."""
-            x_squared_sum = (x * x).sum(dim=-1, keepdim=True)
-            rms = torch.sqrt(x_squared_sum / x.shape[-1])
-            return x / (rms + eps) * weight
+            """Direct RMS approach: compute RMS directly."""
+            x_squared = x * x
+            mean_squared = x_squared.mean(dim=-1, keepdim=True)
+            rms = torch.sqrt(mean_squared + eps)
+            return x / rms * weight
 
-        def rmsnorm_fused(
+        def rmsnorm_decomposition3(
             x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
-            """Single-pass with fused operations: better memory locality."""
-            norm_factor = (x * x).mean(dim=-1, keepdim=True).add_(eps).rsqrt_()
-            return x.mul_(norm_factor).mul_(weight)
+            """Single expression approach: combine operations in one line."""
+            return x * torch.rsqrt((x * x).mean(dim=-1, keepdim=True) + eps) * weight
 
         @torch.library.custom_op(test_op_name, mutates_args=())
         def test_rmsnorm_op(
             input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
-            return rmsnorm_standard(input_tensor, weight, eps)
+            return rmsnorm_decomposition1(input_tensor, weight, eps)
 
         @test_rmsnorm_op.register_fake
         def _(input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8):
@@ -197,25 +196,24 @@ class TestCustomOpAutoTune(TestCase):
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
         @register_custom_op_autotuning(op_object.default)
-        def test_rmsnorm_autotuning(
-            input_tensor, weight, eps: float = 1e-8, default_impl=None
-        ):
+        def _(input_tensor, weight, eps: float = 1e-8, default_impl=None):
             return autotune_custom_op(
                 name="test_rmsnorm_autotuned",
                 decompositions=[
-                    rmsnorm_standard,
-                    rmsnorm_explicit_rms,
-                    rmsnorm_fused,
+                    rmsnorm_decomposition1,
+                    rmsnorm_decomposition2,
+                    rmsnorm_decomposition3,
                 ],
                 inputs=[input_tensor, weight],
                 kwargs={"eps": eps},
-                default_impl=default_impl,  # Pass OpOverload for blackbox testing
-                include_blackbox=True,  # Enable blackbox to test the functionality!
+                default_impl=default_impl,
             )
 
         # Test inputs and run autotuning
         input_tensor, weight = self._create_rmsnorm_inputs()
-        expected = rmsnorm_standard(input_tensor, weight)
+        expected = rmsnorm_decomposition1(
+            input_tensor, weight
+        )  # Use one of the defined implementations
         self._run_autotune_test(op_object, (input_tensor, weight), expected, "RMSNorm")
 
         # # Test numerical equivalence of all implementations
@@ -239,43 +237,49 @@ class TestCustomOpAutoTune(TestCase):
         """Test MLP autotuning with multiple decomposition variants"""
         test_op_name = f"test_lib::mlp_{id(self)}"
 
-        # Define implementations with different characteristics
-        def mlp_standard(input_tensor, gate_weight, up_weight, down_weight):
-            """Standard separate matmuls with ReLU activation."""
+        # Define implementations with different approaches but no intentional inefficiencies
+        def mlp_decomposition1(input_tensor, gate_weight, up_weight, down_weight):
+            """Separate matmuls: standard implementation with torch.matmul."""
             gate_proj = torch.matmul(input_tensor, gate_weight)
             up_proj = torch.matmul(input_tensor, up_weight)
             gated = torch.relu(gate_proj) * up_proj
             return torch.matmul(gated, down_weight)
 
-        def mlp_fused_projections(input_tensor, gate_weight, up_weight, down_weight):
-            """Fused projection weights: reduces memory accesses but increases intermediate memory."""
+        def mlp_decomposition2(input_tensor, gate_weight, up_weight, down_weight):
+            """Batched approach: uses torch.mm with reshaped tensors."""
+            batch_shape = input_tensor.shape[:-1]
+            hidden_dim = input_tensor.shape[-1]
+            output_dim = down_weight.shape[-1]
+
+            # Reshape for batched operations
+            input_2d = input_tensor.view(-1, hidden_dim)
+
+            # Use torch.mm for potentially better performance
+            gate_proj = torch.mm(input_2d, gate_weight)
+            up_proj = torch.mm(input_2d, up_weight)
+
+            # Activation and gating
+            gated = torch.relu(gate_proj) * up_proj
+            output_2d = torch.mm(gated, down_weight)
+
+            # Reshape back
+            return output_2d.view(*batch_shape, output_dim)
+
+        def mlp_decomposition3(input_tensor, gate_weight, up_weight, down_weight):
+            """Fused weights approach: concatenate then split weights."""
+            # Concatenate gate and up weights for one matrix multiply
             fused_weight = torch.cat([gate_weight, up_weight], dim=1)
             fused_proj = torch.matmul(input_tensor, fused_weight)
-            mid_dim = gate_weight.shape[1]
-            gate_proj, up_proj = fused_proj.split([mid_dim, mid_dim], dim=-1)
+
+            # Split the result
+            intermediate_dim = gate_weight.shape[1]
+            gate_proj, up_proj = fused_proj.split(
+                [intermediate_dim, intermediate_dim], dim=-1
+            )
+
+            # Apply activation and final projection
             gated = torch.relu(gate_proj) * up_proj
             return torch.matmul(gated, down_weight)
-
-        def mlp_chunked_computation(input_tensor, gate_weight, up_weight, down_weight):
-            """Chunked computation: trades compute for memory efficiency."""
-            # Process in smaller chunks to simulate different memory access patterns
-            chunk_size = min(64, input_tensor.shape[-2])
-            if input_tensor.shape[-2] <= chunk_size:
-                # If input is small, just use standard computation
-                gate_proj = torch.matmul(input_tensor, gate_weight)
-                up_proj = torch.matmul(input_tensor, up_weight)
-                gated = torch.relu(gate_proj) * up_proj
-                return torch.matmul(gated, down_weight)
-
-            # Otherwise chunk the computation
-            input_chunks = torch.chunk(input_tensor, chunks=2, dim=-2)
-            output_chunks = []
-            for chunk in input_chunks:
-                gate_proj = torch.matmul(chunk, gate_weight)
-                up_proj = torch.matmul(chunk, up_weight)
-                gated = torch.relu(gate_proj) * up_proj
-                output_chunks.append(torch.matmul(gated, down_weight))
-            return torch.cat(output_chunks, dim=-2)
 
         @torch.library.custom_op(test_op_name, mutates_args=())
         def test_mlp_op(
@@ -284,7 +288,9 @@ class TestCustomOpAutoTune(TestCase):
             up_weight: torch.Tensor,
             down_weight: torch.Tensor,
         ) -> torch.Tensor:
-            return mlp_standard(input_tensor, gate_weight, up_weight, down_weight)
+            return mlp_decomposition1(
+                input_tensor, gate_weight, up_weight, down_weight
+            )  # Use one of the defined implementations
 
         @test_mlp_op.register_fake
         def _(input_tensor, gate_weight, up_weight, down_weight):
@@ -301,25 +307,24 @@ class TestCustomOpAutoTune(TestCase):
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
         @register_custom_op_autotuning(op_object.default)
-        def test_mlp_autotuning(
-            input_tensor, gate_weight, up_weight, down_weight, default_impl=None
-        ):
+        def _(input_tensor, gate_weight, up_weight, down_weight, default_impl=None):
             return autotune_custom_op(
                 name="test_mlp_autotuned",
                 decompositions=[
-                    mlp_standard,
-                    mlp_fused_projections,
-                    mlp_chunked_computation,
+                    mlp_decomposition1,  # Separate matmuls approach
+                    mlp_decomposition2,  # Batched matrix multiply approach
+                    mlp_decomposition3,  # Fused weights approach
                 ],
                 inputs=[input_tensor, gate_weight, up_weight, down_weight],
                 kwargs={},
                 default_impl=default_impl,  # Pass OpOverload for blackbox testing
-                include_blackbox=True,  # Enable blackbox functionality!
             )
 
         # Test inputs and run autotuning
         input_tensor, gate_weight, up_weight, down_weight = self._create_mlp_inputs()
-        expected = mlp_standard(input_tensor, gate_weight, up_weight, down_weight)
+        expected = mlp_decomposition1(
+            input_tensor, gate_weight, up_weight, down_weight
+        )  # Use one of the defined implementations
         self._run_autotune_test(
             op_object,
             (input_tensor, gate_weight, up_weight, down_weight),
@@ -394,7 +399,7 @@ class TestCustomOpAutoTune(TestCase):
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
         @register_custom_op_autotuning(op_object.default)
-        def test_blackbox_autotuning(x, y, default_impl=None):
+        def _(x, y, default_impl=None):
             return autotune_custom_op(
                 name="test_blackbox_autotuned",
                 decompositions=[
@@ -404,7 +409,6 @@ class TestCustomOpAutoTune(TestCase):
                 inputs=[x, y],
                 kwargs={},
                 default_impl=default_impl,  # This should be the OpOverload
-                include_blackbox=True,  # Enable blackbox choice!
             )
 
         # Test inputs
@@ -412,25 +416,8 @@ class TestCustomOpAutoTune(TestCase):
         y = torch.randn(4, 8, device=self.device, dtype=self.dtype)
         expected = original_impl(x, y)
 
-        print(f"\n🧪 Testing blackbox choice integration for {test_op_name}")
-
-        # First verify that default_impl passed to our function is the correct OpOverload
-        def type_validation_wrapper(*args, **kwargs):
-            default_impl = kwargs.get("default_impl")
-            print(
-                f"✅ Type validation: default_impl is {type(default_impl)} with name {default_impl.name() if hasattr(default_impl, 'name') else 'N/A'}"
-            )
-            return test_blackbox_autotuning(*args, **kwargs)
-
-        # Replace the original function temporarily for type checking
-        original_func = test_blackbox_autotuning
-        test_blackbox_autotuning = type_validation_wrapper
-
         # Run autotuning test
         self._run_autotune_test(op_object, (x, y), expected, "BlackboxChoice")
-
-        # Restore original function
-        test_blackbox_autotuning = original_func
 
         # Verify numerical equivalence of all implementations
         implementations = [
@@ -448,8 +435,6 @@ class TestCustomOpAutoTune(TestCase):
                 atol=1e-5,
                 msg=f"BlackboxChoice {name} differs from expected",
             )
-
-        print("✅ Blackbox choice integration test passed!")
 
 
 if __name__ == "__main__":

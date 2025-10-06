@@ -186,10 +186,13 @@ def autotune_custom_op(
     kwargs: Optional[dict[str, Any]] = None,
     layout: Optional[Layout] = None,
     default_impl: Optional[Callable[..., Any]] = None,
-    include_blackbox: bool = True,
 ) -> Union[TensorBox, Any]:
     """
     Autotune custom operations by comparing multiple decomposition implementations.
+
+    The original custom op implementation is automatically included as a blackbox
+    choice when default_impl is provided as an OpOverload, providing a performance
+    baseline and fallback option.
 
     Args:
         name: Operation name for identification
@@ -198,7 +201,6 @@ def autotune_custom_op(
         kwargs: Additional arguments for decomposition functions
         layout: Output layout (inferred if None)
         default_impl: Default implementation to use as fallback (optional)
-        include_blackbox: If True, include original custom op as blackbox choice (default: True)
 
     Returns:
         Optimized implementation result
@@ -214,15 +216,11 @@ def autotune_custom_op(
 
     decompositions = list(decompositions)
 
-    # Allow empty decompositions only if include_blackbox=True and we have a default_impl OpOverload
+    # Allow empty decompositions only if we have a default_impl OpOverload for blackbox
     if not decompositions:
-        if not (
-            include_blackbox
-            and default_impl is not None
-            and hasattr(default_impl, "_op")
-        ):
+        if not (default_impl is not None and hasattr(default_impl, "_op")):
             raise ValueError(
-                "decompositions list cannot be empty unless include_blackbox=True with OpOverload default_impl"
+                "decompositions list cannot be empty unless default_impl is an OpOverload"
             )
 
     # Store original OpOverload for blackbox choice
@@ -230,44 +228,11 @@ def autotune_custom_op(
     processed_decompositions = decompositions.copy()
     template_default_impl = None  # What to pass to CustomOpTemplate
 
-    # Add default implementation as fallback decomposition if provided and not using blackbox
+    # Handle default implementation
     if default_impl is not None:
-        # If default_impl is an OpOverload (the custom op itself), handle specially
+        # If default_impl is an OpOverload (the custom op itself), store it for blackbox use
         if hasattr(default_impl, "_op"):
-            # Store for potential blackbox use
             original_op_overload = default_impl
-
-            # Only add as decomposition if not using blackbox
-            if not include_blackbox:
-                # Create a wrapper function that calls the OpOverload DIRECTLY
-                # This should bypass the lowering system to avoid recursive autotuning
-                def default_wrapper(*args, **kwargs):
-                    # Call the OpOverload directly, bypassing any registered lowerings
-                    # This prevents recursive autotuning calls
-                    from torch._inductor.ir import ir_node_to_tensor
-
-                    # Convert IR nodes back to tensors if needed
-                    tensor_args = []
-                    for arg in args:
-                        if hasattr(arg, "realize"):
-                            # This is an IR node, convert to tensor
-                            tensor_args.append(ir_node_to_tensor(arg))
-                        else:
-                            tensor_args.append(arg)
-
-                    # Call the original OpOverload directly
-                    return original_op_overload(*tensor_args, **kwargs)
-
-                # Try to extract a meaningful name from the OpOverload
-                try:
-                    op_name = default_impl.name().replace("::", "_")
-                except:
-                    op_name = "custom_op"
-                default_wrapper.__name__ = f"{op_name}_default"
-
-                processed_decompositions.append(default_wrapper)
-                template_default_impl = default_wrapper  # Use wrapper, NOT OpOverload
-            # If include_blackbox=True, don't add OpOverload to decompositions or template
         else:
             # default_impl is already a callable function
             if default_impl not in processed_decompositions:
@@ -285,11 +250,7 @@ def autotune_custom_op(
     )
 
     # If we have no decompositions but have an OpOverload, we need to handle layout inference specially
-    if (
-        not processed_decompositions
-        and include_blackbox
-        and original_op_overload is not None
-    ):
+    if not processed_decompositions and original_op_overload is not None:
         # Infer layout using the OpOverload directly
         from torch._inductor.ir import ir_node_to_tensor
         from torch._inductor.virtualized import V
@@ -309,8 +270,8 @@ def autotune_custom_op(
         # Use the inferred layout from the choices (all choices should have the same layout)
         inferred_layout = layout or (choices[0].layout if choices else None)
 
-    # Add blackbox choice if requested and we have an OpOverload
-    if include_blackbox and original_op_overload is not None:
+    # Add blackbox choice automatically if we have an OpOverload
+    if original_op_overload is not None:
         if inferred_layout is None:
             # Need to infer layout for blackbox choice
             from torch._inductor.ir import ir_node_to_tensor
@@ -335,7 +296,6 @@ def autotune_custom_op(
             kwargs=kwargs,
         )
         choices.append(blackbox_choice)
-        print(f"✅ Added blackbox choice for {original_op_overload.name()}")
 
     if not choices:
         raise RuntimeError(f"No valid choices generated for {name}")
@@ -378,6 +338,7 @@ def register_custom_op_autotuning(
     """
 
     def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+
         @functools.wraps(fn)
         def wrapped(*args: Any, **kwargs: Any) -> Any:
             out = fn(*args, **kwargs, default_impl=custom_op)
