@@ -27,9 +27,9 @@ import contextlib
 import functools
 import types
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -362,6 +362,7 @@ def get_ignored_functions() -> set[Callable]:
         Tensor._view_func,
         Tensor._view_func_unsafe,
         Tensor._rev_view_func_unsafe,
+        Tensor._dtensor__new__,
         Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
         Tensor._has_symbolic_sizes_strides.__get__,
@@ -488,7 +489,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.bernoulli: lambda input, generator=None, out=None: -1,
         torch.bilinear: lambda input1, input2, weight, bias: -1,
         torch.binary_cross_entropy_with_logits: (
-            lambda input, target, weight=None, size_average=None, reduce=None, reduction="mean", pos_weight=None, label_smoothing=0.0: -1  # noqa: B950
+            lambda input, target, weight=None, size_average=None, reduce=None, reduction="mean", pos_weight=None: -1
         ),
         torch.bincount: lambda input, weights=None, minlength=0: -1,
         torch.binomial: lambda count, prob, generator=None: -1,
@@ -609,8 +610,8 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.fused_moving_avg_obs_fake_quant: (
             lambda x, observer_on, fake_quant_on, averaging_const, running_min, running_max, scale, zero_point, quant_min, quant_max, ch_axis, per_row_fake_quant=False, symmetric_quant=False: -1  # noqa: B950
         ),
-        torch.fbgemm_linear_fp16_weight: lambda input, packed_weight, bias: -1,
-        torch.fbgemm_linear_fp16_weight_fp32_activation: lambda input, packed_weight, bias: -1,
+        torch.fbgemm_linear_fp16_weight: lambda input, packed_weight, bias, output: -1,
+        torch.fbgemm_linear_fp16_weight_fp32_activation: lambda input, packed_weight, bias, output: -1,
         torch.fbgemm_linear_int8_weight: lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1,  # noqa: B950
         torch.fbgemm_linear_int8_weight_fp32_activation: (
             lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1
@@ -851,10 +852,10 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         ),
         torch.nn.functional.bilinear: lambda input1, input2, weight, bias=None: -1,
         torch.nn.functional.binary_cross_entropy: (
-            lambda input, target, weight=None, size_average=None, reduce=None, reduction="mean", label_smoothing=0.0: -1
+            lambda input, target, weight=None, size_average=None, reduce=None, reduction="mean": -1
         ),
         torch.nn.functional.binary_cross_entropy_with_logits: (
-            lambda input, target, weight=None, size_average=None, reduce=None, reduction="mean", pos_weight=None, label_smoothing=0.0: -1  # noqa: B950
+            lambda input, target, weight=None, size_average=None, reduce=None, reduction="mean", pos_weight=None: -1
         ),
         torch.nn.functional.celu: lambda input, alpha=1.0, inplace=False: -1,
         torch.nn.functional.cosine_embedding_loss: (
@@ -1515,6 +1516,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         Tensor.zero_: lambda self: -1,
         Tensor.__dlpack__: lambda self, stream=None, max_version=None, dl_device=None, copy=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
+        Tensor.index: lambda self, a, b: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }  # fmt: skip
 

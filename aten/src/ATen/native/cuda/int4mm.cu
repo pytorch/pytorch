@@ -1304,7 +1304,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   constexpr int32_t kKTileSize = 16;
 
   // GPT-FAST assumes nTileSize of 8 for quantized weight tensor.
-  // See https://github.com/pytorch-labs/gpt-fast/blob/091515ab5b06f91c0d6a3b92f9c27463f738cc9b/quantize.py#L510
+  // See https://github.com/meta-pytorch/gpt-fast/blob/091515ab5b06f91c0d6a3b92f9c27463f738cc9b/quantize.py#L510
   // Torch dynamo also requires the torch ops has the same output shape for each device.
   // See https://github.com/pytorch/pytorch/blob/ec284d3a74ec1863685febd53687d491fd99a161/torch/_meta_registrations.py#L3263
   constexpr int32_t kNTileSizeTensor = 8;

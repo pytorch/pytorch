@@ -3,7 +3,8 @@
 import importlib
 import math
 import warnings
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -1079,6 +1080,9 @@ def lp_pool3d(
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     See :class:`~torch.nn.LPPool3d` for details.
     """
     if has_torch_function_unary(input):
@@ -1117,6 +1121,9 @@ def lp_pool2d(
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
 
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     See :class:`~torch.nn.LPPool2d` for details.
     """
     if has_torch_function_unary(input):
@@ -1151,6 +1158,9 @@ def lp_pool1d(
 
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
+
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
@@ -3262,11 +3272,13 @@ def gaussian_nll_loss(
         if input.size()[:-1] == var.size():
             var = torch.unsqueeze(var, -1)
 
-        # This checks if the sizes match up to the final dimension, and the final dimension of var is of size 1.
+        # This checks if the var is broadcastable to the input and there is only one mismatched dimension.
         # This is also a homoscedastic case.
         # e.g. input.size = (10, 2, 3), var.size = (10, 2, 1)
+        # or  input.size = (4, 3, 32, 32), var.size = (4, 1, 32, 32)
         elif (
-            input.size()[:-1] == var.size()[:-1] and var.size(-1) == 1
+            input.ndim == var.ndim
+            and sum(y for x, y in zip(input.size(), var.size()) if x != y) == 1
         ):  # Heteroscedastic case
             pass
 
@@ -3472,7 +3484,6 @@ def binary_cross_entropy(
     size_average: Optional[bool] = None,
     reduce: Optional[bool] = None,
     reduction: str = "mean",
-    label_smoothing: float = 0.0,
 ) -> Tensor:
     r"""Compute Binary Cross Entropy between the target and input probabilities.
 
@@ -3491,11 +3502,9 @@ def binary_cross_entropy(
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
             and :attr:`reduce` are in the process of being deprecated, and in the meantime,
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
-        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
-            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
-            become a mixture of the original ground truth and a uniform distribution as described in
-            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+
     Examples::
+
         >>> input = torch.randn(3, 2, requires_grad=True)
         >>> target = torch.rand(3, 2, requires_grad=False)
         >>> loss = F.binary_cross_entropy(torch.sigmoid(input), target)
@@ -3511,7 +3520,6 @@ def binary_cross_entropy(
             size_average=size_average,
             reduce=reduce,
             reduction=reduction,
-            label_smoothing=label_smoothing,
         )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -3527,13 +3535,6 @@ def binary_cross_entropy(
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
-    assert 0 <= label_smoothing <= 1, (
-        f"label_smoothing must be between 0.0 and 1.0. Got: {label_smoothing}"
-    )
-
-    if label_smoothing > 0:
-        target = target * (1 - label_smoothing) + (1 - target) * label_smoothing
-
     return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
 
 
@@ -3545,7 +3546,6 @@ def binary_cross_entropy_with_logits(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
     pos_weight: Optional[Tensor] = None,
-    label_smoothing: float = 0.0,
 ) -> Tensor:
     r"""Compute Binary Cross Entropy between target and input logits.
 
@@ -3572,11 +3572,9 @@ def binary_cross_entropy_with_logits(
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
             along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
-        label_smoothing (float, optional): A float in [0.0, 1.0]. Specifies the amount
-            of smoothing when computing the loss, where 0.0 means no smoothing. The targets
-            become a mixture of the original ground truth and a uniform distribution as described in
-            `Rethinking the Inception Architecture for Computer Vision <https://arxiv.org/abs/1512.00567>`__. Default: :math:`0.0`.
+
     Examples::
+
          >>> input = torch.randn(3, requires_grad=True)
          >>> target = torch.empty(3).random_(2)
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
@@ -3593,7 +3591,6 @@ def binary_cross_entropy_with_logits(
             reduce=reduce,
             reduction=reduction,
             pos_weight=pos_weight,
-            label_smoothing=label_smoothing,
         )
     if size_average is not None or reduce is not None:
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
@@ -3604,13 +3601,6 @@ def binary_cross_entropy_with_logits(
         raise ValueError(
             f"Target size ({target.size()}) must be the same as input size ({input.size()})"
         )
-
-    assert 0 <= label_smoothing <= 1, (
-        f"label_smoothing must be between 0.0 and 1.0. Got: {label_smoothing}"
-    )
-
-    if label_smoothing > 0:
-        target = target * (1 - label_smoothing) + (1 - target) * label_smoothing
 
     return torch.binary_cross_entropy_with_logits(
         input, target, weight, pos_weight, reduction_enum
@@ -3659,7 +3649,7 @@ def smooth_l1_loss(
             reduction=reduction,
             beta=beta,
         )
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -3722,7 +3712,7 @@ def huber_loss(
             weight=weight,
         )
 
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -3799,7 +3789,7 @@ def l1_loss(
             reduce=reduce,
             reduction=reduction,
         )
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -3872,7 +3862,7 @@ def mse_loss(
             weight=weight,
         )
 
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -4728,7 +4718,7 @@ def interpolate(  # noqa: F811
             ]
         elif torch.jit.is_scripting():
             output_size = [
-                int(math.floor(float(input.size(i + 2)) * scale_factors[i]))
+                math.floor(float(input.size(i + 2)) * scale_factors[i])
                 for i in range(dim)
             ]
         else:
@@ -5845,7 +5835,6 @@ scaled_dot_product_attention = _add_docstr(
                 assert attn_mask is None
                 temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
                 attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-                attn_bias.to(query.dtype)
 
             if attn_mask is not None:
                 if attn_mask.dtype == torch.bool:

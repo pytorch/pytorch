@@ -293,6 +293,7 @@ class _ExportPackage:
                     if isinstance(fn, torch.nn.Module):
                         dynamic_shapes = v(fn, *args, **kwargs)  # type: ignore[arg-type]
                     else:
+                        # pyrefly: ignore  # invalid-param-spec
                         dynamic_shapes = v(*args, **kwargs)
                 except AssertionError:
                     continue
@@ -340,6 +341,7 @@ class _ExportPackage:
         assert not hasattr(fn, "_define_overload")
         _exporter_context._define_overload = _define_overload  # type: ignore[attr-defined]
 
+        # pyrefly: ignore  # bad-return
         return _exporter_context
 
     @property
@@ -362,7 +364,7 @@ class _ExportPackage:
             "always_keep_tensor_constants": True,
             # we'll change this back to False once we enable weight deduping for standalone mode
             "aot_inductor.package_constants_in_so": standalone,
-            "aot_inductor.compile_standalone": standalone,
+            "aot_inductor_mode.compile_standalone": standalone,
         }
         aoti_files_map = {}
         model_names = []
@@ -376,6 +378,7 @@ class _ExportPackage:
                 kwargs=ep.example_inputs[1],
                 options=options,
             )
+            # pyrefly: ignore  # unsupported-operation
             aoti_files_map[name] = aoti_files
 
         from torch._inductor.package import package

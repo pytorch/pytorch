@@ -162,7 +162,7 @@ def save_graph_repro_ep(
         assert args is not None
         exported_program = torch.export.export(gm, args, strict=strict)
     elif gm is None:
-        gm = exported_program.module()
+        gm = exported_program.module(check_guards=False)
 
     # save a graph preview using gm
     module_string = get_module_string(gm)  # type: ignore[arg-type]
@@ -302,7 +302,7 @@ def repro_common(
     options: Any, exported_program: ExportedProgram
 ) -> tuple[torch.fx.GraphModule, Any, Any]:
     torch._inductor.config.generate_intermediate_hooks = True
-    mod = exported_program.module()
+    mod = exported_program.module(check_guards=False)
     args, kwargs = exported_program.example_inputs
     return mod, args, kwargs  # type: ignore[return-value]
 
@@ -368,7 +368,7 @@ def export_for_aoti_minifier(
 
     try:
         ep = torch.export.export(gm, tuple_inputs, strict=strict)
-        gm = ep.module()
+        gm = ep.module(check_guards=False)
         return gm
     except Exception as e:
         if skip_export_error:

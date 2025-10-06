@@ -261,12 +261,9 @@ void Unpickler::run() {
 void Unpickler::setInput(size_t memo_id) {
   AT_ASSERT(!stack_.empty());
   if (memo_id >= memo_table_.size()) {
-    memo_table_.insert(
-        memo_table_.end(), memo_id - memo_table_.size(), IValue());
-    memo_table_.push_back(stack_.back());
-  } else {
-    memo_table_[memo_id] = stack_.back();
+    memo_table_.resize(memo_id + 1);
   }
+  memo_table_[memo_id] = stack_.back();
 }
 
 static std::vector<int64_t> tupleToIntList(const IValue& v) {
@@ -1066,10 +1063,10 @@ void Unpickler::rebuildRRef() {
     // const reference will extend the lifetime of the temporary variable
     const auto& rrefId = distributed::rpc::RRefId(
         static_cast<int16_t>(args.at(distributed::rpc::RREFID_ON_IDX).toInt()),
-        static_cast<int64_t>(args.at(distributed::rpc::RREFID_ID_IDX).toInt()));
+        args.at(distributed::rpc::RREFID_ID_IDX).toInt());
     const auto& forkId = distributed::rpc::RRefId(
         static_cast<int16_t>(args.at(distributed::rpc::FORKID_ON_IDX).toInt()),
-        static_cast<int64_t>(args.at(distributed::rpc::FORKID_ID_IDX).toInt()));
+        args.at(distributed::rpc::FORKID_ID_IDX).toInt());
     auto parent =
         static_cast<int16_t>(args.at(distributed::rpc::PARENT_IDX).toInt());
     const auto& typeStr = static_cast<std::string>(

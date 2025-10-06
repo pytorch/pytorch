@@ -15,8 +15,9 @@ import tempfile
 import time
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Generic, Optional, Union
+from typing import Any, Generic, Optional, Union
 from typing_extensions import ParamSpec
 from weakref import WeakSet
 
@@ -1206,7 +1207,7 @@ def safe_grad_filter(message, category, filename, lineno, file=None, line=None) 
 def user_warning_filter(
     message, category, filename, lineno, file=None, line=None
 ) -> bool:
-    return not category == UserWarning
+    return category != UserWarning
 
 
 @contextlib.contextmanager
@@ -1289,6 +1290,7 @@ def trace_structured_artifact(
     name: str,  # this will go in metadata
     encoding: str,
     payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    compile_id: Optional[CompileId] = None,
 ) -> None:
     trace_structured(
         "artifact",
@@ -1297,6 +1299,7 @@ def trace_structured_artifact(
             "encoding": encoding,
         },
         payload_fn=payload_fn,
+        compile_id=compile_id,
     )
 
 

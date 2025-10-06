@@ -56,6 +56,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._scaled_dot_product_fused_attention_overrideable_backward.default": {},
     "aten._scaled_dot_product_fused_attention_overrideable.default": {},
     "aten._scaled_mm.default": {},
+    "aten._scaled_grouped_mm.default": {},
     "aten._scaled_mm.out": {},
     "aten._segment_reduce_backward.default": {},
     "aten._thnn_fused_lstm_cell.default": {},
@@ -183,4 +184,9 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
 # The same BC rules apply as inductor_fallback_ops.
 aten_shimified_ops: dict[str, dict[str, list[str]]] = {
     "aten.fill_.Scalar": {},
+    "aten.pad.default": {},
+    "aten.narrow.default": {},
+    "aten.amax.default": {},
+    "aten.new_empty.default": {},
+    "aten.new_zeros.default": {},
 }

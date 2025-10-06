@@ -109,13 +109,15 @@ if torch._C._has_mkldnn:
             # depends on the alignment of internally-stored metadata.
             # In aot mode, we need to firstly save the packed weight, when loading it,
             # it will be in a different address which doesn't work.
-            # Disable MKL prepack linear in AOT mode
+            # Disable MKL prepack linear in AOT mode.
+            # Disable MKL prepack linear when batch_size has free symbols.
             packed_weight_op = (
                 mkldnn._reorder_linear_weight
                 if (
                     is_lp_weight
                     or mkldnn._is_mkldnn_acl_supported()
                     or V.aot_compilation
+                    or has_free_symbols(batch_size)
                 )
                 else torch.ops.mkl._mkl_reorder_linear_weight
             )
@@ -128,7 +130,12 @@ if torch._C._has_mkldnn:
         ):
             packed_linear_inputs: tuple[Any, ...] = (input, packed_weight_node)
             transpose_weight_node = packed_weight_node.args[0]
-            if is_lp_weight or mkldnn._is_mkldnn_acl_supported() or V.aot_compilation:
+            if (
+                is_lp_weight
+                or mkldnn._is_mkldnn_acl_supported()
+                or V.aot_compilation
+                or has_free_symbols(batch_size)
+            ):
                 packed_linear_inputs += (bias, "none", [], "")
                 packed_linear_op: Callable[..., Any] = mkldnn._linear_pointwise.default
             else:
@@ -1218,7 +1225,6 @@ if torch._C._has_mkldnn:
         weight_meta_value = linear_node.args[weight_idx].meta.get("val")
         if input_meta_value is None or weight_meta_value is None:
             return False
-        batch_size = input_meta_value.shape[0]
         if (
             input_meta_value.dtype == torch.float64
             or weight_meta_value.dtype == torch.float64
@@ -1236,12 +1242,12 @@ if torch._C._has_mkldnn:
             reduced_f32_matmul_enabled and weight_meta_value.dtype == torch.float32
         )
         compute_with_lp = is_lp_weight or use_reduced_f32_for_fp32_weight
-        # on x86, for fp32, mkl should be enabled and batch_size should not be a free symbol.
+        # on x86, for fp32, mkl should be enabled.
         # on aarch64, use mkldnn op for fp32 as well if acl is enabled
         if (
             not compute_with_lp
             and not mkldnn._is_mkldnn_acl_supported()
-            and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
+            and not torch._C.has_mkl
         ):
             return False
         for meta_value in [input_meta_value, weight_meta_value]:
@@ -1460,10 +1466,6 @@ if torch._C._has_mkldnn:
                 )
                 compute_with_lp = is_lp_weight or use_reduced_f32_for_fp32_weight
                 batch_size = input.meta.get("val").shape[0]
-                if has_free_symbols(batch_size):
-                    assert compute_with_lp or mkldnn._is_mkldnn_acl_supported(), (
-                        f"only bf16/fp16 weight prepacking supports dynamic shape inputs but got {weight_dtype}"
-                    )
                 packed_weight_node = mkldnn_device_op.pack_linear_weight(
                     graph, compute_with_lp, transpose_weight_node, batch_size
                 )
