@@ -2013,11 +2013,10 @@ def skipIfHpu(fn):
             fn(*args, **kwargs)
     return wrapper
 
-def getRocmVersion() -> tuple[int, int, int]:
-    rocm_version = str(torch.version.hip)
-    rocm_version = rocm_version.split("-")[0]    # ignore git sha
-    rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
-    return (rocm_version_tuple[0], rocm_version_tuple[1], rocm_version_tuple[2])
+def getRocmVersion() -> tuple[int, int]:
+    from torch.testing._internal.common_cuda import _get_torch_rocm_version
+    rocm_version = _get_torch_rocm_version()
+    return (rocm_version_tuple[0], rocm_version_tuple[1])
 
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
