@@ -212,3 +212,86 @@ class SubgraphTemplate(KernelTemplate):
             description=description,
             make_fx_graph=make_fx_graph,
         )
+
+    def generate_custom_op_choices(
+        self,
+        name: str,
+        decompositions: list[Callable[..., Any]],
+        input_nodes: list[Buffer],
+        kwargs: dict[str, Any] = None,
+        default_impl: Callable[..., Any] = None,
+    ) -> list[SubgraphChoiceCaller]:
+        """
+        Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
+
+        This method extends SubgraphTemplate to support custom op decompositions,
+        allowing multiple implementations to compete in autotuning.
+
+        Args:
+            name: Base name for the choices
+            decompositions: List of decomposition functions to compare
+            input_nodes: Input nodes for the operation
+            kwargs: Additional arguments for decomposition functions
+            default_impl: Default implementation for layout inference
+
+        Returns:
+            List of SubgraphChoiceCaller instances for autotuning
+        """
+        if not decompositions:
+            return []
+
+        kwargs = kwargs or {}
+
+        # Infer output layout using default_impl or first decomposition
+        layout = self._infer_custom_op_layout(
+            input_nodes, decompositions, kwargs, default_impl
+        )
+
+        choices = []
+        for decomp in decompositions:
+            # Create make_fx_graph function for this decomposition
+            def make_fx_graph(*args, decomp=decomp):
+                import functools
+
+                from torch.fx.experimental.proxy_tensor import make_fx
+
+                return make_fx(functools.partial(decomp, **kwargs))(*args)
+
+            choice = self.generate(
+                name=f"{name}_{decomp.__name__}",
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=make_fx_graph,
+                description=f"CustomOp {decomp.__name__}",
+            )
+            choices.append(choice)
+
+        return choices
+
+    def _infer_custom_op_layout(
+        self,
+        input_nodes: list[Buffer],
+        decompositions: list[Callable[..., Any]],
+        kwargs: dict[str, Any],
+        default_impl: Callable[..., Any] = None,
+    ) -> Layout:
+        """Infer output layout for custom ops using the default implementation when available."""
+        import functools
+
+        from torch._inductor.ir import FixedLayout, ir_node_to_tensor
+        from torch._inductor.virtualized import V
+
+        # Use default_impl if available, otherwise use first decomposition
+        impl = default_impl if default_impl is not None else decompositions[0]
+
+        with V.fake_mode:
+            example_inputs = [ir_node_to_tensor(inp) for inp in input_nodes]
+            fn = functools.partial(impl, **kwargs)
+            output = fn(*example_inputs)
+
+            return FixedLayout(
+                device=output.device,
+                dtype=output.dtype,
+                size=output.shape,
+                stride=output.stride(),
+            )

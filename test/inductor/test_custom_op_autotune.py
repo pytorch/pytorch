@@ -30,7 +30,7 @@ torch.set_float32_matmul_precision("high")
 class TestCustomOpAutoTune(TestCase):
     """Test custom operation autotuning functionality."""
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Set up test environment with appropriate device and dtype."""
         super().setUp()
         self.device = "cuda" if HAS_GPU else "cpu"
@@ -330,6 +330,100 @@ class TestCustomOpAutoTune(TestCase):
             expected,
             "MLP",
         )
+
+    def _create_decompose_k_inputs(self, m=32, k=32768, n=32):
+        """Create test inputs for decompose_k matrix multiplication - matching real test sizes."""
+        a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
+        b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
+        return a, b
+
+    @skipIfXpu
+    def test_decompose_k_custom_op_autotune(self):
+        """Test decompose_k autotuning with different k_splits values for matrix multiplication."""
+        test_op_name = f"test_lib::decompose_k_{id(self)}"
+
+        def decompose_k_base(
+            a: torch.Tensor, b: torch.Tensor, k_splits: int
+        ) -> torch.Tensor:
+            """Matrix multiply with k-way decomposition - exactly like PyTorch's mm.py implementation."""
+            m = a.shape[0]
+            n = b.shape[1]
+            k = a.shape[1]
+
+            k_parts = k // k_splits
+            B = k_splits
+
+            a_reshaped = torch.permute(
+                a.reshape(m, B, k_parts), (1, 0, 2)
+            )  # [B, m, k_parts]
+            b_reshaped = b.reshape(B, k_parts, n)  # [B, k_parts, n]
+
+            result = torch.bmm(a_reshaped, b_reshaped)  # [B, m, n]
+
+            return torch.sum(result, dim=0)  # [m, n]
+
+        import functools
+
+        decompose_k_decomposition1 = functools.partial(
+            decompose_k_base, k_splits=16
+        )  # split16
+        decompose_k_decomposition2 = functools.partial(
+            decompose_k_base, k_splits=32
+        )  # split32
+        decompose_k_decomposition3 = functools.partial(
+            decompose_k_base, k_splits=64
+        )  # split64
+        decompose_k_decomposition4 = functools.partial(
+            decompose_k_base, k_splits=128
+        )  # split128
+        decompose_k_decomposition5 = functools.partial(
+            decompose_k_base, k_splits=256
+        )  # split256
+
+        # Set names for better debugging
+        decompose_k_decomposition1.__name__ = "decompose_k_split16"
+        decompose_k_decomposition2.__name__ = "decompose_k_split32"
+        decompose_k_decomposition3.__name__ = "decompose_k_split64"
+        decompose_k_decomposition4.__name__ = "decompose_k_split128"
+        decompose_k_decomposition5.__name__ = "decompose_k_split256"
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def test_decompose_k_op(
+            a: torch.Tensor, b: torch.Tensor, k_splits: int = 4
+        ) -> torch.Tensor:
+            return decompose_k_base(a, b, k_splits)
+
+        @test_decompose_k_op.register_fake
+        def _(a: torch.Tensor, b: torch.Tensor, k_splits: int = 4):
+            return torch.empty(a.shape[0], b.shape[1], device=a.device, dtype=a.dtype)
+
+        lib_name, op_name = test_op_name.split("::")
+        op_object = getattr(getattr(torch.ops, lib_name), op_name)
+
+        # Define decompositions with different k_splits values - same as real test
+        decompositions = [
+            decompose_k_decomposition1,  # k_splits=16
+            decompose_k_decomposition2,  # k_splits=32
+            decompose_k_decomposition3,  # k_splits=64
+            decompose_k_decomposition4,  # k_splits=128
+            decompose_k_decomposition5,  # k_splits=256
+        ]
+
+        @register_custom_op_autotuning(op_object.default)
+        def _(a, b, k_splits: int = 4, default_impl=None):
+            return autotune_custom_op(
+                name="test_decompose_k_autotuned",
+                decompositions=decompositions,
+                inputs=[a, b],
+                kwargs={"k_splits": k_splits},
+                default_impl=default_impl,
+            )
+
+        a, b = self._create_decompose_k_inputs()
+
+        # Test autotuning with k_splits=16
+        expected = decompose_k_base(a, b, k_splits=16)
+        self._run_autotune_test(op_object, (a, b, 16), expected, "DecomposeK")
 
 
 if __name__ == "__main__":

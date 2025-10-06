@@ -2879,7 +2879,6 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         timings = do_autotuning(choices, precompile_fn)
-        # breakpoint()
         # if timings is empty, we really have no choice but to return a semi-random
         # choice. returning the first `ExternKernelCaller` is probably the safest bet
         # in this case, since it will generally be the ATen kernel. if there are no
