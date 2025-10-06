@@ -70,7 +70,7 @@ from torch.utils._thunk import Thunk
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from ._backward_state import BackwardState
-from .sym_node import SymNode
+from .sym_node import SymNode, wrap_node
 
 
 if TYPE_CHECKING:
@@ -84,16 +84,17 @@ if TYPE_CHECKING:
     from torch.types import IntLikeType
 
 __all__ = [
+    "DecompositionInterpreter",
     "PythonKeyTracer",
     "dispatch_trace",
-    "make_fx",
-    "DecompositionInterpreter",
-    "py_sym_types",
     "get_innermost_proxy_mode",
     "get_proxy_mode",
     "handle_sym_dispatch",
-    "maybe_enable_thunkify",
+    "make_fx",
     "maybe_disable_thunkify",
+    "maybe_enable_thunkify",
+    "no_sym_dispatch",
+    "py_sym_types",
 ]
 
 _ProxyTracer = Union["PythonKeyTracer", "_GraphAppendingTracerEx"]
@@ -409,7 +410,7 @@ def get_proxy_slot(
         else:
             if isinstance(default, _NoDefault):
                 raise RuntimeError(
-                    f"{obj} ({id(obj)})is not tracked with proxy for {tracer}"
+                    f"{obj} ({id(obj)}) is not tracked with proxy for {tracer}"
                 )
             return default
     else:
@@ -1490,7 +1491,24 @@ _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_m
 )
 
 
+class _CurrentProxyTorchDispatchModeState(threading.local):
+    # The current ProxyTorchDispatchMode for SymNode tracing. The dispatcher
+    # tracks SymNode operations (see handle_sym_dispatch()). It needs to do so
+    # even if proxy tracing is disabled in case a SymNode "leaks" from a
+    # disabled section to an enabled section.
+    #
+    # For example - let's say you have some code which is tracing an operation
+    # and in the middle needs to do some FakeTensor operations to compute a
+    # size but it doesn't want those temporary operations to be added to the
+    # graph - so it disables tracing. If it uses the result of those
+    # operations and they contain a SymNode then the proxy will not know the
+    # provinance of the SymNode.
+    current_sym_mode: ProxyTorchDispatchMode | None = None
+
+
 class ProxyTorchDispatchMode(TorchDispatchMode):
+    _global_state = _CurrentProxyTorchDispatchModeState()
+
     # Ensure this is read-only; this exists only for legacy reasons
     @property
     def enable_tracing(self) -> bool:
@@ -1514,10 +1532,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.PROXY
-        # Every time we enter a mode, we maintain a stack telling us what the previous
-        # ProxyTorchDispatchMode state was (if there was any).
+        # Every time we enter a mode, we maintain a stack telling us what the
+        # previous ProxyTorchDispatchMode state was (if there was any) as well
+        # as the previous _global_state.current_sym_mode.
         # This lets us properly reset the state on exit.
-        self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
+        self.enter_stack: list[
+            tuple[ProxyTorchDispatchMode | None, ProxyTorchDispatchMode | None]
+        ] = []
         self.decomp_layers: int = 0
         from torch._inductor import config
 
@@ -1541,8 +1562,12 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     def __enter__(self) -> Self:
         # Stash and store the previous proxy mode (there may or may not be one)
-        maybe_prev_proxy_mode = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
-        self.enter_stack.append(maybe_prev_proxy_mode)
+        prev_proxy_mode: ProxyTorchDispatchMode | None = _unset_infra_mode(
+            torch._C._TorchDispatchModeKey.PROXY
+        )
+        prev_sym_mode = self._global_state.current_sym_mode
+        self.enter_stack.append((prev_proxy_mode, prev_sym_mode))
+        self._global_state.current_sym_mode = self
         return super().__enter__()
 
     def __exit__(
@@ -1554,9 +1579,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         b = super().__exit__(exc_type, exc_value, traceback)
 
         # Re-enable the previous proxy mode, if there was one.
-        mb_previous_proxy_mode = self.enter_stack.pop()
-        if mb_previous_proxy_mode is not None:
-            _push_mode(mb_previous_proxy_mode)
+        prev_proxy_mode, prev_sym_mode = self.enter_stack.pop()
+        if prev_proxy_mode is not None:
+            _push_mode(prev_proxy_mode)
+        self._global_state.current_sym_mode = prev_sym_mode
 
         return b
 
@@ -1604,12 +1630,19 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         args: tuple[object, ...],
         kwargs: dict[str, object],
     ) -> object:
-        # Peephole optimize multiply by one
+        # Peephole optimize
         # NB: be careful not to trigger guards here!
         if func == operator.mul:
+            # multiply by one
             if isinstance(args[1], int) and args[1] == 1:
                 return args[0]
             elif isinstance(args[0], int) and args[0] == 1:
+                return args[1]
+        elif func == operator.add:
+            # add zero
+            if isinstance(args[1], int) and args[1] == 0:
+                return args[0]
+            elif isinstance(args[0], int) and args[0] == 0:
                 return args[1]
 
         # For speed, we assume there are no nested data structures
@@ -2461,24 +2494,49 @@ def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     return pre_dispatch_mode or mode
 
 
+class _NoSymDispatch:
+    pass
+
+
+no_sym_dispatch = _NoSymDispatch()
+
+
 def handle_sym_dispatch(
-    func: Callable[_P, R],
-    args: _P.args,  # type: ignore[valid-type]  # not allowed to use _P.args here
-    kwargs: _P.kwargs,  # type: ignore[valid-type]  # not allowed to use _P.kwargs here
-) -> R:
+    func: Callable[_P, R], *args: _P.args, **kwargs: _P.kwargs
+) -> R | _NoSymDispatch:
     """
-    Call into the currently active proxy tracing mode to do a
-    SymInt/SymFloat/SymBool dispatch trace on a function that operates on
-    these arguments.
+    Attempt to do a SymNode dispatch trace on a function. If the function
+    was able to be traced the traced result is returned otherwise the singleton
+    `no_sym_dispatch` is returned.
     """
-    mode = get_proxy_mode()
-    assert mode
-    # Have to do it manually, because we're not doing the normal torch
-    # dispatch machinery which disables it for us
-    with disable_proxy_modes_tracing():
+
+    mode = ProxyTorchDispatchMode._global_state.current_sym_mode
+    if not mode:
+        return no_sym_dispatch
+
+    # Recursively turn the SymNodes in an arg into SymInt/SymFloat/SymBool.
+    def _wrap_arg(arg: Any) -> Any:
+        if isinstance(arg, list):
+            return [_wrap_arg(a) for a in arg]
+        elif isinstance(arg, tuple):
+            return tuple(_wrap_arg(a) for a in arg)
+        elif isinstance(arg, SymNode):
+            # Turn the SymNode into a SymInt/SymFloat/SymBool
+            return wrap_node(arg)
+        else:
+            raise RuntimeError("Unhandled arg type {type(arg)} in _wrap_arg()")
+
+    wrapped_args = _wrap_arg(args)
+
+    # Temporary disable the current_sym_mode while we re-run the op.
+    saved = ProxyTorchDispatchMode._global_state.current_sym_mode
+    ProxyTorchDispatchMode._global_state.current_sym_mode = None
+    try:
         # TODO: properly compute types
         types: list[type] = []
-        return mode.__sym_dispatch__(func, types, args, kwargs)  # type: ignore[arg-type, return-value]
+        return mode.__sym_dispatch__(func, types, wrapped_args, kwargs)  # type: ignore[arg-type, return-value]
+    finally:
+        ProxyTorchDispatchMode._global_state.current_sym_mode = saved
 
 
 @contextmanager
