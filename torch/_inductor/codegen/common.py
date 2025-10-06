@@ -2245,6 +2245,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     name, fused_node_names
                 )
             ):
+                self.num_store -= 1
                 names_to_remove.add(name)
 
         for name in names_to_remove:
@@ -2709,6 +2710,7 @@ class CSEProxy(DefaultHandler):
         self._update_store_cache(name, value)
 
         if name not in V.graph.removed_buffers:
+            self.kernel.num_store += 1
             return self.kernel.store_reduction(name, index, value)
 
     def reduction(
