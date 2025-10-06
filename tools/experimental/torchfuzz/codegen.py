@@ -123,7 +123,12 @@ class FuzzTemplate:
 
                 if isinstance(spec, ScalarSpec):
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-                    if spec.dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
+                    if spec.dtype in [
+                        torch.int8,
+                        torch.int16,
+                        torch.int32,
+                        torch.int64,
+                    ]:
                         # For integer scalars, use randint to avoid always getting 0
                         code_lines.append(
                             f"{arg_name} = int(torch.randint(5, 30, ()).item())"
@@ -157,7 +162,12 @@ class FuzzTemplate:
                     stride_str = str(spec.stride)
 
                     # Special handling for integer tensors which might be used as indices
-                    if spec.dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
+                    if spec.dtype in [
+                        torch.int8,
+                        torch.int16,
+                        torch.int32,
+                        torch.int64,
+                    ]:
                         # For integer tensors, generate valid indices with headroom for arithmetic
                         # Use smaller range [5, 30] to allow for multiplication and other operations
                         # This prevents indices from becoming too large after arithmetic
@@ -174,7 +184,6 @@ class FuzzTemplate:
                         code_lines.append(
                             f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
                         )
-
 
         return code_lines
 
@@ -240,8 +249,6 @@ class DefaultFuzzTemplate(FuzzTemplate):
 
     def flags_codegen(self):
         return ["torch._dynamo.config.capture_scalar_outputs = True"]
-
-
 
     def epilogue_codegen(self):
         return []

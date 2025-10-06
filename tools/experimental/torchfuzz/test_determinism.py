@@ -53,7 +53,11 @@ def run_fuzzer_with_seed(seed):
 
     if path is None:
         # Fallback: pick the most recently modified fuzz_*.py in /tmp/torchfuzz
-        py_files = sorted(torchfuzz_dir.glob("fuzz_*.py"), key=lambda p: p.stat().st_mtime, reverse=True)
+        py_files = sorted(
+            torchfuzz_dir.glob("fuzz_*.py"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
         if not py_files:
             print("No Python files generated in /tmp/torchfuzz/")
             return None
