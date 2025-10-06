@@ -427,6 +427,13 @@ def autograd_key(
         "local_map in_grad_placements are not yet supported."
     )
     if _DEFER_INLINING:
+        import copy
+        d = copy.deepcopy(local_map_kwargs["in_placements"])
+        if d[0] != d[-1]:
+            fw_gm.meta['local_map_kwargs']["in_placements"] = (d[0], d[0], d[0], d[-1], d[-1], d[-1], d[0])
+        else:
+            # from IPython import embed; embed(); exit()
+            pass
         fw_gm, bw_gm, num_fw_ins, num_fw_outs, filtered_grads_idx = create_hop_fw_bw(
             fw_gm, *args
         )
