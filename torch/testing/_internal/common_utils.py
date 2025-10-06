@@ -102,6 +102,7 @@ except ImportError:
 
 
 SEED = 1234
+MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a")
 
