@@ -52,21 +52,30 @@ class BlackboxChoiceCaller(ChoiceCaller):
     ):
         super().__init__(name, input_nodes, layout, description)
         self.original_op_overload = original_op_overload
-        self.kwargs = kwargs or {}
+        self.kwargs = kwargs if kwargs is not None else {}
 
-    def benchmark(self, *args, out=None):
+    def benchmark(self, *args, out=None) -> float:
         """Benchmark the original OpOverload directly"""
 
         def run_blackbox():
             return self.original_op_overload(*args, **self.kwargs)
 
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(run_blackbox)
+            result = do_bench_using_profiling(run_blackbox)
+            # Ensure we return a float, not a list
+            if isinstance(result, list):
+                return result[0] if result else 0.0
+            return result
 
         if self.layout.device.type == "cpu":
-            return benchmarker.benchmark_cpu(run_blackbox)
+            result = benchmarker.benchmark_cpu(run_blackbox)
         else:
-            return benchmarker.benchmark_gpu(run_blackbox)
+            result = benchmarker.benchmark_gpu(run_blackbox)
+
+        # Ensure we return a float, not a list
+        if isinstance(result, list):
+            return result[0] if result else 0.0
+        return result
 
     def to_callable(self):
         """Return the original OpOverload as callable"""
@@ -204,8 +213,17 @@ def autotune_custom_op(
         )
 
     decompositions = list(decompositions)
+
+    # Allow empty decompositions only if include_blackbox=True and we have a default_impl OpOverload
     if not decompositions:
-        raise ValueError("decompositions list cannot be empty")
+        if not (
+            include_blackbox
+            and default_impl is not None
+            and hasattr(default_impl, "_op")
+        ):
+            raise ValueError(
+                "decompositions list cannot be empty unless include_blackbox=True with OpOverload default_impl"
+            )
 
     # Store original OpOverload for blackbox choice
     original_op_overload = None
@@ -266,10 +284,30 @@ def autotune_custom_op(
         default_impl=template_default_impl,  # Use the correct callable, never OpOverload
     )
 
-    choices = template.generate_choices(input_nodes)
+    # If we have no decompositions but have an OpOverload, we need to handle layout inference specially
+    if (
+        not processed_decompositions
+        and include_blackbox
+        and original_op_overload is not None
+    ):
+        # Infer layout using the OpOverload directly
+        from torch._inductor.ir import ir_node_to_tensor
+        from torch._inductor.virtualized import V
 
-    # Use the inferred layout from the choices (all choices should have the same layout)
-    inferred_layout = layout or (choices[0].layout if choices else None)
+        with V.fake_mode:
+            example_inputs = [ir_node_to_tensor(inp) for inp in input_nodes]
+            output = original_op_overload(*example_inputs, **kwargs)
+            inferred_layout = FixedLayout(
+                device=output.device,
+                dtype=output.dtype,
+                size=output.shape,
+                stride=output.stride(),
+            )
+        choices = []  # No decomposition choices
+    else:
+        choices = template.generate_choices(input_nodes)
+        # Use the inferred layout from the choices (all choices should have the same layout)
+        inferred_layout = layout or (choices[0].layout if choices else None)
 
     # Add blackbox choice if requested and we have an OpOverload
     if include_blackbox and original_op_overload is not None:
