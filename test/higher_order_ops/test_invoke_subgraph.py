@@ -1607,6 +1607,7 @@ class GraphModule(torch.nn.Module):
     def test_unbacked1(self):
         @nested_compile_region
         def gn(x, y):
+            b = x.item()
             return y[:b].clone()
 
         def fn(x, y):
