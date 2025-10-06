@@ -105,12 +105,12 @@ def is_functional_schema(schema: Any, *, view_ok: bool = False) -> bool:
                     num_tensor_outputs += 1
 
         elif isinstance(schema, torchgen.model.FunctionSchema):
-            for arg in schema.arguments.flat_non_out:
-                if arg.type.is_tensor_like():
+            for argument in schema.arguments.flat_non_out:
+                if argument.type.is_tensor_like():
                     num_tensor_inputs += 1
 
-            for ret in schema.returns:
-                if ret.type.is_tensor_like():
+            for ret_arg in schema.returns:
+                if ret_arg.type.is_tensor_like():
                     num_tensor_outputs += 1
 
         if is_non_mutating_view:
@@ -158,7 +158,7 @@ def mutates_and_returns_first_arg(op: OpOverload):
     if op.namespace != "aten":
         return False
     schema = op._schema
-    if not len(schema.returns) == 1:
+    if len(schema.returns) != 1:
         return False
     if schema.returns[0].alias_info is None:
         return False
