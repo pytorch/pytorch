@@ -656,7 +656,7 @@ struct ReduceOp {
 
     __syncthreads();
 
-    for (int offset = 1; offset < dim_x; offset <<= 1) {
+    for (int offset = dim_x / 2; offset > 0; offset >>= 1) {
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = ops.warp_shfl_down(value[i], offset);
