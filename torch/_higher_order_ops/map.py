@@ -10,7 +10,6 @@ from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import _maybe_run_with_interpreter, reenter_make_fx
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -26,6 +25,7 @@ from .utils import (
     fill_none_with_masks,
     filter_with_masks,
     materialize_as_graph,
+    register_fake,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     split_into_chunks,
@@ -251,10 +251,9 @@ def map_proxy_torch_dispatch_mode(mode, f, xs, args):
     return trace_map(mode, map_impl, f, xs, args)
 
 
-@map_impl.py_impl(FakeTensorMode)
-def map_fake_tensor_mode(mode, f, xs, args):
-    with mode:
-        return map_dense(f, xs, args)
+@register_fake(map_impl)
+def map_fake_tensor_mode(f, xs, args):
+    return map_dense(f, xs, args)
 
 
 @map_impl.py_functionalize_impl
