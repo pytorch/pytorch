@@ -593,6 +593,22 @@ class TestNNParametrization(NNTestCase):
             parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
         self.assertFalse(parametrize.is_parametrized(module))
 
+        class ChangeDeviceInverse(nn.Module):
+            def forward(self, x):
+                return x.float()
+
+            def right_inverse(self, w):
+                return w.to(torch.device("meta"))
+
+        # For parametrizations that return one tensor, right_inverse may not change the device
+        with self.assertRaisesRegex(
+            ValueError, "outputs one tensor, it may not change the device"
+        ):
+            parametrize.register_parametrization(
+                module, "weight", ChangeDeviceInverse()
+            )
+        self.assertFalse(parametrize.is_parametrized(module))
+
         # Doesn't return a tensor
         class NotTensor(nn.Module):
             def forward(self, x):

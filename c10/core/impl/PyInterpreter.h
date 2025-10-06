@@ -168,6 +168,9 @@ struct C10_API PyInterpreterVTable {
 
   virtual bool is_contiguous(const TensorImpl* self, at::MemoryFormat)
       const = 0;
+  virtual c10::SymBool sym_is_contiguous(
+      const TensorImpl* self,
+      at::MemoryFormat) const = 0;
   virtual bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
       const = 0;
   virtual bool is_non_overlapping_and_dense(const TensorImpl* self) const = 0;

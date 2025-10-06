@@ -585,6 +585,16 @@ if __name__ == "__main__":
         for arch in arch_list:
             self.assertTrue(arch in flags)
 
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_can_device_access_peer(self):
+        device_count = torch.xpu.device_count()
+        for device in range(device_count):
+            for peer in range(device_count):
+                self.assertEqual(
+                    torch.xpu.can_device_access_peer(device, peer),
+                    torch.xpu.can_device_access_peer(peer, device),
+                )
+
     def test_torch_version_xpu(self):
         self.assertEqual(len(torch.version.xpu), 8)
         compiler_version = int(torch.version.xpu)

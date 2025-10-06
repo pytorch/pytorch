@@ -78,8 +78,7 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Bool);
   } else if (PyLong_Check(obj)) { // Wrap longs in Long tensors
-    at::Tensor var = scalar_to_tensor(
-        at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(obj))));
+    at::Tensor var = scalar_to_tensor(at::Scalar(THPUtils_unpackLong(obj)));
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Long);

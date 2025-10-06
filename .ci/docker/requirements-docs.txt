@@ -1,8 +1,15 @@
 sphinx==5.3.0
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 5.3.0
--e git+https://github.com/pytorch/pytorch_sphinx_theme.git@1657ad2fc1acdc98aa719eebecbb0128a7c13ce4#egg=pytorch_sphinx_theme2
 
+standard-imghdr==3.13.0; python_version >= "3.13"
+#Description: This is needed by Sphinx, so it needs to be added here.
+# The reasons are as follows:
+# 1) This module has been removed from the Python standard library since Python 3.13(https://peps.python.org/pep-0594/#imghdr);
+# 2) The current version of Sphinx (5.3.0) is not compatible with Python 3.13.
+# Once Sphinx is upgraded to a version compatible with Python 3.13 or later, we can remove this dependency.
+
+-e git+https://github.com/pytorch/pytorch_sphinx_theme.git@71e55749be14ceb56e7f8211a9fb649866b87ad4#egg=pytorch_sphinx_theme2
 # TODO: sphinxcontrib.katex 0.9.0 adds a local KaTeX server to speed up pre-rendering
 # but it doesn't seem to work and hangs around idly. The initial thought that it is probably
 # something related to Docker setup. We can investigate this later.

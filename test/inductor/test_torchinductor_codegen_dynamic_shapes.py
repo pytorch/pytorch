@@ -104,9 +104,13 @@ test_failures = {
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
     "test_to_device_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu"), is_skip=True),
+    "test_as_strided_on_views_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     #
     # Failed to find dynamic for loop variable:
     #
+    "test_conv1d_with_permute_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange2_dynamic_shapes": TestFailure(("cpu",)),
     "test_arange3_dynamic_shapes": TestFailure(("cpu",)),

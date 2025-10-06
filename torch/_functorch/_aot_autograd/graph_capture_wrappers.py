@@ -12,9 +12,10 @@ It does so by:
 """
 
 import warnings
+from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, cast, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -806,7 +807,7 @@ def create_functionalized_fn(
                 # Here, we perform extra checks for primals that were mutated in the **backward**
                 # We're doing the checks here instead of doing them with the rest of the input mutation handling because:
                 # - We need to detect inputs that were mutated in the backward **separately** from mutations that happened
-                #   during the forward, because the handling is different: some input mutations from the the forward
+                #   during the forward, because the handling is different: some input mutations from the forward
                 #   can be only handled in a fw-only runtime epilogue, and in theory if we wanted to handle those same
                 #   types of mutations in the backward we would need a bw-only runtime epilogue.
                 # - We could in theory have our analysis pass differentiate mutations in the fw from mutations in
@@ -1304,10 +1305,12 @@ def aot_dispatch_subclass(
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         without_output_descs(metadata_fn),
+        # pyrefly: ignore  # bad-argument-type
         flat_args_descs=primals_unwrapped_descs,
         static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
+        # pyrefly: ignore  # not-iterable
     )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated

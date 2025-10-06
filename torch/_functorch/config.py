@@ -296,6 +296,11 @@ fake_tensor_prefer_device_type: Optional[str] = None
 # TODO: turn on by default
 graphsafe_rng_functionalization = True
 
+# Whether or not to eagerly compile the backward
+# used by AOT compile and other settings
+# TODO: once AOT compile calls aot autograd directly instead of
+# through compile_fx, we can remove this
+force_non_lazy_backward_lowering = False
 
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests

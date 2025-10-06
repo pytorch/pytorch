@@ -1128,9 +1128,6 @@ def forward(self, y_1, x_1):
             a = _a.item()
             b = _b.item()
             stride = _stride.item()
-            torch._check_is_size(a)
-            torch._check_is_size(b)
-            torch._check_is_size(stride)
             ta = torch.randn(a * stride)
             tb = torch.randn(b * stride)
             r = torch.cat([ta, tb])
@@ -1476,9 +1473,9 @@ def forward(self, x_1, y_1):
         # See https://github.com/pytorch/pytorch/issues/123651
         def f(x):
             i0 = x.item()
-            torch._check_is_size(i0)
             # To trigger the original issue, the max bound has to
             # be chosen such that 448 / 447 < 2 (which it is.)
+            torch._check(i0 > 0)
             torch._check(i0 <= 448)
             return torch.zeros(256 * i0).view(-1, 447)
         make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device="cuda"))
@@ -1559,9 +1556,6 @@ def forward(self, x_1, y_1):
         def f(lengths, values):
             # tolist not directly supported atm
             sizes = [lengths[i].item() for i in range(lengths.size(0))]
-            for s in sizes:
-                # TODO(avik): no assertion generated with torch._check_is_size?
-                torch._constrain_as_size(s)
             return torch.split(values, sizes)
 
         r = str(make_fx(f, tracing_mode="symbolic")(
@@ -1576,9 +1570,6 @@ def forward(self, lengths_1, values_1):
     _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
     select_2 = torch.ops.aten.select.int(lengths_1, 0, 2);  lengths_1 = None
     _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(select_2);  select_2 = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size = None
-    sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1);  sym_constrain_range_for_size_1 = None
-    sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2);  sym_constrain_range_for_size_2 = None
     split_with_sizes = torch.ops.aten.split_with_sizes.default(values_1, [_local_scalar_dense, _local_scalar_dense_1, _local_scalar_dense_2]);  values_1 = _local_scalar_dense = _local_scalar_dense_1 = _local_scalar_dense_2 = None
     getitem = split_with_sizes[0]
     getitem_1 = split_with_sizes[1]
@@ -1867,7 +1858,7 @@ L['a'].size()[1] > L['a'].size()[0]
             show_guards(tensor),
             """\
 L['a'].size()[1] < L['a'].size()[0]
-L['a'].size()[0] <= 19
+3 <= L['a'].size()[0] and L['a'].size()[0] <= 19
 L['a'].size()[1] <= 18""")
 
     def test_sym_storage_offset(self):
@@ -1973,7 +1964,6 @@ make_fx_failures = {
     skip('item'),
     xfail('cov'),
     xfail('nn.functional.gaussian_nll_loss'),
-    xfail('tensor_split'),
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
@@ -1993,10 +1983,12 @@ make_fx_failures = {
 
 only_real_tensor_failures = {
     xfail('narrow'),
+    xfail('tensor_split'),
 }
 
 only_fake_tensor_failures = {
     xfail('narrow'),
+    xfail('tensor_split'),
 }
 
 fake_tensor_failures = set()

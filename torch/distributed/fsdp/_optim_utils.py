@@ -351,7 +351,7 @@ def _broadcast_state(
         if isinstance(state, torch.Tensor):
             assert state.dim() == 0, (
                 "For non-zero ranks, a tensor state should have zero dimension, "
-                "but got the state with shape {state.shape()}."
+                f"but got the state with shape {state.shape}."
             )
             return state
         elif not isinstance(state, _PosDimTensorInfo):
@@ -426,7 +426,7 @@ def _flatten_optim_state_dict(
     Note that ``_flatten_tensor_optim_state`` does not need ``optim`` to
     flatten/shard the state. However, NamedOptimizer and KeyedOptimizer require
     all the states even if the corresponding parameters are empty. To this end,
-    ``optim`` will be used to to get the initial state of the empty parameters.
+    ``optim`` will be used to get the initial state of the empty parameters.
     ``optim`` should only be non-None if the ``optim` is KeyedOptimizer or
     NamedOptimizer.
 
@@ -1508,8 +1508,7 @@ def _allgather_orig_param_states(
         return output_states
 
     has_state_params: list[bool] = [
-        True if fqn in output_states else False
-        for fqn, idx in fsdp_param_info.param_indices.items()
+        fqn in output_states for fqn, idx in fsdp_param_info.param_indices.items()
     ]
 
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,

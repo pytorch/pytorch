@@ -64,9 +64,7 @@ def _is_symmetric_quant(qscheme: "torch.qscheme") -> bool:
 
 
 def _is_float_qparams(qscheme: "torch.qscheme") -> bool:
-    return qscheme in [
-        torch.per_channel_affine_float_qparams,
-    ]
+    return qscheme == torch.per_channel_affine_float_qparams
 
 
 class FakeQuantizeBase(ABC, Module):

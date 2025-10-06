@@ -40,7 +40,7 @@
 #include <thrust/iterator/discard_iterator.h>
 
 
-#if defined(__CUDACC__) && ((CUSPARSE_VERSION >= 11000) || (defined(USE_ROCM) && ROCM_VERSION >= 60300))
+#if defined(__CUDACC__) && (defined(CUSPARSE_VERSION) || (defined(USE_ROCM) && ROCM_VERSION >= 60300))
 #define IS_CUSPARSE11_AVAILABLE() 1
 #else
 #define IS_CUSPARSE11_AVAILABLE() 0
@@ -688,13 +688,6 @@ void sparse_sparse_matmul_cuda_kernel(
         std::is_same_v<c10::complex<float>, scalar_t> ||
         std::is_same_v<c10::complex<double>, scalar_t>,
     "sparse_sparse_matmul_cuda_kernel only supports data type of half, bfloat16, float, double and complex float, double.");
-
-  // older versions of cusparse on Windows segfault for complex128 dtype
-#if defined(_WIN32) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11400
-  TORCH_CHECK(
-      !(mat1.scalar_type() == ScalarType::ComplexDouble),
-      "Sparse multiplication with complex128 dtype inputs is not supported with current CUDA version. Please upgrade to CUDA Toolkit 11.2.1+");
-#endif
 
   Tensor mat1_indices_ = mat1._indices().contiguous();
   Tensor mat1_values = mat1._values().contiguous();

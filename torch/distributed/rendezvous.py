@@ -9,9 +9,9 @@ except ImportError as e:
 import numbers
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import timedelta
-from typing import Callable, Optional
+from typing import Optional
 
 from torch.distributed import FileStore, Store, TCPStore
 

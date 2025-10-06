@@ -169,7 +169,10 @@ std::string repro_from_args(const ConvolutionParams& params) {
   ss << "If that doesn't trigger the error, please include your original repro script when reporting this issue.\n\n";
   ss << "import torch\n";
   ss << "torch.backends.cuda.matmul.allow_tf32 = "
-     << pybool(at::globalContext().float32Precision("cuda", "matmul") == "tf32")
+     << pybool(
+            at::globalContext().float32Precision(
+                at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+            at::Float32Precision::TF32)
      << "\n";
   ss << "torch.backends.cudnn.benchmark = "
      << pybool(at::globalContext().benchmarkCuDNN()) << "\n";
@@ -726,7 +729,7 @@ Tensor cudnn_convolution_relu(
 
   auto& ctx = at::globalContext();
   bool benchmark = ctx.benchmarkCuDNN();
-  bool allow_tf32 = ctx.allowTF32CuDNN("conv");
+  bool allow_tf32 = ctx.allowTF32CuDNN(at::Float32Op::CONV);
   auto _bias = bias_t.has_value()
       ? bias_t.value()
       : at::zeros(
@@ -784,7 +787,7 @@ Tensor cudnn_convolution_add_relu(
   }
 
   auto& ctx = at::globalContext();
-  bool allow_tf32 = ctx.allowTF32CuDNN("conv");
+  bool allow_tf32 = ctx.allowTF32CuDNN(at::Float32Op::CONV);
   bool benchmark = ctx.benchmarkCuDNN();
   auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
   auto _bias = bias_t.has_value()

@@ -3,8 +3,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
-from collections.abc import Sequence
-from typing import Any, Callable, cast, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, cast, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -240,8 +240,8 @@ class DTensor(torch.Tensor):
     # _op_dispatcher instance as a class attribute to handle runtime dispatching logic
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
-    @staticmethod
-    @torch._disable_dynamo
+    # This implementation is just to convince mypy _spec and _local_tensor are
+    # initialized; it is immediately overridden below.
     def __new__(
         cls,
         local_tensor: torch.Tensor,
@@ -249,10 +249,21 @@ class DTensor(torch.Tensor):
         *,
         requires_grad: bool,
     ) -> "DTensor":
+        r = torch.Tensor._dtensor__new__(
+            cls, local_tensor, spec, requires_grad=requires_grad
+        )
+        r._spec = spec
+        r._local_tensor = local_tensor
+        return r
+
+    __new__ = torch.Tensor._dtensor__new__  # type: ignore[assignment] # noqa: F811
+
+    @torch._disable_dynamo
+    @mark_subclass_constructor_exportable_experimental
+    def __init__(self, *args, **kwargs):
         """
         Construct a DTensor from a local tensor, device mesh, and placement and
         other tensor properties (i.e. shape, requires_grad, strides, etc).
-
         .. note:: This is not a public API and it's only supposed to be used by the
             operator implementations and internals. If you want to construct a
             DTensor from a local tensor, consider using ``DTensor.from_local``, if
@@ -260,31 +271,6 @@ class DTensor(torch.Tensor):
             already have tensor initialized and want to shard this tensor),
             consider using ``distribute_tensor``.
         """
-        if local_tensor.requires_grad and not requires_grad:
-            warnings.warn(
-                "To construct DTensor from torch.Tensor, it's recommended to "
-                "use local_tensor.detach() and make requires_grad consistent."
-            )
-
-        # new method instruct wrapper tensor from local_tensor and add
-        # placement spec, it does not do actual distribution
-        assert spec.tensor_meta is not None, "TensorMeta should not be None!"
-
-        r = torch.Tensor._make_dtensor(
-            cls,
-            spec.tensor_meta.shape,
-            spec.tensor_meta.stride,
-            local_tensor,
-            requires_grad,
-        )
-
-        r._spec = spec
-        r._local_tensor = local_tensor
-        return r
-
-    @torch._disable_dynamo
-    @mark_subclass_constructor_exportable_experimental
-    def __init__(self, *args, **kwargs):
         super().__init__()
 
     # pyre-fixme[14]: `__repr__` overrides method defined in `DTensor` inconsistently.
@@ -401,6 +387,12 @@ class DTensor(torch.Tensor):
         .. note:: ``from_local`` is differentiable, the `requires_grad` of the created
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
         """
+        # `local_tensor` argument cannot be DTensor
+        if isinstance(local_tensor, DTensor):
+            raise RuntimeError(
+                f"the local_tensor argument only accepts torch.Tensor but got {type(local_tensor)} value."
+            )
+
         # if same shape/dtype, no need to run_check, if not, must allgather
         # the metadatas to check the size/dtype across ranks
         # There should be no data communication unless there's replication
@@ -542,9 +534,10 @@ class DTensor(torch.Tensor):
 
         placements = list(placements)
         for i, placement in enumerate(placements):
-            if placement.is_partial():
+            if placement.is_partial() and self.placements[i] != placement:
                 raise RuntimeError(
-                    "Can not redistribute to Partial, redistributing to Partial is for internal use only!"
+                    f"Can not redistribute from {self.placements[i]} to {placement}, "
+                    "redistributing to Partial is for internal use only!"
                 )
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
@@ -606,7 +599,21 @@ class DTensor(torch.Tensor):
         """
         return self._spec.placements
 
+    def _raise_if_contains_partial_placements(self) -> None:
+        """
+        Raise an error if the DTensor contains partial placements.
+        """
+        for placement in self._spec.placements:
+            if not isinstance(placement, Partial):
+                continue
+
+            raise ValueError(
+                "Any checkpointing related operations are not supported for "
+                "DTensor with partial placements!"
+            )
+
     def __create_write_items__(self, fqn: str, object: Any):
+        self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_write_items_for_dtensor,
         )
@@ -629,6 +636,7 @@ class DTensor(torch.Tensor):
         Returns:
             A List[:class:`ChunkStorageMetadata`] object that represents the shard size/offset on the current rank.
         """
+        self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_chunk_from_dtensor,
         )
@@ -641,12 +649,24 @@ class DTensor(torch.Tensor):
             raise RuntimeError("Unsupported tensor type!")
 
     def __get_tensor_shard__(self, index):
+        self._raise_if_contains_partial_placements()
         if hasattr(self._local_tensor, "__get_tensor_shard__"):
             return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
             return self.to_local()
         else:
             raise RuntimeError("Unsupported tensor type!")
+
+    @classmethod
+    def __metadata_guard__(
+        cls, orig: tuple[DTensorSpec, bool], other: tuple[DTensorSpec, bool]
+    ) -> bool:
+        orig_spec, orig_requires_grad = orig
+        other_spec, other_requires_grad = other
+        return (
+            orig_spec._check_equals(other_spec, skip_shapes=True)
+            and orig_requires_grad == other_requires_grad
+        )
 
 
 def distribute_tensor(

@@ -28,6 +28,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
+#include <c10/util/FileSystem.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -57,57 +58,7 @@
 #include <ATen/ops/scatter_reduce.h>
 #include <ATen/ops/view_as_real_ops.h>
 #include <ATen/ops/view_ops.h>
-
 #endif
-
-#ifndef _WIN32
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <climits>
-
-#else
-#include <filesystem>
-namespace fs = std::filesystem;
-#endif
-
-// HACK for failed builds in ARVR, where it cannot find these symbols within
-// std::experimental::filesystem
-namespace {
-std::string get_current_path() {
-#ifdef _WIN32
-  return fs::current_path().string();
-#else
-  // NOLINTNEXTLINE(*array*)
-  char currentPath[PATH_MAX]{};
-  if (getcwd(currentPath, sizeof(currentPath)) != nullptr) {
-    return std::string(currentPath);
-  } else {
-    throw std::runtime_error("Failed to get current path");
-  }
-#endif
-}
-
-bool file_exists(std::string& path) {
-#ifdef _WIN32
-  return fs::exists(path);
-#else
-  struct stat rc{};
-  return lstat(path.c_str(), &rc) == 0;
-#endif
-}
-
-bool create_directories(const std::string& path) {
-#ifdef _WIN32
-  return fs::create_directories(path);
-#else
-  if (mkdir(path.c_str(), 0777) == -1) {
-    throw std::runtime_error("Failed to create directory");
-  }
-  return true;
-#endif
-}
-} // namespace
 
 using namespace torch::aot_inductor;
 
@@ -267,6 +218,55 @@ AOTITorchError aoti_torch_delete_tensor_object(AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
     delete t;
+  });
+}
+
+AOTITorchError aoti_torch_delete_c10_value_object(C10IValueHandle handle) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = reinterpret_cast<c10::IValue*>(handle);
+    delete t;
+  });
+}
+
+AOTITorchError aoti_torch_int64_to_ivalue(
+    int64_t val,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = new c10::IValue(val);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_str_to_ivalue(
+    const char* val,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::IValue* t = new c10::IValue(val);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_strlist_to_ivalue(
+    const char** val,
+    int64_t len,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::string> vec;
+    for (int64_t i = 0; i < len; i++) {
+      vec.push_back(std::string(val[i]));
+    }
+    c10::IValue* t = new c10::IValue(vec);
+    *ivalue = reinterpret_cast<C10IValueHandle>(t);
+  });
+}
+
+AOTITorchError aoti_torch_tensor_to_ivalue(
+    AtenTensorHandle tensor,
+    C10IValueHandle* ivalue) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* tmp_tensor = tensor_handle_to_tensor_pointer(tensor);
+    c10::IValue* tmp_ivalue = new c10::IValue(*tmp_tensor);
+    *ivalue = reinterpret_cast<C10IValueHandle>(tmp_ivalue);
   });
 }
 
@@ -1124,7 +1124,7 @@ AOTITorchError aoti_record_function_start(
 
     std::vector<c10::IValue> recordInputs(n_inputs);
     for (size_t i = 0; i < n_inputs; i++) {
-      recordInputs.push_back(*reinterpret_cast<c10::IValue*>(inputs[i]));
+      recordInputs[i] = *reinterpret_cast<c10::IValue*>(inputs[i]);
     }
 
     newGuard->before(name, &recordInputs, &recordKwargs);
@@ -1232,21 +1232,22 @@ void aoti_torch_save_tensor_handle(
   at::Tensor* t = tensor_handle_to_tensor_pointer(self);
 #ifndef C10_MOBILE
   // Save tensor to tmp .pt file for tensors and can be torch.load'ed later
-  std::string cwd = get_current_path();
-  std::string tmp_folder = cwd + "/tmp/aoti_torch/";
-  if (!file_exists(tmp_folder)) {
+  auto cwd = c10::filesystem::current_path();
+  auto tmp_folder = cwd / "tmp" / "aoti_torch";
+  if (!c10::filesystem::exists(tmp_folder)) {
     std::cout
         << "aoti_torch_save_tensor_handle: Path does not exist, creating it..."
         << tmp_folder << '\n';
 
-    if (!create_directories(tmp_folder)) {
+    std::error_code ec{};
+    if (!c10::filesystem::create_directories(tmp_folder, ec)) {
       std::cout << "aoti_torch_save_tensor_handle: Error creating directory: "
-                << tmp_folder << '\n';
+                << tmp_folder << " error:" << ec.message() << '\n';
       return;
     }
   }
-  std::string tensor_filepath_to_save = tmp_folder + launch_prefix + "_" +
-      kernel_name + "_" + tensor_name + "_" + t->device().str() + ".pt";
+  std::string tensor_filepath_to_save = tmp_folder.string() + launch_prefix +
+      "_" + kernel_name + "_" + tensor_name + "_" + t->device().str() + ".pt";
 
   auto bytes = torch::jit::pickle_save(c10::IValue(*t));
   std::ofstream fout(tensor_filepath_to_save, std::ios::out | std::ios::binary);
@@ -1373,11 +1374,8 @@ void aoti_torch_warn(
     const char* file,
     uint32_t line,
     const char* msg) {
-  ::c10::warn(::c10::Warning(
-      ::c10::UserWarning(),
-      {func, file, static_cast<uint32_t>(line)},
-      msg,
-      false));
+  ::c10::warn(
+      ::c10::Warning(::c10::UserWarning(), {func, file, line}, msg, false));
 }
 
 AOTITorchError aoti_torch__alloc_from_pool(

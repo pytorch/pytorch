@@ -203,7 +203,7 @@ class LocalCallbackManager {
   // Runtime cache.
   size_t global_version_{GlobalCallbackManager::NoVersion};
   std::array<CacheEntry, NumRecordScopes> active_callbacks_;
-  std::mt19937 generator_{};
+  std::mt19937 generator_;
 };
 
 // ============================================================================

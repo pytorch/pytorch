@@ -359,9 +359,10 @@ class TestUnflatten(TestCase):
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=True)
         with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6"),
+            AssertionError,
+            escape("Guard failed: x.size()[0] == 2"),
         ):
+            # expected 2, but got 6
             export_module.module()(torch.randn(6, 6))
 
         unflattened = unflatten(export_module)

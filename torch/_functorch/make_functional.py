@@ -6,8 +6,8 @@
 # LICENSE file in the root directory of this source tree.
 
 import copy
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, NoReturn, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, NoReturn, Union
 
 import torch
 import torch.nn as nn
@@ -42,7 +42,9 @@ def create_names_map(
     This function creates a mapping from the names in named_params to the
     names in tied_named_params: {'A': ['A'], 'B': ['B', 'B_tied']}.
     """
+    # pyrefly: ignore  # no-matching-overload
     named_params = dict(named_params)
+    # pyrefly: ignore  # no-matching-overload
     tied_named_params = dict(tied_named_params)
 
     tensors_dict_keys = set(named_params.keys())
@@ -51,9 +53,11 @@ def create_names_map(
 
     tensor_to_mapping: dict[Tensor, tuple[str, list[str]]] = {}
     for key, tensor in named_params.items():
+        # pyrefly: ignore  # unsupported-operation
         tensor_to_mapping[tensor] = (key, [])
     for key, tensor in tied_named_params.items():
         assert tensor in tensor_to_mapping
+        # pyrefly: ignore  # bad-argument-type
         tensor_to_mapping[tensor][1].append(key)
     return dict(tensor_to_mapping.values())
 

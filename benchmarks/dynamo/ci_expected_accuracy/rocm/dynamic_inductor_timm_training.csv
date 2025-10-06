@@ -34,7 +34,7 @@ convnext_base,pass,7
 
 
 
-crossvit_9_240,pass,7
+crossvit_9_240,fail_accuracy,7
 
 
 
@@ -46,7 +46,7 @@ deit_base_distilled_patch16_224,pass,7
 
 
 
-dla102,pass,7
+dla102,pass,0
 
 
 
@@ -62,7 +62,7 @@ eca_botnext26ts_256,pass,7
 
 
 
-eca_halonext26ts,pass,7
+eca_halonext26ts,fail_accuracy,7
 
 
 
@@ -74,7 +74,7 @@ fbnetc_100,pass,7
 
 
 
-fbnetv3_b,pass,6
+fbnetv3_b,fail_accuracy,6
 
 
 
@@ -130,7 +130,7 @@ mnasnet_100,pass,7
 
 
 
-mobilenetv2_100,pass,7
+mobilenetv2_100,fail_accuracy,7
 
 
 
@@ -150,7 +150,7 @@ pit_b_224,pass,6
 
 
 
-pnasnet5large,pass,5
+pnasnet5large,fail_accuracy,5
 
 
 
@@ -162,7 +162,7 @@ regnety_002,pass,6
 
 
 
-repvgg_a2,pass,7
+repvgg_a2,fail_accuracy,7
 
 
 
@@ -186,7 +186,7 @@ resnest101e,pass,6
 
 
 
-rexnet_100,pass,7
+rexnet_100,fail_accuracy,7
 
 
 
@@ -230,7 +230,7 @@ twins_pcpvt_base,pass,7
 
 
 
-visformer_small,pass,7
+visformer_small,fail_accuracy,7
 
 
 

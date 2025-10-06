@@ -6,7 +6,8 @@ import itertools
 import os
 import tempfile
 import unittest
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 from unittest.mock import MagicMock
 
 import torch
@@ -14,6 +15,9 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint, replicate
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    apply_activation_checkpointing,
+)
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.fsdp import (
     FSDPModule,
@@ -57,6 +61,7 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import run_tests, TEST_XPU, xfailIf
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    FeedForward,
     ModelArgs,
     Transformer,
     TransformerBlock,
@@ -1005,6 +1010,222 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
                 ("reshard", "", TrainingState.POST_BACKWARD),
                 ("post_backward", "", TrainingState.POST_BACKWARD),
+            ]
+            self.assertEqual(events, expected_backward_events)
+            events.clear()
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_modules_to_backward_prefetch_inside_ac(self):
+        n_layers = 3
+        reshard_after_forward = True
+        # use checkpoint wrapper instead of torch.utils
+        model_args = ModelArgs(n_layers=n_layers, checkpoint_activations=False)
+        model = Transformer(model_args)
+        apply_activation_checkpointing(
+            model, check_fn=lambda m: isinstance(m, TransformerBlock)
+        )
+        apply_activation_checkpointing(
+            model, check_fn=lambda m: isinstance(m, FeedForward)
+        )
+        fully_shard([model.tok_embeddings, model.pos_embeddings])
+        for layer in model.layers:
+            # mimic fully_shard(layer.moe.experts)
+            fully_shard(
+                layer.feed_forward.w1, reshard_after_forward=reshard_after_forward
+            )
+            fully_shard(layer, reshard_after_forward=reshard_after_forward)
+        fully_shard(
+            [model.norm, model.output], reshard_after_forward=reshard_after_forward
+        )
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+        inp = torch.randint(
+            0,
+            model_args.vocab_size,
+            (2, model_args.max_seq_len),
+            device=device_type.type,
+        )
+
+        def set_backward_prefetch(model: Transformer) -> None:
+            # tell pyre model.set_modules_to_backward_prefetch is available
+            assert isinstance(model, FSDPModule)
+            assert isinstance(model.output, FSDPModule)
+
+            # mimic deepseek MOE
+            # prefetch layer - 1 and its feedforward before cpu sync during a2a
+            reversed_transformer_blocks = list(reversed(model.layers))
+            prev_transformer_blocks = reversed_transformer_blocks[1:] + [None]
+
+            if (
+                model.norm is not None
+                and model.output is not None
+                and len(model.layers) > 0
+            ):
+                assert isinstance(reversed_transformer_blocks[0], FSDPModule)
+                model.output.set_modules_to_backward_prefetch(
+                    [reversed_transformer_blocks[0]]
+                )
+
+            for transformer_block, prev_transformer_block in zip(
+                reversed_transformer_blocks, prev_transformer_blocks
+            ):
+                assert isinstance(transformer_block, FSDPModule)
+                if prev_transformer_block is not None:
+                    assert isinstance(prev_transformer_block, FSDPModule)
+                    assert hasattr(prev_transformer_block.feed_forward, "w1")
+                    assert isinstance(
+                        prev_transformer_block.feed_forward.w1, FSDPModule
+                    )
+                    transformer_block.set_modules_to_backward_prefetch(
+                        [
+                            prev_transformer_block,
+                            prev_transformer_block.feed_forward.w1,
+                        ]
+                    )
+                elif model.tok_embeddings is not None:
+                    assert isinstance(model.tok_embeddings, FSDPModule)
+                    transformer_block.set_modules_to_backward_prefetch(
+                        [model.tok_embeddings]
+                    )
+
+        events: list[EventType] = []
+        unshard_with_record = self._get_unshard_with_record(
+            FSDPParamGroup.unshard, events
+        )
+        reshard_with_record = self._get_reshard_with_record(
+            FSDPParamGroup.reshard, events
+        )
+        with (
+            patch_unshard(unshard_with_record),
+            patch_reshard(reshard_with_record),
+        ):
+            loss = model(inp)
+            events.clear()
+            loss.sum().backward()
+            expected_backward_events = [
+                ("unshard", "norm, output", TrainingState.PRE_BACKWARD),
+                ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
+                ("reshard", "norm, output", TrainingState.POST_BACKWARD),
+                # layers.2 prefetch w1
+                (
+                    "unshard",
+                    "layers.2._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.PRE_BACKWARD,
+                ),
+                # layers.2.w1 prefetch layers.1
+                ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
+                (
+                    "reshard",
+                    "layers.2._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.POST_BACKWARD,
+                ),
+                ("reshard", "layers.2", TrainingState.POST_BACKWARD),
+                (
+                    "unshard",
+                    "layers.1._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.PRE_BACKWARD,
+                ),
+                ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
+                (
+                    "reshard",
+                    "layers.1._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.POST_BACKWARD,
+                ),
+                ("reshard", "layers.1", TrainingState.POST_BACKWARD),
+                (
+                    "unshard",
+                    "layers.0._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.PRE_BACKWARD,
+                ),
+                (
+                    "unshard",
+                    "tok_embeddings, pos_embeddings",
+                    TrainingState.PRE_BACKWARD,
+                ),
+                (
+                    "reshard",
+                    "layers.0._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.POST_BACKWARD,
+                ),
+                ("reshard", "layers.0", TrainingState.POST_BACKWARD),
+                (
+                    "reshard",
+                    "tok_embeddings, pos_embeddings",
+                    TrainingState.POST_BACKWARD,
+                ),
+                (
+                    "reshard",
+                    "tok_embeddings, pos_embeddings",
+                    TrainingState.POST_BACKWARD,
+                ),
+                ("reshard", "norm, output", TrainingState.POST_BACKWARD),
+            ]
+            self.assertEqual(events, expected_backward_events)
+            events.clear()
+
+            set_backward_prefetch(model)
+            loss = model(inp)
+            events.clear()
+            loss.sum().backward()
+            expected_backward_events = expected_backward_events = [
+                ("unshard", "norm, output", TrainingState.PRE_BACKWARD),
+                # root explicit prefetch layers.2
+                ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
+                ("reshard", "norm, output", TrainingState.POST_BACKWARD),
+                # layers.2 prefetch layers.1 and feed_forward
+                ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
+                (
+                    "unshard",
+                    "layers.1._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.PRE_BACKWARD,
+                ),
+                # AC recompute_fn
+                (
+                    "unshard",
+                    "layers.2._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.FORWARD,
+                ),
+                (
+                    "reshard",
+                    "layers.2._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.POST_BACKWARD,
+                ),
+                ("reshard", "layers.2", TrainingState.POST_BACKWARD),
+                # layers.1 prefetch layers.0
+                ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
+                (
+                    "unshard",
+                    "layers.0._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.PRE_BACKWARD,
+                ),
+                (
+                    "reshard",
+                    "layers.1._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.POST_BACKWARD,
+                ),
+                ("reshard", "layers.1", TrainingState.POST_BACKWARD),
+                # layers.0 prefetch embeddings
+                (
+                    "unshard",
+                    "tok_embeddings, pos_embeddings",
+                    TrainingState.PRE_BACKWARD,
+                ),
+                (
+                    "reshard",
+                    "layers.0._checkpoint_wrapped_module.feed_forward._checkpoint_wrapped_module.w1",
+                    TrainingState.POST_BACKWARD,
+                ),
+                ("reshard", "layers.0", TrainingState.POST_BACKWARD),
+                (
+                    "reshard",
+                    "tok_embeddings, pos_embeddings",
+                    TrainingState.POST_BACKWARD,
+                ),
+                (
+                    "reshard",
+                    "tok_embeddings, pos_embeddings",
+                    TrainingState.POST_BACKWARD,
+                ),
+                ("reshard", "norm, output", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_backward_events)
             events.clear()

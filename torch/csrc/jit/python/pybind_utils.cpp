@@ -780,9 +780,17 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
     const py::args& args,
     const py::kwargs& kwargs) {
+  return getOpWithStack(
+      c10::ArrayRef<std::shared_ptr<Operator>>(operations), args, kwargs);
+}
+
+std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
+    const py::args& args,
+    const py::kwargs& kwargs) {
   Stack stack;
   if (operations.size() == 1) {
-    std::shared_ptr<Operator> op = operations.at(0);
+    std::shared_ptr<Operator> op = operations[0];
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(op->schema(), args, kwargs, std::nullopt);
 
@@ -834,6 +842,15 @@ py::object invokeOperatorFromPython(
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk) {
+  return invokeOperatorFromPython(
+      c10::ArrayRef<std::shared_ptr<Operator>>(operations), args, kwargs, dk);
+}
+
+py::object invokeOperatorFromPython(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    std::optional<c10::DispatchKey> dk) {
   auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
@@ -855,8 +872,9 @@ std::optional<py::object> _maybe_handle_torch_function(
     const py::args& args,
     const py::kwargs& kwargs) {
   std::vector<PyObject*> overloaded_args;
-  size_t total_arg_num = args.size() + kwargs.size();
-  for (const auto i : c10::irange(args.size())) {
+  const auto args_size = args.size();
+  size_t total_arg_num = args_size + kwargs.size();
+  for (const auto i : c10::irange(args_size)) {
     is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
     is_tensor_list_and_append_overloaded(
         args[i].ptr(),
@@ -906,6 +924,17 @@ std::optional<py::object> _maybe_handle_torch_function(
 
 py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    Symbol symbol,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    bool is_overload,
+    std::optional<c10::DispatchKey> dk) {
+  return _get_operation_for_overload_or_packet(
+      c10::ArrayRef(operations), symbol, args, kwargs, is_overload, dk);
+}
+
+py::object _get_operation_for_overload_or_packet(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     Symbol symbol,
     const py::args& args,
     const py::kwargs& kwargs,

@@ -121,7 +121,6 @@ class TestCUDA(JitTestCase):
 
         self.assertTrue(event_default_args)
 
-    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_current_stream(self):
         # Test current stream on the device and check if the stream device index

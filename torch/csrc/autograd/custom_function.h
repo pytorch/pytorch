@@ -228,30 +228,32 @@ inline variable_list CppNode_apply_functional(
     }
   }
 
-  if (num_outputs != num_forward_inputs) {
-    std::string msg("function ");
-    msg += name + " returned an incorrect number of gradients (expected ";
-    msg += std::to_string(num_forward_inputs) + ", got ";
-    msg += std::to_string(num_outputs) + ")";
-    throw std::runtime_error(msg);
-  }
+  TORCH_CHECK(
+      num_outputs == num_forward_inputs,
+      "function ",
+      name,
+      " returned an incorrect number of gradients (expected ",
+      num_forward_inputs,
+      ", got ",
+      num_outputs,
+      ")");
 
   variable_list results;
   results.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
     if (!is_variable_input_[i]) {
-      if (outputs[i].defined()) {
-        std::string msg("function ");
-        msg += name +
-            " returned a gradient different that is defined at position ";
-        msg += std::to_string(i + 1) +
-            ", std the corresponding forward input was not a Variable";
-        throw std::runtime_error(msg);
-      }
+      TORCH_CHECK(
+          outputs[i].defined() == false,
+          "function ",
+          name,
+          " returned a gradient different that is defined at position ",
+          i + 1,
+          ", std the corresponding forward input was not a Variable");
       continue;
     }
     results.emplace_back(outputs[i]);
   }
+
   return results;
 }
 

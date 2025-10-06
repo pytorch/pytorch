@@ -1,113 +1,246 @@
+import logging
 import os
 import subprocess
 import sysconfig
 from typing import Any, Optional
 
+import torch.distributed as dist
 from torch.utils._triton import has_triton
 
 
-def _find_nvshmem_device_library() -> str:
-    paths = [os.path.join(sysconfig.get_path("purelib"), "nvidia", "nvshmem", "lib")]
+logger = logging.getLogger(__name__)
 
-    # Add common system installation paths
-    common_paths = [
-        "/usr/local/lib",
-        "/usr/lib",
-        "/opt/nvidia/nvshmem/lib",
-    ]
-    paths.extend(common_paths)
 
-    try:
-        import torch
+class NvshmemLibFinder:
+    """
+    A class to find path to the NVSHMEM device library.
 
-        torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
-        so_path = os.path.join(torch_lib, "libtorch_nvshmem.so")
+    Environment variable:
 
-        if os.path.exists(so_path):
-            try:
-                result = subprocess.run(
-                    ["readelf", "-d", so_path],
-                    capture_output=True,
-                    text=True,
-                    check=True,
+    `NVSHMEM_LIB_DIR` (Optional[str]): The directory where the NVSHMEM device
+    library is located. If not provided, it will use the default path where
+    NVSHMEM wheel is installed, or search for the library in common system
+    paths.
+    """
+
+    # Class variable to store the found library path for reuse
+    found_device_lib_path: Optional[str] = None
+
+    @classmethod
+    def find_device_library(cls) -> str:
+        """
+        Find the path to the NVSHMEM device library.
+
+        Returns:
+            str: The path to libnvshmem_device.bc (included).
+        """
+        if cls.found_device_lib_path is not None:
+            # Return the cached path if it exists
+            return cls.found_device_lib_path
+
+        # First, check if the user has specified a custom library path
+        user_lib_dir = os.environ.get("NVSHMEM_LIB_DIR", None)
+        if user_lib_dir is not None:
+            lib_path = os.path.join(user_lib_dir, "libnvshmem_device.bc")
+            if not os.path.exists(lib_path):
+                raise RuntimeError(
+                    f"NVSHMEM device library not found at specified path: {user_lib_dir}"
                 )
+            cls.found_device_lib_path = lib_path
+            return lib_path
 
-                for line in result.stdout.splitlines():
-                    if ("RPATH" in line or "RUNPATH" in line) and "[" in line:
-                        rpath = line.split("[", 1)[1].split("]", 1)[0]
-                        for p in rpath.split(":"):
-                            p = p.strip().replace("$ORIGIN", torch_lib)
-                            if p and p not in paths:
-                                paths.append(p)
-            except subprocess.CalledProcessError:
-                pass
+        # Otherwise, search for the library in the default installation paths
+        paths = [
+            os.path.join(sysconfig.get_path("purelib"), "nvidia", "nvshmem", "lib")
+        ]
 
-    except ImportError:
-        pass
+        # Add common system installation paths
+        common_paths = [
+            "/usr/local/lib",
+            "/usr/lib",
+            "/opt/nvidia/nvshmem/lib",
+        ]
+        paths.extend(common_paths)
 
-    for path in paths:
-        device_lib = os.path.join(path, "libnvshmem_device.bc")
-        if os.path.exists(device_lib):
-            return device_lib
+        try:
+            import torch
 
-    raise RuntimeError(f"NVSHMEM device library not found. Searched: {paths}")
+            torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
+            so_path = os.path.join(torch_lib, "libtorch_nvshmem.so")
+
+            if os.path.exists(so_path):
+                try:
+                    result = subprocess.run(
+                        ["readelf", "-d", so_path],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+
+                    for line in result.stdout.splitlines():
+                        if ("RPATH" in line or "RUNPATH" in line) and "[" in line:
+                            rpath = line.split("[", 1)[1].split("]", 1)[0]
+                            for p in rpath.split(":"):
+                                p = p.strip().replace("$ORIGIN", torch_lib)
+                                if p and p not in paths:
+                                    paths.append(p)
+                except subprocess.CalledProcessError:
+                    pass
+
+        except ImportError:
+            pass
+
+        for path in paths:
+            device_lib = os.path.join(path, "libnvshmem_device.bc")
+            if os.path.exists(device_lib):
+                cls.found_device_lib_path = device_lib
+                return device_lib
+
+        raise RuntimeError(f"NVSHMEM device library not found. Searched: {paths}")
 
 
 def enable_triton(lib_dir: Optional[str] = None) -> dict[str, str]:
+    raise NotImplementedError(
+        "`enable_triton` is deprecated. "
+        "If you need NVSHMEM device function support for Triton, "
+        "please use `@requires_nvshmem` to decorate your Triton kernel. ",
+    )
+
+
+class NvshmemKernelRegistry:
     """
-    Enable NVSHMEM device functions for Triton. It performs a NVSHMEM
-    device-side initialization on the kernel module created by Triton.
-
-    This function sets a global hook that initializes NVSHMEM for Triton
-    kernels. To avoid unnecessary initializations, the hook only acts on
-    kernels that have "nvshmem" in their function name. Therefore, it is
-    required that all Triton kernels using NVSHMEM primitives follow this
-    naming convention.
-
-    Args:
-        lib_dir (Optional[str]): The directory where the NVSHMEM device library
-        is located. If not provided, it will use the default path where NVSHMEM
-        wheel is installed.
-
-    Returns:
-        dict[str, str]: A dictionary containing the NVSHMEM device library name
-        and path.
+    A class to register kernel functions that ** require NVSHMEM initialization **
     """
-    import triton
 
-    from torch.distributed._distributed_c10d import _nvshmemx_cumodule_init
+    # Class variable to store the functions to be initialized
+    _to_init: dict[str, Any] = {}
 
-    if lib_dir is not None:
-        lib_path = os.path.join(lib_dir, "libnvshmem_device.bc")
-        if not os.path.exists(lib_path):
-            raise RuntimeError(
-                f"NVSHMEM device library not found at specified path: {lib_path}"
+    @classmethod
+    def register(cls, name: str) -> None:
+        """
+        Register a kernel function with the given name.
+
+        Args:
+            name (str): The name of the kernel function.
+        """
+        cls._to_init.setdefault(name)
+
+    @classmethod
+    def deregister(cls, name: str) -> None:
+        """
+        Deregister a kernel function with the given name.
+
+        Args:
+            name (str): The name of the kernel function.
+        """
+        cls._to_init.pop(name, None)
+
+    @classmethod
+    def has(cls, name: str) -> bool:
+        """
+        Check if a kernel function with the given name is registered.
+
+        Args:
+            name (str): The name of the kernel function.
+
+        Returns:
+            bool: True if the kernel function is registered, False otherwise.
+        """
+        return name in cls._to_init
+
+
+def _nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+    """
+    A hook function to initialize the CUModule created by `triton.jit` with
+    NVSHMEM device context
+    """
+    from torch._C._distributed_c10d import _nvshmemx_cumodule_init
+
+    jit_function = kwargs["fn"].jit_function
+    fn_name = jit_function.fn.__name__
+
+    # Only initialize NVSHMEM module for kernels registered via @requires_nvshmem
+    if NvshmemKernelRegistry.has(fn_name):
+        key = kwargs["key"]
+        device = kwargs["compile"]["device"]
+        jit_function = kwargs["fn"].jit_function
+        kernel_cache = jit_function.device_caches[device][0]
+        kernel = kernel_cache.get(key, None)
+        if kernel is not None:
+            kernel.run
+            # Initialize NVSHMEM for the CU module
+            _nvshmemx_cumodule_init(kernel.module)
+        else:
+            logger.warning(
+                f"It seems Triton hasn't created a kernel for function {fn_name}. "  # noqa: G004
+                "Please report this issue to Triton."
             )
-    else:
-        # Otherwise, search for the library automatically.
-        lib_path = _find_nvshmem_device_library()
 
+
+if has_triton():
+    from triton.runtime.jit import JITFunction, KernelInterface
+
+    # Create a new Callable class that follows the KernelInterface protocol so
+    # that the Callable works with the subscript operator, e.g. `foo[(1, 1)]`
+    class GridCallableWithExtern(KernelInterface):
+        """
+        `KernelInterface` invokes `self.run` in `__getitem__`, i.e. [].  We
+        implement a `run` method by directing the call to `JITFunction.run`,
+        with added extern_libs kwarg, so that users don't have to pass it
+        """
+
+        def __init__(self, jit_func: JITFunction, extern_libs: dict[str, str]) -> None:
+            self.jit_func = jit_func
+            self.extern_libs = extern_libs
+
+        def run(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            # Call the JITFunction.run with added extern_libs kwarg
+            return self.jit_func.run(*args, **kwargs, extern_libs=self.extern_libs)
+
+
+def requires_nvshmem(  # type: ignore[no-untyped-def]
+    jit_func,  # JITFunction created by triton.jit
+):
+    """
+    A decorator to register a Triton kernel function that requires NVSHMEM initialization.
+
+    Example usage:
+    ```
+        @requires_nvshmem
+        @triton.jit
+        def foo(...):
+            ...
+    ```
+
+    If you would like to specify a path to the NVSHMEM device library other
+    than standard search locations, you can use the following environment
+    variable:
+    ```
+        export NVSHMEM_LIB_DIR=/path/to/nvshmem/lib
+    ```
+    """
+
+    import triton
+    from triton.runtime.jit import JITFunction
+
+    if not isinstance(jit_func, JITFunction):
+        raise TypeError(f"Expected a JITFunction, but got {type(jit_func)}")
+
+    # Find the NVSHMEM device library
+    lib_path = NvshmemLibFinder.find_device_library()
     extern_libs = {"libnvshmem_device": lib_path}
 
-    # A hook function to initialize NVSHMEM in Triton
-    def nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
-        jit_function = kwargs["fn"].jit_function
-        # Only initialize NVSHMEM module for kernels containing "nvshmem" in their name
-        if "nvshmem" in jit_function.fn.__name__:
-            key = kwargs["key"]
-            device = kwargs["compile"]["device"]
-            jit_function = kwargs["fn"].jit_function
-            kernel_cache, _, _, _ = jit_function.device_caches[device]
-            kernel = kernel_cache.get(key, None)
-            if kernel is not None:
-                kernel.run
-                _nvshmemx_cumodule_init(kernel.module)
+    # Register the JITFunction with the kernel registry as "to be initialized"
+    NvshmemKernelRegistry.register(jit_func.fn.__name__)
 
-    # Register the function as a post-compile hook
-    triton.knobs.runtime.jit_post_compile_hook = nvshmem_init_hook
+    # Register the NVSHMEM init function as a post-compile hook.
+    # [Note] This is a global setting (due to lack of Triton API exposure). To
+    # avoid initializing Triton kernels that do not require NVSHMEM, filtering
+    # is performed in the hook function itself by checking against
+    # NvshmemKernelRegistry.
+    triton.knobs.runtime.jit_post_compile_hook = _nvshmem_init_hook
 
-    # Return to user so that they can use it in Triton kernel invocation
-    return extern_libs
+    return GridCallableWithExtern(jit_func, extern_libs)
 
 
 if has_triton():
@@ -147,7 +280,7 @@ if has_triton():
         tl.static_assert(dest.type == source.type)
         nbytes = nelems * dest.type.element_ty.itemsize
         return putmem_block_extern_wrapper(
-            dest.to(tl.int64), source.to(tl.int64), nbytes, pe
+            dest.to(tl.int64), source.to(tl.int64), nbytes.to(tl.int64), pe
         )
 
     @core.extern
@@ -162,7 +295,7 @@ if has_triton():
                     core.dtype("int64"),  # dest ptr
                     core.dtype("int64"),  # source ptr
                     core.dtype("int64"),  # size in bytes
-                    core.dtype("int64"),  # pe number
+                    core.dtype("int32"),  # pe number
                 ): ("nvshmemx_putmem_block", core.dtype("int32"))
             },
             is_pure=False,
@@ -200,7 +333,7 @@ if has_triton():
         tl.static_assert(dest.type == source.type)
         nbytes = nelems * dest.type.element_ty.itemsize
         return getmem_block_extern_wrapper(
-            dest.to(tl.int64), source.to(tl.int64), nbytes, pe
+            dest.to(tl.int64), source.to(tl.int64), nbytes.to(tl.int64), pe
         )
 
     @core.extern
@@ -215,23 +348,76 @@ if has_triton():
                     core.dtype("int64"),  # dest ptr
                     core.dtype("int64"),  # source ptr
                     core.dtype("int64"),  # size in bytes
-                    core.dtype("int64"),  # pe number
+                    core.dtype("int32"),  # pe number
                 ): ("nvshmemx_getmem_block", core.dtype("int32"))
             },
             is_pure=False,
             _semantic=_semantic,
         )
 
+    @triton.jit  # type: ignore[misc]
+    def get_nbi(dest, source, nelems, pe):  # type: ignore[no-untyped-def]
+        """
+        Get tensor data from a remote PE to local PE, non-blocking.
+
+        Different from the `get` function, this function returns after
+        initiating the operation. The operation is considered complete after a
+        subsequent call to `quiet`.
+
+        Args:
+            dest: Destination tensor on the local PE. Type must match source.
+            source: Source tensor on the remote PE containing data to be copied.
+            nelems: Number of elements to transfer.
+            pe: PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
+
+        Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
+
+        Example:
+            ```
+            # Get 100 elements from PE 0
+            nvshmem.get_nbi(dest, src, 100, 0)
+            # Some independent computation which overlaps with the get operation
+            ...
+            # Wait for completion of the get operation
+            nvshmem.quiet()
+            ```
+        """
+        tl.static_assert(dest.type == source.type)
+        nbytes = nelems * dest.type.element_ty.itemsize
+        return getmem_block_extern_wrapper(
+            dest.to(tl.int64), source.to(tl.int64), nbytes.to(tl.int64), pe
+        )
+
     @core.extern
+    def getmem_nbi_block_extern_wrapper(dest, source, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+        """Low-level extern wrapper for NVSHMEM get"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [dest, source, size_bytes, pe],
+            {
+                (
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int64"),  # size in bytes
+                    core.dtype("int32"),  # pe number
+                ): ("nvshmemx_getmem_nbi_block", core.dtype("int32"))
+            },
+            is_pure=False,
+            _semantic=_semantic,
+        )
+
+    @triton.jit  # type: ignore[misc]
     def putmem_signal_block(  # type: ignore[no-untyped-def]
         dst,
         src,
         size_bytes,
-        sig_addr,
         signal,
+        sig_val,
         sig_op,
         pe,
-        _semantic=None,
     ):  # type: ignore[no-untyped-def]
         """
         Put data to remote PE with atomic signal operation using block-scoped operation.
@@ -241,17 +427,16 @@ if has_triton():
         This enables efficient point-to-point synchronization between PEs.
 
         Args:
-            dst (int64): Symmetric address of the destination data object on the remote PE.
-            src (int64): Local address of the source data object containing data to be copied.
+            dst (tensor): A tensor on calling PE symmetric to the destination tensor on remote PE.
+            src (tensor): Local tensor containing the source data.
             size_bytes (int64): Number of bytes to transfer. Must be positive.
-            sig_addr (int64): Symmetric address of the signal variable (uint64_t) on the remote PE.
+            signal (tensor): Symmetric signal pad with remote PE.
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
-            sig_op (int64): Signal operation type. Common values:
+            sig_op (int32): Signal operation type. Common values:
                            - NVSHMEM_SIGNAL_SET (0): Atomic set operation
                            - NVSHMEM_SIGNAL_ADD (5): Atomic add operation
-            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
-            _semantic: Optional semantic information for Triton compilation.
+            pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
 
         Returns:
             int32: Status code (0 for success).
@@ -273,19 +458,42 @@ if has_triton():
             )
             ```
         """
+        # Ensure sig_val is 64 bits
+        sig_val = 0 << 32 | sig_val
+        return putmem_signal_block_extern_wrapper(
+            dst.to(tl.int64),
+            src.to(tl.int64),
+            size_bytes.to(tl.int64),
+            signal.to(tl.int64),
+            sig_val.to(tl.uint64),
+            sig_op,
+            pe,
+        )
+
+    @core.extern
+    def putmem_signal_block_extern_wrapper(  # type: ignore[no-untyped-def]
+        dst,
+        src,
+        size_bytes,
+        signal,
+        sig_val,
+        sig_op,
+        pe,
+        _semantic=None,
+    ):  # type: ignore[no-untyped-def]
         return core.extern_elementwise(
             "",
             "",
-            [dst, src, size_bytes, sig_addr, signal, sig_op, pe],
+            [dst, src, size_bytes, signal, sig_val, sig_op, pe],
             {
                 (
                     core.dtype("int64"),
                     core.dtype("int64"),
                     core.dtype("int64"),
                     core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
+                    core.dtype("uint64"),
+                    core.dtype("int32"),
+                    core.dtype("int32"),
                 ): ("nvshmemx_putmem_signal_block", core.dtype("int32"))
             },
             is_pure=False,
@@ -327,8 +535,8 @@ if has_triton():
             ```
         """
         tl.static_assert(
-            ivar.type.element_ty.itemsize == 8,
-            "wait_until expects a 64-bit type for the synchronization variable",
+            ivar.type.element_ty.itemsize == 4,
+            "wait_until expects a 32-bit type for the synchronization variable",
         )
         return wait_until_extern_wrapper(ivar.to(tl.int64), cmp_op, cmp_val)
 
@@ -341,16 +549,16 @@ if has_triton():
             {
                 (
                     core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
-                ): ("nvshmem_longlong_wait_until", core.dtype("int32"))
+                    core.dtype("int32"),
+                    core.dtype("int32"),
+                ): ("nvshmem_int_wait_until", core.dtype("int32"))
             },
             is_pure=False,
             _semantic=_semantic,
         )
 
-    @core.extern
-    def signal_wait_until(sig_addr, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
+    @triton.jit  # type: ignore[misc]
+    def signal_wait_until(signal, cmp, cmp_val):  # type: ignore[no-untyped-def]
         """
         Wait until a signal variable meets a specified condition.
 
@@ -360,9 +568,9 @@ if has_triton():
         with signal operations.
 
         Args:
-            sig_addr (int64): Symmetric address of the signal variable (uint64_t).
+            signal (tensor): Symmetric signal tensor with remote PE.
                              Must be 8-byte aligned symmetric memory.
-            cmp (int64): Comparison operator. Common values:
+            cmp (int32): Comparison operator. Common values:
                         - NVSHMEM_CMP_EQ (0): Wait until signal == cmp_val
                         - NVSHMEM_CMP_NE (1): Wait until signal != cmp_val
                         - NVSHMEM_CMP_GT (2): Wait until signal > cmp_val
@@ -370,7 +578,6 @@ if has_triton():
                         - NVSHMEM_CMP_LT (4): Wait until signal < cmp_val
                         - NVSHMEM_CMP_LE (5): Wait until signal <= cmp_val
             cmp_val (int64): Value to compare against.
-            _semantic: Optional semantic information for Triton compilation.
 
         Returns:
             int32: Status code (0 for success).
@@ -389,15 +596,22 @@ if has_triton():
             nvshmem.signal_wait_until(signal_ptr, NVSHMEM_CMP_EQ, 42)
             ```
         """
+        cmp_val = 0 << 32 | cmp_val
+        return signal_wait_until_extern_wrapper(
+            signal.to(tl.int64), cmp, cmp_val.to(tl.uint64)
+        )
+
+    @core.extern
+    def signal_wait_until_extern_wrapper(signal, cmp, cmp_val, _semantic=None):  # type: ignore[no-untyped-def]
         return core.extern_elementwise(
             "",
             "",
-            [sig_addr, cmp, cmp_val],
+            [signal, cmp, cmp_val],
             {
                 (
                     core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
+                    core.dtype("int32"),
+                    core.dtype("uint64"),
                 ): ("nvshmem_signal_wait_until", core.dtype("int32"))
             },
             is_pure=False,
@@ -417,10 +631,10 @@ if has_triton():
             sig_addr (int64): Symmetric address of the signal variable (uint64_t) on the remote PE.
                              Must be 8-byte aligned symmetric memory.
             signal (int64): Value to be used in the signal operation.
-            sig_op (int64): Signal operation type. Common values:
+            sig_op (int32): Signal operation type. Common values:
                            - NVSHMEM_SIGNAL_SET (0): Atomically set sig_addr = signal
                            - NVSHMEM_SIGNAL_ADD (5): Atomically set sig_addr += signal
-            pe (int64): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
+            pe (int32): PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
             _semantic: Optional semantic information for Triton compilation.
 
         Returns:
@@ -448,8 +662,8 @@ if has_triton():
                 (
                     core.dtype("int64"),
                     core.dtype("int64"),
-                    core.dtype("int64"),
-                    core.dtype("int64"),
+                    core.dtype("int32"),
+                    core.dtype("int32"),
                 ): ("nvshmemx_signal_op", core.dtype("int32"))
             },
             is_pure=False,
@@ -764,7 +978,7 @@ if has_triton():
         tl.static_assert(dest.type == source.type)
         size_bytes_per_pe = nelems_per_pe * dest.type.element_ty.itemsize
         return alltoallmem_block_extern_wrapper(
-            team, dest.to(tl.int64), source.to(tl.int64), size_bytes_per_pe
+            team, dest.to(tl.int64), source.to(tl.int64), size_bytes_per_pe.to(tl.int64)
         )
 
     @core.extern  # type: ignore[misc]
@@ -778,7 +992,7 @@ if has_triton():
             [team, dest, source, size_bytes],
             {
                 (
-                    core.dtype("int64"),  # team handle
+                    core.dtype("int32"),  # team handle
                     core.dtype("int64"),  # dest ptr
                     core.dtype("int64"),  # source ptr
                     core.dtype("int64"),  # size in bytes
@@ -819,7 +1033,7 @@ if has_triton():
         tl.static_assert(dest.type == source.type)
         nbytes = nelems * dest.type.element_ty.itemsize
         return broadcastmem_block_extern_wrapper(
-            team, dest.to(tl.int64), source.to(tl.int64), nbytes, pe_root
+            team, dest.to(tl.int64), source.to(tl.int64), nbytes.to(tl.int64), pe_root
         )
 
     @core.extern  # type: ignore[misc]
@@ -838,11 +1052,11 @@ if has_triton():
             [team, dest, source, size_bytes, pe_root],
             {
                 (
-                    core.dtype("int64"),  # team handle
+                    core.dtype("int32"),  # team handle
                     core.dtype("int64"),  # dest ptr
                     core.dtype("int64"),  # source ptr
                     core.dtype("int64"),  # size in bytes
-                    core.dtype("int64"),  # pe_root
+                    core.dtype("int32"),  # pe_root
                 ): ("nvshmemx_broadcastmem_block", core.dtype("int32"))
             },
             is_pure=False,
@@ -883,7 +1097,7 @@ if has_triton():
             team,
             dest.to(tl.int64),
             source.to(tl.int64),
-            nreduce,
+            nreduce.to(tl.int64),
             operation,
             dtype,
         )
@@ -966,7 +1180,7 @@ if has_triton():
 
         # Define function signature - all parameters are int64 in Triton (they are just ptrs)
         signature = (
-            core.dtype("int64"),  # team handle
+            core.dtype("int32"),  # team handle
             core.dtype("int64"),  # destination pointer
             core.dtype("int64"),  # source pointer
             core.dtype("int64"),  # number of elements
@@ -980,3 +1194,27 @@ if has_triton():
             is_pure=False,
             _semantic=_semantic,
         )
+
+    # Utility for inspecting Triton kernels
+
+    triton_kernels: dict = {}
+
+    def _log_triton_kernel(kernel) -> None:  # type: ignore[no-untyped-def]
+        import atexit
+        import tempfile
+
+        if dist.is_initialized() and dist.get_rank() != 0:
+            return
+
+        def on_exit() -> None:
+            logger.info("PTX files:")
+            for kernel in triton_kernels:
+                with tempfile.NamedTemporaryFile(dir="/tmp", delete=False) as f:
+                    f.write(kernel.asm["ptx"].encode("utf-8"))
+                    logger.info(f"+- {kernel.name}: {f.name}")  # noqa: G004
+
+        if len(triton_kernels) == 0:
+            atexit.register(on_exit)
+
+        if kernel not in triton_kernels:
+            triton_kernels[kernel] = None

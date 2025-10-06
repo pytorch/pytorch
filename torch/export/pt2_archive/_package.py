@@ -6,8 +6,7 @@ import os
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import Any, IO, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
+from typing import Any, IO, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -43,6 +42,7 @@ from torch.export.pt2_archive.constants import (
     CONSTANTS_CONFIG_FILENAME_FORMAT,
     CONSTANTS_DIR,
     CUSTOM_OBJ_FILENAME_PREFIX,
+    EXECUTORCH_DIR,
     EXTRA_DIR,
     MODELS_DIR,
     MODELS_FILENAME_FORMAT,
@@ -172,8 +172,10 @@ class PT2ArchiveWriter:
             os.path.isfile, glob.glob(f"{folder_dir}/**", recursive=True)
         )
         for file_path in file_paths:
+            # pyrefly: ignore  # no-matching-overload
             filename = os.path.relpath(file_path, folder_dir)
             archive_path = os.path.join(archive_dir, filename)
+            # pyrefly: ignore  # bad-argument-type
             self.write_file(archive_path, file_path)
 
     def close(self) -> None:
@@ -345,7 +347,7 @@ def _get_raw_tensor_bytes(value: torch.Tensor) -> bytes:
     if _is_fake_tensor(value):
         value_bytes = b""
     elif value.data_ptr():
-        cpu_tensor = value.cpu().contiguous()
+        cpu_tensor = value.cpu()
         value_untyped_storage = cpu_tensor.untyped_storage()
         # we store the raw bytes the untyped storage. Tensor metadata is stored separately
         value_bytes = bytes(
@@ -529,6 +531,16 @@ def _package_extra_files(
         archive_writer.write_string(f"{EXTRA_DIR}{extra_file_name}", content)
 
 
+def _package_executorch_files(
+    archive_writer: PT2ArchiveWriter, executorch_files: Optional[dict[str, bytes]]
+) -> None:
+    if executorch_files is None:
+        return
+
+    for file_name, content in executorch_files.items():
+        archive_writer.write_bytes(f"{EXECUTORCH_DIR}{file_name}", content)
+
+
 def package_pt2(
     f: FileLike,
     *,
@@ -539,6 +551,7 @@ def package_pt2(
     extra_files: Optional[dict[str, Any]] = None,
     opset_version: Optional[dict[str, int]] = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+    executorch_files: Optional[dict[str, bytes]] = None,
 ) -> FileLike:
     r"""
     Saves the artifacts to a PT2Archive format. The artifact can then be loaded
@@ -569,6 +582,9 @@ def package_pt2(
 
         pickle_protocol: can be specified to override the default protocol
 
+        executorch_files (Optional[dict[str, bytes]]): Optional executorch
+         artifacts to save.
+
     """
     assert not (
         exported_programs is None and aoti_files is None and extra_files is None
@@ -579,6 +595,7 @@ def package_pt2(
 
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.writable() and f.seekable())
+        # pyrefly: ignore  # no-matching-overload
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
         or (isinstance(f, tempfile._TemporaryFileWrapper) and f.name.endswith(".pt2"))
     ):
@@ -590,8 +607,10 @@ def package_pt2(
         )
 
     if isinstance(f, (str, os.PathLike)):
+        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
+    # pyrefly: ignore  # bad-argument-type
     with PT2ArchiveWriter(f) as archive_writer:
         _package_exported_programs(
             archive_writer, exported_programs, pickle_protocol=pickle_protocol
@@ -602,9 +621,11 @@ def package_pt2(
             pickle_protocol=pickle_protocol,
         )
         _package_extra_files(archive_writer, extra_files)
+        _package_executorch_files(archive_writer, executorch_files)
 
     if isinstance(f, (io.IOBase, IO)):
         f.seek(0)
+    # pyrefly: ignore  # bad-return
     return f
 
 
@@ -778,7 +799,9 @@ def _load_state_dict(
                     ),
                 )
                 if payload_meta.is_param:
-                    state_dict[weight_fqn] = torch.nn.Parameter(weight_tensor)
+                    state_dict[weight_fqn] = torch.nn.Parameter(
+                        weight_tensor, requires_grad=tensor_meta.requires_grad
+                    )
                 else:
                     state_dict[weight_fqn] = weight_tensor
 
@@ -899,6 +922,44 @@ def _load_extra_files(
     return extra_file_contents
 
 
+def _load_aoti(
+    file: str,
+    model_name: str,
+    run_single_threaded: bool,
+    num_runners: int,
+    device_idx: int,
+) -> AOTICompiledModel:
+    loaded_metadata = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(  # type: ignore[attr-defined]
+        file, model_name
+    )
+
+    device = loaded_metadata["AOTI_DEVICE_KEY"]
+    current_device_info = torch._inductor.codecache.get_device_information(device)
+
+    for k, v in current_device_info.items():
+        if k in loaded_metadata:
+            if v != loaded_metadata[k]:
+                logger.warning(
+                    "Device information mismatch for %s: %s vs %s. "
+                    "This could cause some issues when loading the AOTInductor compiled artifacts.",
+                    k,
+                    v,
+                    loaded_metadata[k],
+                )
+
+    aoti_compiled_model = AOTICompiledModel(
+        torch._C._aoti.AOTIModelPackageLoader(
+            file,
+            model_name,
+            run_single_threaded,
+            num_runners,
+            device_idx,
+        )
+    )
+
+    return aoti_compiled_model
+
+
 def load_pt2(
     f: FileLike,
     *,
@@ -937,6 +998,7 @@ def load_pt2(
 
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
+        # pyrefly: ignore  # no-matching-overload
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
     ):
         # TODO: turn this into an error in 2.9
@@ -947,10 +1009,12 @@ def load_pt2(
         )
 
     if isinstance(f, (str, os.PathLike)):
+        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
     weights = {}
     weight_maps = {}
+    # pyrefly: ignore  # bad-argument-type
     with PT2ArchiveReader(f) as archive_reader:
         version = archive_reader.read_string(ARCHIVE_VERSION_PATH)
         if version != ARCHIVE_VERSION_VALUE:
@@ -1001,14 +1065,12 @@ def load_pt2(
                 logger.debug("Writing buffer to tmp file located at %s.", tf.name)
 
                 aoti_runners = {
-                    model_name: AOTICompiledModel(
-                        torch._C._aoti.AOTIModelPackageLoader(
-                            tf.name,
-                            model_name,
-                            run_single_threaded,
-                            num_runners,
-                            device_index,
-                        )
+                    model_name: _load_aoti(
+                        tf.name,
+                        model_name,
+                        run_single_threaded,
+                        num_runners,
+                        device_index,
                     )
                     for model_name in aoti_model_names
                 }
@@ -1016,10 +1078,13 @@ def load_pt2(
             aoti_runners = {}
     else:
         aoti_runners = {
-            model_name: AOTICompiledModel(
-                torch._C._aoti.AOTIModelPackageLoader(
-                    f, model_name, run_single_threaded, num_runners, device_index
-                )
+            model_name: _load_aoti(
+                # pyrefly: ignore  # bad-argument-type
+                f,
+                model_name,
+                run_single_threaded,
+                num_runners,
+                device_index,
             )
             for model_name in aoti_model_names
         }

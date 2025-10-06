@@ -906,7 +906,7 @@ static void ref_dyn_quant_matmul_4bit_channelwise_kernel(
           // Round to nearest integer
           const int32_t nudged_zero_point0 = lrintf(zero_point0);
 
-          int8_t* dst_ptr = (int8_t*)lhs_qa8dx + m_idx * dst_stride;
+          int8_t* dst_ptr = lhs_qa8dx + m_idx * dst_stride;
 
           // LHS offset at the beginning of the row
           *((float*)(dst_ptr)) = recip_scale0;
@@ -1048,7 +1048,7 @@ static void ref_dyn_quant_matmul_4bit_groupwise_kernel(
       zero_point0 = (std::min)(zero_point0, qmax);
       const int32_t nudged_zero_point0 = lrintf(zero_point0);
 
-      int8_t* dst_ptr = (int8_t*)lhs_qa8dx + row_idx * dst_stride;
+      int8_t* dst_ptr = lhs_qa8dx + row_idx * dst_stride;
 
       *((float*)(dst_ptr)) = recip_scale0;
       dst_ptr += sizeof(float);

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Callable, Union
+from collections.abc import Callable
+from typing import Union
 from typing_extensions import TypeVarTuple
 
 import torch

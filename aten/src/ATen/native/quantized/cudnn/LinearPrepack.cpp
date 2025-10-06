@@ -10,7 +10,6 @@
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
-#include <torch/library.h>
 
 int register_linear_params();
 

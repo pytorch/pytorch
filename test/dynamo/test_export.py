@@ -2754,7 +2754,6 @@ def forward(self, x):
     def test_exported_graph_serialization(self):
         def f(x, y):
             b = x.item()
-            torch._check_is_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -4669,7 +4668,6 @@ class ExportTestsDevice(torch._dynamo.test_case.TestCase):
         class MyModel(torch.nn.Module):
             def forward(self, numel, scalar):
                 u0 = numel.item()
-                torch._check_is_size(u0)
                 x = torch.ones(u0 + 1)
                 return scalar - x
 

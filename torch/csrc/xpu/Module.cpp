@@ -415,6 +415,11 @@ static void initXpuMethodBindings(PyObject* module) {
         return std::make_tuple(
             stream.id(), stream.device_index(), stream.device_type());
       });
+  m.def(
+      "_xpu_canDeviceAccessPeer",
+      [](c10::DeviceIndex device, c10::DeviceIndex peer) {
+        return at::xpu::canDeviceAccessPeer(device, peer);
+      });
 }
 
 // Callback for python part. Used for additional initialization of python

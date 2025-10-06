@@ -340,7 +340,6 @@ if torch.backends.mps.is_available():
             "masked.median": None,
             "matrix_exp": None,
             "mode": None,
-            "native_dropout_backward": None,
             "normnuc": None,
             "nn.functional.fractional_max_pool2d": None,
             "nn.functional.fractional_max_pool3d": None,
@@ -349,7 +348,6 @@ if torch.backends.mps.is_available():
             "nn.functional.interpolatearea": None,
             "nn.functional.interpolatebicubic": [torch.uint8],
             "nn.functional.ctc_loss": None,
-            "nn.functional.embedding_bag": None,
             "nn.functional.multi_margin_loss": None,
             "nn.functional.multilabel_margin_loss": None,
             "nn.functional.pdist": None,
@@ -385,8 +383,6 @@ if torch.backends.mps.is_available():
             "symeig": None,
             "take": None,
             "to": None,
-            "to_sparse": None,
-            "unique": None,
             "vdot": None,
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
@@ -759,6 +755,10 @@ if torch.backends.mps.is_available():
             "eye": [torch.float16, torch.float32],
             # topk fails with duplicate indices
             "topk": [torch.float16],
+            # Could not run 'aten::uniform_' with arguments from the 'SparseCPU' backend
+            "to_sparse": None,
+            # Exception: the derivative for '_unique2' is not implemented.
+            "unique": None,
         }
 
         SKIPLIST_GRAD = {

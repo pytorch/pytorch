@@ -321,7 +321,7 @@ class ConcatDataset(Dataset[_T_co]):
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super().__init__()
         self.datasets = list(datasets)
-        assert len(self.datasets) > 0, "datasets should not be an empty iterable"  # type: ignore[arg-type]
+        assert len(self.datasets) > 0, "datasets should not be an empty iterable"
         for d in self.datasets:
             assert not isinstance(d, IterableDataset), (
                 "ConcatDataset does not support IterableDataset"
@@ -454,9 +454,7 @@ def random_split(
         for i, frac in enumerate(lengths):
             if frac < 0 or frac > 1:
                 raise ValueError(f"Fraction at index {i} is not between 0 and 1")
-            n_items_in_split = int(
-                math.floor(len(dataset) * frac)  # type: ignore[arg-type]
-            )
+            n_items_in_split = math.floor(len(dataset) * frac)  # type: ignore[arg-type]
             subset_lengths.append(n_items_in_split)
         remainder = len(dataset) - sum(subset_lengths)  # type: ignore[arg-type]
         # add 1 to all the lengths in round-robin fashion until the remainder is 0

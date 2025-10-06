@@ -132,7 +132,7 @@ def _infer_device_type(*args):
 
     def add_device_types(arg):
         nonlocal device_types
-        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu":
+        if isinstance(arg, torch.Tensor) and arg.device.type != "cpu":
             device_types.append(arg.device.type)
     tree_map(add_device_types, args)
 

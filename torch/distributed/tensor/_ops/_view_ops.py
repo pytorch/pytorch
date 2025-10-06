@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Callable, cast, Optional, Union
+from typing import cast, Optional, Union
 
 import torch
 from torch import Tensor
@@ -490,7 +490,9 @@ def propagate_shape_and_sharding(
     - An output dimension that is a split of the input dimension can only be sharded
       if the leftmost split size is divisible by the mesh dimension
     """
-    assert len(input_src_placements) == len(mesh_sizes)
+    assert len(input_src_placements) == len(mesh_sizes), (
+        f"{input_src_placements} != {mesh_sizes}"
+    )
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     mesh_ndim = len(mesh_sizes)
     shardable_dims: dict[int, list[bool]] = {}

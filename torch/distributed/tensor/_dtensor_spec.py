@@ -78,7 +78,7 @@ class DTensorSpec:
             self._hash = self._hash_impl()
         return self._hash
 
-    def __eq__(self, other: object, /) -> bool:
+    def _check_equals(self, other: object, skip_shapes: bool = False) -> bool:
         if not (
             isinstance(other, DTensorSpec)
             and self.mesh == other.mesh
@@ -88,11 +88,16 @@ class DTensorSpec:
         if self.tensor_meta is None or other.tensor_meta is None:
             return self.tensor_meta == other.tensor_meta
 
+        if skip_shapes:
+            return self.tensor_meta.dtype == other.tensor_meta.dtype
         return (
             self.tensor_meta.shape == other.tensor_meta.shape  # type: ignore[union-attr]
             and self.tensor_meta.stride == other.tensor_meta.stride  # type: ignore[union-attr]
             and self.tensor_meta.dtype == other.tensor_meta.dtype  # type: ignore[union-attr]
         )
+
+    def __eq__(self, other: object, /) -> bool:
+        return self._check_equals(other)
 
     def __str__(self) -> str:
         """

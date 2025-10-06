@@ -232,11 +232,11 @@ class autocast:
             )
         if dtype is None:
             dtype = torch.get_autocast_dtype(device_type)
+        self.fast_dtype = dtype
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
-            self.fast_dtype = dtype
-            assert dtype is not None
+            assert self.fast_dtype is not None
             return
         self.device = device_type
         if not is_autocast_available(self.device):
@@ -244,7 +244,6 @@ class autocast:
                 f"User specified an unsupported autocast device_type '{self.device}'"
             )
         self.custom_backend_name = torch._C._get_privateuse1_backend_name()
-        self.fast_dtype = torch.get_autocast_dtype(self.device)
         if self.device == self.custom_backend_name:
             necessary_funcs = [
                 "get_amp_supported_dtype",
@@ -271,8 +270,6 @@ class autocast:
                 "User provided device_type of 'cuda', but CUDA is not available. Disabling"
             )
             enabled = False
-        if dtype is not None:
-            self.fast_dtype = dtype
         if cache_enabled is not None:
             self._cache_enabled = cache_enabled
 
@@ -467,7 +464,11 @@ def _cast(value, device_type: str, dtype: _dtype):
         return value.to(dtype) if is_eligible else value
     elif isinstance(value, (str, bytes)):
         return value
-    elif HAS_NUMPY and isinstance(value, np.ndarray):
+    elif HAS_NUMPY and isinstance(
+        value,
+        # pyrefly: ignore  # missing-attribute
+        np.ndarray,
+    ):
         return value
     elif isinstance(value, collections.abc.Mapping):
         return {
@@ -524,18 +525,18 @@ def custom_fwd(
         args[0]._dtype = torch.get_autocast_dtype(device_type)
         if cast_inputs is None:
             args[0]._fwd_used_autocast = torch.is_autocast_enabled(device_type)
-            return fwd(*args, **kwargs)
+            return fwd(*args, **kwargs)  # pyrefly: ignore  # not-callable
         else:
             autocast_context = torch.is_autocast_enabled(device_type)
             args[0]._fwd_used_autocast = False
             if autocast_context:
                 with autocast(device_type=device_type, enabled=False):
-                    return fwd(
+                    return fwd(  # pyrefly: ignore  # not-callable
                         *_cast(args, device_type, cast_inputs),
                         **_cast(kwargs, device_type, cast_inputs),
                     )
             else:
-                return fwd(*args, **kwargs)
+                return fwd(*args, **kwargs)  # pyrefly: ignore  # not-callable
 
     return decorate_fwd
 
@@ -570,6 +571,6 @@ def custom_bwd(bwd=None, *, device_type: str):
             enabled=args[0]._fwd_used_autocast,
             dtype=args[0]._dtype,
         ):
-            return bwd(*args, **kwargs)
+            return bwd(*args, **kwargs)  # pyrefly: ignore  # not-callable
 
     return decorate_bwd

@@ -176,7 +176,7 @@ struct LinalgCheckMatrixUnaryRuleHelper;
 
 template <char const *op_name, typename F, F Func, typename A, typename... T>
 struct LinalgCheckMatrixUnaryRuleHelper<op_name, F, Func, typelist<A, T...>> {
-  static inline Tensor check_and_reshape_input(const Tensor& tensor, std::optional<int64_t> batch_dim) {
+  static Tensor check_and_reshape_input(const Tensor& tensor, std::optional<int64_t> batch_dim) {
     TORCH_CHECK(rankWithoutBatchDim(tensor, batch_dim) >= 2, op_name, ": The input tensor A must have at least 2 dimensions.");
     return moveBatchDimToFront(tensor, batch_dim);
   }
@@ -222,7 +222,7 @@ struct LinalgCheckMatrixBinaryRuleHelper;
 
 template <char const *op_name, typename F, F Func, typename A, typename B, typename... T>
 struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>> {
-  static inline std::tuple<Tensor, Tensor> check_inputs_and_reshape_inputs(
+  static std::tuple<Tensor, Tensor> check_inputs_and_reshape_inputs(
       const Tensor& first, std::optional<int64_t> first_bdim,
       const Tensor& second, std::optional<int64_t> second_bdim) {
     TORCH_CHECK(rankWithoutBatchDim(first, first_bdim) >= 2,

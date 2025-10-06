@@ -52,6 +52,11 @@ inline void delete_tensor_object(void* ptr) {
       aoti_torch_delete_tensor_object(reinterpret_cast<AtenTensorHandle>(ptr)));
 }
 
+inline void delete_c10_value_object(void* ptr) {
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_c10_value_object(
+      reinterpret_cast<C10IValueHandle>(ptr)));
+}
+
 class RAIIAtenRecordFunctionHandle {
  public:
   RAIIAtenRecordFunctionHandle() : handle_(nullptr, noop_deleter) {}
@@ -196,9 +201,50 @@ class RAIIAtenTensorHandle {
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
 
+// RAIIC10IValueHandle steals the IValue objects created by the libtorch C ABI
+class RAIIC10IValueHandle {
+ public:
+  RAIIC10IValueHandle() : handle_(nullptr, noop_deleter) {}
+  RAIIC10IValueHandle(const RAIIC10IValueHandle& other) = delete;
+  RAIIC10IValueHandle& operator=(const RAIIC10IValueHandle& other) = delete;
+
+  // Steal the ownership from another RAIIC10IValueHandle using std::move
+  RAIIC10IValueHandle(RAIIC10IValueHandle&& other) = default;
+  RAIIC10IValueHandle& operator=(RAIIC10IValueHandle&& other) = default;
+
+  // Steal the ownership from raw C10IValueHandle
+  RAIIC10IValueHandle(C10IValueHandle handle)
+      : handle_(handle, delete_c10_value_object) {}
+
+  ~RAIIC10IValueHandle() {
+    handle_.reset();
+  }
+
+  // Return a raw C10IValueHandle to be used by aoti_torch functions
+  // Note: this function does NOT transfer the ownership of the handle
+  operator C10IValueHandle() const {
+    return handle_.get();
+  }
+
+  C10IValueHandle release() {
+    return handle_.release();
+  }
+
+  C10IValueHandle get() const {
+    return handle_.get();
+  }
+
+  void reset() {
+    handle_.reset();
+  }
+
+ private:
+  std::unique_ptr<C10IValueOpaque, DeleterFnPtr> handle_;
+};
+
 class MaybeOwningAtenTensorHandle {
  public:
-  MaybeOwningAtenTensorHandle() : handle_(nullptr), raii_handle_() {}
+  MaybeOwningAtenTensorHandle() : handle_(nullptr) {}
   // We skip copy constructor as MaybeOwningAtenTensorHandle might be RAII which
   // makes it undefined.
   MaybeOwningAtenTensorHandle(const MaybeOwningAtenTensorHandle& other) =
