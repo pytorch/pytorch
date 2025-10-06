@@ -172,6 +172,9 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex128(
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
 
+// Check if PyTorch was compiled with intra-op parallelism support
+AOTI_TORCH_EXPORT bool aoti_torch_get_intra_op_parallel_enabled();
+
 // Free the tensor object
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
@@ -439,17 +442,14 @@ AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_thread_id_guard(ThreadIdGuardHandle guard);
 
 // ABI stable invoke_parallel function
-typedef void (*aoti_invoke_parallel_callback_t)(
-    int64_t begin,
-    int64_t end,
-    void* user_data);
+typedef void (*AOTIParallelLambda)(int64_t begin, int64_t end, void* ctx);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_invoke_parallel(
     int64_t begin,
     int64_t end,
     int64_t grain_size,
-    aoti_invoke_parallel_callback_t callback,
-    void* user_data);
+    AOTIParallelLambda lambda,
+    void* ctx);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_check_inf_and_nan(const char* tensor_name, AtenTensorHandle tensor);

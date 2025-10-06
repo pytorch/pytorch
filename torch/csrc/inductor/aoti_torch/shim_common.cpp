@@ -202,6 +202,21 @@ uint64_t aoti_torch_abi_version() {
 }
 #endif // C10_MOBILE
 
+// Check if PyTorch was compiled with intra-op parallelism support.
+// This function works because shim_common.cpp includes ATen/Parallel.h, which
+// in turn includes:
+// - ATen/ParallelNative.h (if AT_PARALLEL_NATIVE=1) -> defines
+// INTRA_OP_PARALLEL
+// - ATen/ParallelOpenMP.h (if AT_PARALLEL_OPENMP=1 and _OPENMP is available) ->
+// defines INTRA_OP_PARALLEL
+bool aoti_torch_get_intra_op_parallel_enabled() {
+#ifdef INTRA_OP_PARALLEL
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
 }
@@ -1445,19 +1460,16 @@ AOTITorchError aoti_torch_invoke_parallel(
     int64_t begin,
     int64_t end,
     int64_t grain_size,
-    aoti_invoke_parallel_callback_t callback,
-    void* user_data) {
+    AOTIParallelLambda lambda,
+    void* ctx) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    // Create a lambda that calls the callback with user data
-    // This matches the original parallel_for implementation which sets
-    // ParallelGuard in the callback
-    auto f = [callback, user_data](int64_t begin, int64_t end) {
-      c10::ParallelGuard guard(true);
-      callback(begin, end, user_data);
+    // Wrap the lambda+ctx pair into a callable object for invoke_parallel
+    auto wrapper = [lambda, ctx](int64_t chunk_begin, int64_t chunk_end) {
+      lambda(chunk_begin, chunk_end, ctx);
     };
 
-    // Call the original at::internal::invoke_parallel with this lambda
-    at::internal::invoke_parallel(begin, end, grain_size, f);
+    // Call PyTorch internal invoke_parallel with the wrapper
+    at::internal::invoke_parallel(begin, end, grain_size, wrapper);
   });
 }
 
