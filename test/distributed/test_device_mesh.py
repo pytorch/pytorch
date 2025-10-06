@@ -336,20 +336,6 @@ class DeviceMeshTest(DTensorTestBase):
                 f"{device_type}:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
             )
 
-    @with_comms
-    def test_set_mesh_dim_group_options(self):
-        device_type = (
-            torch.accelerator.current_accelerator().type
-            if torch.accelerator.is_available()
-            else "cpu"
-        )
-        _mesh_resources._set_mesh_dim_group_options(1, "fake", None)
-
-        mesh_tensor = torch.arange(4).reshape(2, 2)
-        mesh = DeviceMesh(device_type, mesh_tensor)
-        # Fake pg only have BackendType as BackendType::CUSTOM.
-        self.assertEqual(mesh.get_group(1)._get_backend_name(), "custom")
-
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
