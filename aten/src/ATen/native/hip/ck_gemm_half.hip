@@ -605,10 +605,10 @@ void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
     "gfx1150", "gfx1151"
 #endif
   };
-  if (at::detail::getCUDAHooks().isGPUArch(archs)) {
+  if (at::detail::getCUDAHooks().isGPUArch(wmma_archs)) {
     dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGS(at::Half));
   }
-  else if (at::detail::getCUDAHooks().isGPUArch("gfx9")) {
+  else if (at::detail::getCUDAHooks().isGPUArch({"gfx9"})) {
     dispatch_half_gemm(CUDABLAS_GEMM_ARGS(at::Half));
   }
   else {
