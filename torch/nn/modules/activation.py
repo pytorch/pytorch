@@ -1087,6 +1087,9 @@ def _is_make_fx_tracing():
 
 
 def _is_exporting():
+    # More details at https://github.com/pytorch/pytorch/issues/164062
+
+    # The weird code is because of TorchScript not returning early on `and` conditions.
     if not torch.jit.is_scripting():
         return torch.compiler.is_exporting()
     return False
