@@ -2719,6 +2719,7 @@ from torch import fx as fx
 torch.backends.mps._init()
 
 from torch import compiler as compiler
+from torch import compiler2 as compiler2
 
 
 class _TritonLibrary:
