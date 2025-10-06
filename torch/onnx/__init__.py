@@ -36,10 +36,10 @@ from ._internal.torchscript_exporter._type_utils import (
     JitScalarType,  # Deprecated members that are excluded from __all__
 )
 
-# pyrefly: ignore  # deprecated; pyrefly
+
 from ._internal.torchscript_exporter.utils import (  # Deprecated members that are excluded from __all__
     register_custom_op_symbolic,
-    select_model_mode_for_export,
+    select_model_mode_for_export,  # pyrefly: ignore  # deprecated
     unregister_custom_op_symbolic,
 )
 from .errors import OnnxExporterError
