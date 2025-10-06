@@ -62,20 +62,21 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     const int mat_a_dim = mat_a.dim();
     const int mat_b_dim = mat_b.dim();
 
-    auto offs_accessor = offs->accessor<int, 1>();
-    int num_groups = offs_accessor.size(0);
     const char* a_ptr_base = reinterpret_cast<const char*>(mat_a.data_ptr());
     const char* b_ptr_base = reinterpret_cast<const char*>(mat_b.data_ptr());
     char* out_ptr_base = reinterpret_cast<char*>(out.data_ptr());
-    const int M = mat_a.size(0); // number of rows in A
-    const int N = mat_b.size(1); // number of columns in B
-    const int K = mat_a.size(1); // columns in A == rows in B
     const size_t a_element_size = mat_a.element_size();
     const size_t b_element_size = mat_b.element_size();
     const size_t out_element_size = out.element_size();
 
     // for each group, calculate m,n,k,lda,ldb,ldc and A,B,out pointer base addresses.
     if (mat_a_dim == 2 && mat_b_dim == 2) {
+        // 2D*2D case requires offset tensor
+        auto offs_accessor = offs->accessor<int, 1>();
+        int num_groups = offs_accessor.size(0);
+        const int M = mat_a.size(0); // number of rows in A
+        const int N = mat_b.size(1); // number of columns in B
+        const int K = mat_a.size(1); // columns in A == rows in B
         // for 2d*2d input, output is 3d.
         // for each group, A columns (K) are sliced. M and N dimensions are not sliced.
         for (int i = 0; i < num_groups; ++i) {
@@ -131,6 +132,10 @@ void launch_grouped_bgemm_ck_impl_dispatch(
             p_e_ptrs.push_back(group_e_ptr);
         }
     } else if (mat_a_dim == 2 && mat_b_dim == 3) {
+        // 2D*3D case requires offset tensor
+        auto offs_accessor = offs->accessor<int, 1>();
+        int num_groups = offs_accessor.size(0);
+        
         // 2d*3d input, output is 2d.
         // A: [m * n_groups, k], B: [n_groups, n, k] or [n_groups, k, n], Output: [m * n_groups, n]
         // Offset divides M dimension (rows of A), each group gets different rows of A and different batch of B
@@ -207,6 +212,82 @@ void launch_grouped_bgemm_ck_impl_dispatch(
             p_b_ptrs.push_back(group_b_ptr);
             p_e_ptrs.push_back(group_e_ptr);
         }
+    } else if (mat_a_dim == 3 && mat_b_dim == 3) {
+        // 3d*3d input, output is 3d - batched matrix multiplication
+        // A: [batch, m, k], B: [batch, k, n] or [batch, n, k] (depending on transpose), Output: [batch, m, n]
+        // Each batch is processed as a separate GEMM operation
+        const int batch_size = mat_a.size(0);
+        const int M = mat_a.size(1); // rows in each A matrix
+        const int K = mat_a.size(2); // columns in A == rows in B (or columns if B is transposed)
+        
+        // Determine N from B tensor - it could be B.size(1) or B.size(2) depending on layout
+        int N;
+        if (mat_b.size(1) == K) {
+            // B is [batch, k, n] - normal layout
+            N = mat_b.size(2);
+        } else if (mat_b.size(2) == K) {
+            // B is [batch, n, k] - transposed layout  
+            N = mat_b.size(1);
+        } else {
+            TORCH_CHECK(false, "CK Group GEMM 3D-3D: B tensor dimensions incompatible with A. A=[", 
+                       batch_size, ",", M, ",", K, "], B=[", mat_b.size(0), ",", mat_b.size(1), ",", mat_b.size(2), "]");
+        }
+                
+        for (int i = 0; i < batch_size; ++i) {
+            // Select A batch for group i: A[i, :, :]
+            const void* group_a_ptr = a_ptr_base + i * mat_a.stride(0) * a_element_size;
+            
+            // Select B batch for group i: B[i, :, :]
+            const void* group_b_ptr = b_ptr_base + i * mat_b.stride(0) * b_element_size;
+            
+            // Select output batch for group i: Output[i, :, :]
+            void* group_e_ptr = out_ptr_base + i * out.stride(0) * out_element_size;
+            
+            int lda, ldb, ldc;
+            
+            if (std::is_same<ALayout, ck::tensor_layout::gemm::RowMajor>::value) {
+                // Row-major A: leading dimension = distance between rows = stride(1)
+                lda = mat_a.stride(1);
+            } else {
+                // Column-major A: leading dimension = distance between columns = stride(2)
+                lda = mat_a.stride(2);
+            }
+            
+            if (std::is_same<BLayout, ck::tensor_layout::gemm::RowMajor>::value) {
+                // Row-major B: leading dimension = distance between rows
+                if (mat_b.size(1) == K) {
+                    // B is [batch, k, n] - normal layout
+                    ldb = mat_b.stride(1); // stride between K rows
+                } else {
+                    // B is [batch, n, k] - transposed layout, treat as [k, n] for GEMM
+                    ldb = mat_b.stride(2); // stride between N rows (since we're accessing as [k,n])
+                }
+            } else {
+                // Column-major B: leading dimension = distance between columns
+                if (mat_b.size(1) == K) {
+                    // B is [batch, k, n] - normal layout
+                    ldb = mat_b.stride(2); // stride between N columns
+                } else {
+                    // B is [batch, n, k] - transposed layout
+                    ldb = mat_b.stride(1); // stride between K columns (since we're accessing as [n,k]→[k,n])
+                }
+            }
+            
+            // Output is typically row-major: leading dimension = distance between rows = stride(1)
+            ldc = out.stride(1);
+            
+            gemm_descs.push_back({
+                static_cast<ck::index_t>(M),
+                static_cast<ck::index_t>(N),
+                static_cast<ck::index_t>(K),
+                static_cast<ck::index_t>(lda),
+                static_cast<ck::index_t>(ldb),
+                static_cast<ck::index_t>(ldc)
+            });
+            p_a_ptrs.push_back(group_a_ptr);
+            p_b_ptrs.push_back(group_b_ptr);
+            p_e_ptrs.push_back(group_e_ptr);
+        }
     } else {
         TORCH_CHECK(false, "CK Group GEMM: Unsupported dimensions, mat A dim is ", mat_a_dim, "mat B dim is ", mat_b_dim);
     }
@@ -249,8 +330,8 @@ void group_gemm_ck(
     const std::optional<at::Tensor>& /*bias*/,
     at::Tensor& out)
 {
-    bool a_row_major = mat_a.stride(1) == 1;
-    // For 3D B tensor [batch, dim1, dim2], check if the last dimension is contiguous
+    // For 3D tensors, check the last dimension stride for row-major detection
+    bool a_row_major = (mat_a.dim() == 3) ? (mat_a.stride(2) == 1) : (mat_a.stride(1) == 1);
     bool b_row_major = (mat_b.dim() == 3) ? (mat_b.stride(2) == 1) : (mat_b.stride(1) == 1);
 
     if (mat_a.dtype() == at::kBFloat16) {
