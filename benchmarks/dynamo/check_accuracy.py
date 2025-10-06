@@ -80,7 +80,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "timm_vovnet",
                 "torchrec_dlrm",
                 "vgg16",
-                "dla102",
                 # LLM
                 "meta-llama/Llama-3.2-1B",
                 "google/gemma-2-2b",
