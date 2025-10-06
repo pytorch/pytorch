@@ -649,18 +649,6 @@ class DTensorRedistributePlanner:
         return "->".join([str(s) for s in state_list])
 
 
-def _is_default_device_order(shard_order: TensorDimTuple) -> bool:
-    """
-    Check if the device order is the default left-to-right order.
-    """
-    for tensor_dim_and_mesh_dims in shard_order:
-        tensor_dim, *mesh_dims = tensor_dim_and_mesh_dims
-        is_increasing = all(prev < nxt for prev, nxt in zip(mesh_dims, mesh_dims[1:]))
-        if not is_increasing:
-            return False
-    return True
-
-
 def _gen_transform_infos_non_cached(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
@@ -671,7 +659,8 @@ def _gen_transform_infos_non_cached(
     dst_shard_order = dst_spec.shard_order
     assert src_shard_order is not None and dst_shard_order is not None
     if all(
-        _is_default_device_order(order) for order in (src_shard_order, dst_shard_order)
+        DTensorSpec.is_default_device_order(order)
+        for order in (src_shard_order, dst_shard_order)
     ):
         use_greedy_transform = True
     else:
