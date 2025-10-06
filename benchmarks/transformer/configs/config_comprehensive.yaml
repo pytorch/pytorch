@@ -26,3 +26,4 @@ kv_size: null
 # Metrics and output
 throughput: true  # Calculate memory bandwidth & TFLOPS
 save_path: "comprehensive_results.csv"  # Save to CSV
+output_json_for_dashboard: "attn_bench_comp.json"

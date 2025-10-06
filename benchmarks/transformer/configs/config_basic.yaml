@@ -25,7 +25,6 @@ kv_size: null  # Use batch sizes instead
 
 # Metrics and output
 throughput: true  # Always calculate TBS and TFLOPs
-show_speedups: false  # Show speedup calculations
 save_path: null  # No CSV output
 
 # Uncomment to change
@@ -35,3 +34,4 @@ save_path: null  # No CSV output
 #     BLOCK_N: 128
 #     num_warps: 8
 #     num_stages: 2
+output_json_for_dashboard: "attn_bench_basic.json"
