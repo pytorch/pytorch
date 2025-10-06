@@ -18,11 +18,11 @@ from torch.distributed.tensor.experimental._attention import (
     _cp_options,
     _DispatchMode,
     _is_causal_behavior,
+    _LoadBalancer,
+    _PerDocumentHeadTailLoadBalancer,
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
-    LoadBalancer,
-    PerDocumentHeadTailLoadBalancer,
     set_rotate_method,
 )
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -387,7 +387,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         qkv_size: int,
         B: int = 1,
         mask_func: _mask_mod_signature = causal_mask,
-        lb: Optional[LoadBalancer] = None,
+        lb: Optional[_LoadBalancer] = None,
         atol: float = 1e-6,
         rtol: float = 1e-2,
     ) -> None:
@@ -616,7 +616,7 @@ class CPFlexAttentionTest(DTensorTestBase):
 
             # generate load balancer
             load_balancer = (
-                PerDocumentHeadTailLoadBalancer(
+                _PerDocumentHeadTailLoadBalancer(
                     lengths, self.world_size, torch.device(self.device_type)
                 )
                 if enable_load_balance

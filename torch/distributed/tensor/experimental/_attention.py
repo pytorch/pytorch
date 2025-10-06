@@ -72,9 +72,10 @@ class _ContextParallelGlobalVars:
 _cp_global_vars = _ContextParallelGlobalVars()
 
 
-class LoadBalancer(ABC):
+# make it private since it's still a prototype
+class _LoadBalancer(ABC):
     @abstractmethod
-    def generate_indices(self, restore: bool = False) -> Optional[torch.Tensor]:
+    def _generate_indices(self, restore: bool = False) -> Optional[torch.Tensor]:
         """
         Generate indices for load balancing.
         Args:
@@ -132,18 +133,7 @@ class LoadBalancer(ABC):
         """
 
 
-class _DummyLoadBalancer(LoadBalancer):
-    def __init__(self) -> None:
-        pass
-
-    def generate_indices(self, restore: bool = False) -> Optional[torch.Tensor]:
-        """
-        Returns `None` to express no-load-balancing.
-        """
-        return None
-
-
-class HeadTailLoadBalancer(LoadBalancer):
+class _HeadTailLoadBalancer(_LoadBalancer):
     def __init__(
         self, seq_length: int, world_size: int, device: Union[str, torch.device]
     ):
@@ -151,7 +141,7 @@ class HeadTailLoadBalancer(LoadBalancer):
         self.world_size = world_size
         self.device = device
 
-    def generate_indices(self, restore: bool = False) -> torch.Tensor:
+    def _generate_indices(self, restore: bool = False) -> torch.Tensor:
         """
         Generate head-and-tail load balancing indices or restore indices.
         Args:
@@ -239,7 +229,7 @@ class HeadTailLoadBalancer(LoadBalancer):
         return all_indices_tensor
 
 
-class PerDocumentHeadTailLoadBalancer(LoadBalancer):
+class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
     def __init__(
         self,
         seq_length_per_doc: Union[list[int], list[list[int]]],
@@ -250,7 +240,7 @@ class PerDocumentHeadTailLoadBalancer(LoadBalancer):
         self.world_size = world_size
         self.device = device
 
-    def generate_indices(self, restore: bool = False) -> torch.Tensor:
+    def _generate_indices(self, restore: bool = False) -> torch.Tensor:
         """
         Generate the per-document head-and-tail rearrange indices so that after rearranging
         the input is load-balanced in per-document head-and-tail style.
@@ -366,11 +356,11 @@ class PerDocumentHeadTailLoadBalancer(LoadBalancer):
 
 def _create_default_load_balancer(
     seq_length: int, world_size: int, device: Union[str, torch.device]
-) -> LoadBalancer:
+) -> Optional[_LoadBalancer]:
     if _cp_options.enable_load_balance:
-        return HeadTailLoadBalancer(seq_length, world_size, device)
+        return _HeadTailLoadBalancer(seq_length, world_size, device)
     else:
-        return _DummyLoadBalancer()
+        return None
 
 
 def _set_cp_global_var(name: str, value: Any) -> None:
@@ -1432,56 +1422,33 @@ def _context_parallel_dispatcher(
         raise NotImplementedError("torch dispatch mode is not supported yet.")
 
 
-def _generate_round_robin_indices(
-    seq_length: int,
-    cp_world_size: int,
-    device: torch.device,
-    restore: bool = False,
-) -> torch.Tensor:
-    """
-    Generate round-robin load balancing indices or restore indices.
-    Args:
-        seq_length: Total sequence length
-        cp_world_size: Context parallel world size
-        device: Device to place the tensor on
-        restore: If True, generate restore indices that map round-robin rearranged
-                positions back to original positions. If False, generate load
-                balance indices that rearrange original positions to round-robin pattern.
-    Returns:
-        Index tensor of shape (seq_length,) with the requested mapping.
-    """
-    assert seq_length % (cp_world_size * 2) == 0
-    chunk_size = seq_length // (cp_world_size * 2)
-    all_indices = []
-
-    for cp_rank in range(cp_world_size):
-        # Generate indices for first chunk of the cp rank
-        first_chunk_start = cp_rank * chunk_size
-        first_chunk_indices = list(
-            range(first_chunk_start, first_chunk_start + chunk_size)
-        )
-
-        # Second chunk: positions from the complementary chunk
-        second_chunk_idx = cp_world_size * 2 - cp_rank - 1
-        second_chunk_start = second_chunk_idx * chunk_size
-        second_chunk_indices = list(
-            range(second_chunk_start, second_chunk_start + chunk_size)
-        )
-        # combine the indices for this rank
-        all_indices.extend(first_chunk_indices + second_chunk_indices)
-    all_indices_tensor = torch.tensor(all_indices, dtype=torch.int, device=device)
-    if restore:
-        all_indices_tensor = torch.argsort(all_indices_tensor)
-    return all_indices_tensor
-
-
 def _context_parallel_buffers(
     mesh: DeviceMesh,
     buffers: list[torch.Tensor],
     buffer_seq_dims: list[int],
-    load_balance_indices: Optional[torch.Tensor] = None,
+    load_balancer: Optional[_LoadBalancer] = None,
 ) -> list[torch.Tensor]:
-    """Shard the buffers along the sequence dimensions according to CP rules."""
+    """
+    Shard the buffers along the sequence dimensions according to CP rules.
+    Args:
+        mesh (:class:`DeviceMesh`): the device mesh for the context parallelism.
+        buffers (List[torch.Tensor]): the buffers to be sharded.
+        seq_dims (List[int]): the sequence dimensions of ``buffers``. This list
+            must have the same length as ``buffers``.
+        load_balancer (Optional[:class:`_Loadbalancer`]): an optional `_LoadBalancer`
+            object. If this argument is `None`, it means the `buffers` needs no
+            rearrangement before being sharded. If this argument is a `_LoadBalancer`
+            object, call its `_generate_indices(restore=False)` to generate the
+            rearrange indices such that each shard of `buffer[rearrange_idx]` is
+            well-balanced (i.e. having close sparsities).
+
+    Returns:
+        List[torch.Tensor]: the sharded buffers.
+    """
+    # generate the index tensor for rearranging the buffer if a load-balance
+    # is available
+    load_balance_indices = load_balancer._generate_indices() if load_balancer else None
+
     new_buffers = []
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if load_balance_indices is not None:
@@ -1520,7 +1487,6 @@ def context_parallel(
     buffers: Optional[list[torch.Tensor]] = None,
     buffer_seq_dims: Optional[list[int]] = None,
     no_restore_buffers: Optional[set[torch.Tensor]] = None,
-    load_balancer: Optional[LoadBalancer] = None,
 ) -> Generator[None, None, None]:
     """
 
@@ -1546,7 +1512,6 @@ def context_parallel(
             won't be restored after the context exits. This set must be a subset
             of ``buffers``. If the buffers won't be used after the context exits,
             these buffers can be put in this list to avoid extra restore time.
-        @TODO: add load_balancer
 
     .. warning::
         `torch.distributed.tensor.experimental.context_parallel` is a
@@ -1572,19 +1537,13 @@ def context_parallel(
     seq_length = buffers[0].shape[buffer_seq_dims[0]]
     cp_world_size = mesh.size()
 
-    # If users don't pass in a `load_balancer`:
-    # - if `enable_load_balance` is True, we use the default round-robin
-    #   load balancer.
-    # - if `enable_load_balance` is False, we don't do any load balancing
-    #   by passing in `None` as `load_balance_indices`.
-    load_balancer = load_balancer or _create_default_load_balancer(
-        seq_length, cp_world_size, device
-    )
-    load_balance_indices = load_balancer.generate_indices(restore=False)
+    # If `enable_load_balance` is True, the default Head-tail load balancer
+    # (:class:`_HeadTailLoadBalancer`) is used to rearrange the buffers before
+    # sharding. Otherwise, we don't do any load-balance rearrange by passing
+    # `None` to `_context_parallel_shard()`.
+    load_balancer = _create_default_load_balancer(seq_length, cp_world_size, device)
+    shards = _context_parallel_buffers(mesh, buffers, buffer_seq_dims, load_balancer)
 
-    shards = _context_parallel_buffers(
-        mesh, buffers, buffer_seq_dims, load_balance_indices
-    )
     for buffer, shard in zip(buffers, shards):
         shard = shard.clone()
         buffer.resize_(shard.shape)
@@ -1604,7 +1563,7 @@ def context_parallel_unshard(
     mesh: DeviceMesh,
     buffers: list[torch.Tensor],
     seq_dims: list[int],
-    load_balancer: Optional[LoadBalancer] = None,
+    load_balancer: Optional[_LoadBalancer] = None,
 ) -> list[torch.Tensor]:
     """
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.
@@ -1614,7 +1573,12 @@ def context_parallel_unshard(
         buffers (List[torch.Tensor]): the buffers to be unsharded.
         seq_dims (List[int]): the sequence dimensions of ``buffers``. This list
             must have the same length as ``buffers``.
-        @TODO: add load_balancer
+        load_balancer (Optional[:class:`_Loadbalancer`]): an optional `_LoadBalancer`
+            object. If this argument is `None`, it means the `buffers` were not
+            rearranged when being sharded and there's no need to put it back to order
+            after unsharding. If this argument is a `_LoadBalancer` object, call
+            its `_generate_indices(restore=True)` to generate the restore indices such
+            that `unsharded[restore_idx]` is the original buffer.
 
     Returns:
         List[torch.Tensor]: the unsharded buffers.
@@ -1631,7 +1595,9 @@ def context_parallel_unshard(
     load_balancer = load_balancer or _create_default_load_balancer(
         seq_length, cp_world_size, device
     )
-    restore_indices = load_balancer.generate_indices(restore=True)
+    restore_indices = (
+        load_balancer._generate_indices(restore=True) if load_balancer else None
+    )
 
     unsharded_buffers = []
     for b, dim in zip(buffers, seq_dims):
@@ -1693,7 +1659,7 @@ def create_cp_block_mask(
     Q_LEN: int,
     KV_LEN: int,
     device_mesh: DeviceMesh,
-    load_balancer: Optional[LoadBalancer] = None,
+    load_balancer: Optional[_LoadBalancer] = None,
 ) -> BlockMask:
     """
     This API creates a special BlockMask for Context Parallel FlexAttention:
@@ -1711,7 +1677,7 @@ def create_cp_block_mask(
         Q_LEN (int): Sequence length of query (global view).
         KV_LEN (int): Sequence length of key/value (global view).
         device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
-        load_balancer (optional[:class:`LoadBalancer`]): The load-balancer used to rearrange
+        load_balancer (optional[:class:`_LoadBalancer`]): The load-balancer used to rearrange
             QKV before sharding. This will be used to modify the block_mask generated.
 
     Return:
@@ -1776,6 +1742,10 @@ def create_cp_block_mask(
     )
     Q_SHARD_LEN = Q_LEN // cp_group_size
     block_size = _DEFAULT_SPARSE_BLOCK_SIZE
+
+    rearrange_indices = (
+        load_balancer._generate_indices(restore=False) if load_balancer else None
+    )
     block_mask = compiled_create_block_mask(
         _rewrite_mask_mod(
             mask_mod,
@@ -1783,7 +1753,7 @@ def create_cp_block_mask(
             cp_group_size,
             block_size,
             Q_SHARD_LEN,
-            qkv_rearrange_indices=load_balancer.generate_indices(restore=False),
+            qkv_rearrange_indices=rearrange_indices,
         ),
         B,
         H,
