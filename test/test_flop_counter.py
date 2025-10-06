@@ -13,13 +13,11 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-)
-from torch.testing._internal.common_device_type import (
-    e4m3_type,
 )
 
 
