@@ -114,6 +114,7 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     if len(a) != len(b):
         return False
 
+    # pyrefly: ignore  # bad-assignment
     for x, y in zip(a, b):
         if allow_rhs_unbacked:
             if isinstance(y, torch.SymInt):
@@ -307,7 +308,10 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         guard_size_oblivious,
     )
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
+    def eval_eager(x):
+        return bool(x)
+
+    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
 
     if maybe_guard_or_false(a.numel() < 2):
         return True
@@ -390,7 +394,11 @@ def validate_memory_format(memory_format: torch.memory_format):
 
 
 def is_contiguous_for_memory_format(  # type: ignore[return]
-    a: Tensor, *, memory_format: torch.memory_format, false_if_dde=False
+    a: Tensor,
+    *,
+    memory_format: torch.memory_format,
+    false_if_dde=False,
+    # pyrefly: ignore  # bad-return
 ) -> bool:
     validate_memory_format(memory_format)
 
@@ -811,12 +819,16 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 # mapping negative offsets to positive ones
 @overload
 def canonicalize_dims(
-    rank: int, indices: Sequence[int], wrap_scalar: bool = True
+    rank: int,
+    indices: Sequence[int],
+    wrap_scalar: bool = True,
+    # pyrefly: ignore  # bad-return
 ) -> tuple[int, ...]:
     pass
 
 
 @overload
+# pyrefly: ignore  # bad-return
 def canonicalize_dims(rank: int, indices: int, wrap_scalar: bool = True) -> int:
     pass
 
@@ -863,6 +875,7 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
 
     # Note: cannot initialize device to the first arg's device (it may not have one)
     device = None
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -910,6 +923,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
     """
     shape = None
 
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -936,6 +950,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     shape = None
     scalar_shape = None
 
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -992,6 +1007,7 @@ def extract_shape_from_varargs(
 
     # Handles tuple unwrapping
     if len(shape) == 1 and isinstance(shape[0], Sequence):
+        # pyrefly: ignore  # bad-assignment
         shape = shape[0]
 
     if validate:
@@ -1293,6 +1309,7 @@ def get_higher_dtype(
 
         raise RuntimeError("Unexpected type given to _extract_dtype!")
 
+    # pyrefly: ignore  # bad-argument-type
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
@@ -1388,6 +1405,7 @@ def check_same_dtype(*args):
     full_dtype = None
     scalar_type = None
 
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             # Scalar type checking is disabled (and may be removed in the future)
@@ -1665,6 +1683,7 @@ def elementwise_dtypes(
         # Prefers dtype of tensors with one or more dimensions, then zero-dim tensors, then wrapped numbers
         # This follows the numpy type promotion rules.
         if one_plus_dim_tensor_dtype is not None:
+            # pyrefly: ignore  # bad-return
             return one_plus_dim_tensor_dtype
         
         if zero_dim_tensor_dtype is not None:
