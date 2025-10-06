@@ -786,6 +786,94 @@ graph():
         # instead of the scripted function, so we get x.sin()
         self.assertEqual(res, x.sin())
 
+    def test_nested_module_fake_tensor_leak(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self._tensor_cache = None
+
+            def forward(self, x):
+                if self._tensor_cache is None:
+                    self._tensor_cache = x + 2
+                return self._tensor_cache.sum() + x.sum()
+
+        class Foo(torch.nn.Module):
+            def __init__(self, bar):
+                super().__init__()
+                self.bar = bar
+
+            def forward(self, x):
+                return self.bar(x)
+
+        foo = Foo(Bar())
+        _ = export(foo, (torch.ones(4, 4),), strict=False)
+        self.assertTrue(foo.bar._tensor_cache is None)
+
+    def test_export_leak_compile(self):
+        class BaseModule(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                raise NotImplementedError
+
+        class CacheModule(BaseModule):
+            def __init__(self, cache: torch.Tensor):
+                super().__init__()
+                assert cache.ndim == 3
+                self.cache = torch.nn.Parameter(cache, requires_grad=False)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                n_tokens = x.size(1)
+                rolled_cache = torch.roll(self.cache.data, -n_tokens, dims=1)
+                rolled_cache[:, -n_tokens:, :] = x
+                self.cache.data = rolled_cache
+                return self.cache
+
+        class LinearBlock(torch.nn.Module):
+            def __init__(self, in_features, out_features, activation=None):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features)
+                self.activation = activation
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.activation(x) if self.activation else x
+
+        class MyModel(BaseModule):
+            def __init__(self):
+                super().__init__()
+                default_cache = torch.zeros(1, 10, 5)
+                self.cache_layer = CacheModule(default_cache)
+                self.fc1 = LinearBlock(5, 10, activation=torch.nn.ReLU())
+                self.fc2 = LinearBlock(10, 5)
+
+            def forward(self, x):
+                cached = self.cache_layer(x)
+                out = self.fc1(cached)
+                out = self.fc2(out)
+                return out
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "We found a fake tensor in the exported program constant's list. "
+            "This typically means our tracing system encountered an op that we can't trace through. "
+            "For the potential source, you can refer to following model attribute: cache_layer.lifted_tensor_0. "
+            "Please file an issue on github.",
+        ):
+            _ = export(MyModel(), (torch.randn(1, 3, 5),), strict=False)
+
+        with self.assertWarnsRegex(
+            UserWarning,
+            "We found a fake tensor in the exported program constant's list. "
+            "This typically means our tracing system encountered an op that we can't trace through. "
+            "For the potential source, you can refer to following model attribute: cache_layer.lifted_tensor_0. "
+            "Please file an issue on github.",
+        ):
+            # can't trigger all variant of export because later on it will crash
+            # and it is good because we warned :).
+            with torch._export.config.patch(error_on_lifted_constant_tensors=False):
+                _ = torch.export.export(
+                    MyModel(), (torch.randn(1, 3, 5),), strict=False
+                )
+
     def test_inline_script_class_method(self):
         class M(torch.nn.Module):
             @staticmethod
@@ -13843,9 +13931,9 @@ def forward(self, x):
                 self.bar = x.sum()
                 return x + 2
 
-        with self.assertRaisesRegex(
-            ValueError,
-            "During torch.export, following attrs were created in the model.forward:",
+        with self.assertWarnsRegex(
+            UserWarning,
+            "The tensor attribute self.bar was assigned during export",
         ):
             _ = export(Foo(), (torch.randn(4, 4),), strict=False)
 
