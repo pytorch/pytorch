@@ -686,9 +686,9 @@ class TestDTensorOps(DTensorOpTestBase):
             self.assertEqual(full_tensor, tensor.mean(dim=reduce_dim))
 
             if is_evenly_shardable:
-                self.assertTrue("[P] -> [R]" in debug_mode.debug_string())
+                self.assertTrue("P(avg)->R" in debug_mode.debug_string())
             else:
-                self.assertTrue("[S(0)] -> [R])" in debug_mode.debug_string())
+                self.assertTrue("S(0)[0]->R" in debug_mode.debug_string())
 
 
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)

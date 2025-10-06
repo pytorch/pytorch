@@ -27,6 +27,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.utils._debug_mode import DebugMode
 
 
 funcol = torch.ops.c10d_functional
@@ -746,6 +747,341 @@ class MultiDimRedistributeTest(DTensorTestBase):
             local_out_dt = out_dt.to_local()
             local_expected_dt = expected_dt.to_local()
             self.assertEqual(local_out_dt, local_expected_dt)
+
+
+class DeviceOrderRedistributeTest(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 8
+
+    @with_comms
+    def test_negative_dim_in_placements(self):
+        device_mesh = self.build_device_mesh()
+        input_tensor = torch.randn(8, 6, 5, device=self.device_type)
+        # Use negative dim in Shard placement
+        placements = [Shard(-1)]
+        dt = distribute_tensor(input_tensor, device_mesh, placements)
+        self.assertEqual(dt.placements[0].dim, 2)
+        dt2 = dt.redistribute(device_mesh, [Shard(-2)])
+        self.assertEqual(dt2.placements[0].dim, 1)
+        self.assertEqual(dt2.full_tensor(), input_tensor)
+
+    @with_comms
+    def test_negative_dim_in_shard_order(self):
+        mesh = init_device_mesh(self.device_type, (2, 4))
+        input_tensor = torch.randn(8, 6, 5, device=self.device_type)
+        shard_order = {-1: [0], -2: [1]}
+        dt = distribute_tensor(input_tensor, mesh, shard_order=shard_order)
+        self.assertEqual(dt.shard_order, ((1, 1), (2, 0)))
+        self.assertEqual(dt.full_tensor(), input_tensor)
+        shard_order = {2: [0], -2: [1]}
+        dt2 = dt.redistribute(mesh, shard_order=shard_order)
+        self.assertEqual(dt2.shard_order, ((1, 1), (2, 0)))
+
+    def _extract_redistribute_trace_from_debugmode(self, s: str) -> str:
+        import re
+
+        match = re.search(r"trace:\s*(.*)\)", s)
+        if match:
+            trace_str = match.group(1).rstrip(")")
+            return trace_str
+        else:
+            return ""
+
+    @with_comms
+    def test_ordered_redistribute(self):
+        """Test ordered redistribution with various sharding syntaxes"""
+        torch.manual_seed(21)
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "tp", "xp")
+        )
+        input_data = torch.randn((8, 8, 8), device=self.device_type)
+        sharding_src_dst_pairs_with_expected_trace = [
+            # without specifying the `shard_order`, it will trigger the default
+            # left-to-right device distribution
+            (
+                ([Shard(0), Shard(0), Shard(0)], None),
+                ([Replicate(), Shard(0), Shard(0)], None),
+            ),
+            # below placement is same as above with device order will be default
+            # to ["dp", "tp", "xp"], which is the same as [0,1,2].
+            (
+                (None, {0: ["dp", "tp", "xp"]}),
+                (None, {0: [1, 2]}),
+            ),
+            (
+                (None, {0: [1, 0, 2]}),
+                (None, {0: [1, 2]}),
+            ),
+            (
+                (None, {0: [1, 0, 2]}),
+                (None, {0: [0, 1]}),
+            ),
+            # If we use the graph search solution, the redistribution path will
+            # be S(0)[0, 1] -> S(0)[0]S(1)[1] -> S(1)[1] -> S(0)[2]S(1)[1],
+            # which takes only 1 comm count. However, this placement follows the
+            # default device order and the greedy solution will be triggered,
+            # which results in path: S(0)[0, 1] -> S(0)[0]S(1)[1] -> S(1)[1] ->
+            # S(0)[2]S(1)[1] with 2 comm count
+            (
+                (None, {0: ["dp", "tp"]}),
+                (None, {1: ["tp"], 0: [2]}),
+            ),
+        ]
+        for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
+            sharding_src_dst_pairs_with_expected_trace
+        ):
+            sharded_dt = distribute_tensor(
+                input_data.clone(), mesh, src_placement, shard_order=src_order
+            )
+            with DebugMode(record_torchfunction=False) as debug_mode:
+                out_dt = sharded_dt.redistribute(
+                    mesh, dst_placement, shard_order=dst_order
+                )
+            trace_str = self._extract_redistribute_trace_from_debugmode(
+                debug_mode.debug_string()
+            )
+            if idx == 0:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0, 1, 2]->S(0)[0, 1]->S(0)[0]->R*->S(0)[1]->S(0)[1, 2]""",
+                )
+            elif idx == 1:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0, 1, 2]->S(0)[0, 1]->S(0)[0]->R*->S(0)[1]->S(0)[1, 2]""",
+                )
+            elif idx == 2:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1, 0, 2]->S(0)[1, 0]S(1)[2]->S(0)[1]S(1)[2]->S(0)[1, 2]""",
+                )
+            elif idx == 3:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1, 0, 2]->S(0)[1, 0]->S(0)[1]S(1)[0]->S(1)[0]S(2)[1]->S(0)[0]S(2)[1]->S(0)[0, 1]""",
+                )
+            elif idx == 4:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0, 1]->S(0)[0]S(1)[1]->S(1)[1]->S(0)[2]S(1)[1]""",
+                )
+            expected_dt = distribute_tensor(
+                input_data.clone(), mesh, dst_placement, shard_order=dst_order
+            )
+            self.assertEqual(sharded_dt.full_tensor(), expected_dt.full_tensor())
+            local_out_dt = out_dt.to_local()
+            local_expected_dt = expected_dt.to_local()
+            self.assertEqual(local_out_dt, local_expected_dt)
+
+    def generate_shard_orders(self, mesh, tensor_rank):
+        # Generate all possible sharding placement of tensor with rank
+        # `tensor_rank` over mesh.
+        def _split_list(lst: list, N: int):
+            def compositions(n, k):
+                if k == 1:
+                    yield [n]
+                else:
+                    for i in range(1, n - k + 2):
+                        for tail in compositions(n - i, k - 1):
+                            yield [i] + tail
+
+            length = len(lst)
+            for comp in compositions(length, N):
+                result = []
+                start = 0
+                for size in comp:
+                    result.append(lst[start : start + size])
+                    start += size
+                yield result
+
+        all_mesh = list(range(mesh.ndim))
+        all_device_order = list(itertools.permutations(all_mesh))
+        for device_order in all_device_order:
+            # split on device orders, and assign each device order segment to a tensor dim
+            for num_split in range(1, mesh.ndim + 1):
+                # possible_splits = np.array_split(device_order, num_split)
+                for splitted_list in _split_list(list(range(mesh.ndim)), num_split):
+                    for tensor_dims in itertools.combinations(
+                        range(tensor_rank), len(splitted_list)
+                    ):
+                        shard_order = {}
+                        assert len(tensor_dims) == len(splitted_list)
+                        for tensor_dim, mesh_dims in zip(tensor_dims, splitted_list):
+                            shard_order[tensor_dim] = device_order[
+                                mesh_dims[0] : mesh_dims[-1] + 1
+                            ]
+                        yield shard_order
+
+    @with_comms
+    def test_generate_shard_orders(self):
+        """Check if `generate_shard_orders` generates unique sharding combinations"""
+        import math
+
+        test_inputs = [
+            {"mesh": init_device_mesh(self.device_type, (2, 2, 2)), "tensor_rank": 2},
+            {"mesh": init_device_mesh(self.device_type, (2, 2, 2)), "tensor_rank": 3},
+            {"mesh": init_device_mesh(self.device_type, (2, 2, 2)), "tensor_rank": 4},
+        ]
+        for test_input in test_inputs:
+            all_combinations = []
+            for shard_order in self.generate_shard_orders(
+                test_input["mesh"], test_input["tensor_rank"]
+            ):
+                all_combinations.append(shard_order)  # noqa: PERF402
+            for i in range(len(all_combinations)):
+                for j in range(i + 1, len(all_combinations)):
+                    assert all_combinations[i] != all_combinations[j], (
+                        f"Duplicate elements found in all_combinations {all_combinations[i]}, {all_combinations[j]}"
+                    )
+            expected_total_combination = 0
+            N = test_input["mesh"].ndim
+            M = test_input["tensor_rank"]
+            for i in range(1, N + 1):
+                # assign total i split of device to tensor dims
+                if M < i:
+                    continue
+                device_combination_count = math.comb(
+                    N - 1, i - 1
+                )  # choose i-1 non-empty segments from a list of size N
+                tensor_dim_order_permutation = math.comb(M, i)  # choose i tensor dims
+                expected_total_combination += (
+                    device_combination_count * tensor_dim_order_permutation
+                )
+            # multiple by total possible permutation of device order
+            expected_total_combination *= math.factorial(N)
+            self.assertEqual(len(all_combinations), expected_total_combination)
+
+    @with_comms
+    def test_ordered_distribute_all_combination(self):
+        """Exhaustively test all possible sharding combinations and verify correctness"""
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_tensor_shape = [
+            # even sharding
+            (16, 8),
+            (8, 16, 32),
+            (8, 32, 16, 16),
+            # uneven sharding with padding
+            (17, 5),
+            (13, 2, 13),
+            (33, 16, 8, 1),
+        ]
+
+        # 1. Verify correctness of distribute_tensor from Tensor to DTensor.
+        for tensor_shape in input_tensor_shape:
+            input_data = torch.randn(tensor_shape, device=self.device_type)
+            tensor_rank = input_data.ndim
+            for shard_order in self.generate_shard_orders(mesh, tensor_rank):
+                sharded_dt = distribute_tensor(
+                    input_data.clone(), mesh, shard_order=shard_order
+                )
+                self.assertEqual(sharded_dt.full_tensor(), input_data)
+
+        # 2. Verify the correctness of redistribution from DTensor to DTensor.
+        # This test repeatedly redistributes a DTensor to various ordered
+        # placements and checks that the resulting tensor matches the original
+        # full tensor.
+        for tensor_shape in input_tensor_shape:
+            input_data = torch.randn(tensor_shape, device=self.device_type)
+            tensor_rank = input_data.ndim
+            prev_sharded_dt = None
+            for shard_order in self.generate_shard_orders(mesh, tensor_rank):
+                if prev_sharded_dt is None:
+                    prev_sharded_dt = distribute_tensor(
+                        input_data.clone(), mesh, shard_order=shard_order
+                    )
+                else:
+                    sharded_dt = prev_sharded_dt.redistribute(
+                        mesh, shard_order=shard_order
+                    )
+                    self.assertEqual(sharded_dt.full_tensor(), input_data)
+                    prev_sharded_dt = sharded_dt
+
+    @with_comms
+    def test_ordered_redistribute_with_partial(self):
+        """Test mixing Partial in the original placements and do redistribute."""
+        # This test takes 123s to complete on 8XA100...
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_tensor_shape = [
+            # even sharding
+            (16, 8),
+            (8, 16, 32),
+            (8, 32, 16, 16),
+            # uneven sharding with padding
+            (17, 5),
+            (13, 2, 13),
+            (33, 16, 8, 1),
+        ]
+        placement_choice = [
+            Shard(0),
+            Shard(1),
+            Shard(2),
+            Partial("sum"),
+            Partial("min"),
+            Replicate(),
+        ]
+        # pick 3 for the 3D mesh
+        partial_placement_comb = list(itertools.combinations(placement_choice, 3))
+
+        def _is_valid_placement(placements, tensor_rank):
+            # Check if placements is valid for tensor with rank `tensor_rank`
+            for placement in placements:
+                if isinstance(placement, Shard):
+                    if placement.dim >= tensor_rank:
+                        return False
+            return True
+
+        for shape in input_tensor_shape:
+            for placements in partial_placement_comb:
+                if not _is_valid_placement(placements, len(shape)):
+                    continue
+                local_tensor = torch.randn(shape, device=self.device_type)
+                full_tensor = DTensor.from_local(local_tensor, mesh, placements)
+                for shard_order in self.generate_shard_orders(mesh, len(shape)):
+                    sharded_dt = full_tensor.redistribute(mesh, shard_order=shard_order)
+                    self.assertEqual(
+                        sharded_dt.full_tensor(), full_tensor.full_tensor()
+                    )
+
+    @with_comms
+    def test_ordered_redistribute_with_backward(self):
+        """Test mixing Partial in the original placements and do redistribute."""
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        x_tensor_shape = (16, 32)
+        w_tensor_shape = (32, 16)
+        # TODO(zpcore): we should pass the test for any shard orders from
+        # generate_shard_orders(). However this will fail because we haven't
+        # supported DTensor dispatcher to correctly 1) redistribute when shard
+        # order is different between args. 2) propagate shard order through
+        # tensor ops.
+        shard_order_list = [
+            {0: [], 1: [1]},
+            {0: [], 1: [0, 1]},
+            {0: [], 1: [0, 1, 2]},
+            {0: [0, 1, 2]},
+            # {0: [0, 2, 1]},  # this fails for now because output_dt.sum() will drop shard order.
+        ]
+        # for shard_order in self.generate_shard_orders(mesh, len(x_tensor_shape)):
+        for shard_order in shard_order_list:
+            x = torch.randn(x_tensor_shape, device=self.device_type, requires_grad=True)
+            w = torch.randn(w_tensor_shape, device=self.device_type, requires_grad=True)
+            # backward with full tensor
+            output = torch.mm(x, w)
+            loss = output.sum()
+            loss.backward()
+            # NB: for now, we MUST force using the same `shard_order`` for all tensors, until
+            # we update the sharding strategy to handle ops with different `shard_order`.
+            x_dt = distribute_tensor(x, mesh, shard_order=shard_order)
+            w_dt = distribute_tensor(w, mesh, shard_order=shard_order)
+            # backward with sharded tensor
+            output_dt = torch.mm(x_dt, w_dt)
+            loss_dt = output_dt.sum()
+            loss_dt.backward()
+            for var, var_dt in [(x, x_dt), (w, w_dt)]:
+                self.assertEqual(var_dt.full_tensor(), var)
+                self.assertEqual(var_dt.grad.full_tensor(), var.grad)
 
 
 if __name__ == "__main__":
