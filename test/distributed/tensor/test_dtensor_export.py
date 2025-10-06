@@ -39,6 +39,18 @@ class SimpleModel(torch.nn.Module):
         return self.mlp_1(self.mlp_0(input))
 
 
+class SimpleModelDynamicShapes(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.mlp_0 = MLPModule(device)
+        self.mlp_1 = MLPModule(device)
+
+    def forward(self, input):
+        if input.shape[0] > 4:
+            return self.mlp_0(input.sin())
+        return self.mlp_1(input.cos())
+
+
 class SimpleModelAnnotated(torch.nn.Module):
     def __init__(self, device):
         super().__init__()
@@ -281,6 +293,45 @@ class DTensorExportTest(TestCase):
 
     def test_annotate_aot_export_joint_with_descriptors_alone(self):
         self._run_test(aot_export_joint_with_descriptors_alone, True)
+
+    def test_dynamic_shapes(self):
+        dp_degree = 2
+        tp_degree = self.world_size // dp_degree
+
+        # 2-D mesh is [dp, tp]
+        mesh_2d = init_device_mesh(
+            self.device_type,
+            mesh_shape=(dp_degree, tp_degree),
+            mesh_dim_names=["dp", "tp"],
+        )
+
+        model = SimpleModelDynamicShapes(self.device_type)
+        parallelize_plan = {
+            "mlp_0.net1": ColwiseParallel(),
+            "mlp_0.net2": RowwiseParallel(),
+            "mlp_1.net1": ColwiseParallel(),
+            "mlp_1.net2": RowwiseParallel(),
+        }
+        tp_model = parallelize_module(model, mesh_2d["tp"], parallelize_plan)
+
+        inputs = torch.rand(20, 10, device=self.device_type)
+        inputs = distribute_tensor(inputs, mesh_2d["tp"], placements=[Replicate()])
+        torch._dynamo.mark_dynamic(inputs, 0, min=5, max=100)
+
+        joint_gm = graph_capture_and_aot_export_joint_with_descriptors(tp_model, inputs)
+
+        res = []
+        for node in joint_gm.graph.nodes:
+            if node.op == "placeholder":
+                assert "val" in node.meta
+                fake_val = node.meta["val"]
+                if isinstance(fake_val, torch._subclasses.fake_tensor.FakeTensor):
+                    res.append(list(fake_val.shape))
+
+        self.assertExpectedInline(
+            str(res),
+            """[[4, 10], [4], [10, 4], [10], [s22, 10], [s22, 10]]""",
+        )
 
 
 instantiate_parametrized_tests(DTensorExportTest)

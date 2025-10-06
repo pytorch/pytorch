@@ -404,7 +404,8 @@ def _dynamo_graph_capture_for_export(
     constraints: Optional[list[Constraint]] = None,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
 ) -> Callable[
-    ..., tuple[torch.fx.GraphModule, torch._subclasses.fake_tensor.FakeTensorMode]
+    ...,
+    tuple[torch.fx.GraphModule, Optional[torch._subclasses.fake_tensor.FakeTensorMode]],
 ]:
     """
     Improved dynamo graph capture using transformer approach with proper fake tensor handling.
@@ -430,7 +431,11 @@ def _dynamo_graph_capture_for_export(
     _dynamic_shapes = dynamic_shapes
     _constraints = constraints
 
-    def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
+    def inner(
+        *args: Any, **kwargs: Any
+    ) -> tuple[
+        torch.fx.GraphModule, Optional[torch._subclasses.fake_tensor.FakeTensorMode]
+    ]:
         # This sets the is_exporting flag when building guards.
         with _compiling_state_context():
             flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
