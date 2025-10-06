@@ -5114,14 +5114,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         return (min_choice, timings[min_choice])
 
     def finalize_as_triton_callers(
-        self, callers: dict[Optional[int], TritonTemplateCallerBase]
+        self, callers: dict[Optional[Any], TritonTemplateCallerBase]
     ) -> None:
         """Finalize with multiple callers for different hint overrides"""
-        for hint_override, caller in callers.items():
-            self._make_kernel_renders[hint_override] = caller.get_make_kernel_render()
+        for hint_override_key, caller in callers.items():
+            self._make_kernel_renders[hint_override_key] = caller.get_make_kernel_render()
 
-        # Set the default to be the one without hint override
-        self.make_kernel_render = self._make_kernel_renders[None]
+        # # Set the default to be the one without hint override
+        # self.make_kernel_render = self._make_kernel_renders[None]
 
 
 class CUDATemplateBuffer(TemplateBuffer):

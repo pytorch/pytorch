@@ -3,6 +3,7 @@ import functools
 import itertools
 import logging
 from collections.abc import Iterable, Sequence
+from contextlib import contextmanager
 from typing import Any, Callable, cast, Optional, Union
 
 import sympy
@@ -94,6 +95,23 @@ class SizeVarAllocator:
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
         self._simplify_loops = self.make_simplify_loops_cache()
+
+        self.active_hint_overrides = {}
+
+    @contextmanager
+    def set_hint_overrides(self, overrides):
+        new_overrides = {}
+        for k, v in overrides.items():
+            new_overrides[k] = v
+            if k in self.replacements:
+                kr = self.replacements[k]
+                if isinstance(kr, sympy.Symbol):
+                    new_overrides[kr] = v
+        try:
+            self.active_hint_overrides = new_overrides
+            yield
+        finally:
+            self.active_hint_override = {}
 
     def simplify(self, expr: Expr):
         return sympy.expand(expr).xreplace(self.replacements)
@@ -559,6 +577,7 @@ class SizeVarAllocator:
             return expr
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
+        expr = self.remove_precomputed_replacements(expr)
         if not isinstance(expr, Expr):
             assert isinstance(expr, int)
             return expr
@@ -570,12 +589,13 @@ class SizeVarAllocator:
                 return expr  # inf/nan/I
 
         if hint_override:
-            return hint_override
-
-        expr = self.remove_precomputed_replacements(expr)
-
-        if use_user_provided_hint_override:
-            expr = sympy_subs(expr, self.var_to_hint_override)
+            subs = {symbol: hint_override for symbol in free_symbols}
+            for symbol in subs:
+                if symbol.name.startswith("s") and symbol in self.active_hint_overrides:
+                    subs[symbol] = self.active_hint_overrides[symbol]
+            out = expr.subs(subs)
+            assert isinstance(out, sympy.Integer)
+            return out
 
         return sympy_subs(expr, self.var_to_val)
 
@@ -605,6 +625,9 @@ class SizeVarAllocator:
             return fallback
 
         try:
+            if isinstance(hint_override, tuple):
+                print("size_hint", expr, fallback, hint_override, self.active_hint_overrides, out)
+                breakpoint()
             return int(out)
         except Exception:
             log.debug("failed on: %s", out)

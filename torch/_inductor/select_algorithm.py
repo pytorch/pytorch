@@ -989,6 +989,9 @@ class TritonTemplateKernel(TritonKernel):
             input_node = self.named_input_nodes[input_name]
             output_index = input_node.make_indexer()(index_symbols)
 
+            # if isinstance(input_node, ir.BaseView):
+            #     input_node = input_node.unwrap_view()
+
             # in def_kernel above we define the inputs with the storage offset adjusted
             # creating the load in input_node.make_indexer() will also adjust by storage offset
             # so subtract here to not double increment
@@ -1023,6 +1026,9 @@ class TritonTemplateKernel(TritonKernel):
                 load_code += f", mask={mask}, other={other})"
             else:
                 load_code += ")"
+
+            # if load_code == "b = tl.load(B + ((tl.broadcast_to(idx_m + 512*idx_n, [BLOCK_K, BLOCK_N])).broadcast_to(xindex.shape)))":
+            #     breakpoint()
 
         hook_key = f"<LOAD_INPUT_{input_name}>"
 
@@ -1981,7 +1987,7 @@ class TritonTemplate(KernelTemplate):
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, result.kernel_args_sizevars_keys),
             fallback=config.unbacked_symint_fallback,
-            hint_override=hint_override,
+            hint_override=None if hint_override is None else 42,
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
@@ -2029,7 +2035,7 @@ class TritonTemplate(KernelTemplate):
             *V.graph.sizevars.size_hints(
                 call_sizes,
                 fallback=config.unbacked_symint_fallback,
-                hint_override=hint_override,
+                hint_override=None if hint_override is None else 42,
             ),
             kwargs,
         )
@@ -2668,6 +2674,7 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         if len(choices) == 0:
+            breakpoint()
             raise create_no_valid_choices("No choices exist for backend.")
         log.debug("Max autotune selects from %s choices.", str(len(choices)))
 
@@ -2707,7 +2714,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 dynamo_compile_column_us="compile_time_autotune_time_us",
                 metadata=_autotune_metadata(input_nodes),
             ):
-                benchmark_results = benchmark(choices, hint_override=hint_override)
+                benchmark_results = benchmark(choices, hint_override=None if hint_override is None else 42)
                 if config.max_autotune_report_choices_stats:
                     _log_autotune_choices_stats(
                         f"{name}_template_autotuning", benchmark_results
@@ -2812,7 +2819,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     autotune_elapse,
                     precompile_elapse,
                     prescreening_elapse,
-                    hint_override=hint_override,
+                    hint_override=None if hint_override is None else 42,
                 )
 
             def profiler_bench_function():
@@ -3171,6 +3178,14 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
+        print("inputs")
+        for x in inputs:
+            if isinstance(x, torch.Tensor):
+                print(x.shape, x.stride())
+            else:
+                print(x)
+        print("outputs")
+        print(output.shape, output.stride())
         result = choice.benchmark(*inputs, out=output)
         device_type = next(
             (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
@@ -3223,6 +3238,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         exc_info=True,
                     )
                 else:
+                    breakpoint()
                     log.error(
                         "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
                         msg,
