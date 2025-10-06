@@ -17,6 +17,7 @@ from torch._higher_order_ops.utils import (
     FunctionalizeCtxWrapper,
     get_dummy_aot_autograd_config,
     HopInstance,
+    maybe_ignore_fresh_unbacked_symbols,
     prepare_fw_with_masks,
     reenter_make_fx,
     register_fake,
@@ -593,9 +594,17 @@ def _(ctx, subgraph, identifier, *operands):
 # Register the hop fake fn. This will be called in the fake_tensor _dispatch_impl.
 @register_fake(invoke_subgraph)
 def _(subgraph, identifier, *operands):
+    mode = torch.utils._python_dispatch._get_current_dispatch_mode()
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    assert isinstance(mode, FakeTensorMode)
+
     from torch._dynamo.utils import dynamo_timed
 
-    with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
+    with (
+        dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True),
+        maybe_ignore_fresh_unbacked_symbols(mode),
+    ):
         return subgraph(*operands)
 
 

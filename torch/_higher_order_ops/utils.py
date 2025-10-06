@@ -13,7 +13,7 @@ from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._subclasses.functional_tensor import (
     disable_functional_mode,
     FunctionalTensor,
@@ -100,6 +100,14 @@ def _maybe_compile_and_run_fn(fn, *args):
             return torch.compile(fn, backend=backend, fullgraph=True)(*args)
     else:
         return fn(*args)
+
+
+def maybe_ignore_fresh_unbacked_symbols(mode: FakeTensorMode):
+    return (
+        contextlib.nullcontext()
+        if mode.shape_env is None
+        else mode.shape_env.ignore_fresh_unbacked_symbols()
+    )
 
 
 def reenter_make_fx(fn):
@@ -1047,8 +1055,6 @@ def register_fake(hop, fn=None):
     assert hop not in registered_hop_fake_fns
 
     def register(func: F) -> F:
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
         redirect_to_mode(hop, FakeTensorMode)
 
         registered_hop_fake_fns[hop] = func

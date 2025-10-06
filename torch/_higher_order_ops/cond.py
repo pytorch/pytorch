@@ -1,6 +1,5 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-import contextlib
 import functools
 import logging
 import warnings
@@ -24,7 +23,9 @@ from torch._higher_order_ops.utils import (
     fill_none_with_masks,
     filter_with_masks,
     materialize_as_graph,
+    maybe_ignore_fresh_unbacked_symbols,
     reenter_make_fx,
+    register_fake,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     unique_graph_id,
@@ -375,17 +376,11 @@ def inner(mode, pred, true_fn, false_fn, operands):
     return trace_cond(mode, cond_op, pred, true_fn, false_fn, operands)
 
 
-@cond_op.py_impl(FakeTensorMode)
-def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
-    # Ignore here, because if you've gotten here but you're not manually
-    # tracing the inner graphs, that means that you intend to reuse the graph
-    # directly.  Which means the old unbacked symbol bindings are appropriate.
-    # This strategy will not work if unbacked symbols can escape.
-    ignore_fresh_unbacked = contextlib.nullcontext()
-    if mode.shape_env:
-        ignore_fresh_unbacked = mode.shape_env.ignore_fresh_unbacked_symbols()
-
-    with mode, ignore_fresh_unbacked:
+@register_fake(cond_op)
+def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
+    mode = torch.utils._python_dispatch._get_current_dispatch_mode()
+    assert isinstance(mode, FakeTensorMode)
+    with maybe_ignore_fresh_unbacked_symbols(mode):
         flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
         flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
         if true_out_spec != false_out_spec:
