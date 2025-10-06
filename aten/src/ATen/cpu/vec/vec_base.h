@@ -76,7 +76,11 @@ Windows llvm will not have this definition.
 #define __at_align__
 #endif
 #define VECTOR_WIDTH 32
+#ifdef CPU_CAPABILITY_AVX2
 #define int_vector __m256i
+#else
+#define int_vector svuint8_t
+#endif
 #elif defined(__aarch64__)
 // Define alignment and vector width for SVE128/Default (e.g., NEON)
 #if defined(__GNUC__)
@@ -87,6 +91,7 @@ Windows llvm will not have this definition.
 #define __at_align__
 #endif
 #define VECTOR_WIDTH 16
+#define int_vector uint8x16_t
 #else
 // Fallback: define default alignment and vector width
 #if defined(__GNUC__)
@@ -1016,7 +1021,8 @@ VECTORIZED_SUPPORT_SCALARS_FOR_BINARY_FUNC(clamp_min)
 
 struct Vectorizedi;
 
-#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512) || \
+    defined(__aarch64__)
 template <class T, typename Op>
 static inline Vectorized<T> bitwise_binary_op(
     const Vectorized<T>& a,
@@ -1033,6 +1039,14 @@ static inline Vectorized<T> bitwise_binary_op(
       _mm512_load_si512(reinterpret_cast<const int_vector*>((const T*)a));
   int_vector b_buffer =
       _mm512_load_si512(reinterpret_cast<const int_vector*>((const T*)b));
+#elif defined(CPU_CAPABILITY_SVE256)
+  int_vector a_buffer =
+      svld1_u8(svptrue_b8(), reinterpret_cast<const uint8_t*>((const T*)a));
+  int_vector b_buffer =
+      svld1_u8(svptrue_b8(), reinterpret_cast<const uint8_t*>((const T*)b));
+#else
+  int_vector a_buffer = vld1q_u8(reinterpret_cast<const uint8_t*>((const T*)a));
+  int_vector b_buffer = vld1q_u8(reinterpret_cast<const uint8_t*>((const T*)b));
 #endif
   buffer = op(a_buffer, b_buffer);
   __at_align__ T results[Vectorized<T>::size()];
@@ -1041,6 +1055,10 @@ static inline Vectorized<T> bitwise_binary_op(
   _mm256_store_si256(reinterpret_cast<int_vector*>(results), buffer);
 #elif defined(CPU_CAPABILITY_AVX512)
   _mm512_store_si512(reinterpret_cast<int_vector*>(results), buffer);
+#elif defined(CPU_CAPABILITY_SVE256)
+  svst1_u8(svptrue_b8(), reinterpret_cast<uint8_t*>(results), buffer);
+#else
+  vst1q_u8(reinterpret_cast<uint8_t*>(results), buffer);
 #endif
   return Vectorized<T>::loadu(results);
 }
@@ -1059,6 +1077,13 @@ inline Vectorized<T> operator&(const Vectorized<T>& a, const Vectorized<T>& b) {
 #elif defined(CPU_CAPABILITY_AVX512)
   return bitwise_binary_op(
       a, b, [](int_vector a, int_vector b) { return _mm512_and_si512(a, b); });
+#elif defined(CPU_CAPABILITY_SVE256)
+  return bitwise_binary_op(a, b, [](int_vector a, int_vector b) {
+    return svand_u8_x(svptrue_b8(), a, b);
+  });
+#else
+  return bitwise_binary_op(
+      a, b, [](int_vector a, int_vector b) { return vandq_u8(a, b); });
 #endif
 }
 template <
@@ -1075,6 +1100,13 @@ inline Vectorized<T> operator|(const Vectorized<T>& a, const Vectorized<T>& b) {
 #elif defined(CPU_CAPABILITY_AVX512)
   return bitwise_binary_op(
       a, b, [](int_vector a, int_vector b) { return _mm512_or_si512(a, b); });
+#elif defined(CPU_CAPABILITY_SVE256)
+  return bitwise_binary_op(a, b, [](int_vector a, int_vector b) {
+    return svorr_u8_x(svptrue_b8(), a, b);
+  });
+#else
+  return bitwise_binary_op(
+      a, b, [](int_vector a, int_vector b) { return vorrq_u8(a, b); });
 #endif
 }
 template <
@@ -1091,6 +1123,13 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
 #elif defined(CPU_CAPABILITY_AVX512)
   return bitwise_binary_op(
       a, b, [](int_vector a, int_vector b) { return _mm512_xor_si512(a, b); });
+#elif defined(CPU_CAPABILITY_SVE256)
+  return bitwise_binary_op(a, b, [](int_vector a, int_vector b) {
+    return sveor_u8_x(svptrue_b8(), a, b);
+  });
+#else
+  return bitwise_binary_op(
+      a, b, [](int_vector a, int_vector b) { return veorq_u8(a, b); });
 #endif
 }
 
