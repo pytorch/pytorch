@@ -770,7 +770,7 @@ inline void convert(const bool* src, int32_t* dst, int64_t n) {
 
 template <>
 inline void convert(const uint8_t* src, bool* dst, int64_t n) {
-  constexpr uint64_t oneRegElemCount = Vectorized<uint8_t>::size();
+  constexpr uint64_t oneRegElemCount = Vectorized<int8_t>::size();
   constexpr uint64_t twoRegsElemCount = oneRegElemCount * 2;
   constexpr uint64_t fourRegsElemCount = twoRegsElemCount * 2;
   const uint64_t count = static_cast<uint64_t>(n);
