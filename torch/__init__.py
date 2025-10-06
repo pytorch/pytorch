@@ -1702,14 +1702,6 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)
 
 
-def _check_is_nonnegative(i, message=None, *, max=None):
-    """Checks that a given integer is >=0 and <= max, adding runtime assertions
-    if needed"""
-    _check(i >= 0, message)
-    if max is not None:
-        _check(i <= max, message)
-
-
 # TODO add deprecation annotation
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
