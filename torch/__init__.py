@@ -1702,7 +1702,7 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)
 
 
-def _check_size(i, message=None, *, max=None):
+def _check_isnonnegative(i, message=None, *, max=None):
     """Checks that a given integer is >=0 and <= max, adding runtime assertions
     if needed"""
     _check(i >= 0, message)

@@ -1253,7 +1253,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
     def test_bound_shape_checks(self):
         def f1(x, y):
             b = x.item()
-            torch._check_size(b, max=y.shape[0] - 1)
+            torch._is_nonnegative(b, max=y.shape[0] - 1)
             return y[:b]
 
         fn1 = torch.compile(f1, fullgraph=True, backend="eager")
@@ -1321,13 +1321,13 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)
-    def test_torch_check_size(self):
+    def test_torch_check_nonnegative(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
         @torch.compile(backend=cnts, fullgraph=True)
         def f(x):
             y = x.item()
-            torch._check_size(y)
+            torch._is_nonnegative(y)
             # Cannot conditional on unbacked SymInt
             if y == 0:
                 assert False
