@@ -203,6 +203,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
         torch._utils.is_compiling: True,
         torch.compiler.is_compiling: True,
         torch.compiler.is_dynamo_compiling: True,
+        torch.compiler.is_exporting: True,
         torch.nn.modules.activation._is_make_fx_tracing: False,
     }
 
@@ -513,24 +514,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch._dynamo.external_utils.is_compiling,
                 torch.compiler.is_compiling,
                 torch.compiler.is_dynamo_compiling,
+                torch.compiler.is_exporting,
             ):
                 tx.mark_inconsistent_side_effects()
-
             return ConstantVariable.create(tracing_state_functions()[self.value])
-
-        @register(torch.compiler.is_exporting)
-        def handle_torch_compiler_is_exporting(
-            self, tx: "InstructionTranslator", *args, **kwargs
-        ):
-            assert not args and not kwargs
-            tx.mark_inconsistent_side_effects()
-            # This is undesirable but for nn.MultiheadAttention module,
-            # export and dynamo require different behavior due to downstream
-            # changes. For that module, _is_make_fx_tracing (which is True)
-            # leads to slow path for non-strict export, and fast path for
-            # Dynamo. Ideally, we would like strict export and dynamo to be
-            # same, but this causes issues with executorch models.
-            return ConstantVariable.create(tx.export)
 
         @register(*dispatch_key_set_functions)
         def handle_dispatch_key_set_functions(
