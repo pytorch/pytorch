@@ -3812,18 +3812,29 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           "error_on_collective",
           &::c10d::FakeProcessGroup::Options::error_on_collective);
   fakeProcessGroup
-      .def(
-          py::init([](int rank,
-                      int size,
-                      c10::intrusive_ptr<::c10d::FakeProcessGroup::Options>
-                          options) {
-            return c10::make_intrusive<::c10d::FakeProcessGroup>(
+      .def_static(
+          "_create_internal",
+          [](int rank,
+             int size,
+             c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
+            return ::c10d::FakeProcessGroup::_create_internal(
                 rank, size, std::move(options));
-          }),
+          },
           py::arg("rank"),
           py::arg("world_size"),
           py::arg("options") =
               c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+      .def(
+          "__init__",
+          [](const py::object&,
+             const py::args& args,
+             const py::kwargs& kwargs) {
+            TORCH_CHECK(
+                false,
+                "FakeProcessGroup cannot be constructed directly. "
+                "Use torch.distributed.init_process_group(backend='fake') instead to ensure "
+                "proper dispatch system integration.");
+          })
       .def_property_readonly(
           "options", &::c10d::FakeProcessGroup::getBackendOptions);
   auto fakeWork =

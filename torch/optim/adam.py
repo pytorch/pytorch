@@ -415,6 +415,7 @@ def _single_tensor_adam(
                     if weight_decay.requires_grad:
                         grad = grad.addcmul_(param.clone(), weight_decay)
                     else:
+                        # pyrefly: ignore  # bad-argument-type
                         grad = grad.add(param, alpha=weight_decay)
                 else:
                     grad = grad.add(param, alpha=weight_decay)
@@ -444,6 +445,7 @@ def _single_tensor_adam(
             device_beta1 = beta1
 
         # Decay the first and second moment running average coefficient
+        # pyrefly: ignore  # no-matching-overload
         exp_avg.lerp_(grad, 1 - device_beta1)
 
         # Nested if is necessary to bypass jitscript rules
@@ -692,6 +694,7 @@ def _multi_tensor_adam(
             device_exp_avgs, device_grads, cast(float, 1 - device_beta1)
         )
 
+        # pyrefly: ignore  # no-matching-overload
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
 
         # Due to the strictness of the _foreach_addcmul API, we can't have a single

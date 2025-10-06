@@ -1207,7 +1207,7 @@ def safe_grad_filter(message, category, filename, lineno, file=None, line=None) 
 def user_warning_filter(
     message, category, filename, lineno, file=None, line=None
 ) -> bool:
-    return not category == UserWarning
+    return category != UserWarning
 
 
 @contextlib.contextmanager

@@ -86,6 +86,10 @@ class OverlapPreservingBucketer:
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
         _stable_topological_sort(self.graph, additional_deps)
+
+        # After topological sort, preserve dependencies using effect tokens
+        self._preserve_dependencies_with_tokens(additional_deps)
+
         self.graph.lint()
 
     def _find_buckets(
@@ -254,3 +258,19 @@ class OverlapPreservingBucketer:
                 overlap_deps[new_wait].add(info.hiding_node)
 
         return overlap_deps
+
+    def _preserve_dependencies_with_tokens(
+        self, additional_deps: dict[fx.Node, OrderedSet[fx.Node]]
+    ) -> None:
+        """
+        Preserve dependencies using effect tokens and with_effects higher-order op.
+
+        Uses the standalone token_dependencies utility for consistent behavior
+        across different overlap scheduling approaches.
+        """
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering,
+        )
+
+        if torch._inductor.config.test_configs.aten_fx_overlap_insert_overlap_deps:
+            preserve_node_ordering(self.graph, additional_deps)
