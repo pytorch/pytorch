@@ -148,8 +148,9 @@ class OperatorBase:
                 "Please register a mode for the DispatchKey.Python key instead."
             )
 
-            if 'CompositeImplicit' in str(k) or 'Autograd' in str(k):
-                return fn
+            if k == DispatchKey.CompositeImplicitAutograd or k == DispatchKey.Autograd:
+                if torch._C._dispatch_has_kernel(self.name()) and torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), k):
+                    return fn
             if k in self.py_kernels:
                 raise RuntimeError(
                     f"Trying to override a python impl for {k} on operator {self.name()}"
