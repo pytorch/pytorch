@@ -54,8 +54,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 if [ "$ANACONDA_PYTHON_VERSION" = "3.14" ]; then
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
              python="3.14.0rc2" \
+             ${SYSROOT_DEP} \
              -c conda-forge/label/python_rc -c conda-forge \
-             ${SYSROOT_DEP}
 else
   # Install correct Python version
   # Also ensure sysroot is using a modern GLIBC to match system compilers
