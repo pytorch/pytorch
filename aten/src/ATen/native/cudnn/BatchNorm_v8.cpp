@@ -49,18 +49,17 @@ namespace fe = cudnn_frontend;
 
 auto get_fe_dtype(const Tensor& t) {
   auto dtype = t.scalar_type();
-  auto fe_dtype = fe::DataType_t::FLOAT;
-  if (dtype == at::ScalarType::Half) {
-    fe_dtype = fe::DataType_t::HALF;
-  } else if (dtype == at::ScalarType::BFloat16) {
-    fe_dtype = fe::DataType_t::BFLOAT16;
-  } else if (dtype == at::ScalarType::Float) {
-    fe_dtype = fe::DataType_t::FLOAT;
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        false, "cuDNN batch norm got unsupported dtype: ", dtype);
+  switch (dtype) {
+    case at::ScalarType::Half:
+      return fe::DataType_t::HALF;
+    case at::ScalarType::BFloat16:
+      return fe::DataType_t::BFLOAT16;
+    case at::ScalarType::Float:
+      return fe::DataType_t::FLOAT;
+    default:
+      TORCH_INTERNAL_ASSERT(
+          false, "cuDNN batch norm got unsupported dtype: ", dtype);
   }
-  return fe_dtype;
 }
 
 Tensor expandScale(const Tensor& t, int64_t dim) {
