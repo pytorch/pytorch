@@ -24,9 +24,11 @@ def normalize_graph(gm):
 class TestFakeDistributed(DynamoTestCase):
     def setUp(self):
         # Use FakeProcessGroup to run tests on a single process
-        dist.init_process_group(backend="fake", rank=0, world_size=2)
         self.local_rank = 0
-        self.world_size = 2
+        self.world_size = 512
+        dist.init_process_group(
+            backend="fake", rank=self.local_rank, world_size=self.world_size
+        )
 
     def tearDown(self):
         dist.destroy_process_group()
@@ -132,6 +134,30 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(10)
         res = fn(x)
         self.assertEqual(res, x)
+
+    def test_device_mesh_dim_names(self):
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(
+                8,
+                8,
+                8,
+            ),
+            mesh_dim_names=("dp", "tp", "ep"),  # data parallel dimension
+        )
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            dp_dim = device_mesh.mesh_dim_names.index("dp")
+            tp_dim = device_mesh.mesh_dim_names.index("tp")
+            ep_dim = device_mesh.mesh_dim_names.index("ep")
+            concat = str(dp_dim + 1) + str(tp_dim + 1) + str(ep_dim + 1)
+            return x + int(concat)
+
+        x = torch.zeros(10)
+        out = fn(x)
+        for val in out:
+            self.assertEqual(val, 123)
 
 
 instantiate_parametrized_tests(TestFakeDistributed)
