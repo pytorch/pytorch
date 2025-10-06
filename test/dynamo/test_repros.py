@@ -5816,6 +5816,16 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         fn(torch.rand(4))
 
+    def test_is_exporting(self):
+        def fn(x):
+            if torch.nn.modules.activation._is_exporting():
+                return x + 2
+            return x + 3
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
     def test_negative_floor_div_solve(self):
         class CompiledClass(nn.Module):
             def __init__(self) -> None:
