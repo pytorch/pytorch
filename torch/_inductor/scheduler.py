@@ -3168,7 +3168,6 @@ class Scheduler:
                     if overrides:
                         callers[None] = min_node_unfused
                         for override_vals in itertools.product(*[overrides[k] for k in free_symbols if k in overrides]):
-                            override_vals = tuple(override_vals)
                             override_key = tuple((s, v) for s, v in zip(free_symbols, override_vals))
                             timings = multi_node.choice_timings(hint_override=override_key)
                             triton_timings = {
@@ -3350,52 +3349,51 @@ class Scheduler:
                     overrides[sym] = V.graph.sizevars.var_to_hint_override[sym]
 
             for override_vals in itertools.product(*[overrides[k] for k in free_symbols if k in overrides]):
-                override_vals = tuple(override_vals)
-                overrides_ = dict(zip(free_symbols, override_vals))
                 override_key = tuple((s, v) for s, v in zip(free_symbols, override_vals))
-                with V.graph.sizevars.set_hint_overrides(overrides_):
-                    choice_timings = multi_node.choice_timings(override_key)
-                    for choice, unfused_time in sorted(
-                        choice_timings.items(), key=lambda x: x[1]
+                choice_timings = multi_node.choice_timings(override_key)
+                for choice, unfused_time in sorted(
+                    choice_timings.items(), key=lambda x: x[1]
+                ):
+                    if not isinstance(
+                        choice, torch._inductor.select_algorithm.TritonTemplateCaller
                     ):
-                        if not isinstance(
-                            choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                        ):
-                            continue
-                        with multi_node.swap_as_triton_caller(choice):
-                            future_choices.append(
-                                (
-                                    choice,
-                                    *compile_kernel(node_list_fused),
-                                )
+                        continue
+                    with multi_node.swap_as_triton_caller(choice):
+                        future_choices.append(
+                            (
+                                choice,
+                                *compile_kernel(
+                                    node_list_fused, hint_override=choice.hint_override
+                                ),
                             )
+                        )
 
-                    min_ms_fused = float("inf")
-                    ms_fused_choice: Optional[TritonTemplateCallerBase] = None
-                    new_timings = {}
-                    for choice, future, mod_fused in future_choices:
-                        try:
-                            if future is not None:
-                                future.result()
-                        except Exception as e:
-                            if fusion_log.isEnabledFor(logging.DEBUG):
-                                fusion_log.debug(
-                                    "Exception in compiling %s: %s",
-                                    "prologue" if not epilogue_fusion else "epilogue",
-                                    str(e),
-                                )
-                            continue
-                        with multi_node.swap_as_triton_caller(choice):
-                            ms_fused, path = self.benchmark_codegened_module(
-                                mod_fused, device
+                min_ms_fused = float("inf")
+                ms_fused_choice: Optional[TritonTemplateCallerBase] = None
+                new_timings = {}
+                for choice, future, mod_fused in future_choices:
+                    try:
+                        if future is not None:
+                            future.result()
+                    except Exception as e:
+                        if fusion_log.isEnabledFor(logging.DEBUG):
+                            fusion_log.debug(
+                                "Exception in compiling %s: %s",
+                                "prologue" if not epilogue_fusion else "epilogue",
+                                str(e),
                             )
-                            new_timings[choice] = ms_fused
-                            if ms_fused < min_ms_fused:
-                                min_ms_fused = ms_fused
-                                ms_fused_choice = choice
-                    multi_node._choice_timings[override_key] = new_timings
-                    assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
-                    hint_override_best_fusion_choice[override_key] = ms_fused_choice
+                        continue
+                    with multi_node.swap_as_triton_caller(choice):
+                        ms_fused, path = self.benchmark_codegened_module(
+                            mod_fused, device
+                        )
+                        new_timings[choice] = ms_fused
+                        if ms_fused < min_ms_fused:
+                            min_ms_fused = ms_fused
+                            ms_fused_choice = choice
+                multi_node._choice_timings[override_key] = new_timings
+                assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
+                hint_override_best_fusion_choice[override_key] = ms_fused_choice
 
             # Eagerly compile and benchmark non-template nodes
             choice_timings = multi_node.choice_timings()

@@ -1729,16 +1729,15 @@ class SIMDScheduling(BaseScheduling):
         )
 
     def _make_shape_cache_key(
-        self, node: MultiTemplateBuffer, hint_key: Any
+        self, node: MultiTemplateBuffer, hint: int
     ) -> tuple[tuple[int, ...], ...]:
         """
         Returns cache key for hint-based multi-graph; key is tuple of shapes with hint filled in.
         """
-        hints = {k: v for k, v in hint_key}
         shapes = self._get_multikernel_shapes(node)
         return tuple(
             tuple(
-                V.graph.sizevars.size_hint(s.subs(hints), hint_override=42)
+                V.graph.sizevars.size_hint(s, hint_override=hint)
                 for s in shape
             )
             for shape in shapes
@@ -1773,47 +1772,41 @@ class SIMDScheduling(BaseScheduling):
             src_codes = []
 
             for (
-                size_hint_key,
+                size_hint,
                 make_kernel_render,
             ) in template_node.node._make_kernel_renders.items():
-                if size_hint_key is None:
-                    ctx = contextlib.nullcontext()
-                else:
-                    size_hint_overrides = {k: v for k, v in size_hint_key}
-                    ctx = V.graph.sizevars.set_hint_overrides(size_hint_overrides)
-                with ctx:
-                    breakpoint()
-                    kernel, render = make_kernel_render(
-                        template_node.node, hint_override=42
+                kernel, render = make_kernel_render(
+                    template_node.node, hint_override=hint_override
+                )
+
+                if only_gen_src_code:
+                    src_code = self._codegen_single_template(
+                        kernel,
+                        render,
+                        template_node,
+                        epilogue_nodes,
+                        prologue_nodes,
+                        only_gen_src_code=True,
                     )
-                    if only_gen_src_code:
-                        src_code = self._codegen_single_template(
-                            kernel,
-                            render,
-                            template_node,
-                            epilogue_nodes,
-                            prologue_nodes,
-                            only_gen_src_code=True,
-                        )
-                        assert isinstance(src_code, str)
-                        src_codes.append(src_code)
-                    else:
-                        if size_hint_key is None:
-                            continue  # skip kernel generation based on real runtime value; only use hints
-                        kernel = self._codegen_single_template(
-                            kernel,
-                            render,
-                            template_node,
-                            epilogue_nodes,
-                            prologue_nodes,
-                            only_gen_src_code=False,
-                        )
-                        shape_cache_key = (
-                            None
-                            if size_hint_key is None
-                            else self._make_shape_cache_key(template_node.node, size_hint_key)
-                        )
-                        kernels[shape_cache_key] = kernel
+                    assert isinstance(src_code, str)
+                    src_codes.append(src_code)
+                else:
+                    if size_hint is None:
+                        continue  # skip kernel generation based on real runtime value; only use hints
+                    kernel = self._codegen_single_template(
+                        kernel,
+                        render,
+                        template_node,
+                        epilogue_nodes,
+                        prologue_nodes,
+                        only_gen_src_code=False,
+                    )
+                    shape_cache_key = (
+                        None
+                        if size_hint is None
+                        else self._make_shape_cache_key(template_node.node, size_hint)
+                    )
+                    kernels[shape_cache_key] = kernel
 
             if only_gen_src_code:
                 return "\n\n".join(src_codes)

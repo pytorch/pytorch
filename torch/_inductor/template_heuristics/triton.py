@@ -582,7 +582,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         min_block_size_k = 32 if (has_int8_tensor or self.has_int8_tensor) else 16
 
         scaled_configs = []
-
         # get free symbols
         free_symbols = set()
         for expr in [m, n, k]:
@@ -598,52 +597,50 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         for override_vals in itertools.product(*[overrides[k] for k in free_symbols if k in overrides]):
             override_key = tuple((s, v) for s, v in zip(free_symbols, override_vals))
-            overrides_ = dict(zip(free_symbols, override_vals))
-            with V.graph.sizevars.set_hint_overrides(overrides_):
-                m_hint = max(
-                    next_power_of_2(
-                        V.graph.sizevars.size_hint(
-                            m,
-                            fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                            hint_override=42,
-                        )
-                    ),
-                    min_block_size,
-                )
-                n_hint = max(
-                    next_power_of_2(
-                        V.graph.sizevars.size_hint(
-                            n,
-                            fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                            hint_override=42,
-                        )
-                    ),
-                    min_block_size,
-                )
-                k_hint = max(
-                    next_power_of_2(
-                        V.graph.sizevars.size_hint(
-                            k,
-                            fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
-                            hint_override=42,
-                        )
-                    ),
-                    min_block_size_k,
-                )
-
-                for c in configs:
-                    scaled_config = dataclasses.replace(
-                        c,
-                        block_m=max(min(int(c.block_m * scale), m_hint), min_block_size),
-                        block_n=max(min(int(c.block_n * scale), n_hint), min_block_size),
-                        block_k=max(min(int(c.block_k * scale), k_hint), min_block_size_k),
+            m_hint = max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        m,
+                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=override_key,
                     )
+                ),
+                min_block_size,
+            )
+            n_hint = max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        n,
+                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                        hint_override=override_key,
+                    )
+                ),
+                min_block_size,
+            )
+            k_hint = max(
+                next_power_of_2(
+                    V.graph.sizevars.size_hint(
+                        k,
+                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
+                        hint_override=override_key,
+                    )
+                ),
+                min_block_size_k,
+            )
 
-                    if not exclude(
-                        scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
-                    ):
-                        scaled_configs.append(scaled_config)
+            for c in configs:
+                scaled_config = dataclasses.replace(
+                    c,
+                    block_m=max(min(int(c.block_m * scale), m_hint), min_block_size),
+                    block_n=max(min(int(c.block_n * scale), n_hint), min_block_size),
+                    block_k=max(min(int(c.block_k * scale), k_hint), min_block_size_k),
+                    hint_override=override_key,
+                )
+
+                if not exclude(
+                    scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
+                ):
+                    scaled_configs.append(scaled_config)
 
         return scaled_configs
 
