@@ -3,6 +3,8 @@
 Quantization
 ============
 
+.. automodule:: torch.quantization.scaled_mm
+
 .. automodule:: torch.ao.quantization
 .. automodule:: torch.ao.quantization.fx
 
@@ -34,7 +36,6 @@ and supported quantized modules and functions.
     :hidden:
 
     quantization-support
-
 
 .. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
 .. They are here for tracking purposes until they are more permanently fixed.
