@@ -101,7 +101,7 @@ class WindowsCrossCompilationTestFramework:
 
                 # Prepare inductor configs
                 inductor_configs = {
-                    # "aot_inductor.cross_target_platform": "windows",
+                    "aot_inductor.cross_target_platform": "windows",
                     "aot_inductor.precompile_headers": False,
                 }
                 if config.inductor_configs:

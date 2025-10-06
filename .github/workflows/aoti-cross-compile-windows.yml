@@ -44,33 +44,12 @@ jobs:
         ]}
     secrets: inherit
 
+  # Custom test job for cross-compilation
   cross-compile-linux-test:
     name: cross-compile-linux-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs: [cross-compile-linux-build, get-default-label-prefix]
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm86
-      docker-image: ${{ needs.cross-compile-linux-build.outputs.docker-image }}
-      test-matrix: ${{ needs.cross-compile-linux-build.outputs.test-matrix }}
-      pre-script: |
-        # Install MinGW cross-compiler
-        apt-get update
-        apt-get install -y gcc-mingw-w64-x86-64
-      test-script: |
-        # Run cross-compilation tests and generate .pt2 files
-        python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir /tmp/aoti_packages
-
-        # Verify packages were generated
-        echo "Generated packages:"
-        ls -la /tmp/aoti_packages/ || echo "No packages directory found"
-    secrets: inherit
-
-  # Upload cross-compiled artifacts
-  upload-artifacts:
-    name: upload-artifacts
     runs-on: ${{ needs.get-default-label-prefix.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu
-    needs: [cross-compile-linux-test, cross-compile-linux-build, get-default-label-prefix]
-    if: success()
+    needs: [cross-compile-linux-build, get-default-label-prefix]
+    timeout-minutes: 240
     container:
       image: ${{ needs.cross-compile-linux-build.outputs.docker-image }}
     steps:
@@ -80,23 +59,27 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: linux-jammy-cuda12.8-py3.10-gcc9-sm86
+
       - name: Install MinGW cross-compiler
         run: |
           apt-get update
-          apt-get install -y gcc-mingw-w64-x86-64
+          apt-get install -y g++-mingw-w64-x86-64-win32
 
-      - name: Generate packages for upload
+      - name: Run cross-compilation tests
         run: |
-          # Re-run compilation to generate packages
+          # Run cross-compilation tests and generate .pt2 files
           python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir /tmp/aoti_packages
-          ls -la /tmp/aoti_packages/
 
       - name: Upload AOTI packages to S3
         uses: seemethere/upload-artifact-s3@v5
         with:
           s3-bucket: gha-artifacts
           s3-prefix: ${{ github.repository }}/${{ github.run_id }}/artifacts/aoti-cross-compile
-          retention-days: 1
+          retention-days: 7
           if-no-files-found: error
           path: /tmp/aoti_packages/
 
@@ -114,19 +97,45 @@ jobs:
         ]}
     secrets: inherit
 
+  # Test compiled packages on Windows
   windows-test:
     name: windows-test
     runs-on: windows.g5.4xlarge.nvidia.gpu
     needs: [windows-test-build, cross-compile-linux-test]
+    timeout-minutes: 240
     if: success()
-    env:
-      PYTORCH_FINAL_PACKAGE_DIR: /tmp/pytorch-build-results
-      WIN_PACKAGE_WORK_DIR: /d/win_tmp/
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
+        shell: bash
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+          git config --global core.ignorecase false
+          git config --global core.fsmonitor false
+
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
+
+      - name: Setup Windows
+        uses: ./.github/actions/setup-win
+        with:
+          cuda-version: "12.8"
+
+      - name: Download PyTorch Build Artifacts
+        uses: seemethere/download-artifact-s3@v4
+        with:
+          name: win-vs2022-cuda12.8-py3.10
+          path: C:\${{ github.run_id }}\build-results
 
       - name: Download AOTI packages from S3
         uses: seemethere/download-artifact-s3@v4
@@ -135,25 +144,18 @@ jobs:
           s3-prefix: ${{ github.repository }}/${{ github.run_id }}/artifacts/aoti-cross-compile
           path: D:\aoti_packages
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
-          cache: pip
-          cache-dependency-path: |
-            **/requirements.txt
-            **/pyproject.toml
-
-      - name: Setup CUDA
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-
-      - name: Install PyTorch
+      - name: Verify packages
         shell: bash
         run: |
-          python -m pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu118
+          echo "Build artifacts:"
+          ls -la "C:/${{ github.run_id }}/build-results/" || echo "No build artifacts found"
+          echo "AOTI packages:"
+          ls -la "D:/aoti_packages/" || echo "No AOTI packages found"
 
       - name: Run Windows load tests
         shell: bash
+        env:
+          USE_CUDA: 1
         run: |
-          # Set package directory and run load tests
+          # Run Windows load tests with downloaded packages
           python test/inductor/test_aoti_cross_compile_windows.py -k load --package-dir D:/aoti_packages
