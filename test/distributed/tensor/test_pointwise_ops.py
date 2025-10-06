@@ -333,7 +333,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     def test_inplace_op_partial_to_replicate(self):
         # test that in-place operations correctly update the spec when converting
-        # from Partial to Replicate placement (issue #163374)
+        # from partial to replicate placement (issue #163374)
         device_mesh = self.build_device_mesh()
 
         tensor = torch.ones(8, 8, device=self.device_type)
