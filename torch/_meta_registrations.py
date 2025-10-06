@@ -2286,6 +2286,43 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     return a.new_empty((N, P), dtype=result_dtype)
 
 
+@register_meta(aten.addmm)
+@out_wrapper(exact_dtype=True)
+def meta_addmm(
+    self, mat1, mat2, out_dtype: Optional[torch.dtype] = None, *, alpha=1, beta=1
+):
+    torch._check(self.dim() == 2, lambda: "bias must be 2D")
+    torch._check(mat1.dim() == 2, lambda: "mat1 must be 2D")
+    torch._check(mat2.dim() == 2, lambda: "mat2 must be 2D")
+    N, M1 = mat1.shape
+    M2, P = mat2.shape
+    torch._check(
+        M1 == M2,
+        lambda: f"mat1 and mat2 must have same reduction dim, but got [{N}, {M1}] X [{M2}, {P}].",
+    )
+    # Validate out_dtype if provided
+    if out_dtype is not None:
+        input_dtype = mat1.dtype
+        torch._check(
+            mat2.dtype == input_dtype,
+            lambda: "mat1 and mat2 must have the same dtype",
+        )
+        torch._check(
+            self.dtype == input_dtype,
+            lambda: "bias and mat1 must have the same dtype",
+        )
+        torch._check(
+            out_dtype == input_dtype
+            or (
+                out_dtype == torch.float32
+                and input_dtype in (torch.float16, torch.bfloat16)
+            ),
+            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+        )
+    result_dtype = mat1.dtype if out_dtype is None else out_dtype
+    return self.new_empty((N, P), dtype=result_dtype)
+
+
 def _compute_reduction_shape(self, dims, keepdim):
     if keepdim:
         return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
