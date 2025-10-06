@@ -1253,7 +1253,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
     def test_bound_shape_checks(self):
         def f1(x, y):
             b = x.item()
-            torch._is_nonnegative(b, max=y.shape[0] - 1)
+            torch._check_is_nonnegative(b, max=y.shape[0] - 1)
             return y[:b]
 
         fn1 = torch.compile(f1, fullgraph=True, backend="eager")
@@ -1327,7 +1327,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         @torch.compile(backend=cnts, fullgraph=True)
         def f(x):
             y = x.item()
-            torch._is_nonnegative(y)
+            torch._check_is_nonnegative(y)
             # Cannot conditional on unbacked SymInt
             if y == 0:
                 assert False
