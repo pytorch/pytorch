@@ -126,15 +126,6 @@ static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN = {
     "TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN"};
 
-// Whether to include stack trace in the Flight Recorder trace (default true)
-static std::vector<std::string> TORCH_NCCL_INCLUDE_STACK_TRACE = {
-    "TORCH_NCCL_INCLUDE_STACK_TRACE"};
-
-// Whether to include only active collectives in the Flight Recorder trace
-// (default false)
-static std::vector<std::string> TORCH_NCCL_INCLUDE_ONLY_ACTIVE = {
-    "TORCH_NCCL_INCLUDE_ONLY_ACTIVE"};
-
 // Whether to include only active collectives in the Flight Recorder trace
 // (default false)
 static std::vector<std::string> TORCH_NCCL_EXTRA_DUMP_ON_EXEC = {

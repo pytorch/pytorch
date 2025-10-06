@@ -1443,7 +1443,7 @@ void ProcessGroupNCCL::dumpExtraDebuggingInfo() {
       // When this routine is called, exception is captured so
       // dumping by default_pg is not guaranteed due to early termination of
       // process So we call dumping manually here
-      bool onlyActive = getCvarBool(TORCH_NCCL_INCLUDE_ONLY_ACTIVE, false);
+      bool onlyActive = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
       // Stacktrace is not included at the moment to prevent deadlock due to GIL
       dumpDebuggingInfo(false, onlyActive);
     }
@@ -1874,10 +1874,10 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // recorder and dump. After dump, the training should continue.
     if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
       // best effort dump, not waiting for the dump here
-      bool onlyActive = getCvarBool(TORCH_NCCL_INCLUDE_ONLY_ACTIVE, false);
+      bool onlyActive = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
       LOG(INFO) << pg_->logPrefix()
                 << "Dump signal received through pipe, triggering FR dump.";
-      futures.emplace_back(std::async(std::launch::async, [this]() {
+      futures.emplace_back(std::async(std::launch::async, [this, onlyActive]() {
         return this->pg_->dumpDebuggingInfo(false, onlyActive);
       }));
     }
@@ -1896,8 +1896,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
-    bool dumpStackTrace = getCvarBool(TORCH_NCCL_INCLUDE_STACK_TRACE, true);
-    bool onlyActive = getCvarBool(TORCH_NCCL_INCLUDE_ONLY_ACTIVE, false);
+    bool dumpStackTrace = getCvarBool(TORCH_INCLUDE_STACK_TRACE, true);
+    bool onlyActive = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
     ::c10d::C10dLoggingData debugLog;
     debugLog.integers["pg_id"] = static_cast<int64_t>(pg_->getUid());
     debugLog.integers["rank"] = pg_->getRank();
