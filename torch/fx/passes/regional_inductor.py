@@ -76,25 +76,38 @@ def has_marked_node_custom_metadata(node):
     )
 
 
+def _compile_fx_annotated_nodes_with_inductor(gm):
+    found_marked_node = False
+    for node in gm.graph.nodes:
+        if has_marked_node_custom_metadata(node):
+            found_marked_node = True
+            break
+
+    if not found_marked_node:
+        print("No inductor marked nodes found")
+        return gm
+
+    class InductorMarkedNodes(OperatorSupport):
+        def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
+            return has_marked_node_custom_metadata(node)
+
+    marked_nodes = InductorMarkedNodes()
+    gm = partition_by_supported_nodes(gm, marked_nodes, "__marked_inductor_submod")
+    gm = compile_submod(gm, "__marked_inductor_submod")
+    return gm
+
+
+def recursive_compile_fx_annotated_nodes_with_inductor(gm):
+    for node in gm.graph.find_nodes(op="get_attr"):
+        submod = getattr(gm, node.target)
+        if isinstance(submod, torch.fx.GraphModule):
+            recursive_compile_fx_annotated_nodes_with_inductor(submod)
+
+    return _compile_fx_annotated_nodes_with_inductor(gm)
+
+
 def compile_fx_annotated_nodes_with_inductor(gm, *example_args):
     # fuser utils create new nodes using create_proxy which retains the seq_nr
     # metadata and cause issues
     with torch.fx.traceback.preserve_node_meta(enable=False):
-        found_marked_node = False
-        for node in gm.graph.nodes:
-            if has_marked_node_custom_metadata(node):
-                found_marked_node = True
-                break
-
-        if not found_marked_node:
-            print("No inductor marked nodes found")
-            return gm
-
-        class InductorMarkedNodes(OperatorSupport):
-            def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-                return has_marked_node_custom_metadata(node)
-
-        marked_nodes = InductorMarkedNodes()
-        gm = partition_by_supported_nodes(gm, marked_nodes, "__marked_inductor_submod")
-        gm = compile_submod(gm, "__marked_inductor_submod")
-        return gm
+        return recursive_compile_fx_annotated_nodes_with_inductor(gm)
