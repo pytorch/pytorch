@@ -453,13 +453,13 @@ static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
     return at::_ops::detach::redispatch(
         ks & c10::after_ADInplaceOrView_keyset, self);
   })();
-  if (self.is_inference()) {
-    return self;
-  }
   // NB: we can't make detach() a normal view operator because the
   // codegen generates allow_tensor_metadata_change = True (and leaves
   // is_fresh_tensor to the default setting of False) for them. In the
   // future we should have an option for this in the codegen.
+  if (self.is_inference()) {
+    return out;
+  }
   return ::torch::autograd::make_variable_non_differentiable_view(
       self,
       out,
