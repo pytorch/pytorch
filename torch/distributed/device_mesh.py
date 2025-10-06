@@ -86,7 +86,7 @@ else:
             # A root mesh is not created through slicing.
             # We considers the root mesh of a root mesh is itself.
             # We keep this function for backward compatibility.
-            return device_mesh.root_mesh
+            return device_mesh._get_root_mesh()
 
         @staticmethod
         def num_devices_per_host(device_type: str) -> int:
@@ -420,18 +420,8 @@ else:
                             dim_group_names.append(dim_group.group_name)  # type: ignore[union-attr]
             self._dim_group_names = dim_group_names
 
-        @property
-        def root_mesh(self) -> "DeviceMesh":
-            # If a mesh does not have a root mesh stored, it is a root mesh itself.
-            # A root mesh is not created through slicing.
+        def _get_root_mesh(self) -> "DeviceMesh":
             return self._root_mesh if self._root_mesh else self
-
-        @root_mesh.setter
-        def root_mesh(self, mesh: Optional["DeviceMesh"]) -> None:
-            # you can add validation logic here if needed
-            if mesh is not None and not isinstance(mesh, DeviceMesh):
-                raise TypeError(f"Expected DeviceMesh or None, got {type(mesh)}")
-            self._root_mesh = mesh
 
         def __enter__(self) -> "DeviceMesh":
             # set this mesh as the current mesh in mesh env
@@ -542,17 +532,17 @@ else:
                 return self
             else:
                 sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
-                # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
+                # When using FakeTensorMode to trace the model, `_create_sub_mesh()` will
                 # fail as it will require a real tensor to manipulate.
                 # `unset_fake_temporarily()` will allow us to materialize the tensors
-                # within `create_sub_mesh`, which should not affect modling.
+                # within `_create_sub_mesh`, which should not affect modling.
                 #
                 # Note that this should be orthogonal to torch.compile(). But whether
                 # we can compile device_mesh `slicing` (no graph break) is not verified
                 # yet and need a follow-up,
                 # TODO: compiler + device_mesh slicing.
                 with torch._subclasses.fake_tensor.unset_fake_temporarily():
-                    submesh = self.create_sub_mesh(sliced_mesh_layout, mesh_dim_names)
+                    submesh = self._create_sub_mesh(sliced_mesh_layout, mesh_dim_names)
                 return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
@@ -582,7 +572,7 @@ else:
             if self.mesh.ndim == 1 and mesh_dim is None:
                 return not_none(_resolve_process_group(self._dim_group_names[0]))
 
-            root_mesh = self.root_mesh
+            root_mesh = self._get_root_mesh()
             root_to_flatten_mapping = root_mesh._flatten_mapping
             if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping.keys():
                 dim_group_name = root_to_flatten_mapping[
@@ -607,12 +597,12 @@ else:
             """
             return [self.get_group(i) for i in range(self.mesh.ndim)]
 
-        def create_sub_mesh(
+        def _create_sub_mesh(
             self,
             layout: _MeshLayout,
             submesh_dim_names: tuple[str, ...],
         ) -> "DeviceMesh":
-            root_mesh = self.root_mesh
+            root_mesh = self._get_root_mesh()
             slice_dim_group_name = []
             for name in submesh_dim_names:
                 if name in not_none(self.mesh_dim_names):
@@ -644,15 +634,15 @@ else:
                 _layout=layout,
             )
             res_submesh._dim_group_names = slice_dim_group_name
-            res_submesh.root_mesh = root_mesh
+            res_submesh._root_mesh = root_mesh
             return res_submesh
 
-        def create_flatten_mesh(
+        def _create_flatten_mesh(
             self,
             mesh_dim_name: Optional[str] = None,
             backend_override: BackendConfig = (None, None),
         ) -> "DeviceMesh":
-            root_mesh = self.root_mesh
+            root_mesh = self._get_root_mesh()
 
             if not mesh_dim_name:
                 mesh_dim_name = "_".join(not_none(self.mesh_dim_names))
@@ -672,10 +662,7 @@ else:
 
             flattened_mesh_layout = self._layout.coalesce()
             # Quick return if the flatten mesh has been created before.
-            if (
-                root_mesh._flatten_mapping
-                and mesh_dim_name in root_mesh._flatten_mapping
-            ):
+            if mesh_dim_name in root_mesh._flatten_mapping:
                 if (
                     flattened_mesh_layout
                     == root_mesh._flatten_mapping[mesh_dim_name]._layout
@@ -703,7 +690,7 @@ else:
                 (backend_override,),
                 _layout=self._layout.coalesce(),
             )
-            res_flattened_mesh.root_mesh = root_mesh
+            res_flattened_mesh._root_mesh = root_mesh
             root_mesh._flatten_mapping[mesh_dim_name] = res_flattened_mesh
 
             return res_flattened_mesh
@@ -714,7 +701,7 @@ else:
             The device_mesh passed in needs to be sliced out from the root mesh
             or submesh of the root mesh.
             """
-            root_mesh = self.root_mesh
+            root_mesh = self._get_root_mesh()
             child_mesh_dim_names = self.mesh_dim_names
             if root_mesh and child_mesh_dim_names:
                 assert len(child_mesh_dim_names) == 1, (
@@ -742,7 +729,7 @@ else:
             If valid, return dim indexes of the slice mesh in the device mesh.
             """
             slice_from_root = True
-            if self != self.root_mesh:
+            if self != self._get_root_mesh():
                 warnings.warn(
                     "You are attempting to slice a submesh from another submesh. While we support this operation, "
                     "it is users' responsibility to ensure that the submesh is consistently sliced across all ranks. "
@@ -755,7 +742,7 @@ else:
             flatten_name_to_root_layout = (
                 {
                     key: mesh._layout
-                    for key, mesh in self.root_mesh._flatten_mapping.items()
+                    for key, mesh in self._get_root_mesh()._flatten_mapping.items()
                 }
                 if slice_from_root
                 else {}
@@ -1090,7 +1077,7 @@ else:
             else:
                 backend_override_tuple = (None, None)
 
-            return self.create_flatten_mesh(mesh_dim_name, backend_override_tuple)
+            return self._create_flatten_mesh(mesh_dim_name, backend_override_tuple)
 
     def _normalize_backend_override(
         backend_override: dict[
