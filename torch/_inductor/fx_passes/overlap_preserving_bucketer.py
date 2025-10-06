@@ -16,7 +16,7 @@ from torch._inductor.fx_passes.overlap_scheduling import CollectiveInfo
 from torch.utils._ordered_set import OrderedSet
 
 
-@dataclass
+@dataclass(slots=True)
 class CollBucket:
     """Track information about a bucket of collectives."""
 

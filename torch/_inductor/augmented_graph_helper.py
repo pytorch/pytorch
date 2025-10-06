@@ -82,11 +82,6 @@ class AugmentedGraphHelper:
         """
         Check if there's a path from source to target.
 
-        Args:
-            source: Starting node
-            target: Target node
-            boudned_search_ragnge
-
         If bounds are provided, only searches nodes within the idx of these ranges.
         """
         # we should not be checking path from node to itself
