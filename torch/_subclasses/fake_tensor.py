@@ -1904,7 +1904,7 @@ class FakeTensorMode(TorchDispatchMode):
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
-            assert isinstance(output, tuple)
+            assert isinstance(output, (tuple, list))
             non_cacheable = any(
                 isinstance(o, (torch.Tensor, torch.SymInt))
                 and has_free_unbacked_symbols(o)
@@ -2505,15 +2505,7 @@ class FakeTensorMode(TorchDispatchMode):
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
-            # Reenable the fake tensor mode for the registered fake function
-            maybe_ignore_fresh_unbacked_symbols = (
-                contextlib.nullcontext
-                if self.shape_env is None
-                else self.shape_env.ignore_fresh_unbacked_symbols
-            )
-
-            with self, maybe_ignore_fresh_unbacked_symbols():
-                # pyrefly: ignore  # index-error
+            with self:
                 return registered_hop_fake_fns[func](*args, **kwargs)
 
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
