@@ -115,7 +115,6 @@ class WindowsCrossCompilationTestFramework:
                     inductor_configs=inductor_configs,
                 )
 
-                print(f"Generated {config.name} package at: {package_path}")
                 self.assertTrue(
                     os.path.exists(package_path),
                     f"Package file should exist at {package_path}",
@@ -163,9 +162,6 @@ class WindowsCrossCompilationTestFramework:
                 # Compare outputs
                 torch.testing.assert_close(
                     original_output, loaded_output, rtol=config.rtol, atol=config.atol
-                )
-                print(
-                    f"Successfully loaded and tested cross-compiled {config.name} model on Windows"
                 )
 
         return load_test
@@ -318,21 +314,45 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
 
 
 if __name__ == "__main__":
-    import argparse
+    import sys
 
     from torch._inductor.test_case import run_tests
 
-    parser = argparse.ArgumentParser(description="Run Windows cross-compilation tests")
-    parser.add_argument(
-        "--package-dir",
-        type=str,
-        help="Directory to store .pt2 package files (default: temporary directory)",
-    )
+    # Check for --package-dir argument and remove it before unittest sees it
+    package_dir = None
+    filtered_argv = []
+    i = 0
+    while i < len(sys.argv):
+        if sys.argv[i] == "--package-dir":
+            if i + 1 < len(sys.argv):
+                package_dir = sys.argv[i + 1]
+                i += 2  # Skip both --package-dir and its value
+            else:
+                print("Error: --package-dir requires a valid directory path")
+                sys.exit(1)
+        elif sys.argv[i].startswith("--package-dir="):
+            package_dir = sys.argv[i].split("=", 1)[1]
+            i += 1
+        else:
+            filtered_argv.append(sys.argv[i])
+            i += 1
 
-    args, unknown_args = parser.parse_known_args()
+    # Validate and set the base path for package storage
+    if package_dir:
+        try:
+            package_path = Path(package_dir)
+            package_path.mkdir(parents=True, exist_ok=True)
+            # Test write access
+            test_file = package_path / ".test_write"
+            test_file.touch()
+            test_file.unlink()
+            WindowsCrossCompilationTestFramework.set_base_path(package_dir)
+        except Exception:
+            print("Error: --package-dir requires a valid directory path")
+            sys.exit(1)
 
-    # Set the base path for package storage
-    WindowsCrossCompilationTestFramework.set_base_path(args.package_dir)
+    # Update sys.argv to remove our custom arguments
+    sys.argv = filtered_argv
 
     if HAS_GPU:
         run_tests(needs="filelock")
