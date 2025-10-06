@@ -4,9 +4,10 @@ r"""Implementation for Stochastic Weight Averaging implementation."""
 import itertools
 import math
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from copy import deepcopy
-from typing import Any, Callable, cast, Literal, Optional, Union
+from typing import Any, cast, Literal, Optional, Union
+from typing_extensions import override
 
 import torch
 from torch import Tensor
@@ -248,11 +249,13 @@ class AveragedModel(Module):
     def update_parameters(self, model: Module):
         """Update model parameters."""
         self_param = (
+            # pyrefly: ignore  # bad-argument-type
             itertools.chain(self.module.parameters(), self.module.buffers())
             if self.use_buffers
             else self.parameters()
         )
         model_param = (
+            # pyrefly: ignore  # bad-argument-type
             itertools.chain(model.parameters(), model.buffers())
             if self.use_buffers
             else model.parameters()
@@ -299,8 +302,11 @@ class AveragedModel(Module):
                 for p_averaged, p_model in zip(  # type: ignore[assignment]
                     self_param_detached, model_param_detached
                 ):
+                    # pyrefly: ignore  # missing-attribute
                     n_averaged = self.n_averaged.to(p_averaged.device)
+                    # pyrefly: ignore  # missing-attribute
                     p_averaged.detach().copy_(
+                        # pyrefly: ignore  # missing-attribute, bad-argument-type
                         self.avg_fn(p_averaged.detach(), p_model, n_averaged)
                     )
 
@@ -431,10 +437,7 @@ class SWALR(LRScheduler):
                 "anneal_strategy must by one of 'cos' or 'linear', "
                 f"instead got {anneal_strategy}"
             )
-        elif anneal_strategy == "cos":
-            self.anneal_func = self._cosine_anneal
-        elif anneal_strategy == "linear":
-            self.anneal_func = self._linear_anneal
+        self._set_anneal_func(anneal_strategy)
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
             raise ValueError(
                 f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}"
@@ -456,8 +459,29 @@ class SWALR(LRScheduler):
             return swa_lr
         return (lr - alpha * swa_lr) / (1 - alpha)
 
+    @override
     def get_lr(self):
-        """Get learning rate."""
+        r"""Compute the next learning rate for each of the optimizer's
+        :attr:`~torch.optim.Optimizer.param_groups`.
+
+        Uses :attr:`anneal_func` to interpolate between each group's
+        ``group["lr"]`` and ``group["swa_lr"]`` over :attr:`anneal_epochs`
+        epochs. Once :attr:`anneal_epochs` is reached, keeps the learning rate
+        fixed at ``group["swa_lr"]``.
+
+        Returns:
+            list[float | Tensor]: A :class:`list` of learning rates for each of
+            the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the
+            same types as their current ``group["lr"]``\s.
+
+        .. note::
+            If you're trying to inspect the most recent learning rate, use
+            :meth:`get_last_lr()` instead.
+
+        .. note::
+            The returned :class:`~torch.Tensor`\s are copies, and never alias
+            the optimizer's ``group["lr"]``\s.
+        """
         # `_get_lr_called_within_step` is only available `_enable_get_lr_call`,
         # so we ignore the type error here. See `LRScheduler.step()` for more details.
         if not self._get_lr_called_within_step:
@@ -470,15 +494,48 @@ class SWALR(LRScheduler):
         step = self._step_count - 1
         if self.anneal_epochs == 0:
             step = max(1, step)
+        # pyrefly: ignore  # no-matching-overload
         prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
         prev_alpha = self.anneal_func(prev_t)
         prev_lrs = [
             self._get_initial_lr(group["lr"], group["swa_lr"], prev_alpha)
             for group in self.optimizer.param_groups
         ]
+        # pyrefly: ignore  # no-matching-overload
         t = max(0, min(1, step / max(1, self.anneal_epochs)))
         alpha = self.anneal_func(t)
         return [
             group["swa_lr"] * alpha + lr * (1 - alpha)
             for group, lr in zip(self.optimizer.param_groups, prev_lrs)
         ]
+
+    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]):
+        self._anneal_strategy = anneal_strategy
+        if anneal_strategy == "cos":
+            self.anneal_func = self._cosine_anneal
+        else:
+            self.anneal_func = self._linear_anneal
+
+    @override
+    def state_dict(self) -> dict[str, Any]:
+        """Return the state of the scheduler as a :class:`dict`.
+
+        It contains an entry for every variable in self.__dict__ which
+        is not the optimizer or anneal_func.
+        """
+        return {
+            key: value
+            for key, value in self.__dict__.items()
+            if key not in ("optimizer", "anneal_func")
+        }
+
+    @override
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Load the scheduler's state.
+
+        Args:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        self.__dict__.update(state_dict)
+        self._set_anneal_func(self._anneal_strategy)

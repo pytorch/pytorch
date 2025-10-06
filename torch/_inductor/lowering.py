@@ -47,7 +47,13 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    Identity,
+    Mod,
+    ModularIndexing,
+)
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -314,6 +320,26 @@ def in_namespace(op, namespace):
     return False
 
 
+def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """
+    Copy cpu scalar if doesn't not match with given `device`
+    """
+    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
+        x.get_size()
+    ):
+        return x
+    size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
+    cur_device = x.get_device()
+    if (
+        cur_device is not None
+        and cur_device.type == "cpu"
+        and cur_device != device
+        and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
+    ):
+        return TensorBox(ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False)))
+    return x
+
+
 def transform_args(
     args: list[Any],
     kwargs: dict[str, Any],
@@ -321,6 +347,10 @@ def transform_args(
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
 ) -> tuple[list[Any], dict[str, Any]]:
+    """
+    Transforms arguments for broadcasting and type promotion
+    """
+
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
     # check that there's something to transform
@@ -347,6 +377,12 @@ def transform_args(
         device = (
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
+
+        for i in args_indices:
+            args[i] = maybe_copy_cpu_scalar(args[i], device)
+
+        for k in kwargs_indices:
+            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
 
         # sometimes args are an immutable list so we can't mutate them
         def promote(arg):
@@ -497,13 +533,9 @@ def broadcast_symbolic_shapes(a, b):
     """
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
-        if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), fallback_value=False
-        ):
+        if V.graph.sizevars.is_size_one_or_false(y):
             output.append(x)
-        elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), fallback_value=False
-        ):
+        elif V.graph.sizevars.is_size_one_or_false(x):
             output.append(y)
         else:
             V.graph.sizevars.check_equals(x, y)
@@ -605,8 +637,8 @@ def make_pointwise(
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
-            and dtype in low_pr_fp
         )
+        emulate_output_cast = emulate_precision_casts and dtype in low_pr_fp
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
@@ -623,7 +655,7 @@ def make_pointwise(
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
-                if emulate_precision_casts:
+                if emulate_output_cast:
                     # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
                     # then upcasting again, to emulate casts that eager would do.
                     downcast = ops.to_dtype(out, dtype, use_compute_types=False)
@@ -949,13 +981,10 @@ def broadcast_tensors(*inputs):
     for x in inputs:
         sizes = x.get_size()
 
-        def is_length_one(size: sympy.Expr):
-            return V.graph.sizevars.shape_env.evaluate_expr(
-                sympy.Eq(size, 1), fallback_value=False
-            )
-
         if len(sizes) != len(target) or any(
-            is_length_one(a) != is_length_one(b) for a, b in zip(sizes, target)
+            V.graph.sizevars.is_size_one_or_false(a)
+            != V.graph.sizevars.is_size_one_or_false(b)
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -1172,23 +1201,143 @@ def permute(x, dims):
 
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
+    """
+    Lowers a slice call, creating ExternKernels for the output size & storage offset symbols,
+    if the indices are unbacked and appropriate semantics aren't known.
+    If they are known (indices are static/backed/unbacked with info), a SliceView is created.
+    """
+
+    from torch.fx.experimental.symbolic_shapes import (
+        CallMethodKey,
+        resolve_unbacked_bindings,
+    )
+
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
+    size = x.get_size()[dim]
+    step = sympy.expand(step)
+    assert isinstance(step, sympy.Expr) or step > 0, step
+
+    # maybe apply slice optimization
+    try:
+        if (
+            start == 0
+            and V.graph.sizevars.statically_known_leq(size, end)
+            and step == 1
+        ):
+            return x
+    except TypeError:
+        pass
+
+    # try to avoid dynamic (unbacked) slice
+    def compute_slice_index(index, size, default=None):
+        if index is None:
+            return default
+
+        fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
+        index = sympy.expand(index)
+        size = sympy.expand(size)
+        if fn(sympy.Ge(index, 0)) and fn(sympy.Le(index, size)):
+            return index
+        elif fn(sympy.Lt(index, 0)) and fn(sympy.Ge(index, -size)):
+            return index + size
+        elif fn(sympy.Gt(index, size)):
+            return size
+        elif fn(sympy.Lt(index, -size)):
+            return 0
+        return None
+
+    start_index, end_index = None, None
+    ambiguous_slice = clamp
+    if ambiguous_slice:
+        start_index = compute_slice_index(start, size, 0)
+        end_index = compute_slice_index(end, size, size)
+        if start_index is not None and end_index is not None:
+            start, end = start_index, end_index
+            ambiguous_slice = False
+
+    # ambiguous_slice=False means we know what semantics this slice call follows,
+    # and don't need to generate an extern kernel to represent the output size.
+    # This is assumed True for clamp=False
+    # (meant to follow standard indexing semantics: 0 <= index < size)
+    if not ambiguous_slice:
+        return TensorBox(
+            ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
+        )  # go to SliceView/ReinterpretView
+
+    # unbacked territory: create DynamicSlice ExternKernel
+    # clamp is True, unbacked start / end
+    assert clamp
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
+    assert unbacked_bindings is not None
+    assert len(unbacked_bindings) <= 2, unbacked_bindings
+    sym_size, sym_storage = None, None
+    for sym, keypath in unbacked_bindings.items():
+        if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
+            sym_size = sym
+        elif keypath == (CallMethodKey("storage_offset"),):
+            sym_storage = sym
+
+    assert start_index is None or end_index is None
+    b_size = ir.DynamicSliceSize(
+        sym_size,
+        start,
+        end,
+        step,
+        x.get_size()[dim],
+    )
+    b_size.name = V.graph.register_buffer(b_size)
+    V.graph.register_operation(b_size)
+    new_size = sym_size
+
+    if start_index is not None:
+        # we shouldn't have allocated storage offset symbol if start index was determinable
+        assert sym_storage is None
+        new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
+    else:
+        b_storage = ir.DynamicSelectStorageOffset(
+            sym_storage,
+            start,
+            x.get_layout().offset,
+            x.get_stride()[dim],
+            x.get_size()[dim],
+            clamp=True,
+        )
+        b_storage.name = V.graph.register_buffer(b_storage)
+        V.graph.register_operation(b_storage)
+        new_storage_offset = sym_storage
+
+    new_sizes = list(x.get_size())
+    new_strides = list(x.get_stride())
+    new_sizes[dim] = new_size
+    new_strides[dim] *= step
+    return as_strided(x, new_sizes, new_strides, new_storage_offset)
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
 def as_strided(x, size, stride, storage_offset=None):
+    new_device = None
+    new_dtype = None
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
-        # as_strided ignores views
+        # Note: Merging views
+        # When we use as_strided, we can rewrite the size/stride/offset
+        # of the incoming buffer x. If x is a view, we would overwrite
+        # its metadata. Except for dtype, which we need to propagate.
+
+        # Technically device is not needed because it is not possible
+        # to have a cross-device view today.
+        new_device = x.get_device()
+        new_dtype = x.dtype
         x = x.data.unwrap_view()
     x.realize()
     if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_storage_and_layout(x)
     new_layout = ir.FixedLayout(
-        old_layout.device,
-        old_layout.dtype,
+        new_device if new_device else old_layout.device,
+        new_dtype if new_dtype else old_layout.dtype,
         [sympy.expand(s) for s in size],
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset or 0),
@@ -1334,13 +1483,8 @@ def _assert_async(cond, msg):
     cond = to_dtype(cond, torch.bool)
 
     def inner_fn(index):
-        if hasattr(cond.data, "data") and hasattr(cond.data.data, "force_realize"):
-            with cond.data.data.force_realize():
-                cond_loader = cond.make_loader()
-                return ops.device_assert_async(cond_loader(index), msg)
-        else:
-            cond_loader = cond.make_loader()
-            return ops.device_assert_async(cond_loader(index), msg)
+        with ir.ComputedBuffer.force_realize():
+            return ops.device_assert_async(cond.make_loader()(index), msg)
 
     assertion_op = Pointwise.create(
         device=cond.get_device(),
@@ -1810,7 +1954,8 @@ def select(x, dim, idx):
             del new_stride[dim]
             return as_strided(x, new_size, new_stride, new_storage_offset)
         else:
-            slice_result = slice_(x, dim, actual_index, actual_index + 1)
+            # no need to clamp, this function handles negative indexing itself
+            slice_result = slice_(x, dim, actual_index, actual_index + 1, clamp=False)
             return squeeze(slice_result, dim)
 
     # Unbacked Semantics:
@@ -1833,6 +1978,7 @@ def select(x, dim, idx):
         x.get_layout().offset,
         new_stride[dim],
         x.get_size()[dim],
+        clamp=False,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -1889,7 +2035,7 @@ def unfold(x, dimension, size, step):
     dim = canonicalize_dim(ndim, dimension)
 
     if ndim == 0:
-        return slice_(unsqueeze(x, 0), end=size)
+        return slice_(unsqueeze(x, 0), end=size, clamp=False)
 
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
@@ -1942,8 +2088,9 @@ def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
     # TODO: don't guard on static shape here
     new_len = V.graph.sizevars.guard_int(x.get_size()[dim]) // 2
-    a = slice_(x, dim, 0, new_len)
-    b = slice_(x, dim, new_len, new_len * 2)
+    # no need to clamp, index is int based on input size
+    a = slice_(x, dim, 0, new_len, clamp=False)
+    b = slice_(x, dim, new_len, new_len * 2, clamp=False)
     return mul(a, sigmoid(b))
 
 
@@ -2580,8 +2727,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_val.stride()
         ]
-
-        stride_order = ir.get_stride_order(meta_val.stride())
+        shape_env = V.graph.sizevars.shape_env
+        stride_order = ir.get_stride_order(meta_val.stride(), shape_env)
 
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
@@ -2617,7 +2764,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        is_aligned_tensor = ir.is_aligned_realized_tensor_hint(arg, ALIGNMENT)
+        is_aligned_tensor = ir.is_aligned_realized_tensor(arg, ALIGNMENT)
         if is_aligned_tensor:
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
@@ -2685,7 +2832,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
-            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+            return V.graph.sizevars.guard_or_false(
+                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
+            )
 
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
@@ -2777,7 +2926,7 @@ make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.upsample_linear1d_backward)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_trilinear3d_backward)
-make_fallback(aten.grid_sampler_2d_backward, require_dense)
+make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten._pdist_backward)
 
 
@@ -3019,7 +3168,7 @@ def select_scatter(x, src, dim: int, index: int):
 
 @register_lowering(aten.slice_scatter, type_promotion_kind=None)
 def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
-    assert x.get_dtype() == src.get_dtype()
+    src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
@@ -3699,8 +3848,8 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    assert isinstance(V.graph.current_node.target, torch._ops.OpOverload)
-    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
+    op_overload = getattr(aten.index_put_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
+    ir.IndexPutFallback(op_overload, self, indices, values, accumulate)
     return self
 
 
@@ -4300,7 +4449,7 @@ def inplace_constant_pad_nd(
         layout.offset,
     )
 
-    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad)
+    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad, clamp=False)
     fill_(sliced_x, fill_value)
 
     counters["inductor"]["inplace_padding"] += 1
@@ -4763,11 +4912,11 @@ def max_pool2d_with_indices_backward(
     new_size = list(x.get_size())
 
     h_window_size = max(
-        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        max(FloorDiv(h, stride[0]) - max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
         for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        max(FloorDiv(w, stride[1]) - max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
         for w in range(kernel_size[1] * 2)
     )
 
@@ -5013,7 +5162,7 @@ def _adaptive_avg_pool2d(x, output_size):
         o_size = [*batch, h_out, w_out]
         return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
     if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
+        kernel_size = [FloorDiv(h_in, h_out), FloorDiv(w_in, w_out)]
         return avg_pool2d(x, kernel_size)
 
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
@@ -5281,7 +5430,9 @@ def upsample_nearest2d_backward(
     *_batch, out_h, out_w = input_size
 
     if inp_h % out_h == 0 and inp_w % out_w == 0:
-        return avg_pool2d(x, [inp_h // out_h, inp_w // out_w], divisor_override=1)
+        return avg_pool2d(
+            x, [FloorDiv(inp_h, out_h), FloorDiv(inp_w, out_w)], divisor_override=1
+        )
 
     h_kernel_max = ceildiv(inp_h, out_h)
     w_kernel_max = ceildiv(inp_w, out_w)
@@ -5535,11 +5686,11 @@ def avg_pool2d_backward(
     dtype = x.get_dtype()
 
     h_window_size = max(
-        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        max(FloorDiv(h, stride[0]) - max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
         for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        max(FloorDiv(w, stride[1]) - max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
         for w in range(kernel_size[1] * 2)
     )
 
@@ -7047,7 +7198,7 @@ def cond(pred, true_fn, false_fn, operands):
 
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
-def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
+def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
     if any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
@@ -7057,25 +7208,83 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    def _map_output(out: Any):
-        if isinstance(out, TensorBox):
-            return out
-        elif isinstance(out, ir.StorageBox):
-            return TensorBox(out)
-        elif isinstance(out, ir.MultiOutput):
-            return TensorBox.create(out)
-        else:
-            raise RuntimeError(f"NYI unsupported output type: {type(out)}")
-
-    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    result = ir.WhileLoop.create(
+        cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
+    )
     assert isinstance(result, Sequence)
-    return list(map(_map_output, result))
+    return list(map(ir.WhileLoop._maybe_wrap_as_tensor_box, result))
+
+
+register_lowering(
+    torch.ops.higher_order.while_loop_stack_output, type_promotion_kind=None
+)(functools.partial(while_loop, stack_output=True))
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
 def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     result = ir.InvokeSubgraph.create(subgraph_fn, *operands)
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
+
+
+# Import the control_deps_op HOP for lowering
+from torch._inductor.fx_passes.control_dependencies import control_deps
+
+
+@register_lowering(control_deps, type_promotion_kind=None)
+def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
+    """
+    Lower control_deps_op by ensuring dependencies are realized and tracking them.
+
+    The control_deps_op HOP makes dependencies explicit in the graph. During lowering:
+    1. Realize all additional dependencies to ensure they're computed
+    2. Execute the target operation normally
+    3. Track the dependencies for the scheduler
+    """
+    # Realize all additional dependencies
+    dep_names = []
+    for dep in additional_deps:
+        if not isinstance(dep, IRNode):
+            continue
+
+        dep.realize()
+        dep_names.append(dep.get_name())
+
+    original_args = V.graph.current_node.args
+    arg_offset = 2  # first two args (additional_deps, subgraph)
+    assert len(args) + arg_offset == len(original_args)
+
+    output = None
+
+    operation_len = len(V.graph.operations)
+    assert len(subgraph_fn.graph_module.graph.find_nodes(op="placeholder")) == len(args)
+    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
+        if node.op == "placeholder":
+            assert node not in V.graph.env
+            V.graph.env[node] = args[i]
+            continue
+        elif node.op == "output":
+            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
+        else:
+            assert node not in V.graph.env
+            V.graph.env[node] = V.graph.run_node(node)
+
+    assert output is not None and additional_deps
+
+    # some operators, like wait_tensor, just return their input,
+    # so its more robust to add dep to the operation itself,
+    # otherwise you can have a cycle of
+    # a = coll
+    # b = control_deps(a, mm, ...)
+    # c = control_deps(b, wait, ...)
+    # if c == a, then you have a cycle.
+    for op in V.graph.operations[operation_len:]:
+        for dep_name in dep_names:
+            op_name = op.operation_name
+            assert op_name is not None
+            V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    return output
 
 
 @register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)
@@ -7193,9 +7402,8 @@ def prepare_softmax_online(x, dim):
         reduction_numel=rnumel,
     )
 
-    if (
-        num_split == 1
-        and V.graph.sizevars.size_hint(rnumel) >= config.unroll_reductions_threshold
+    if num_split == 1 and V.graph.sizevars.statically_known_geq(
+        rnumel, config.unroll_reductions_threshold
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
             input_node=x, num_output=2, reduction_hint=hint, **kwargs

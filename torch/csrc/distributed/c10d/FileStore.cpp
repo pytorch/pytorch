@@ -7,10 +7,10 @@
 #include <cstdint>
 
 #ifdef _WIN32
+#include <c10/util/FileSystem.h>
 #include <c10/util/win32-headers.h>
 #include <fileapi.h>
 #include <io.h>
-#include <filesystem>
 #else
 #include <sys/file.h>
 #include <unistd.h>
@@ -33,7 +33,11 @@
 #define LOCK_SH 0x00000010
 #define LOCK_UN 0x00000100
 
-int flock_(int fd, int op) {
+#if defined(_WIN32) && defined(USE_ROCM)
+static
+#endif
+    int
+    flock_(int fd, int op) {
   HANDLE hdl = (HANDLE)_get_osfhandle(fd);
   DWORD low = 1, high = 0;
   OVERLAPPED offset = {0, 0, 0, 0, NULL};
@@ -157,7 +161,7 @@ class File {
 #ifdef _WIN32
       // if the parent folder doesn't exist it will never be able to create the
       // file so we can skip the retry
-      if (!std::filesystem::exists(std::filesystem::path(path).parent_path())) {
+      if (!c10::filesystem::exists(c10::filesystem::path(path).parent_path())) {
         break;
       }
 #endif

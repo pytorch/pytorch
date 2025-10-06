@@ -42,7 +42,7 @@ def load_checked_2d(
     IS_DIVISIBLE_M: tl.constexpr,
     IS_DIVISIBLE_N: tl.constexpr,
     M_LEN: tl.constexpr,
-    N_DIM: tl.constexpr,
+    N_LEN: tl.constexpr,
 ):
     # Calculate final pointer if strides are provided
     if stride_m is not None and stride_n is not None:
@@ -50,9 +50,9 @@ def load_checked_2d(
 
     # Handle all masking cases
     if not IS_DIVISIBLE_M and not IS_DIVISIBLE_N:
-        return tl.load(ptr, mask=(offs_m[:, None] < M_LEN) & (offs_n[None, :] < N_DIM), other=0.0)
+        return tl.load(ptr, mask=(offs_m[:, None] < M_LEN) & (offs_n[None, :] < N_LEN), other=0.0)
     elif IS_DIVISIBLE_M and not IS_DIVISIBLE_N:
-        return tl.load(ptr, mask=(offs_n[None, :] < N_DIM), other=0.0)
+        return tl.load(ptr, mask=(offs_n[None, :] < N_LEN), other=0.0)
     elif not IS_DIVISIBLE_M and IS_DIVISIBLE_N:
         return tl.load(ptr, mask=(offs_m[:, None] < M_LEN), other=0.0)
     else:  # Both divisible

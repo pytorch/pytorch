@@ -9,10 +9,8 @@ import contextlib
 import os
 from subprocess import CalledProcessError
 import sys
-from typing import Any, Optional
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.graph import GraphLowering
 from torch._inductor.compile_fx import shape_env_from_inputs
 from torch._inductor.utils import OrderedSet
@@ -38,6 +36,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import (
     LazyVal,
     IS_FBCODE,
+)
+from torch.testing._internal.common_utils import (
     TestCase,
     IS_CI,
     IS_WINDOWS,
@@ -307,103 +307,6 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 
-@contextlib.contextmanager
-def patch_inductor_backend(
-    device: str,
-    python_wrapper_codegen: PythonWrapperCodegen = None,
-    custom_pass: CustomGraphModulePass = None,
-    custom_backend_config: ConfigModule = None
-):
-    """
-    Patch the inductor backend for a specific device.
-    """
-    # Make sure the backend is already registered
-    init_backend_registration()
-
-    # Get the original registration parameters
-    original_scheduling = get_scheduling_for_device(device)
-    original_python_wrapper = get_wrapper_codegen_for_device(device, False)
-    original_cpp_wrapper = get_wrapper_codegen_for_device(device, True)
-    original_custom_pass = get_custom_backend_pass_for_device(device)
-    original_custom_backend_config = get_custom_backend_config_for_device(device)
-
-    try:
-        # Register modified backend for the device
-        register_backend_for_device(
-            device,
-            original_scheduling,
-            python_wrapper_codegen if python_wrapper_codegen is not None else original_python_wrapper,
-            original_cpp_wrapper,
-            custom_pass if custom_pass is not None else original_custom_pass,
-            custom_backend_config if custom_backend_config is not None else original_custom_backend_config
-        )
-        yield
-    finally:
-        # Restore the original backend
-        register_backend_for_device(
-            device,
-            original_scheduling,
-            original_python_wrapper,
-            original_cpp_wrapper,
-            original_custom_pass,
-            original_custom_backend_config
-        )
-
-def backend_for_device(device: str) -> Optional[str]:
-    """ Get the Inductor codegen backend used for the device ``device``. """
-    if dev_int := get_interface_for_device(device):
-        return dev_int.inductor_backend()
-    return None
-
-def try_patch_inductor_backend_config(device: str, key: str,
-                                      value: Any) -> contextlib.ContextDecorator:
-    """
-    Try to patch the backend-specific Inductor options, for the codegen backend
-    corresponding to the given ``device``. If that config can't be found to
-    patch, skip the test.
-
-    Will patch the member of the global ``config.$BACKEND``, if it exists. If
-    the given device also specifies a custom config module, will also try to
-    patch its ``$BACKEND`` member if it exists.
-
-    """
-    device_backend = backend_for_device(device)
-
-    if device_backend is None:
-        return unittest.skip(
-            f"Can't patch Inductor config {key} for device {device}")
-
-    config_modules = [torch._inductor.config]
-    if custom_config_module := get_custom_backend_config_for_device(device):
-        config_modules.append(custom_config_module)
-
-    contexts: list[contextlib.ContextDecorator] = []
-
-    for mod in config_modules:
-        if (
-                hasattr(mod, f"{device_backend}")
-                and hasattr(mod, f"{device_backend}.{key}")
-        ):
-            contexts.append(mod.patch(f"{device_backend}.{key}", value))
-
-    if len(contexts) == 0:
-        return unittest.skip(
-            f"Can't patch Inductor config {key} for device {device}")
-
-    class ContextStack(contextlib.ContextDecorator):
-        def __init__(self, contexts: list[contextlib.ContextDecorator]) -> None:
-            self.contexts: list[contextlib.ContextDecorator] = contexts
-
-        def __enter__(self) -> None:
-            for cd in self.contexts:
-                cd.__enter__()
-
-        def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
-            for cd in self.contexts:
-                cd.__exit__(exc_type, exc_val, exc_tb)
-
-    return ContextStack(contexts)
-
 class MockGraphHandler(GraphLowering):
     """Minimal mock graph handler for testing virtualized context."""
 
@@ -421,3 +324,48 @@ class MockGraphHandler(GraphLowering):
     def get_dtype(self, buffer_name: str) -> torch.dtype:  # noqa: ARG002
         """Return default dtype for any buffer (for testing)."""
         return torch.float32
+
+@contextlib.contextmanager
+def patch_inductor_backend(
+    device: str,
+    python_wrapper_codegen: PythonWrapperCodegen = None,
+    custom_pass: CustomGraphModulePass = None,
+    custom_backend_config: ConfigModule = None
+):
+    """
+    Patch the inductor backend for a specific device.
+    """
+    # Make sure the backend is already registered
+    init_backend_registration()
+
+    # Get the original registration parameters
+    original_scheduling = get_scheduling_for_device(device)
+    original_python_wrapper = get_wrapper_codegen_for_device(device, False)
+    original_cpp_wrapper = get_wrapper_codegen_for_device(device, True)
+    original_fx_wrapper = get_wrapper_codegen_for_device(device, fx_wrapper=True)
+    original_custom_pass = get_custom_backend_pass_for_device(device)
+    original_custom_backend_config = get_custom_backend_config_for_device(device)
+
+    try:
+        # Register modified backend for the device
+        register_backend_for_device(
+            device,
+            original_scheduling,
+            python_wrapper_codegen if python_wrapper_codegen is not None else original_python_wrapper,
+            original_cpp_wrapper,
+            original_fx_wrapper,
+            custom_pass if custom_pass is not None else original_custom_pass,
+            custom_backend_config if custom_backend_config is not None else original_custom_backend_config
+        )
+        yield
+    finally:
+        # Restore the original backend
+        register_backend_for_device(
+            device,
+            original_scheduling,
+            original_python_wrapper,
+            original_cpp_wrapper,
+            original_fx_wrapper,
+            original_custom_pass,
+            original_custom_backend_config
+        )

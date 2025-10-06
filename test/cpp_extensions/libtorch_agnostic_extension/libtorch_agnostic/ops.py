@@ -242,6 +242,32 @@ def my_narrow(t, dim, start, length) -> Tensor:
     return torch.ops.libtorch_agnostic.my_narrow.default(t, dim, start, length)
 
 
+def my_copy_(dst, src, non_blocking) -> Tensor:
+    """
+    Returns tensor dst that is updated with src elements.
+
+    Args:
+        dst: Destination tensor
+        src: Source tensor
+        non_blocking: bool
+
+    Returns: Updated tensor
+    """
+    return torch.ops.libtorch_agnostic.my_copy_.default(dst, src, non_blocking)
+
+
+def my_clone(t) -> Tensor:
+    """
+    Returns a clone of input tensor.
+
+    Args:
+        t: Input tensor
+
+    Returns: Cloned tensor
+    """
+    return torch.ops.libtorch_agnostic.my_clone.default(t)
+
+
 def test_device_guard(device_index) -> int:
     """
     Tests the DeviceGuard functionality by creating a device guard and returning an empty tensor.
@@ -295,3 +321,15 @@ def my_new_empty_dtype_variant(t) -> Tensor:
     Returns: New empty tensor with shape [2, 5] and dtype bfloat16
     """
     return torch.ops.libtorch_agnostic.my_new_empty_dtype_variant.default(t)
+
+
+def my_new_zeros_dtype_variant(t) -> Tensor:
+    """
+    Returns a new tensor filled with 0s with shape [2, 5] and dtype Float
+
+    Args:
+        t: Input tensor used as a reference for device and other properties
+
+    Returns: New zeros tensor
+    """
+    return torch.ops.libtorch_agnostic.my_new_zeros_dtype_variant.default(t)

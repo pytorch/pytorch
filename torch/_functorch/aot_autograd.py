@@ -2,9 +2,10 @@
 
 import contextlib
 import itertools
+from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 from unittest.mock import patch
 
 import torch
@@ -106,6 +107,7 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
 from ._aot_autograd.runtime_wrappers import (  # noqa: F401
     AOTDedupeWrapper,
     AOTSyntheticBaseWrapper,
+    SerializableCompiledFunction,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
     AOTConfig,
@@ -1072,6 +1074,7 @@ def aot_module_simplified(
             boxed_forward_device_index,
             ignore_shape_env,
             flatten=False,
+            force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
         )
 
         compiled_fn = None
@@ -1110,6 +1113,7 @@ def aot_module_simplified(
         # the inputs so that they can be freed before the end of this scope.
         # For overhead reasons, this is not the default wrapper, see comment:
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
+        @simple_wraps(compiled_fn)
         def forward(runtime_args: list[Any]):
             flat_args = []
             flat_args.extend(params_buffers_flat)
@@ -1123,6 +1127,7 @@ def aot_module_simplified(
         # historically returned a function that was not the boxed calling
         # convention.  This should get fixed...
         # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
+        @simple_wraps(compiled_fn)
         def forward(*runtime_args: tuple[Any]):
             full_args = []
             full_args.extend(params_buffers_flat)
@@ -1134,6 +1139,16 @@ def aot_module_simplified(
     forward.named_parameters = mod.named_parameters
     forward.named_buffers = mod.named_buffers
 
+    # Add a serialize function
+    def grab_serialize_fn(fn):
+        if isinstance(fn, SerializableCompiledFunction):
+            return fn.serialize_fn
+        elif hasattr(fn, "__wrapped__"):
+            return grab_serialize_fn(fn.__wrapped__)
+        else:
+            return None
+
+    forward.serialize = grab_serialize_fn(forward)  # type: ignore[attr-defined]
     return forward
 
 
@@ -1155,8 +1170,6 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
-    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
-    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1234,9 +1247,16 @@ def aot_export_joint_with_descriptors(
         mod,
         args,
         kwargs,
-        fw_compiler,
-        bw_compiler,
+        # Fill in default arguments for fw_compiler, bw_compiler, partition_fn.
+        # These arguments are not used here but we need them anyway to make
+        # aot_config happy for now. (TODO: refactor aot_config as a follow-up.)
+        # These arguments can be overridden in aot_compile_joint_with_descriptors,
+        # where they are actually used (to partition the joint graph into forward
+        # and backward graphs and then compile them individually).
+        boxed_nop_preserve_node_meta,
+        boxed_nop_preserve_node_meta,
         default_partition,
+        # In contrast, decompositions are needed at this stage.
         decompositions,
         keep_inference_input_mutations,
         None,
@@ -1280,7 +1300,13 @@ def aot_export_joint_with_descriptors(
     )
 
 
-def aot_compile_joint_with_descriptors(jd: JointWithDescriptors) -> callable:
+def aot_compile_joint_with_descriptors(
+    jd: JointWithDescriptors,
+    *,
+    partition_fn: Callable = default_partition,
+    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+) -> callable:
     """
     Companion function for aot_export_joint_with_descriptors which compiles the joint
     graph into a callable function that follows a standard calling convention.
@@ -1291,6 +1317,11 @@ def aot_compile_joint_with_descriptors(jd: JointWithDescriptors) -> callable:
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
+    # Update the AOTState with the provided compilers
+    jd._aot_state.aot_config.fw_compiler = fw_compiler
+    jd._aot_state.aot_config.bw_compiler = bw_compiler
+    jd._aot_state.aot_config.partition_fn = partition_fn
+
     compiled_fn, _ = aot_stage2_compile(jd._aot_state, jd._aot_graph_capture)
 
     # Cribbed from torch/export/pt2_archive/_package.py
