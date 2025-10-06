@@ -587,20 +587,38 @@ void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
   rocm_fa_preferred_backend = b;
 }
 
-bool Context::allowFP16ReductionCuBLAS() const {
+CuBLASReductionOption Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
 
-void Context::setAllowFP16ReductionCuBLAS(bool b) {
-  allow_fp16_reduction_cublas = b;
+void Context::setAllowFP16ReductionCuBLAS(bool allow_reduced_precision, bool allow_splitk) {
+  TORCH_CHECK(
+      !(allow_reduced_precision && !allow_splitk),
+      "allow_splitk=False is not supported when reduced precision reductions are enabled");
+  if (allow_reduced_precision) {
+    allow_fp16_reduction_cublas = CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  } else if (allow_splitk) {
+    allow_fp16_reduction_cublas = CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK;
+  } else {
+    allow_fp16_reduction_cublas = CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK;
+  }
 }
 
-bool Context::allowBF16ReductionCuBLAS() const {
+CuBLASReductionOption Context::allowBF16ReductionCuBLAS() const {
   return allow_bf16_reduction_cublas;
 }
 
-void Context::setAllowBF16ReductionCuBLAS(bool b) {
-  allow_bf16_reduction_cublas = b;
+void Context::setAllowBF16ReductionCuBLAS(bool allow_reduced_precision, bool allow_splitk) {
+  TORCH_CHECK(
+      !(allow_reduced_precision && !allow_splitk),
+      "allow_splitk=False is not supported when reduced precision reductions are enabled");
+  if (allow_reduced_precision) {
+    allow_bf16_reduction_cublas = CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  } else if (allow_splitk) {
+    allow_bf16_reduction_cublas = CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK;
+  } else {
+    allow_bf16_reduction_cublas = CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK;
+  }
 }
 
 bool Context::allowFP16AccumulationCuBLAS() const {
