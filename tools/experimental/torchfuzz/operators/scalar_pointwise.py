@@ -86,14 +86,14 @@ class ScalarDivOperator(ScalarPointwiseOperator):
         if len(input_names) != 2:
             raise ValueError(f"{self.__class__.__name__} requires exactly two inputs")
 
-        # Prevent ZeroDivisionError at runtime by guarding the denominator.
-        # Use integer fallback 1 for integer dtypes, and 1.0 for floating types.
+        # Prevent ZeroDivisionError at runtime by clamping the denominator.
+        # Clamp denominator to at least 1 (for ints) or 1e-6 (for floats).
         if isinstance(output_spec, ScalarSpec) and output_spec.dtype in [
             torch.int8,
             torch.int16,
             torch.int32,
             torch.int64,
         ]:
-            return f"{output_name} = {input_names[0]} / ({input_names[1]} if {input_names[1]} != 0 else 1)"
+            return f"{output_name} = {input_names[0]} / max({input_names[1]}, 1)"
         else:
-            return f"{output_name} = {input_names[0]} / ({input_names[1]} if {input_names[1]} != 0 else 1.0)"
+            return f"{output_name} = {input_names[0]} / max({input_names[1]}, 1e-6)"
