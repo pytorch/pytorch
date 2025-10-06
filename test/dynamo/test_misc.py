@@ -1321,7 +1321,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     # Translation validation changes the exception type, don't run with it
     @torch.fx.experimental._config.patch(translation_validation=False)
-    def test_torch_check_size(self):
+    def test_torch_check_nonnegative(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
         @torch.compile(backend=cnts, fullgraph=True)
