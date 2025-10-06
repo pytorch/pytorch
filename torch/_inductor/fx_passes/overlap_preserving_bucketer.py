@@ -1,4 +1,5 @@
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Optional
 
 import torch
@@ -11,8 +12,56 @@ from torch._inductor.fx_passes.bucketing import (
     is_reduce_scatter_tensor as is_reduce_scatter,
     is_wait_tensor,
 )
-from torch._inductor.fx_passes.overlap_scheduling import CollBucket, CollectiveInfo
+from torch._inductor.fx_passes.overlap_scheduling import CollectiveInfo
 from torch.utils._ordered_set import OrderedSet
+
+
+@dataclass(slots=True)
+class CollBucket:
+    """Track information about a bucket of collectives."""
+
+    collectives: list[fx.Node] = field(
+        default_factory=list
+    )  # Original collective starts
+    total_bytes: int = 0
+    min_start_idx: Optional[int] = None  # Minimum index of collective starts
+    max_wait_idx: Optional[int] = None  # Maximum index of collective waits
+
+    bucketed_start: Optional[fx.Node] = None  # After bucketing
+    bucketed_wait: Optional[fx.Node] = None  # After bucketing
+
+    def add_collective(
+        self,
+        coll_info: CollectiveInfo,
+        node_idx: dict[fx.Node, int],
+    ) -> None:
+        """
+        Add a collective to this bucket and update bucket metadata.
+
+        This handles all updates needed when adding a collective:
+        - Appends to collectives list
+        - Updates total bytes
+        - Updates min_start_idx and max_wait_idx
+        """
+        collective = coll_info.start_node
+
+        # Add to bucket
+        self.collectives.append(collective)
+        self.total_bytes += coll_info.size_bytes
+
+        # Update min start index
+        start_idx = node_idx[collective]
+        if self.min_start_idx is None:
+            self.min_start_idx = start_idx
+        else:
+            self.min_start_idx = min(self.min_start_idx, start_idx)
+
+        # Update max wait index
+        wait_idx = node_idx[coll_info.wait_node]
+        if self.max_wait_idx is None:
+            self.max_wait_idx = wait_idx
+        else:
+            self.max_wait_idx = max(self.max_wait_idx, wait_idx)
 
 
 def bucket_key(node: torch.fx.Node) -> Optional[object]:
@@ -44,20 +93,19 @@ class OverlapPreservingBucketer:
         self.scheduled = scheduled
         self.max_bucket_memory_gb = max_bucket_memory_gb
         self.node_idx = {n: i for i, n in enumerate(scheduled)}
+        self.aug_graph = AugmentedGraphHelper(self.graph, node_to_idx=self.node_idx)
 
     def bucket_collectives(self) -> None:
         """Main entry point for bucketing collectives."""
-
-        aug_graph = AugmentedGraphHelper(self.graph)
 
         # Add extra dependencies for hidden collectives
         # For each hidden collective, add: compute -> start and wait -> compute
         for start_node, info in self.collective_info.items():
             if info.hiding_node and not info.is_exposed:
                 # Add edge: hiding_compute depends on start (start must come before compute)
-                aug_graph.add_extra_dep(n=info.hiding_node, dep=start_node)
+                self.aug_graph.add_extra_dep(n=info.hiding_node, dep=start_node)
                 # Add edge: wait depends on hiding_compute (compute must come before wait)
-                aug_graph.add_extra_dep(n=info.wait_node, dep=info.hiding_node)
+                self.aug_graph.add_extra_dep(n=info.wait_node, dep=info.hiding_node)
 
         # Group collectives by bucket key (type, group, etc.)
         grouped_collectives: dict[object, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
@@ -68,7 +116,7 @@ class OverlapPreservingBucketer:
 
         all_buckets: list[CollBucket] = []
         for collective_group in grouped_collectives.values():
-            buckets = self._find_buckets(collective_group, aug_graph)
+            buckets = self._find_buckets(collective_group)
             all_buckets.extend(buckets)
 
         # Collect all extra dependencies to preserve after bucketing
@@ -95,7 +143,6 @@ class OverlapPreservingBucketer:
     def _find_buckets(
         self,
         collective_group: OrderedSet[fx.Node],
-        aug_graph: AugmentedGraphHelper,
     ) -> list[CollBucket]:
         """Find valid buckets within a group of similar collectives."""
 
@@ -108,13 +155,10 @@ class OverlapPreservingBucketer:
                 continue
 
             # Initialize bucket with first collective
-            bucket_info = CollBucket(
-                collectives=[start_node],
-                total_bytes=self.collective_info[start_node].size_bytes,
-            )
+            bucket_info = CollBucket()
+            bucket_info.add_collective(self.collective_info[start_node], self.node_idx)
             processed.add(start_node)
 
-            # TODO - limit within range
             for candidate in collective_group:
                 if candidate in processed:
                     continue
@@ -123,9 +167,10 @@ class OverlapPreservingBucketer:
                 if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
                     continue
 
-                if self._can_add_to_bucket(bucket_info, candidate, aug_graph):
-                    bucket_info.collectives.append(candidate)
-                    bucket_info.total_bytes += candidate_bytes
+                if self._can_add_to_bucket(bucket_info, candidate):
+                    bucket_info.add_collective(
+                        self.collective_info[candidate], self.node_idx
+                    )
                     processed.add(candidate)
 
             if len(bucket_info.collectives) > 1:
@@ -137,11 +182,30 @@ class OverlapPreservingBucketer:
         """Check if there's an ancestor relationship between two nodes."""
         return n1 in self.node_ancestors[n2] or n2 in self.node_ancestors[n1]
 
+    def _has_path(
+        self,
+        source: fx.Node,
+        source_bounds: tuple[int, int],
+        target: fx.Node,
+        target_bounds: tuple[int, int],
+    ) -> bool:
+        """Check if there's a path from source to target with bounded search."""
+
+        search_range = (
+            min(source_bounds[0], target_bounds[0]),
+            max(source_bounds[1], target_bounds[1]),
+        )
+
+        return self.aug_graph.has_path(
+            source,
+            target,
+            bounded_search_range=search_range,
+        )
+
     def _can_add_to_bucket(
         self,
         bucket_info: CollBucket,
         candidate: fx.Node,
-        aug_graph: AugmentedGraphHelper,
     ) -> bool:
         """
         Check if candidate can be added to bucket without interfering
@@ -174,29 +238,39 @@ class OverlapPreservingBucketer:
         # Check if there's a path between any existing start and candidate start.
         # Because the collectives have already been merged, we can just start from one
         # of them.
-        # TODO: we have a range of possible idxs of the merged node, and idx of new node.
-        # we should not do path search beyond that range
         existing_coll = bucket_info.collectives[0]
-        if aug_graph.has_path(existing_coll, candidate):
+
+        # Calculate bounds for path search
+        candidate_idx = self.node_idx[candidate]
+        candidate_wait_idx = self.node_idx[candidate_wait]
+
+        bucket_min_idx = bucket_info.min_start_idx
+        bucket_max_idx = bucket_info.max_wait_idx
+        assert bucket_min_idx is not None and bucket_max_idx is not None
+        existing_bounds = (bucket_min_idx, bucket_max_idx)
+        candidate_bounds = (candidate_idx, candidate_wait_idx)
+
+        if self._has_path(existing_coll, existing_bounds, candidate, candidate_bounds):
             return False
-        if aug_graph.has_path(candidate, existing_coll):
+        if self._has_path(candidate, candidate_bounds, existing_coll, existing_bounds):
             return False
 
         # Safe to merge starts - do the merge
-        aug_graph.merge_to_set(existing_coll, candidate)
+        self.aug_graph.merge_to_set(existing_coll, candidate)
 
         # Step 3: Check and merge waits
         existing_wait = self.collective_info[existing_coll].wait_node
-        candidate_wait = candidate_info.wait_node
-        # TODO - as above, limit search by idx
-        if aug_graph.has_path(existing_wait, candidate_wait) or aug_graph.has_path(
-            candidate_wait, existing_wait
+
+        if self._has_path(
+            existing_wait, existing_bounds, candidate_wait, candidate_bounds
+        ) or self._has_path(
+            candidate_wait, candidate_bounds, existing_wait, existing_bounds
         ):
             # Unmerge the start we just merged
-            aug_graph.unmerge_node(candidate)
+            self.aug_graph.unmerge_node(candidate)
             return False
 
-        aug_graph.merge_to_set(existing_wait, candidate_wait)
+        self.aug_graph.merge_to_set(existing_wait, candidate_wait)
         return True
 
     def _apply_bucket(
