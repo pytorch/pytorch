@@ -316,7 +316,7 @@ def _preload_cuda_deps(
         if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
             break
-    if not lib_path and is_required:
+    if not lib_path and required:
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
     else if lib_path:
         ctypes.CDLL(lib_path)
