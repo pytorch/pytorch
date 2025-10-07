@@ -12,8 +12,8 @@ import pathlib
 import textwrap
 import traceback
 import typing
-from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Literal
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, Literal
 
 import onnxscript
 import onnxscript.evaluator
@@ -132,8 +132,10 @@ class TorchTensor(ir.Tensor):
         # view the tensor as that dtype so that it is convertible to NumPy,
         # and then view it back to the proper dtype (using ml_dtypes obtained by
         # calling dtype.numpy()).
+        # pyrefly: ignore  # missing-attribute
         if self.dtype == ir.DataType.BFLOAT16:
             return (
+                # pyrefly: ignore  # missing-attribute
                 self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
             )
         if self.dtype in {
@@ -142,9 +144,11 @@ class TorchTensor(ir.Tensor):
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
+            # pyrefly: ignore  # missing-attribute
             return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
         if self.dtype == ir.DataType.FLOAT4E2M1:
             return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
+                # pyrefly: ignore  # missing-attribute
                 self.dtype.numpy()
             )
 
@@ -168,6 +172,7 @@ class TorchTensor(ir.Tensor):
 
         if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
             raise TypeError(
+                # pyrefly: ignore  # missing-attribute
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
                 "or save the model without initializers by setting include_initializers=False."
@@ -238,6 +243,7 @@ def _set_shape_type(
             if isinstance(dim, int):
                 dims.append(dim)
             else:
+                # pyrefly: ignore  # bad-argument-type
                 dims.append(str(dim.node))
 
         # If the dtype is set already (e.g. by the onnx_symbolic ops),
@@ -270,8 +276,6 @@ def _set_shape_type(
     elif isinstance(meta_val, (float, torch.SymFloat)):
         value.dtype = ir.DataType.FLOAT
         value.shape = ir.Shape([])
-    else:
-        pass
 
 
 def _get_qualified_module_name(cls: Any) -> str:
@@ -1214,6 +1218,7 @@ def _exported_program_to_onnx_program(
     # so we need to get them from the name_* apis.
     for name, torch_tensor in itertools.chain(
         exported_program.named_parameters(),
+        # pyrefly: ignore  # bad-argument-type
         exported_program.named_buffers(),
         exported_program.constants.items(),
     ):

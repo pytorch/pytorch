@@ -11,7 +11,7 @@
 #include <string>
 
 PyObject* THPLayout_New(at::Layout layout, const std::string& name) {
-  auto type = (PyTypeObject*)&THPLayoutType;
+  auto type = &THPLayoutType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();

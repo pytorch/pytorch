@@ -500,19 +500,10 @@ class CodeGen:
 
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
-                if hasattr(o, "__args__"):
-                    # Assign global names for each of the inner type variables.
+                if hasattr(o, "__args__") and o.__args__:
                     args = [type_repr(arg) for arg in o.__args__]
-
-                    if len(args) == 0:
-                        # Bare type, such as `typing.Tuple` with no subscript
-                        # This code-path used in Python < 3.9
-                        return origin_typename
-
                     return f"{origin_typename}[{','.join(args)}]"
                 else:
-                    # Bare type, such as `typing.Tuple` with no subscript
-                    # This code-path used in Python 3.9+
                     return origin_typename
 
             # Common case: this is a regular module name like 'foo.bar.baz'
@@ -657,24 +648,37 @@ class CodeGen:
                     "val",
                     node.meta.get("tensor_meta", node.meta.get("example_value", None)),
                 )
+
+                def _tensor_annotation(t: torch.Tensor) -> str:
+                    stride = stringify_shape(t.stride()) if include_stride else ""
+                    device = f"{t.device}" if include_device else ""
+                    return (
+                        f"{red(dtype_abbrs[t.dtype])}"
+                        f"{blue(stringify_shape(t.shape))}"
+                        f"{dim_blue(stride)}"
+                        f"{dim_green(device)}"
+                    )
+
                 # use string as annotation, to make it valid python code
                 if isinstance(meta_val, torch.Tensor) and meta_val.layout not in (
                     torch.sparse_csc,
                     torch.sparse_csr,
                 ):
-                    stride_annotation = (
-                        f"{stringify_shape(meta_val.stride())}"
-                        if include_stride
-                        else ""
+                    # Fake tensors cause tests to wobble, so do not custom print them.
+                    is_plain = type(meta_val) is torch.Tensor or isinstance(
+                        meta_val, torch._subclasses.FakeTensor
                     )
-                    device_annotation = f"{meta_val.device}" if include_device else ""
-                    maybe_type_annotation = (
-                        f': "{red(dtype_abbrs[meta_val.dtype])}{blue(stringify_shape(meta_val.shape))}'
-                        f'{dim_blue(stride_annotation)}{dim_green(device_annotation)}"'
-                    )
+                    core = _tensor_annotation(meta_val)
+                    if is_plain:
+                        maybe_type_annotation = f': "{core}"'
+                    else:
+                        cls = meta_val.__class__.__name__
+                        maybe_type_annotation = f': "{cls}({core})"'
+
                 elif isinstance(meta_val, py_sym_types):
                     val_str = CodeGen._sym_repr(meta_val)
                     maybe_type_annotation = f': "Sym({val_str})"'
+
                 elif isinstance(meta_val, TensorMetadata):
                     maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
 
@@ -1832,6 +1836,7 @@ class Graph:
                             "a str is expected"
                         )
                 if node.op in ["get_attr", "call_module"]:
+                    # pyrefly: ignore  # missing-attribute
                     target_atoms = node.target.split(".")
                     m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
