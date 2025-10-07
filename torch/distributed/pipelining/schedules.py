@@ -2089,8 +2089,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         )
                         stage.backward_weight_one_chunk(
                             mb_index,
-                            last_backward=backward_counter[stage_idx]
-                            == self._n_microbatches,
+                            last_backward=last_backward,
                         )
                         if last_backward:
                             stage.scale_grads(grad_scale_factor)
