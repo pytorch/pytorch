@@ -973,7 +973,7 @@ graph():
 
         model = M()
         ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
-        print(ep)
+
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
 
@@ -2666,7 +2666,7 @@ class GraphModule(torch.nn.Module):
         m = M()
         x = torch.randn(3)
         ep = export(m, (x,))
-        print(ep)
+
         ufm = torch.export.unflatten(ep)
         self.assertExpectedInline(
             str(ufm.graph_module.code).strip(),
@@ -3571,7 +3571,6 @@ graph():
                     sample_input = _tensor(nz=nz)
                     ep = export(mod, (sample_input,), strict=False)
                     self.assertEqual(ep.module()(sample_input), nz)
-                    print(ep)
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
@@ -8902,7 +8901,6 @@ def forward(self, x):
 
             def forward(self, start_pos: torch.Tensor):
                 pos = start_pos.item()
-                torch._check_is_size(pos)
                 torch._check(pos >= 0)
                 torch._check(pos <= 4)
                 return self.freq[pos] * self.freq[pos]
@@ -8911,16 +8909,10 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
         decompose_ep = ep.run_decompositions()
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_mixed_input(self):
@@ -14360,7 +14352,6 @@ def forward(self, x, y):
     sin = torch.ops.aten.sin.default(y)
     sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size_default = None
     ge_1 = _local_scalar_dense >= 3
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le_1 = _local_scalar_dense <= 5
@@ -16781,15 +16772,7 @@ class TestOneOffModelExportResult(TestCase):
 
         with torch.nn.attention.sdpa_kernel([SDPBackend.MATH]):
             ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
-            print(ep.graph)
             ep.run_decompositions()
-            print(ep.graph)
-
-    #         self.assertExpectedInline(ep.graph_module.code.strip(), """\
-    # def forward(self, arg0_1, arg1_1, arg2_1):
-    #     _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(arg0_1, arg1_1, arg2_1, 0.0, True);  arg0_1 = arg1_1 = arg2_1 = None
-    #     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
-    #     return (getitem,)""")
 
     @skipIfCrossRef
     @unittest.skipIf(
