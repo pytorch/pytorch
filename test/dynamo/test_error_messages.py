@@ -1085,48 +1085,39 @@ Most recent bytecode instructions traced (max 20):
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)
     def test_variable_tracker_bytecode_to_graph_break_fullgraph(self, records):
-        @torch.compile(backend="eager", fullgraph=True)
+        # def test_bytecode_graphbreak_fullgraph(self, x):
         def fn(x):
             y = x + 1
             z = x + y
             torch._dynamo.graph_break()
             return z
 
-        fn(torch.ones(3))
+        # assertRaises suppresses the traceback, so manually catch
+        e = None
+        try:
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+        except Exception as exn:
+            e = exn
 
-        pattern = r"TRACE.*"
-        s = munge_exc(records[-1].getMessage(), skip=0)
-        breakpoint()
-        matches = re.findall(pattern, s)
-        self.assertIn(len(matches), [13, 20])
-        # TODO: Checking inconsistent logging output
-
-        def post_munge(s):
-            s = re.sub(r"TRACE.*\n", "", s, flags=re.MULTILINE)
-            return re.sub(r"TRACE.*", "", s)
-
+        self.assertIsNotNone(e)
+        msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
         self.assertExpectedInline(
-            post_munge(s),
-            """\
-Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+            munge_exc(msg, suppress_suffix=True, skip=0),
+            """Traceback (most recent call last):
+  File "test_error_messages.py", line N, in test_variable_tracker_bytecode_to_graph_break_fullgraph
+    torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
-User code traceback:
-  File "test_error_messages.py", line N, in test_variable_tracker_bytecode_to_graph_break
-    fn(torch.ones(3))
 
-========== most recent `torch.compile` tracing attempt started here ==========
-
-  File "test_error_messages.py", line N, in fn
+from user code:
+   File "test_error_messages.py", line N, in fn
     torch._dynamo.graph_break()
 
-NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
-Most recent bytecode instructions traced (max 20):
 """,
         )
 
@@ -1143,8 +1134,8 @@ Most recent bytecode instructions traced (max 20):
         fn(torch.ones(3))
 
         pattern = r"TRACE.*"
-        s = munge_exc(records[-1].getMessage(), skip=0)
-        breakpoint()
+        s = munge_exc(records[0].getMessage(), skip=0)
+        # breakpoint()
         matches = re.findall(pattern, s)
         self.assertIn(len(matches), [13, 20])
         # TODO: Checking inconsistent logging output
