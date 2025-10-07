@@ -41,8 +41,10 @@ class ConstantOperator(Operator):
     ) -> str:
         """Generate code for constant creation."""
         # Create constant by calling fuzzing functions during codegen with deterministic seed
-        # Use a deterministic seed based on the variable name to ensure reproducibility
-        var_seed = hash(output_name) % (2**31)
+        # Use a deterministic hash based on the variable name to ensure reproducibility across processes
+        import hashlib
+
+        var_seed = int(hashlib.md5(output_name.encode()).hexdigest()[:8], 16) % (2**31)  # noqa: S324
 
         if isinstance(output_spec, ScalarSpec):
             # Call fuzz_scalar during codegen and embed the result
@@ -96,6 +98,21 @@ class ConstantOperator(Operator):
             else:
                 # For non-empty tensors, use the first element as fill value
                 fill_value = actual_tensor.flatten()[0].item()
+
+                # For integer types, clamp the value to a smaller range to avoid
+                # issues when used in arithmetic with embedding indices
+                import torch
+
+                if output_spec.dtype in [
+                    torch.int8,
+                    torch.int16,
+                    torch.int32,
+                    torch.int64,
+                ]:
+                    # Clamp integer values to [0, 3] to avoid index overflow in multiplication
+                    # Even with multiplication, indices should stay in reasonable range
+                    fill_value = max(0, min(3, abs(fill_value)))
+
                 tensor_creation = (
                     f"torch.full({size_str}, {fill_value}, dtype={dtype_str})"
                 )
