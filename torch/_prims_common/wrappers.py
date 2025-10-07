@@ -279,7 +279,6 @@ def out_wrapper(
             TensorLikeType
             if is_tensor
             else NamedTuple(
-                # pyrefly: ignore  # bad-argument-count
                 f"return_types_{fn.__name__}",
                 # pyrefly: ignore  # bad-argument-count
                 [(o, TensorLikeType) for o in out_names],
