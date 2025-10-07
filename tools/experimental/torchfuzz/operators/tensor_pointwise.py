@@ -86,8 +86,9 @@ class PointwiseOperator(Operator):
 class AddOperator(PointwiseOperator):
     """Operator for element-wise addition."""
 
-    def __init__(self):
+    def __init__(self, weight: float = 1.0):
         super().__init__("add", "torch.add", "+")
+        self.weight = float(weight)
 
 
 class MulOperator(PointwiseOperator):
