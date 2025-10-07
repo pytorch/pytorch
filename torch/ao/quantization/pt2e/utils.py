@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
 import types
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
@@ -71,6 +72,7 @@ def _find_q_dq_node_for_user(
                 dq_node = n
                 break
     if dq_node is None:
+        # pyrefly: ignore  # bad-assignment
         for n in user.kwargs:
             if (
                 isinstance(n, torch.fx.Node)
@@ -353,15 +355,16 @@ def _get_aten_graph_module_for_pattern(
     """
     if is_cuda:
         example_inputs = tuple(
-            [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
+            x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs
         )
 
-    aten_pattern = torch.export.export(
-        pattern,  # type: ignore[arg-type]
-        example_inputs,
-        kwargs,
-        strict=True,
-    ).module(check_guards=False)
+    with torch._export.config.patch(use_new_tracer_experimental=True):
+        aten_pattern = torch.export.export(
+            pattern,  # type: ignore[arg-type]
+            example_inputs,
+            kwargs,
+            strict=True,
+        ).module(check_guards=False)
 
     aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
     aten_pattern.recompile()  # type: ignore[operator]
