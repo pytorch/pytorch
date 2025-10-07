@@ -38,6 +38,7 @@ from .utils import (
     contains_wait,
     find_recursive_deps_of_node,
     find_recursive_users_of_node,
+    get_dtype_size,
     is_collective,
     is_fallback_op,
     is_wait,
@@ -90,6 +91,84 @@ def raise_comms(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
     return _schedule_for_comm(
         snodes, raise_comms=True, sink_waits=False, reorder_for_overlap=False
     )
+
+
+def raise_device_copy(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
+    def _get_dst_buffer_if_is_backward_reload_node(
+        snode: BaseSchedulerNode,
+    ) -> Optional[SchedulerBuffer]:
+        if not isinstance(snode.node, ir.DeviceCopy):
+            return None
+        if not snode.node.codegen_args()[2]:
+            return None
+
+        dst_buf_name = (
+            snode.node.output_view.codegen_reference()
+            if snode.node.output_view
+            else snode.node.codegen_reference()
+        )
+        dst_buf = snode.scheduler.name_to_buf[dst_buf_name]
+        if device := dst_buf.get_device():
+            if device.type != "cpu":
+                return dst_buf
+
+        return None
+
+    def _estimate_transfer_time_in_ms(dst_buf: SchedulerBuffer) -> float:
+        buf_size_bytes = V.graph.sizevars.size_hint(
+            dst_buf.node.get_numel(),
+            fallback=0,
+        ) * get_dtype_size(dst_buf.node.get_dtype())
+        buf_size_in_GB = buf_size_bytes / (1024**3)
+
+        return buf_size_in_GB * 1_000 / config.cpu_gpu_bw
+
+    # We construct new_order from old_order by going in reverse
+    new_order = []
+    # Queue to hold device copy nodes waiting to be placed (FIFO)
+    # Each entry is (snode, remaining_overlap_time)
+    device_copy_queue = []
+
+    # Loop through old_order in reverse
+    for snode in reversed(snodes):
+        dst_buf = _get_dst_buffer_if_is_backward_reload_node(snode)
+
+        if dst_buf:
+            # This is a device copy node - add it to the queue
+            transfer_time_ms = _estimate_transfer_time_in_ms(dst_buf)
+            device_copy_queue.append((snode, transfer_time_ms))
+        else:
+            # This is a compute node
+            if not device_copy_queue:
+                # Queue is empty - add compute node directly to new_order
+                new_order.append(snode)
+            else:
+                #Queue is not empty - use this compute node's runtime to satisfy overlap requirements
+                compute_runtime_ms = estimate_op_runtime(snode)
+
+                # Reduce remaining overlap time for ONLY the first device copy in queue
+                if device_copy_queue:
+                    dc_snode, remaining_time = device_copy_queue[0]
+                    device_copy_queue[0] = (
+                        dc_snode,
+                        remaining_time - compute_runtime_ms,
+                    )
+
+                # Pop and add device copies whose remaining time is <= 0
+                while device_copy_queue and device_copy_queue[0][1] <= 0:
+                    dc_snode, _ = device_copy_queue.pop(0)  # FIFO - pop from front
+                    new_order.append(dc_snode)
+
+                # Add the compute node
+                new_order.append(snode)
+
+    # Add any remaining device copies in the queue (these didn't get enough overlap)
+    while device_copy_queue:
+        dc_snode, _ = device_copy_queue.pop(0)
+        new_order.append(dc_snode)
+
+    # Since we built new_order in reverse, we need to reverse it to get the final order
+    return list(reversed(new_order))
 
 
 def reorder_compute_for_overlap(
@@ -1342,7 +1421,7 @@ def reorder_compute_and_comm_for_overlap(
         peak_memory, _ = estimate_peak_memory(
             snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
         )
-        if torch.distributed.get_rank() == 0:
+        if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
             overlap_log.debug(
                 f"==== Visualize overlap before reordering pass {p}, {peak_memory=} ===="  # noqa: G004
             )
@@ -1353,7 +1432,7 @@ def reorder_compute_and_comm_for_overlap(
         t0 = time.time()
         order = p(order)  # type: ignore[operator]
         t = time.time() - t0
-        if torch.distributed.get_rank() == 0:
+        if not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0:
             overlap_log.debug(
                 f"==== Visualize overlap after reordering pass {p} (ran in {t} sec)===="  # noqa: G004
             )
