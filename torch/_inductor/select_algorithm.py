@@ -3573,10 +3573,6 @@ class AlgorithmSelectorCache(PersistentCache):
         if config.autotune_num_choices_displayed == 0:
             return
 
-        # If no timings (e.g., after fallback), skip detailed logging
-        if not timings:
-            return
-
         # when autotune_num_choices_displayed is None, [:None] means all
         n = config.autotune_num_choices_displayed
         top_k = sorted(timings, key=timings.__getitem__)[:n]
