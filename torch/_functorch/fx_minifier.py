@@ -4,9 +4,9 @@ import copy
 import math
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Callable
 
 import torch
 import torch.fx as fx

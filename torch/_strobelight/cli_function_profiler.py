@@ -6,10 +6,10 @@ import os
 import re
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from threading import Lock
 from timeit import default_timer as timer
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 
@@ -314,6 +314,7 @@ def strobelight(
     ) -> Callable[_P, Optional[_R]]:
         @functools.wraps(work_function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> Optional[_R]:
+            # pyrefly: ignore  # bad-argument-type
             return profiler.profile(work_function, *args, **kwargs)
 
         return wrapper_function
