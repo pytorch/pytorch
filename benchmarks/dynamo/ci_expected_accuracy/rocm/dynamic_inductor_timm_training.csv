@@ -10,35 +10,11 @@ beit_base_patch16_224,pass,7
 
 
 
-botnet26t_256,pass,6
-
-
-
-cait_m36_384,eager_fail_to_run,0
-
-
-
-coat_lite_mini,pass,6
-
-
-
 convit_base,pass,7
 
 
 
-convmixer_768_32,pass,5
-
-
-
 convnext_base,pass,7
-
-
-
-crossvit_9_240,fail_accuracy,7
-
-
-
-cspdarknet53,pass,7
 
 
 
@@ -66,14 +42,6 @@ eca_halonext26ts,fail_accuracy,7
 
 
 
-fbnetc_100,pass,7
-
-
-
-fbnetv3_b,fail_accuracy,6
-
-
-
 gernet_l,pass,6
 
 
@@ -90,10 +58,6 @@ gmixer_24_224,pass,6
 
 
 
-gmlp_s16_224,pass,7
-
-
-
 hrnet_w18,pass,5
 
 
@@ -106,19 +70,7 @@ jx_nest_base,pass,7
 
 
 
-lcnet_050,pass,6
-
-
-
 mixer_b16_224,pass,7
-
-
-
-mixnet_l,pass,6
-
-
-
-mnasnet_100,pass,7
 
 
 
@@ -138,35 +90,11 @@ nfnet_l0,pass,7
 
 
 
-pnasnet5large,fail_accuracy,5
-
-
-
-poolformer_m36,pass,6
-
-
-
 repvgg_a2,fail_accuracy,7
 
 
 
 res2net101_26w_4s,pass,6
-
-
-
-res2net50_14w_8s,pass,6
-
-
-
-res2next50,pass,6
-
-
-
-resnest101e,pass,6
-
-
-
-rexnet_100,fail_accuracy,7
 
 
 
@@ -194,11 +122,7 @@ tf_efficientnet_b0,pass,6
 
 
 
-tf_mixnet_l,pass,6
-
-
-
-tnt_s_patch16_224,pass,7
+tf_tnt_s_patch16_224,pass,7
 
 
 
@@ -211,10 +135,6 @@ visformer_small,fail_accuracy,7
 
 
 vit_base_patch16_224,pass,7
-
-
-
-volo_d1_224,pass,7
 
 
 

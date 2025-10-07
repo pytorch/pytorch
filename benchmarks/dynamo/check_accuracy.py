@@ -36,7 +36,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             {
                 "Background_Matting",
                 "alexnet",
-                "cait_m36_384",
                 "dla102",
                 "demucs",
                 "densenet121",
@@ -44,7 +43,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "doctr_det_predictor",
                 "doctr_reco_predictor",
                 "dpn107",
-                "fbnetv3_b",
                 "hf_BigBird",
                 "hf_Longformer",
                 "hf_Reformer",

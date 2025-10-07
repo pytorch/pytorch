@@ -118,10 +118,8 @@ class CI(NamedTuple):
 
 CI_SKIP_OPTIMIZER = {
     # TIMM
-    "convmixer_768_32",  # accuracy
     "hrnet_w18",  # Stack issue in fx
     # HF
-    "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
     "MobileBertForQuestionAnswering",  # Stack issue in fx
     "PegasusForConditionalGeneration",  # OOM
@@ -208,19 +206,10 @@ BENCHMARK_USE_SGD = {
     "XGLMForCausalLM",
     # TIMM
     "adv_inception_v3",
-    "botnet26t_256",
-    "cait_m36_384",  # OOM
-    "coat_lite_mini",
     "convit_base",
     "dpn107",
-    "fbnetv3_b",
     "gernet_l",
-    "lcnet_050",
-    "mixnet_l",
     "res2net101_26w_4s",
-    "res2net50_14w_8s",
-    "res2next50",
-    "resnest101e",
     "sebotnet33ts_256",
     "swsl_resnext101_32x16d",
     "tf_efficientnet_b0",
@@ -250,12 +239,10 @@ CI_USE_SGD = {
     "mobilenet_v2_quantized_qat",
     "phi_1_5 resnet50_quantized_qat",
     "BlenderbotForCausalLM",
-    "cait_m36_384",
     "DALLE2_pytorch",
     "moco",
     "timm_efficientdet",
     "ghostnet_100",
-    "poolformer_m36",
     "inception_v3",
     "selecsls42b",
     "mobilevit_s",
@@ -3786,7 +3773,6 @@ def run(runner, args, original_dir=None):
         if args.only is not None and args.only in {
             "DebertaForQuestionAnswering",
             "nvidia_deeprecommender",
-            "crossvit_9_240",
         }:
             # These seem unhappy with numerics of larger cuBLASLt workspace
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False

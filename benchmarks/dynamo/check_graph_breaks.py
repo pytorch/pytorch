@@ -32,7 +32,6 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
         flaky_models.update(
             {
                 "alexnet",
-                "cait_m36_384",
                 "demucs",
                 "densenet121",
                 "detectron2_fcos_r_50_fpn",
