@@ -1245,7 +1245,7 @@ def _free_unbacked_symbols_with_path(
             else _symint_wrap(coeff)
         )
         # TODO: DivideByKey needs to test divisibility at runtime!
-        # pyrefly: ignore  # unsupported-operation
+
         r[unbacked] = path + (DivideByKey(divisor),)
         if real is not None:
             assert isinstance(real, int)
@@ -5334,7 +5334,7 @@ class ShapeEnv:
             ]
         else:
             assert len(input_contexts) == len(placeholders)
-            # pyrefly: ignore  # bad-assignment
+
             for i, (t, context) in enumerate(zip(placeholders, input_contexts)):
                 if isinstance(t, Tensorlike):
                     if context is None:
@@ -5684,13 +5684,13 @@ class ShapeEnv:
                         )
                         track_symint(property_source, ss, constraint_size[i])
                 else:
-                    # pyrefly: ignore  # missing-attribute
+
                     for i, ss in enumerate(curr_t.size()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.SIZE, i
                         )
                         track_symint(property_source, ss, constraint_size[i])
-                    # pyrefly: ignore  # missing-attribute
+
                     for i, ss in enumerate(curr_t.stride()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.STRIDE, i
@@ -5698,7 +5698,7 @@ class ShapeEnv:
                         track_symint(property_source, ss, constraint_stride[i])
                     track_symint(
                         TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
-                        # pyrefly: ignore  # missing-attribute
+
                         curr_t.storage_offset(),
                     )
 
@@ -5744,7 +5744,7 @@ class ShapeEnv:
                         continue
 
                 if is_dim(source):
-                    # pyrefly: ignore  # missing-attribute
+
                     self.dim_constraints.add_equality(source, expr)
 
                 for exprs, printer, lang in zip(all_exprs, printers, langs):
@@ -5898,7 +5898,7 @@ class ShapeEnv:
                 continue
             expr = self.simplify(ra.expr)
 
-            # pyrefly: ignore  # missing-attribute
+
             self.dim_constraints.add(expr)
 
         # 3. Every symbol must be within its value range (this handles 0/1
@@ -5915,7 +5915,7 @@ class ShapeEnv:
             verbose_expr = ""
             if r.lower not in (-sympy.oo, -int_oo):
                 if any(is_dim(source) for source in sources):
-                    # pyrefly: ignore  # missing-attribute
+
                     self.dim_constraints.add(sympy.Ge(symbol, r.lower))
                 # Only print lower bound in simplified mode if it is not the
                 # default
@@ -5924,7 +5924,7 @@ class ShapeEnv:
                 verbose_expr = f"{r.lower} <= {rf}  # {vr_sloc.lower}"
             if r.upper not in (sympy.oo, int_oo):
                 if any(is_dim(source) for source in sources):
-                    # pyrefly: ignore  # missing-attribute
+
                     self.dim_constraints.add(sympy.Le(symbol, r.upper))
                 # nontrivial upper bound is always interesting
                 bounds.append(sympy.Le(symbol, r.upper, evaluate=False))
@@ -6173,7 +6173,7 @@ class ShapeEnv:
                     else:
                         bindings[-s] = -arg
 
-        # pyrefly: ignore  # bad-assignment
+
         for t, arg in zip(placeholders, args):
             if t is None:
                 continue
@@ -8060,7 +8060,7 @@ def _suggest_fixes_for_data_dependent_error_non_strict(
                 if isinstance(leaf, torch.SymInt):
                     src_map[str(leaf.node.expr)].append(name)
                 elif isinstance(leaf, torch.Tensor):
-                    # pyrefly: ignore  # bad-assignment
+
                     for i, dim in enumerate(leaf.shape):
                         if isinstance(dim, torch.SymInt):
                             src_map[str(dim.node.expr)].append(f"{name}.shape[{i}]")

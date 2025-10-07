@@ -625,7 +625,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.unknown()
         else:
             return ValueRanges.coordinatewise_monotone_map(
-                # pyrefly: ignore  # bad-argument-type
+
                 a,
                 b,
                 # pyrefly: ignore  # bad-argument-type
@@ -642,7 +642,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.unknown()
         else:
             return ValueRanges.coordinatewise_monotone_map(
-                # pyrefly: ignore  # bad-argument-type
+
                 a,
                 b,
                 # pyrefly: ignore  # bad-argument-type

@@ -1793,17 +1793,17 @@ class _ModuleStackTracer(PythonKeyTracer):
         self.enable_attr_proxy = False
         self.submodule_paths = {}
         for name, m in self.scope_root.named_modules(remove_duplicate=False):
-            # pyrefly: ignore  # unsupported-operation
+
             if m in self.submodule_paths:
                 log.info(
                     "Shared module found between %s and %s, AttrProxy is enabled.",
-                    # pyrefly: ignore  # unsupported-operation
+
                     self.submodule_paths[m],
                     name,
                 )
                 self.enable_attr_proxy = True
             else:
-                # pyrefly: ignore  # unsupported-operation
+
                 self.submodule_paths[m] = name
 
         self.proxy_paths: WeakKeyDictionary[_AttrProxy, str] = WeakKeyDictionary()

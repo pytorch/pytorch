@@ -664,7 +664,7 @@ def _rename_constants_nodes(
         if spec.kind == InputKind.CONSTANT_TENSOR and not spec.arg.name.startswith(
             const_prefix
         ):
-            # pyrefly: ignore  # bad-argument-type
+
             if spec.arg.name.startswith(buffer_prefix):  # map from buffer to constants
                 c_name = rename_constant(
                     const_prefix + spec.arg.name[len(buffer_prefix) :]

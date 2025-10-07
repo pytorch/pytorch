@@ -241,7 +241,7 @@ def tensorify_python_scalars(
             # pyrefly: ignore  # missing-attribute
             val = node.meta.get("val")
             if isinstance(val, FakeTensor):
-                # pyrefly: ignore  # bad-assignment
+
                 for dim in val.shape:
                     if isinstance(dim, torch.SymInt):
                         for s in dim.node.expr.free_symbols:
