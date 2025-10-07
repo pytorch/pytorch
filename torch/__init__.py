@@ -384,7 +384,7 @@ def _load_global_deps() -> None:
             _preload_cuda_deps(lib_folder, lib_name)
 
         # libnvToolsExt is Optional Dependency
-        _preload_cuda_deps("nvtx", "libnvToolsExt.so.*[0-9]", False)
+        _preload_cuda_deps("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
