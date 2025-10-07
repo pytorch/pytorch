@@ -93,6 +93,7 @@ class OutputProp:
                 )
 
             if isinstance(result, torch.Tensor):  # type: ignore[possibly-undefined]
+                # pyrefly: ignore  # unbound-name
                 node.traced_result = result
 
             # pyrefly: ignore  # unsupported-operation
@@ -1350,6 +1351,7 @@ def print_n_shadows_summary(
     """
 
     try:
+        # pyrefly: ignore  # import-error
         from tabulate import tabulate
     except ImportError:
         print(

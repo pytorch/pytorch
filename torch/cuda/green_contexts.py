@@ -10,6 +10,7 @@ if hasattr(torch._C, "GreenContext"):
 
 
 # Python shim helps Sphinx process docstrings more reliably.
+# pyrefly: ignore  # invalid-inheritance
 class GreenContext(_GreenContext):
     r"""Wrapper around a CUDA green context.
 

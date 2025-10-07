@@ -36,6 +36,7 @@ from torch.fx._pytree import (
 )
 from torch.utils._pytree import (  # pyrefly: ignore  # deprecated
     _deregister_pytree_node,
+    # pyrefly: ignore  # deprecated
     _register_pytree_node,
     Context,
     FlattenFunc,

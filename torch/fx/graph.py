@@ -1763,6 +1763,7 @@ class Graph:
         installed.
         """
         try:
+            # pyrefly: ignore  # import-error
             from tabulate import tabulate
         except ImportError:
             print(

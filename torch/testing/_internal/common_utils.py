@@ -95,7 +95,7 @@ from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 from torch.utils import cpp_extension
 try:
-    import pytest
+    import pytest  # type: ignore[import-not-found]
     has_pytest = True
 except ImportError:
     has_pytest = False
