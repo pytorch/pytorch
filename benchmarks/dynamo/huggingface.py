@@ -59,7 +59,6 @@ imports = [
     "BigBirdConfig",
     "BlenderbotForConditionalGeneration",
     "BlenderbotModel",
-    "BlenderbotSmallForConditionalGeneration",
     "BlenderbotSmallModel",
     "CLIPModel",
     "CLIPVisionModel",
@@ -73,7 +72,6 @@ imports = [
     "MarianForCausalLM",
     "MarianModel",
     "MarianMTModel",
-    "PegasusForConditionalGeneration",
     "PegasusModel",
     "ReformerConfig",
     "ViTForImageClassification",
@@ -167,7 +165,7 @@ def get_sequence_length(model_cls, model_name):
             "Bert",
             "Roberta",
         )
-    ) or model_name in ("DistillGPT2", "GoogleFnet", "YituTechConvBert", "CamemBert"):
+    ) or model_name in ("GoogleFnet", "YituTechConvBert"):
         seq_length = 512
     elif model_name in ("TrOCRForCausalLM"):
         seq_length = 256
@@ -222,9 +220,7 @@ def generate_inputs_for_model(
         BlenderbotModel,
         BlenderbotSmallModel,
         BlenderbotForConditionalGeneration,
-        BlenderbotSmallForConditionalGeneration,
         PegasusModel,
-        PegasusForConditionalGeneration,
         MarianModel,
         MarianMTModel,
     ]:
@@ -321,20 +317,12 @@ EXTRA_MODELS = {
     #     BigBirdConfig(attention_type="block_sparse"),
     #     AutoModelForMaskedLM,
     # ),
-    "DistillGPT2": (
-        AutoConfig.from_pretrained("distilgpt2"),
-        AutoModelForCausalLM,
-    ),
     "GoogleFnet": (
         AutoConfig.from_pretrained("google/fnet-base"),
         AutoModelForMaskedLM,
     ),
     "YituTechConvBert": (
         AutoConfig.from_pretrained("YituTech/conv-bert-base"),
-        AutoModelForMaskedLM,
-    ),
-    "CamemBert": (
-        AutoConfig.from_pretrained("camembert-base"),
         AutoModelForMaskedLM,
     ),
 }
@@ -375,8 +363,6 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return name in [
-            "ElectraForQuestionAnswering",
-            "MegatronBertForQuestionAnswering",
             "GPT2ForSequenceClassification",
         ]
 

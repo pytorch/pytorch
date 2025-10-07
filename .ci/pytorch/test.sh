@@ -834,7 +834,7 @@ test_dynamo_benchmark() {
     # TODO (huydhn): Just smoke test some sample models
     if [[ "${TEST_CONFIG}" == *b200* ]]; then
       if [[ "${suite}" == "huggingface" ]]; then
-        export TORCHBENCH_ONLY_MODELS="DistillGPT2"
+        export TORCHBENCH_ONLY_MODELS="AlbertForMaskedLM"
       elif [[ "${suite}" == "timm_models" ]]; then
         export TORCHBENCH_ONLY_MODELS="inception_v3"
       elif [[ "${suite}" == "torchbench" ]]; then
@@ -886,7 +886,7 @@ test_inductor_torchbench_smoketest_perf() {
   done
 
   # Perform some "warm-start" runs for a few huggingface models.
-  for test in AlbertForQuestionAnswering AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
+  for test in AllenaiLongformerBase DistilBertForMaskedLM GoogleFnet YituTechConvBert; do
     python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \
