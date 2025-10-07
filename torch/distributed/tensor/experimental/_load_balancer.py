@@ -413,8 +413,6 @@ class _PTRRLoadBalancer(_LoadBalancer):
                     [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0]  -> row value = 7
                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0]  -> row value = 3
                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1]  -> row value = 4
-
-
         """
         block_mask = self.block_mask
         kv_num_blocks = block_mask.kv_num_blocks
