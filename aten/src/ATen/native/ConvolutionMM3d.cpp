@@ -9,6 +9,7 @@
 #include <ATen/native/TransposeType.h>
 #include <ATen/native/Unfold3d.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_numerics.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -174,6 +175,23 @@ static inline void slow_conv3d_shape_check(
   const int64_t input_height = input.size(dim_height);
   const int64_t input_width = input.size(dim_width);
 
+  constexpr int64_t MAX_SAFE_PAD = (1LL << 61);
+
+  TORCH_CHECK_VALUE(
+    pad_height <= MAX_SAFE_PAD,
+    "Padding height too large: pad_height=",
+    pad_height);
+
+  TORCH_CHECK_VALUE(
+    pad_width <= MAX_SAFE_PAD,
+    "Padding width too large: pad_width=",
+    pad_width);
+
+  TORCH_CHECK_VALUE(
+    pad_depth <= MAX_SAFE_PAD,
+    "Padding depth too large: pad_depth=",
+    pad_depth);
+
   const int64_t exact_input_depth = input_depth + 2 * pad_depth;
   const int64_t exact_input_height = input_height + 2 * pad_height;
   const int64_t exact_input_width = input_width + 2 * pad_width;
@@ -220,6 +238,14 @@ static inline void slow_conv3d_shape_check(
       " x ",
       output_width,
       "). Output size is too small");
+
+  uint64_t kernel_product;
+  TORCH_CHECK(
+    !c10::mul_overflows(kernel_height, kernel_width, &kernel_product),
+    "Kernel height x width product is too large: kernel_height=",
+    kernel_height,
+    ", kernel_width=",
+    kernel_width);
 
   if (weight.defined()) {
     int64_t n_input_plane = weight.size(1);

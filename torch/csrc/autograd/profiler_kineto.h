@@ -65,6 +65,7 @@ struct TORCH_API KinetoEvent {
   int64_t privateuse1ElapsedUs() const;
   void getPerfEventCounters(torch::profiler::perf_counters_t&) const;
   extra_meta_t extraMeta() const;
+  std::string metadataJson() const;
 
  private:
   torch::profiler::impl::ProfilerVoidEventStub fallbackStart() const;
