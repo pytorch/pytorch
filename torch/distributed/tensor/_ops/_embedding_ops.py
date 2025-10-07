@@ -4,7 +4,6 @@
 from typing import cast
 
 import torch
-
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpStrategy,
