@@ -58,10 +58,9 @@ def validate_input_col(fn: Callable, input_col: int | tuple | list | None) -> No
     """
     try:
         sig = inspect.signature(fn)
-    except (
-        ValueError
-    ):  # Signature cannot be inspected, likely it is a built-in fn or written in C
-        return
+    except (ValueError, TypeError) as e:
+        # Handle cases where signature cannot be inspected
+        raise ValueError(f"Cannot inspect signature of function {fn}: {e}") from e
     if isinstance(input_col, (list, tuple)):
         input_col_size = len(input_col)
     else:
