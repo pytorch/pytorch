@@ -528,10 +528,5 @@ class ComposabilityTest(MultiProcContinuousTest):
 
 
 instantiate_parametrized_tests(ComposabilityTest)
-
-import fbvscode
-
-
-fbvscode.attach_debugger()
 if __name__ == "__main__":
     run_tests()
