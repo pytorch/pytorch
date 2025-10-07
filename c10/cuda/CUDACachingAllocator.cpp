@@ -816,7 +816,7 @@ struct ExpandableSegment {
 struct BlockState {
   c10::DeviceIndex device = 0;
   cudaStream_t stream = nullptr;
-  stream_set stream_uses = {};
+  stream_set stream_uses;
   size_t size = 0;
   void* ptr = nullptr;
   bool allocated = false;
@@ -1683,7 +1683,7 @@ class DeviceCachingAllocator {
     cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
   };
 
-  inline CaptureInfo stream_get_capture_info(cudaStream_t stream) {
+  CaptureInfo stream_get_capture_info(cudaStream_t stream) {
     CaptureInfo info{};
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
     C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
@@ -1997,7 +1997,7 @@ class DeviceCachingAllocator {
       ss.put(SHAREABLE_CUDA_EXPANDABLE_SEGMENT);
       auto full_range = block->expandable_segment_->share(
           SegmentRange(block->ptr, block->size), ss);
-      offset = (char*)block->ptr - (char*)full_range.ptr;
+      offset = (char*)block->ptr - full_range.ptr;
     }
     return ShareableHandle{offset, ss.str()};
   }
@@ -3384,7 +3384,7 @@ class DeviceCachingAllocator {
     if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
       // If there is an active mempool with a given allocator,
       // we use the given allocator's delete function.
-      pool->owner_PrivatePool->allocator()->raw_delete((void*)block->ptr);
+      pool->owner_PrivatePool->allocator()->raw_delete(block->ptr);
     } else {
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
     }
@@ -3423,8 +3423,7 @@ class DeviceCachingAllocator {
     }
     block->pool->blocks.erase(block);
 
-    ptrdiff_t before_size =
-        static_cast<char*>(unmapped.ptr) - static_cast<char*>(block->ptr);
+    ptrdiff_t before_size = unmapped.ptr - static_cast<char*>(block->ptr);
     if (before_size > 0) {
       // prev? -> before_free -> block
       Block* before_free = new Block(
@@ -3442,7 +3441,7 @@ class DeviceCachingAllocator {
           block->stream,
           after_size,
           block->pool,
-          static_cast<char*>(unmapped.ptr) + unmapped.size);
+          unmapped.ptr + unmapped.size);
       after_free->expandable_segment_ = block->expandable_segment_;
       after_free->splice(block, block->next);
       block->pool->insert_into_blocks(after_free);
@@ -3832,7 +3831,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         ": did you call init?");
     Block* block = device_allocator[device]->malloc(device, size, stream);
     add_allocated_block(block);
-    *devPtr = (void*)block->ptr;
+    *devPtr = block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
       (*interp)->trace_gpu_memory_allocation(
