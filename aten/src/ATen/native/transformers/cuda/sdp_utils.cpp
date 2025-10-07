@@ -16,6 +16,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/Array.h>
 #include <c10/util/Exception.h>
+#include <c10/util/string_view.h>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -25,9 +26,12 @@
 
 #if USE_ROCM
 #if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
+#include <ATen/native/transformers/hip/aotriton_versions.h>
 #include <aotriton/flash.h>
 #define USE_ROCM_ATTENTION 1
 #endif
+#else
+#define USE_ROCM_ATTENTION 0
 #endif
 
 // Avoid potential compiler -Wall -Werror complains undefined macro
@@ -112,9 +116,24 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 // caller_is_meff is added to make the TORCH_WARN message showing the correct result
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
-#if USE_ROCM_ATTENTION && AOTRITON_VERSION_MINOR >= 9
+#if USE_ROCM_ATTENTION
   // AOTriton 0.9+ supports head_dim up to 512
-  const auto max_size = c10::SymInt(512);
+  const static auto max_hdim = []() {
+#if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
+    // gfx11xx only support hdim <= 256 on AOTriton 0.11
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    const c10::basic_string_view<char> arch(dprops->gcnArchName);
+    if (arch.starts_with("gfx11")) {
+      return 256;
+    }
+#endif // AOTriton 0.11
+#if AOTRITON_VERSION_CURRENT >= AOTRITON_VERSION_INT(0, 9)
+    return 512;
+#else
+    return 256;
+#endif
+  }();
+  const auto max_size = c10::SymInt(max_hdim);
 #else
   // All head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
@@ -138,6 +157,28 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
           " instead.");
     }
     return false;
+  }
+  if constexpr(caller_is_meff) {
+    bool is_half = (params.query.dtype() == at::kHalf) ||
+      (params.query.dtype() == at::kBFloat16);
+    const int64_t alignment = is_half ? 8 : 4;
+    if (!(query_size_last % alignment == 0 && query_size_last > 0 &&
+          value_size_last % alignment == 0 && value_size_last > 0)) {
+      if (debug) {
+        TORCH_WARN(
+            "Mem efficient attention requires last dimension of inputs to be divisible by ",
+            alignment,
+            ". ",
+            "Got Query.size(-1): ",
+            query_size_last,
+            ", Key.size(-1): ",
+            params.key.sym_size(-1),
+            ", Value.size(-1): ",
+            params.value.sym_size(-1),
+            " instead.");
+      }
+      return false;
+    }
   }
   return true;
 }
