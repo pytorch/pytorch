@@ -769,7 +769,8 @@ def list_gpu_processes(device: "Device" = None) -> str:
         try:
             import pynvml  # type: ignore[import]
         except ModuleNotFoundError:
-            return "pynvml module not found, please install pynvml"
+            return "pynvml module not found, please install nvidia-ml-py"
+        # pyrefly: ignore  # import-error
         from pynvml import NVMLError_DriverNotLoaded
 
         try:
@@ -852,6 +853,7 @@ def _record_memory_history_legacy(
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
         record_context,
+        # pyrefly: ignore  # bad-argument-type
         trace_alloc_max_entries,
         trace_alloc_record_context,
         record_context_cpp,
@@ -862,7 +864,7 @@ def _record_memory_history_legacy(
 
 
 def _record_memory_history(
-    enabled: Literal[None, "state", "all"] = "all", *args, **kwargs
+    enabled: Optional[Literal["state", "all"]] = "all", *args, **kwargs
 ) -> None:
     """Enable recording of stack traces associated with memory
     allocations, so you can tell what allocated any piece of memory in
