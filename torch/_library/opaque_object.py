@@ -21,7 +21,6 @@ class FakeOpaqueObject:
 OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
 
 OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
-OpaqueType.__module__ = "torch.library"
 
 
 def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
@@ -98,9 +97,12 @@ def get_payload(opaque_object: torch._C.ScriptObject) -> Any:
     """
     if isinstance(opaque_object, FakeScriptObject):
         raise ValueError(
-            "OpaqueObjects are opaque, so therefore the contents should not be "
-            "visible to torch.compile, and the fake kernel should not depend "
-            "on the contents of the OpaqueObject at all."
+            "get_payload: this function was called with a FakeScriptObject "
+            "implying that you are calling get_payload inside of a fake kernel."
+            "The fake kernel should not depend on the contents of the "
+            "OpaqueObject at all, so we're erroring out. If you need this"
+            "functionality, consider creating a custom TorchBind Object instead"
+            "(but note that this is more difficult)."
         )
     if not (
         isinstance(opaque_object, torch._C.ScriptObject)
@@ -127,9 +129,12 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
     """
     if isinstance(opaque_object, FakeScriptObject):
         raise ValueError(
-            "OpaqueObjects are opaque, so therefore the contents should not be "
-            "visible to torch.compile, and the fake kernel should not depend "
-            "on the contents of the OpaqueObject at all."
+            "set_payload: this function was called with a FakeScriptObject "
+            "implying that you are calling get_payload inside of a fake kernel."
+            "The fake kernel should not depend on the contents of the "
+            "OpaqueObject at all, so we're erroring out. If you need this"
+            "functionality, consider creating a custom TorchBind Object instead"
+            "(but note that this is more difficult)."
         )
 
     if not (

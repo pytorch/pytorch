@@ -42,12 +42,6 @@ EOF
     rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
     amdgpu_baseurl="https://repo.radeon.com/amdgpu/${ROCM_VERSION}/ubuntu"
 
-    # Special case for ROCM_VERSION == 7.0
-    if [[ $(ver "$ROCM_VERSION") -eq $(ver 7.0) ]]; then
-        rocm_baseurl="https://repo.radeon.com/rocm/apt/7.0_alpha2"
-        amdgpu_baseurl="https://repo.radeon.com/amdgpu/30.10_alpha2/ubuntu"
-    fi
-
     # Add amdgpu repository
     UBUNTU_VERSION_NAME=`cat /etc/os-release | grep UBUNTU_CODENAME | awk -F= '{print $2}'`
     echo "deb [arch=amd64] ${amdgpu_baseurl} ${UBUNTU_VERSION_NAME} main" > /etc/apt/sources.list.d/amdgpu.list

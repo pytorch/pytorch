@@ -6,7 +6,14 @@ import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.effects import _deregister_effectful_op
-from torch._library.opaque_object import get_payload, make_opaque, set_payload
+from torch._library.fake_class_registry import maybe_to_fake_obj
+from torch._library.opaque_object import (
+    get_payload,
+    make_opaque,
+    OpaqueType,
+    set_payload,
+)
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -88,7 +95,8 @@ class TestOpaqueObject(TestCase):
         self.lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
 
         def pop_impl_fake(q: torch._C.ScriptObject) -> torch.Tensor:
-            # This is not accurate
+            # This is not accurate since the queue could have tensors that are
+            # not rank 1
             ctx = torch._custom_op.impl.get_ctx()
             u0 = ctx.new_dynamic_size()
             return torch.empty(u0)
@@ -99,7 +107,7 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::queue_size",
             mutates_args=[],
         )
-        def size_impl(q: torch.library.OpaqueType) -> int:
+        def size_impl(q: OpaqueType) -> int:
             queue = get_payload(q)
             assert isinstance(queue, OpaqueQueue)
             return queue.size()
@@ -187,6 +195,55 @@ class TestOpaqueObject(TestCase):
 
         self.assertTrue(q1 is not q2)
         self.assertTrue(q1 == q2)
+
+    def test_bad_fake(self):
+        torch.library.define(
+            "_TestOpaqueObject::bad_fake",
+            "(__torch__.torch.classes.aten.OpaqueObject q, Tensor x) -> Tensor",
+            lib=self.lib,
+        )
+
+        def f(q, x):
+            torch.ops._TestOpaqueObject.bad_fake(q, x)
+            return x.cos()
+
+        def bad_fake1(q: torch._C.ScriptObject, b: torch.Tensor) -> torch.Tensor:
+            payload = get_payload(q)
+            return b * payload
+
+        torch.library.register_fake(
+            "_TestOpaqueObject::bad_fake", bad_fake1, lib=self.lib
+        )
+
+        with FakeTensorMode() as fake_mode:
+            obj = make_opaque(1)
+            fake_obj = maybe_to_fake_obj(fake_mode, obj)
+            x = torch.ones(3)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "get_payload: this function was called with a FakeScriptObject",
+            ):
+                torch.ops._TestOpaqueObject.bad_fake(fake_obj, x)
+
+        def bad_fake2(q: torch._C.ScriptObject, b: torch.Tensor) -> torch.Tensor:
+            set_payload(q, 2)
+            return torch.empty_like(b)
+
+        torch.library.register_fake(
+            "_TestOpaqueObject::bad_fake", bad_fake2, lib=self.lib, allow_override=True
+        )
+
+        with FakeTensorMode() as fake_mode:
+            obj = make_opaque(1)
+            fake_obj = maybe_to_fake_obj(fake_mode, obj)
+            x = torch.ones(3)
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "set_payload: this function was called with a FakeScriptObject",
+            ):
+                torch.ops._TestOpaqueObject.bad_fake(fake_obj, x)
 
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_make_fx(self, make_fx_tracing_mode):
