@@ -84,13 +84,16 @@ class MicrobatchTests(TestCase):
 
             return block_causal_mask
 
-        batch = list(range(DOC_LEN)) * 1024
-        batch = torch.tensor(batch[: B * SEQ_LEN], device=device).reshape(B, SEQ_LEN)
+        # Create a fake batch which packs several documents together, which
+        # each has DOC_LEN tokens and the last token is the EOS token, DOC_LEN - 1.
+        total_elements = B * SEQ_LEN
+        batch = torch.arange(total_elements, device=device) % DOC_LEN
+        batch = batch.reshape(B, SEQ_LEN)
         q, k, v = (
             torch.randn(B, H, SEQ_LEN, DIM, device=device, requires_grad=True)
             for i in range(3)
         )
-        block_mask_fn = torch.compile(create_block_mask)
+        block_mask_fn = torch.compile(create_block_mask, fullgraph=True)
         block_mask = block_mask_fn(
             create_block_causal_mask(batch, DOC_LEN - 1),
             B=B,
@@ -100,7 +103,7 @@ class MicrobatchTests(TestCase):
             device=device,
         )
         if device == "cuda":
-            flex_fn = torch.compile(flex_attention)
+            flex_fn = torch.compile(flex_attention, fullgraph=True)
         else:
             # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
             flex_fn = flex_attention
@@ -116,52 +119,53 @@ class MicrobatchTests(TestCase):
             kwargs_chunk_spec=None,
         )
 
-        q_chunks = []
-        dq_chunks = []
-        k_chunks = []
-        dk_chunks = []
-        v_chunks = []
-        dv_chunks = []
-        block_mask_chunks = []
-        out_chunks = []
+        q_total_chunks = []
+        dq_total_chunks = []
+        k_total_chunks = []
+        dk_total_chunks = []
+        v_total_chunks = []
+        dv_total_chunks = []
+        block_mask_total_chunks = []
+        out_total_chunks = []
         for i in range(len(arg_split)):
             q_chunk, k_chunk, v_chunk, block_mask_chunk = arg_split[i]
-            for chunk, chunks in zip(
-                (q_chunk, k_chunk, v_chunk), (q_chunks, k_chunks, v_chunks)
+            for chunk, total_chunks in zip(
+                (q_chunk, k_chunk, v_chunk),
+                (q_total_chunks, k_total_chunks, v_total_chunks),
             ):
                 chunk.requires_grad = True
-                chunks.append(chunk)
+                total_chunks.append(chunk)
 
             out_chunk = flex_fn(
                 q_chunk, k_chunk, v_chunk, block_mask=block_mask_chunk["block_mask"]
             )
 
             out_chunk.sum().backward()
-            dq_chunks.append(q_chunk.grad)
-            dk_chunks.append(k_chunk.grad)
-            dv_chunks.append(v_chunk.grad)
-            block_mask_chunks.append(block_mask_chunk["block_mask"])
-            out_chunks.append(out_chunk)
+            dq_total_chunks.append(q_chunk.grad)
+            dk_total_chunks.append(k_chunk.grad)
+            dv_total_chunks.append(v_chunk.grad)
+            block_mask_total_chunks.append(block_mask_chunk["block_mask"])
+            out_total_chunks.append(out_chunk)
 
-        concat_q = torch.cat(q_chunks, dim=0)
-        concat_dq = torch.cat(dq_chunks, dim=0)
-        concat_k = torch.cat(k_chunks, dim=0)
-        concat_dk = torch.cat(dk_chunks, dim=0)
-        concat_v = torch.cat(v_chunks, dim=0)
-        concat_dv = torch.cat(dv_chunks, dim=0)
+        concat_q = torch.cat(q_total_chunks, dim=0)
+        concat_dq = torch.cat(dq_total_chunks, dim=0)
+        concat_k = torch.cat(k_total_chunks, dim=0)
+        concat_dk = torch.cat(dk_total_chunks, dim=0)
+        concat_v = torch.cat(v_total_chunks, dim=0)
+        concat_dv = torch.cat(dv_total_chunks, dim=0)
         concat_kv_indices = torch.cat(
-            [bm.kv_indices for bm in block_mask_chunks], dim=0
+            [bm.kv_indices for bm in block_mask_total_chunks], dim=0
         )
         concat_kv_num_blocks = torch.cat(
-            [bm.kv_num_blocks for bm in block_mask_chunks], dim=0
+            [bm.kv_num_blocks for bm in block_mask_total_chunks], dim=0
         )
         concat_kv_full_num_blocks = torch.cat(
-            [bm.full_kv_num_blocks for bm in block_mask_chunks], dim=0
+            [bm.full_kv_num_blocks for bm in block_mask_total_chunks], dim=0
         )
         concat_kv_full_indices = torch.cat(
-            [bm.full_kv_indices for bm in block_mask_chunks], dim=0
+            [bm.full_kv_indices for bm in block_mask_total_chunks], dim=0
         )
-        concat_out = torch.cat(out_chunks, dim=0)
+        concat_out = torch.cat(out_total_chunks, dim=0)
         self.assertEqual(concat_q, q)
         self.assertEqual(concat_dq, q.grad)
         self.assertEqual(concat_k, k)

@@ -118,14 +118,12 @@ class _Replicate:
 
 def _split_block_mask(
     block_mask: BlockMask,
-    spec: TensorChunkSpec,
     num_chunks: int,
 ) -> list[BlockMask]:
-    """Given a block mask, and a chunking spec, split the block mask.
+    """Given a block mask, split the block mask along the batch dimension (dim0).
 
     Args:
         block_mask: Block mask to split
-        spec: Chunking spec
         num_chunks: Number of chunks to split the block mask into
 
     Returns:
@@ -136,19 +134,18 @@ def _split_block_mask(
         "Block mask has fewer batch size than the number of chunks. "
     )
 
+    batch_dim = 0
     kv_num_blocks_chunks = torch.tensor_split(
-        block_mask.kv_num_blocks, num_chunks, spec.split_dim
+        block_mask.kv_num_blocks, num_chunks, batch_dim
     )
-    kv_indices_chunks = torch.tensor_split(
-        block_mask.kv_indices, num_chunks, spec.split_dim
-    )
+    kv_indices_chunks = torch.tensor_split(block_mask.kv_indices, num_chunks, batch_dim)
     full_kv_num_blocks_chunks = (
-        torch.tensor_split(block_mask.full_kv_num_blocks, num_chunks, spec.split_dim)
+        torch.tensor_split(block_mask.full_kv_num_blocks, num_chunks, batch_dim)
         if block_mask.full_kv_num_blocks is not None
         else [None] * num_chunks
     )
     full_kv_indices_chunks = (
-        torch.tensor_split(block_mask.full_kv_indices, num_chunks, spec.split_dim)
+        torch.tensor_split(block_mask.full_kv_indices, num_chunks, batch_dim)
         if block_mask.full_kv_indices is not None
         else [None] * num_chunks
     )
@@ -158,13 +155,12 @@ def _split_block_mask(
     for chunk_idx in range(num_chunks):
 
         def create_mask_mod(idx):
-            def mask_mod_wrapper(b, h, q_idx, kv_idx):
+            def batch_offset_mask_mod(b, h, q_idx, kv_idx):
                 b_offset = torch.full_like(b, idx)
                 return block_mask.mask_mod(b + b_offset, h, q_idx, kv_idx)
 
-            return mask_mod_wrapper
+            return batch_offset_mask_mod
 
-        # `from_kv_blocks` is strictly faster than `create_block_mask`.
         chunk_block_masks.append(
             BlockMask.from_kv_blocks(
                 kv_num_blocks=kv_num_blocks_chunks[chunk_idx],
@@ -251,7 +247,7 @@ def _shard_dict_of_args(
     values, tree_spec = tree_flatten(args_dict)
     chunk_specs, _ = tree_flatten(args_chunk_spec)
 
-    # Fist check and find the actual number of chunks
+    # First check and find the actual number of chunks
     split_sizes = []
     for v, spec in zip(values, chunk_specs, strict=True):
         if spec is _Replicate:
@@ -277,13 +273,15 @@ def _shard_dict_of_args(
         elif isinstance(v, torch.Tensor):
             v_splits = _split_tensor(v, spec, result_num_chunks)
         elif isinstance(v, BlockMask):
-            v_splits = _split_block_mask(v, spec, result_num_chunks)
+            v_splits = _split_block_mask(v, result_num_chunks)
         else:
             raise ValueError(
                 f"Unsupported chunk spec: {spec} and value: {v} combination."
             )
 
-        for _flat_split_result, _v_split in zip(flat_split_results, v_splits):
+        for _flat_split_result, _v_split in zip(
+            flat_split_results, v_splits, strict=True
+        ):
             _flat_split_result.append(_v_split)
 
     return [
