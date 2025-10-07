@@ -124,6 +124,7 @@ pytree.register_pytree_node(
     torch.Size,
     lambda xs: (list(xs), None),
     lambda xs, _: tuple(xs),
+    # pyrefly: ignore  # bad-argument-type
     flatten_with_keys_fn=lambda xs: (
         [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
         None,
@@ -306,6 +307,7 @@ def set_proxy_slot(  # type: ignore[no-redef]
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     assert isinstance(obj, (Tensor, SymNode)), type(obj)
+    # pyrefly: ignore  # no-matching-overload
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
 
 
@@ -402,6 +404,7 @@ def get_proxy_slot(
         assert isinstance(obj, py_sym_types), type(obj)
         tracker = tracer.symnode_tracker
 
+    # pyrefly: ignore  # unsupported-operation
     if obj not in tracker:
         # Last ditch
         if isinstance(obj, py_sym_types) and obj.node.expr in tracer.sympy_expr_tracker:
@@ -413,6 +416,7 @@ def get_proxy_slot(
                 )
             return default
     else:
+        # pyrefly: ignore  # index-error
         value = tracker[obj]
     res = transform(value)
     return res
@@ -788,6 +792,7 @@ def fetch_object_proxy(
 def fetch_object_proxy(
     tracer: _ProxyTracer, t: Union[Tensor, _AnyScriptObjectType, PySymType]
 ) -> object:
+    # pyrefly: ignore  # no-matching-overload
     return get_proxy_slot(t, tracer, t)
 
 
@@ -836,6 +841,7 @@ def _fetch_proxies_and_all_constant_flag(
     """
     f_flat_args_kwargs = [
         (
+            # pyrefly: ignore  # no-matching-overload
             fetch_object_proxy(tracer, x)
             if isinstance(x, (Tensor, _AnyScriptObject))
             else x
@@ -1410,6 +1416,7 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
         kwargs: Optional[dict[str, object]] = None,
     ) -> object:
         kwargs = kwargs or {}
+        # pyrefly: ignore  # bad-assignment
         self.tracer.torch_fn_metadata = func
         self.tracer.torch_fn_counts[func] = self.tracer.torch_fn_counts.get(func, 0) + 1
         return func(*args, **kwargs)
@@ -1459,6 +1466,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # For autocast, the python APIs run so we don't have to run them again
             # here.
             if func is torch._C._set_grad_enabled:
+                # pyrefly: ignore  # bad-argument-type
                 func(*args, **kwargs)
             return node
 
@@ -1672,6 +1680,7 @@ class DecompositionInterpreter(fx.Interpreter):
         self.decomposition_table = decomposition_table or {}
         self.mode = ProxyTorchDispatchMode(self.tracer, tracing_mode="real")
 
+    # pyrefly: ignore  # bad-override
     def placeholder(
         self,
         target: str,  # type: ignore[override]
@@ -1684,6 +1693,7 @@ class DecompositionInterpreter(fx.Interpreter):
         # TODO handle case where the first character of target is '*'
         return out
 
+    # pyrefly: ignore  # bad-override
     def get_attr(
         self,
         target: str,  # type: ignore[override]
@@ -1697,6 +1707,7 @@ class DecompositionInterpreter(fx.Interpreter):
 
     # call_function, call_method, call_module get traced automatically by the outer mode.
 
+    # pyrefly: ignore  # bad-override
     def output(
         self,
         target: str,  # type: ignore[override]
@@ -1782,14 +1793,17 @@ class _ModuleStackTracer(PythonKeyTracer):
         self.enable_attr_proxy = False
         self.submodule_paths = {}
         for name, m in self.scope_root.named_modules(remove_duplicate=False):
+            # pyrefly: ignore  # unsupported-operation
             if m in self.submodule_paths:
                 log.info(
                     "Shared module found between %s and %s, AttrProxy is enabled.",
+                    # pyrefly: ignore  # unsupported-operation
                     self.submodule_paths[m],
                     name,
                 )
                 self.enable_attr_proxy = True
             else:
+                # pyrefly: ignore  # unsupported-operation
                 self.submodule_paths[m] = name
 
         self.proxy_paths: WeakKeyDictionary[_AttrProxy, str] = WeakKeyDictionary()
@@ -1815,6 +1829,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 # Class is modified to be a subclass of torch.nn.Module
                 # Warning: We blow away our own attributes here to mimic the base class
                 # - so don't expect `self.x` to do anything useful.
+                # pyrefly: ignore  # no-matching-overload
                 self.__class__ = type(
                     base.__class__.__name__,
                     (self.__class__, base.__class__),
@@ -1837,6 +1852,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 if not isinstance(attr_val, Module):
                     return attr_val
 
+                # pyrefly: ignore  # index-error
                 return AttrProxy(attr_val, tracer.proxy_paths[self] + "." + name)
 
             def get_base(self) -> Module:
@@ -1849,10 +1865,12 @@ class _ModuleStackTracer(PythonKeyTracer):
                         res = torch.nn.Sequential(
                             OrderedDict(list(self._modules.items())[idx])
                         )
+                        # pyrefly: ignore  # index-error
                         return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
                     elif isinstance(self, torch.nn.ModuleList):
                         # Copied from nn/modules/container.py
                         res = torch.nn.ModuleList(list(self._modules.values())[idx])
+                        # pyrefly: ignore  # index-error
                         return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
 
                 return super().__getitem__(idx)  # type: ignore[misc]
