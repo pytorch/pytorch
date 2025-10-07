@@ -254,12 +254,14 @@ class SubgraphTemplate(KernelTemplate):
         choices = []
         for decomp in decompositions:
             # Create make_fx_graph function for this decomposition
-            def make_fx_graph(*args, decomp=decomp):
+            def make_fx_graph(*args: Any, decomp: Callable[..., Any] = decomp) -> Any:
                 import functools
 
                 from torch.fx.experimental.proxy_tensor import make_fx
 
-                return make_fx(functools.partial(decomp, **kwargs))(*args)
+                # Ensure kwargs is not None for unpacking
+                decomp_kwargs = kwargs if kwargs is not None else {}
+                return make_fx(functools.partial(decomp, **decomp_kwargs))(*args)
 
             choice = self.generate(
                 name=f"{name}_{decomp.__name__}",
