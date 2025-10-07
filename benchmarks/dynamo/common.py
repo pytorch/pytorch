@@ -2059,8 +2059,6 @@ class BenchmarkRunner:
         from diffusers.models.transformer_2d import Transformer2DModel
         from torchbenchmark.models.nanogpt.model import Block
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-        from transformers.models.t5.modeling_t5 import T5Block
-        from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
 
         from torch.distributed.fsdp.wrap import (
             ModuleWrapPolicy,
