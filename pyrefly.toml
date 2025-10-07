@@ -25,10 +25,6 @@ project-excludes = [
   "torch/nn/**",
   "torch/_dynamo/**",
   "torch/utils/**",
-  "torch/ao/**",
-  "torch/fx/**",
-  "torch/distributions/**",
-  "torch/onnx/**",
   # formatting issues
   "torch/linalg/__init__.py",
   "torch/package/importer.py",

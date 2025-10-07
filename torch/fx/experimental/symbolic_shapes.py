@@ -839,6 +839,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         factor = functools.reduce(math.gcd, map(integer_coefficient, atoms))
         if factor == 1:
             return expr
+        # pyrefly: ignore  # bad-argument-type
         atoms = [div_by_factor(x, factor) for x in atoms]
         return _sympy_from_args(
             sympy.Add, atoms, sort=True, is_commutative=expr.is_commutative
@@ -1234,6 +1235,7 @@ def _free_unbacked_symbols_with_path(
             else _symint_wrap(coeff)
         )
         # TODO: DivideByKey needs to test divisibility at runtime!
+        # pyrefly: ignore  # unsupported-operation
         r[unbacked] = path + (DivideByKey(divisor),)
         if real is not None:
             assert isinstance(real, int)
@@ -1256,6 +1258,7 @@ def _free_unbacked_symbols_with_path(
         and s.rhs == 1
         and s.lhs in pending
     ):
+        # pyrefly: ignore  # unsupported-operation
         r[s.lhs] = path + (ConvertIntKey(),)
         if real is not None:
             assert type(real) is bool
@@ -2172,6 +2175,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.inner_contexts is None:
+            # pyrefly: ignore  # bad-assignment
             self.inner_contexts = {}
 
 
@@ -2260,9 +2264,12 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
     # only re-create the objects if any of the args changed to avoid expensive
     # checks when re-creating objects.
     new_args = [_fast_expand(arg) for arg in expr.args]  # type: ignore[arg-type]
+    # pyrefly: ignore  # missing-attribute
     if any(arg is not new_arg for arg, new_arg in zip(expr.args, new_args)):
+        # pyrefly: ignore  # missing-attribute
         return _fast_expand(expr.func(*new_args))
 
+    # pyrefly: ignore  # missing-attribute
     if expr.is_Pow:
         base: sympy.Expr
         exp: sympy.Expr
@@ -2272,9 +2279,11 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
                 return sympy.expand_multinomial(expr, deep=False)
             elif exp < 0:
                 return S.One / sympy.expand_multinomial(S.One / expr, deep=False)
+    # pyrefly: ignore  # missing-attribute
     elif expr.is_Mul:
         num: list[sympy.Expr] = []
         den: list[sympy.Expr] = []
+        # pyrefly: ignore  # missing-attribute
         for arg in expr.args:
             if arg.is_Pow and arg.args[1] == -1:
                 den.append(S.One / arg)  # type: ignore[operator, arg-type]
@@ -2396,6 +2405,7 @@ def _maybe_evaluate_static_worker(
 
     # TODO: remove this try catch (esp for unbacked_only)
     try:
+        # pyrefly: ignore  # missing-attribute
         new_expr = expr.xreplace(new_shape_env)
     except RecursionError:
         log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
@@ -2933,13 +2943,19 @@ class DimConstraints:
             # is_integer tests though haha
             return (base - mod_reduced) / divisor
 
+        # pyrefly: ignore  # missing-attribute
         if expr.has(Mod):
+            # pyrefly: ignore  # missing-attribute
             expr = expr.replace(Mod, mod_handler)
         # 7 // -3 is -3, 7 % -3 is -2, and 7 - (-2) / -3 is -3.0 so negative
         # arguments should be OK.
+        # pyrefly: ignore  # missing-attribute
         if expr.has(PythonMod):
+            # pyrefly: ignore  # missing-attribute
             expr = expr.replace(PythonMod, mod_handler)
+        # pyrefly: ignore  # missing-attribute
         if expr.has(FloorDiv):
+            # pyrefly: ignore  # missing-attribute
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
@@ -5057,6 +5073,7 @@ class ShapeEnv:
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
+                # pyrefly: ignore  # unsupported-operation
                 self.val_to_var[val] = sympy_expr
 
             if isinstance(val, int):
@@ -5288,15 +5305,19 @@ class ShapeEnv:
 
         # Expand optional inputs, or verify invariants are upheld
         if input_contexts is None:
+            # pyrefly: ignore  # bad-assignment
             input_contexts = [
+                # pyrefly: ignore  # bad-argument-type
                 _create_no_constraints_context(t) if isinstance(t, Tensorlike) else None
                 for t in placeholders
             ]
         else:
             assert len(input_contexts) == len(placeholders)
+            # pyrefly: ignore  # bad-assignment
             for i, (t, context) in enumerate(zip(placeholders, input_contexts)):
                 if isinstance(t, Tensorlike):
                     if context is None:
+                        # pyrefly: ignore  # bad-argument-type
                         input_contexts[i] = _create_no_constraints_context(t)
                 else:
                     assert isinstance(t, (SymInt, int, SymFloat, float))
@@ -5582,6 +5603,7 @@ class ShapeEnv:
                 s = sympy.Float(val)
                 input_guards.append((source, s))
 
+        # pyrefly: ignore  # no-matching-overload
         for t, source, context in zip(placeholders, sources, input_contexts):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
@@ -5641,11 +5663,13 @@ class ShapeEnv:
                         )
                         track_symint(property_source, ss, constraint_size[i])
                 else:
+                    # pyrefly: ignore  # missing-attribute
                     for i, ss in enumerate(curr_t.size()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.SIZE, i
                         )
                         track_symint(property_source, ss, constraint_size[i])
+                    # pyrefly: ignore  # missing-attribute
                     for i, ss in enumerate(curr_t.stride()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.STRIDE, i
@@ -5653,6 +5677,7 @@ class ShapeEnv:
                         track_symint(property_source, ss, constraint_stride[i])
                     track_symint(
                         TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
+                        # pyrefly: ignore  # missing-attribute
                         curr_t.storage_offset(),
                     )
 
@@ -5698,6 +5723,7 @@ class ShapeEnv:
                         continue
 
                 if is_dim(source):
+                    # pyrefly: ignore  # missing-attribute
                     self.dim_constraints.add_equality(source, expr)
 
                 for exprs, printer, lang in zip(all_exprs, printers, langs):
@@ -5851,6 +5877,7 @@ class ShapeEnv:
                 continue
             expr = self.simplify(ra.expr)
 
+            # pyrefly: ignore  # missing-attribute
             self.dim_constraints.add(expr)
 
         # 3. Every symbol must be within its value range (this handles 0/1
@@ -5867,6 +5894,7 @@ class ShapeEnv:
             verbose_expr = ""
             if r.lower not in (-sympy.oo, -int_oo):
                 if any(is_dim(source) for source in sources):
+                    # pyrefly: ignore  # missing-attribute
                     self.dim_constraints.add(sympy.Ge(symbol, r.lower))
                 # Only print lower bound in simplified mode if it is not the
                 # default
@@ -5875,6 +5903,7 @@ class ShapeEnv:
                 verbose_expr = f"{r.lower} <= {rf}  # {vr_sloc.lower}"
             if r.upper not in (sympy.oo, int_oo):
                 if any(is_dim(source) for source in sources):
+                    # pyrefly: ignore  # missing-attribute
                     self.dim_constraints.add(sympy.Le(symbol, r.upper))
                 # nontrivial upper bound is always interesting
                 bounds.append(sympy.Le(symbol, r.upper, evaluate=False))
@@ -5943,6 +5972,7 @@ class ShapeEnv:
                 else:
                     str_msg = f"  - {msg_cb()}"
                     error_msgs.append(str_msg)
+                    # pyrefly: ignore  # bad-argument-type
                     debug_names.add(debug_name)
             if len(error_msgs) > 0:
                 debug_names_str = ", ".join(sorted(debug_names))
@@ -6076,6 +6106,7 @@ class ShapeEnv:
         Get a list of guards, but pruned so it only provides guards that
         reference symints from the passed in input
         """
+        # pyrefly: ignore  # bad-assignment
         symints = {
             s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)
         }
@@ -6121,6 +6152,7 @@ class ShapeEnv:
                     else:
                         bindings[-s] = -arg
 
+        # pyrefly: ignore  # bad-assignment
         for t, arg in zip(placeholders, args):
             if t is None:
                 continue
@@ -6338,6 +6370,7 @@ class ShapeEnv:
         Apply symbol replacements to any symbols in the given expression.
         """
         replacements = {}
+        # pyrefly: ignore  # missing-attribute
         for s in expr.free_symbols:
             r = self._find(s)
 
@@ -6347,6 +6380,7 @@ class ShapeEnv:
             if not r.is_Symbol or r != s:
                 replacements[s] = r
         if replacements:
+            # pyrefly: ignore  # missing-attribute
             return safe_expand(expr.xreplace(replacements))
         else:
             return expr
@@ -7121,6 +7155,7 @@ class ShapeEnv:
         instructions = list(dis.Bytecode(frame.f_code))
         co_lines, offset = inspect.getsourcelines(frame.f_code)
         start, end, cur = None, None, None
+        # pyrefly: ignore  # bad-assignment
         for i, instr in enumerate(instructions):
             if instr.starts_line is not None:
                 cur = instr.starts_line
@@ -8000,6 +8035,7 @@ def _suggest_fixes_for_data_dependent_error_non_strict(
                 if isinstance(leaf, torch.SymInt):
                     src_map[str(leaf.node.expr)].append(name)
                 elif isinstance(leaf, torch.Tensor):
+                    # pyrefly: ignore  # bad-assignment
                     for i, dim in enumerate(leaf.shape):
                         if isinstance(dim, torch.SymInt):
                             src_map[str(dim.node.expr)].append(f"{name}.shape[{i}]")
