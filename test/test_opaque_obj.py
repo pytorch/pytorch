@@ -3,7 +3,12 @@ import copy
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._library.opaque_object import get_payload, make_opaque, set_payload
+from torch._library.opaque_object import (
+    get_payload,
+    make_opaque,
+    OpaqueType,
+    set_payload,
+)
 
 
 class OpaqueQueue:
@@ -66,7 +71,7 @@ class TestOpaqueObject(TestCase):
             "_TestOpaqueObject::queue_size",
             mutates_args=[],
         )
-        def size_impl(q: torch.library.OpaqueType) -> int:
+        def size_impl(q: OpaqueType) -> int:
             queue = get_payload(q)
             assert isinstance(queue, OpaqueQueue)
             return queue.size()
