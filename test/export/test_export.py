@@ -8780,7 +8780,7 @@ def forward(self, x):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         # This is because we insert sym_constrain_range in the graph now
-        error_msg = r"ailed for expression u0 >= 0 on node 'ge'"
+        error_msg = r".* failed for expression u0 >= 0 on node .*"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
