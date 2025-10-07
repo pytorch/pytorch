@@ -42,7 +42,13 @@ void zendnn_baddbmm(
   TORCH_CHECK(
       (batch1.scalar_type() == batch2.scalar_type()),
       "zendnn_baddbmm: batch1 and batch2 data types should be same");
-  data_types matmul_dtype = {inp_dtype, wgt_dtype, out_type, data_type_t::none};
+
+  data_types matmul_dtype;
+  matmul_dtype.src = inp_dtype;
+  matmul_dtype.wei = wgt_dtype;
+  matmul_dtype.dst = out_type;
+  matmul_dtype.bias = data_type_t::none;
+  matmul_dtype.compute = data_type_t::none;
 
   // Execute batched matmul directly for LoA path
   matmul_direct(
@@ -62,6 +68,7 @@ void zendnn_baddbmm(
       ldc,
       matmul_dtype,
       postop,
+      lowoha_quantization_params_t(),
       /*batch_a=*/batch1.size(0),
       /*batch_b=*/batch2.size(0));
   return;
