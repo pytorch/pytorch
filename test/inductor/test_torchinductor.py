@@ -6449,7 +6449,7 @@ class CommonTemplate:
         else:
             atol = 5e-4
             rtol = 3e-4
-        
+
         # MPS has correctness problem before MacOS15
         with (
             contextlib.nullcontext()
@@ -6472,9 +6472,7 @@ class CommonTemplate:
     @skip_if_gpu_halide
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
-    @unittest.skipIf(
-        config.triton.native_matmul, "native matmul has better precision"
-    )
+    @unittest.skipIf(config.triton.native_matmul, "native matmul has better precision")
     @torch._inductor.config.patch(joint_graph_constant_folding=True)
     def test_remove_no_ops(self):
         def matmul_with_op(x, y, fn):

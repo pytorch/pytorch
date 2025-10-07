@@ -2727,11 +2727,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             #        tl.arange(0, XBLOCK) + tl.full([1], int)  # -> broadcasting error
             #    In this case, we fall back to dense indexing:
             #        tl.full([XBLOCK], int)
-            if copy_shape or len(self.dense_size_list()) == 1 :
+            if copy_shape or len(self.dense_size_list()) == 1:
                 expand_str, expand_shape = _get_expand_str()
-            else:    
-                expand_str = str([1]*len(self.dense_size_list()))
-                expand_shape = tuple([1]*len(self.dense_size_list()))
+            else:
+                expand_str = str([1] * len(self.dense_size_list()))
+                expand_shape = tuple([1] * len(self.dense_size_list()))
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
@@ -3581,7 +3581,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             elif reduction_type == "dot":
                 # Here, we don't perform the masking.
                 # Masking w/ where condition in native matmul is handled in ops.dot codegen.
-                # Since tl.dot performs reduction within the triton block, 
+                # Since tl.dot performs reduction within the triton block,
                 # masking should happen before the tl.dot is called.
                 masked_value = self.cse.generate(self.compute, value, dtype=value.dtype)
             else:

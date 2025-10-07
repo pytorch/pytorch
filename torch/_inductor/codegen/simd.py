@@ -419,13 +419,12 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         if config.triton.native_matmul:
             for node in self.features.node_schedule:
                 if (
-                    isinstance(node, scheduler.SchedulerNode):
-                    and isinstance(node.node, ir.ComputedBuffer):
+                    isinstance(node, scheduler.SchedulerNode)
+                    and isinstance(node.node, ir.ComputedBuffer)
                     and node.node.get_reduction_type() == "dot"
                 ):
                     self.is_native_matmul = True
                     break
-
 
         # define this in a closure to make cache local to object
         @functools.cache
@@ -765,12 +764,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
-
                     return_getters.append(
                         make_combined(
-                            [
-                                size2,
-                            ],
+                            [size2],
                             [
                                 add_range(current_group, size1),
                                 add_range(current_group + 1, size2),

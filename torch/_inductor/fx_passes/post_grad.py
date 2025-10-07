@@ -29,7 +29,7 @@ from .. import config, ir, pattern_matcher
 from ..codegen.common import custom_backend_passes
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
-from ..lowering import lowerings as L, make_pointwise, make_reduction, transform_args, to_dtype
+from ..lowering import lowerings as L, make_pointwise, make_reduction, transform_args
 from ..pattern_matcher import (
     _return_true,
     Arg,
@@ -1663,18 +1663,16 @@ def native_matmul_pass(graph: torch.fx.Graph):
             convert_input_to_bool=False,
         )  # Handles broadcasting the arguments
 
-        if (
-            config.triton.codegen_upcast_to_fp32 and
-            mat1.dtype in [torch.float16, torch.bfloat16]
-        ):
+        if config.triton.codegen_upcast_to_fp32 and mat1.dtype in [
+            torch.float16,
+            torch.bfloat16,
+        ]:
+
             def _to_dtype(x):
                 return ops.to_dtype(x, mat1.dtype, use_compute_types=False)
 
-            args = [
-                make_pointwise(_to_dtype)(x)
-                for x in args
-            ]
-          
+            args = [make_pointwise(_to_dtype)(x) for x in args]
+
         mul_pointwise = make_pointwise(ops.dot)(*args)
         dot_reduction = make_reduction("dot")(
             mul_pointwise,
@@ -1698,17 +1696,15 @@ def native_matmul_pass(graph: torch.fx.Graph):
             convert_input_to_bool=False,
         )  # Handles broadcasting the arguments
 
-        if (
-            config.triton.codegen_upcast_to_fp32 and
-            mat1.dtype in [torch.float16, torch.bfloat16]
-        ):
+        if config.triton.codegen_upcast_to_fp32 and mat1.dtype in [
+            torch.float16,
+            torch.bfloat16,
+        ]:
+
             def _to_dtype(x):
                 return ops.to_dtype(x, mat1.dtype, use_compute_types=False)
-            
-            args = [
-                make_pointwise(_to_dtype)(x)
-                for x in args
-            ]      
+
+            args = [make_pointwise(_to_dtype)(x) for x in args]
 
         mul_pointwise = make_pointwise(ops.dot)(*args)
         dot_reduction = make_reduction("dot")(

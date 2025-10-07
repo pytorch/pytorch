@@ -4711,7 +4711,6 @@ class ComputedBuffer(OperationBuffer):
             Callable[[Sequence[int]], Sequence[int]],
             Callable[[Sequence[int]], Sequence[int]],
         ]:
-           
             newsizes, reindex0, reindex1 = self._apply_loop_reordering(
                 x_vars, support_vars, sizes, memory_addrs
             )
@@ -4734,14 +4733,14 @@ class ComputedBuffer(OperationBuffer):
             #
             # TODO: Consider extending tl.dot codegen to support arbitrary loop orders.
             if self.get_reduction_type() == "dot" and len(sizes) == 3:
-                order = list(range(len(sizes))) # default order 
-                
+                order = list(range(len(sizes)))  # default order
+
                 # if z axis is not the outermost, use the default reorder.
-                if reindex0(order)[0] != 0 : 
+                if reindex0(order)[0] != 0:
                     newsizes = [sizes[i] for i in order]
                     reindex0 = same_reorder(order)
                     reindex1 = inverse_reorder(order)
-                
+
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
 

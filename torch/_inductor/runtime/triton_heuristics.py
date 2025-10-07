@@ -2656,6 +2656,7 @@ def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages:
     config = {k: v for k, v in config.items() if v is not None}
     return Config(config, num_warps=num_warps, num_stages=num_stages)
 
+
 def _config_helper(bmm=False, persistent=False):
     # Each entry is: (sizes_dict, num_warps, num_stages)
     _base_mm_configs = [
@@ -2689,12 +2690,10 @@ def _config_helper(bmm=False, persistent=False):
         out.append((d, w, s))
 
     # Deduplicate by converting dicts to immutable frozensets
-    deduped = {
-        (frozenset(d.items()), w, s): (d, w, s)
-        for d, w, s in out
-    }
+    deduped = {(frozenset(d.items()), w, s): (d, w, s) for d, w, s in out}
 
     return list(deduped.values())
+
 
 triton_native_mm_configs = _config_helper(bmm=False, persistent=False)
 triton_native_persistent_mm_configs = _config_helper(bmm=False, persistent=True)
