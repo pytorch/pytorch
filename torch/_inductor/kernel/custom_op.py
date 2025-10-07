@@ -30,12 +30,15 @@ from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.utils import do_bench_using_profiling
 
 
-class BlackboxChoiceCaller(ChoiceCaller):
+class CustomOpFallbackChoice(ChoiceCaller):
     """
-    Wraps the original custom op implementation as a blackbox choice for autotuning.
+    Wraps the original custom op implementation as a fallback choice for autotuning.
 
-    This allows the original custom op implementation to compete against optimized
-    decompositions in autotuning, providing a performance baseline and fallback.
+    When a custom op is autotuned, this allows the original implementation (from
+    @torch.library.custom_op) to compete against decomposed variants. This provides:
+    - Performance baseline for comparison
+    - Safe fallback if decompositions fail
+    - Direct benchmarking of the original implementation
     """
 
     def __init__(
@@ -44,58 +47,58 @@ class BlackboxChoiceCaller(ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         description: str,
-        original_op_overload: torch._ops.OpOverload,
+        default_op_overload: torch._ops.OpOverload,
         kwargs: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
-        self.original_op_overload = original_op_overload
+        self.default_op_overload = default_op_overload
         self.kwargs = kwargs or {}
 
     def benchmark(self, *args, out=None) -> float:
         """Benchmark the original OpOverload directly."""
 
-        def run_blackbox():
-            return self.original_op_overload(*args, **self.kwargs)
+        def run_default_op():
+            return self.default_op_overload(*args, **self.kwargs)
 
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            result = do_bench_using_profiling(run_blackbox)
+            result = do_bench_using_profiling(run_default_op)
             if isinstance(result, list):
                 return result[0] if result else 0.0
             return result
 
         if self.layout.device.type == "cpu":
-            result = benchmarker.benchmark_cpu(run_blackbox)
+            result = benchmarker.benchmark_cpu(run_default_op)
         else:
-            result = benchmarker.benchmark_gpu(run_blackbox)
+            result = benchmarker.benchmark_gpu(run_default_op)
 
         if isinstance(result, list):
             return result[0] if result else 0.0
         return result
 
     def to_callable(self) -> Callable[..., Any]:
-        """Return the original OpOverload as callable."""
-        return lambda *args: self.original_op_overload(*args, **self.kwargs)
+        """Return the default OpOverload as callable."""
+        return lambda *args: self.default_op_overload(*args, **self.kwargs)
 
     def call_name(self) -> str:
-        return f"blackbox_{self.original_op_overload.name()}"
+        return f"fallback_{self.default_op_overload.name()}"
 
     def hash_key(self) -> str:
-        return f"blackbox-{self.original_op_overload.name()}-{id(self.input_nodes)}"
+        return f"fallback-{self.default_op_overload.name()}-{id(self.input_nodes)}"
 
     def output_node(self) -> TensorBox:
-        """Create fallback kernel for the original OpOverload."""
-        handler = fallback_handler(self.original_op_overload, add_to_fallback_set=False)
+        """Create fallback kernel for the default OpOverload."""
+        handler = fallback_handler(self.default_op_overload, add_to_fallback_set=False)
         return handler(*self.input_nodes, **self.kwargs)
 
     def info_dict(self) -> dict[str, str]:
         return {
-            "backend": "blackbox_fallback",
-            "kernel_name": self.original_op_overload.name(),
+            "backend": "fallback_default",
+            "kernel_name": self.default_op_overload.name(),
             "description": self.description,
         }
 
     def autoheuristic_id(self) -> str:
-        return f"blackbox_{self.original_op_overload.name()}"
+        return f"fallback_{self.default_op_overload.name()}"
 
 
 __all__ = ["autotune_custom_op", "register_custom_op_autotuning"]
@@ -108,6 +111,7 @@ def autotune_custom_op(
     kwargs: Optional[dict[str, Any]] = None,
     layout: Optional[Layout] = None,
     default_impl: Optional[Callable[..., Any]] = None,
+    input_gen_fns: Optional[dict[int, Callable[[Buffer], torch.Tensor]]] = None,
 ) -> Union[TensorBox, Any]:
     """
     Autotune custom operations by comparing multiple decomposition implementations.
@@ -138,23 +142,16 @@ def autotune_custom_op(
 
     decompositions = list(decompositions)
 
-    # Allow empty decompositions only if we have a default_impl OpOverload for blackbox
-    if not decompositions:
-        if not (default_impl is not None and hasattr(default_impl, "_op")):
-            raise ValueError(
-                "decompositions list cannot be empty unless default_impl is an OpOverload"
-            )
-
-    # Store original OpOverload for blackbox choice
-    original_op_overload = None
+    # Store default OpOverload for fallback choice
+    default_op_overload = None
     processed_decompositions = decompositions.copy()
-    template_default_impl = None  # What to pass to CustomOpTemplate
+    template_default_impl = None
 
     # Handle default implementation
     if default_impl is not None:
-        # If default_impl is an OpOverload (the custom op itself), store it for blackbox use
+        # If default_impl is an OpOverload (the custom op itself), store it for fallback use
         if hasattr(default_impl, "_op"):
-            original_op_overload = default_impl
+            default_op_overload = default_impl
         else:
             # default_impl is already a callable function
             if default_impl not in processed_decompositions:
@@ -171,21 +168,22 @@ def autotune_custom_op(
         input_nodes=input_nodes,
         kwargs=kwargs,
         default_impl=template_default_impl,
+        input_gen_fns=input_gen_fns,
     )
 
     # Use the inferred layout from the choices (all choices should have the same layout)
     inferred_layout = layout or (choices[0].layout if choices else None)
 
-    # Add blackbox choice automatically if we have an OpOverload
-    if original_op_overload is not None:
+    # Add fallback choice automatically if we have an OpOverload
+    if default_op_overload is not None:
         if inferred_layout is None:
-            # Need to infer layout for blackbox choice
+            # Need to infer layout for fallback choice
             from torch._inductor.ir import ir_node_to_tensor
             from torch._inductor.virtualized import V
 
             with V.fake_mode:
                 example_inputs = [ir_node_to_tensor(inp) for inp in input_nodes]
-                output = original_op_overload(*example_inputs, **kwargs)
+                output = default_op_overload(*example_inputs, **kwargs)
                 inferred_layout = FixedLayout(
                     device=output.device,
                     dtype=output.dtype,
@@ -193,15 +191,15 @@ def autotune_custom_op(
                     stride=output.stride(),
                 )
 
-        blackbox_choice = BlackboxChoiceCaller(
-            name=f"{name}_blackbox_original",
+        fallback_choice = CustomOpFallbackChoice(
+            name=f"{name}_fallback_default",
             input_nodes=input_nodes,
             layout=inferred_layout,
-            description=f"Original {original_op_overload.name()} implementation (blackbox)",
-            original_op_overload=original_op_overload,
+            description=f"Default {default_op_overload.name()} implementation (fallback)",
+            default_op_overload=default_op_overload,
             kwargs=kwargs,
         )
-        choices.append(blackbox_choice)
+        choices.append(fallback_choice)
 
     if not choices:
         raise RuntimeError(f"No valid choices generated for {name}")
@@ -211,6 +209,7 @@ def autotune_custom_op(
         choices=choices,
         input_nodes=input_nodes,
         layout=inferred_layout,
+        input_gen_fns=input_gen_fns,
     )
 
 

@@ -36,6 +36,16 @@ class TestCustomOpAutoTune(TestCase):
         self.device = "cuda" if HAS_GPU else "cpu"
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
 
+    def simple_randn_gen(self, x):
+        """Simple random normal generator for input_gen_fns - reusable across all tests."""
+        from torch._inductor.virtualized import V
+
+        return torch.randn(
+            [V.graph.sizevars.size_hint(i) for i in x.get_size()],
+            dtype=x.get_dtype(),
+            device=x.get_device(),
+        )
+
     def _create_test_configs(self):
         """Create common test configurations for different sizes."""
         return [
@@ -100,7 +110,7 @@ class TestCustomOpAutoTune(TestCase):
                     msg=f"{op_name} {name} differs from {reference_name}",
                 )
 
-    def _create_rmsnorm_inputs(self, batch_size=2, seq_len=32, hidden_dim=256):
+    def _create_rmsnorm_inputs(self, batch_size=8, seq_len=1024, hidden_dim=512):
         """Create test inputs for RMSNorm operations."""
         input_tensor = torch.randn(
             batch_size,
@@ -171,15 +181,6 @@ class TestCustomOpAutoTune(TestCase):
         def rmsnorm_decomposition2(
             x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
-            """Direct RMS approach: compute RMS directly."""
-            x_squared = x * x
-            mean_squared = x_squared.mean(dim=-1, keepdim=True)
-            rms = torch.sqrt(mean_squared + eps)
-            return x / rms * weight
-
-        def rmsnorm_decomposition3(
-            x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
-        ) -> torch.Tensor:
             """Single expression approach: combine operations in one line."""
             return x * torch.rsqrt((x * x).mean(dim=-1, keepdim=True) + eps) * weight
 
@@ -187,7 +188,9 @@ class TestCustomOpAutoTune(TestCase):
         def test_rmsnorm_op(
             input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
-            return rmsnorm_decomposition1(input_tensor, weight, eps)
+            return torch.nn.functional.rms_norm(
+                input_tensor, input_tensor.shape[-1:], weight, eps=eps
+            )
 
         @test_rmsnorm_op.register_fake
         def _(input_tensor: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8):
@@ -199,8 +202,12 @@ class TestCustomOpAutoTune(TestCase):
         decompositions = [
             rmsnorm_decomposition1,
             rmsnorm_decomposition2,
-            rmsnorm_decomposition3,
         ]
+
+        input_gen_fns = {
+            0: self.simple_randn_gen,  # input tensor
+            1: self.simple_randn_gen,  # weight tensor
+        }
 
         @register_custom_op_autotuning(op_object.default)
         def _(input_tensor, weight, eps: float = 1e-8, default_impl=None):
@@ -210,6 +217,7 @@ class TestCustomOpAutoTune(TestCase):
                 inputs=[input_tensor, weight],
                 kwargs={"eps": eps},
                 default_impl=default_impl,
+                input_gen_fns=input_gen_fns,
             )
 
         # Test inputs
@@ -304,6 +312,13 @@ class TestCustomOpAutoTune(TestCase):
             mlp_decomposition3,
         ]
 
+        mlp_input_gen_fns = {
+            0: self.simple_randn_gen,  # input
+            1: self.simple_randn_gen,  # gate weight
+            2: self.simple_randn_gen,  # up weight
+            3: self.simple_randn_gen,  # down weight
+        }
+
         @register_custom_op_autotuning(op_object.default)
         def _(input_tensor, gate_weight, up_weight, down_weight, default_impl=None):
             return autotune_custom_op(
@@ -312,6 +327,7 @@ class TestCustomOpAutoTune(TestCase):
                 inputs=[input_tensor, gate_weight, up_weight, down_weight],
                 kwargs={},
                 default_impl=default_impl,
+                input_gen_fns=mlp_input_gen_fns,
             )
 
         # Test inputs
@@ -331,7 +347,7 @@ class TestCustomOpAutoTune(TestCase):
             "MLP",
         )
 
-    def _create_decompose_k_inputs(self, m=32, k=32768, n=32):
+    def _create_decompose_k_inputs(self, m=256, k=65536, n=1024):
         """Create test inputs for decompose_k matrix multiplication - matching real test sizes."""
         a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
         b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
@@ -365,8 +381,8 @@ class TestCustomOpAutoTune(TestCase):
         import functools
 
         decompose_k_decomposition1 = functools.partial(
-            decompose_k_base, k_splits=16
-        )  # split16
+            decompose_k_base, k_splits=2
+        )  # split2
         decompose_k_decomposition2 = functools.partial(
             decompose_k_base, k_splits=32
         )  # split32
@@ -381,7 +397,7 @@ class TestCustomOpAutoTune(TestCase):
         )  # split256
 
         # Set names for better debugging
-        decompose_k_decomposition1.__name__ = "decompose_k_split16"
+        decompose_k_decomposition1.__name__ = "decompose_k_split2"
         decompose_k_decomposition2.__name__ = "decompose_k_split32"
         decompose_k_decomposition3.__name__ = "decompose_k_split64"
         decompose_k_decomposition4.__name__ = "decompose_k_split128"
@@ -402,12 +418,19 @@ class TestCustomOpAutoTune(TestCase):
 
         # Define decompositions with different k_splits values - same as real test
         decompositions = [
-            decompose_k_decomposition1,  # k_splits=16
+            decompose_k_decomposition1,  # k_splits=2
             decompose_k_decomposition2,  # k_splits=32
             decompose_k_decomposition3,  # k_splits=64
             decompose_k_decomposition4,  # k_splits=128
             decompose_k_decomposition5,  # k_splits=256
         ]
+
+        # Define simple input_gen_fns for decompose_k
+
+        decompose_k_input_gen_fns = {
+            0: self.simple_randn_gen,  # matrix A
+            1: self.simple_randn_gen,  # matrix B
+        }
 
         @register_custom_op_autotuning(op_object.default)
         def _(a, b, k_splits: int = 4, default_impl=None):
@@ -415,15 +438,17 @@ class TestCustomOpAutoTune(TestCase):
                 name="test_decompose_k_autotuned",
                 decompositions=decompositions,
                 inputs=[a, b],
-                kwargs={"k_splits": k_splits},
+                kwargs={},  # No kwargs - let autotune choose the best decomposition
                 default_impl=default_impl,
+                input_gen_fns=decompose_k_input_gen_fns,
             )
 
+        # Test inputs
         a, b = self._create_decompose_k_inputs()
 
-        # Test autotuning with k_splits=16
-        expected = decompose_k_base(a, b, k_splits=16)
-        self._run_autotune_test(op_object, (a, b, 16), expected, "DecomposeK")
+        # Test autotuning - autotune will benchmark all decompositions and choose the fastest
+        expected = a @ b
+        self._run_autotune_test(op_object, (a, b), expected, "DecomposeK")
 
 
 if __name__ == "__main__":

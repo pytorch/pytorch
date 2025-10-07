@@ -1,6 +1,6 @@
 import itertools
 import logging
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._inductor.config as config
@@ -17,6 +17,7 @@ from torch._inductor.ir import (
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.utils import do_bench_using_profiling
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -218,8 +219,9 @@ class SubgraphTemplate(KernelTemplate):
         name: str,
         decompositions: list[Callable[..., Any]],
         input_nodes: list[Buffer],
-        kwargs: dict[str, Any] = None,
-        default_impl: Callable[..., Any] = None,
+        kwargs: Optional[dict[str, Any]] = None,
+        default_impl: Optional[Callable[..., Any]] = None,
+        input_gen_fns: Optional[dict[int, Callable[[Any], torch.Tensor]]] = None,
     ) -> list[SubgraphChoiceCaller]:
         """
         Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
@@ -242,10 +244,14 @@ class SubgraphTemplate(KernelTemplate):
 
         kwargs = kwargs or {}
 
-        # Infer output layout using default_impl or first decomposition
-        layout = self._infer_custom_op_layout(
-            input_nodes, decompositions, kwargs, default_impl
-        )
+        # Infer layouts and ensure stride consistency for fair autotuning comparison
+        layouts = [
+            self._infer_custom_op_layout(input_nodes, [decomp], kwargs, default_impl)
+            for decomp in decompositions
+        ]
+
+        self._validate_stride_consistency(name, decompositions, layouts)
+        layout = layouts[0]  # All layouts have equivalent stride now
 
         choices = []
         for decomp in decompositions:
@@ -268,12 +274,34 @@ class SubgraphTemplate(KernelTemplate):
 
         return choices
 
+    def _validate_stride_consistency(
+        self,
+        op_name: str,
+        decompositions: list[Callable[..., Any]],
+        layouts: list[Layout],
+    ) -> None:
+        """Ensure all decompositions produce compatible strides for fair autotuning."""
+        if not layouts:
+            return
+
+        strides = [layout.stride for layout in layouts]
+        if len(OrderedSet(str(stride) for stride in strides)) > 1:
+            reference = strides[0]
+            for i, stride in enumerate(strides[1:], 1):
+                if stride != reference:
+                    raise AssertionError(
+                        f"Stride mismatch in custom op '{op_name}' autotuning: "
+                        f"'{decompositions[i].__name__}' produces stride {stride}, "
+                        f"but '{decompositions[0].__name__}' produces {reference}. "
+                        f"All decompositions must have identical output strides."
+                    )
+
     def _infer_custom_op_layout(
         self,
         input_nodes: list[Buffer],
         decompositions: list[Callable[..., Any]],
         kwargs: dict[str, Any],
-        default_impl: Callable[..., Any] = None,
+        default_impl: Optional[Callable[..., Any]] = None,
     ) -> Layout:
         """Infer output layout for custom ops using the default implementation when available."""
         import functools
