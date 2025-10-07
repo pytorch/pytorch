@@ -1,6 +1,7 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
+import time
 import unittest
 from itertools import product
 from functools import partial
@@ -36,7 +37,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
-    skipIfRocmVersionLessThan,
     TEST_CUDA,
     TEST_WITH_ROCM,
     TestCase,
@@ -144,7 +144,6 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
-    @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
                         torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
@@ -158,7 +157,6 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     @xfailIfSM100OrLaterAndCondition(lambda params: params.get('dtype') == torch.bfloat16 and params.get('size') == 10000)
-    @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
@@ -170,7 +168,6 @@ class TestMatmulCuda(InductorTestCase):
             self.cublas_addmm(size, dtype, True)
 
     @onlyCUDA
-    @skipIfRocmVersionLessThan((5, 2))
     @dtypes(torch.float16)
     # m == 4 chooses OUTPUT_TYPE reduction on H200
     # m == 8 chooses OUTPUT_TYPE reduction on A100
@@ -191,7 +188,6 @@ class TestMatmulCuda(InductorTestCase):
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_precision
 
     @onlyCUDA
-    @skipIfRocmVersionLessThan((5, 2))
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=7e-1, rtol=2e-1),
                         torch.bfloat16: xtol(atol=1e1, rtol=2e-1)})
@@ -295,6 +291,16 @@ class TestMatmulCuda(InductorTestCase):
 
         # cross comparison
         self.assertEqual(out1_gpu, out2_gpu[0])
+
+    @onlyCUDA
+    @skipIfRocm
+    @parametrize("shape", [2**i for i in range(5, 14)])
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    def test_cublas_deterministic(self, device, shape, dtype):
+        inp = torch.randn(shape, shape, device=device, dtype=dtype)
+        first = torch.matmul(inp, inp)
+        for _ in range(10):
+            self.assertEqual(first, torch.matmul(inp, inp), atol=0., rtol=0.)
 
     def grouped_mm_helper(self, alist, blist, gOlist, agradlist, bgradlist, outlist):
         for a, b, gO, agrad, bgrad, out in zip(alist, blist, gOlist, agradlist, bgradlist, outlist):
@@ -834,6 +840,28 @@ class TestMatmulCuda(InductorTestCase):
                     op(c, a, mismatch_batch_dim_b, out_dtype=torch.float32)
                 else:
                     op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
+
+
+    @unittest.skipIf(not _get_torch_cuda_version() >= (12, 8), "Green Context only tested on 12.8+")
+    def test_greencontext_carveout(self):
+        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
+        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
+        ctx.make_current()
+        torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        partial_res = torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        ctx.pop_current()
+        torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t2 = time.perf_counter()
+        full_res = torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t3 = time.perf_counter()
+        self.assertEqual(partial_res, full_res)
+        self.assertGreater(t1 - t0, t3 - t2)
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
