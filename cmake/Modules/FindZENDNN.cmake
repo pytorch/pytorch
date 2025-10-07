@@ -69,7 +69,7 @@ endmacro()
 
 message(AUTHOR_WARNING "(ZENDNNL) please ensure all zendnnl variables are set properly.")
 
-if (NOT ZENDNN_FOUND)
+if(NOT ZENDNN_FOUND)
   # find openmp
   find_package(OpenMP REQUIRED QUIET)
 
@@ -250,7 +250,7 @@ if (NOT ZENDNN_FOUND)
 
     list(APPEND ZNL_BYPRODUCTS "${ZENDNNL_LIBRARY_LIB_DIR}/libzendnnl_archive.a")
 
-    # decalre all dependencies
+    # declare all dependencies
 
     # json dependency
     zendnnl_add_dependency(NAME json
@@ -341,7 +341,7 @@ if (NOT ZENDNN_FOUND)
       PROPERTIES
       ADDITIONAL_CLEAN_FILES "${ZENDNNL_CLEAN_FILES}")
 
-    # framwork dependencies
+    # framework dependencies
     # add_dependencies(fwk_zendnnl <injected dependency targets>)
     get_target_property(FWK_ZENDNNL_DEPENDS fwk_zendnnl MANUALLY_ADDED_DEPENDENCIES)
     if(${FWK_ZENDNNL_DEPENDS} STREQUAL "FWK_ZENDNNL_DEPENDS-NOTFOUND")
