@@ -485,7 +485,8 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 
-    begin_idx = insts.index("POP_JUMP_IF_TRUE")
+    # expect to find POP_JUMP_[FORWARD_]IF_TRUE
+    begin_idx = next(i for i, inst in enumerate(insts) if inst.startswith("POP_JUMP"))
     end_idx = insts.index("RAISE_VARARGS")
 
     return insts[begin_idx + 1 : end_idx + 1]
@@ -1017,7 +1018,7 @@ def break_graph_if_unsupported(
     return decorator
 
 
-class BytecodeDistpatchTableMeta(type):
+class BytecodeDispatchTableMeta(type):
     """Installs a `cls.dispatch_table` on every subclass to speed up calls to self.OPCODE()"""
 
     def __init__(cls: type, name: str, bases: Any, dct: Any) -> None:
@@ -1142,7 +1143,7 @@ class ExceptionStack:
 
 
 class InstructionTranslatorBase(
-    metaclass=BytecodeDistpatchTableMeta,
+    metaclass=BytecodeDispatchTableMeta,
 ):
     output: OutputGraph
     symbolic_locals: dict[str, VariableTracker]
