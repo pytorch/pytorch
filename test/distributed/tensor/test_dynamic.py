@@ -1,14 +1,20 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-import torch
-import sys
-from torch.distributed.tensor.placement_types import Replicate, Shard
-from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.distributed.tensor import DTensor, distribute_tensor
-from torch.testing._internal.distributed._tensor.common_dtensor import DTensorTestBase, with_comms
-from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu, parametrize, instantiate_parametrized_tests
 from unittest.mock import patch
+
+import torch
+from torch.distributed.tensor import distribute_tensor, DTensor
+from torch.distributed.tensor.placement_types import Replicate
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    with_comms,
+)
 
 
 class TestDynamic(DTensorTestBase):
@@ -16,7 +22,9 @@ class TestDynamic(DTensorTestBase):
     # FIXME: Currently broken for fake tensor cache
     @parametrize("fake_tensor_cache_enabled", [False])
     def test_embedding(self, fake_tensor_cache_enabled):
-        with patch.object(torch._dynamo.config, "fake_tensor_cache_enabled", fake_tensor_cache_enabled):
+        with patch.object(
+            torch._dynamo.config, "fake_tensor_cache_enabled", fake_tensor_cache_enabled
+        ):
             device_mesh = self.build_device_mesh()
 
             placements = (Replicate(),)
@@ -31,7 +39,7 @@ class TestDynamic(DTensorTestBase):
                     requires_grad=True,
                 ),
                 device_mesh,
-                placements, # [Replicate()],
+                placements,  # [Replicate()],
             )
 
             def forward(input_batch_inputs_):
@@ -39,11 +47,13 @@ class TestDynamic(DTensorTestBase):
                 emb = torch.nn.functional.embedding(input_batch_inputs_, to)
                 return emb
 
-            arg0 = torch.randint(low=0, high=100, size=(2, 512), dtype=torch.int64, device="cuda")
+            arg0 = torch.randint(
+                low=0, high=100, size=(2, 512), dtype=torch.int64, device="cuda"
+            )
             arg0 = DTensor.from_local(arg0, device_mesh, placements)
 
             compiled_forward = torch.compile(forward, fullgraph=True, dynamic=True)
-            out = compiled_forward(arg0)
+            _out = compiled_forward(arg0)
 
 
 instantiate_parametrized_tests(TestDynamic)
