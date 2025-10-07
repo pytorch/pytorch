@@ -8782,7 +8782,7 @@ def forward(self, x):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         # This is because we insert sym_constrain_range in the graph now
-        error_msg = r"Invalid value range for -1 between"
+        error_msg = r"ailed for expression u0 >= 0 on node 'ge'"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
@@ -8990,12 +8990,7 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
+
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -9019,13 +9014,7 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-
+      
     def test_to_module_with_mutated_buffer(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -10090,17 +10079,12 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         ep = export(f, (torch.tensor([3]),))
 
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
 
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
+
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
@@ -14318,9 +14302,8 @@ graph():
             """\
 def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item);  sym_constrain_range_for_size_default = None
-    ge_1 = item >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
+    ge = item >= 3
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 3 on node 'ge'");  ge = _assert_scalar_default = None
     le = item <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
     gt_1 = item > 2
@@ -14936,22 +14919,10 @@ graph():
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         # check runtime
