@@ -312,10 +312,6 @@ def async_save(
                 )
             )
 
-    storage_writer = cast(
-        StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
-    )
-
     state_dict = _stateful_to_state_dict(state_dict)
 
     @_dcp_method_logger(log_exceptions=True)

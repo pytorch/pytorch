@@ -53,6 +53,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_release_lock_on_cudamalloc;
   }
 
+  static bool graph_capture_record_stream_reuse() {
+    return instance().m_graph_capture_record_stream_reuse;
+  }
+
   /** Pinned memory allocator settings */
   static bool pinned_use_cuda_host_register() {
     return instance().m_pinned_use_cuda_host_register;
@@ -64,6 +68,10 @@ class C10_CUDA_API CUDAAllocatorConfig {
 
   static bool pinned_use_background_threads() {
     return instance().m_pinned_use_background_threads;
+  }
+
+  static size_t pinned_reserve_segment_size_mb() {
+    return instance().m_pinned_reserve_segment_size_mb;
   }
 
   static size_t pinned_max_register_threads() {
@@ -139,7 +147,13 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parsePinnedNumRegisterThreads(
       const std::vector<std::string>& config,
       size_t i);
+  size_t parsePinnedReserveSegmentSize(
+      const std::vector<std::string>& config,
+      size_t i);
   size_t parsePinnedUseBackgroundThreads(
+      const std::vector<std::string>& config,
+      size_t i);
+  size_t parseGraphCaptureRecordStreamReuse(
       const std::vector<std::string>& config,
       size_t i);
 
@@ -148,11 +162,13 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::vector<size_t> m_roundup_power2_divisions;
   std::atomic<double> m_garbage_collection_threshold;
   std::atomic<size_t> m_pinned_num_register_threads;
+  std::atomic<size_t> m_pinned_reserve_segment_size_mb;
   std::atomic<bool> m_expandable_segments;
   std::atomic<Expandable_Segments_Handle_Type>
       m_expandable_segments_handle_type;
   std::atomic<bool> m_release_lock_on_cudamalloc;
   std::atomic<bool> m_pinned_use_cuda_host_register;
+  std::atomic<bool> m_graph_capture_record_stream_reuse;
   std::atomic<bool> m_pinned_use_background_threads;
   std::string m_last_allocator_settings;
   std::mutex m_last_allocator_settings_mutex;

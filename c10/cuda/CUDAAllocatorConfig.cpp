@@ -15,6 +15,7 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
       m_max_non_split_rounding_size(kLargeBuffer),
       m_garbage_collection_threshold(0),
       m_pinned_num_register_threads(1),
+      m_pinned_reserve_segment_size_mb(0),
       m_expandable_segments(false),
 #if CUDA_VERSION >= 12030
       m_expandable_segments_handle_type(
@@ -25,6 +26,7 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
 #endif
       m_release_lock_on_cudamalloc(false),
       m_pinned_use_cuda_host_register(false),
+      m_graph_capture_record_stream_reuse(false),
       m_pinned_use_background_threads(false) {
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
@@ -370,8 +372,14 @@ void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
     } else if (config_item_view == "pinned_num_register_threads") {
       i = parsePinnedNumRegisterThreads(config, i);
       used_native_specific_option = true;
+    } else if (config_item_view == "pinned_reserve_segment_size_mb") {
+      i = parsePinnedReserveSegmentSize(config, i);
+      used_native_specific_option = true;
     } else if (config_item_view == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(config, i);
+      used_native_specific_option = true;
+    } else if (config_item_view == "graph_capture_record_stream_reuse") {
+      i = parseGraphCaptureRecordStreamReuse(config, i);
       used_native_specific_option = true;
     } else {
       TORCH_CHECK(
@@ -406,6 +414,23 @@ size_t CUDAAllocatorConfig::parsePinnedUseCudaHostRegister(
   return i;
 }
 
+size_t CUDAAllocatorConfig::parseGraphCaptureRecordStreamReuse(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    TORCH_CHECK(
+        (config[i] == "True" || config[i] == "False"),
+        "Expected a single True/False argument for graph_capture_record_stream_reuse");
+    m_graph_capture_record_stream_reuse = (config[i] == "True");
+  } else {
+    TORCH_CHECK(
+        false, "Error, expecting graph_capture_record_stream_reuse value", "");
+  }
+
+  return i;
+}
+
 size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
     const std::vector<std::string>& config,
     size_t i) {
@@ -426,6 +451,22 @@ size_t CUDAAllocatorConfig::parsePinnedNumRegisterThreads(
   } else {
     TORCH_CHECK(
         false, "Error, expecting pinned_num_register_threads value", "");
+  }
+  return i;
+}
+
+size_t CUDAAllocatorConfig::parsePinnedReserveSegmentSize(
+    const std::vector<std::string>& config,
+    size_t i) {
+  consumeToken(config, ++i, ':');
+  if (++i < config.size()) {
+    size_t val2 = stoi(config[i]);
+    TORCH_CHECK(
+        val2 > 0, "Pinned reserve segment size has to be greater than 0 ", "");
+    m_pinned_reserve_segment_size_mb = val2;
+  } else {
+    TORCH_CHECK(
+        false, "Error, expecting pinned_reserve_segment_size_mb value", "");
   }
   return i;
 }
