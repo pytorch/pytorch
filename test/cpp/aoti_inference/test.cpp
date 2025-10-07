@@ -915,7 +915,6 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   }
 }
 
-#if defined(USE_CUDA) || defined(USE_ROCM)
 void test_cuda_alloc_test() {
   torch::NoGradGuard no_grad;
 
@@ -955,8 +954,8 @@ void test_cuda_alloc_test() {
       runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
-#endif
 
+#ifdef USE_CUDA
 class ThreadPool {
  private:
   struct Task {
@@ -1050,7 +1049,6 @@ class ThreadPool {
   }
 };
 
-#ifndef USE_ROCM
 void test_multi_cuda_streams(const std::string& device) {
   c10::InferenceMode mode;
   std::string data_path =
