@@ -117,8 +117,6 @@ class CI(NamedTuple):
 
 
 CI_SKIP_OPTIMIZER = {
-    # TIMM
-    "hrnet_w18",  # Stack issue in fx
     # HF
     "MobileBertForMaskedLM",  # Stack issue in fx
     "MobileBertForQuestionAnswering",  # Stack issue in fx
@@ -206,15 +204,8 @@ BENCHMARK_USE_SGD = {
     "XGLMForCausalLM",
     # TIMM
     "adv_inception_v3",
-    "convit_base",
-    "dpn107",
-    "gernet_l",
-    "res2net101_26w_4s",
-    "sebotnet33ts_256",
-    "swsl_resnext101_32x16d",
     "tf_efficientnet_b0",
     "ghostnet_100",
-    "gmixer_24_224",
 }
 
 # These models OOM in CI
@@ -244,14 +235,12 @@ CI_USE_SGD = {
     "timm_efficientdet",
     "ghostnet_100",
     "inception_v3",
-    "selecsls42b",
     "mobilevit_s",
     "pytorch_CycleGAN_and_pix2pix",
     "vision_maskrcnn",
     "dlrm",
     "resnet50",
     "dm_nfnet_f0",
-    "tf_mixnet_l",
 }
 
 
@@ -3800,7 +3789,6 @@ def run(runner, args, original_dir=None):
             runner.skip_models.update(
                 {
                     # xfail: https://github.com/pytorch/pytorch/issues/145773
-                    "convit_base",
                     "llama",
                     "cm3leon_generate",
                 }

@@ -10,5 +10,4 @@ skip:
       # timeout on aarch64
       - dm_nfnet_f0
       - nfnet_l0
-      - swsl_resnext101_32x16d
       - visformer_small
