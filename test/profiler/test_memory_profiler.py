@@ -1414,7 +1414,6 @@ class TestMemoryProfilerE2E(TestCase):
             aten::t                                  7 (PARAMETER)                                 -> 7 (PARAMETER)
             aten::mm                                 25 (AUTOGRAD_DETAIL), 7 (PARAMETER)           -> 27 (AUTOGRAD_DETAIL)
             aten::t                                  26 (GRADIENT)                                 -> 26 (GRADIENT)
-            aten::detach                             26 (GRADIENT)                                 -> 26 (GRADIENT)
             aten::detach                             26 (GRADIENT)                                 -> ???
             aten::detach                             6 (ACTIVATION)                                -> 6 (ACTIVATION)
             aten::threshold_backward                 27 (AUTOGRAD_DETAIL), 6 (ACTIVATION)          -> 28 (AUTOGRAD_DETAIL)
@@ -1423,10 +1422,8 @@ class TestMemoryProfilerE2E(TestCase):
             aten::t                                  29 (GRADIENT)                                 -> 29 (GRADIENT)
             aten::sum.dim_IntList                    28 (AUTOGRAD_DETAIL)                          -> 30 (GRADIENT)
             aten::view                               30 (GRADIENT)                                 -> 30 (GRADIENT)
-            aten::detach                             30 (GRADIENT)                                 -> 30 (GRADIENT)
             aten::detach                             30 (GRADIENT)                                 -> ???
             aten::t                                  29 (GRADIENT)                                 -> 29 (GRADIENT)
-            aten::detach                             29 (GRADIENT)                                 -> 29 (GRADIENT)
             aten::detach                             29 (GRADIENT)                                 -> ???""",
         )
 
