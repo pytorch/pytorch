@@ -70,7 +70,7 @@ fastNLP_Bert,pass,10
 
 
 
-functorch_dp_cifar10,pass,7
+functorch_dp_cifar10,fail_accuracy,7
 
 
 
@@ -110,7 +110,19 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,25
+hf_Longformer,pass,10
+
+
+
+hf_Reformer,pass,20
+
+
+
+hf_Roberta_base,pass,6
+
+
+
+hf_T5,pass,5
 
 
 
@@ -158,7 +170,7 @@ mobilenet_v2_quantized_qat,eager_fail_to_run,0
 
 
 
-mobilenet_v3_large,pass,7
+mobilenet_v3_large,pass,0
 
 
 
@@ -198,7 +210,7 @@ pytorch_unet,pass_due_to_skip,7
 
 
 
-resnet152,pass,7
+resnet152,pass,0
 
 
 
@@ -242,11 +254,19 @@ stable_diffusion_unet,pass_due_to_skip,0
 
 
 
+timm_efficientdet,pass,8
+
+
+
 timm_efficientnet,pass,7
 
 
 
-timm_regnet,pass,7
+timm_nfnet,pass,6
+
+
+
+timm_regnet,pass,0
 
 
 
@@ -278,7 +298,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,39
+vision_maskrcnn,fail_accuracy,39
 
 
 

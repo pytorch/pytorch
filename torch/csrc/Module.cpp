@@ -71,6 +71,7 @@
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/cpu/Module.h>
+#include <torch/csrc/distributed/python_placement.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/functionalization/Module.h>
@@ -410,9 +411,11 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
   std::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
+      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          /*ignore_hermetic_tls=*/false);
   std::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
+      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          /*ignore_hermetic_tls=*/false);
   TORCH_INTERNAL_ASSERT(
       mb_obj_a.has_value() && mb_obj_b.has_value(),
       "Both tensors should have PyObjects tagged by the current python interpreter");
@@ -492,7 +495,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
 
 static PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  Py_ssize_t num_args = args ? (Py_ssize_t)PyTuple_Size(args) : 0;
+  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
   TORCH_CHECK(num_args == 2, "expected exactly 2 arguments");
   PyObject* arg1 = PyTuple_GET_ITEM(args, 0);
   TORCH_CHECK(THPSize_Check(arg1), "expected a torch.Size as argument 1");
@@ -2111,6 +2114,8 @@ PyObject* initModule() {
   THXPEvent_init(module);
 #endif
 
+  torch::distributed::initPlacementBindings(module);
+
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
         // PyModule_AddObject steals reference
@@ -2493,7 +2498,8 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_fp32_precision_getter",
       [](const std::string& backend, const std::string& op) {
-        return at::globalContext().float32Precision(backend, op);
+        return at::precision2str(at::globalContext().float32Precision(
+            at::str2backend(backend), at::str2op(op)));
       });
 
   py_module.def(
@@ -2501,7 +2507,10 @@ Call this whenever a new thread is created in order to propagate values from
       [](const std::string& backend,
          const std::string& op,
          const std::string& precision) {
-        at::globalContext().setFloat32Precision(backend, op, precision);
+        at::globalContext().setFloat32Precision(
+            at::str2backend(backend),
+            at::str2op(op),
+            at::str2precision(precision));
         return precision;
       });
 
