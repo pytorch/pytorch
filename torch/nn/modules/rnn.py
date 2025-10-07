@@ -242,7 +242,7 @@ class RNNBase(Module):
         for fw in self._flat_weights:
             if (
                 not isinstance(fw, Tensor)
-                or not (fw.dtype == dtype)
+                or fw.dtype != dtype
                 or not fw.is_cuda
                 or not torch.backends.cudnn.is_acceptable(fw)
             ):
