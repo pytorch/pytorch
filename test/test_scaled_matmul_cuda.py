@@ -11,7 +11,7 @@ from typing import Optional
 import torch
 
 
-from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
+from torch.nn.functional import scaled_mm, _ScalingType as ScalingType, _SwizzleType as SwizzleType
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     _get_torch_cuda_version,
