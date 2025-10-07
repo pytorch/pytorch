@@ -8991,7 +8991,6 @@ def forward(self, x):
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
 
-
         with self.assertRaisesRegex(
             RuntimeError,
             r"Runtime assertion failed for expression u[\d+] \<\= 7",
@@ -9014,7 +9013,7 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-      
+
     def test_to_module_with_mutated_buffer(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -10083,7 +10082,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
-
 
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
