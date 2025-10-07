@@ -125,6 +125,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.graph.disable_saved_tensors_hooks,
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
+        torch.fx.traceback.annotate,
         # We'll let Dynamo inline into the contextlib part of these context
         # manager instances, all the way till it invokes the wrapped function
         # itself (at which point we wrap it back to special context manager
@@ -270,6 +271,26 @@ class BaseTorchVariable(VariableTracker):
     def can_constant_fold_through(self):
         if self.value in constant_fold_functions:
             return True
+
+        if (
+            self.value is torch.autograd._profiler_enabled
+            and config.constant_fold_autograd_profiler_enabled
+        ):
+            # The relevant flag is enabled only for export. One might wonder
+            # why?
+            #
+            # Actually we would like to not graph break even in the case of
+            # Dynamo. But there is a weird-unsolved bug with Kineto + Dynamo
+            # when there are distributed jobs that lead to NCCL timeouts. This
+            # bug is a rare edege case, but we have not been able to root cause
+            # it yet. See https://www.internalfb.com/sevmanager/view/560336 for
+            # more details.
+            #
+            # So is this safe for export? Yes, for export, we do not anticipate
+            # JIT tracing in distributed job training, and the weird edge-case
+            # interaction with Kineto is not a valid usecase. So, this is ok.
+            return True
+
         return getattr(self.value, "__module__", None) == "math"
 
 
@@ -305,6 +326,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
             FSDPParamGroupUseTrainingStateVariable,
+            FxTracebackAnnotateVariable,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
@@ -339,6 +361,11 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) <= 1 and len(kwargs) == 0
             inf_mode = args[0].as_python_constant() if len(args) == 1 else True
             return InferenceModeVariable.create(tx, inf_mode)
+        elif self.value is torch.fx.traceback.annotate:
+            assert len(args) <= 1 and len(kwargs) == 0
+            return FxTracebackAnnotateVariable(
+                args[0].as_python_constant(), source=self.source
+            )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
