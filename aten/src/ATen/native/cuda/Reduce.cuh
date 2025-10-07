@@ -55,6 +55,23 @@ C10_HOST_DEVICE static void reduce_fraction(size_t &numerator, size_t &denominat
   denominator /= a;
 }
 
+C10_HOST_DEVICE static void next_pow_2(size_t x, size_t& pow2) {
+  int n = x / 2;
+    if (n == 0)
+      n = 1;
+    else {
+      n--;
+      n |= n >> 1;
+      n |= n >> 2;
+      n |= n >> 4;
+      n |= n >> 8;
+      n |= n >> 16;
+      n++;
+    }
+
+    pow2 = n;
+}
+
 //template for changing MAX_NUM_THREADS based on op dtype
 template <typename T>
 struct mnt_wrapper {
@@ -655,8 +672,9 @@ struct ReduceOp {
     }
 
     __syncthreads();
-
-    for (int offset = dim_x / 2; offset > 0; offset >>= 1) {
+    size_t offset = 0;
+    next_pow_2(dim_x / 2, offset);
+    for (; offset > 0; offset >>= 1) {
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = ops.warp_shfl_down(value[i], offset);
