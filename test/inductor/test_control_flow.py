@@ -2197,7 +2197,7 @@ class ScanTests(TestCase):
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_scan_with_nonzero(self, device, dynamic, autograd):
         # Create a tensor with some zero and non-zero elements
-        input_tensor = torch.tensor([0., 1., 0., 3., 0., 5.], requires_grad=True)
+        input_tensor = torch.tensor([0.0, 1.0, 0.0, 3.0, 0.0, 5.0], requires_grad=True)
         self._run_test(
             model=ScanModels.ScanWithNonzero(),
             inputs=(input_tensor,),
