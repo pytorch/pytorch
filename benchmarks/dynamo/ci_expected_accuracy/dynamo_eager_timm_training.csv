@@ -51,3 +51,7 @@ swin_base_patch4_window7_224,pass,7
 
 
 tf_efficientnet_b0,pass,6
+
+
+
+visformer_small,pass,7
