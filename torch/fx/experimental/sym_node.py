@@ -480,7 +480,8 @@ class SymNode:
             no_sym_dispatch,
         )
 
-        if (result := handle_sym_dispatch(torch.sym_sum, *args)) is not no_sym_dispatch:
+        # sym_sum() takes a tuple itself
+        if (result := handle_sym_dispatch(torch.sym_sum, args)) is not no_sym_dispatch:
             return to_node(self, result)
         exprs = [a.expr for a in args]
         out = sympy.Add(*exprs)
