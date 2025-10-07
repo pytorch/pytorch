@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, get_args, Optional, Union
+from typing import Any, get_args, Optional, Union
 
 import torch
 import torch._library.utils as library_utils
@@ -508,7 +508,7 @@ def do_auto_functionalize(
             normalized_kwargs[arg.name] = kwargs[arg.name]
         elif idx < len(args):
             # if its out of bounds we don't need to do anything
-            # as it means the the optional arg was passed with its default
+            # as it means the optional arg was passed with its default
             # value
             normalized_kwargs[arg.name] = args[idx]
         else:
@@ -625,7 +625,7 @@ def do_auto_functionalize_v2(
             normalized_kwargs[arg.name] = kwargs[arg.name]
         elif idx < len(args):
             # if its out of bounds we don't need to do anything
-            # as it means the the optional arg was passed with its default
+            # as it means the optional arg was passed with its default
             # value
             normalized_kwargs[arg.name] = args[idx]
         else:
