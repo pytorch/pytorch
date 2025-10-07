@@ -973,7 +973,7 @@ graph():
 
         model = M()
         ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
-        print(ep)
+
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
 
@@ -2666,7 +2666,7 @@ class GraphModule(torch.nn.Module):
         m = M()
         x = torch.randn(3)
         ep = export(m, (x,))
-        print(ep)
+
         ufm = torch.export.unflatten(ep)
         self.assertExpectedInline(
             str(ufm.graph_module.code).strip(),
@@ -8906,7 +8906,6 @@ def forward(self, x):
                 return self.freq[pos] * self.freq[pos]
 
         ep = export(M(), (torch.tensor(1),))
-        print(ep)
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
@@ -16773,15 +16772,7 @@ class TestOneOffModelExportResult(TestCase):
 
         with torch.nn.attention.sdpa_kernel([SDPBackend.MATH]):
             ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
-            print(ep.graph)
             ep.run_decompositions()
-            print(ep.graph)
-
-    #         self.assertExpectedInline(ep.graph_module.code.strip(), """\
-    # def forward(self, arg0_1, arg1_1, arg2_1):
-    #     _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(arg0_1, arg1_1, arg2_1, 0.0, True);  arg0_1 = arg1_1 = arg2_1 = None
-    #     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
-    #     return (getitem,)""")
 
     @skipIfCrossRef
     @unittest.skipIf(
