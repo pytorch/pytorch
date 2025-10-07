@@ -111,11 +111,11 @@ static bool use_mkldnn_fp16_matmul() {
 }
 
 static bool use_mkldnn_bf32_matmul() {
-  return use_mkldnn_bf16_matmul() && at::globalContext().float32Precision("mkldnn", "matmul") == "bf16";
+  return use_mkldnn_bf16_matmul() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::BF16;
 }
 
 static bool use_mkldnn_tf32_matmul() {
-  return cpuinfo_has_x86_amx_fp16() && at::globalContext().float32Precision("mkldnn", "matmul") == "tf32";
+  return cpuinfo_has_x86_amx_fp16() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::TF32;
 }
 
 // returns an ideep::tensor

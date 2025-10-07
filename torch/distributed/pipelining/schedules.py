@@ -8,9 +8,10 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -1190,7 +1191,7 @@ def _add_send_recv(
         """
         if action is None:
             return True
-        elif action.computation_type == F and not action.stage_index == 0:
+        elif action.computation_type == F and action.stage_index != 0:
             if (
                 _Action(action.stage_index, RECV_F, action.microbatch_index)
                 in prev_actions
@@ -1204,7 +1205,7 @@ def _add_send_recv(
             return False
         elif (
             action.computation_type in (BACKWARD_INPUT, FULL_BACKWARD)
-            and not action.stage_index == num_stages - 1
+            and action.stage_index != num_stages - 1
         ):
             if (
                 _Action(action.stage_index, RECV_B, action.microbatch_index)
@@ -1951,7 +1952,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             stage_idx,
                             mb_index,
                         ) not in bwd_recv_ops, (
-                            "Recv twice for {stage_idx=} {mb_index=} without executing backward"
+                            f"Recv twice for {stage_idx=} {mb_index=} without executing backward"
                         )
                         bwd_recv_ops[(stage_idx, mb_index)] = _batch_p2p(
                             stage.get_bwd_recv_ops(mb_index)
