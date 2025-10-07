@@ -1532,6 +1532,14 @@ except RuntimeError as e:
                 self.dataset, num_workers=1, multiprocessing_context=object()
             )
 
+        # stateful with multi-process data loading
+        with self.assertRaisesRegex(
+            ValueError, "stateful option is only supported with single-process data loading"
+        ):
+            self._get_data_loader(
+                self.dataset, num_workers=1, stateful=True
+            )
+
         # map-style
         sampler = torch.utils.data.SequentialSampler(self.dataset)
         batch_sampler = torch.utils.data.BatchSampler(sampler, 3, False)
