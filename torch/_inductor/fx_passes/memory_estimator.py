@@ -133,21 +133,22 @@ class GraphAliasTracker:
         """Get all storages that this node uses as inputs."""
         return self.node_to_storage_uses[node]
 
-    def get_storages_last_used_at(
+    def get_storages_last_used(
         self,
         node: fx.Node,
     ) -> OrderedSet[StorageKey]:
         """
         Get storages whose last use is at this node.
-
-        Returns storages that are currently active and have their
-        last use at this node.
         """
         return self.node_to_storages_last_used[node]
 
 
 def _size_of_default(num_bytes: Union[int, torch.SymInt]) -> int:
     return hint_int(num_bytes, fallback=torch._inductor.config.unbacked_symint_fallback)
+
+
+def device_filter(device: torch.device) -> bool:
+    return device.type != "cpu"
 
 
 def build_memory_profile(
@@ -184,7 +185,7 @@ def build_memory_profile(
         graph.find_nodes(op="placeholder"), graph.find_nodes(op="get_attr")
     ):
         for storage_key in alias_info.get_fresh_allocations(node):
-            if storage_key.device.type != "cpu":
+            if device_filter(storage_key.device):
                 current_memory += size_of(storage_key.storage.nbytes())
 
     memory_profile = [current_memory]
@@ -195,16 +196,16 @@ def build_memory_profile(
 
         # Process allocations
         for storage_key in alias_info.get_fresh_allocations(node):
-            if storage_key.device.type != "cpu":
+            if device_filter(storage_key.device):
                 current_memory += size_of(storage_key.storage.nbytes())
 
         memory_profile.append(current_memory)
 
         # Process deallocations
-        for storage_key in alias_info.get_storages_last_used_at(node):
+        for storage_key in alias_info.get_storages_last_used(node):
             allocator = alias_info.storage_to_allocator[storage_key]
             if is_releasable(allocator):
-                if storage_key.device.type != "cpu":
+                if device_filter(storage_key.device):
                     current_memory -= size_of(storage_key.storage.nbytes())
 
         memory_profile.append(current_memory)
