@@ -71,6 +71,7 @@
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/cpu/Module.h>
+#include <torch/csrc/distributed/python_placement.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/functionalization/Module.h>
@@ -2112,6 +2113,8 @@ PyObject* initModule() {
   THXPStream_init(module);
   THXPEvent_init(module);
 #endif
+
+  torch::distributed::initPlacementBindings(module);
 
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
