@@ -53,10 +53,8 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-def _tolist_with_constrain_as_size(tensor):
+def _tolist(tensor):
     lst = tensor.tolist()
-    for elem in lst:
-        torch._check_is_size(elem)
     return lst
 
 
@@ -537,10 +535,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             ranks,
             group_size,
         ):
-            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
-            output_split_sizes = _tolist_with_constrain_as_size(
-                output_split_sizes_tensor
-            )
+            input_split_sizes = _tolist(input_split_sizes_tensor)
+            output_split_sizes = _tolist(output_split_sizes_tensor)
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
                 output_split_sizes,
@@ -700,10 +696,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             ranks,
             group_size,
         ):
-            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
-            output_split_sizes = _tolist_with_constrain_as_size(
-                output_split_sizes_tensor
-            )
+            input_split_sizes = _tolist(input_split_sizes_tensor)
+            output_split_sizes = _tolist(output_split_sizes_tensor)
             a2a = torch.ops.custom_ns.alltoall_autograd.default(
                 inp,
                 output_split_sizes,
@@ -1808,59 +1802,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert y_ag0.dtype == ag_0.dtype
         assert y_ag1.dtype == ag_1.dtype
 
-        assert same(out, correct), f"{out} va {correct}"
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @unittest.skipIf(not SM80OrLater, "bfloat16")
-    @parametrize("bucket_mode", ["all_custom_ops_multidtype"])
-    def test_reduce_scatter_bucket_multidtype(self, bucket_mode):
-        def func(x, w, rs_0, rs_1, *, tag, ranks, group_size):
-            # do some unrelated matmuls
-            y = torch.mm(x, w)
-
-            # reduce_scatter
-            group_name = (
-                torch.distributed.distributed_c10d._get_default_group().group_name
-            )
-            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
-                rs_0, "sum", group_size, group_name
-            )
-            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
-                rs_1, "sum", group_size, group_name
-            )
-
-            # wait op
-            rs_0_out = torch.ops.c10d_functional.wait_tensor(rs_0_out)
-            rs_1_out = torch.ops.c10d_functional.wait_tensor(rs_1_out)
-
-            return y, rs_0_out, rs_1_out
-
-        x = torch.ones(4, 384, device="cuda", dtype=torch.float32)
-        w = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        rs_0 = torch.ones(384, 512, device="cuda", dtype=torch.float32)
-        rs_1 = torch.ones(384, 256, device="cuda", dtype=torch.bfloat16)
-        inputs = [x, w, rs_0, rs_1]
-        func(*inputs, **self.get_world_trs())
-
-        with torch._inductor.config.patch(
-            {
-                "bucket_reduce_scatters_fx": bucket_mode,
-                "reorder_for_compute_comm_overlap": False,
-            }
-        ):
-            compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
-            (
-                FileCheck()
-                .check_count(
-                    "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-                    count=1,
-                    exactly=True,
-                )
-                .run(code)
-            )
-        out = compiled(*inputs, **self.get_world_trs())
-        correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
