@@ -30,7 +30,7 @@ BertForQuestionAnswering,pass,5
 
 
 
-BlenderbotForCausalLM,eager_fail_to_run,0
+BlenderbotForCausalLM,pass_due_to_skip,0
 
 
 
@@ -50,7 +50,7 @@ DebertaV2ForMaskedLM,pass_due_to_skip,0
 
 
 
-DebertaV2ForQuestionAnswering,eager_1st_run_OOM,0
+DebertaV2ForQuestionAnswering,pass,4
 
 
 

@@ -9,11 +9,12 @@ import time
 import unittest
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import wraps
-from typing import Any, Callable, cast, no_type_check, Optional, Union
+from typing import Any, cast, no_type_check, Optional, Union
 from unittest import mock
 
 import torch
