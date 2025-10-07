@@ -530,7 +530,7 @@ class CPFlexAttentionTest(DTensorTestBase):
                     "qkv_size": [
                         (256 if enable_load_balance else 128) * self.world_size,
                         2048,
-                    ]
+                    ],
                 },
                 self._test_cp_flex_attention,
             )

@@ -16,7 +16,13 @@ class _LoadBalancer(ABC):
             restore (bool):
 
         Returns:
-            The generated indices.
+            The generated indices of shape `(1, seq_len)` if the load-balancing is
+            identical within the batch, or `(batch_size, seq_len)` if the load-balancing
+            should vary within the batch.
+
+        Warning:
+            For Multi-Head Attention, we require the masks over the head dimension are identical
+            (i.e. the return value of `_generate_indices()` does not have `heads` dimension).
 
         Example:
             Here is the causal mask for attention where q_len == kv_len == 8:
@@ -85,7 +91,12 @@ class _HeadTailLoadBalancer(_LoadBalancer):
                 balance indices that rearrange original positions to head-and-tail pattern.
 
         Returns:
-            Index tensor of shape (seq_length,) with the requested mapping.
+            The generated indices of shape `(1, seq_len)` because the load-balancing is
+            identical within the batch.
+
+        Warning:
+            For Multi-Head Attention, we require the masks over the head dimension are identical
+            (i.e. the return value of `_generate_indices()` does not have `heads` dimension).
 
         Example:
             Here is the causal mask for attention where q_len == kv_len == 8:
@@ -160,16 +171,20 @@ class _HeadTailLoadBalancer(_LoadBalancer):
         if restore:
             all_indices_tensor = torch.argsort(all_indices_tensor)
 
-        return all_indices_tensor
+        return all_indices_tensor.unsqueeze(0)  # add batch dim
 
 
 class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
     def __init__(
         self,
-        seq_length_per_doc: Union[list[int], list[list[int]]],
+        seq_length_per_doc: list[list[int]],
         world_size: int,
         device: Union[str, torch.device],
     ):
+        """
+        `seq_length_per_doc` has size (B, seq_len) if the load-balancing should vary
+        within the batch. Otherwise `seq_length_per_doc` should have size (1, seq_len).
+        """
         self.seq_length_per_doc = seq_length_per_doc
         self.world_size = world_size
         self.device = device
@@ -187,7 +202,12 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
                 head-and-tail pattern.
 
         Returns:
-            Index tensor of shape (seq_length,) with the requested mapping.
+            The generated indices of shape `(batch_size, seq_len)` if the load-balancing
+            should vary within the batch. Otherwise, it should have shape `(1, seq_len)`.
+
+        Warning:
+            For Multi-Head Attention, we require the masks over the head dimension are identical
+            (i.e. `seq_length_per_doc` must have size (B, seq_len) or (1, seq_len)).
 
         Example:
             Here is the document causal mask for attention where q_len == kv_len == 16:
@@ -231,19 +251,12 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0]
                     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0]
         """
-        if isinstance(self.seq_length_per_doc[0], list):
-            # The load-balance is different within batch
-            return torch.stack(
-                [
-                    self._generate_indices_for_batch(seq_lengths, restore)
-                    for seq_lengths in self.seq_length_per_doc
-                ]
-            )
-        else:
-            # The load-balance is identical within batch
-            return torch.stack(
-                [self._generate_indices_for_batch(self.seq_length_per_doc, restore)]
-            )
+        return torch.stack(
+            [
+                self._generate_indices_for_batch(seq_lengths, restore)
+                for seq_lengths in self.seq_length_per_doc
+            ]
+        )
 
     def _generate_indices_for_batch(self, seq_length_per_doc, restore) -> torch.Tensor:  # type: ignore[no-untyped-def]
         world_size = self.world_size
