@@ -25,6 +25,7 @@ from torch._higher_order_ops.utils import (
     get_tensor_mask,
     mask_list,
     materialize_as_graph,
+    maybe_ignore_fresh_unbacked_symbols,
     reenter_make_fx,
     register_fake,
     split_into_chunks,
@@ -32,6 +33,7 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -815,15 +817,19 @@ def scan_proxy_mode(mode, combine_fn, init, xs, additional_inputs):
 
 @register_fake(scan_op)
 def scan_fake_tensor_mode(combine_fn, init, xs, additional_inputs):
+    mode = torch.utils._python_dispatch._get_current_dispatch_mode()
+    assert isinstance(mode, FakeTensorMode)
+
     scan_length = xs[0].shape[0]
-    carry, outputs = _extract_carry_and_out(
-        combine_fn(
-            *init,
-            *[first_slice_copy(inp) for inp in xs],
-            *additional_inputs,
-        ),
-        len(init),
-    )
+    with maybe_ignore_fresh_unbacked_symbols(mode):
+        carry, outputs = _extract_carry_and_out(
+            combine_fn(
+                *init,
+                *[first_slice_copy(inp) for inp in xs],
+                *additional_inputs,
+            ),
+            len(init),
+        )
     out = (
         *carry,
         *(stack_y(t, scan_length) for t in outputs),
