@@ -916,7 +916,7 @@ while_loop_stack_output_op.py_impl(ProxyTorchDispatchMode)(
     functools.partial(while_loop_tracing, stack_output=True)
 )
 
-while_loop_stack_output_op.py_impl(FakeTensorMode)(
+register_fake(while_loop_stack_output_op)(
     functools.partial(while_loop_fake_tensor_mode, stack_output=True)
 )
 
