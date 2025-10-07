@@ -15,12 +15,11 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA)
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
 #endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
 #include <torch/script.h>
@@ -1051,6 +1050,7 @@ class ThreadPool {
   }
 };
 
+#ifndef USE_ROCM
 void test_multi_cuda_streams(const std::string& device) {
   c10::InferenceMode mode;
   std::string data_path =
@@ -1098,7 +1098,8 @@ void test_multi_cuda_streams(const std::string& device) {
     ASSERT_TRUE(torch::allclose(ref_output_tensors[0], all_outputs[i][0]));
   }
 }
-#endif
+#endif // USE_ROCM
+#endif // USE_CUDA || USE_ROCM
 } // namespace
 
 namespace torch::aot_inductor {
