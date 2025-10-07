@@ -303,7 +303,9 @@ def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
     return nvidia_lib_paths + lib_paths
 
 
-def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
+def _preload_cuda_deps(
+    lib_folder: str, lib_name: str, is_required: boolean = True
+) -> None:
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == "Linux", "Should only be called on Linux"
@@ -314,7 +316,7 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
         if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
             break
-    if not lib_path:
+    if not lib_path and is_required:
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
     ctypes.CDLL(lib_path)
 
@@ -372,16 +374,6 @@ def _load_global_deps() -> None:
             "cufile": "libcufile.so.*[0-9]",
         }
 
-        from torch.torch_version import TorchVersion
-        from torch.version import cuda as cuda_ver
-
-        cuda_version = TorchVersion(cuda_ver)
-
-        # Include libnvToolsExt only for older CUDA builds
-        # See: https://github.com/pytorch/pytorch/issues/152756
-        if cuda_version and cuda_version < "12.9":
-            cuda_libs["nvtx"] = "libnvToolsExt.so.*[0-9]"
-
         is_cuda_lib_err = [
             lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
         ]
@@ -389,6 +381,9 @@ def _load_global_deps() -> None:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
+
+        # libnvToolsExt is Optional Dependency
+        _preload_cuda_deps("nvtx", "libnvToolsExt.so.*[0-9]", False)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
