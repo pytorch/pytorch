@@ -1942,7 +1942,7 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
     torch._check_type(
         not indices.is_complex()
         and not indices.is_floating_point()
-        and not indices.dtype == torch.bool,
+        and indices.dtype != torch.bool,
         lambda: f"expected 'indices' to be integer dtype, but got {indices.dtype}",
     )
 

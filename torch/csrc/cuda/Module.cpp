@@ -23,6 +23,7 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <torch/csrc/cuda/green_context.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #ifdef USE_NCCL
@@ -303,7 +304,7 @@ at::Scalar as_scalar(PyObject* arg) {
   }
 
   if (THPUtils_checkLong(arg)) {
-    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
+    return at::Scalar(THPUtils_unpackLong(arg));
   }
 
   if (PyBool_Check(arg)) {
@@ -735,8 +736,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
         "mempool_id elements must be integers");
 
     mempool_id = c10::cuda::MempoolId_t(
-        static_cast<int64_t>(THPUtils_unpackLong(id1)),
-        static_cast<int64_t>(THPUtils_unpackLong(id2)));
+        THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
   }
 
   using c10::cuda::CUDACachingAllocator::BlockInfo;
@@ -1491,6 +1491,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         addStorageDeleterFns(storages_to_add_deleters_to, delta);
       });
 }
+static void initGreenContext(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+  py::class_<GreenContext>(m, "GreenContext")
+      .def_static("create", &GreenContext::create)
+      .def("make_current", &GreenContext::makeCurrent)
+      .def("pop_current", &GreenContext::popCurrent);
+}
 
 static void bindGetDeviceProperties(PyObject* module) {
   // Add method to torch.cuda
@@ -2215,6 +2222,7 @@ void initModule(PyObject* module) {
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
   initCudaMethodBindings(module);
+  initGreenContext(module);
 }
 
 } // namespace torch::cuda
