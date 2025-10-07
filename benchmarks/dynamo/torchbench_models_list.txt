@@ -4,11 +4,6 @@ LearningToPaint,1024
 alexnet,1024
 dcgan,1024
 densenet121,64
-hf_Albert,32
-hf_Bart,16
-hf_Bert,16
-hf_GPT2,16
-hf_T5,4
 mnasnet1_0,256
 mobilenet_v2,128
 mobilenet_v3_large,256

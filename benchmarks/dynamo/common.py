@@ -155,7 +155,6 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "detectron2_fasterrcnn_r_50_c4",
     "detectron2_fasterrcnn_r_50_dc5",
     "detectron2_fasterrcnn_r_50_fpn",
-    "hf_T5_generate",
     "Reformer",
     "llama",
 }.union(INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY)
@@ -188,7 +187,6 @@ BENCHMARK_USE_SGD = {
     "timm_vision_transformer",
     "timm_vovnet",
     "vgg16",
-    "hf_T5",  # Fails dynamic https://github.com/pytorch/pytorch/issues/115968
     # HF
     "AlbertForMaskedLM",
     "BartForCausalLM",
@@ -245,8 +243,6 @@ CI_USE_SGD = {
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
-    "hf_T5_base",
-    "hf_clip",
     "llama_v2_7b_16h",
     "mobilenet_v2_quantized_qat",
     "phi_1_5 resnet50_quantized_qat",
@@ -2079,10 +2075,6 @@ class BenchmarkRunner:
         # handcrafted wrap policy
         MODEL_FSDP_WRAP = {
             "stable_diffusion_unet": (Transformer2DModel,),
-            "hf_T5": (T5Block,),
-            "hf_T5_base": (T5Block,),
-            "hf_T5_large": (T5Block,),
-            "hf_Whisper": (WhisperEncoderLayer,),
             "llama_v2_7b_16h": (LlamaDecoderLayer,),
             "nanogpt": (Block,),
         }
@@ -3863,8 +3855,6 @@ def run(runner, args, original_dir=None):
                 "timm_efficientdet",
             }
         )
-        if args.training:
-            runner.skip_models.add("hf_T5")
 
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)

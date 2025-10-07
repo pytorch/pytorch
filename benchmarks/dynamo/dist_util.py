@@ -128,8 +128,6 @@ def fsdp_checkpointing_base(model, blocks):
 
 MODEL_FSDP_WRAP = {
     "toy_model": (MyModule,),
-    "hf_Bert": (BertLayer, BertLMPredictionHead),
-    "hf_T5": (T5Block,),
 }
 
 
