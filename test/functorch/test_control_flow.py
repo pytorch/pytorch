@@ -5460,16 +5460,15 @@ class GraphModule(torch.nn.Module):
                 def body_fn(c, a, b):
                     return c - 1, a.nonzero(), b.nonzero()
 
-                return torch.ops.higher_order.while_loop(
+                return torch.while_loop(
                     cond_fn,
                     body_fn,
                     (c, a, b),
-                    tuple(),
                 )
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected carried_inputs and body_output to have same metadata but found",
+            "Expected body_fn_output and carried_inputs to have same metadata but found",
         ):
             make_fx(Mod(), tracing_mode="fake")(
                 torch.tensor(

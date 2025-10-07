@@ -20,10 +20,10 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
+    fake_propagate_subgraph,
     fill_none_with_masks,
     filter_with_masks,
     materialize_as_graph,
-    maybe_ignore_fresh_unbacked_symbols,
     reenter_make_fx,
     register_fake,
     save_tensors_and_symints_for_backward,
@@ -380,14 +380,22 @@ def inner(mode, pred, true_fn, false_fn, operands):
 def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
     mode = torch.utils._python_dispatch._get_current_dispatch_mode()
     assert isinstance(mode, FakeTensorMode)
-    with maybe_ignore_fresh_unbacked_symbols(mode):
-        flat_true_outs, true_out_spec = pytree.tree_flatten(true_fn(*operands))
-        flat_false_outs, false_out_spec = pytree.tree_flatten(false_fn(*operands))
-        if true_out_spec != false_out_spec:
-            raise RuntimeError(
-                "Unmatched output spec from torch.cond branches: "
-                f"true branch tree_spec {true_out_spec} vs false branch tree_spec {false_out_spec}."
-            )
+    # We allow unbacked symbols to leak out of cond's true_fn and false_fn by merging them.
+    flat_true_outs, true_out_spec = pytree.tree_flatten(
+        fake_propagate_subgraph(
+            true_fn, operands, check_no_unbacked_symbol_leakage=False
+        )
+    )
+    flat_false_outs, false_out_spec = pytree.tree_flatten(
+        fake_propagate_subgraph(
+            false_fn, operands, check_no_unbacked_symbol_leakage=False
+        )
+    )
+    if true_out_spec != false_out_spec:
+        raise RuntimeError(
+            "Unmatched output spec from torch.cond branches: "
+            f"true branch tree_spec {true_out_spec} vs false branch tree_spec {false_out_spec}."
+        )
 
     merged_outs = []
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):

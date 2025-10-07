@@ -18,6 +18,7 @@ from torch._higher_order_ops.utils import (
     first_slice_copy_with_grad,
     materialize_as_graph,
     reenter_make_fx,
+    register_fake,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     split_into_chunks,
@@ -25,7 +26,6 @@ from torch._higher_order_ops.utils import (
     validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -846,10 +846,9 @@ def associative_scan_proxy_mode(mode, combine_fn, xs, additional_inputs):
     )
 
 
-@associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, combine_fn, xs, additional_inputs):
-    with mode:
-        return tuple(x.clone() for x in xs)
+@register_fake(associative_scan_op)
+def assoiciative_scan_fake_tensor_mode(combine_fn, xs, additional_inputs):
+    return tuple(x.clone() for x in xs)
 
 
 @associative_scan_op.py_functionalize_impl

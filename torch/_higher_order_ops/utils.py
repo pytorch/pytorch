@@ -126,6 +126,55 @@ def reenter_make_fx(fn):
     return wrapped
 
 
+def fake_propagate_subgraph(
+    fn: Callable,
+    args: Sequence[Any],
+    check_no_unbacked_symbol_leakage: bool = True,
+    debug_info: str = "",
+) -> Any:
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+    from torch.utils._ordered_set import OrderedSet
+
+    fake_mode = torch.utils._python_dispatch._get_current_dispatch_mode()
+    assert isinstance(fake_mode, FakeTensorMode)
+
+    def extract_free_unbacked_symbols(values):
+        symbols: OrderedSet[Any] = OrderedSet()
+        for item in pytree.tree_flatten(values)[0]:
+            if isinstance(item, torch.Tensor):
+                # For tensors: check size, stride, and storage_offset
+                symbols.update(free_unbacked_symbols(item.size()))
+                symbols.update(free_unbacked_symbols(item.stride()))
+                symbols.update(free_unbacked_symbols(item.storage_offset()))
+            elif isinstance(item, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+                symbols.update(free_unbacked_symbols(item.node.expr))
+        return symbols
+
+    args_free_unbacked_symbols = extract_free_unbacked_symbols(args)
+
+    with maybe_ignore_fresh_unbacked_symbols(fake_mode):
+        fake_outs = fn(*args)
+
+    fake_outs_free_unbacked_symbols = extract_free_unbacked_symbols(fake_outs)
+
+    # Assert that output free unbacked symbols are a subset of input free unbacked symbols
+    if (
+        check_no_unbacked_symbol_leakage
+        and not fake_outs_free_unbacked_symbols.issubset(args_free_unbacked_symbols)
+    ):
+        raise NotImplementedError(
+            f"Subgraph returning a data-dependent shaped tensor that's not present in input "
+            f"This is currently not supported. Please file an issue if you need this feature. "
+            f"More debug info: {debug_info}\n"
+            f"Input unbacked symbols: {args_free_unbacked_symbols},"
+            f"Output unbacked symbols: {fake_outs_free_unbacked_symbols}\n"
+            f"The traced subraph returns tensor of data-dependent shape:\n"
+            f"{fn.print_readable(print_output=False) if isinstance(fn, torch.fx.GraphModule) else fn} "
+        )
+
+    return fake_outs
+
+
 def _maybe_reenter_make_fx(fn):
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
 

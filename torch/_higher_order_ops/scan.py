@@ -19,6 +19,7 @@ from torch._higher_order_ops.utils import (
     _maybe_compile_and_run_fn,
     check_input_alias_and_mutation_return_outputs,
     check_meta_consistency,
+    fake_propagate_subgraph,
     fill_none_with_masks,
     filter_with_masks,
     first_slice_copy,
@@ -26,6 +27,7 @@ from torch._higher_order_ops.utils import (
     mask_list,
     materialize_as_graph,
     reenter_make_fx,
+    register_fake,
     split_into_chunks,
     unique_graph_id,
     validate_subgraph_args_types,
@@ -813,23 +815,28 @@ def scan_proxy_mode(mode, combine_fn, init, xs, additional_inputs):
     return trace_scan(mode, scan_op, combine_fn, init, xs, additional_inputs)
 
 
-@scan_op.py_impl(FakeTensorMode)
-def scan_fake_tensor_mode(mode, combine_fn, init, xs, additional_inputs):
-    with mode:
-        scan_length = xs[0].shape[0]
-        carry, outputs = _extract_carry_and_out(
-            combine_fn(
+@register_fake(scan_op)
+def scan_fake_tensor_mode(combine_fn, init, xs, additional_inputs):
+    mode = torch.utils._python_dispatch._get_current_dispatch_mode()
+    assert isinstance(mode, FakeTensorMode)
+
+    scan_length = xs[0].shape[0]
+    carry, outputs = _extract_carry_and_out(
+        fake_propagate_subgraph(
+            combine_fn,
+            (
                 *init,
                 *[first_slice_copy(inp) for inp in xs],
                 *additional_inputs,
             ),
-            len(init),
-        )
-        out = (
-            *carry,
-            *(stack_y(t, scan_length) for t in outputs),
-        )
-        return out
+        ),
+        len(init),
+    )
+    out = (
+        *carry,
+        *(stack_y(t, scan_length) for t in outputs),
+    )
+    return out
 
 
 @scan_op.py_functionalize_impl
