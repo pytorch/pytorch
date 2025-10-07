@@ -1021,7 +1021,12 @@ class Module:
 
         for key, buf in self._buffers.items():
             if buf is not None:
-                self._buffers[key] = fn(buf)
+                buf_applied = fn(buf)
+
+                if compute_should_use_set_data(buf, buf_applied):
+                    buf.data = buf_applied
+                else:
+                    self._buffers[key] = buf_applied
 
         return self
 

@@ -13660,6 +13660,14 @@ if __name__ == '__main__':
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
+    @onlyCUDA
+    def test_buffer_attribute_preservation(self):
+        model = torch.nn.Linear(1, 1)
+        model.register_buffer("test", torch.Tensor([0]))
+        model.test.test_attr = "test_attr"
+        model = model.to('cuda')
+        self.assertEqual(model.test.test_attr, "test_attr")
+
 
 class TestFunctionalPickle(TestCase):
 
