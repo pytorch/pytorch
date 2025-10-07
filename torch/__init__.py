@@ -355,8 +355,6 @@ def _load_global_deps() -> None:
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
-        from torch.version import cuda as cuda_version
-
         cuda_libs: dict[str, str] = {
             "cublas": "libcublas.so.*[0-9]",
             "cudnn": "libcudnn.so.*[0-9]",
@@ -374,13 +372,14 @@ def _load_global_deps() -> None:
             "cufile": "libcufile.so.*[0-9]",
         }
 
-        from torch.version import cuda as cuda_ver
         from torch.torch_version import TorchVersion
+        from torch.version import cuda as cuda_ver
+
         cuda_version = TorchVersion(cuda_ver)
 
         # Include libnvToolsExt only for older CUDA builds
         # See: https://github.com/pytorch/pytorch/issues/152756
-        if (cuda_version and cuda_version < "12.9"):
+        if cuda_version and cuda_version < "12.9":
             cuda_libs["nvtx"] = "libnvToolsExt.so.*[0-9]"
 
         is_cuda_lib_err = [
