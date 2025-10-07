@@ -109,7 +109,6 @@ def autotune_custom_op(
     decompositions: list[Callable[..., Any]],
     inputs: list[Any],
     kwargs: Optional[dict[str, Any]] = None,
-    layout: Optional[Layout] = None,
     default_impl: Optional[Callable[..., Any]] = None,
     input_gen_fns: Optional[dict[int, Callable[[Buffer], torch.Tensor]]] = None,
 ) -> Union[TensorBox, Any]:
@@ -125,8 +124,8 @@ def autotune_custom_op(
         decompositions: List of decomposition function implementations to compare
         inputs: Input tensors/nodes
         kwargs: Additional arguments for decomposition functions
-        layout: Output layout (inferred if None)
         default_impl: Default implementation to use as fallback (optional)
+        input_gen_fns: Input generation functions for benchmarking (optional)
 
     Returns:
         Optimized implementation result
@@ -134,69 +133,44 @@ def autotune_custom_op(
     if kwargs is None:
         kwargs = {}
 
-    # Validate that decompositions is always a list
     if not isinstance(decompositions, (list, tuple)):
         raise TypeError(
             f"decompositions must be a list or tuple of callables, got {type(decompositions)}"
         )
 
-    decompositions = list(decompositions)
-
-    # Store default OpOverload for fallback choice
-    default_op_overload = None
-    processed_decompositions = decompositions.copy()
-    template_default_impl = None
-
-    # Handle default implementation
-    if default_impl is not None:
-        # If default_impl is an OpOverload (the custom op itself), store it for fallback use
-        if hasattr(default_impl, "_op"):
-            default_op_overload = default_impl
-        else:
-            # default_impl is already a callable function
-            if default_impl not in processed_decompositions:
-                processed_decompositions.append(default_impl)
-            template_default_impl = default_impl
-
     input_nodes = list(inputs)
 
-    # Generate decomposition choices using SubgraphTemplate's new method
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
         name=name,
-        decompositions=processed_decompositions,
+        decompositions=list(decompositions),
         input_nodes=input_nodes,
         kwargs=kwargs,
-        default_impl=template_default_impl,
-        input_gen_fns=input_gen_fns,
+        default_impl=None,
     )
 
-    # Use the inferred layout from the choices (all choices should have the same layout)
-    inferred_layout = layout or (choices[0].layout if choices else None)
+    # Handle default custom op implementation as fallback
+    if default_impl and hasattr(default_impl, "_op"):
+        from torch._inductor.ir import ir_node_to_tensor
+        from torch._inductor.virtualized import V
 
-    # Add fallback choice automatically if we have an OpOverload
-    if default_op_overload is not None:
-        if inferred_layout is None:
-            # Need to infer layout for fallback choice
-            from torch._inductor.ir import ir_node_to_tensor
-            from torch._inductor.virtualized import V
+        with V.fake_mode:
+            example_inputs = [ir_node_to_tensor(inp) for inp in input_nodes]
+            output = default_impl(*example_inputs, **kwargs)
+            layout = FixedLayout(
+                device=output.device,
+                dtype=output.dtype,
+                size=output.shape,
+                stride=output.stride(),
+            )
 
-            with V.fake_mode:
-                example_inputs = [ir_node_to_tensor(inp) for inp in input_nodes]
-                output = default_op_overload(*example_inputs, **kwargs)
-                inferred_layout = FixedLayout(
-                    device=output.device,
-                    dtype=output.dtype,
-                    size=output.shape,
-                    stride=output.stride(),
-                )
-
+        # Add fallback choice
         fallback_choice = CustomOpFallbackChoice(
             name=f"{name}_fallback_default",
             input_nodes=input_nodes,
-            layout=inferred_layout,
-            description=f"Default {default_op_overload.name()} implementation (fallback)",
-            default_op_overload=default_op_overload,
+            layout=layout,
+            description=f"Default {default_impl.name()} implementation (fallback)",
+            default_op_overload=default_impl,
             kwargs=kwargs,
         )
         choices.append(fallback_choice)
@@ -208,7 +182,7 @@ def autotune_custom_op(
         name=name,
         choices=choices,
         input_nodes=input_nodes,
-        layout=inferred_layout,
+        layout=choices[0].layout,
         input_gen_fns=input_gen_fns,
     )
 

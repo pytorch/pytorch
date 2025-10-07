@@ -17,7 +17,6 @@ from torch._inductor.ir import (
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.utils import do_bench_using_profiling
 from torch._inductor.virtualized import V
-from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -221,7 +220,6 @@ class SubgraphTemplate(KernelTemplate):
         input_nodes: list[Buffer],
         kwargs: Optional[dict[str, Any]] = None,
         default_impl: Optional[Callable[..., Any]] = None,
-        input_gen_fns: Optional[dict[int, Callable[[Any], torch.Tensor]]] = None,
     ) -> list[SubgraphChoiceCaller]:
         """
         Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
@@ -285,16 +283,15 @@ class SubgraphTemplate(KernelTemplate):
             return
 
         strides = [layout.stride for layout in layouts]
-        if len(OrderedSet(str(stride) for stride in strides)) > 1:
-            reference = strides[0]
-            for i, stride in enumerate(strides[1:], 1):
-                if stride != reference:
-                    raise AssertionError(
-                        f"Stride mismatch in custom op '{op_name}' autotuning: "
-                        f"'{decompositions[i].__name__}' produces stride {stride}, "
-                        f"but '{decompositions[0].__name__}' produces {reference}. "
-                        f"All decompositions must have identical output strides."
-                    )
+        reference = strides[0]
+        for i, stride in enumerate(strides[1:]):
+            if stride != reference:
+                raise AssertionError(
+                    f"Stride mismatch in custom op '{op_name}' autotuning: "
+                    f"'{decompositions[i].__name__}' produces stride {stride}, "
+                    f"but '{decompositions[0].__name__}' produces {reference}. "
+                    f"All decompositions must have identical output strides."
+                )
 
     def _infer_custom_op_layout(
         self,
