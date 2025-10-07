@@ -3068,6 +3068,8 @@ make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
 @register_lowering(aten.copy, type_promotion_kind=None)
 def copy(self, src, non_blocking=False):
+    if not isinstance(src, ir.IRNode):
+        src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
     x = src
     if self.get_device() != src.get_device():
         x = to_device(x, self.get_device())
@@ -7224,6 +7226,67 @@ register_lowering(
 def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     result = ir.InvokeSubgraph.create(subgraph_fn, *operands)
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
+
+
+# Import the control_deps_op HOP for lowering
+from torch._inductor.fx_passes.control_dependencies import control_deps
+
+
+@register_lowering(control_deps, type_promotion_kind=None)
+def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
+    """
+    Lower control_deps_op by ensuring dependencies are realized and tracking them.
+
+    The control_deps_op HOP makes dependencies explicit in the graph. During lowering:
+    1. Realize all additional dependencies to ensure they're computed
+    2. Execute the target operation normally
+    3. Track the dependencies for the scheduler
+    """
+    # Realize all additional dependencies
+    dep_names = []
+    for dep in additional_deps:
+        if not isinstance(dep, IRNode):
+            continue
+
+        dep.realize()
+        dep_names.append(dep.get_name())
+
+    original_args = V.graph.current_node.args
+    arg_offset = 2  # first two args (additional_deps, subgraph)
+    assert len(args) + arg_offset == len(original_args)
+
+    output = None
+
+    operation_len = len(V.graph.operations)
+    assert len(subgraph_fn.graph_module.graph.find_nodes(op="placeholder")) == len(args)
+    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
+        if node.op == "placeholder":
+            assert node not in V.graph.env
+            V.graph.env[node] = args[i]
+            continue
+        elif node.op == "output":
+            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
+        else:
+            assert node not in V.graph.env
+            V.graph.env[node] = V.graph.run_node(node)
+
+    assert output is not None and additional_deps
+
+    # some operators, like wait_tensor, just return their input,
+    # so its more robust to add dep to the operation itself,
+    # otherwise you can have a cycle of
+    # a = coll
+    # b = control_deps(a, mm, ...)
+    # c = control_deps(b, wait, ...)
+    # if c == a, then you have a cycle.
+    for op in V.graph.operations[operation_len:]:
+        for dep_name in dep_names:
+            op_name = op.operation_name
+            assert op_name is not None
+            V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    return output
 
 
 @register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)
