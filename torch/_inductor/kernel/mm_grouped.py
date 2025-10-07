@@ -335,11 +335,10 @@ triton_grouped_mm_source = r"""
                         + (n_start_offset + offs_bn[:, None]) * B_STRIDE_N
                         + offs_k[None, :] * B_STRIDE_K
                     )
-                    a = tl.load(a_ptrs, mask=offs_am[:, None] < m_size)
-                    b = tl.load(b_ptrs, mask=offs_bn[:, None] < n_size)
-                    if k_offset + BLOCK_K > k_size:
-                        a = tl.where(group_offs_k < k_size, a, 0)
-                        b = tl.where(group_offs_k < k_size, b, 0)
+                    a_mask = (offs_am[:, None] < m_size) & (group_offs_k[None, :] < k_size)
+                    b_mask = (offs_bn[:, None] < n_size) & (group_offs_k[None, :] < k_size)
+                    a = tl.load(a_ptrs, mask=a_mask, other=0)
+                    b = tl.load(b_ptrs, mask=b_mask, other=0)
 {%- if USE_FAST_ACCUM %}
                     accumulator = tl.dot(a, b.T, accumulator)
 {%- else %}
@@ -361,6 +360,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_am[:, None],
                     mask=offs_am[:, None] < m_size,
+                    other=0,
                 )
                 scale_b = tl.load(
                     scale_b_ptr
@@ -371,6 +371,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_bn[None, :],
                     mask=offs_bn[None, :] < n_size,
+                    other=0,
                 )
                 c = accumulator.to(tl.float32) * scale_a * scale_b
 {%- else %}
@@ -469,7 +470,7 @@ def grouped_mm_args(
 aten__grouped_mm = ExternKernelChoice(
     torch._grouped_mm,
     "at::_grouped_mm",
-    op_overload=aten._grouped_mm,
+    op_overload=aten._grouped_mm.default,
     has_out_variant=False,
 )
 
@@ -477,7 +478,7 @@ aten__grouped_mm = ExternKernelChoice(
 aten__scaled_grouped_mm = ExternKernelChoice(
     torch._scaled_grouped_mm,
     "at::_scaled_grouped_mm",
-    op_overload=aten._scaled_grouped_mm,
+    op_overload=aten._scaled_grouped_mm.default,
     has_out_variant=False,
 )
 
@@ -491,7 +492,7 @@ def can_use_triton_kernel(
 ) -> bool:
     if not (
         torch.cuda.is_available()
-        and torch.cuda.get_device_capability() == (9, 0)
+        and torch.cuda.get_device_capability() >= (9, 0)
         and not torch.version.hip
     ):
         return False
@@ -734,6 +735,9 @@ def tuned_scaled_grouped_mm(
     layout: Optional[Layout] = None,
 ) -> TensorBox:
     """Auto-tuning for _scaled_grouped_mm() operator."""
+
+    # matching _scaled_grouped_mm_cuda Blas.cpp implementation
+    out_dtype = out_dtype or torch.bfloat16
 
     return _tuned_grouped_mm_common(
         "aten._scaled_grouped_mm.default",

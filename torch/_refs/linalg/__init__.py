@@ -56,7 +56,7 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
         torch._check(
             utils.get_higher_dtype(dtype, x_dtype) == dtype,
             lambda: f"{fn_name}: the dtype of the input ({x_dtype}) should be convertible "
-            "without narrowing to the specified dtype ({dtype})",
+            f"without narrowing to the specified dtype ({dtype})",
         )
 
 
@@ -110,7 +110,7 @@ def _check_vector_norm_args(
             x.numel() != 0,
             not isinstance(dim, IntLike) and dim is not None and len(dim) != 0,
         ),
-        "linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+        f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
         "because the operation does not have an identity",
     )
 
@@ -119,7 +119,7 @@ def _check_vector_norm_args(
         for d in dim:
             torch._check(
                 sym_or(x.numel() != 0, d < len(shape) and d >= 0 and shape[d] != 0),
-                "linalg.vector_norm cannot compute the {ord} norm on the "
+                f"linalg.vector_norm cannot compute the {ord} norm on the "
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
             )
@@ -216,15 +216,18 @@ def matrix_norm(
     # shape
     check_is_matrix(A, "linalg.matrix_norm")
     # dim
+    # pyrefly: ignore  # no-matching-overload
     dim = utils.canonicalize_dims(A.ndim, dim)
     if isinstance(dim, Dim):
         dim = (dim,)  # type: ignore[assignment]
     torch._check(
-        len(dim) == 2, lambda: "linalg.matrix_norm: dim must be a 2-tuple. Got {dim}"
+        len(dim) == 2, lambda: f"linalg.matrix_norm: dim must be a 2-tuple. Got {dim}"
     )
     torch._check(
+        # pyrefly: ignore  # index-error
         dim[0] != dim[1],
-        lambda: "linalg.matrix_norm: dims must be different. Got ({dim[0]}, {dim[1]})",
+        # pyrefly: ignore  # index-error
+        lambda: f"linalg.matrix_norm: dims must be different. Got ({dim[0]}, {dim[1]})",
     )
     # dtype arg
     _check_norm_dtype(dtype, A.dtype, "linalg.matrix_norm")
@@ -233,7 +236,7 @@ def matrix_norm(
         # ord
         torch._check(
             ord in ("fro", "nuc"),
-            lambda: "linalg.matrix_norm: Order {ord} not supported.",
+            lambda: f"linalg.matrix_norm: Order {ord} not supported.",
         )
         # dtype
         check_fp_or_complex(
@@ -245,6 +248,7 @@ def matrix_norm(
         else:  # ord == "nuc"
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
+            # pyrefly: ignore  # index-error
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = torch.sum(svdvals(prims.transpose(A, perm)), -1, keepdim)
             if keepdim:
@@ -256,7 +260,7 @@ def matrix_norm(
         abs_ord = abs(ord)
         torch._check(
             abs_ord in (2, 1, float("inf")),
-            lambda: "linalg.matrix_norm: Order {ord} not supported.",
+            lambda: f"linalg.matrix_norm: Order {ord} not supported.",
         )
         # dtype
         check_fp_or_complex(
@@ -268,6 +272,7 @@ def matrix_norm(
         if abs_ord == 2.0:
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
+            # pyrefly: ignore  # index-error
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = max_min(svdvals(prims.transpose(A, perm)), dim=-1)
             if keepdim:
@@ -275,6 +280,7 @@ def matrix_norm(
                 result = prims.transpose(torch.unsqueeze(result, -1), inv_perm)
             return result
         else:  # 1, -1, inf, -inf
+            # pyrefly: ignore  # bad-unpacking
             dim0, dim1 = dim
             if abs_ord == float("inf"):
                 dim0, dim1 = dim1, dim0
@@ -300,12 +306,12 @@ def norm(
             dim = (dim,)  # type: ignore[assignment]
         torch._check(
             len(dim) in (1, 2),
-            lambda: "linalg.norm: If dim is specified, it must be of length 1 or 2. Got {dim}",
+            lambda: f"linalg.norm: If dim is specified, it must be of length 1 or 2. Got {dim}",
         )
     elif ord is not None:
         torch._check(
             A.ndim in (1, 2),
-            lambda: "linalg.norm: If dim is not specified but ord is, the input must be 1D or 2D. Got {A.ndim}D",
+            lambda: f"linalg.norm: If dim is not specified but ord is, the input must be 1D or 2D. Got {A.ndim}D",
         )
 
     if ord is not None and (

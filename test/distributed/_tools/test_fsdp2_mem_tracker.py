@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: fsdp"]
 import functools
 import gc
 from typing import Union

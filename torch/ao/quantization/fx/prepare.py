@@ -1708,7 +1708,7 @@ def insert_observers_for_model(
 
             skip_inserting_observers = (
                 (qconfig is None) or not output_is_a_tensor
-            ) and (not node.op == "output")
+            ) and (node.op != "output")
 
             # TODO: take a closer look to see if we can remove this check
             # right now it is here because of `observed_node_names`, we are using

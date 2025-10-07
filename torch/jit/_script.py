@@ -14,7 +14,8 @@ import functools
 import inspect
 import pickle
 import warnings
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 from typing_extensions import deprecated
 
 import torch
@@ -544,6 +545,7 @@ if _enabled:
                 #
                 # This ensures that if we use the attr again in `__init__`, it
                 # will look like the actual value, not an instance of Attribute.
+                # pyrefly: ignore  # invalid-argument
                 if isinstance(value, Attribute):
                     # NB: Ensure that we set __annotations__ on the specific
                     # class in question, and not on a superclass (which would
@@ -655,6 +657,7 @@ if _enabled:
 
             # Finalize the ScriptModule: replace the nn.Module state with our
             # custom implementations and flip the _initializing bit.
+            # pyrefly: ignore  # missing-attribute
             RecursiveScriptModule._finalize_scriptmodule(script_module)
             return script_module
 
@@ -928,6 +931,7 @@ if _enabled:
                 # Don't do anything here, we'll initialize the ScriptModule below
                 return
 
+            # pyrefly: ignore  # missing-attribute
             return RecursiveScriptModule._construct(
                 self._c._replicate_for_data_parallel(), init_fn
             )
@@ -937,6 +941,7 @@ if _enabled:
     # This is because `super().foo()` does not use
     # `__getattr__` to look up `foo`. So we need to make each method available on
     # the ScriptModule manually.
+    # pyrefly: ignore  # missing-attribute
     for name, item in RecursiveScriptModule.__dict__.items():
         if not callable(item) and not isinstance(item, property):
             continue
@@ -1005,6 +1010,7 @@ if _enabled:
         if name.startswith("__") or name.endswith("_call_impl"):
             continue
         if (
+            # pyrefly: ignore  # missing-attribute
             name not in RecursiveScriptModule.__dict__
             and name not in _compiled_methods_allowlist
         ):
@@ -1037,6 +1043,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
         return memo[id(obj)]
 
     obj = (
+        # pyrefly: ignore  # not-callable
         obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj
     )  # type: ignore[operator]
     # Record obj in memo to avoid infinite recursion in the case of cycles in the module
@@ -1134,6 +1141,7 @@ def _script_impl(
         # the provide example inputs. This logs all the traces in type_trace_db
         type_trace_db = JitTypeTraceStore()
         if monkeytype_trace:
+            # pyrefly: ignore  # bad-argument-count
             monkeytype_config = JitTypeTraceConfig(type_trace_db)
             with monkeytype_trace(monkeytype_config):
                 if isinstance(example_inputs, dict):
