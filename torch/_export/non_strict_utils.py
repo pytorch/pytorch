@@ -101,6 +101,7 @@ class _KeyPathTrie:
             assert len(kp) > 0
             k, *kp = kp  # type: ignore[assignment]
             node = node[k]
+        # pyrefly: ignore  # bad-return
         return node, kp
 
 
@@ -139,6 +140,7 @@ def key_path_to_source(
         source: Source = LocalSource("args")
     else:
         source, kp = sourced_prefixes.get(kp)
+    # pyrefly: ignore  # bad-assignment
     for k in kp:
         if isinstance(k, SequenceKey):
             source = GetItemSource(source, k.idx)
@@ -354,10 +356,12 @@ def _override_builtin_ops():
     original_min = builtins.min
     original_pow = math.pow
 
+    # pyrefly: ignore  # bad-assignment
     builtins.max = functools.partial(
         _tensor_min_max, real_callable=original_max, tensor_callable=torch.maximum
     )
 
+    # pyrefly: ignore  # bad-assignment
     builtins.min = functools.partial(
         _tensor_min_max, real_callable=original_min, tensor_callable=torch.minimum
     )
@@ -1083,6 +1087,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
                 def run():
                     # Run sequence.
+                    # pyrefly: ignore  # index-error
                     t = args[0]
                     for _method, _args in sequence:
                         t = _method(t, *_args)

@@ -1692,6 +1692,7 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
+# TODO add deprecation annotation
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
@@ -2653,6 +2654,7 @@ def compile(
                     dynamic=dynamic,
                     disable=disable,
                     guard_filter_fn=guard_filter_fn,
+                    # pyrefly: ignore  # bad-argument-type
                 )(model)(*args, **kwargs)
 
         return export_wrapped_fn

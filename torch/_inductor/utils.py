@@ -504,7 +504,7 @@ def is_pointwise_use(
     Uses in views ops will follow the views uses
     """
 
-    if not use.op == "call_function":
+    if use.op != "call_function":
         return False
     if not (
         isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
@@ -2020,7 +2020,7 @@ def use_ck_template(layout: Layout) -> bool:
     if not torch.version.hip:
         return False
     # tensors must be on GPU
-    if not layout.device.type == "cuda":
+    if layout.device.type != "cuda":
         return False
     # hardware check
     # if config arch list is not specified, get the native arch from the device properties
