@@ -142,7 +142,7 @@ class PlacementClassVariable(DistributedVariable):
 
         from torch.distributed.tensor.placement_types import Placement
 
-        return type(value) is type and issubclass(value, Placement)
+        return isinstance(value, type) and issubclass(value, Placement)
 
     def as_python_constant(self):
         return self.value
@@ -153,13 +153,10 @@ class PlacementClassVariable(DistributedVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if (
-            inspect.getattr_static(self.value, "__new__", None) == object.__new__
-            and self.source
-        ):
+        if self.source:
             # NOTE: we don't need to track mutations to the placement class as they
-            # suppose to be immutable.
-            new_obj = object.__new__(self.value)
+            # are supposed to be immutable.
+            new_obj = self.value.__new__(self.value)
             var = PlacementVariable(new_obj)
             if inspect.getattr_static(self.value, "__init__", None):
                 var.call_method(tx, "__init__", args, kwargs)
@@ -274,11 +271,7 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "get_rank":
             return ConstantVariable.create(self.value.get_rank())
         if name == "get_local_rank":
-            const_args = [x.as_python_constant() for x in args]
-            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            return ConstantVariable.create(
-                self.value.get_local_rank(*const_args, **const_kwargs)
-            )
+            return ConstantVariable.create(self.value.get_local_rank())
         if name == "get_group":
             const_args = [x.as_python_constant() for x in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
