@@ -5691,6 +5691,19 @@ class TestSparseAny(TestCase):
                     RuntimeError, r"memory pinning of \w*indices \(=0\) must match memory pinning of values \(=1\)"):
                 generic_constructor(*args2, **kwargs)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    def test_view_as_real(self, device, dtype):
+        x = torch.tensor(2 + 3j, dtype=dtype, device=device)
+        indices = torch.tensor([[0], [0]])
+        size = torch.Size([3, 3])
+        xs = torch.sparse_coo_tensor(indices, x, size, dtype=dtype)
+        res = torch.view_as_real(xs).coalesce()
+
+        self.assertEqual(res.indices(), indices)
+        self.assertEqual(res.values()[0][0], x.real)
+        self.assertEqual(res.values()[0][1], x.imag)
+        self.assertEqual(res.shape, xs.shape + (2,))
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), allow_mps=True, except_for='meta')
