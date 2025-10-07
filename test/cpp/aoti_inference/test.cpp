@@ -1096,7 +1096,7 @@ void test_multi_cuda_streams(const std::string& device) {
     ASSERT_TRUE(torch::allclose(ref_output_tensors[0], all_outputs[i][0]));
   }
 }
-#endif // USE_ROCM
+#endif // USE_CUDA
 #endif // USE_CUDA || USE_ROCM
 } // namespace
 
