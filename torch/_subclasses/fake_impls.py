@@ -1335,7 +1335,7 @@ def make_fast_binary_impl(
                 # Use elementwise_dtypes for the tricky case
                 has_different_input_dtypes = True
                 continue
-            if common_device == cpu and not op.device.type == "cpu":
+            if common_device == cpu and op.device.type != "cpu":
                 common_device = op.device
             # Slightly simplified here as target_dtype cannot vary
             if common_dtype is None:
