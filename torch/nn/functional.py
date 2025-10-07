@@ -11,8 +11,8 @@ from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import (
     _add_docstr,
     _infer_size,
-    _ScalingType as ScalingType,
-    _SwizzleType as SwizzleType,
+    _ScalingType,
+    _SwizzleType,
 )
 from torch._jit_internal import (
     _overload,
@@ -6520,11 +6520,11 @@ def scaled_mm(
     mat_a: Tensor,
     mat_b: Tensor,
     scale_a: Tensor | list[Tensor],
-    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_recipe_a: _ScalingType | list[_ScalingType],
     scale_b: Tensor | list[Tensor],
-    scale_recipe_b: ScalingType | list[ScalingType],
-    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
-    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    scale_recipe_b: _ScalingType | list[_ScalingType],
+    swizzle_a: _SwizzleType | list[_SwizzleType] | None = None,
+    swizzle_b: _SwizzleType | list[_SwizzleType] | None = None,
     bias: Optional[Tensor] = None,
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
     contraction_dim: Optional[list[int]] = None,
