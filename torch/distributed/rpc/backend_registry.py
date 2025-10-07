@@ -350,7 +350,7 @@ def _tensorpipe_init_backend_handler(
 
     device_count = torch.cuda.device_count()
 
-    is_static_group = True if world_size else False
+    is_static_group = bool(world_size)
     # world_size is specified so this is a static group (ranks cannot join and leave)
     if is_static_group:
         # The agent's join method is required to behave like a barrier and perform

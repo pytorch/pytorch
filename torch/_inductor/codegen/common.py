@@ -2053,6 +2053,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.stores = IndentedBuffer()
 
         self.num_load = 0
+        self.num_store = 0
         self.num_reduction = 0
 
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
@@ -2266,6 +2267,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     name, fused_node_names
                 )
             ):
+                self.num_store -= 1
                 names_to_remove.add(name)
 
         for name in names_to_remove:
@@ -2732,6 +2734,7 @@ class CSEProxy(DefaultHandler):
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
+            self.kernel.num_store += 1
 
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
@@ -2741,6 +2744,7 @@ class CSEProxy(DefaultHandler):
         self._update_store_cache(name, value)
 
         if name not in V.graph.removed_buffers:
+            self.kernel.num_store += 1
             return self.kernel.store_reduction(name, index, value)
 
     def reduction(

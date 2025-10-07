@@ -560,7 +560,7 @@ float hsum_sq(const int32_t* A, int len) {
   alignas(64) float temp[8];
   _mm256_store_ps(temp, sum_ps);
   for (const auto k : c10::irange(8)) {
-    row_sum += static_cast<float>(temp[k]);
+    row_sum += temp[k];
   }
 #elif defined(CPU_CAPABILITY_AVX512)
   __m512 sum_ps = _mm512_setzero_ps();
@@ -574,7 +574,7 @@ float hsum_sq(const int32_t* A, int len) {
   alignas(64) float temp[16];
   _mm512_store_ps(temp, sum_ps);
   for (const auto k : c10::irange(16)) {
-    row_sum += static_cast<float>(temp[k]);
+    row_sum += temp[k];
   }
 #endif // CPU_CAPABILITY_AVX2 or CPU_CAPABILITY_AVX512
 
@@ -1282,7 +1282,7 @@ template <bool ReLUFused = false>
 void qadd_scalar_kernel(Tensor& out, const Tensor& self, const Scalar& other) {
   int64_t zero_point = out.q_zero_point();
   float scale = static_cast<float>(out.q_scale());
-  float inv_scale = static_cast<float>(1.0f / scale);
+  float inv_scale = 1.0f / scale;
   int64_t self_zero_point = self.q_zero_point();
   float self_scale = static_cast<float>(self.q_scale());
 
@@ -2915,7 +2915,7 @@ void fake_quantize_learnable_channel_grad_kernel_cpu(
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       *dx_output = (*dy_input) * (xqi >= quant_min && xqi <= quant_max);
       // Calculate gradients for scale and zero point.
-      float xfqi = static_cast<float>((std::max(std::min(xqi, quant_max), quant_min) - (*zero_point_input)) * (*scale_input));
+      float xfqi = ((std::max(std::min(xqi, quant_max), quant_min) - (*zero_point_input)) * (*scale_input));
       if (xqi < quant_min || xqi > quant_max) {
         *dzero_point_output = (*dy_input) * (-1) * (*scale_input) * grad_factor;
         *dscale_output = ((xqi < quant_min) ? ((*dy_input) * dscale_small) : ((*dy_input) * dscale_big)) * grad_factor;
@@ -4415,7 +4415,7 @@ void _qmul_tensor_cpu_impl(
     uint8_t y_data = *(y_ptr + idx);
     int32_t x_val = static_cast<int32_t>(x_data) - x_zero_point;
     int32_t y_val = static_cast<int32_t>(y_data) - y_zero_point;
-    int32_t out_val = static_cast<int32_t>(x_val * y_val);
+    int32_t out_val = x_val * y_val;
     float out_val_f = (float)out_val * multiplier;
     if constexpr (std::is_same<T, float>::value) {
       *(out_ptr + idx) = out_val_f;
