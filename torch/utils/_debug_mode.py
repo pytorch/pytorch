@@ -30,11 +30,17 @@ def _stringify_placement(placement) -> str:
     return f"[{', '.join([str(p) for p in placement])}]"
 
 
+def _stringify_dtensor_spec(spec) -> str:
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+    return DTensorSpec.format_shard_order_str(spec.placements, spec.shard_order)
+
+
 def _tensor_debug_string(tensor) -> str:
     """Convert tensor to debug string representation."""
     if isinstance(tensor, torch.distributed.tensor.DTensor):
         # omitted device mesh
-        return f"dt: {dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}{_stringify_placement(tensor.placements)}"
+        return f"dt: {dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}{_stringify_dtensor_spec(tensor._spec)}"
     elif isinstance(tensor, FakeTensor):
         return f"ft: {dtype_abbrs[tensor.dtype]}{_stringify_shape(tensor.shape)}"
     elif isinstance(tensor, torch.Tensor):
@@ -50,7 +56,7 @@ def _arg_to_str(arg) -> str:
         if isinstance(x, torch.Tensor):
             return _tensor_debug_string(x)
         elif isinstance(x, DTensorSpec):
-            return _stringify_placement(x.placements)
+            return _stringify_dtensor_spec(x)
         return x
 
     arg = tree_map(to_str, arg)
@@ -59,9 +65,13 @@ def _arg_to_str(arg) -> str:
 
 def _op_to_str(op, *args, **kwargs) -> str:
     if op == REDISTRIBUTE_FUNC:
-        assert len(args) == 3
-        _args = [_arg_to_str(arg) for arg in args]
-        args_str = f"{_args[0]}, {_args[1]} -> {_args[2]}"
+        if len(args) == 2:
+            args_str = f"{_arg_to_str(args[0])}, trace: {args[1]}"
+        elif len(args) == 3:
+            _args = [_arg_to_str(arg) for arg in args]
+            args_str = f"{_args[0]}, {_args[1]} -> {_args[2]}"
+        else:
+            raise RuntimeError(f"Unsupported args for {REDISTRIBUTE_FUNC}: {args}")
     else:
         args_str = ", ".join(_arg_to_str(arg) for arg in args)
 
@@ -158,12 +168,23 @@ class DebugMode(TorchDispatchMode):
             torch._C._pop_torch_function_stack()
 
     @contextlib.contextmanager
-    def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
+    def record_redistribute_calls(
+        self,
+        arg_idx,
+        src_placement,
+        dst_placement,
+        transform_info_str: Optional[str] = None,
+    ):
         try:
+            arg_list = (
+                [arg_idx, transform_info_str]
+                if transform_info_str
+                else [arg_idx, src_placement, dst_placement]
+            )
             self.operators.append(
                 (
                     REDISTRIBUTE_FUNC,
-                    [arg_idx, src_placement, dst_placement],
+                    arg_list,
                     {},
                     self.call_depth + 1,
                 )
