@@ -774,12 +774,10 @@ class MemoryProfile:
                     for key, (_, version) in node.inputs.items()
                     if self._categories.get(key, version)
                     in (Category.GRADIENT, Category.PARAMETER)
-
                     or key.id in depends_on_gradient
                 )
 
                 if ids:
-
                     depends_on_gradient.update(ids)
 
                     depends_on_gradient.update(key.id for key in node.outputs)
@@ -790,7 +788,6 @@ class MemoryProfile:
             # once to fold the first step into that loop, and a third time
             # where no new elements are added.
             if len(depends_on_gradient) == start_size:
-
                 return depends_on_gradient
 
     def _set_gradients_and_temporaries(self) -> None:

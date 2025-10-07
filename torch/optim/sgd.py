@@ -337,7 +337,6 @@ def _single_tensor_sgd(
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
-
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
 
@@ -433,12 +432,10 @@ def _multi_tensor_sgd(
 
             all_states_with_momentum_buffer = True
             for i in range(len(device_momentum_buffer_list)):
-
                 if device_momentum_buffer_list[i] is None:
                     all_states_with_momentum_buffer = False
                     break
                 else:
-
                     bufs.append(cast(Tensor, device_momentum_buffer_list[i]))
 
             if all_states_with_momentum_buffer:
@@ -448,13 +445,11 @@ def _multi_tensor_sgd(
                 bufs = []
 
                 for i in range(len(device_momentum_buffer_list)):
-
                     if device_momentum_buffer_list[i] is None:
                         buf = device_momentum_buffer_list[i] = momentum_buffer_list[
                             indices[i]
                         ] = device_grads[i].detach().clone()
                     else:
-
                         buf = cast(Tensor, device_momentum_buffer_list[i])
                         buf.mul_(momentum).add_(device_grads[i], alpha=1 - dampening)
 

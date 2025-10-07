@@ -407,7 +407,6 @@ def insert_deferred_runtime_asserts(
                         ):
                             # pyrefly: ignore  # unbound-name
                             expr_to_proxy[sym_expr] = _sympy_interp(
-
                                 expr_to_proxy,
                                 # pyrefly: ignore  # unbound-name
                                 sym_expr,
@@ -417,7 +416,6 @@ def insert_deferred_runtime_asserts(
                     node.replace_all_uses_with(hash_node)
                     gm.graph.erase_node(node)
                     log.debug(
-
                         "CSE node %s -> %s for expr %s",
                         node,
                         hash_node,

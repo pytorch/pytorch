@@ -8,7 +8,6 @@ import torch
 # try to import tablate
 got_tabulate = True
 try:
-
     from tabulate import tabulate
 except ImportError:
     got_tabulate = False

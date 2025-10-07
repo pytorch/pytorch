@@ -112,7 +112,6 @@ def _resize_fft_input(
         if x_sizes[dims[i]] > sizes[i]:
             x = x.narrow(dims[i], 0, sizes[i])
 
-
     return torch.constant_pad_nd(x, pad_amount) if must_copy else x
 
 

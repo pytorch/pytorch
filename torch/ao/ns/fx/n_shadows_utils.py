@@ -1351,7 +1351,6 @@ def print_n_shadows_summary(
     """
 
     try:
-
         from tabulate import tabulate
     except ImportError:
         print(

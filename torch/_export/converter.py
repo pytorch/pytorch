@@ -1097,7 +1097,6 @@ class TS2FXGraphConverter:
 
             # Update the value of loop local variables.
             if node.outputsSize() >= 1:
-
                 for i, outp in enumerate(node.outputs()):
                     output_name = outp.debugName()
                     self.name_to_node[output_name] = self.fx_graph.call_function(

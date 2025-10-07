@@ -5684,7 +5684,6 @@ class ShapeEnv:
                         )
                         track_symint(property_source, ss, constraint_size[i])
                 else:
-
                     for i, ss in enumerate(curr_t.size()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.SIZE, i
@@ -5698,7 +5697,6 @@ class ShapeEnv:
                         track_symint(property_source, ss, constraint_stride[i])
                     track_symint(
                         TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
-
                         curr_t.storage_offset(),
                     )
 
@@ -5744,7 +5742,6 @@ class ShapeEnv:
                         continue
 
                 if is_dim(source):
-
                     self.dim_constraints.add_equality(source, expr)
 
                 for exprs, printer, lang in zip(all_exprs, printers, langs):
@@ -5898,7 +5895,6 @@ class ShapeEnv:
                 continue
             expr = self.simplify(ra.expr)
 
-
             self.dim_constraints.add(expr)
 
         # 3. Every symbol must be within its value range (this handles 0/1
@@ -5915,7 +5911,6 @@ class ShapeEnv:
             verbose_expr = ""
             if r.lower not in (-sympy.oo, -int_oo):
                 if any(is_dim(source) for source in sources):
-
                     self.dim_constraints.add(sympy.Ge(symbol, r.lower))
                 # Only print lower bound in simplified mode if it is not the
                 # default
@@ -5924,7 +5919,6 @@ class ShapeEnv:
                 verbose_expr = f"{r.lower} <= {rf}  # {vr_sloc.lower}"
             if r.upper not in (sympy.oo, int_oo):
                 if any(is_dim(source) for source in sources):
-
                     self.dim_constraints.add(sympy.Le(symbol, r.upper))
                 # nontrivial upper bound is always interesting
                 bounds.append(sympy.Le(symbol, r.upper, evaluate=False))
@@ -6172,7 +6166,6 @@ class ShapeEnv:
                         assert bindings[-s] == -arg, f"{bindings[-s]} != {-arg}"
                     else:
                         bindings[-s] = -arg
-
 
         for t, arg in zip(placeholders, args):
             if t is None:
@@ -8060,7 +8053,6 @@ def _suggest_fixes_for_data_dependent_error_non_strict(
                 if isinstance(leaf, torch.SymInt):
                     src_map[str(leaf.node.expr)].append(name)
                 elif isinstance(leaf, torch.Tensor):
-
                     for i, dim in enumerate(leaf.shape):
                         if isinstance(dim, torch.SymInt):
                             src_map[str(dim.node.expr)].append(f"{name}.shape[{i}]")

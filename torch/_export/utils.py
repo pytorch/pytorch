@@ -34,9 +34,8 @@ from torch.fx._pytree import (
     _deregister_pytree_flatten_spec,
     register_pytree_flatten_spec,
 )
-from torch.utils._pytree import (
+from torch.utils._pytree import (  # pyrefly: ignore  # deprecated
     _deregister_pytree_node,
-    # pyrefly: ignore  # deprecated
     _register_pytree_node,
     Context,
     FlattenFunc,
@@ -472,7 +471,6 @@ def _check_input_constraints_for_graph(
         elif isinstance(node_val, torch.SymInt):
             _check_symint(
                 node_val,
-
                 arg,
                 range_constraints,
                 unification_map,

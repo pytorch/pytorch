@@ -1763,7 +1763,6 @@ class Graph:
         installed.
         """
         try:
-
             from tabulate import tabulate
         except ImportError:
             print(

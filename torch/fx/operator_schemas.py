@@ -143,7 +143,6 @@ def _torchscript_schema_to_signature_impl(
     else:
         return_type = tuple(return_types)
 
-
     return inspect.Signature(parameters, return_annotation=return_type)
 
 

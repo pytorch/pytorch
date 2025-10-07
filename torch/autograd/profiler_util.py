@@ -51,11 +51,8 @@ class EventList(list):
 
             for idx in range(len(self)):
                 if (
-
                     self[idx].cpu_parent is not None
-
                     and self[idx].cpu_parent.name == self[idx].name
-
                     and len(self[idx].cpu_parent.cpu_children) == 1
                 ):
                     self[idx].cpu_parent.cpu_children = self[idx].cpu_children
