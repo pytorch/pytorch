@@ -4,12 +4,12 @@ import math
 import os
 import socket
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -317,6 +317,7 @@ def _pipelined_produce_and_all2all(
     chunk_producer: Callable[[int, torch.Tensor], None],
     output: torch.Tensor,
     group_name: str,
+    out_chunk_dim: int = 0,
 ) -> None:
     """
     Perform the following logic with micro-pipelined computation and
@@ -328,7 +329,9 @@ def _pipelined_produce_and_all2all(
         ]
         dist.all_to_all_single(output=output, input=torch.cat(chunks))
     """
-    out_chunks = output.chunk(c10d._get_group_size_by_name(group_name))
+    out_chunks = output.chunk(
+        c10d._get_group_size_by_name(group_name), dim=out_chunk_dim
+    )
     p2p_workspace_size_req = out_chunks[0].numel() * out_chunks[0].element_size() * 2
     symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
     group_size = symm_mem.world_size
@@ -1065,10 +1068,39 @@ def _fused_matmul_reduce_scatter_impl(
         reduce_fn = partial(torch.mean, dim=0)
     else:
         raise ValueError("reduce_op must be sum or avg")
-
     group = c10d._resolve_process_group(group_name)
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
+
+    if scatter_dim == A.ndim - 1:
+        B_shards = B.chunk(group.size(), dim=B.ndim - 1)
+        A_flat = A.flatten(0, -2)
+
+        def _chunk_producer(rank: int, out: torch.Tensor) -> None:
+            mm_out_op(A_flat, B_shards[rank], **kwargs, out=out)
+
+        leading_dims = list(A.shape[:-1])
+
+        stacked_partials = torch.empty(
+            (A_flat.shape[0], B.shape[1]),
+            dtype=out_dtype or A.dtype,
+            device=A.device,
+        )
+
+        _pipelined_produce_and_all2all(
+            _chunk_producer,
+            stacked_partials,
+            group_name,
+            out_chunk_dim=1,
+        )
+
+        stacked_partials_view = stacked_partials.reshape(
+            *leading_dims, group.size(), -1
+        )
+        return reduce_fn(
+            stacked_partials_view,
+            dim=-2,
+        )
 
     # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
     x = A.movedim(scatter_dim, 0)
@@ -1389,7 +1421,7 @@ def _maybe_convert_scalar_types_to_dtypes(
         if scalar_type is None:
             dtypes.append(scalar_type)
         elif scalar_type not in _SCALAR_TYPE_TO_DTYPE:
-            raise ValueError("Unrecognized scalar type {scalar_type}")
+            raise ValueError(f"Unrecognized scalar type {scalar_type}")
         else:
             dtypes.append(_SCALAR_TYPE_TO_DTYPE[scalar_type])
     return dtypes
