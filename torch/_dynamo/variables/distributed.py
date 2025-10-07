@@ -142,7 +142,7 @@ class PlacementClassVariable(DistributedVariable):
 
         from torch.distributed.tensor.placement_types import Placement
 
-        return isinstance(value, type) and issubclass(value, Placement)
+        return type(value) is type and issubclass(value, Placement)
 
     def as_python_constant(self):
         return self.value
@@ -153,10 +153,13 @@ class PlacementClassVariable(DistributedVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if self.source:
+        if (
+            inspect.getattr_static(self.value, "__new__", None) == object.__new__
+            and self.source
+        ):
             # NOTE: we don't need to track mutations to the placement class as they
-            # are supposed to be immutable.
-            new_obj = self.value.__new__(self.value)
+            # suppose to be immutable.
+            new_obj = object.__new__(self.value)
             var = PlacementVariable(new_obj)
             if inspect.getattr_static(self.value, "__init__", None):
                 var.call_method(tx, "__init__", args, kwargs)
