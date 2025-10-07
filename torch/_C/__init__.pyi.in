@@ -1917,7 +1917,6 @@ class TensorBase(metaclass=_TensorMeta):
     names: list[str]
     device: _device
     dtype: _dtype
-    grad_dtype: _dtype | None
     layout: _layout
     real: Tensor
     imag: Tensor
@@ -2776,4 +2775,18 @@ class _StaticCudaLauncher:
         arg_types: str,
         args: tuple[Any, ...],
         stream: _int,
+    ) -> None: ...
+
+# Defined in torch/csrc/cuda/green_context.h
+class GreenContext:
+    @staticmethod
+    def create(
+        num_sms: _int,
+        device_id: _int,
+    ) -> GreenContext: ...
+    def make_current(
+        self,
+    ) -> None: ...
+    def pop_current(
+        self,
     ) -> None: ...
