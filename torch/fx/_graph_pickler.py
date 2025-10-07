@@ -65,6 +65,7 @@ class GraphPickler(pickle.Pickler):
         self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
 
     @override
+    # pyrefly: ignore  # bad-override
     def reducer_override(
         self, obj: object
     ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
@@ -201,6 +202,7 @@ class _SymNodePickleData:
     ]:
         args = (cls(obj.node), pickler._unpickle_state)
         if isinstance(obj, torch.SymInt):
+            # pyrefly: ignore  # bad-return
             return _SymNodePickleData.unpickle_sym_int, args
         else:
             raise NotImplementedError(f"Unhandled SymNode type {type(obj)}")
@@ -277,6 +279,7 @@ class _TensorPickleData:
                 return FakeTensor(
                     unpickle_state.fake_mode,
                     make_meta_t(),
+                    # pyrefly: ignore  # bad-argument-type
                     device,
                 )
 
