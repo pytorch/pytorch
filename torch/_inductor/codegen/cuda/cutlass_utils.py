@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+from typing_extensions import TypeIs
 
 import sympy
 
@@ -40,23 +41,20 @@ def move_cutlass_compiled_cache() -> None:
     if not try_import_cutlass.cache_info().currsize > 0:
         return
 
-    if config.is_fbcode():
-        import python_cutlass  # type: ignore[import-not-found]
-    else:
-        import cutlass_cppgen as python_cutlass  # type: ignore[import-not-found]  # noqa: F401
+    import cutlass_cppgen  # type: ignore[import-not-found]
 
-    # Check if the CACHE_FILE attribute exists in python_cutlass and if the file exists
-    if not hasattr(python_cutlass, "CACHE_FILE") or not os.path.exists(
-        python_cutlass.CACHE_FILE
+    # Check if the CACHE_FILE attribute exists in cutlass_cppgen and if the file exists
+    if not hasattr(cutlass_cppgen, "CACHE_FILE") or not os.path.exists(
+        cutlass_cppgen.CACHE_FILE
     ):
         return
 
     try:
-        filename = os.path.basename(python_cutlass.CACHE_FILE)
-        shutil.move(python_cutlass.CACHE_FILE, os.path.join(cache_dir(), filename))
+        filename = os.path.basename(cutlass_cppgen.CACHE_FILE)
+        shutil.move(cutlass_cppgen.CACHE_FILE, os.path.join(cache_dir(), filename))
         log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
     except OSError as e:
-        log.warning("Failed to move CUTLASS compiled cache file: %s", str(e))
+        log.warning("Failed to move CUTLASS compiled cache file: %s", e)
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
@@ -78,8 +76,8 @@ def try_import_cutlass() -> bool:
     """
     if config.is_fbcode():
         try:
+            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
             import cutlass_library  # type: ignore[import-not-found]
-            import python_cutlass  # type: ignore[import-not-found]  # noqa: F401
         except ImportError as e:
             log.warning(
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
@@ -112,13 +110,13 @@ def try_import_cutlass() -> bool:
     )
 
     cutlass_library_src_path = path_join(cutlass_python_path, "cutlass_library")
-    cutlass_src_path = path_join(cutlass_python_path, "cutlass")
+    cutlass_cppgen_src_path = path_join(cutlass_python_path, "cutlass_cppgen")
     pycute_src_path = path_join(cutlass_python_path, "pycute")
 
     tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
-    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass_cppgen")
+    dst_link_cutlass_cppgen = path_join(tmp_cutlass_full_path, "cutlass_cppgen")
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
 
     # mock modules to import cutlass
@@ -145,7 +143,9 @@ def try_import_cutlass() -> bool:
             link_and_append(
                 dst_link_library, cutlass_library_src_path, tmp_cutlass_full_path
             )
-            link_and_append(dst_link_cutlass, cutlass_src_path, tmp_cutlass_full_path)
+            link_and_append(
+                dst_link_cutlass_cppgen, cutlass_cppgen_src_path, tmp_cutlass_full_path
+            )
             link_and_append(dst_link_pycute, pycute_src_path, tmp_cutlass_full_path)
 
             for module in mock_modules:
@@ -156,7 +156,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass_cppgen  # noqa: F401, F811
+            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401, F811
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
@@ -420,8 +420,8 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     size = inductor_layout.size
     offset = inductor_layout.offset
 
-    def is_static_int(number):
-        return isinstance(number, (int, sympy.Integer))
+    def is_static_int(number: object) -> TypeIs[int | sympy.Integer]:
+        return isinstance(number, (int | sympy.Integer))
 
     def a_factor_of(x, alignment):
         if is_static_int(x) and is_static_int(alignment):
