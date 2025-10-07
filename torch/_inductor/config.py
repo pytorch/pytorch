@@ -390,7 +390,7 @@ reorder_for_compute_comm_overlap_passes: list[
 reorder_prefetch_limit: Optional[int] = None
 
 # enable operator reordering for peak memory optimization
-reorder_for_peak_memory = True
+reorder_for_peak_memory = False
 reorder_for_peak_memory_debug = False
 
 # In some cases, when all the nodes that can be scheduled are quite large,
@@ -399,6 +399,9 @@ reorder_for_peak_memory_debug = False
 # become schedulable by analyzing their successor nodes. The default value
 # is zero, which turns off this optimization.
 size_threshold_for_succ_based_strategy: int = 0
+
+# flag for enabling activation offloading (developing phase)
+enable_activation_offloading = False
 
 reorder_iterative_debug_memory_recompute: bool = False
 reorder_iterative_debug_limit_to_reorder: Optional[int] = (
@@ -433,6 +436,9 @@ intra_node_bw = 300
 # unit: GB/s, uni-directional P2P bandwidth per node
 # default value is InfiniBand
 inter_node_bw = 25
+
+# unit: GB/s, uni-directional CPU <> GPU bandwidth per rank
+cpu_gpu_bw = 30
 
 # use Inductor's experimental benchmarker (runtime/benchmarking.py)
 # to benchmark kernels during autotuning, otherwise fall back to
