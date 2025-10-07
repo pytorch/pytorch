@@ -69,6 +69,7 @@ class CompileArtifacts:
 @dataclass
 class AOTCompiledFunction:
     _artifacts: CompileArtifacts
+    _guard_check_enabled: bool = True
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals = bind_locals(self._artifacts.signature, *args, **kwargs)
@@ -76,6 +77,8 @@ class AOTCompiledFunction:
         return self._artifacts.guard_manager.check(f_locals)
 
     def __post_init__(self) -> None:
+        from .package import load_guards_state
+
         self._artifacts.check_compatibility()
 
         import_sources = {
@@ -91,7 +94,7 @@ class AOTCompiledFunction:
         )
 
         if self._artifacts.guard_manager is None:
-            guards_state = pickle.loads(self._artifacts.guards_state)
+            guards_state = load_guards_state(self._artifacts.guards_state)
             self._artifacts.guard_manager = torch._dynamo.guards.CheckFunctionManager(
                 self._artifacts.original_code,
                 guards_state.output_graph,
@@ -101,7 +104,7 @@ class AOTCompiledFunction:
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         assert self._artifacts.guard_manager is not None
-        if not self.guard_check(*args, **kwargs):
+        if self._guard_check_enabled and not self.guard_check(*args, **kwargs):
             f_locals = bind_locals(self._artifacts.signature, *args, **kwargs)
             reason = str(self._artifacts.guard_manager.check_verbose(f_locals))
             raise RuntimeError(f"GuardManager check failed, reason: {reason}")
@@ -141,6 +144,9 @@ class AOTCompiledFunction:
 
         artifacts = CompileArtifacts(**state)
         return cls(artifacts)
+
+    def disable_guard_check(self) -> None:
+        self._guard_check_enabled = False
 
 
 class BundledAOTAutogradSerializableCallable(SerializableCallable):
