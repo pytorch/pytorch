@@ -82,7 +82,7 @@ from .utils import (
 from .virtualized import V
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger(__name__); log.setLevel(logging.CRITICAL)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 compute_dependencies_log = torch._logging.getArtifactLogger(

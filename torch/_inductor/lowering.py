@@ -853,6 +853,15 @@ def to_device(x: TensorBox, device: torch.device, *, copy=False, non_blocking=Fa
 
 @register_lowering(prims.device_put, type_promotion_kind=None)
 def _device_put(x: TensorBox, device: torch.device, non_blocking=False):
+    # Check if this device_put node was marked for activation offloading by the partitioner
+    is_activation_offloading = False
+    if hasattr(V.graph, 'current_node') and V.graph.current_node is not None:
+        is_activation_offloading = V.graph.current_node.meta.get("is_activation_offloading", False)
+
+    # For activation offloading, create a special DeviceCopy with the flag
+    if is_activation_offloading:
+        return TensorBox.create(ir.DeviceCopy.create(x, device, non_blocking, is_activation_offloading))
+
     return to_device(x, device, copy=True, non_blocking=non_blocking)
 
 

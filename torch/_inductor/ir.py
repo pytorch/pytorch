@@ -7180,7 +7180,13 @@ class IndexPutFallback(ExternKernel):
 
 class DeviceCopy(ExternKernelOut):
     @classmethod
-    def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
+    def create(
+        cls,
+        x: IRNode,
+        device: torch.device,
+        non_blocking: bool,
+        is_activation_offloading: bool = False
+    ) -> IRNode:
         if (
             not x.is_extern()
             and all(r in V.graph.constants for r in x.get_read_names())
@@ -7194,7 +7200,7 @@ class DeviceCopy(ExternKernelOut):
         V.graph.add_device_info(x_device)
 
         developer_warning("DeviceCopy in input program")
-        constant_args = (non_blocking,)
+        constant_args = (non_blocking, is_activation_offloading)
         # Device Copy should keep the same layout as input
         x = ExternKernel.require_contiguous(x)
         stride = None
@@ -7223,13 +7229,15 @@ class DeviceCopy(ExternKernelOut):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         args = self.codegen_args()
-        assert len(args) == 2
-        if self.output_view:
-            wrapper.codegen_device_copy(
-                args[0], self.output_view.codegen_reference(), args[1]
-            )
+        assert len(args) == 3
+        src, non_blocking, is_activation_offloading = args[0], args[1], args[2]
+
+        dst = self.output_view.codegen_reference() if self.output_view else self.codegen_reference()
+
+        if is_activation_offloading:
+            wrapper.codegen_device_copy_activation_offloading(src, dst, non_blocking)
         else:
-            wrapper.codegen_device_copy(args[0], self.codegen_reference(), args[1])
+            wrapper.codegen_device_copy(src, dst, non_blocking)
 
 
 class DynamicSelectStorageOffset(ExternKernel):

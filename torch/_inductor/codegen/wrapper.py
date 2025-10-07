@@ -79,7 +79,7 @@ if TYPE_CHECKING:
     from .wrapper_fxir import FxConverter
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger(__name__); log.setLevel(logging.CRITICAL)
 
 pexpr = PythonPrinter().doprint
 
@@ -1037,6 +1037,10 @@ class PythonWrapperCodegen(CodeGen):
         self.codegened_graph_stack = []
         self.computed_sizes_stack = []
 
+        # Track buffers that were produced by DeviceCopy operations with activation offloading
+        self.devicecopy_offload_buffers: OrderedSet[str] = OrderedSet()
+        self._offload_stream_initialized: bool = False
+
         self.write_header()
 
         if not is_codegen_graph_partition_subgraph(self):
@@ -1509,6 +1513,9 @@ class PythonWrapperCodegen(CodeGen):
         args: list[str],
         device: str,
     ) -> None:
+        # Check if any args reference buffers from DeviceCopy operations and add sync if needed
+        self._check_and_add_devicecopy_sync(args)
+
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
@@ -1976,6 +1983,46 @@ class PythonWrapperCodegen(CodeGen):
 
     def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
+
+    def _initialize_offload_stream(self):
+        """Initialize the offload stream for activation offloading if not already done"""
+        if not self._offload_stream_initialized:
+            self.writeline("# Initialize offload stream for activation offloading")
+            self.writeline("if not hasattr(torch.cuda, '_activation_offload_stream'):")
+            self.writeline(
+                "    torch.cuda._activation_offload_stream = torch.cuda.Stream()"
+            )
+            self.writeline("_offload_stream = torch.cuda._activation_offload_stream")
+            self._offload_stream_initialized = True
+
+    def codegen_device_copy_activation_offloading(
+        self, src, dst, non_blocking: Union[bool, str]
+    ):
+        """Generate streaming copy code for activation offloading operations"""
+        # Initialize the offload stream if not already done
+        self._initialize_offload_stream()
+
+        self.writeline("with torch.cuda.stream(_offload_stream):")
+        self.writeline(
+            "    torch.cuda.current_stream().wait_stream(torch.cuda.default_stream())"
+        )
+        self.writeline(f"    {dst}.copy_({src}, {non_blocking})")
+
+        # Track the buffer that was produced by DeviceCopy with activation offloading
+        self.devicecopy_offload_buffers.add(str(dst))
+
+    def _check_and_add_devicecopy_sync(self, args):
+        """Check if any args reference buffers from DeviceCopy operations and add sync if needed."""
+        if not self._offload_stream_initialized:
+            return  # No DeviceCopy operations with activation offloading have occurred
+
+        for arg in args:
+            arg_str = str(arg)
+            if arg_str in self.devicecopy_offload_buffers:
+                self.writeline(
+                    "torch.cuda.current_stream().wait_stream(_offload_stream)"
+                )
+                return
 
     def codegen_multi_output(self, node: ir.MultiOutput):
         result_name = node.get_name()
@@ -2736,6 +2783,10 @@ class PythonWrapperCodegen(CodeGen):
         original_fxnode_name=None,
     ):
         device = device or V.graph.get_current_device_or_throw()
+
+        # Check if any args reference buffers from DeviceCopy operations and add sync if needed
+        self._check_and_add_devicecopy_sync(call_args)
+
         if not triton and device.type != "cuda":
             if device.type == "cpu":
                 self.writeline(self.wrap_kernel_call(kernel_name, call_args))
