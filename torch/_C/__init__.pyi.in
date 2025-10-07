@@ -26,10 +26,12 @@ import numpy
 import torch
 from torch import inf, SymInt, Tensor
 from torch._C import (
+    _acc,
     _aoti,
     _cpu,
     _dynamo,
     _export,
+    _functionalization,
     _functorch,
     _lazy,
     _lazy_ts_backend,
@@ -2211,6 +2213,9 @@ class _CudaDeviceProperties:
     warp_size: _int
     uuid: str
     L2_cache_size: _int
+    clock_rate: _int
+    memory_clock_rate: _int
+    memory_bus_width: _int
 
 # Functions related to SDPA
 class _SDPAParams:
@@ -2770,4 +2775,18 @@ class _StaticCudaLauncher:
         arg_types: str,
         args: tuple[Any, ...],
         stream: _int,
+    ) -> None: ...
+
+# Defined in torch/csrc/cuda/green_context.h
+class GreenContext:
+    @staticmethod
+    def create(
+        num_sms: _int,
+        device_id: _int,
+    ) -> GreenContext: ...
+    def make_current(
+        self,
+    ) -> None: ...
+    def pop_current(
+        self,
     ) -> None: ...
