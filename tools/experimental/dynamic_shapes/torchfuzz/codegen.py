@@ -107,25 +107,47 @@ class FuzzTemplate:
 
 class DefaultFuzzTemplate(FuzzTemplate):
     def __init__(self):
-        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
+        from torchfuzz.checks import EagerVsFullGraphDynamicCompileWithNumericsCheck
 
         super().__init__(
             supported_ops=[
+                # Basic arithmetic operations
                 "torch.add",
                 "torch.sub",
                 "torch.mul",
                 "torch.div",
+                # Tensor shape operations
                 "torch.Tensor.view",
                 "torch.reshape",
                 "torch.flatten",
                 "torch.squeeze",
                 "torch.unsqueeze",
+                # Matrix operations
                 "torch.mm",
                 "torch.addmm",
                 "torch.bmm",
                 "torch.matmul",
+                # Neural network operations
+                "torch.nn.functional.embedding",
+                "torch.nn.functional.linear",
+                # Activation functions
+                "torch.nn.functional.relu",
+                "torch.nn.functional.leaky_relu",
+                "torch.nn.functional.elu",
+                "torch.nn.functional.gelu",
+                "torch.nn.functional.silu",
+                "torch.sigmoid",
+                "torch.tanh",
+                "torch.nn.functional.softmax",
+                # Normalization layers
+                "torch.nn.functional.layer_norm",
+                "torch.nn.functional.rms_norm",
+                "torch.nn.functional.batch_norm",
+                "torch.nn.functional.group_norm",
+                # Regularization
+                "torch.nn.functional.dropout",
             ],
-            check=EagerVsFullGraphDynamicCompileCheck(),
+            check=EagerVsFullGraphDynamicCompileWithNumericsCheck(),
         )
 
     def spec_distribution(self):
@@ -184,9 +206,25 @@ class DefaultFuzzTemplate(FuzzTemplate):
                         storage_size = 1
 
                     stride_str = str(spec.stride)
-                    code_lines.append(
-                        f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
-                    )
+
+                    # Special handling for integer tensors which might be used as indices
+                    if spec.dtype in [torch.int32, torch.int64]:
+                        # For integer tensors, generate valid indices with headroom for arithmetic
+                        # Use smaller range [5, 30] to allow for multiplication and other operations
+                        # This prevents indices from becoming too large after arithmetic
+                        min_val = (
+                            5  # Minimum to avoid negative results after subtraction
+                        )
+                        max_val = (
+                            30  # Maximum to avoid out-of-bounds after multiplication
+                        )
+                        code_lines.append(
+                            f"{arg_name} = torch.as_strided(torch.randint({min_val}, {max_val}, ({storage_size},)).to({dtype_str}), {size_str}, {stride_str})"
+                        )
+                    else:
+                        code_lines.append(
+                            f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
+                        )
 
         return code_lines
 

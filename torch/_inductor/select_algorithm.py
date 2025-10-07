@@ -2610,6 +2610,16 @@ class AlgorithmSelectorCache(PersistentCache):
         self.precompile_cache.clear()
         self.prescreening_cache.clear()
 
+    def pick_deterministic_choice(self, choices: list[ChoiceCaller]) -> ChoiceCaller:
+        assert len(choices) >= 2
+        externs = [
+            choice for choice in choices if isinstance(choice, ExternKernelChoice)
+        ]
+        if len(externs) > 0:
+            return externs[0]
+        else:
+            return choices[0]
+
     def __call__(
         self,
         name,
@@ -2665,6 +2675,9 @@ class AlgorithmSelectorCache(PersistentCache):
             if not isinstance(choices[0], CUDATemplateCaller):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
+
+        if config.deterministic:
+            return self.pick_deterministic_choice(choices).output_node()
 
         inputs_key = create_inputs_key(input_nodes)
 
