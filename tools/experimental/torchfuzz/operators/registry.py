@@ -14,6 +14,29 @@ from torchfuzz.operators.layout import (
     ViewOperator,
 )
 from torchfuzz.operators.masked_select import MaskedSelectOperator
+from torchfuzz.operators.matrix_multiply import (
+    AddmmOperator,
+    BmmOperator,
+    MatmulOperator,
+    MMOperator,
+)
+from torchfuzz.operators.nn_functional import (
+    BatchNormOperator,
+    DropoutOperator,
+    ELUOperator,
+    EmbeddingOperator,
+    GELUOperator,
+    GroupNormOperator,
+    LayerNormOperator,
+    LeakyReLUOperator,
+    LinearOperator,
+    ReLUOperator,
+    RMSNormOperator,
+    SigmoidOperator,
+    SiLUOperator,
+    SoftmaxOperator,
+    TanhOperator,
+)
 from torchfuzz.operators.nonzero import NonzeroOperator
 from torchfuzz.operators.scalar_pointwise import (
     ScalarAddOperator,
@@ -69,6 +92,35 @@ class OperatorRegistry:
         self.register(SqueezeOperator())
         self.register(UnsqueezeOperator())
 
+        # Matrix multiplication operators
+        self.register(MMOperator())
+        self.register(AddmmOperator())
+        self.register(BmmOperator())
+        self.register(MatmulOperator())
+
+        # Neural network functional operators
+        self.register(EmbeddingOperator())
+        self.register(LinearOperator())
+
+        # Activation functions
+        self.register(ReLUOperator())
+        self.register(LeakyReLUOperator())
+        self.register(ELUOperator())
+        self.register(GELUOperator())
+        self.register(SiLUOperator())
+        self.register(SigmoidOperator())
+        self.register(TanhOperator())
+        self.register(SoftmaxOperator())
+
+        # Normalization layers
+        self.register(LayerNormOperator())
+        self.register(RMSNormOperator())
+        self.register(BatchNormOperator())
+        self.register(GroupNormOperator())
+
+        # Regularization
+        self.register(DropoutOperator())
+
     def register(self, operator: Operator):
         """Register an operator in the registry."""
         self._operators[operator.name] = operator
@@ -102,3 +154,52 @@ def register_operator(operator: Operator):
 def list_operators() -> dict[str, Operator]:
     """List all operators in the global registry."""
     return _global_registry.list_operators()
+
+
+def set_operator_weight(op_name: str, weight: float) -> None:
+    """Set the selection weight for a specific operator.
+
+    Args:
+        op_name: The registered operator name (e.g., "add", "arg") OR fully-qualified torch op
+                 (e.g., "torch.nn.functional.relu", "torch.matmul")
+        weight: New relative selection weight (must be > 0)
+    """
+    if weight <= 0:
+        raise ValueError("Operator weight must be > 0")
+
+    # Try by registry key
+    op = _global_registry.get(op_name)
+    if op is not None:
+        op.weight = float(weight)
+        return
+
+    # Fallback: try to locate by fully-qualified torch op name
+    for candidate in _global_registry.list_operators().values():
+        if getattr(candidate, "torch_op_name", None) == op_name:
+            candidate.weight = float(weight)
+            return
+
+    raise KeyError(f"Operator '{op_name}' not found by registry name or torch op name")
+
+
+def set_operator_weights(weights: dict[str, float]) -> None:
+    """Bulk-update operator weights from a mapping of name -> weight."""
+    for name, w in weights.items():
+        set_operator_weight(name, w)
+
+
+def set_operator_weight_by_torch_op(torch_op_name: str, weight: float) -> None:
+    """Set operator weight by fully-qualified torch op name."""
+    if weight <= 0:
+        raise ValueError("Operator weight must be > 0")
+    for candidate in _global_registry.list_operators().values():
+        if getattr(candidate, "torch_op_name", None) == torch_op_name:
+            candidate.weight = float(weight)
+            return
+    raise KeyError(f"Torch op '{torch_op_name}' not found in registry")
+
+
+def set_operator_weights_by_torch_op(weights: dict[str, float]) -> None:
+    """Bulk-update weights by fully-qualified torch op names."""
+    for name, w in weights.items():
+        set_operator_weight_by_torch_op(name, w)
