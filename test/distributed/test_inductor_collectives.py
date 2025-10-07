@@ -530,7 +530,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             ranks,
             group_size,
         ):
-            input_split_sizes = input_split_sizes_tensor.to_list()
+            input_split_sizes = input_split_sizes_tensor.tolist()
             output_split_sizes = output_split_sizes_tensor.tolist()
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
