@@ -421,6 +421,8 @@ class MetalOverrides(OpOverrides):
         # Binary special ops
         for name in [
             "polygamma",
+            "igamma",
+            "igammac",
             "zeta",
         ]:
             setattr(cls, name, functools.partialmethod(cls._special_binary, name=name))

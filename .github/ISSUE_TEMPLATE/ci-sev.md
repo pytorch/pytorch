@@ -1,6 +1,10 @@
 ---
 name: "⚠️ CI SEV"
 about: Tracking incidents for PyTorch's CI infra.
+title: ''
+labels: ''
+assignees: ''
+
 ---
 
 > NOTE: Remember to label this issue with "`ci: sev`"
