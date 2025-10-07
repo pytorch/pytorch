@@ -88,13 +88,18 @@ class StreamStateManager:
     def track_internal_node(self, node: Node) -> None:
         # if we are in a stream context, all created nodes are internal
         if self.in_stream_context():
-            # if we have seen the node before, it is an internal
-            self._cur_state().internal_nodes.add(node)
+            val = node.meta.get("example_value")
+            if isinstance(val, torch.Tensor):
+                # Only add tensor nodes
+                # if we have seen the node before, it is an internal
+                self._cur_state().internal_nodes.add(node)
 
     def track_node(self, node: Node) -> None:
         # If we are in a stream context, args of ops may be external
-        if self.in_stream_context() and node not in self._internal_nodes():
-            self._external_nodes().add(node)
+        if self.in_stream_context():
+            val = node.meta.get("example_value")
+            if isinstance(val, torch.Tensor) and node not in self._internal_nodes():
+                self._external_nodes().add(node)
 
     def push_stream_state(self, node: Node) -> None:
         self.state_stack.append(StreamState(node, OrderedSet(), OrderedSet()))
