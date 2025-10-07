@@ -14,10 +14,10 @@ from torch._higher_order_ops.utils import (
     _maybe_reenter_make_fx,
     _set_compilation_env,
     clone_outputs_aliasing_inputs,
+    fake_propagate_subgraph,
     FunctionalizeCtxWrapper,
     get_dummy_aot_autograd_config,
     HopInstance,
-    maybe_ignore_fresh_unbacked_symbols,
     prepare_fw_with_masks,
     reenter_make_fx,
     register_fake,
@@ -601,11 +601,8 @@ def _(subgraph, identifier, *operands):
 
     from torch._dynamo.utils import dynamo_timed
 
-    with (
-        dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True),
-        maybe_ignore_fresh_unbacked_symbols(mode),
-    ):
-        return subgraph(*operands)
+    with dynamo_timed("invoke_subgraph_fake_tensor", log_pt2_compile_event=True):
+        return fake_propagate_subgraph(subgraph, operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
