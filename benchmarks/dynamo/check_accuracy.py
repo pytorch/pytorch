@@ -82,6 +82,8 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "vgg16",
                 "BERT_pytorch",
                 "coat_lite_mini",
+                "mobilenet_v3_large",
+                "vision_maskrcnn",
                 # LLM
                 "meta-llama/Llama-3.2-1B",
                 "google/gemma-2-2b",
