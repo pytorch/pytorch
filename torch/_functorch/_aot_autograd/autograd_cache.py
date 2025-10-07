@@ -16,9 +16,10 @@ import shutil
 import time
 import traceback
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from copy import copy
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override
 
 import torch
@@ -284,19 +285,6 @@ def check_cacheable(gm: torch.fx.GraphModule):
         check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
 
 
-def check_metadata_cacheable(metadata: ViewAndMutationMeta):
-    """
-    When view replay is turned on, we bypass autograd cache if
-    the output is aliased.
-    """
-    if config.view_replay_for_aliased_outputs:
-        for info in metadata.output_info:
-            if info.functional_tensor is not None:
-                raise BypassAOTAutogradCache(
-                    "Cannot cache a graph with functional tensor"
-                )
-
-
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -396,6 +384,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self, gm: torch.fx.GraphModule):
         super().__init__(gm)
+        # pyrefly: ignore  # bad-override
         self.dispatch_table: dict
         self.dispatch_table.update(
             {
@@ -520,7 +509,7 @@ def autograd_cache_key(
 TOut = TypeVar("TOut", bound=OutputCode)
 
 
-class InductorOutput(Generic[TOut], ABC):
+class InductorOutput(ABC, Generic[TOut]):
     """
     Class representing a single inductor output
     """
@@ -803,7 +792,6 @@ class GenericAOTAutogradCacheEntry(Generic[TForward, TBackward]):
         """
         Perform any preparations to make the cache entry ready for serialization.
         """
-        check_metadata_cacheable(self.runtime_metadata)
         self.compiled_fw.pre_save()
         if self.compiled_bw is not None:
             self.compiled_bw.pre_save()
@@ -1211,7 +1199,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                 cache_state = "miss"
                 if (
                     config.strict_autograd_cache
-                    or torch._dynamo.config.caching_precompile
+                    or torch._dynamo.config.strict_precompile
                 ):
                     raise e
             # Most often this is BypassAOTAutogradCache, but
@@ -1244,7 +1232,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                     log_cache_bypass("bypass_aot_autograd", str(e))
                 if (
                     config.strict_autograd_cache
-                    or torch._dynamo.config.caching_precompile
+                    or torch._dynamo.config.strict_precompile
                 ):
                     raise e
             if compiled_fn is None:
