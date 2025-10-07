@@ -1282,7 +1282,17 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
       std::make_pair(ScalingType::BlockWise1x16, ScalingType::BlockWise1x16)
     },
     mat1, mat2, scale_a, scale_b);
+  // Hopper 128x blockwise scaling types
+  std::unordered_set<ScalingType> hopperx128 = {
+      ScalingType::BlockWise128x128,
+      ScalingType::BlockWise1x128
+  };
 
+  if (hopperx128.count(scaling_choice_a) || hopperx128.count(scaling_choice_b)) {
+    TORCH_CHECK(out_dtype.has_value(),
+        "torch._scaled_mm with 128x blockwise scaling requires explicit out_dtype "
+        "(e.g., torch.float16, torch.bfloat16, or torch.float32)");
+  }
   TORCH_CHECK(!scale_result || (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
        "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
