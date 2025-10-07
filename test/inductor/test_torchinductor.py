@@ -10707,6 +10707,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
             self.common(fn, (x,))
 
+    def test_copy_with_scalar_src(self):
+        def fn(x):
+            buffer = torch.zeros_like(x)
+            buffer.copy_(2)
+            result = x + buffer
+            return result
+
+        x = torch.randn(64, 64, dtype=torch.float32, device=self.device)
+        self.common(fn, (x,))
+
     def test_kwargs(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
