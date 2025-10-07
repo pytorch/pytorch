@@ -305,24 +305,41 @@ def _package_aoti_files(
             filename = f"{WEIGHT_FILENAME_PREFIX}{idx}"
             model_name, weight_name = get_complete(group, all_weights)
             complete_tensor, _ = all_weights[model_name].get_weight(weight_name)
-            buffer = io.BytesIO()
-            torch.save(complete_tensor, buffer, pickle_protocol=pickle_protocol)
+
+            tensor_bytes = _get_raw_tensor_bytes(complete_tensor)
             archive_writer.write_bytes(
-                os.path.join(WEIGHTS_DIR, filename), buffer.getvalue()
+                os.path.join(WEIGHTS_DIR, filename), tensor_bytes
             )
+
             for model_name, weight_name in group:
-                _, w_property = all_weights[model_name].get_weight(weight_name)
-                weights_configs[model_name][weight_name] = (
-                    filename,
-                    w_property.shape,
-                    w_property.stride,
-                    w_property.offset,
+                tensor, _ = all_weights[model_name].get_weight(weight_name)
+                weights_configs[model_name][weight_name] = schema.PayloadMeta(
+                    path_name=filename,
+                    is_param=isinstance(tensor, torch.nn.Parameter),
+                    use_pickle=False,
+                    tensor_meta=serialize_tensor_meta(tensor),
                 )
 
+            # buffer = io.BytesIO()
+            # torch.save(complete_tensor, buffer, pickle_protocol=pickle_protocol)
+            # archive_writer.write_bytes(
+            #     os.path.join(WEIGHTS_DIR, filename), buffer.getvalue()
+            # )
+            # for model_name, weight_name in group:
+            #     tensor, _ = all_weights[model_name].get_weight(weight_name)
+            #     weights_configs[model_name][weight_name] = schema.PayloadMeta(
+            #         path_name=filename,
+            #         is_param=isinstance(tensor, torch.nn.Parameter),
+            #         use_pickle=True,
+            #         tensor_meta=serialize_tensor_meta(tensor),
+            #     )
+
         for model_name, weights_config in weights_configs.items():
+            payload_config = schema.PayloadConfig(config=weights_config)
+
             archive_writer.write_string(
                 os.path.join(AOTINDUCTOR_DIR, model_name, "weights_config.json"),
-                json.dumps(weights_config),
+                json.dumps(_dataclass_to_dict(payload_config)),
             )
             logger.debug("packaging weights_config for model %s", model_name)
             logger.debug(weights_config)
