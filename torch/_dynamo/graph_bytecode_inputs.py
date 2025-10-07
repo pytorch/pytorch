@@ -21,9 +21,12 @@ def has_user_objects() -> bool:
 
 
 def get_user_object_by_index(index: int) -> Any:
+    print(index)
+    breakpoint()
     assert index in index_to_user_object_weakref, (
         "Index not registered in index_to_user_object_weakref"
     )
+    print(index_to_user_object_weakref[index])
     obj = index_to_user_object_weakref[index]()
     assert obj is not None, "User object is no longer alive"
     return index_to_user_object_weakref[index]()
