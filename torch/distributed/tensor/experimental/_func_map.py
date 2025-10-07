@@ -62,6 +62,12 @@ def local_map(
             ``redistribute_inputs`` is ``False``, an exception will be raised. Otherwise if
             ``redistribute_inputs`` is ``True``, the argument will be first redistributed to
             the required sharding placements before passing its local tensor to ``func``.
+
+            For :class:`torch.nn.Module` inputs containing :class:`DTensor` parameters,
+            the placements will be applied to all DTensor parameters in the module. The
+            module's parameters will be converted to local tensors before being passed
+            to ``func``.
+
             The only exception is when required placements are not ``None`` and the
             argument is a :class:`torch.Tensor`. In this case, the placements examination
             will be skipped and the argument will be directly passed to ``func``.
@@ -158,6 +164,54 @@ def local_map(
     )
 
 
+def _has_dtensor_parameters(module: torch.nn.Module) -> bool:
+    """check if an nn.Module has any DTensor parameters."""
+    for param in module.parameters():
+        if isinstance(param, DTensor):
+            return True
+    return False
+
+
+def _convert_module_dtensor_to_local(
+    module: torch.nn.Module,
+    placements: Optional[Sequence[Placement]],
+    redistribute: bool,
+    grad_placements: Optional[Sequence[Placement]] = None,
+) -> torch.nn.Module:
+    """convert DTensor parameters in an nn.Module to local tensors."""
+    for name, param in module.named_parameters(recurse=False):
+        if isinstance(param, DTensor):
+            if placements is not None:
+                if not isinstance(placements, tuple):
+                    placements = tuple(placements)
+
+                if param.placements != placements:
+                    if redistribute:
+                        param = param.redistribute(placements=placements)
+                    else:
+                        raise ValueError(
+                            f"Parameter {name} in module has mismatched placements: "
+                            f"param placements is {param.placements} but the input "
+                            f"placements is {placements}! "
+                            "If redistribute_inputs is wanted, set "
+                            "redistribute_inputs=True to local_map."
+                        )
+
+            if grad_placements is not None:
+                if not isinstance(grad_placements, tuple):
+                    grad_placements = tuple(grad_placements)
+                local_param = param.to_local(grad_placements=grad_placements)
+            else:
+                local_param = param.to_local()
+
+            if isinstance(local_param, AsyncCollectiveTensor):
+                local_param = local_param.wait()
+
+            module._parameters[name] = local_param
+
+    return module
+
+
 def _local_map_wrapped(
     func: Callable,
     out_placements: OutputPlacements,
@@ -227,6 +281,35 @@ def _local_map_wrapped(
                 local_arg = local_arg.wait()
 
             flat_local_args.append(local_arg)
+        elif isinstance(arg, torch.nn.Module):
+            if _has_dtensor_parameters(arg):
+                seen_dtensor_arg = True
+
+                if device_mesh is None:
+                    for param in arg.parameters():
+                        if isinstance(param, DTensor):
+                            device_mesh = param.device_mesh
+                            break
+
+                spec = in_placements[idx] if in_placements is not None else None
+                grad_spec = (
+                    in_grad_placements[idx] if in_grad_placements is not None else None
+                )
+
+                # convert DTensor parameters to local tensors
+                # note: this modifies the module in-place
+                local_module = _convert_module_dtensor_to_local(
+                    arg, spec, redistribute_inputs, grad_spec
+                )
+                flat_local_args.append(local_module)
+            else:
+                if in_placements is not None:
+                    spec = in_placements[idx]
+                    assert spec is None, (
+                        f"Non-DTensor nn.Module input {arg} expects None placements "
+                        f"but received {spec}!"
+                    )
+                flat_local_args.append(arg)
         else:
             # Non-Tensor input must have None in `in_placements`
             if in_placements is not None and not isinstance(arg, torch.Tensor):
