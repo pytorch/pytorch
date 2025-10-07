@@ -21,9 +21,6 @@ try:
 except ImportError:
     from torchbench import setup_torchbench_cwd
 
-from transformers.models.bert.modeling_bert import BertLayer, BertLMPredictionHead
-from transformers.models.t5.modeling_t5 import T5Block
-
 
 def setup(rank, world_size):
     os.environ["MASTER_ADDR"] = os.getenv("MASTER_ADDR", "localhost")
