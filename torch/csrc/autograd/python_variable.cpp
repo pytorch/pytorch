@@ -842,7 +842,6 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(_local_tensor)                                            \
   _(_spec)                                                    \
   _(args_schema)                                              \
-  _(has_symints)                                              \
   _(kwargs_schema)                                            \
   _(op)                                                       \
   _(schema_info)                                              \
@@ -1104,40 +1103,6 @@ static PyObject* DTensor_OpSchema_post_init(PyObject* mod, PyObject* self) {
     return nullptr;
   }
 
-  const auto dtensor_spec_class = get_dtensor_spec_class();
-  bool has_symints = false;
-  for (const auto& a : args_schema) {
-    if (Py_TYPE(a.ptr()) != (PyTypeObject*)(dtensor_spec_class.ptr()) &&
-        !py::isinstance(a, dtensor_spec_class)) {
-      continue;
-    }
-    const py::handle tensor_meta = a.attr(dtensor_interned_strings.tensor_meta);
-    if (tensor_meta.is_none()) {
-      continue;
-    }
-    const auto contains_any_symint = [](const py::tuple& sequence) {
-      for (const auto& s : sequence) {
-        if (THPUtils_checkLong(s.ptr())) {
-          continue;
-        }
-        if (torch::is_symint(s)) {
-          return true;
-        }
-      }
-      return false;
-    };
-    // Specifically it's supposed to be torch.Size.
-    py::object raw_shape = tensor_meta.attr(dtensor_interned_strings.shape);
-    if (!PyTuple_Check(raw_shape.ptr())) {
-      PyErr_SetString(PyExc_TypeError, "OpSchema.shape must be a tuple!");
-      return nullptr;
-    }
-    const auto shape = py::reinterpret_steal<py::tuple>(raw_shape.release());
-    if (contains_any_symint(shape)) {
-      has_symints = true;
-    }
-  }
-  self_handle.attr(dtensor_interned_strings.has_symints) = has_symints;
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
