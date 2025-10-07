@@ -331,6 +331,7 @@ static PyObject* THPStorage_pynew(
       case at::DeviceType::Meta:
       case at::DeviceType::PrivateUse1:
       case at::DeviceType::MAIA:
+      case at::DeviceType::MTIA:
         allocator = c10::GetAllocator(device.type());
         break;
       default:
@@ -449,7 +450,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
       return nullptr;
     }
     uint8_t value = storage_get(storage, nindex);
-    return THPByteUtils_newReal(value);
+    return THPUtils_packUInt32(value);
     /* Slice index */
   } else if (PySlice_Check(index)) {
     Py_ssize_t start = 0, stop = 0, slicelength = 0, step = 0;

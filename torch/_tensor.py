@@ -4,10 +4,11 @@ import enum
 import functools
 import warnings
 from collections import OrderedDict
+from collections.abc import Callable
 from copy import deepcopy
 from numbers import Number
-from typing import Any, Callable, cast, Optional, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
+from typing import Any, cast, Concatenate, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._C as _C
@@ -755,7 +756,10 @@ class Tensor(torch._C.TensorBase):
                 "post accumulate grad hooks cannot be registered on non-leaf tensors"
             )
         if self._post_accumulate_grad_hooks is None:
-            self._post_accumulate_grad_hooks: dict[Any, Any] = OrderedDict()
+            self._post_accumulate_grad_hooks: dict[Any, Any] = (
+                # pyrefly: ignore  # bad-assignment
+                OrderedDict()
+            )
 
         from torch.utils.hooks import RemovableHandle
 
@@ -1055,7 +1059,12 @@ class Tensor(torch._C.TensorBase):
         if isinstance(split_size, (int, torch.SymInt)):
             return torch._VF.split(self, split_size, dim)  # type: ignore[attr-defined]
         else:
-            return torch._VF.split_with_sizes(self, split_size, dim)
+            return torch._VF.split_with_sizes(
+                self,
+                # pyrefly: ignore  # bad-argument-type
+                split_size,
+                dim,
+            )
 
     def unique(self, sorted=True, return_inverse=False, return_counts=False, dim=None):
         r"""Returns the unique elements of the input tensor.
@@ -1100,6 +1109,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rsub__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
+        # pyrefly: ignore  # no-matching-overload
         return _C._VariableFunctions.rsub(self, other)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
@@ -1125,7 +1135,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rmod__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        return torch.remainder(other, self)
+        return torch.remainder(other, self)  # pyrefly: ignore  # no-matching-overload
 
     def __format__(self, format_spec):
         if has_torch_function_unary(self):
@@ -1138,7 +1148,7 @@ class Tensor(torch._C.TensorBase):
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rpow__(self, other: Union["Tensor", int, float, bool, complex]) -> "Tensor":
-        return torch.pow(other, self)
+        return torch.pow(other, self)  # pyrefly: ignore  # no-matching-overload
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __floordiv__(self, other: Union["Tensor", int, float, bool]) -> "Tensor":  # type: ignore[override]
@@ -1154,12 +1164,14 @@ class Tensor(torch._C.TensorBase):
     def __rlshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
+        # pyrefly: ignore  # no-matching-overload
         return torch.bitwise_left_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
     def __rrshift__(
         self, other: Union["Tensor", int, float, bool, complex]
     ) -> "Tensor":
+        # pyrefly: ignore  # no-matching-overload
         return torch.bitwise_right_shift(other, self)
 
     @_handle_torch_function_and_wrap_type_error_to_not_implemented
@@ -1334,7 +1346,7 @@ class Tensor(torch._C.TensorBase):
 
         return self._typed_storage()._get_legacy_storage_class()
 
-    def refine_names(self, *names):
+    def refine_names(self, *names):  # pyrefly: ignore  # bad-override
         r"""Refines the dimension names of :attr:`self` according to :attr:`names`.
 
         Refining is a special case of renaming that "lifts" unnamed dimensions.
@@ -1378,7 +1390,7 @@ class Tensor(torch._C.TensorBase):
         names = resolve_ellipsis(names, self.names, "refine_names")
         return super().refine_names(names)
 
-    def align_to(self, *names):
+    def align_to(self, *names):  # pyrefly: ignore  # bad-override
         r"""Permutes the dimensions of the :attr:`self` tensor to match the order
         specified in :attr:`names`, adding size-one dims for any new names.
 
@@ -1699,7 +1711,7 @@ class Tensor(torch._C.TensorBase):
     def __dlpack__(
         self,
         *,
-        stream: Optional[Any] = None,
+        stream: Optional[Any] = -1,
         max_version: Optional[tuple[int, int]] = None,
         dl_device: Optional[tuple[enum.IntEnum, int]] = None,
         copy: Optional[bool] = None,
@@ -1717,9 +1729,12 @@ class Tensor(torch._C.TensorBase):
                 pointer to a CUDA stream. The current stream is synchronized with
                 this stream before the capsule is created, and since the capsule
                 shares its storage with the tensor this make it safe to access from
-                both streams.  If None or -1 is passed then no synchronization is performed.
+                both streams.  If -1 is passed then no synchronization is performed.
                 If 1 (on CUDA) or 0 (on ROCM) then the default stream is used for
-                synchronization.
+                synchronization. This API intentionally slightly deviates from the DLPack
+                guidance: the default stream is -1 (stream-preserving; no cross-stream sync),
+                because many from_dlpack implementations intend stream preservation.
+                For non-CUDA devices, -1 is treated the same as None.
 
             max_version (tuple[int, int] or None): An optional Python tuple with
                 2 integers, representing the maximum version the caller supports. If
@@ -1797,7 +1812,7 @@ class Tensor(torch._C.TensorBase):
                 event.record(current_stream)
                 stream.wait_event(event)
         elif self.device.type == "cpu":
-            assert stream is None, "stream should be None on cpu."
+            assert stream is None or stream == -1, "stream should be None on cpu."
 
         if self.device.type == "xla":
             import torch_xla

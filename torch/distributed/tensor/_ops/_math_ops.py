@@ -73,17 +73,19 @@ class _NormPartial(Partial):
 
     norm_type: Union[int, float, str] = 2
 
-    def __post_init__(self):
-        """Set the appropriate reduce op based on the norm type."""
-        # Use `object.__setattr__` to bypass frozen checks
-        if self.norm_type in (float("inf"), "inf"):
-            object.__setattr__(self, "reduce_op", "max")
-        elif self.norm_type in (float("-inf"), "-inf"):
-            object.__setattr__(self, "reduce_op", "min")
-        elif isinstance(self.norm_type, (int, float)):
-            object.__setattr__(self, "reduce_op", "sum")
+    def __init__(self, norm_type: Union[int, float, str] = 2):
+        reduce_op = None
+        if norm_type in (float("inf"), "inf"):
+            reduce_op = "max"
+        elif norm_type in (float("-inf"), "-inf"):
+            reduce_op = "min"
+        elif isinstance(norm_type, (int, float)):
+            reduce_op = "sum"
         else:
-            raise NotImplementedError(f"Unsupported norm type: {self.norm_type}")
+            raise NotImplementedError(f"Unsupported norm type: {norm_type}")
+
+        super().__init__(reduce_op)
+        object.__setattr__(self, "norm_type", norm_type)
 
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -1232,4 +1234,37 @@ def histc_strategy(op_schema: OpSchema) -> OpStrategy:
 
     return expand_to_full_mesh_op_strategy(
         input_strategy.mesh, op_schema, single_mesh_dim_strategies
+    )
+
+
+@register_op_strategy(
+    [aten.logsumexp.default],
+    schema_info=RuntimeSchemaInfo(
+        # static_argnum is the position where non-Tensor args beings.
+        static_argnum=1,
+        # static_kwargkey is the name of kwargs to hash (which determines
+        # whether sharding prop can be cached).
+        static_kwargkey=["keepdim"],
+    ),
+)
+def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
+    """Implements the sharding propagation strategy for logsumexp."""
+
+    # args_schema contains all but the DTensor args (e.g., dim, keepdim).
+    args_schema = op_schema.args_schema
+    assert len(args_schema) > 1  # input and dim are required.
+
+    input_strategy = args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+
+    dims_arg = args_schema[1]
+    reduce_dims = _infer_reduction_dims(dims_arg, input_strategy.ndim)
+    assert reduce_dims is not None
+
+    keep_dim = cast(bool, op_schema.kwargs_schema.get("keepdim", False))
+    return common_reduction_strategy(
+        input_strategy,
+        reduce_dims,
+        keep_dim=keep_dim,
+        reduction_linear=False,
     )

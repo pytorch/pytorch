@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import copy
 import warnings
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -381,7 +382,7 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = (
                 f"{enc_layer}.activation_relu_or_gelu was not True"
             )
-        elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps):
+        elif encoder_layer.norm1.eps != encoder_layer.norm2.eps:
             why_not_sparsity_fast_path = (
                 f"{enc_layer}.norm1.eps was not equal to {enc_layer}.norm2.eps"
             )
@@ -443,6 +444,7 @@ class TransformerEncoder(Module):
         str_first_layer = "self.layers[0]"
         batch_first = first_layer.self_attn.batch_first
         is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
+        do_mask_check = getattr(self, "mask_check", True)
 
         if not is_fastpath_enabled:
             why_not_sparsity_fast_path = (
@@ -456,15 +458,19 @@ class TransformerEncoder(Module):
             )
         elif first_layer.training:
             why_not_sparsity_fast_path = f"{str_first_layer} was in training mode"
-        elif not src.dim() == 3:
+        elif src.dim() != 3:
             why_not_sparsity_fast_path = (
                 f"input not batched; expected src.dim() of 3 but got {src.dim()}"
             )
         elif src_key_padding_mask is None:
             why_not_sparsity_fast_path = "src_key_padding_mask was None"
-        elif (
-            (not hasattr(self, "mask_check")) or self.mask_check
-        ) and not torch._nested_tensor_from_mask_left_aligned(
+        # This check avoids a call to torch._nested_tensor_from_mask_left_aligned() that
+        # breaks in torch.compile.
+        elif do_mask_check and torch.compiler.is_compiling():
+            why_not_sparsity_fast_path = (
+                "mask_check enabled with torch.compile or torch.export"
+            )
+        elif do_mask_check and not torch._nested_tensor_from_mask_left_aligned(
             src, src_key_padding_mask.logical_not()
         ):
             why_not_sparsity_fast_path = "mask_check enabled, and src and src_key_padding_mask was not left aligned"
@@ -826,7 +832,7 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = (
                 "torch.backends.mha.get_fastpath_enabled() was not True"
             )
-        elif not src.dim() == 3:
+        elif src.dim() != 3:
             why_not_sparsity_fast_path = (
                 f"input not batched; expected src.dim() of 3 but got {src.dim()}"
             )
@@ -840,7 +846,7 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "self_attn._qkv_same_embed_dim was not True"
         elif not self.activation_relu_or_gelu:
             why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
-        elif not (self.norm1.eps == self.norm2.eps):
+        elif self.norm1.eps != self.norm2.eps:
             why_not_sparsity_fast_path = "norm1.eps is not equal to norm2.eps"
         elif src.is_nested and (
             src_key_padding_mask is not None or src_mask is not None
