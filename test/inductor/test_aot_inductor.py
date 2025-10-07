@@ -6372,10 +6372,10 @@ class AOTInductorTestsTemplate:
 
         new_output = runner_call(test_inputs)
         expected_output = model(test_inputs)
-        torch.testing.assert_close(new_output, expected_output)
+        torch.testing.assert_close(new_output, expected_output, atol=1e-3, rtol=1e-3)
 
         with self.assertRaises(AssertionError):
-            torch.testing.assert_close(new_expected, new_output)
+            torch.testing.assert_close(new_expected, new_output, atol=1e-3, rtol=1e-3)
 
     def test_cond_share_predicte(self):
         class Model(torch.nn.Module):

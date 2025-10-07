@@ -1266,7 +1266,7 @@ class SIMDScheduling(BaseScheduling):
                 # 2. Triton kernels with native matmul always tile loops as (z,y,x)
                 #    (see get_tiling_and_scores in this file)
                 #
-                # 3. If a candidate node (node2) uses a different loop order (e.g., (y,z,x,r)),
+                # 3. If a candidate node (node2) uses a different loop order (e.g., (z,x,y,r)),
                 #    its tiling is incompatible with native matmul tiling (z,y,x,r).
                 #    This means _split_iteration_ranges will fail, so these nodes should not be fused.
                 tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1)

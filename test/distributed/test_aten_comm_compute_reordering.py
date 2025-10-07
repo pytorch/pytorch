@@ -64,6 +64,7 @@ def get_patches():
     return {
         "test_configs.estimate_aten_runtime": estimate_aten_runtime,
         "reorder_for_locality": False,
+        "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],
         "compile_threads": 1,
         "force_disable_caches": True,
@@ -134,7 +135,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
     @torch._inductor.config.patch(get_patches())
-    @torch._inductor.config.patch({"triton.native_matmul": False})
     def test_raise_comms(self):
         def func(a):
             b = torch.matmul(a, a)
