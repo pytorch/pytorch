@@ -1203,6 +1203,26 @@ class TestDTensorSpec(DTensorTestBase):
         )
         self.assertEqual(tensor_global._spec.shard_order, ())
 
+    @with_comms
+    def test_default_shard_order(self):
+        mesh_shape = (2, 2, self.world_size // 4)
+        mesh = init_device_mesh(self.device_type, mesh_shape)
+        tensor_local = torch.randn(8, 6, 5, device=self.device_type)
+
+        tensor_global = DTensor.from_local(
+            tensor_local, mesh, [Shard(1), Shard(2), Shard(1)]
+        )
+        # DTensorSpec automatically builds the default left-to-right order
+        self.assertEqual(tensor_global._spec.shard_order, ((1, 0, 2), (2, 1)))
+        self.assertTrue(
+            DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
+        )
+        # manually set the shard_order by exchange mesh dim 0 and 2
+        tensor_global._spec.shard_order = ((1, 2, 0), (2, 1))
+        self.assertFalse(
+            DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
+        )
+
 
 if __name__ == "__main__":
     run_tests()
