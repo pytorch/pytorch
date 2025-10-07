@@ -1,13 +1,14 @@
 # mypy: allow-untyped-defs
-from enum import Enum
 from typing import Any, Optional, Union
-from weakref import WeakKeyDictionary
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.torchbind import call_torchbind
+from torch._library.custom_ops import CustomOpDef
+from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.utils import RegistrationHandle
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
@@ -17,38 +18,90 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 
-class _EffectType(Enum):
-    ORDERED = "Ordered"
+_op_identifier = Union[
+    str,
+    "torch._ops.OpOverload",
+    "torch._library.custom_ops.CustomOpDef",
+    "torch._ops.HigherOrderOperator",
+]
+OpType = Union["torch._ops.HigherOrderOperator", "torch._ops.OpOverload"]
+
+_EffectType = EffectType
 
 
-OpType = Union[torch._ops.HigherOrderOperator, torch._ops.OpOverload]
+class SideEffectRegistry:
+    def __init__(self):
+        self._data = {}
 
+    def get_key(self, op: _op_identifier) -> str:
+        if isinstance(op, torch._ops.OpOverload):
+            op = op._name
+            if len(op.split(".")) == 1:
+                op = f"{op}.default"
+        elif isinstance(op, torch._ops.HigherOrderOperator):
+            op = f"{op.namespace}::{op.name()}.default"
+        elif isinstance(op, CustomOpDef):
+            op = op._qualname
+            if len(op.split(".")) == 1:
+                op = f"{op}.default"
 
-SIDE_EFFECTS = WeakKeyDictionary[OpType, _EffectType](
-    [
-        (torch.ops.aten._print.default, _EffectType.ORDERED),
-        (call_torchbind, _EffectType.ORDERED),
-    ]
-)
-
-
-def _register_effectful_op(op: OpType, effect: _EffectType):
-    assert isinstance(
-        op, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
-    ) and not has_aliasing(op)
-    if op in SIDE_EFFECTS and SIDE_EFFECTS[op] != effect:
-        raise RuntimeError(
-            f"Already registered effect type {SIDE_EFFECTS[op]} to op {op}, "
-            f"trying to register a different effect type {effect}."
+        assert isinstance(op, str), (
+            f"Expected op to be a string or an OpOverload, but got {op}"
         )
-    SIDE_EFFECTS[op] = effect
+        assert len(op.split("::")) == 2, (
+            f'Expected op to be of the form "namespace::name.overload", but got {op}'
+        )
+        assert len(op.split(".")) == 2, (
+            'Expected op to be of the form "namespace::name.overload", '
+            f"but got {op}. If an overload is not specified, you can put "
+            '"default" as the overload'
+        )
+
+        return op
+
+    def register(self, op: _op_identifier, effect: Optional[_EffectType]):
+        key = self.get_key(op)
+        if key in self._data:
+            raise RuntimeError(
+                f"Op {op} is already registered with effect {self._data[key]}"
+            )
+        self._data[key] = effect
+
+    def find(self, op: _op_identifier) -> Optional[_EffectType]:
+        key = self.get_key(op)
+        return self._data.get(key, None)
+
+    def contains(self, op: _op_identifier) -> bool:
+        key = self.get_key(op)
+        return key in self._data
+
+    def delete(self, op: _op_identifier):
+        key = self.get_key(op)
+        if key not in self._data:
+            raise RuntimeError(f"Op {op} is not registered as effectful")
+        del self._data[key]
 
 
-def _deregister_effectful_op(op: OpType):
-    if op not in SIDE_EFFECTS:
-        raise RuntimeError(f"Op {op} is not registered as effectful")
+SIDE_EFFECTS = SideEffectRegistry()
 
-    del SIDE_EFFECTS[op]
+SIDE_EFFECTS.register("aten::_print.default", _EffectType.ORDERED)
+SIDE_EFFECTS.register(call_torchbind, _EffectType.ORDERED)
+
+
+def _register_effectful_op(
+    op: _op_identifier, effect: Optional[EffectType]
+) -> RegistrationHandle:
+    SIDE_EFFECTS.register(op, effect)
+
+    def _deregister_effect():
+        _deregister_effectful_op(op)
+
+    return RegistrationHandle(_deregister_effect)
+
+
+def _deregister_effectful_op(op: _op_identifier):
+    if SIDE_EFFECTS.contains(op):
+        SIDE_EFFECTS.delete(op)
 
 
 class WithEffects(HigherOrderOperator):
@@ -88,7 +141,7 @@ with_effects = WithEffects()
 def has_aliasing(op: OpType):
     # NOT FOR PUBLIC USE
     if isinstance(op, torch._ops.HigherOrderOperator):
-        return op not in SIDE_EFFECTS
+        return not SIDE_EFFECTS.contains(op)
 
     for arg in op._schema.arguments:
         if arg.alias_info is not None:
@@ -113,21 +166,21 @@ def has_effects(op, args, kwargs) -> bool:
 
 
 def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
-    if op in SIDE_EFFECTS:
-        return SIDE_EFFECTS[op]
+    if SIDE_EFFECTS.contains(op):
+        return SIDE_EFFECTS.find(op)
 
     for arg in args:
         if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
             # Add it to the table so that next time we see the same op we don't
             # have to parse through the args again
-            SIDE_EFFECTS[op] = _EffectType.ORDERED
+            SIDE_EFFECTS.register(op, _EffectType.ORDERED)
             return _EffectType.ORDERED
 
     for arg in kwargs.values():
         if isinstance(arg, (torch.ScriptObject, FakeScriptObject)):
             # Add it to the table so that next time we see the same op we don't
             # have to parse through the args again
-            SIDE_EFFECTS[op] = _EffectType.ORDERED
+            SIDE_EFFECTS.register(op, _EffectType.ORDERED)
             return _EffectType.ORDERED
 
     return None

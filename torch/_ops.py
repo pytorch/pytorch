@@ -1056,12 +1056,18 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
         )
 
         try:
-            if self not in SIDE_EFFECTS:
-                _register_effectful_op(self, _EffectType.ORDERED)
+            # We don't want to register the effect if there already exists a
+            # registration, especially if the registration is None (explicitly
+            # no effect)
+            registered_op = SIDE_EFFECTS.contains(self)
+            handle = None
+            if not registered_op:
+                handle = _register_effectful_op(self, _EffectType.ORDERED)
             yield
         finally:
-            if self in SIDE_EFFECTS:
-                del SIDE_EFFECTS[self]
+            if not registered_op:
+                assert handle is not None
+                handle.destroy()
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
