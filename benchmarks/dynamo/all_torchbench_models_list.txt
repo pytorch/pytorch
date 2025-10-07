@@ -25,15 +25,6 @@ drq
 fambench_dlrm
 fambench_xlmr
 fastNLP_Bert
-hf_Albert
-hf_Bart
-hf_Bert
-hf_BigBird
-hf_DistilBert
-hf_GPT2
-hf_Longformer
-hf_Reformer
-hf_T5
 maml
 maml_omniglot
 mnasnet1_0

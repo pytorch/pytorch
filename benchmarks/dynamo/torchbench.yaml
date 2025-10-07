@@ -5,8 +5,6 @@ batch_size:
     demucs: 4
     dlrm: 1024
     densenet121: 4
-    hf_Reformer: 4
-    hf_T5_base: 4
     timm_efficientdet: 1
     llama_v2_7b_16h: 1
     # reduced from 16 due to cudagraphs OOM in TorchInductor dashboard
@@ -30,7 +28,6 @@ tolerance:
     - alexnet
     - attention_is_all_you_need_pytorch
     - densenet121
-    - hf_Albert
     - vgg16
     - mobilenet_v3_large
     - nvidia_deeprecommender
@@ -47,13 +44,11 @@ tolerance:
   higher_fp16:
     - doctr_reco_predictor
     - drq
-    - hf_Whisper
     - phlippe_resnet
 
   higher_bf16:
     - doctr_reco_predictor
     - drq
-    - hf_Whisper
 
   # These models need higher tolerance for xpu devices with bf16
   higher_bf16_xpu:
@@ -75,12 +70,6 @@ require_larger_multiplier_for_smaller_tensor:
 
 # These benchmarks took >600s on an i9-11900K CPU
 very_slow: &VERY_SLOW_MODELS
-  # 3339s
-  - hf_BigBird
-  # 3062s
-  - hf_Longformer
-  # 930s
-  - hf_T5
 
 
 # These benchmarks took >60s on an i9-11900K CPU
@@ -92,18 +81,6 @@ slow:
   - demucs
   # 242s
   - fastNLP_Bert
-  # 221s
-  - hf_Albert
-  # 400s
-  - hf_Bart
-  # 334s
-  - hf_Bert
-  # 187s
-  - hf_DistilBert
-  # 470s
-  - hf_GPT2
-  # 141s
-  - hf_Reformer
   # 317s
   - speech_transformer
   # 99s
@@ -190,8 +167,6 @@ skip:
 
   device:
     cpu:
-      # OOMs
-      - hf_T5_generate
       # model is CUDA only
       - cm3leon_generate
       # timeout
@@ -208,7 +183,6 @@ skip:
       - torchrec_dlrm
       - simple_gpt
       # works on cuda, accuracy failure on cpu
-      - hf_Whisper
       - stable_diffusion_text_encoder
       - llava
       - moco
@@ -235,7 +209,6 @@ skip:
       - sam_fast
       # Model's DEFAULT_TRAIN_BSIZE is not implemented
       - cm3leon_generate
-      - hf_T5_generate
       - doctr_det_predictor
       - doctr_reco_predictor
       - moondream
@@ -247,9 +220,6 @@ skip:
     - cm3leon_generate
     - detectron2_fcos_r_50_fpn
     - fastNLP_Bert
-    - hf_Longformer
-    - hf_Reformer
-    - hf_T5_generate
     - opacus_cifar10
     - speech_transformer
 
@@ -286,8 +256,6 @@ accuracy:
       # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
       # even for 40 GB machine. We have tested accuracy for smaller version of
       # these models
-      - hf_GPT2_large
-      - hf_T5_large
       - timm_vision_transformer_large
       # accuracy https://github.com/pytorch/pytorch/issues/93847
       - maml
@@ -300,5 +268,4 @@ accuracy:
       - pytorch_unet
 
   max_batch_size:
-    hf_GPT2: 2
     pytorch_unet: 2
