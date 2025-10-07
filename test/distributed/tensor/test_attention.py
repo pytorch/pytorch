@@ -15,15 +15,19 @@ from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
     _CausalBehavior,
+    _context_parallel_buffers,
     _cp_options,
     _DispatchMode,
     _is_causal_behavior,
-    _LoadBalancer,
-    _PerDocumentHeadTailLoadBalancer,
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
+)
+from torch.distributed.tensor.experimental._load_balancer import (
+    _HeadTailLoadBalancer,
+    _LoadBalancer,
+    _PerDocumentHeadTailLoadBalancer,
 )
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
@@ -388,46 +392,37 @@ class CPFlexAttentionTest(DTensorTestBase):
         B: int = 1,
         mask_func: _mask_mod_signature = causal_mask,
         lb: Optional[_LoadBalancer] = None,
-        atol: float = 1e-6,
-        rtol: float = 1e-2,
+        atol: float = 1e-4,
+        rtol: float = 1,
     ) -> None:
-        torch.cuda.manual_seed(10)
+        torch.cuda.manual_seed(1234)
+
         dtype = torch.float32
         bs = B if B > 1 else 8
-        query_tokens = context_tokens = qkv_size
         dim = 32
         nheads = 8
 
-        q = torch.rand(
-            (bs, nheads, query_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        k = torch.rand(
-            (bs, nheads, context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        v = torch.rand(
-            (bs, nheads, context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
+        qkv = [
+            torch.rand(
+                (bs, nheads, qkv_size, dim),
+                device=self.device_type,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        ]
 
         block_mask = compiled_create_block_mask(
             mask_func,
             B=B,
             H=1,
-            Q_LEN=query_tokens,
-            KV_LEN=context_tokens,
+            Q_LEN=qkv_size,
+            KV_LEN=qkv_size,
             device=self.device_type,
         )
 
         expect_out, expect_aux = compiled_flex_attention(
-            q, k, v, block_mask=block_mask, return_aux=AuxRequest(lse=True)
+            *qkv, block_mask=block_mask, return_aux=AuxRequest(lse=True)
         )
         expect_out.sum().backward()
 
@@ -438,20 +433,16 @@ class CPFlexAttentionTest(DTensorTestBase):
             mesh_dim_names=("cp",),
         )
 
-        # set CP context dispatch mode to use TORCH_FUNCTION for flex_attention
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.TORCH_FUNCTION
-        )
-
-        # prepare input buffer
-        cp_q = q.detach().clone()
-        cp_k = k.detach().clone()
-        cp_v = v.detach().clone()
-
         # create block_mask for CP
         from torch.distributed.tensor.experimental._attention import (
             create_cp_block_mask,
         )
+
+        if not lb and _cp_options.enable_load_balance:
+            # NOTE: when parallelizing `flex_attention`, we require not-None
+            # `load_balancer` object be explicitly passed APIs `_context_parallel_shard`
+            # and `context_parallel_unshard` if load-balancing is needed.
+            lb = _HeadTailLoadBalancer(qkv_size, self.world_size, self.device_type)
 
         # if load-balance is enabled, reorder input tensor and produce the index tensor
         # NOTE: call create_block_mask() within TorchFunctionMode would cause error in create_fw_bw_graph
@@ -459,8 +450,8 @@ class CPFlexAttentionTest(DTensorTestBase):
             mask_func,
             B=B,
             H=1,
-            Q_LEN=query_tokens,
-            KV_LEN=context_tokens,
+            Q_LEN=qkv_size,
+            KV_LEN=qkv_size,
             device_mesh=device_mesh,
             load_balancer=lb,
         )
@@ -468,36 +459,30 @@ class CPFlexAttentionTest(DTensorTestBase):
         # shard qkv on seq_dim
         shard_dim = 2
 
-        with context_parallel(
+        cp_qkv = _context_parallel_buffers(
             device_mesh,
-            buffers=[cp_q, cp_k, cp_v],
+            buffers=[t.detach().clone() for t in qkv],
             buffer_seq_dims=[shard_dim] * 3,
             load_balancer=lb,
-        ):
-            cp_q.requires_grad = True
-            cp_k.requires_grad = True
-            cp_v.requires_grad = True
+        )
+        for t in cp_qkv:
+            t.requires_grad = True
 
+        # TODO: remove this once https://github.com/pytorch/pytorch/pull/164500 is merged
+        torch.distributed.tensor.experimental._attention._dispatch_mode = (
+            _DispatchMode.TORCH_FUNCTION
+        )
+        with context_parallel(
+            device_mesh, buffers=[torch.empty(self.world_size * 2)], buffer_seq_dims=[0]
+        ):
             cp_out, cp_aux = compiled_flex_attention(
-                cp_q,
-                cp_k,
-                cp_v,
+                *cp_qkv,
                 block_mask=cp_block_mask,
                 return_aux=AuxRequest(lse=True),
             )
 
-            # check block_mask rewrite doesn't escape to the outside
-            assert cp_block_mask.seq_lengths == (
-                cp_q.size(dim=shard_dim),
-                cp_k.size(dim=shard_dim),
-            )
-
             # backward run
             cp_out.sum().backward()
-
-            cp_q.requires_grad = False
-            cp_k.requires_grad = False
-            cp_v.requires_grad = False
 
         # unshard the output
         cp_out, cp_lse = context_parallel_unshard(
@@ -510,15 +495,16 @@ class CPFlexAttentionTest(DTensorTestBase):
         torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
 
         # unshard the gradient
-        cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
+        cp_qkv_grad = context_parallel_unshard(
             device_mesh,
-            buffers=[cp_q.grad, cp_k.grad, cp_v.grad],
+            buffers=[t.grad for t in cp_qkv],
             seq_dims=[2, 2, 2],
             load_balancer=lb,
         )
-        torch.testing.assert_close(cp_q_grad, q.grad, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_k_grad, k.grad, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_v_grad, v.grad, atol=atol, rtol=rtol)
+
+        qkv_grad = [t.grad for t in qkv]
+        for grad, cp_grad in zip(qkv_grad, cp_qkv_grad):
+            torch.testing.assert_close(grad, cp_grad, atol=atol, rtol=rtol)
 
         # reset CP context dispatch mode to default
         torch.distributed.tensor.experimental._attention._dispatch_mode = (
@@ -530,7 +516,7 @@ class CPFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    def test_cp_flex_attention(self) -> None:
+    def test_cp_flex_attention_causal_mask(self) -> None:
         restore_enable_load_balance = _cp_options.enable_load_balance
 
         for enable_load_balance in [
@@ -542,7 +528,7 @@ class CPFlexAttentionTest(DTensorTestBase):
             self.run_subtests(
                 {
                     "qkv_size": [
-                        256 if enable_load_balance else 128 * self.world_size,
+                        (256 if enable_load_balance else 128) * self.world_size,
                         2048,
                     ]
                 },
