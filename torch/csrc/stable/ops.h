@@ -8,9 +8,9 @@
 #include <vector>
 
 #include <c10/util/Exception.h>
-#include <c10/util/ParallelGuard.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
+#include <torch/csrc/stable/parallel_utils.h>
 #include <torch/headeronly/core/ScalarType.h>
 
 namespace torch::stable {
@@ -241,14 +241,14 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
 template <typename F>
 struct Trampoline {
   static void invoke(int64_t begin, int64_t end, void* ctx) {
-    c10::ParallelGuard guard(true);
+    ParallelGuard guard(true);
     F* fn = static_cast<F*>(ctx);
     (*fn)(begin, end);
   }
 };
 
-// ABI stable version of parallel_for with identical semantics to
-// at::parallel_for
+// We expect this to be the ABI stable version of parallel_for with identical
+// semantics to at::parallel_for
 template <class F>
 inline void parallel_for(
     const int64_t begin,
@@ -260,7 +260,6 @@ inline void parallel_for(
     return;
   }
 
-  // Use runtime detection of parallel support instead of compile-time #ifdef
   if (aoti_torch_get_intra_op_parallel_enabled()) {
     aoti_torch_lazy_init_num_threads();
     const auto numiter = end - begin;
@@ -268,11 +267,9 @@ inline void parallel_for(
         (numiter > grain_size && numiter > 1 &&
          !aoti_torch_in_parallel_region() && aoti_torch_get_num_threads() > 1);
     if (!use_parallel) {
-      ThreadIdGuardHandle tid_guard;
-      TORCH_ERROR_CODE_CHECK(aoti_torch_create_thread_id_guard(0, &tid_guard));
-      c10::ParallelGuard guard(true);
+      ThreadIdGuard tid_guard(0);
+      ParallelGuard guard(true);
       f(begin, end);
-      TORCH_ERROR_CODE_CHECK(aoti_torch_delete_thread_id_guard(tid_guard));
       return;
     }
 
@@ -283,11 +280,9 @@ inline void parallel_for(
         &Trampoline<F>::invoke,
         const_cast<void*>(static_cast<const void*>(&f))));
   } else {
-    ThreadIdGuardHandle tid_guard;
-    TORCH_ERROR_CODE_CHECK(aoti_torch_create_thread_id_guard(0, &tid_guard));
-    c10::ParallelGuard guard(true);
+    ThreadIdGuard tid_guard(0);
+    ParallelGuard guard(true);
     f(begin, end);
-    TORCH_ERROR_CODE_CHECK(aoti_torch_delete_thread_id_guard(tid_guard));
   }
 }
 

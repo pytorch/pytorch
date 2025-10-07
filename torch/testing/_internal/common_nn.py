@@ -24,7 +24,8 @@ from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
 
-from typing import Callable, Union, Any
+from typing import Union, Any
+from collections.abc import Callable
 from collections.abc import Sequence
 
 TemporaryFile = tempfile.TemporaryFile

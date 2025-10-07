@@ -35,6 +35,11 @@ def get_extension():
     extra_compile_args = {
         "cxx": ["-fdiagnostics-color=always"],
     }
+    extra_link_args = []
+
+    # Enable OpenMP support
+    extra_compile_args["cxx"].extend(["-fopenmp", "-D_OPENMP"])
+    extra_link_args.append("-fopenmp")
 
     extension = CppExtension
     # allow including <cuda_runtime.h>
@@ -50,7 +55,7 @@ def get_extension():
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,
             extra_compile_args=extra_compile_args,
-            extra_link_args=[],
+            extra_link_args=extra_link_args,
         )
     ]
 

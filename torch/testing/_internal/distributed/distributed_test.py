@@ -13,11 +13,12 @@ import tempfile
 import time
 import unittest
 from collections import defaultdict, namedtuple, OrderedDict
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import reduce
-from typing import Any, Callable, NamedTuple, Union
+from typing import Any, NamedTuple, Union
 
 import numpy as np
 

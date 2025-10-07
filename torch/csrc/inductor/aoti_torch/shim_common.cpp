@@ -30,6 +30,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Stream.h>
 #include <c10/util/FileSystem.h>
+#include <c10/util/ParallelGuard.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1390,11 +1391,8 @@ void aoti_torch_warn(
     const char* file,
     uint32_t line,
     const char* msg) {
-  ::c10::warn(::c10::Warning(
-      ::c10::UserWarning(),
-      {func, file, static_cast<uint32_t>(line)},
-      msg,
-      false));
+  ::c10::warn(
+      ::c10::Warning(::c10::UserWarning(), {func, file, line}, msg, false));
 }
 
 AOTITorchError aoti_torch__alloc_from_pool(
@@ -1454,6 +1452,27 @@ AOTITorchError aoti_torch_delete_thread_id_guard(ThreadIdGuardHandle guard) {
         reinterpret_cast<at::internal::ThreadIdGuard*>(guard);
     delete tid_guard;
   });
+}
+
+AOTITorchError aoti_torch_create_parallel_guard(
+    bool state,
+    ParallelGuardHandle* ret_guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::ParallelGuard* guard = new c10::ParallelGuard(state);
+    *ret_guard = reinterpret_cast<ParallelGuardHandle>(guard);
+  });
+}
+
+AOTITorchError aoti_torch_delete_parallel_guard(ParallelGuardHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::ParallelGuard* parallel_guard =
+        reinterpret_cast<c10::ParallelGuard*>(guard);
+    delete parallel_guard;
+  });
+}
+
+bool aoti_torch_parallel_guard_is_enabled() {
+  return c10::ParallelGuard::is_enabled();
 }
 
 AOTITorchError aoti_torch_invoke_parallel(

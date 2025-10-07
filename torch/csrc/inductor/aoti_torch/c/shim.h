@@ -441,6 +441,18 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_thread_id_guard(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_thread_id_guard(ThreadIdGuardHandle guard);
 
+// ABI stable ParallelGuard handle - opaque pointer to avoid exposing C++ class
+struct ParallelGuardOpaque;
+using ParallelGuardHandle = ParallelGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_create_parallel_guard(bool state, ParallelGuardHandle* ret_guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_parallel_guard(ParallelGuardHandle guard);
+
+AOTI_TORCH_EXPORT bool aoti_torch_parallel_guard_is_enabled();
+
 // ABI stable invoke_parallel function
 typedef void (*AOTIParallelLambda)(int64_t begin, int64_t end, void* ctx);
 
