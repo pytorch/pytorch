@@ -14,6 +14,14 @@ from torch.utils._pytree import tree_map_only
 log = logging.getLogger(__name__)
 
 
+def _is_wait_tensor(node: fx.Node) -> bool:
+    """Check if a node is a wait_tensor operation."""
+    return (
+        node.op == "call_function"
+        and node.target == torch.ops._c10d_functional.wait_tensor.default
+    )
+
+
 @dataclass(frozen=True)
 class StorageKey:
     storage: torch.UntypedStorage
@@ -117,11 +125,22 @@ class GraphAliasTracker:
     def _get_input_storages(self, node: fx.Node) -> OrderedSet[StorageKey]:
         """
         Get all storages from a node's inputs.
+
+        For wait_tensor operations, this includes both the direct inputs (the collective handle)
+        and all inputs from the corresponding collective start operation, since the wait
+        is what actually allows those inputs to be freed.
         """
         input_storages: OrderedSet[StorageKey] = OrderedSet()
 
         for input_node in node.all_input_nodes:
             input_storages.update(self.node_to_output_storages[input_node])
+
+        # Handle collective start/wait pairs: wait_tensor should also "use" all inputs
+        # from the collective start operation, since it's the wait that releases them
+        if _is_wait_tensor(node):
+            collective_start = node.args[0]
+            assert isinstance(collective_start, fx.Node)
+            input_storages.update(self.node_to_storage_uses[collective_start])
 
         return input_storages
 

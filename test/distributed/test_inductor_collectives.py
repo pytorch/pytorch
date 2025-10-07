@@ -1380,6 +1380,59 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = torch.ops.c10d_functional.all_reduce(x, "sum", **self.get_world_trs())
         self.assertEqual(x.size(), out.size())
 
+    def test_memory_estimator_wait_tensor_usage(self):
+        """
+        Test that the memory estimator correctly tracks storage usage for wait_tensor operations.
+
+        The wait_tensor operation should track both its direct inputs (the collective handle)
+        and all inputs from the corresponding collective start operation, since the wait
+        is what actually allows those inputs to be freed.
+        """
+        from torch._inductor.fx_passes.memory_estimator import GraphAliasTracker, _is_wait_tensor
+
+        def example(a, b, *, tag, ranks, group_size):
+            x = torch.matmul(a, b)
+            # Start collective operation
+            ar = torch.ops.c10d_functional.all_reduce(x, "sum", tag, ranks, group_size)
+            # Perform other computation
+            y = torch.matmul(a, b)
+            # Wait for collective to complete
+            ar_result = torch.ops.c10d_functional.wait_tensor(ar)
+            return ar_result, y
+
+        example_partial = functools.partial(example, **self.get_world_trs())
+        inputs = (torch.ones(4, 4, device=self.device),) * 2
+
+        # Create FX graph to analyze
+        fx_module = make_fx(example_partial)(*inputs)
+        nodes = list(fx_module.graph.nodes)
+
+        # Find wait_tensor node
+        wait_node = None
+        collective_start_node = None
+        for node in nodes:
+            if _is_wait_tensor(node):
+                wait_node = node
+                collective_start_node = node.args[0]
+                break
+
+        self.assertIsNotNone(wait_node, "Should find wait_tensor node in graph")
+        self.assertIsNotNone(collective_start_node, "Should find collective start node")
+
+        # Create alias tracker
+        alias_tracker = GraphAliasTracker(nodes)
+
+        # Get storage uses for both nodes
+        wait_uses = alias_tracker.get_storage_uses(wait_node)
+        collective_uses = alias_tracker.get_storage_uses(collective_start_node)
+
+        # The wait_tensor node should use all storages from the collective start node
+        # plus its own direct input storages
+        self.assertTrue(collective_uses.issubset(wait_uses))
+
+        # Verify that wait_tensor is correctly identified
+        self.assertTrue(_is_wait_tensor(wait_node))
+
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
