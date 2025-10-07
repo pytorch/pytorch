@@ -937,6 +937,7 @@ def _check_graph_equivalence(x: torch.nn.Module, y: torch.nn.Module):
                 for key, value in pytree.tree_map(arg_dump, node.kwargs).items()
             ]
             target = node.target if node.op in ("call_function", "get_attr") else ""
+            # pyrefly: ignore  # bad-argument-type
             ret.append(f"{i}: {node.op}[{target}]({', '.join(args_dump)})")
             nodes_idx[id(node)] = i
         return "\n".join(ret)
@@ -1473,6 +1474,7 @@ class _ModuleFrame:
                 self.seen_attrs[self.child_fqn].add(node.target)
 
             self.copy_node(node)
+            # pyrefly: ignore  # unsupported-operation
             node_idx += 1
 
 
