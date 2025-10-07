@@ -1881,6 +1881,42 @@ class ScanModels:
             final, ys = scan_op(step, initial, xs)
             return final, ys
 
+    class ScanWithSumToInt(torch.nn.Module):
+        def __init__(self, reverse, dim):
+            super().__init__()
+            self.reverse = reverse
+            self.dim = dim
+
+        def forward(self, scan_op, init, xs):
+            def combine_fn(carry, x):
+                # Get an integer by sum().to(torch.int64).item()
+                int_val = x.sum().to(torch.int64).item()
+                # Use that integer to compute new_carry and ys
+                new_carry = carry + int_val
+                ys = carry * int_val + x
+                return new_carry, ys
+
+            return scan_op(combine_fn, init, xs, dim=self.dim, reverse=self.reverse)
+
+    class ScanWithNonzero(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+
+        def forward(self, scan_op, input_tensor):
+            nz_indices = input_tensor.nonzero().squeeze(-1)
+            torch._check(nz_indices.size(0) > 0)
+            nz_values = input_tensor[nz_indices]
+            init = nz_values.clone()
+            xs = nz_values
+
+            def combine_fn(carry, x):
+                new_carry = carry + x * 2
+                ys = carry * x + 1
+                return new_carry, ys
+
+            last_carry, ys = scan_op(combine_fn, init, xs)
+            return last_carry + init, ys
+
 
 class ScanTests(TestCase):
     def _run_test(
@@ -1890,6 +1926,7 @@ class ScanTests(TestCase):
         device,
         dynamic,
         autograd=False,
+        compile_fake_scan=True,
     ):
         import copy
 
@@ -1933,14 +1970,15 @@ class ScanTests(TestCase):
         result_exp = _run_model(model1, [_fake_scan] + inputs)
         result_eager = _run_model(model2, [scan] + inputs)
         result_compiled = _run_model(model3, [scan] + inputs)
-        result_compiled_exp = _run_model(
-            model4,
-            [_fake_scan] + inputs,
-        )
 
         self.assertEqual(result_exp, result_eager)
         self.assertEqual(result_exp, result_compiled)
-        self.assertEqual(result_exp, result_compiled_exp)
+        if compile_fake_scan:
+            result_compiled_exp = _run_model(
+                model4,
+                [_fake_scan] + inputs,
+            )
+            self.assertEqual(result_exp, result_compiled_exp)
 
     def _compare_result(
         self,
@@ -2128,6 +2166,50 @@ class ScanTests(TestCase):
             device=device,
             dynamic=dynamic,
             autograd=autograd,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @parametrize("reverse", [False])
+    @parametrize("dim", [0])
+    @parametrize("autograd", [False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_scan_with_sum_to_int(self, device, dynamic, reverse, dim, autograd):
+        B = 4
+        T = 8
+        H = 3
+        init = torch.randn((B, H))
+        xs = torch.randn((T, B, H))
+        xs = xs.movedim(0, dim)
+        self._run_test(
+            model=ScanModels.ScanWithSumToInt(reverse=reverse, dim=dim),
+            inputs=(
+                init,
+                xs,
+            ),
+            device=device,
+            dynamic=dynamic,
+            autograd=autograd,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @parametrize("autograd", [False])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_scan_with_nonzero(self, device, dynamic, autograd):
+        # Create a tensor with some zero and non-zero elements
+        input_tensor = torch.tensor([0.0, 1.0, 0.0, 3.0, 0.0, 5.0], requires_grad=True)
+        self._run_test(
+            model=ScanModels.ScanWithNonzero(),
+            inputs=(input_tensor,),
+            device=device,
+            dynamic=dynamic,
+            autograd=autograd,
+            # Cannot compile fake scan since number of iterations
+            # is unbacked.
+            compile_fake_scan=False,
         )
 
 
