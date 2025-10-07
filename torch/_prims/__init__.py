@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import operator
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import partial, reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch._prims_common as utils
@@ -427,6 +427,7 @@ def _prim_elementwise_meta(
     # Acquires the device (if it exists) or number
     device = None
     number = None
+    # pyrefly: ignore  # bad-assignment
     for arg in args_:
         if isinstance(arg, TensorLike):
             if utils.is_cpu_scalar_tensor(arg):
@@ -1015,8 +1016,10 @@ def _div_aten(a, b):
     )
 
     if is_integral:
+        # pyrefly: ignore  # bad-argument-type
         return torch.div(a, b, rounding_mode="trunc")
     else:
+        # pyrefly: ignore  # bad-argument-type
         return torch.true_divide(a, b)
 
 
