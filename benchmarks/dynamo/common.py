@@ -226,7 +226,6 @@ BENCHMARK_USE_SGD = {
     "tf_efficientnet_b0",
     "ghostnet_100",
     "gmixer_24_224",
-    "tinynet_a",
 }
 
 # These models OOM in CI
@@ -256,19 +255,15 @@ CI_USE_SGD = {
     "moco",
     "timm_efficientdet",
     "ghostnet_100",
-    "regnety_002",
     "poolformer_m36",
     "inception_v3",
-    "tinynet_a",
     "selecsls42b",
     "mobilevit_s",
     "pytorch_CycleGAN_and_pix2pix",
     "vision_maskrcnn",
-    "resmlp_12_224",
     "dlrm",
     "resnet50",
     "dm_nfnet_f0",
-    "pit_b_224",
     "tf_mixnet_l",
 }
 

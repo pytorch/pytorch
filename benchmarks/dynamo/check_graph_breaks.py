@@ -44,7 +44,6 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
                 "hf_Roberta_base",
                 "hf_T5",
                 "hf_T5_base",
-                "levit_128",
                 "llava",
                 "microbench_unbacked_tolist_sum",
                 "resnet50",

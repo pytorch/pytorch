@@ -96,7 +96,6 @@ REQUIRE_HIGHER_TOLERANCE_AMP = {
 }
 
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
-    "levit_128",
     "sebotnet33ts_256",
     "beit_base_patch16_224",
     "cspdarknet53",
@@ -116,7 +115,6 @@ REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
 }
 
 SCALED_COMPUTE_LOSS = {
-    "ese_vovnet19b_dw",
     "fbnetc_100",
     "mnasnet_100",
     "mobilevit_s",

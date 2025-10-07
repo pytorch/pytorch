@@ -66,10 +66,6 @@ eca_halonext26ts,pass,7
 
 
 
-ese_vovnet19b_dw,pass,7
-
-
-
 fbnetc_100,pass,7
 
 
@@ -114,10 +110,6 @@ lcnet_050,pass,6
 
 
 
-levit_128,pass,7
-
-
-
 mixer_b16_224,pass,7
 
 
@@ -146,19 +138,11 @@ nfnet_l0,pass,7
 
 
 
-pit_b_224,pass,6
-
-
-
 pnasnet5large,pass,5
 
 
 
 poolformer_m36,pass,6
-
-
-
-regnety_002,pass,6
 
 
 
@@ -175,10 +159,6 @@ res2net50_14w_8s,pass,6
 
 
 res2next50,pass,6
-
-
-
-resmlp_12_224,pass,6
 
 
 
@@ -215,10 +195,6 @@ tf_efficientnet_b0,pass,6
 
 
 tf_mixnet_l,pass,6
-
-
-
-tinynet_a,pass,6
 
 
 
