@@ -3,9 +3,9 @@ import collections
 import inspect
 import logging
 import weakref
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, overload, Union
+from typing import Any, Optional, overload, Union
 
 import torch
 from torch import _C, _ops, Tensor
