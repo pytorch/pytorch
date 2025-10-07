@@ -2881,6 +2881,18 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     import torch._utils
 
     if isinstance(example_value, torch.Tensor):
+        # Check if the result is a sparse tensor - 
+        # Inductor cannot handle sparse tensors, so we need to graph break
+        if is_sparse_any(example_value) and (
+            not tx.export or not config.capture_sparse_compute
+        ):
+            unimplemented_v2(
+                gb_type="Sparse tensor operations are not supported by Inductor",
+                context="",
+                explanation="torch.compile with inductor backend does not support sparse tensors. "
+                "Operations that produce sparse tensors will cause a graph break.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         var = construct_tensor_variable(
             target_cls, tx, proxy, example_value, subclass_type, options
         )
