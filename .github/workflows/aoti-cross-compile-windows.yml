@@ -34,10 +34,10 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-default-label-prefix
     with:
-      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm86
-      docker-image-name: pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
+      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
       test-matrix: |
         { include: [
           { config: "aoti_cross_compile", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
