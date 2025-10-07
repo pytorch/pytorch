@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from enum import Enum
 from functools import lru_cache
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, cast, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -1884,13 +1884,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         send_ops: list[list[dist.Work]] = []
 
         # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
-        unshard_ops: dict[int, UnshardHandle] = {}
+        unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
         unsharded_stages = set()
 
         def _assert_unsharded(stage_idx: int):
             """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
             if stage_idx in unshard_ops:
-                unshard_ops[stage_idx].wait()
+                for op in unshard_ops[stage_idx]:
+                    op.wait()
                 del unshard_ops[stage_idx]
                 unsharded_stages.add(stage_idx)
             assert stage_idx in unsharded_stages, (
@@ -1955,7 +1956,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             stage_idx not in unsharded_stages
                             and stage_idx not in unshard_ops
                         ), f"Unsharding the same {stage_idx=} twice"
-                        unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)  # type: ignore[operator]
+                        for submodule in stage.submod.modules():
+                            if not isinstance(submodule, FSDPModule):
+                                continue
+                            handle = cast(
+                                UnshardHandle, submodule.unshard(async_op=True)
+                            )
+                            unshard_ops[stage_idx].append(handle)
                 elif comp_type == RESHARD:
                     if stage_uses_fsdp:
                         assert stage_idx in unsharded_stages, (
@@ -1964,7 +1971,10 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         assert stage_idx not in unshard_ops, (
                             f"Resharding {stage_idx=} before finishing unshard"
                         )
-                        stage.submod.reshard()  # type: ignore[operator]
+                        for submodule in stage.submod.modules():
+                            if not isinstance(submodule, FSDPModule):
+                                continue
+                            submodule.reshard()
                 elif comp_type == FORWARD:
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
