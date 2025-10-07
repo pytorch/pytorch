@@ -592,7 +592,6 @@ class TestUnbackedSymints(InductorTestCase):
     def test_to_int_with_unbacked_size(self, device):
         def fn(x):
             unbacked = x.item()
-            # torch._check(unbacked)
 
             # Transpose to avoid contig short-circuit.
             unbacked_size = torch.ones(
