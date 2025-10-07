@@ -14,10 +14,11 @@ import copy
 import functools
 import itertools
 import pprint
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
@@ -150,7 +151,7 @@ class AliasOfInputHandler:
         self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
-        self.functional_tensor = info.functional_tensor
+        self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(self, orig_inputs, fw_outs, out):
@@ -159,7 +160,7 @@ class AliasOfInputHandler:
             aliased_base_tensor,
             self.unwrap_out(out),
             self.requires_grad,
-            self.functional_tensor,
+            self.view_meta_sequence,
             replay_views=self.replay_views,
         )
 
@@ -190,7 +191,7 @@ class AliasOfIntermediateHandler:
 
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
-        self.functional_tensor = info.functional_tensor
+        self.view_meta_sequence = info.view_meta_sequence
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(self, orig_inputs, fw_outs, out):
@@ -199,7 +200,7 @@ class AliasOfIntermediateHandler:
             self._unwrap_aliased_base_tensor(aliased_base_tensor),
             self.unwrap_out(out),
             self.requires_grad,
-            self.functional_tensor,
+            self.view_meta_sequence,
             replay_views=self.replay_views,
         )
 
@@ -224,6 +225,7 @@ def make_output_handler(info, runtime_metadata, trace_joint):
 # not sure why AOTDispatcher needs to manually set this
 def maybe_mark_dynamic_helper(t: torch.Tensor, dims: set[int]):
     if hasattr(t, "_dynamo_weak_dynamic_indices"):
+        # pyrefly: ignore  # missing-attribute
         t._dynamo_weak_dynamic_indices |= dims
     else:
         t._dynamo_weak_dynamic_indices = dims.copy()  # type: ignore[attr-defined]
@@ -1141,6 +1143,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 
         def _unpack_synthetic_bases(primals: tuple[Any, ...]) -> list[Any]:
             f_args_inner = []
+            # pyrefly: ignore  # not-iterable
             for inner_idx_or_tuple in synthetic_base_info:
                 if isinstance(inner_idx_or_tuple, int):
                     f_args_inner.append(primals[inner_idx_or_tuple])
@@ -2111,6 +2114,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 return (ctx._autograd_function_id, *ctx.symints)
 
             @staticmethod
+            # pyrefly: ignore  # bad-override
             def forward(ctx, *deduped_flat_tensor_args):
                 args = deduped_flat_tensor_args
                 if backward_state_indices:
@@ -2147,6 +2151,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 #   in the fw output order.
                 fw_outs = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_fw,
+                    # pyrefly: ignore  # bad-argument-type
                     args,
                     disable_amp=disable_amp,
                 )
@@ -2342,6 +2347,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     _aot_id = aot_config.aot_id
 
                     @staticmethod
+                    # pyrefly: ignore  # bad-override
                     def forward(double_ctx, *unused_args):
                         return impl_fn(double_ctx)
 
