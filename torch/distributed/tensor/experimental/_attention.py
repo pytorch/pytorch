@@ -1165,17 +1165,20 @@ def _context_parallel_buffers(
     # generate the index tensor for rearranging the buffer if a load-balance
     # is available
     load_balance_indices = load_balancer._generate_indices() if load_balancer else None
+    assert load_balance_indices is None or load_balance_indices.ndim == 2, (
+        "load balance index expects shape (1, seq_len) or (B, seq_len) "
+        f"but got {load_balance_indices.shape}."
+    )
 
     new_buffers = []
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if load_balance_indices is not None:
-            if load_balance_indices.ndim == 1:
+            if load_balance_indices.size(0) == 1:  # identical load-balance in batch
                 buffer = torch.index_select(
-                    buffer, dim=seq_dim, index=load_balance_indices
+                    buffer, dim=seq_dim, index=load_balance_indices[0]
                 )
             else:
                 # load_balance_indices has shape (batch_size, seq_length)
-                # TODO: add shape check
                 # TODO: this for-looop can be done in a smarter way
                 lb_indices_batch_size = load_balance_indices.size(dim=0)
                 buffer_batch_size = buffer.size(dim=0)
@@ -1339,19 +1342,22 @@ def context_parallel_unshard(
         load_balancer._generate_indices(restore=True) if load_balancer else None
     )
 
+    assert restore_indices is None or restore_indices.ndim == 2, (
+        "load balance restore index expects shape (1, seq_len) or (B, seq_len) "
+        f"but got {restore_indices.shape}."
+    )
     unsharded_buffers = []
     for b, dim in zip(buffers, seq_dims):
         b = b.contiguous()
         unsharded_b = _maybe_wait(ft_c.all_gather_tensor(b, dim, mesh))
 
         if restore_indices is not None:
-            if restore_indices.ndim == 1:
+            if restore_indices.size(0) == 1:  # identical load-balance in batch
                 unsharded_b = torch.index_select(
-                    unsharded_b, dim=dim, index=restore_indices
+                    unsharded_b, dim=dim, index=restore_indices[0]
                 )
             else:
                 # restore_indices has shape (batch_size, seq_length)
-                # TODO: add shape check
                 # TODO: this for-looop can be done in a smarter way
                 lb_indices_batch_size = restore_indices.size(dim=0)
                 buffer_batch_size = unsharded_b.size(dim=0)
@@ -1461,12 +1467,19 @@ def create_cp_block_mask(
         local_q_size: int,
         qkv_rearrange_indices: Optional[torch.Tensor] = None,
     ) -> _mask_mod_signature:
+        assert qkv_rearrange_indices is None or qkv_rearrange_indices.ndim == 2, (
+            "load balance index expects shape (1, seq_len) or (B, seq_len) "
+            f"but got {qkv_rearrange_indices.shape}."
+        )
+
         def qkv_idx_restore(
             b: torch.Tensor, idx_post_rearrange: torch.Tensor
         ) -> torch.Tensor:
             if qkv_rearrange_indices is not None:
-                if qkv_rearrange_indices.ndim == 1:  # identical across batches
-                    idx_pre_rearrange = qkv_rearrange_indices[idx_post_rearrange]
+                if (
+                    qkv_rearrange_indices.size(0) == 1
+                ):  # identical load-balance in batch
+                    idx_pre_rearrange = qkv_rearrange_indices[0][idx_post_rearrange]
                 else:
                     idx_pre_rearrange = qkv_rearrange_indices[b][idx_post_rearrange]
             else:
