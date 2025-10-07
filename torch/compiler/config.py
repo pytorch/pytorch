@@ -15,11 +15,23 @@ contain configuration options that affect only a specific part of the compiler:
 import sys
 from typing import Optional
 
+from torch._environment import is_fbcode
 from torch.utils._config_module import Config, install_config_module
 
 
 __all__ = [
     "job_id",
+    "verbose", 
+    "recompile_limit",
+    "accumulated_recompile_limit", 
+    "fail_on_recompile_limit_hit",
+    "capture_scalar_outputs",
+    "capture_dynamic_output_shape_ops",
+    "allow_unspec_int_on_nn_module",
+    "skip_tensor_guards_with_matching_dict_tags",
+    "enable_cpp_symbolic_shape_guards",
+    "wrap_top_frame",
+    "reorderable_logging_functions",
 ]
 
 
@@ -118,6 +130,99 @@ force_cudagraph_gc: bool = Config(env_name_default="TORCH_CUDAGRAPH_GC", default
 """
 If True (the backward-compatible behavior) then gc.collect() before recording
 any cudagraph.
+"""
+
+
+# Migrated from torch._dynamo.config - Runtime Behavior Configuration
+
+verbose: bool = Config(env_name_default="TORCHDYNAMO_VERBOSE", default=False)
+"""
+Enable verbose logging for compilation. When True, prints full stack traces on warnings and errors.
+This is useful for debugging compilation issues and understanding what operations are causing problems.
+"""
+
+recompile_limit: int = Config(default=8)
+"""
+Controls the maximum number of cache entries with a guard on same ID_MATCH'd object.
+It also controls the maximum size of cache entries if they don't have any ID_MATCH'd guards.
+When this limit is reached, the function will be disabled for compilation to prevent
+excessive recompilation overhead.
+"""
+
+accumulated_recompile_limit: int = Config(default=256)
+"""
+Safeguarding to prevent horrible recompilation scenarios. This is the total accumulated
+cache limit across all functions to prevent excessive memory usage from compiled code caches.
+"""
+
+fail_on_recompile_limit_hit: bool = Config(default=False)
+"""
+Raise a hard error if cache limit is hit. If you are on a model where you know you've
+sized the cache correctly, this can help detect problems when you regress guards/specialization.
+This works best when recompile_limit=1. This flag is incompatible with suppress_errors.
+"""
+
+
+# Capture and Tracing Configuration
+
+capture_scalar_outputs: bool = Config(env_name_default="TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS", default=False)
+"""
+Enable capturing scalar outputs in the traced graph. Not all backends support scalars.
+Some calls on torch.Tensor (like .item()) return a scalar type. When this flag is set to False,
+we introduce a graph break instead of capturing. This requires dynamic_shapes to be True.
+"""
+
+capture_dynamic_output_shape_ops: bool = Config(env_name_default="TORCHDYNAMO_CAPTURE_DYNAMIC_OUTPUT_SHAPE_OPS", default=False)
+"""
+Enable capturing operators with dynamic output shapes (e.g., nonzero, unique).
+Not all backends support these operators. When this flag is set to False, we introduce
+a graph break instead of capturing. This requires dynamic_shapes to be True.
+If you set this to True, you probably also want capture_scalar_outputs.
+"""
+
+
+# Optimization and Performance Configuration
+
+allow_unspec_int_on_nn_module: bool = Config(default=False)
+"""
+Allow int members of NN modules to be potentially unspecialized through dynamic shape mechanism.
+Currently, Dynamo will always specialize on int members of NN module. However, there could be
+cases where this is undesirable, e.g., when tracking step count leading to constant recompilation
+and eventually eager fallback. Setting this flag to True enables the dynamic shape mechanism
+for int members. Defaults to False for backward compatibility.
+"""
+
+skip_tensor_guards_with_matching_dict_tags: bool = Config(default=True)
+"""
+Consider a tensor immutable if it is one of the values of a dictionary, and
+the dictionary tag is the same across invocation calls. This optimization can
+help reduce guard overhead for tensors stored in dictionaries.
+"""
+
+enable_cpp_symbolic_shape_guards: bool = Config(default=not is_fbcode())
+"""
+Use C++ guard manager for symbolic shapes. This can provide performance improvements
+for guard evaluation in symbolic shape handling. May be disabled in some environments
+like fbcode for compatibility reasons.
+"""
+
+wrap_top_frame: bool = Config(default=False)
+"""
+Take the function/module decorated with torch.compile and pass it through a wrapper.
+This ensures that nn.module hooks are also compiled in the same frame, providing
+better integration for modules with hooks.
+"""
+
+
+# Debugging and Logging Configuration
+
+reorderable_logging_functions: set = Config(default_factory=set)
+"""
+A set of logging functions which will be reordered to the end of graph breaks,
+allowing dynamo to construct larger graphs. Note that there are some limitations
+to this, such as how it does not correctly print objects that were mutated after
+the print statement. Functions in this set will be moved to execute after the
+compiled portion of the graph.
 """
 
 

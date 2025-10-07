@@ -31,7 +31,8 @@ from torch.utils._config_module import Config, get_tristate_env, install_config_
 log_file_name: Optional[str] = None
 
 # [@compile_ignored: debug] Verbose will print full stack traces on warnings and errors
-verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
+# MIGRATED: Now defined in torch.compiler.config and aliased here for backward compatibility
+verbose: bool = Config(alias="torch.compiler.config.verbose")
 
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
@@ -44,24 +45,22 @@ dead_code_elimination = True
 
 # disable (for a function) when cache reaches this size
 
-# controls the maximum number of cache entries with a guard on same ID_MATCH'd
-# object. It also controls the maximum size of cache entries if they don't have
-# any ID_MATCH'd guards.
-# [@compile_ignored: runtime_behaviour]
-recompile_limit = 8
+# MIGRATED: These configs are now defined in torch.compiler.config and aliased here for backward compatibility
+# [@compile_ignored: runtime_behaviour] 
+recompile_limit: int = Config(alias="torch.compiler.config.recompile_limit")
 
 # [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
-accumulated_recompile_limit = 256
+accumulated_recompile_limit: int = Config(alias="torch.compiler.config.accumulated_recompile_limit") 
 
 # [@compile_ignored: runtime_behaviour] skip tracing recursively if cache limit is hit (deprecated: does not do anything)
 skip_code_recursive_on_recompile_limit_hit = True
 
-# raise a hard error if cache limit is hit.  If you are on a model where you
+# MIGRATED: raise a hard error if cache limit is hit.  If you are on a model where you
 # know you've sized the cache correctly, this can help detect problems when
 # you regress guards/specialization.  This works best when recompile_limit = 1.
 # This flag is incompatible with: suppress_errors.
 # [@compile_ignored: runtime_behaviour]
-fail_on_recompile_limit_hit = False
+fail_on_recompile_limit_hit: bool = Config(alias="torch.compiler.config.fail_on_recompile_limit_hit")
 
 cache_size_limit: int = Config(alias="torch._dynamo.config.recompile_limit")
 accumulated_cache_size_limit: int = Config(
@@ -75,6 +74,7 @@ skip_code_recursive_on_cache_limit_hit: bool = Config(
 fail_on_cache_limit_hit: bool = Config(
     alias="torch._dynamo.config.fail_on_recompile_limit_hit"
 )
+
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
@@ -247,19 +247,17 @@ repro_ignore_non_fp = os.environ.get("TORCHDYNAMO_REPRO_IGNORE_NON_FP") == "1"
 # [@compile_ignored: runtime_behaviour]
 same_two_models_use_fp64 = True
 
-# Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
+# MIGRATED: Not all backends support scalars. Some calls on torch.Tensor (like .item()) return a scalar type.
 # When this flag is set to False, we introduce a graph break instead of capturing.
 # This requires dynamic_shapes to be True.
-capture_scalar_outputs = os.environ.get("TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS") == "1"
+capture_scalar_outputs: bool = Config(alias="torch.compiler.config.capture_scalar_outputs")
 
-# Not all backends support operators that have dynamic output shape (e.g.,
+# MIGRATED: Not all backends support operators that have dynamic output shape (e.g.,
 # nonzero, unique).  When this flag is set to False, we introduce a graph
 # break instead of capturing.  This requires dynamic_shapes to be True.
 # If you set this to True, you probably also want capture_scalar_outputs
 # (these are separated for historical reasons).
-capture_dynamic_output_shape_ops = (
-    os.environ.get("TORCHDYNAMO_CAPTURE_DYNAMIC_OUTPUT_SHAPE_OPS", "0") == "1"
-)
+capture_dynamic_output_shape_ops: bool = Config(alias="torch.compiler.config.capture_dynamic_output_shape_ops")
 
 # hybrid backed unbacked symints
 prefer_deferred_runtime_asserts_over_guards = False
@@ -274,13 +272,13 @@ prefer_deferred_runtime_asserts_over_guards = False
 # compile this code; however, this can be useful for export.
 force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 
-# Currently, Dynamo will always specialize on int members of NN module.
+# MIGRATED: Currently, Dynamo will always specialize on int members of NN module.
 # However, there could be cases where this is undesirable, e.g., when tracking
 # step count leading to constant recompilation and eventually eager fallback.
 # Setting this flag to True will allow int members to be potentially unspecialized
 # through dynamic shape mechanism.
 # Defaults to False for BC.
-allow_unspec_int_on_nn_module = False
+allow_unspec_int_on_nn_module: bool = Config(alias="torch.compiler.config.allow_unspec_int_on_nn_module")
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 3 modes.
@@ -347,9 +345,9 @@ skip_nnmodule_hook_guards = True
 # notice and lead to incorrect result.
 skip_no_tensor_aliasing_guards_on_parameters = True
 
-# Considers a tensor immutable if it is one of the values of a dictionary, and
+# MIGRATED: Considers a tensor immutable if it is one of the values of a dictionary, and
 # the dictionary tag is same across invocation calls.
-skip_tensor_guards_with_matching_dict_tags = True
+skip_tensor_guards_with_matching_dict_tags: bool = Config(alias="torch.compiler.config.skip_tensor_guards_with_matching_dict_tags")
 
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
 skip_guards_on_constant_func_defaults = True
@@ -429,8 +427,8 @@ use_numpy_random_stream = False
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
 
-# Use C++ guard manager for symbolic shapes
-enable_cpp_symbolic_shape_guards = not is_fbcode()
+# MIGRATED: Use C++ guard manager for symbolic shapes
+enable_cpp_symbolic_shape_guards: bool = Config(alias="torch.compiler.config.enable_cpp_symbolic_shape_guards")
 
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
@@ -547,11 +545,11 @@ capture_func_transforms = True
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
-# A set of logging functions which will be reordered to the end of graph breaks,
+# MIGRATED: A set of logging functions which will be reordered to the end of graph breaks,
 # allowing dynamo to construct large graph. Note that there are some
 # limitations to this, such as how it does not correctly print objects that were
 # mutated after the print statement.
-reorderable_logging_functions: set[Callable[[Any], None]] = set()
+reorderable_logging_functions: set = Config(alias="torch.compiler.config.reorderable_logging_functions")
 
 # A set of methods that will be ignored while tracing,
 # to prevent graph breaks.
@@ -680,9 +678,9 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
 # distributed jobs to timeout with Kineto profiler when this is set to True.
 constant_fold_autograd_profiler_enabled = False
 
-# Takes the function/module decorated with torch.compile and passes it through a
+# MIGRATED: Takes the function/module decorated with torch.compile and passes it through a
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
-wrap_top_frame = False
+wrap_top_frame: bool = Config(alias="torch.compiler.config.wrap_top_frame")
 
 # Flag to record runtime overhead in profile traces. Used for pre-graph bytecode
 # and AOTAutograd runtime wrapper.
