@@ -100,7 +100,7 @@ def implements_per_sample_grads(torch_function):
 # This is a __torch_function__ object but it could have also been a Tensor Extension
 # with a dispatch key.
 #
-# Needs to be a tensor subclass to allow reparamaterization
+# Needs to be a tensor subclass to allow reparameterization
 class ExpandedWeight(torch.Tensor):
     def __init__(self, orig_weight, batch_size, loss_reduction):
         self.batch_size = batch_size
