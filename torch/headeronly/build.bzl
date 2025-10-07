@@ -4,7 +4,7 @@ def define_targets(rules):
     # for filepaths.
     is_buck = hasattr(native, "read_config")
     template_arg = "version.h.in" if is_buck else "$(location version.h.in)"
-    
+
     genrule_args = {
         "name": "version_h",
         "srcs": [
@@ -17,12 +17,12 @@ def define_targets(rules):
                "--version-path $(location //:version.txt) --output-path $@ ",
         "tools": ["//tools/setup_helpers:gen_version_header"],
     }
-    
+
     # Add visibility only for Bazel, buck genrule in fbcode.bzl does not
     # support this argument
     if not is_buck:
         genrule_args["visibility"] = ["//visibility:public"]
-    
+
     rules.genrule(**genrule_args)
 
     rules.cc_library(
