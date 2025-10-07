@@ -56,6 +56,7 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
+#include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <torch/csrc/autograd/generated/python_return_types.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
@@ -72,6 +73,7 @@
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
+#include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
@@ -492,7 +494,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
 
 static PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  Py_ssize_t num_args = args ? (Py_ssize_t)PyTuple_Size(args) : 0;
+  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
   TORCH_CHECK(num_args == 2, "expected exactly 2 arguments");
   PyObject* arg1 = PyTuple_GET_ITEM(args, 0);
   TORCH_CHECK(THPSize_Check(arg1), "expected a torch.Size as argument 1");
@@ -2090,8 +2092,10 @@ PyObject* initModule() {
   torch::cpu::initModule(module);
   torch::accelerator::initModule(module);
   torch::instruction_counter::initModule(module);
+  torch::acc::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
+  torch::functionalization::initModule(module);
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -2491,7 +2495,8 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_fp32_precision_getter",
       [](const std::string& backend, const std::string& op) {
-        return at::globalContext().float32Precision(backend, op);
+        return at::precision2str(at::globalContext().float32Precision(
+            at::str2backend(backend), at::str2op(op)));
       });
 
   py_module.def(
@@ -2499,7 +2504,10 @@ Call this whenever a new thread is created in order to propagate values from
       [](const std::string& backend,
          const std::string& op,
          const std::string& precision) {
-        at::globalContext().setFloat32Precision(backend, op, precision);
+        at::globalContext().setFloat32Precision(
+            at::str2backend(backend),
+            at::str2op(op),
+            at::str2precision(precision));
         return precision;
       });
 

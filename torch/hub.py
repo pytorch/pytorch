@@ -334,7 +334,7 @@ def _check_repo_is_trusted(
         if not is_trusted:
             warnings.warn(
                 "You are about to download and run code from an untrusted repository. In a future release, this won't "
-                "be allowed. To add the repository to your trusted list, change the command to {calling_fn}(..., "
+                f"be allowed. To add the repository to your trusted list, change the command to {calling_fn}(..., "
                 "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
                 f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
                 f"'yes'. You can also use {calling_fn}(..., trust_repo='check') which will only prompt for "
@@ -421,7 +421,7 @@ def set_dir(d: Union[str, os.PathLike]) -> None:
         d (str): path to a local folder to save downloaded models & weights.
     """
     global _hub_dir
-    _hub_dir = os.path.expanduser(d)
+    _hub_dir = os.path.expanduser(d)  # pyrefly: ignore  # no-matching-overload
 
 
 def list(

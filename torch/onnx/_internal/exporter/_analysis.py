@@ -122,6 +122,7 @@ def _format_model_info(model_info: ModelInfo) -> str:
 
         target_to_nodes = defaultdict(list)
         for node, _ in model_info.dispatch_failures:
+            # pyrefly: ignore  # index-error
             target_to_nodes[str(node.target)].append(node)
 
         target_to_messages = {}
