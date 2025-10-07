@@ -11,7 +11,6 @@
 
 namespace torch::cuda::CUDAPluggableAllocator {
 
-
 TORCH_CUDA_CPP_API std::shared_ptr<
     c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator();
