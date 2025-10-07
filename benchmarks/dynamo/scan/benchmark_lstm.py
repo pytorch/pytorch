@@ -51,7 +51,7 @@ class LSTM(torch.nn.Module):
             c_new = f * c + i * g
             h_new = o * torch.tanh(c_new)
             
-            return (h_new, c_new), o + 0.
+            return (h_new, c_new.clone()), h_new.clone()
         
         carry, outs = scan(lstm_combine, init, xs, dim=0)
         
@@ -106,39 +106,4 @@ print(f"PyTorch {t_pytorch} vs. Scan {t_scan} vs. Scan (Comp.) {t_scan_comp}")
 ###############################################################################
 # Run models with backward
 ###############################################################################
-# TODO: This is to be done!
-def wrapper_torch_bwd(fn, xs):
-    result = fn(xs)
-    result = result[0][:10, :30].sum()
-    # grad_init = [torch.ones_like(el) for el in result]
-    # grad = torch.autograd.grad(result, xs, grad_init)
-    grad = torch.autograd.grad(result, xs)
-    return grad
-
-
-# torch.testing.assert_close(result_pytorch, result)
-
-# grad_init = torch.ones_like(result_pytorch)
-# grad_pytorch = torch.autograd.grad(result_pytorch, xs, grad_init)[0]
-# grad = torch.autograd.grad(result, xs, grad_init)[0]
-
-# # The map function computes x ** y for each element, where y = 2
-# # Therefore, we expect the correct gradients to be x * 2
-# print("Gradient of PyTorch:\n", grad_pytorch)
-# print("Gradient of cond:\n", grad)
-# torch.testing.assert_close(grad_pytorch, grad)
-
-    
-# # Matrix implementation for associative_scan
-# result_grad_matrix, t_grad_matrix = time_fn(lambda xs: wrapper_torch_bwd(model_matrix, xs), xs, warm_up=warm_up_cycles)
-
-# # Memory-efficient implementation for associative_scan
-# result_grad_memeff, t_grad_memeff = time_fn(lambda xs: wrapper_torch_bwd(model_memeff, xs), xs, warm_up=warm_up_cycles)
-
-# # Non-jit compiled JAX model
-# result_grad_jax, t_grad_jax = time_fn(lambda xs: wrapper_jax_bwd(s5_operator_jax, xs), xs_jax, warm_up=warm_up_cycles)
-
-# # jit compiled JAX model
-# result_grad_jax_jit, t_grad_jax_jit = time_fn(lambda xs: wrapper_jax_jit_bwd(s5_operator_jax, xs), xs_jax, warm_up=warm_up_cycles)
-
-# print(f"Matrix {t_grad_matrix} vs. Mem eff. {t_grad_memeff} vs. JAX {t_grad_jax} vs. JAX (JIT) {t_grad_jax_jit}")
+# TODO To be done
