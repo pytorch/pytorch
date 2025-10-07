@@ -370,10 +370,18 @@ def _load_global_deps() -> None:
             "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
             "nvshmem": "libnvshmem_host.so.*[0-9]",
             "cufile": "libcufile.so.*[0-9]",
         }
+
+        from torch.version import cuda as cuda_ver
+        from torch.torch_version import TorchVersion
+        cuda_version = TorchVersion(cuda_ver)
+
+        # Include libnvToolsExt only for older CUDA builds
+        # See: https://github.com/pytorch/pytorch/issues/152756
+        if (cuda_version and cuda_version < "12.9"):
+            cuda_libs["nvtx"] = "libnvToolsExt.so.*[0-9]"
 
         is_cuda_lib_err = [
             lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
