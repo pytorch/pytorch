@@ -2,18 +2,26 @@
 # pyre-strict
 
 import os
+import pickle
 from itertools import combinations
+from random import Random
 from typing import Sequence
 from unittest.mock import patch
 
 from filelock import FileLock
 
-from torch._inductor.runtime.caching import config, context, exceptions
+from torch._inductor.runtime.caching import config, context, exceptions, utils
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+
+
+class TestMixin:
+    @property
+    def random_string(self) -> str:
+        return f"s-{Random().randint(0, 2**32)}"
 
 
 @instantiate_parametrized_tests
@@ -329,6 +337,96 @@ class ExceptionsTest(TestCase):
         self.assertTrue(
             issubclass(exceptions.ValueUnPicklingError, exceptions.ValueDecodingError)
         )
+
+
+@instantiate_parametrized_tests
+class UtilsTest(TestMixin, TestCase):
+    def test_lru_cache(self) -> None:
+        """Test that the LRU cache decorator works correctly with various argument types.
+
+        Verifies that the _lru_cache decorator properly caches function results
+        and handles different types of arguments including integers, floats, strings,
+        and keyword arguments. Tests that cached calls return identical results
+        to non-cached calls with proper argument preservation.
+        """
+
+        @utils._lru_cache
+        def foo(*args, **kwargs):
+            return args, kwargs
+
+        self.assertEqual(
+            foo(0),
+            (
+                (0,),
+                {},
+            ),
+        )
+        self.assertEqual(
+            foo(0.0),
+            (
+                (0.0,),
+                {},
+            ),
+        )
+        self.assertEqual(
+            foo("foo"),
+            (
+                ("foo",),
+                {},
+            ),
+        )
+        self.assertEqual(
+            foo("foo", bar="bar"),
+            (
+                ("foo",),
+                {"bar": "bar"},
+            ),
+        )
+
+    @parametrize("pickle_able", [True, False])
+    def test_try_pickle_key(self, pickle_able: bool) -> None:
+        """Test that cache key pickling works correctly and raises appropriate exceptions.
+
+        Verifies that the _try_pickle_key function successfully pickles serializable
+        cache keys and raises KeyPicklingError for non-serializable keys like lambda
+        functions. Tests both the successful pickling path and error handling.
+        """
+        if pickle_able:
+            key: str = self.random_string
+            self.assertEqual(pickle.loads(utils._try_pickle_key(key)), key)
+        else:
+            with self.assertRaises(exceptions.KeyPicklingError):
+                _ = utils._try_pickle_key(lambda: None)
+
+    @parametrize("pickle_able", [True, False])
+    def test_try_pickle_value(self, pickle_able: bool) -> None:
+        """Test that cache value pickling works correctly and raises appropriate exceptions.
+
+        Verifies that the _try_pickle_value function successfully pickles serializable
+        cache values and raises ValuePicklingError for non-serializable values like
+        lambda functions. Tests both successful pickling and proper error handling.
+        """
+        if pickle_able:
+            value: str = self.random_string
+            self.assertEqual(pickle.loads(utils._try_pickle_value(value)), value)
+        else:
+            with self.assertRaises(exceptions.ValuePicklingError):
+                _ = utils._try_pickle_value(lambda: None)
+
+    @parametrize("unpickle_able", [True, False])
+    def test_try_unpickle_value(self, unpickle_able: bool) -> None:
+        """Test that cache value unpickling works correctly and raises appropriate exceptions.
+
+        Verifies that the _try_unpickle_value function successfully unpickles valid
+        pickled data and raises ValueUnPicklingError for invalid data like None.
+        Tests both successful unpickling and proper error handling for corrupted data.
+        """
+        if unpickle_able:
+            value: str = self.random_string
+            self.assertEqual(utils._try_unpickle_value(pickle.dumps(value)), value)
+        else:
+            with self.assertRaises(exceptions.ValueUnPicklingError):
+                _ = utils._try_unpickle_value(b"foo")
 
 
 if __name__ == "__main__":
