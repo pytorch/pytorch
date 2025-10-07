@@ -304,7 +304,7 @@ def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
 
 
 def _preload_cuda_deps(
-    lib_folder: str, lib_name: str, is_required: boolean = True
+    lib_folder: str, lib_name: str, is_required: bool = True
 ) -> None:
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
