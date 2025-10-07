@@ -17,7 +17,7 @@ import re
 import sys
 import threading
 import time
-from collections import defaultdict, namedtuple
+from collections import namedtuple
 from typing import (
     Any,
     Callable,
@@ -2878,49 +2878,18 @@ def adapt_config_for_tiling(
     )
 
 
-class ReductionConfigKey:
-    """
-    The part of reduction configs that affect determinism.
-    """
-
-    def __init__(self, config: Config):
-        # persistent reduction does not have a RBLOCK, use -1 as a flag
-        self.r0_block = config.kwargs.get("R0_BLOCK", -1)
-        self.r1_block = config.kwargs.get("R1_BLOCK", -1)
-        self.num_warps = config.num_warps
-        self.num_ctas = config.num_ctas
-
-    def __hash__(self) -> int:
-        return hash((self.r0_block, self.r1_block, self.num_warps, self.num_ctas))
-
-    def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, ReductionConfigKey)
-            and self.r0_block == other.r0_block
-            and self.r1_block == other.r1_block
-            and self.num_warps == other.num_warps
-            and self.num_ctas == other.num_ctas
-        )
-
-
 def filter_reduction_configs_for_determinism(
     inductor_meta: dict[str, Any], configs: list[Config]
 ) -> list[Config]:
     """
     Filter configs for reduction so the numerics can be deterministic.
 
-    This function group configs by fields that affect determinism
-    - rblock size
-    - num warps
-    - num ctas
-    and return the most promising group based on heuristics.
-
     Heuristics:
     - skip reduction configs with too small RBLOCK
     - skip reduction configs with XBLOCK==1 if we are confident it will not perform well
-    - pick the group with largest size: autotuning more configs may have more chance to give better perf
-    - if there is a tie, pick the group with second largest RBLOCK
-    - if there is still a tie, pick the group with second largest num_warps
+    - if there is a tie, pick the config with second largest RBLOCK
+    - if there is still a tie, pick the config with second largest num_warps
+    - if there is still a tie, pick the config with second largest XBLOCK
     """
     configs = unique_configs(configs)
     assert len(configs) > 0
@@ -2962,51 +2931,50 @@ def filter_reduction_configs_for_determinism(
     if len(newconfigs) > 0:
         configs = newconfigs
 
-    groups: defaultdict[ReductionConfigKey, list[Config]] = defaultdict(
-        list
-    )  # group configs by RBLOCK, num_warps, num_ctas
+    assert len(configs) > 0
 
-    for c in configs:
-        key = ReductionConfigKey(c)
-        groups[key].append(c)
+    def _r0_block(c):
+        return c.kwargs.get("R0_BLOCK", -1)
 
-    assert len(groups) > 0
+    def _xblock(c):
+        return c.kwargs.get("XBLOCK", -1)
 
-    def _pick_group():
-        grouplist = sorted(groups.items(), key=lambda x: len(x[1]), reverse=True)
-        max_group_size = len(grouplist[0][1])
-        grouplist = [*filter(lambda g: len(g[1]) == max_group_size, grouplist)]
+    def _num_warps(c):
+        return c.num_warps
 
-        assert len(grouplist) > 0
-        if len(grouplist) == 1:
-            return grouplist[0][1]
+    def _pick_second_largest(accessor):
+        nonlocal configs
+        configs = sorted(configs, key=lambda x: accessor(x))
+        if accessor(configs[0]) != accessor(configs[-1]):
+            max_val = accessor(configs[-1])
+            configs = [*filter(lambda x: accessor(x) != max_val, configs)]
+            second_max_val = accessor(configs[-1])
+            configs = [*filter(lambda x: accessor(x) == second_max_val, configs)]
+        return configs
+
+    def _pick_config():
+        nonlocal configs
+        assert len(configs) > 0
+        if len(configs) == 1:
+            return configs[0]
 
         # break tie by R0_BLOCK
-        grouplist = sorted(grouplist, key=lambda x: x[0].r0_block)
-        if grouplist[0][0].r0_block != grouplist[-1][0].r0_block:
-            max_r0_block = grouplist[-1][0].r0_block
-            grouplist = [*filter(lambda x: x[0].r0_block != max_r0_block, grouplist)]
-            second_max_r0_block = grouplist[-1][0].r0_block
-            grouplist = [
-                *filter(lambda x: x[0].r0_block == second_max_r0_block, grouplist)
-            ]
-        if len(grouplist) == 1:
-            return grouplist[0][1]
+        configs = _pick_second_largest(_r0_block)
+        if len(configs) == 1:
+            return configs[0]
 
         # break tie by num_warps
-        grouplist = sorted(grouplist, key=lambda x: x[0].num_warps)
-        if grouplist[0][0].num_warps != grouplist[-1][0].num_warps:
-            max_num_warps = grouplist[-1][0].num_warps
-            grouplist = [*filter(lambda x: x[0].num_warps != max_num_warps, grouplist)]
-            second_max_num_warps = grouplist[-1][0].num_warps
-            grouplist = [
-                *filter(lambda x: x[0].num_warps == second_max_num_warps, grouplist)
-            ]
+        configs = _pick_second_largest(_num_warps)
+        if len(configs) == 1:
+            return configs[0]
+
+        # break tie by XBLOCK
+        configs = _pick_second_largest(_xblock)
 
         # there is still a tie, pick the first one
-        return grouplist[0][1]
+        return configs[0]
 
-    configs = _pick_group()
+    configs = [_pick_config()]
 
     if log.isEnabledFor(logging.DEBUG):
         log.debug("reduction configs after filtering:")
