@@ -2491,6 +2491,18 @@ if torch._C.has_zendnn:  # type: ignore[attr-defined]
     ):
         return weight.new_empty(weight.shape)
 
+    @register_meta(aten.zendnn_linear_unary_binary.default)
+    def meta_zendnn_linear_unary_binary(
+        input,
+        weight,
+        binary_input,
+        bias=None,
+        is_weight_prepacked=False,
+        post_op_1="none",
+        post_op_2="none",
+    ):
+        return binary_input.new_empty(binary_input.shape)
+
 
 if torch._C._has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
