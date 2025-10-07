@@ -6101,6 +6101,9 @@ class ExternKernel(InputsKernel):
     def require_exact_strides(
         cls, x: IRNode, exact_strides: Sequence[_IntLike], allow_padding: bool = False
     ) -> IRNode:
+        assert all(isinstance(s, (int, Expr)) for s in exact_strides), (
+            f"Expect stride to be int or Expr but got {exact_strides}"
+        )
         return cls.require_strides(
             x, exact_strides=exact_strides, allow_padding=allow_padding
         )
@@ -8763,7 +8766,9 @@ class WhileLoop(ExternKernel):
                     new_tb = WhileLoop._maybe_wrap_as_tensor_box(tb)
                     ret.append(
                         ExternKernel.require_exact_strides(
-                            new_tb, fk.stride(), allow_padding=False
+                            new_tb,
+                            [Conditional._maybe_expr(s) for s in fk.stride()],
+                            allow_padding=False,
                         )
                     )
                 else:
