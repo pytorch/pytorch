@@ -547,6 +547,7 @@ def _dynamo_graph_capture_for_export(
             clean_export_root(transformed_graph)
 
             transformed_graph.meta["module_call_specs"] = module_call_spec
+            transformed_graph.meta["fake_mode"] = fake_mode
 
             return transformed_graph
 
