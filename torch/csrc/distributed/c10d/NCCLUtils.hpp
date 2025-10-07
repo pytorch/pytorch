@@ -367,7 +367,7 @@ class NCCLComm {
   int rank_{};
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
-  std::optional<std::string> commFailureReason_{};
+  std::optional<std::string> commFailureReason_;
   bool initialized_{false};
   // Whether this communicator is using nonblocking mode. Recorded during comm
   // creation or split. For safety, we give a default value of true (more
