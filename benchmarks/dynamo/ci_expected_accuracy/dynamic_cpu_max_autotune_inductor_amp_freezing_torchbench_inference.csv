@@ -138,7 +138,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,pass,25
+hf_BigBird,pass,27
 
 
 
@@ -158,7 +158,7 @@ hf_Longformer,pass,4
 
 
 
-hf_Reformer,pass,8
+hf_Reformer,pass,5
 
 
 
@@ -334,7 +334,7 @@ timm_vovnet,pass,0
 
 
 
-torch_multimodal_clip,pass,3
+torch_multimodal_clip,pass,0
 
 
 
@@ -346,7 +346,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,fail_accuracy,29
+vision_maskrcnn,fail_accuracy,30
 
 
 

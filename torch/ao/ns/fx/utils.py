@@ -404,6 +404,7 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
                 for model_name, model_results in model_name_to_results.items():
                     if model_name == model_name_with_fqns:
                         continue
+                    # pyrefly: ignore  # bad-assignment
                     for i in range(len(model_results)):
                         fqn = ref_model_results[i]["fqn"]
                         model_results[i]["fqn"] = fqn
@@ -467,6 +468,7 @@ def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tenso
     Return:
         float or tuple of floats
     """
+    # pyrefly: ignore  # unsupported-operation
     return torch.sqrt(((x - y) ** 2).sum() / (x**2).sum())
 
 

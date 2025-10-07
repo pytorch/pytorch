@@ -59,6 +59,13 @@ IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r"BooleanAtom not allowed in this context"
     ),  # https://github.com/pytorch/pytorch/issues/160726
+    re.compile(
+        r"TypeError\(\"unsupported operand type\(s\) for \*: 'SymBool' and 'FakeTensor'\"\)"
+    ),  # https://github.com/pytorch/pytorch/issues/164684
+    re.compile(r"KeyError: u\d+"),  # https://github.com/pytorch/pytorch/issues/164685
+    re.compile(
+        r"torch\._inductor\.exc\.InductorError: CppCompileError: C\+\+ compile error"
+    ),  # https://github.com/pytorch/pytorch/issues/164686
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]
@@ -90,13 +97,18 @@ def is_ignored_output(output: str) -> int:
     return -1
 
 
-def run_fuzzer_with_seed(seed: int, template: str = "default") -> FuzzerResult:
+def run_fuzzer_with_seed(
+    seed: int,
+    template: str = "default",
+    supported_ops: Optional[str] = None,
+) -> FuzzerResult:
     """
     Run fuzzer.py with a specific seed.
 
     Args:
         seed: The seed value to pass to fuzzer.py
         template: The template to use for code generation
+        supported_ops: Comma-separated ops string with optional weights
 
     Returns:
         FuzzerResult dataclass instance
@@ -114,6 +126,10 @@ def run_fuzzer_with_seed(seed: int, template: str = "default") -> FuzzerResult:
             "--template",
             template,
         ]
+
+        # Append supported ops if provided
+        if supported_ops:
+            cmd.extend(["--supported-ops", supported_ops])
 
         result = subprocess.run(
             cmd,
@@ -213,6 +229,7 @@ def run_multi_process_fuzzer(
     seed_count: int = 100,
     verbose: bool = False,
     template: str = "default",
+    supported_ops: Optional[str] = None,
 ) -> None:
     """
     Run the multi-process fuzzer.
@@ -222,6 +239,8 @@ def run_multi_process_fuzzer(
         seed_start: Starting seed value (inclusive)
         seed_count: Number of seeds to run
         verbose: Whether to print detailed output
+        template: The template to use for code generation
+        supported_ops: Comma-separated ops string with optional weights
     """
     seeds = list(range(seed_start, seed_start + seed_count))
 
@@ -250,7 +269,9 @@ def run_multi_process_fuzzer(
             # Submit all seeds to the process pool
             future_results = []
             for seed in seeds:
-                future = pool.apply_async(run_fuzzer_with_seed, (seed, template))
+                future = pool.apply_async(
+                    run_fuzzer_with_seed, (seed, template, supported_ops)
+                )
                 future_results.append(future)
 
             # Set up progress bar

@@ -303,7 +303,7 @@ def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
     return nvidia_lib_paths + lib_paths
 
 
-def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
+def _preload_cuda_deps(lib_folder: str, lib_name: str, required: bool = True) -> None:  # type: ignore[valid-type]
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == "Linux", "Should only be called on Linux"
@@ -314,9 +314,10 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
         if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
             break
-    if not lib_path:
+    if not lib_path and required:
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
-    ctypes.CDLL(lib_path)
+    if lib_path:
+        ctypes.CDLL(lib_path)
 
 
 # See Note [Global dependencies]
@@ -355,8 +356,6 @@ def _load_global_deps() -> None:
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
-        from torch.version import cuda as cuda_version
-
         cuda_libs: dict[str, str] = {
             "cublas": "libcublas.so.*[0-9]",
             "cudnn": "libcudnn.so.*[0-9]",
@@ -370,7 +369,6 @@ def _load_global_deps() -> None:
             "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
             "nvshmem": "libnvshmem_host.so.*[0-9]",
             "cufile": "libcufile.so.*[0-9]",
         }
@@ -382,6 +380,9 @@ def _load_global_deps() -> None:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
+
+        # libnvToolsExt is Optional Dependency
+        _preload_cuda_deps("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
@@ -1692,6 +1693,7 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
+# TODO add deprecation annotation
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
@@ -2653,6 +2655,7 @@ def compile(
                     dynamic=dynamic,
                     disable=disable,
                     guard_filter_fn=guard_filter_fn,
+                    # pyrefly: ignore  # bad-argument-type
                 )(model)(*args, **kwargs)
 
         return export_wrapped_fn
