@@ -1081,33 +1081,57 @@ def _create_cp_block_mask(
     device_mesh: DeviceMesh,
 ) -> BlockMask:
     """
-    This API creates a special BlockMask for Context Parallel FlexAttention:
-    1. This BlockMask is masking on the attention of Q shard and KV global views, by
-    mapping the local q_idx to the global q_idx before sending to mask_mod.
-    2. The kv_seq_length (i.e. seq_lengths[1]) of this blockMask is tailored to match
-    the sequence length of KV shard instead of KV global. This is to pass the shape check
-    in flex_atttention(). The correct value (i.e. the sequence length of KV global) will be
-    used in flex_attention once the shape check passes.
+    Create a specialized BlockMask for Context Parallel FlexAttention.
+
+    This function creates a BlockMask that enables computation of attention results
+    for sharded Q attending to global KV. The mask appropriately handles the query
+    index offset required when each rank operates on a shard of the query sequence
+    while accessing the full key-value sequence.
+
+    The function internally rewrites the provided mask_mod function to translate local
+    query indices to global query indices, ensuring that the masking logic is applied
+    correctly across the distributed computation.
 
     Args:
-        mask_mod (Callable): Function to modify the mask over the global attention result.
+        mask_mod (Callable): Mask function that operates on global attention indices.
         B (int): Batch size.
         H (int): Number of query heads.
-        Q_LEN (int): Sequence length of query (global view).
-        KV_LEN (int): Sequence length of key/value (global view).
-        device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
+        Q_LEN (int): Global sequence length of the query.
+        KV_LEN (int): Global sequence length of the key/value.
+        device_mesh (DeviceMesh): Device mesh used for context parallelism.
 
-    Return:
-        :class:`BlockMask`: the block_mask to be used in flex_attention() within the
-        context_parallel() context.
+    Returns:
+        BlockMask: A block mask configured for the local query shard that can be used
+            with flex_attention() for the given cp_mesh.
 
-    .. warning::
-        This function cannot generate correct block_mask if the BLOCK_SIZE is not
-        ``_DEFAULT_SPARSE_BLOCK_SIZE`` which usually happens when the attention
-        size is smaller than 128. Please do not use context_parallel() when the
-        FlexAttention size is small.
+    Raises:
+        NotImplementedError: If Q_LEN is not divisible by (CP world size * BLOCK_SIZE).
+
+    Warning:
+        Currently requires Q_LEN to be divisible by CP mesh world size * BLOCK_SIZE
+        (BLOCK_SIZE defaults to 128). This constraint exists because the BlockMask
+        must handle both padding and offsets correctly. For example, if Q_LEN is 384,
+        CP world size is 2, and BLOCK_SIZE is 128, the local Q_LEN would be 192. In
+        such cases, both rank0 and rank1 would have paddings in their local BlockMasks.
+        Support for padding in this scenario is planned for future work.
+
+    Example:
+        >>> def causal_mask(b, h, q_idx, kv_idx):
+        >>>     return q_idx >= kv_idx
+        >>> block_mask = _create_cp_block_mask(
+        >>>     mask_mod=causal_mask,
+        >>>     B=2, H=8, Q_LEN=1024, KV_LEN=1024,
+        >>>     device_mesh=mesh
+        >>> )
     """
+
     from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
+
+    if Q_LEN % (device_mesh.size() * _DEFAULT_SPARSE_BLOCK_SIZE) != 0:
+        raise NotImplementedError(
+            f"Q_LEN {Q_LEN} is not divisible by CP mesh world size {device_mesh.size()} * "
+            f"BLOCK_SIZE {_DEFAULT_SPARSE_BLOCK_SIZE}. This is not supported yet. "
+        )
 
     compiled_create_block_mask = torch.compile(
         create_block_mask, dynamic=False, fullgraph=True
@@ -1234,8 +1258,11 @@ class _ContextParallel(ParallelStyle):
         all_args = []
 
         for arg in itertools.chain(args, kwargs.values()):
-            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
-                arg = DTensor.from_local(arg, mesh, placement, run_check=False)
+            if isinstance(arg, torch.Tensor):
+                if isinstance(arg, DTensor):
+                    assert arg._spec.placements == placement
+                else:
+                    arg = DTensor.from_local(arg, mesh, placement, run_check=False)
 
             all_args.append(arg)
 
