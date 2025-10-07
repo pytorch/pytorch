@@ -3,15 +3,14 @@ import contextlib
 import functools
 import logging
 import operator
-import warnings
 from collections.abc import Sequence
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
-from torch.distributed.device_mesh import DeviceMesh
+from torch._C import _DTensor_OpDispatcher_unwrap_to_op_info
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
 from torch.distributed.tensor._random import is_rng_supported_mesh
@@ -21,7 +20,6 @@ from torch.distributed.tensor._tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
-from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._python_dispatch import return_and_correct_aliasing
@@ -382,84 +380,7 @@ class OpDispatcher:
         args: tuple[object, ...],
         kwargs: dict[str, object],
     ) -> OpInfo:
-        # get runtime schema info to determine whether to use pytree to flatten inputs
-        runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
-            op_call, None
-        )
-
-        if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
-            # flatten args/kwargs when op says necessary
-            tree_args, args_spec = pytree.tree_flatten(args)
-            args_list: Sequence[object] = tree_args
-        else:
-            args_list, args_spec = args, None
-
-        args_schema: list[object] = []
-        kwargs_schema: dict[str, object] = {}
-        local_args: list[object] = []
-        local_kwargs: dict[str, object] = {}
-        compute_mesh: Optional[DeviceMesh] = None
-
-        for arg in args_list:
-            if isinstance(arg, dtensor.DTensor):
-                local_args.append(arg._local_tensor)
-                args_schema.append(arg._spec)
-                if compute_mesh is None:
-                    # record the first compute device mesh from args
-                    compute_mesh = arg.device_mesh
-            elif isinstance(arg, torch.Tensor):
-                compute_mesh = compute_mesh or try_find_mesh_from_args(
-                    op_call, args_list
-                )
-                args_schema.append(
-                    self._try_replicate_spec_for_scalar_tensor(
-                        op_call, arg, compute_mesh
-                    )
-                )
-                local_args.append(arg)
-            else:
-                # non DTensor/Tensor args (i.e. int/float/bool), just add to args_schema/local_args
-                args_schema.append(arg)
-                local_args.append(arg)
-
-        for k, v in kwargs.items():
-            if isinstance(v, dtensor.DTensor):
-                local_kwargs[k] = v._local_tensor
-                kwargs_schema[k] = v._spec
-            elif isinstance(v, torch.Tensor):
-                compute_mesh = compute_mesh or try_find_mesh_from_args(
-                    op_call, args_list
-                )
-                kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
-                    op_call, v, compute_mesh
-                )
-                local_kwargs[k] = v
-            else:
-                # non DTensor/Tensor args (i.e. int/float/bool), just add to args_schema/local_args
-                kwargs_schema[k] = v
-                local_kwargs[k] = v
-
-        assert compute_mesh is not None, (
-            f"found no DeviceMesh from dtensor args for {op_call}!"
-        )
-        op_info = OpInfo(
-            compute_mesh,
-            OpSchema(
-                op_call,
-                (
-                    pytree.tree_unflatten(args_schema, args_spec)
-                    if args_spec
-                    else tuple(args_schema)
-                ),
-                kwargs_schema,
-                schema_info=runtime_schema_info,
-            ),
-            args_schema,
-            tuple(local_args),
-            local_kwargs,
-            args_spec,
-        )
-        return op_info
+        return _DTensor_OpDispatcher_unwrap_to_op_info(self, op_call, args, kwargs)
 
     @staticmethod
     def wrap(res: object, spec: OutputSpecType) -> object:
@@ -486,38 +407,3 @@ class OpDispatcher:
             # if the res contains only non tensor values (i.e. int/float/none), we simply return it
             # without rewrapping to DTensor.
             return res
-
-    def _try_replicate_spec_for_scalar_tensor(
-        self,
-        op_call: torch._ops.OpOverload,
-        tensor_arg: torch.Tensor,
-        compute_mesh: DeviceMesh,
-    ) -> DTensorSpec:
-        # util function to produce a replicate spec for a scalar tensor arg/kwarg
-        if tensor_arg.numel() == 1 and tensor_arg.ndim == 1:
-            warnings.warn(
-                "Found a non-scalar tensor with numel=1 and ndim!=0, "
-                "we are implicitly creating a replicated DTensor for it. "
-                "However, please consider changing it to a scalar tensor "
-                "or explicitly create a DTensor under distributed environment."
-            )
-
-        if tensor_arg.numel() == 1 or self._allow_implicit_replication:
-            # scalar tensor can be safely treated as replicated
-            replication_spec = DTensorSpec(
-                compute_mesh,
-                (Replicate(),) * compute_mesh.ndim,
-                tensor_meta=TensorMeta(
-                    shape=tensor_arg.shape,
-                    stride=tensor_arg.stride(),
-                    dtype=tensor_arg.dtype,
-                ),
-            )
-        else:
-            raise RuntimeError(
-                f"{op_call}: got mixed torch.Tensor and DTensor, need to convert all"
-                " torch.Tensor to DTensor before calling distributed operators!"
-                " Please see https://docs.pytorch.org/docs/main/distributed.tensor.html#mixed-tensor-and-dtensor-operations"
-                " for more details."
-            )
-        return replication_spec

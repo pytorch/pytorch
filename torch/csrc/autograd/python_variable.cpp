@@ -1,5 +1,7 @@
+#include <ATen/DTensorState.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/core/impl/HermeticPyObjectTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
@@ -40,7 +42,6 @@
 
 #include <ATen/ATen.h>
 
-#include <c10/core/SymIntArrayRef.h>
 #include <structmember.h>
 #include <cstdint>
 #include <memory>
@@ -789,29 +790,78 @@ static PyObject* THPVariable_make_wrapper_subclass(
   END_HANDLE_TH_ERRORS
 }
 
-static py::handle get_dtensor_spec_class() {
 #if IS_PYBIND_2_13_PLUS
-  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
-      storage;
-  return storage
-      .call_once_and_store_result([]() -> py::object {
-        return py::module::import("torch")
-            .attr("distributed")
-            .attr("tensor")
-            .attr("_dtensor_spec")
-            .attr("DTensorSpec");
-      })
-      .get_stored();
+#define DEFINE_CACHING_PYTHON_IMPORT_GETTER(name, import_expr)             \
+  static py::handle name() {                                               \
+    PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object> \
+        storage;                                                           \
+    return storage                                                         \
+        .call_once_and_store_result(                                       \
+            []() -> py::object { return import_expr; })                    \
+        .get_stored();                                                     \
+  }
 #else
-  static py::handle dtensor_spec_class = py::object(py::module::import("torch")
-                                                        .attr("distributed")
-                                                        .attr("tensor")
-                                                        .attr("_dtensor_spec")
-                                                        .attr("DTensorSpec"))
-                                             .release();
-  return dtensor_spec_class;
+#define DEFINE_CACHING_PYTHON_IMPORT_GETTER(name, import_expr)     \
+  static py::handle name() {                                       \
+    static py::handle storage = py::object(import_expr).release(); \
+    return storage;                                                \
+  }
 #endif
-}
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_dtensor_class,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("DTensor"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_dtensor_spec_class,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("_dtensor_spec")
+        .attr("DTensorSpec"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_opinfo_class,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("_op_schema")
+        .attr("OpInfo"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_opschema_class,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("_op_schema")
+        .attr("OpSchema"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_replicate_class,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("placement_types")
+        .attr("Replicate"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_tensor_meta_class,
+    py::module::import("torch")
+        .attr("distributed")
+        .attr("tensor")
+        .attr("_dtensor_spec")
+        .attr("TensorMeta"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_pytree_tree_flatten,
+    py::module::import("pytree").attr("tree_flatten"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_pytree_tree_unflatten,
+    py::module::import("pytree").attr("tree_unflatten"))
 
 static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   const auto dtensor_spec_class = get_dtensor_spec_class();
@@ -842,10 +892,15 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   _(_local_tensor)                                            \
   _(_spec)                                                    \
   _(args_schema)                                              \
+  _(device_mesh)                                              \
   _(kwargs_schema)                                            \
+  _(ndim)                                                     \
+  _(needs_pytree)                                             \
   _(op)                                                       \
+  _(op_to_schema_info)                                        \
   _(schema_info)                                              \
   _(shape)                                                    \
+  _(sharding_propagator)                                      \
   _(size)                                                     \
   _(static_argnum)                                            \
   _(static_kwargkey)                                          \
@@ -879,6 +934,36 @@ static bool checked_not(PyObject* obj) {
     throw py::error_already_set();
   }
   return result;
+}
+
+static bool checked_istrue(PyObject* obj) {
+  int result = PyObject_IsTrue(obj);
+  if (result == -1) {
+    throw py::error_already_set();
+  }
+  return result;
+}
+
+// pybind11 does not not use PyObject_Vectorcall currently; it seems
+// to materialize a tuple of args instead.
+template <std::size_t N>
+static py::object checked_vectorcall(
+    PyObject* obj,
+    std::array<PyObject*, N> args) {
+  PyObject* result = PyObject_Vectorcall(obj, args.data(), N, nullptr);
+  if (!result) {
+    throw py::error_already_set();
+  }
+  return py::reinterpret_steal<py::object>(result);
+}
+
+template <typename... Args>
+static py::object checked_vectorcall(PyObject* obj, Args... args) {
+  static_assert(
+      (std::is_same_v<Args, PyObject*> && ...),
+      "must pass PyObject* to checked_vectorcall!");
+  std::array<PyObject*, sizeof...(Args)> arr = {args...};
+  return checked_vectorcall(obj, arr);
 }
 
 static c10::SymDimVector tuple_to_symintlist(PyObject* obj) {
@@ -1228,6 +1313,254 @@ static PyObject* DTensor_compute_global_tensor_info(
       "compute_global_tensor_info 3rd argument must be sequence!");
   const py::sequence placements = py::reinterpret_borrow<py::sequence>(args[2]);
   return DTensor_compute_global_tensor_info_impl(tensor, mesh, placements);
+  END_HANDLE_TH_ERRORS
+}
+
+static bool DTensor_Check(py::handle obj) {
+  const auto dtensor = get_dtensor_class();
+  if (Py_TYPE(obj.ptr()) == (PyTypeObject*)dtensor.ptr()) {
+    return true;
+  }
+  return py::isinstance(obj, dtensor);
+}
+
+static bool isinstance2(PyObject* obj, py::handle klass1, py::handle klass2) {
+  return Py_TYPE(obj) == (PyTypeObject*)klass1.ptr() ||
+      Py_TYPE(obj) == (PyTypeObject*)klass2.ptr() ||
+      py::isinstance(obj, klass1) || py::isinstance(obj, klass2);
+}
+
+static py::object try_find_mesh_from_args(
+    py::handle op_call,
+    const py::sequence& args) {
+  const auto dtensor = get_dtensor_class();
+  const auto dtensor_spec = get_dtensor_spec_class();
+  for (const auto& arg : args) {
+    if (isinstance2(arg.ptr(), dtensor, dtensor_spec)) {
+      return arg.attr(dtensor_interned_strings.device_mesh);
+    } else if (PyList_Check(arg.ptr())) {
+      if (PyList_Size(arg.ptr()) > 0) {
+        PyObject* const first_elem = PyList_GET_ITEM(arg.ptr(), 0);
+        if (isinstance2(first_elem, dtensor, dtensor_spec)) {
+          return py::handle(first_elem)
+              .attr(dtensor_interned_strings.device_mesh);
+        }
+      }
+    } else if (PyTuple_Check(arg.ptr())) {
+      if (PyTuple_Size(arg.ptr()) > 0) {
+        PyObject* const first_elem = PyTuple_GET_ITEM(arg.ptr(), 0);
+        if (isinstance2(first_elem, dtensor, dtensor_spec)) {
+          return py::handle(first_elem)
+              .attr(dtensor_interned_strings.device_mesh);
+        }
+      }
+    }
+  }
+  TORCH_CHECK_VALUE(
+      false, "Cannot find device mesh from args for op : ", py::str(op_call));
+}
+
+static /*DTensorSpec*/ py::object try_replicate_spec_for_scalar_tensor(
+    bool allow_implicit_replication,
+    py::handle op_call,
+    const Tensor& tensor_arg,
+    py::handle compute_mesh) {
+  const bool numel_is_one = tensor_arg.numel() == 1;
+  if (numel_is_one && tensor_arg.dim() == 1) {
+    TORCH_WARN(
+        "Found a non-scalar tensor with numel=1 and ndim!=0, "
+        "we are implicitly creating a replicated DTensor for it. "
+        "However, please consider changing it to a scalar tensor "
+        "or explicitly create a DTensor under distributed environment.");
+  }
+
+  TORCH_CHECK(
+      numel_is_one || allow_implicit_replication,
+      py::str(op_call),
+      "got mixed torch.Tensor and DTensor, need to convert all torch.Tensor to DTensor before calling distributed operators!");
+  // scalar tensor can be safely treated as replicated.
+
+  const auto num_placements =
+      py::cast<ssize_t>(compute_mesh.attr(dtensor_interned_strings.ndim));
+  py::tuple placements_tuple(num_placements);
+  py::object replicate = get_replicate_class()();
+  for (const auto idx : c10::irange(num_placements)) {
+    PyTuple_SET_ITEM(
+        placements_tuple.ptr(),
+        idx,
+        py::reinterpret_borrow<py::object>(replicate).release().ptr());
+  }
+
+  return get_dtensor_spec_class()(
+      compute_mesh,
+      placements_tuple,
+      // TODO: how do we efficiently pipe these back through Python?
+      // should we hit the Python APIs instead or is there
+      // equivalent C++ API?
+      get_tensor_meta_class()(
+          tensor_arg.sym_sizes(),
+          tensor_arg.sym_strides(),
+          tensor_arg.dtype()));
+}
+
+// TODO: wire this up in the module definition, try it out!
+static PyObject* DTensor_OpDispatcher_unwrap_to_op_info(
+    PyObject* mod,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  // TODO: come back and reduce use of attr() and callbacks into Python here as
+  // more components are ported to C++.
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_VALUE(
+      nargs == 4, "unwrap_to_op_info expects 4 arguments, got ", nargs);
+  // args[0] should be self, args[1] should be op_call which is
+  // torch._ops.OpOverload
+  const py::handle self_handle(args[0]);
+  const py::handle op_call_handle(args[1]);
+  const auto args_handle = py::reinterpret_borrow<py::tuple>(args[2]);
+  const auto kwargs_handle = py::reinterpret_borrow<py::dict>(args[3]);
+
+  const py::handle sharding_propagator =
+      self_handle.attr(dtensor_interned_strings.sharding_propagator);
+  const py::dict op_to_schema_info = py::reinterpret_borrow<py::dict>(
+      sharding_propagator.attr(dtensor_interned_strings.op_to_schema_info));
+
+  py::sequence args_list;
+  py::object args_spec;
+  PyObject* runtime_schema_info =
+      PyDict_GetItemWithError(op_to_schema_info.ptr(), op_call_handle.ptr());
+  if (runtime_schema_info &&
+      checked_istrue(py::handle(runtime_schema_info)
+                         .attr(dtensor_interned_strings.needs_pytree)
+                         .ptr())) {
+    py::tuple flatten_result = py::reinterpret_steal<py::tuple>(
+        checked_vectorcall(get_pytree_tree_flatten().ptr(), args_handle.ptr()));
+    TORCH_CHECK(flatten_result.size() == 2);
+    args_list = py::reinterpret_borrow<py::sequence>(flatten_result[0]);
+    args_spec = flatten_result[1];
+  } else if (!runtime_schema_info && PyErr_Occurred()) {
+    return nullptr;
+  } else {
+    runtime_schema_info = Py_None;
+    args_list = py::reinterpret_borrow<py::sequence>(args[2]);
+    args_spec = py::none();
+  }
+
+  const auto args_list_size = args_list.size();
+  py::list args_schema(args_list_size);
+  py::list local_args(args_list_size);
+  py::object compute_mesh = py::none();
+
+  Py_ssize_t idx = 0;
+  const bool allow_implicit_replication =
+      at::get_dtensor_allow_implicit_replication();
+  for (const auto& arg : args_list) {
+    if (DTensor_Check(arg.ptr())) {
+      PyList_SET_ITEM(
+          local_args.ptr(),
+          idx,
+          py::reinterpret_borrow<py::object>(
+              arg.attr(dtensor_interned_strings._local_tensor))
+              .release()
+              .ptr());
+      PyList_SET_ITEM(
+          args_schema.ptr(),
+          idx,
+          py::reinterpret_borrow<py::object>(
+              arg.attr(dtensor_interned_strings._spec))
+              .release()
+              .ptr());
+      if (compute_mesh.is_none()) {
+        compute_mesh = py::reinterpret_borrow<py::object>(
+            arg.attr(dtensor_interned_strings.device_mesh));
+      }
+    } else if (THPVariable_Check(arg.ptr())) {
+      if (compute_mesh.is_none()) {
+        compute_mesh = try_find_mesh_from_args(op_call_handle, args_list);
+      }
+      PyList_SET_ITEM(
+          args_schema.ptr(),
+          idx,
+          try_replicate_spec_for_scalar_tensor(
+              allow_implicit_replication,
+              op_call_handle,
+              THPVariable_Unpack(arg.ptr()),
+              compute_mesh)
+              .release()
+              .ptr());
+      PyList_SET_ITEM(
+          local_args.ptr(),
+          idx,
+          py::reinterpret_borrow<py::object>(arg).release().ptr());
+    } else {
+      // non DTensor/Tensor args (i.e. int/float/bool), just add to
+      // args_schema/local_args
+      PyList_SET_ITEM(
+          args_schema.ptr(),
+          idx,
+          py::reinterpret_borrow<py::object>(arg).release().ptr());
+      PyList_SET_ITEM(
+          local_args.ptr(),
+          idx,
+          py::reinterpret_borrow<py::object>(arg).release().ptr());
+    }
+    idx++;
+  }
+
+  idx = 0;
+  py::dict kwargs_schema;
+  py::dict local_kwargs;
+  for (const auto& [k, v] : kwargs_handle) {
+    if (DTensor_Check(v.ptr())) {
+      local_kwargs[k] = v.attr(dtensor_interned_strings._local_tensor);
+      kwargs_schema[k] = v.attr(dtensor_interned_strings._spec);
+    } else if (THPVariable_Check(v.ptr())) {
+      if (compute_mesh.is_none()) {
+        compute_mesh = try_find_mesh_from_args(op_call_handle, args_list);
+      }
+      kwargs_schema[k] = try_replicate_spec_for_scalar_tensor(
+          allow_implicit_replication,
+          op_call_handle,
+          THPVariable_Unpack(v.ptr()),
+          compute_mesh);
+      local_kwargs[k] = v;
+    } else {
+      kwargs_schema[k] = v;
+      local_kwargs[k] = v;
+    }
+  }
+
+  TORCH_CHECK(
+      !compute_mesh.is_none(),
+      "found no DeviceMesh from dtensor args for ",
+      py::str(op_call_handle));
+
+  return checked_vectorcall(
+             get_opinfo_class().ptr(),
+             compute_mesh.ptr(),
+             checked_vectorcall(
+                 get_opschema_class().ptr(),
+                 op_call_handle.ptr(),
+                 checked_istrue(args_spec.ptr())
+                     ? checked_vectorcall(
+                           get_pytree_tree_unflatten().ptr(),
+                           args_schema.ptr(),
+                           args_spec.ptr())
+                           .ptr()
+                     : py::reinterpret_steal<py::object>(
+                           PySequence_Tuple(args_schema.ptr()))
+                           .ptr(),
+                 kwargs_schema.ptr(),
+                 runtime_schema_info)
+                 .ptr(),
+             args_schema.ptr(),
+             py::reinterpret_steal<py::tuple>(
+                 PySequence_Tuple(local_args.ptr()))
+                 .ptr(),
+             local_kwargs.ptr(),
+             args_spec.ptr())
+      .release()
+      .ptr();
   END_HANDLE_TH_ERRORS
 }
 
@@ -2154,6 +2487,10 @@ static PyMethodDef extra_functions[] = {
      castPyCFunctionFast(DTensor_compute_global_tensor_info),
      METH_FASTCALL,
      compute_global_tensor_info_doc},
+    {"_DTensor_OpDispatcher_unwrap_to_op_info",
+     castPyCFunctionFast(DTensor_OpDispatcher_unwrap_to_op_info),
+     METH_FASTCALL,
+     nullptr},
     {nullptr}};
 
 struct THPVariableMeta {

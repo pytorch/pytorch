@@ -4,10 +4,8 @@ from typing import cast, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
-import torch.distributed.tensor._api as dtensor
 from torch._prims_common import ShapeType
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Placement,
@@ -274,27 +272,6 @@ def compute_global_tensor_shape(
         raise NotImplementedError(
             f"Placement type {type(placements[0])} not supported."
         )
-
-
-def try_find_mesh_from_args(
-    op_call: torch._ops.OpOverload, args: Sequence[object]
-) -> DeviceMesh:
-    """
-    Find the device mesh object from args.
-    It returns None if no mesh is found.
-    NOTE: we can optimize this search if needed
-    """
-    for arg in args:
-        if isinstance(arg, (dtensor.DTensor, DTensorSpec)):
-            return arg.device_mesh
-        elif (
-            isinstance(arg, (list, tuple))
-            and len(arg) > 0
-            and isinstance(arg[0], (dtensor.DTensor, DTensorSpec))
-        ):
-            return arg[0].device_mesh
-
-    raise ValueError(f"Cannot find device mesh from args for op : {op_call}.")
 
 
 def compute_local_stride(
