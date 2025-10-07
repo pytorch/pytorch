@@ -242,6 +242,7 @@ select = [
     "Q003",  # avoidable escaped quote
     "Q004",  # unnecessary escaped quote
     "RSE",
+    "RUF007", # pairwise over zip
     "RUF008", # mutable dataclass default
     "RUF013", # ban implicit optional
     "RUF015", # access first ele in constant time
