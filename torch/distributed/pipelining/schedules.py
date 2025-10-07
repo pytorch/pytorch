@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Callable, NamedTuple, Optional, Protocol, Union
+from typing import Any, NamedTuple, Optional, Protocol, Union
 
 import torch
 import torch.distributed as dist
@@ -1813,6 +1813,15 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 f"Invalid computation type {computation_type}. Only FORWARD, FULL_BACKWARD, \
 BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
             )
+
+        # Check if computation_type is already registered
+        if computation_type in self._comp_type_to_function_map:
+            logger.warning(
+                "Computation type %s is already registered. "
+                "Overwriting the existing custom function.",
+                computation_type,
+            )
+
         self._comp_type_to_function_map[computation_type] = custom_function
 
     def _prepare_schedule_with_comms(
@@ -2031,7 +2040,9 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                         assert (
                             stage_idx,
                             mb_index,
-                        ) in self.fwd_recv_ops, f"Computing {action=} before receiving input"
+                        ) in self.fwd_recv_ops, (
+                            f"Computing {action=} before receiving input"
+                        )
                         _wait_batch_p2p(self.fwd_recv_ops.pop((stage_idx, mb_index)))
 
                     output = stage.forward_one_chunk(
@@ -2124,17 +2135,6 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
             try:
                 if action.computation_type in self._comp_type_to_function_map:
-                    stages = []
-                    mb_indices = []
-                    if action.sub_actions is not None:
-                        for sub_a in action.sub_actions:
-                            stages.append(stage_index_to_stage[sub_a.stage_index])
-                            assert sub_a.microbatch_index is not None
-                            mb_indices.append(sub_a.microbatch_index)
-                    else:
-                        stages.append(stage_index_to_stage[action.stage_index])
-                        assert action.microbatch_index is not None
-                        mb_indices.append(action.microbatch_index)
                     ctx = _PipelineContext(
                         self,
                         arg_mbs,
@@ -2142,7 +2142,9 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                         target_mbs,
                         losses,
                     )
-                    self._comp_type_to_function_map[action.computation_type](action, ctx)
+                    self._comp_type_to_function_map[action.computation_type](
+                        action, ctx
+                    )
                 elif action.computation_type == OVERLAP_F_B:
                     assert action.sub_actions is not None, "sub_actions must be set"
                     with record_function("PP::OverlapFwdBwd"):
@@ -2165,7 +2167,6 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     )
                 )
                 raise e
-
 
         # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them
         while len(send_ops):

@@ -790,8 +790,9 @@ class ScheduleTest(MultiProcContinuousTest):
         )
         base_schedule._prepare_schedule_with_comms(base_schedule.pipeline_order)
 
-        # Track callback invocations for FORWARD computation type
-        callback_calls = []
+        # Track both types of callbacks separately
+        forward_calls = []
+        overlap_calls = []
 
         def forward_callback(action: _Action, ctx: _PipelineContext):
             """Custom callback for FORWARD computation that mimics the original implementation."""
@@ -811,8 +812,8 @@ class ScheduleTest(MultiProcContinuousTest):
             is_next_stage_on_this_rank = stage_index + 1 in stage_index_to_stage
             is_prev_stage_on_this_rank = stage_index - 1 in stage_index_to_stage
 
-            # used in test
-            callback_calls.append((stage_index, mb_index))
+            # used in verification at the end
+            forward_calls.append((stage_index, mb_index))
 
             if (
                 not stage.is_first
@@ -854,6 +855,14 @@ class ScheduleTest(MultiProcContinuousTest):
 
             # Forward ========================================================
             forward_callback(fwd_action, ctx)
+            overlap_calls.append(
+                (
+                    fwd_action.stage_index,
+                    fwd_action.microbatch_index,
+                    bwd_action.stage_index,
+                    bwd_action.microbatch_index,
+                )
+            )
 
             # Backward ========================================================
             backward_stage_index = bwd_action.stage_index
@@ -872,9 +881,6 @@ class ScheduleTest(MultiProcContinuousTest):
                 # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
                 and not is_next_stage_on_this_rank
             ):
-                if (backward_stage_index, backward_mb_index) not in bwd_recv_ops:
-                    print("HERE!")
-
                 assert (
                     backward_stage_index,
                     backward_mb_index,
@@ -931,17 +937,18 @@ class ScheduleTest(MultiProcContinuousTest):
             pipe_loss = sum(losses)
             torch.testing.assert_close(pipe_loss, ref_loss)
 
-            # Verify the callback was called for each FORWARD action
-            # In a V-schedule with 8 microbatches and 2 stages per rank,
-            # rank 0 should have 32 calls (8 microbatches * 2 stages * 2 loops)
-            self.assertEqual(
-                len(callback_calls),
-                num_microbatches * 2 * num_loops,
-                "Callback should have been called",
+            # Verify overlap callbacks were called
+            self.assertGreater(
+                len(overlap_calls), 0, "OVERLAP_F_B callback should have been called"
             )
 
+            # In a V-schedule with 8 microbatches and 2 stages per rank,
+            # rank 0 should have 32 calls (8 microbatches * 2 stages * 2 loops)
+            expected_count = num_microbatches * 2 * num_loops
+            self.assertEqual(len(forward_calls), expected_count)
+
             # Verify all callback calls are for stages on this rank
-            for stage_idx, mb_idx in callback_calls:
+            for stage_idx, _ in forward_calls:
                 self.assertIn(
                     stage_idx,
                     stage_indices,
