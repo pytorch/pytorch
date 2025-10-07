@@ -3,7 +3,12 @@ import copy
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._library.opaque_object import get_payload, make_opaque, set_payload
+from torch._library.opaque_object import (
+    get_payload,
+    make_opaque,
+    OpaqueType,
+    set_payload,
+)
 
 
 class OpaqueQueue:
@@ -62,6 +67,15 @@ class TestOpaqueObject(TestCase):
 
         self.lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
 
+        @torch.library.custom_op(
+            "_TestOpaqueObject::queue_size",
+            mutates_args=[],
+        )
+        def size_impl(q: OpaqueType) -> int:
+            queue = get_payload(q)
+            assert isinstance(queue, OpaqueQueue)
+            return queue.size()
+
         super().setUp()
 
     def tearDown(self):
@@ -88,6 +102,8 @@ class TestOpaqueObject(TestCase):
 
         torch.ops._TestOpaqueObject.queue_push(obj, torch.ones(3) + 1)
         self.assertEqual(queue.size(), 1)
+        size = torch.ops._TestOpaqueObject.queue_size(obj)
+        self.assertEqual(size, queue.size())
         popped = torch.ops._TestOpaqueObject.queue_pop(obj)
         self.assertEqual(popped, torch.ones(3) + 1)
         self.assertEqual(queue.size(), 0)

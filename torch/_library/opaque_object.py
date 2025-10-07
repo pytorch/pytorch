@@ -1,9 +1,11 @@
-from typing import Any
+from typing import Any, NewType
 
 import torch
 
 
-OPAQUE_OBJ_TYPE = "__torch__.torch.classes.aten.OpaqueObject"
+OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
+
+OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 
 
 def make_opaque(payload: Any = None) -> torch._C.ScriptObject:
@@ -80,7 +82,7 @@ def get_payload(opaque_object: torch._C.ScriptObject) -> Any:
     """
     if not (
         isinstance(opaque_object, torch._C.ScriptObject)
-        and opaque_object._type().qualified_name() == OPAQUE_OBJ_TYPE
+        and opaque_object._type().qualified_name() == OpaqueTypeStr
     ):
         type_ = (
             opaque_object._type().qualified_name()
@@ -103,7 +105,7 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
     """
     if not (
         isinstance(opaque_object, torch._C.ScriptObject)
-        and opaque_object._type().qualified_name() == OPAQUE_OBJ_TYPE
+        and opaque_object._type().qualified_name() == OpaqueTypeStr
     ):
         type_ = (
             opaque_object._type().qualified_name()
