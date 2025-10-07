@@ -32,7 +32,8 @@ inline void set_zendnn_tensor_attributes(
     const at::Tensor& at_tensor,
     tensor_t& zendnn_tensor,
     const std::string& tensor_name,
-    const data_type_t& tensor_datatype) {
+    const data_type_t& tensor_datatype,
+    const bool is_tensor_prepacked = false) {
   std::vector<long unsigned int> at_tensor_sizes_vec(
       at_tensor.sizes().begin(), at_tensor.sizes().end());
   void* at_tensor_ptr = at_tensor.data_ptr();
@@ -43,15 +44,19 @@ inline void set_zendnn_tensor_attributes(
   if (is_tensor_2d_and_transposed(at_tensor)) {
     zendnn_tensor.set_order("ba");
   }
+  if (is_tensor_prepacked && tensor_name == "weights") {
+    zendnn_tensor.set_layout(tensor_layout_t::blocked);
+  }
 }
 
 inline void create_zendnn_tensor(
     const at::Tensor& source_tensor,
     tensor_t& target_tensor,
     const std::string& tensor_name,
-    data_type_t datatype) {
+    const data_type_t datatype,
+    const bool is_tensor_prepacked = false) {
   set_zendnn_tensor_attributes(
-      source_tensor, target_tensor, tensor_name, datatype);
+      source_tensor, target_tensor, tensor_name, datatype, is_tensor_prepacked);
   target_tensor.create();
   TORCH_CHECK(
       target_tensor.check(),
