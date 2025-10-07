@@ -187,7 +187,6 @@ ignore = [
     # TODO: Remove Python-3.10 specific suppressions
     "B905",
     "UP035",
-    "FURB161",
 ]
 select = [
     "B",

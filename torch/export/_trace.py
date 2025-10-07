@@ -8,9 +8,9 @@ import re
 import sys
 import time
 import warnings
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 
 if TYPE_CHECKING:
@@ -185,6 +185,7 @@ def _ignore_backend_decomps():
 def _disable_custom_triton_op_functional_decomposition():
     old = torch._functorch.config.decompose_custom_triton_ops
     try:
+        # pyrefly: ignore  # bad-assignment
         torch._functorch.config.decompose_custom_triton_ops = False
         yield torch._functorch.config.decompose_custom_triton_ops
     finally:
@@ -204,6 +205,14 @@ def _strip_root(x):
         stripped = x[len("_export_root") :]
         return stripped.removeprefix(".")
     return x
+
+
+def _is_bogus_const_name(name: str):
+    splitted_names = name.split(".")
+    if len(splitted_names) < 1:
+        return True
+
+    return splitted_names[-1].startswith("lifted_tensor")
 
 
 def _rewrite_tracepoint_node(gm: torch.fx.GraphModule):
@@ -357,6 +366,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                                 return self
 
                             def __getitem__(self, idx):
+                                # pyrefly: ignore  # bad-argument-type
                                 parts.append(str(idx))
                                 return self
 
@@ -652,6 +662,7 @@ def _rename_constants_nodes(
         if spec.kind == InputKind.CONSTANT_TENSOR and not spec.arg.name.startswith(
             const_prefix
         ):
+            # pyrefly: ignore  # bad-argument-type
             if spec.arg.name.startswith(buffer_prefix):  # map from buffer to constants
                 c_name = rename_constant(
                     const_prefix + spec.arg.name[len(buffer_prefix) :]
@@ -2069,6 +2080,11 @@ def _export_for_training(
 
     original_state_dict = _get_original_state_dict(mod)
 
+    has_ambient_mode = False
+    if not strict:
+        flat_args, _ = pytree.tree_flatten((args, kwargs))
+        has_ambient_mode = torch._guards.detect_fake_mode(flat_args) is not None
+
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
@@ -2087,6 +2103,25 @@ def _export_for_training(
         prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         _to_aten_func=_export_to_aten_ir_make_fx,
     )
+
+    # If we are tracing with fake inputs, it is expected to
+    # see fake tensor constants.
+    if not strict and not has_ambient_mode:
+        for const, val in export_artifact.aten.constants.items():
+            if isinstance(
+                val, torch._subclasses.fake_tensor.FakeTensor
+            ) and _is_bogus_const_name(const):
+                error_msg = (
+                    f"We found a fake tensor in the exported program constant's list. "
+                    f"This typically means our tracing system encountered an op that "
+                    f"we can't trace through. For the potential source, you can refer to "
+                    f"following model attribute: {const}. "
+                    f"Please file an issue on github. "
+                )
+                if torch._export.config.error_on_lifted_constant_tensors:
+                    raise RuntimeError(error_msg)
+                else:
+                    warnings.warn(error_msg)
 
     export_graph_signature = export_artifact.aten.sig
 

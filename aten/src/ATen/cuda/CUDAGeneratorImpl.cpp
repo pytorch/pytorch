@@ -109,7 +109,7 @@ void CUDAGeneratorState::increase(uint64_t increment) {
         offset_intragraph_ % 4 == 0, "RNG offset must be a multiple of 4.");
     // Ensures the increment does not cause overflow.
     TORCH_INTERNAL_ASSERT(
-        offset_intragraph_ <= std::numeric_limits<uint32_t>::max() - increment,
+        offset_intragraph_ <= std::numeric_limits<uint64_t>::max() - increment,
         "Increment causes overflow in the offset value.");
     offset_intragraph_ += increment;
   } else {
@@ -461,7 +461,7 @@ void CUDAGeneratorImpl::unregister_graph(cuda::CUDAGraph* graph) {
  */
 PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
   if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-    uint32_t offset = state_->offset_intragraph_;
+    uint64_t offset = state_->offset_intragraph_;
     state_->increase(increment);
     return PhiloxCudaState(
         state_->seed_extragraph_.data_ptr<int64_t>(),
