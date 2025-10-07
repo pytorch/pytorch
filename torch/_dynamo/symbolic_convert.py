@@ -4095,6 +4095,7 @@ class InstructionTranslatorBase(
         self.accept_prefix_inst = True
         self.prefix_insts = []
         self.exn_vt_stack = exn_vt_stack
+        self.latest_bytecode_queue = deque(maxlen=20)
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
@@ -4930,6 +4931,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items = []
         self.generator_exhausted = False
         self.is_generator_from_ctx_manager = False
+        self.latest_bytecode_queue = Queue
 
     def YIELD_VALUE(self, inst: Instruction) -> None:
         top = self.pop()

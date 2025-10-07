@@ -1189,7 +1189,7 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker()]""",
         s = munge_exc(records[0].getMessage(), skip=0)
         # breakpoint()
         matches = re.findall(pattern, s)
-        self.assertIn(len(matches), [13, 20])
+        self.assertEqual(len(matches), 13)
         # TODO: Checking inconsistent logging output
 
         def post_munge(s):
