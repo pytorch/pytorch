@@ -2735,6 +2735,12 @@
   ],
   "GB0272": [
     {
+      "Gb_type": "Failed to make weakref to User Object when storing by ID",
+      "Context": "user_objected: {obj}",
+      "Explanation": "Object does not allow us to make a weakref to it",
+      "Hints": []
+    },
+    {
       "Gb_type": "Failed to make weakref to User Object",
       "Context": "user_objected: {obj}",
       "Explanation": "Object does not allow us to make a weakref to it",
@@ -2762,6 +2768,14 @@
         "`torch.compile` does not expect this to happen.",
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
+    }
+  ],
+  "GB0275": [
+    {
+      "Gb_type": "Failed to make weakref to User Object",
+      "Context": "user_object: {value}",
+      "Explanation": "Object does not allow us to make a weakref to it",
+      "Hints": []
     }
   ]
 }
