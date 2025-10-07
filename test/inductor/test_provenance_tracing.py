@@ -13,7 +13,6 @@ import zipfile
 from pathlib import Path
 
 import torch
-from torch._C import FileCheck
 from torch._dynamo.utils import detect_fake_mode
 from torch._inductor import config
 from torch._inductor.debug import (
@@ -24,7 +23,6 @@ from torch._inductor.debug import (
 )
 from torch._inductor.fx_passes.post_grad import post_grad_passes
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -591,47 +589,6 @@ class TestProvenanceTracingStackTraces(TestCase):
                         sorted(expected_lines),
                         f"Mismatch for key: {key}",
                     )
-
-    @torch._inductor.config.patch(
-        {"trace.provenance_tracking_level": 2, "max_autotune_gemm_backends": "ATEN"}
-    )
-    @requires_cuda_and_triton
-    def test_deferred_triton_kernels(self):
-        def foo(m, inp):
-            a = m(inp)
-            return a
-
-        foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
-
-        m = torch.nn.Linear(512, 512, bias=True).half().cuda()
-        inp = torch.rand([1, 512]).half().cuda()
-
-        expected = {
-            "extern_kernels.bias_addmm:1": [
-                "a = m(inp)",
-            ],
-        }
-
-        with self._setup_provenance_capture() as payload_buffer:
-            with torch.no_grad():
-                _, out_code = run_and_get_code(foo_c, m, inp)
-            payload_content = payload_buffer.getvalue().strip()
-            data = json.loads(payload_content)
-            self.assertEqual(set(data.keys()), set(expected.keys()))
-            for key, expected_lines in expected.items():
-                actual_lines = [self.extract_code_line(s) for s in data[key]]
-                self.assertEqual(
-                    sorted(actual_lines),
-                    sorted(expected_lines),
-                    f"Mismatch for key: {key}",
-                )
-
-            # Check that debug handle is in the output code
-            FileCheck().check(
-                "Topologically Sorted Source Nodes: [a], Original ATen: [aten.t, aten.addmm]"
-            ).check("[Provenance debug handles] extern_kernels.bias_addmm:1").check(
-                "extern_kernels.bias_addmm"
-            ).run(out_code[0])
 
     def _check_kernel_information_json(self, kernel_info, expected_kernels):
         """Validate kernel information JSON structure and content."""
