@@ -6742,6 +6742,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 b = x.item()
                 torch._check(b >= 0)
                 torch._check(b < y.shape[0])
+
                 return y[0, b]
 
         if is_non_strict_test(self._testMethodName):
