@@ -13,10 +13,11 @@ struct C10_API PyInterpreterHooksInterface {
 
   // Get the PyInterpreter instance
   // Stub implementation throws error when Python is not available
-  // We return nullptr rather than throwing an error since there are bits of c10
-  // that expect an empty PyObjectSlot when python is not available.
   virtual PyInterpreter* getPyInterpreter() const {
-    return nullptr;
+    TORCH_CHECK(
+        false,
+        "PyTorch was compiled without Python support. "
+        "Cannot access Python interpreter from C++.");
   }
 };
 
@@ -33,6 +34,7 @@ C10_DECLARE_REGISTRY(
 // Get the global PyInterpreter hooks instance
 C10_API const PyInterpreterHooksInterface& getPyInterpreterHooks();
 
+// Helper function to get the global interpreter
 C10_API PyInterpreter* getGlobalPyInterpreter();
 
 } // namespace c10::impl
