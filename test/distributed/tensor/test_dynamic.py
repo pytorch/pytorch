@@ -15,9 +15,12 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.inductor_utils import GPU_TYPE
 
 
 class TestDynamic(DTensorTestBase):
+    @requires_gpu
     @with_comms
     # FIXME: Currently broken for fake tensor cache
     @parametrize("fake_tensor_cache_enabled", [False])
@@ -35,7 +38,7 @@ class TestDynamic(DTensorTestBase):
                 torch.rand(
                     [num_embeddings, embedding_dim],
                     dtype=torch.float32,
-                    device="cuda",
+                    device=GPU_TYPE,
                     requires_grad=True,
                 ),
                 device_mesh,
