@@ -46,6 +46,7 @@ from ..runtime.hints import (
 )
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
+from ..shape_propagation import get_broadcasted_shape
 from ..utils import (
     cache_on_self,
     DelayMaybeLine,
@@ -219,7 +220,6 @@ class TritonSymbols:
         #
         # get_block_shape(y1) = (YBLOCK,1,1)
         # get_block_shape(x0-tmp13) = (YBLOCK,XBLOCK,1)
-        from torch._inductor.shape_propagation import get_broadcasted_shape
 
         expr_shape: BlockShapeType = ()
         expr_vars = expr.free_symbols
