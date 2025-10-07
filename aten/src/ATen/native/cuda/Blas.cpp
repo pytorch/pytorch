@@ -285,8 +285,8 @@ static bool isSupportedHipLtROCmArch(int index) {
 #if ROCM_VERSION >= 60300
         "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
 #endif
-#if ROCM_VERSION >= 60500
-        "gfx950"
+#if ROCM_VERSION >= 70000
+        "gfx950", "gfx1150", "gfx1151"
 #endif
     };
     return at::detail::getCUDAHooks().isGPUArch(archs, index);
@@ -1919,7 +1919,7 @@ Tensor& _mm_dtype_out_cuda(const Tensor& self, const Tensor& mat2, const at::Sca
   TORCH_CHECK(out_dtype == out.scalar_type(), "out_dtype must be the same as the dtype of the provided out tensor");
 
 
-  addmm_out_cuda_impl(const_cast<Tensor&>(out), out, self, mat2, 0, 1);
+  addmm_out_cuda_impl(out, out, self, mat2, 0, 1);
 
   return out;
 }
