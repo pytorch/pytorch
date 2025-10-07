@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch._prims_common as utils
@@ -95,6 +96,7 @@ class AssociativeScanOp(HigherOrderOperator):
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, xs, additional_inputs)
 
+    # pyrefly: ignore  # bad-override
     def gen_schema(self, combine_fn, xs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -196,14 +198,14 @@ def associative_scan(
     def _validate_input(cfn, lxs, d, r, cm):
         # Basic arguments check
         if not callable(cfn):
-            raise ValueError("Combine_fn must be a callable, but got {cfn}")
+            raise ValueError(f"Combine_fn must be a callable, but got {cfn}")
         if not isinstance(d, int):
             raise ValueError("Dim must be an int, but got " + str(type(d)))
         if not isinstance(r, bool):
             raise RuntimeError("Reverse must be a bool, but got " + str(type(r)))
         if cm not in ["pointwise", "generic"]:
             raise ValueError(
-                "Combine_mode must either 'pointwise' or 'generic', but got {cm}"
+                f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
         if cm == "pointwise" and not all(l.device.type == "cuda" for l in lxs):
             raise ValueError(
@@ -647,6 +649,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx,
         combine_fn,
