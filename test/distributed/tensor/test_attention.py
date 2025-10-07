@@ -136,15 +136,13 @@ class RingAttentionTest(DTensorTestBase):
             )
             attention = SDPAWrapper(compiled=compiled, backend=backend)
             attention = parallelize_module(attention, mesh, cp_plan)
-        else:
-            # This won't work for MONKEY_PATCH.
-            attention = F.scaled_dot_product_attention
 
         # Theoretically, context_parallel() should not be used to shard
         # parameters because when require_grad is True, resize_ is not
         # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
         # now. So we can just use context_parallel() to shard q, k, v.
-        # In reality, context_paralle() should be used to shard the input.
+        # In reality, context_parallel() should only be used to shard
+        # the model inputs (batch).
         with context_parallel(
             mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(seq_dim,) * 3
         ):
@@ -563,7 +561,9 @@ class CPFlexAttentionTest(DTensorTestBase):
         )
 
         # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
-        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
+        with self.assertRaisesRegex(
+            NotImplementedError, "Q_LEN 128 is not divisible by CP mesh world size"
+        ):
             self.run_subtests(
                 {"qkv_size": [64 * self.world_size]},
                 self._test_cp_flex_attention,
