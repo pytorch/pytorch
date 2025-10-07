@@ -479,8 +479,10 @@ class TestFP8Lowering(TestCase):
 
         def f(a, b, scale_a, scale_b):
             # Convert to fp8 with correct strides for scaled_mm
-            a_fp8 = a.to(torch.float8_e4m3fn).contiguous()  # row-major
-            b_fp8 = b.t().contiguous().t().to(torch.float8_e4m3fn)  # column-major
+            dtype_float8 = torch.float8_e4m3fn
+            dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, GPU_TYPE)
+            a_fp8 = a.to(dtype_float8).contiguous()  # row-major
+            b_fp8 = b.t().contiguous().t().to(dtype_float8)  # column-major
             return torch._scaled_mm(
                 a_fp8, b_fp8, scale_a, scale_b, out_dtype=torch.bfloat16
             )

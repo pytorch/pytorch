@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import functools
+from contextlib import contextmanager
 from typing import Any, cast, NoReturn, Optional, overload, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
@@ -27,7 +28,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Iterator
 
     from torch.distributed.tensor import DeviceMesh, Shard
 
@@ -37,6 +38,7 @@ __all__ = [
     "UnshardHandle",
     "register_fsdp_forward_method",
     "get_cls_to_fsdp_cls",
+    "disable_fsdp_module_new_init",
 ]
 
 
@@ -252,6 +254,19 @@ def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     )
 
 
+_enable_fsdp_module_new_init: bool = True
+
+
+@contextmanager
+def disable_fsdp_module_new_init() -> Iterator[None]:
+    global _enable_fsdp_module_new_init
+    prev, _enable_fsdp_module_new_init = _enable_fsdp_module_new_init, False
+    try:
+        yield
+    finally:
+        _enable_fsdp_module_new_init = prev
+
+
 class FSDPModule:
     def __new__(cls, *args, **kwargs):
         """
@@ -262,7 +277,8 @@ class FSDPModule:
         # and index 1 is the `FSDPModule` class itself
         orig_cls = cls.__mro__[2]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
-        self.__init__(*args, **kwargs)
+        if _enable_fsdp_module_new_init:
+            self.__init__(*args, **kwargs)
         return self
 
     def reshard(self) -> None:
