@@ -6,6 +6,7 @@ BigBird,32
 BlenderbotForCausalLM,32
 DebertaV2ForMaskedLM,16
 DistilBertForMaskedLM,128
+DistillGPT2,16
 ElectraForCausalLM,8
 GoogleFnet,16
 GPT2ForSequenceClassification,4

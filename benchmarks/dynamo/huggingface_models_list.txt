@@ -6,6 +6,7 @@ BlenderbotForCausalLM,32
 BlenderbotForConditionalGeneration,16
 DebertaV2ForMaskedLM,8
 DistilBertForMaskedLM,256
+DistillGPT2,32
 ElectraForCausalLM,64
 GPT2ForSequenceClassification,8
 GPTJForCausalLM,1

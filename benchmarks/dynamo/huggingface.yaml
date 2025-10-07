@@ -38,6 +38,7 @@ batch_size:
     # BlenderbotForConditionalGeneration : 16
     DebertaV2ForMaskedLM: 4
     DistilBertForMaskedLM: 2
+    DistillGPT2: 2
     ElectraForCausalLM: 2
     GPT2ForSequenceClassification: 2
     # GPTJForCausalLM : 2

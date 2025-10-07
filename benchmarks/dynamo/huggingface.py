@@ -165,7 +165,7 @@ def get_sequence_length(model_cls, model_name):
             "Bert",
             "Roberta",
         )
-    ) or model_name in ("GoogleFnet", "YituTechConvBert"):
+    ) or model_name in ("DistillGPT2", "GoogleFnet", "YituTechConvBert"):
         seq_length = 512
     elif model_name in ("TrOCRForCausalLM"):
         seq_length = 256
@@ -317,6 +317,10 @@ EXTRA_MODELS = {
     #     BigBirdConfig(attention_type="block_sparse"),
     #     AutoModelForMaskedLM,
     # ),
+    "DistillGPT2": (
+        AutoConfig.from_pretrained("distilgpt2"),
+        AutoModelForCausalLM,
+    ),
     "GoogleFnet": (
         AutoConfig.from_pretrained("google/fnet-base"),
         AutoModelForMaskedLM,

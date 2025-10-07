@@ -26,6 +26,10 @@ DistilBertForMaskedLM,pass,0
 
 
 
+DistillGPT2,pass,0
+
+
+
 ElectraForCausalLM,pass,0
 
 
