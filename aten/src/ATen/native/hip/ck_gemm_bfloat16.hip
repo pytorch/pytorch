@@ -772,12 +772,20 @@ void dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
 
 template <>
 void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  std::string_view arch(dprops->gcnArchName);
-  if (arch == "gfx1100") {
+  static const std::vector<std::string> wmma_archs = {
+    "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201",
+#if ROCM_VERSION >= 70000
+    "gfx1150", "gfx1151"
+#endif
+  };
+  if (at::detail::getCUDAHooks().isGPUArch(wmma_archs)) {
     dispatch_bfloat16_gemm_wmma(CUDABLAS_GEMM_ARGS(at::BFloat16));
-  } else{
+  }
+  else if (at::detail::getCUDAHooks().isGPUArch({"gfx9"})) {
     dispatch_bfloat16_gemm(CUDABLAS_GEMM_ARGS(at::BFloat16));
+  }
+  else {
+    TORCH_CHECK(false, "gemm_internal_ck<at::BFloat16> unsupported gfx arch");
   }
 }
 

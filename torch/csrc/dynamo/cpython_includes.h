@@ -20,17 +20,16 @@
 
 #if IS_PYTHON_3_11_PLUS
 #include <internal/pycore_frame.h>
-#if IS_PYTHON_3_14_PLUS
-#include <internal/pycore_genobject.h>
-#include <internal/pycore_interpframe.h>
-#endif
-#if IS_PYTHON_3_14_PLUS && !defined(_WIN32)
-#include <internal/pycore_stackref.h>
-#endif
-#endif
 
 #if IS_PYTHON_3_14_PLUS && !defined(_WIN32)
 #include <internal/pycore_code.h>
+#include <internal/pycore_genobject.h>
+#include <internal/pycore_interpframe.h>
+#include <internal/pycore_stackref.h>
+#elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#include <internal/pycore_interpframe_structs.h> // _PyInterpreterFrame
+#endif
+
 #endif
 
 #undef Py_BUILD_CORE
@@ -61,8 +60,10 @@ extern "C" {
 
 #endif // IS_PYTHON_3_14_PLUS
 
-#if IS_PYTHON_3_14_PLUS
+#if IS_PYTHON_3_14_PLUS && !defined(_WIN32)
 #define FUNC(x) ((PyFunctionObject*)PyStackRef_AsPyObjectBorrow((x)->f_funcobj))
+#elif IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#define FUNC(x) ((PyFunctionObject*)((x)->f_funcobj.bits))
 #elif IS_PYTHON_3_12_PLUS
 #define FUNC(x) ((PyFunctionObject*)(x)->f_funcobj)
 #else
