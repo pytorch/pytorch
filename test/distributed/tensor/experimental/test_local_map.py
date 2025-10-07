@@ -494,5 +494,6 @@ class TestLocalMap(DTensorTestBase):
         Y_expected = torch.nn.functional.linear(X, weight)
         self.assertEqual(Y_dt.full_tensor(), Y_expected)
 
+
 if __name__ == "__main__":
     run_tests()

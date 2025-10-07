@@ -187,7 +187,7 @@ def _convert_module_dtensor_to_local(
 
                 if param.placements != placements:
                     if redistribute:
-                        param = param.redistribute(placements=placements)
+                        param = param.redistribute(placements=placements)  # type: ignore[assignment]
                     else:
                         raise ValueError(
                             f"Parameter {name} in module has mismatched placements: "
@@ -207,7 +207,7 @@ def _convert_module_dtensor_to_local(
             if isinstance(local_param, AsyncCollectiveTensor):
                 local_param = local_param.wait()
 
-            module._parameters[name] = local_param
+            module._parameters[name] = local_param  # type: ignore[assignment]
 
     return module
 
@@ -231,7 +231,7 @@ def _local_map_wrapped(
         )
 
     # we assume every DTensor object is placed on the same device mesh
-    flat_local_args = []
+    flat_local_args: list = []
     seen_dtensor_arg = False
     for idx, arg in enumerate(flat_args):
         if isinstance(arg, DTensor):
@@ -281,6 +281,7 @@ def _local_map_wrapped(
                 local_arg = local_arg.wait()
 
             flat_local_args.append(local_arg)
+
         elif isinstance(arg, torch.nn.Module):
             if _has_dtensor_parameters(arg):
                 seen_dtensor_arg = True
