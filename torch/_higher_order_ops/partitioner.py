@@ -4,6 +4,7 @@ from typing import Any, Union
 
 import torch
 from torch._higher_order_ops.utils import create_bw_fn, materialize_as_graph
+from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -15,6 +16,10 @@ def _find_hop_subgraph_outputs(gm: torch.fx.GraphModule) -> tuple[torch.fx.Node]
     output_node_args = gm.graph.find_nodes(op="output")[0].args
     assert isinstance(output_node_args, tuple)
     return output_node_args[0]
+
+
+def must_recompute_expr(expr: Any) -> bool:
+    return is_complex_expr(expr) or (has_free_unbacked_symbols(expr))
 
 
 def is_complex_expr(expr: Any) -> bool:
@@ -261,7 +266,7 @@ class HopJointGraph:
             if "val" not in n.meta:
                 continue
             val = n.meta["val"]
-            if isinstance(val, torch.SymInt) and is_complex_expr(val.node.expr):
+            if isinstance(val, torch.SymInt) and must_recompute_expr(val.node.expr):
                 assert n.meta.get("recompute", None) is None
 
                 n.meta["recompute"] = CheckpointPolicy.MUST_RECOMPUTE
