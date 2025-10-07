@@ -120,6 +120,7 @@ def _torchscript_schema_to_signature_impl(
             # which makes it hard to do type annotation
             kind = Parameter.POSITIONAL_ONLY  # type: ignore[assignment]
             # This renders all previous arguments to positional only
+            # pyrefly: ignore  # bad-assignment
             for idx, p in enumerate(parameters):
                 assert p.kind == Parameter.POSITIONAL_OR_KEYWORD
                 parameters[idx] = Parameter(
@@ -128,6 +129,7 @@ def _torchscript_schema_to_signature_impl(
                     default=p.default,
                     annotation=p.annotation,
                 )
+        # pyrefly: ignore  # missing-attribute
         parameters.append(
             Parameter(name=name, kind=kind, default=default, annotation=arg_type)
         )
@@ -141,6 +143,7 @@ def _torchscript_schema_to_signature_impl(
     else:
         return_type = tuple(return_types)
 
+    # pyrefly: ignore  # bad-argument-type
     return inspect.Signature(parameters, return_annotation=return_type)
 
 
