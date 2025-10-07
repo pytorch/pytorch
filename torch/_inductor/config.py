@@ -634,6 +634,9 @@ realize_acc_reads_size_threshold: Optional[int] = (
 # fallback to eager for random/dropout, this is slow but useful for debugging
 fallback_random = False
 
+# fallback embedding_bag_byte_unpack to eager
+fallback_embedding_bag_byte_unpack = False
+
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 assume_unaligned_fallback_output = (
@@ -649,7 +652,10 @@ debug_fusion: bool = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion: bool = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 loop_ordering_after_fusion: bool = (
-    os.environ.get("TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0") == "1"
+    os.environ.get(
+        "TORCHINDUCTOR_LOOP_ORDERING_AFTER_FUSION", "0" if is_fbcode() else "1"
+    )
+    == "1"
 )
 
 # If fusing two nodes only save less then score_fusion_memory_threshold memory,
@@ -699,6 +705,10 @@ conv_1x1_as_mm = False
 #   triton.cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
 # enabling both of these will implicitly disable split_reductions
 split_reductions = True
+
+# A deterministic mode that skips any on device benchmarking in Inductor
+# if we know they affect numerics.  WARNING: Expect perf hit in this mode.
+deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
@@ -1440,6 +1450,8 @@ class triton:
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
+    # Use epilogue subtiling. We allow disabling it due to limited B200 testing.
+    enable_epilogue_subtiling = os.environ.get("ENABLE_EPILOGUE_SUBTILING", "1") == "1"
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -1461,6 +1473,8 @@ class triton:
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
+    # If set to true, will generate PDL code on devices that support it.
+    # If set to false, will never generate PDL code.
     enable_pdl = False
 
 
@@ -1520,6 +1534,10 @@ class aot_inductor:
 
     package: bool = False
     package_cpp_only: Optional[bool] = None
+
+    # If package_cpp_only is True, whether cpp files will be compiled to a
+    # dynamically linked library or static linked library
+    dynamic_linkage: bool = True
 
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
@@ -1596,21 +1614,36 @@ class aot_inductor:
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: Optional[list[str]] = None
 
-    compile_standalone: bool = False
-
     # Whether to enable link-time-optimization
     enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
 
     # Whether the compiled .so should link to libtorch
-    # TODO: should consolidate this flag with compile_standalone
     link_libtorch: bool = True
 
-    # If None, the default torch headers such as torch/include
-    # will be used. Otherwise, the provided path will be used instead.
-    # This is needed for torchnative to load libtorch-free .so.
-    # Such as [f"{torchnative_dir}/standalone",f"{torchnative_dir}/",].
-    # TODO: should consolidate this flag with compile_standalone
-    libtorch_free_headers: Optional[list[str]] = None
+    # Currently the only valid option is "windows".
+    # We'll use x86_64-w64-mingw32-gcc to cross-compile a .dll file
+    # If using cuda, you also need to set WINDOWS_CUDA_HOME env var
+    # to point to windows CUDA toolkit.
+    # Example: WINDOWS_CUDA_HOME=cuda-windows-base/cuda_cudart/cudart/
+    # The path should contain lib cuda and lib cudart
+    cross_target_platform: Optional[str] = None
+
+    # If link_libtorch is False and cross_target_platform is windows,
+    # a library needs to be provided to provide the shim implementations.
+    aoti_shim_library: Optional[str] = None
+    aoti_shim_library_path: Optional[str] = None
+
+
+# a convenient class that automatically sets a group of the configs in aot_inductor
+# it should only control the flags in aot_inductor.
+# it should not do anything else.
+class aot_inductor_mode:
+    # dynamic_linkage=False
+    # link_libtorch=False
+    # package_cpp_only=True
+    # embed_kernel_binary=True
+    # emit_multi_arch_kernel=True
+    compile_standalone: bool = False
 
 
 class cuda:
@@ -1711,11 +1744,6 @@ class cuda:
     cutlass_instantiation_level: str = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_INSTANTIATION_LEVEL", "0"
     )
-
-    # Experimental. Only for H100 for now. Flag to control whether to use presets.
-    # Format looks like: "0,1,3" for using presets 0, 1, and 3. Presets can be
-    # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
-    cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
 
     # use compile command to create kernel .cu and .so name
     cutlass_hash_with_compile_cmd: bool = (
@@ -1982,6 +2010,7 @@ class test_configs:
     max_mm_configs: Optional[int] = None
 
     runtime_triton_dtype_assert = False
+    runtime_triton_shape_assert = False
     static_cpp_dtype_assert = False
 
     # regex to control the set of considered autotuning
@@ -1996,6 +2025,28 @@ class test_configs:
     # If set to True, AOTI-generated CMakelists.txt will still use libtorch
     # for unit testing
     use_libtorch = False
+
+    # to be migrated when ready for use
+    aten_fx_overlap_scheduling = False
+
+    # insert ordering deps for overlap
+    aten_fx_overlap_insert_overlap_deps = True
+
+    # to be migrated when ready for use
+    aten_fx_overlap_preserving_bucketing = False
+
+    # to be migrated when ready for use
+    # runtime estimation function for ops
+    # for user-defined estimation function, pass in the function handle
+    # TODO - need estimated and profile based version
+    estimate_aten_runtime: Union[
+        Literal["default"], Callable[[torch.fx.Node], Optional[float]]
+    ] = "default"
+
+    # A test config to ease the test for perf of reduction config filtering
+    force_filter_reduction_configs = (
+        os.getenv("TORCHINDUCTOR_FORCE_FILTER_REDUCTION_CONFIGS") == "1"
+    )
 
 
 if TYPE_CHECKING:

@@ -200,7 +200,7 @@ int IpcChannel::broadcast_fds(
   int world_size = (int)pids.size();
 
   if (rank == src_rank) {
-    for (int dst_rank = 0; dst_rank < (int)world_size; ++dst_rank) {
+    for (int dst_rank = 0; dst_rank < world_size; ++dst_rank) {
       if (dst_rank == rank) {
         continue;
       }
@@ -242,7 +242,7 @@ void map_block(
   CUmemAccessDesc desc;
   desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  desc.location.id = static_cast<int>(device_idx);
+  desc.location.id = device_idx;
   desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
 #elif defined(USE_ROCM)
