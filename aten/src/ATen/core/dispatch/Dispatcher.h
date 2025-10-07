@@ -778,13 +778,13 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
   auto dispatchKeySet =
       op.operatorDef_->op.dispatchKeyExtractor()
           .template getDispatchKeySetUnboxed<Args...>(args...);
-#if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
+// #if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
     detail::_print_dispatch_trace(
         "[call]", toString(op.operator_name()), dispatchKeySet);
   }
-#endif
+// #endif
   const KernelFunction& kernel = op.operatorDef_->op.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
@@ -836,13 +836,13 @@ inline Return Dispatcher::redispatch(
     DispatchKeySet currentDispatchKeySet,
     Args... args) const {
   // do not use RecordFunction on redispatch
-#if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
+// #if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
     detail::_print_dispatch_trace(
         "[redispatch]", toString(op.operator_name()), currentDispatchKeySet);
   }
-#endif
+// #endif
   const KernelFunction& kernel =
       op.operatorDef_->op.lookup(currentDispatchKeySet);
   return kernel.template call<Return, Args...>(
@@ -856,13 +856,13 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack)
   const auto& entry = op.operatorDef_->op;
   auto dispatchKeySet =
       entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
-#if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
+// #if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
     detail::_print_dispatch_trace(
         "[callBoxed]", toString(op.operator_name()), dispatchKeySet);
   }
-#endif
+// #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
@@ -924,13 +924,13 @@ inline void Dispatcher::redispatchBoxed(
   // note: this doesn't need the mutex because write operations on the list keep
   // iterators intact.
   const auto& entry = op.operatorDef_->op;
-#if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
+// #if defined(HAS_TORCH_SHOW_DISPATCH_TRACE) || !defined(NDEBUG)
   DispatchTraceNestingGuard debug_guard;
   if (show_dispatch_trace()) {
     detail::_print_dispatch_trace(
         "[redispatchBoxed]", toString(op.operator_name()), dispatchKeySet);
   }
-#endif
+// #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
   return kernel.callBoxed(op, dispatchKeySet, stack);
 }
