@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import math
 import warnings
+from collections.abc import Callable
 from functools import total_ordering
-from typing import Callable
 
 import torch
 from torch import inf, Tensor

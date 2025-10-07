@@ -7,6 +7,7 @@ from typing import Union
 import torch
 from torch import Tensor
 from torch._inductor import config, utils
+from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_cuda import (
@@ -469,6 +470,87 @@ class TestFP8Lowering(TestCase):
                 self.assertEqual(y_eager, y_compiled, rtol=5e-2, atol=0.07)
             else:
                 self.assertEqual(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    def test_scaled_mm_preserves_strides(self):
+        """Test that scaled_mm preserves stride ordering through a custom pass."""
+
+        GPU_TYPE = "cuda"
+
+        def f(a, b, scale_a, scale_b):
+            # Convert to fp8 with correct strides for scaled_mm
+            dtype_float8 = torch.float8_e4m3fn
+            dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, GPU_TYPE)
+            a_fp8 = a.to(dtype_float8).contiguous()  # row-major
+            b_fp8 = b.t().contiguous().t().to(dtype_float8)  # column-major
+            return torch._scaled_mm(
+                a_fp8, b_fp8, scale_a, scale_b, out_dtype=torch.bfloat16
+            )
+
+        class ScaledMMStridePass(PatternMatcherPass):
+            def __init__(self) -> None:
+                super().__init__()
+                self.called = False
+
+            def __call__(self, g: torch.fx.Graph):
+                # Directly manipulate the graph without using pattern matching
+                for node in g.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten._scaled_mm.default
+                    ):
+                        # Insert clone operations before scaled_mm
+                        with g.inserting_before(node):
+                            a_fp8, b_fp8 = node.args[0], node.args[1]
+
+                            # Clone the inputs to potentially change stride ordering
+                            a_cloned = g.call_function(
+                                torch.ops.aten.clone,
+                                (a_fp8,),
+                                {"memory_format": torch.contiguous_format},
+                            )
+                            b_cloned = g.call_function(
+                                torch.ops.aten.clone,
+                                (b_fp8,),
+                                {"memory_format": torch.contiguous_format},
+                            )
+
+                            # Replace the arguments in the scaled_mm call
+                            node.args = (a_cloned, b_cloned) + node.args[2:]
+                            self.called = True
+
+                g.lint()
+                return g
+
+        stride_pass = ScaledMMStridePass()
+
+        # Create inputs with correct strides for scaled_mm
+        a = torch.randn((64, 128), dtype=torch.bfloat16, device=GPU_TYPE)
+        b = torch.randn((128, 64), dtype=torch.bfloat16, device=GPU_TYPE)
+        scale_a = torch.tensor(1.0, device=GPU_TYPE)
+        scale_b = torch.tensor(1.0, device=GPU_TYPE)
+
+        # First, verify that f works without the pass (baseline)
+        expected = f(a, b, scale_a, scale_b)
+
+        from torch._inductor import config
+
+        with config.patch(post_grad_custom_post_pass=stride_pass):
+            f_compiled = torch.compile(f, dynamic=False)
+            result = f_compiled(a, b, scale_a, scale_b)
+
+            # Verify the pattern was called
+            self.assertTrue(stride_pass.called, "Stride ordering pass was not called")
+
+            # Verify correctness - the pass should preserve correctness
+            # even though it modified strides
+            self.assertEqual(expected, result, atol=1e-2, rtol=1e-2)
+
+            # Verify the generated code contains the clones inserted by our pass
+            _, (wrapper,) = run_and_get_code(f_compiled, a, b, scale_a, scale_b)
+            self.assertIn("scaled_mm", wrapper.lower())
+            # The clones should be visible in the generated code
+            self.assertIn("clone", wrapper.lower())
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
