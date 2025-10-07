@@ -77,28 +77,28 @@ struct LBFGSOptions;
 
 /**
  * OptimizerCloneableOptions provides parameter group inheritance functionality
- * for PyTorch C++ optimizer options. When creating parameter groups with 
- * partial options (e.g., AdamOptions().weight_decay(0.1)), fields not 
+ * for PyTorch C++ optimizer options. When creating parameter groups with
+ * partial options (e.g., AdamOptions().weight_decay(0.1)), fields not
  * explicitly set by the user inherit from the optimizer's default values,
  * while explicitly set fields are preserved.
- * 
+ *
  * This enables Python-like behavior in C++:
  * ```cpp
  * // Python equivalent:
  * // optimizer = Adam([{'params': params1, 'weight_decay': 0.1}], lr=0.01)
  * // Result: weight_decay=0.1 preserved, lr=0.01 inherited
- * 
+ *
  * AdamOptions defaults;
  * defaults.lr(0.01).weight_decay(0.05);
- * 
+ *
  * std::vector<OptimizerParamGroup> groups;
  * groups.emplace_back(params1, std::make_unique<AdamOptions>(
  *     AdamOptions().weight_decay(0.1)));  // Only weight_decay specified
- * 
+ *
  * Adam optimizer(groups, defaults);
  * // Result: group inherits lr=0.01, preserves weight_decay=0.1
  * ```
- * 
+ *
  * **Implementation**: Uses SFINAE-based field detection and constructor-default
  * comparison to distinguish explicitly set fields from default values.
  * Fields that match constructor defaults are inherited; others are preserved.
@@ -110,7 +110,8 @@ class OptimizerCloneableOptions : public OptimizerOptions {
     return std::make_unique<Derived>(static_cast<const Derived&>(*this));
   }
 
-  // SFINAE field detection - detects optimizer fields using public accessor methods
+  // SFINAE field detection - detects optimizer fields using public accessor
+  // methods
   template <class T, class Enable = void>
   struct _has_lr : std::false_type {};
   template <class T>
@@ -120,7 +121,9 @@ class OptimizerCloneableOptions : public OptimizerOptions {
   template <class T, class Enable = void>
   struct _has_momentum : std::false_type {};
   template <class T>
-  struct _has_momentum<T, std::void_t<decltype(std::declval<const T&>().momentum())>>
+  struct _has_momentum<
+      T,
+      std::void_t<decltype(std::declval<const T&>().momentum())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
@@ -134,13 +137,17 @@ class OptimizerCloneableOptions : public OptimizerOptions {
   template <class T, class Enable = void>
   struct _has_dampening : std::false_type {};
   template <class T>
-  struct _has_dampening<T, std::void_t<decltype(std::declval<const T&>().dampening())>>
+  struct _has_dampening<
+      T,
+      std::void_t<decltype(std::declval<const T&>().dampening())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
   struct _has_nesterov : std::false_type {};
   template <class T>
-  struct _has_nesterov<T, std::void_t<decltype(std::declval<const T&>().nesterov())>>
+  struct _has_nesterov<
+      T,
+      std::void_t<decltype(std::declval<const T&>().nesterov())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
@@ -158,14 +165,18 @@ class OptimizerCloneableOptions : public OptimizerOptions {
   template <class T, class Enable = void>
   struct _has_amsgrad : std::false_type {};
   template <class T>
-  struct _has_amsgrad<T, std::void_t<decltype(std::declval<const T&>().amsgrad())>>
+  struct _has_amsgrad<
+      T,
+      std::void_t<decltype(std::declval<const T&>().amsgrad())>>
       : std::true_type {};
 
   // Optimizer-specific field detection
   template <class T, class Enable = void>
   struct _has_lr_decay : std::false_type {};
   template <class T>
-  struct _has_lr_decay<T, std::void_t<decltype(std::declval<const T&>().lr_decay())>>
+  struct _has_lr_decay<
+      T,
+      std::void_t<decltype(std::declval<const T&>().lr_decay())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
@@ -177,7 +188,9 @@ class OptimizerCloneableOptions : public OptimizerOptions {
   template <class T, class Enable = void>
   struct _has_centered : std::false_type {};
   template <class T>
-  struct _has_centered<T, std::void_t<decltype(std::declval<const T&>().centered())>>
+  struct _has_centered<
+      T,
+      std::void_t<decltype(std::declval<const T&>().centered())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
@@ -185,20 +198,25 @@ class OptimizerCloneableOptions : public OptimizerOptions {
   template <class T>
   struct _has_initial_accumulator_value<
       T,
-      std::void_t<decltype(std::declval<const T&>().initial_accumulator_value())>>
+      std::void_t<
+          decltype(std::declval<const T&>().initial_accumulator_value())>>
       : std::true_type {};
 
   // LBFGS-specific fields with appropriate types
   template <class T, class Enable = void>
   struct _has_max_iter : std::false_type {};
   template <class T>
-  struct _has_max_iter<T, std::void_t<decltype(std::declval<const T&>().max_iter())>>
+  struct _has_max_iter<
+      T,
+      std::void_t<decltype(std::declval<const T&>().max_iter())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
   struct _has_max_eval : std::false_type {};
   template <class T>
-  struct _has_max_eval<T, std::void_t<decltype(std::declval<const T&>().max_eval())>>
+  struct _has_max_eval<
+      T,
+      std::void_t<decltype(std::declval<const T&>().max_eval())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
@@ -233,16 +251,16 @@ class OptimizerCloneableOptions : public OptimizerOptions {
       std::void_t<decltype(std::declval<const T&>().line_search_fn())>>
       : std::true_type {};
 
-
   /**
-   * Merges user-specified options with optimizer defaults using constructor-default
-   * comparison to detect explicitly set fields.
-   * 
+   * Merges user-specified options with optimizer defaults using
+   * constructor-default comparison to detect explicitly set fields.
+   *
    * Algorithm:
    * 1. Start with optimizer defaults as base
    * 2. Create fresh constructor instance for comparison
    * 3. If user_value != constructor_default → user explicitly set it → preserve
-   * 4. If user_value == constructor_default → user didn't set it → inherit from defaults
+   * 4. If user_value == constructor_default → user didn't set it → inherit from
+   * defaults
    */
   void _merge_by_comparison(
       const Derived& defaults,
