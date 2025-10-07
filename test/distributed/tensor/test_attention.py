@@ -474,7 +474,9 @@ class CPFlexAttentionTest(DTensorTestBase):
             _DispatchMode.TORCH_FUNCTION
         )
         with context_parallel(
-            device_mesh, buffers=[torch.empty(self.world_size * 2)], buffer_seq_dims=[0]
+            device_mesh,
+            buffers=[torch.empty(1, self.world_size * 2)],
+            buffer_seq_dims=[1],
         ):
             cp_out, cp_aux = compiled_flex_attention(
                 *cp_qkv,
