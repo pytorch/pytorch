@@ -288,8 +288,72 @@ void launch_grouped_bgemm_ck_impl_dispatch(
             p_b_ptrs.push_back(group_b_ptr);
             p_e_ptrs.push_back(group_e_ptr);
         }
+    } else if (mat_a_dim == 3 && mat_b_dim == 2) {
+        // 3D*2D case requires offset tensor
+        auto offs_accessor = offs->accessor<int, 1>();
+        int num_groups = offs_accessor.size(0);
+        // 3d*2d input, output is 3d.
+        // A: [n_groups, m, k], B: [k, total_n] (assuming row-major for both)
+        // Offset divides N dimension of B, each group gets different slice of B and different batch of A
+        const int batch_size = mat_a.size(0); // n_groups
+        const int M = mat_a.size(1); // rows in each A matrix
+        const int K = mat_a.size(2); // columns in A
+        
+        // For row-major A and B case: B should be [K, total_N] 
+        const int total_N = mat_b.size(1); // B is [K, total_N] for row-major
+
+        for (int i = 0; i < num_groups; ++i) {
+            int start_n = (i == 0) ? 0 : offs_accessor[i - 1];
+            int end_n = offs_accessor[i];
+            int n = end_n - start_n;
+            
+            // Skip zero-sized groups but continue processing subsequent groups
+            if (n <= 0) {
+                continue;
+            }
+            
+            // Select A batch for group i: A[i, :, :]
+            const void* group_a_ptr = a_ptr_base + i * mat_a.stride(0) * a_element_size;
+            
+            // Select B slice for group i: B[:, start_n:end_n] (B[K, total_N])
+            const void* group_b_ptr;
+            int ldb;
+            
+            // Check if B is row-major or column-major
+            if (std::is_same<BLayout, ck::tensor_layout::gemm::RowMajor>::value) {
+                // Row-major B [K, total_N]: slice columns [start_n:end_n]
+                group_b_ptr = b_ptr_base + start_n * mat_b.stride(1) * b_element_size;
+                ldb = mat_b.stride(0); // distance between rows (should be total_N)
+            } else {
+                // Column-major B [K, total_N]: slice columns [start_n:end_n]
+                group_b_ptr = b_ptr_base + start_n * mat_b.stride(1) * b_element_size;
+                ldb = mat_b.stride(1); // distance between columns (should be K)
+            }
+            
+            // Select output slice for group i: Output[:, start_n:end_n]
+            void* group_e_ptr = out_ptr_base + start_n * out.stride(1) * out_element_size;
+            
+            int lda, ldc;
+            
+            // Row-major A: leading dimension = distance between rows = stride(1)
+            lda = mat_a.stride(1);            
+            // Output is row-major: leading dimension = distance between rows = stride(0)
+            ldc = out.stride(0);
+
+            gemm_descs.push_back({
+                static_cast<ck::index_t>(M),
+                static_cast<ck::index_t>(n),
+                static_cast<ck::index_t>(K),
+                static_cast<ck::index_t>(lda),
+                static_cast<ck::index_t>(ldb),
+                static_cast<ck::index_t>(ldc)
+            });
+            p_a_ptrs.push_back(group_a_ptr);
+            p_b_ptrs.push_back(group_b_ptr);
+            p_e_ptrs.push_back(group_e_ptr);
+        }
     } else {
-        TORCH_CHECK(false, "CK Group GEMM: Unsupported dimensions, mat A dim is ", mat_a_dim, "mat B dim is ", mat_b_dim);
+        TORCH_CHECK(false, "CK Group GEMM: Unsupported dimensions, mat A dim is ", mat_a_dim, ", mat B dim is ", mat_b_dim);
     }
 
     TORCH_INTERNAL_ASSERT(p_a_ptrs.size() > 0, "CK Group GEMM: No valid groups");
@@ -329,7 +393,7 @@ void group_gemm_ck(
     const std::optional<at::Tensor>& offs,
     const std::optional<at::Tensor>& /*bias*/,
     at::Tensor& out)
-{
+{    
     // For 3D tensors, check the last dimension stride for row-major detection
     bool a_row_major = (mat_a.dim() == 3) ? (mat_a.stride(2) == 1) : (mat_a.stride(1) == 1);
     bool b_row_major = (mat_b.dim() == 3) ? (mat_b.stride(2) == 1) : (mat_b.stride(1) == 1);
@@ -370,6 +434,7 @@ void group_gemm_ck(
     } else {
         TORCH_CHECK(false, "CK Group GEMM: Unsupported mat_a dtype");
     }
+    
 }
 
 } // namespace detail
