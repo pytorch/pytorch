@@ -240,11 +240,18 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     considered as a score_mod function. If the function has 4 positional arguments, it is
     considered as a mask function.
     """
-    num_positional_args = sum(
-        1
-        for param in inspect.signature(fn).parameters.values()
-        if param.default == inspect.Parameter.empty
-    )
+    try:
+        code = fn.__code__
+        num_positional_total = code.co_argcount
+        defaults = fn.__defaults__ or ()
+        num_defaults = len(defaults)
+        num_positional_args = num_positional_total - num_defaults
+    except Exception:
+        num_positional_args = sum(
+            1
+            for p in inspect.signature(fn).parameters.values()
+            if p.default == inspect._empty
+        )
     assert num_positional_args == 5 or num_positional_args == 4
     if num_positional_args == 5:
         return _ModificationType.SCORE_MOD
