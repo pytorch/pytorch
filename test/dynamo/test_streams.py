@@ -82,10 +82,27 @@ class TestStreams(torch._dynamo.test_case.TestCase):
 
         inp = (torch.ones(2, 2) + 1, torch.ones(2, 2))
         fn_opt = torch.compile(fn, fullgraph=True)
-        _, s = fn_opt(*inp)
+        _, s0 = fn_opt(*inp)
+        _, s1 = fn_opt(*inp)
         # Streams will be different values for each invocation
         # so don't check for equality
-        self.assertIsInstance(s, torch.Stream)
+        self.assertIsInstance(s0, torch.Stream)
+        # Stream should be newly allocated on each call
+        self.assertNotEqual(s0, s1)
+
+    def test_get_current_stream_return(self):
+        def fn(x, s):
+            with s:
+                s0 = torch.cuda.current_stream()
+            return x, s0
+
+        s_inp = torch.Stream(device="cuda")
+        inp = (torch.ones(2, 2) + 1, s_inp)
+        fn_opt = torch.compile(fn, fullgraph=True)
+        _, s0 = fn_opt(*inp)
+        _, s1 = fn_opt(*inp)
+        self.assertEqual(s_inp, s0)
+        self.assertEqual(s0, s1)
 
     def test_nested_stream_enter_exit(self):
         pass
