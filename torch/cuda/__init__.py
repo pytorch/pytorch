@@ -35,6 +35,7 @@ from .graphs import (
     is_current_stream_capturing,
     make_graphed_callables,
 )
+from .green_contexts import GreenContext
 from .streams import Event, ExternalStream, Stream
 
 
@@ -1210,7 +1211,7 @@ def get_sync_debug_mode() -> int:
 def _get_pynvml_handler(device: "Device" = None):
     if not _HAS_PYNVML:
         raise ModuleNotFoundError(
-            "pynvml does not seem to be installed or it can't be imported."
+            "nvidia-ml-py does not seem to be installed or it can't be imported."
             # pyrefly: ignore  # invalid-inheritance
         ) from _PYNVML_ERR
     # pyrefly: ignore  # import-error
@@ -1844,6 +1845,7 @@ __all__ = [
     "ExternalStream",
     "Stream",
     "StreamContext",
+    "GreenContext",
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",
