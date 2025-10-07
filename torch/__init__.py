@@ -22,6 +22,7 @@ import platform
 import sys
 import textwrap
 import threading
+import warnings
 from collections.abc import Callable as _Callable
 from typing import (
     Any as _Any,
@@ -1691,6 +1692,7 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
+# TODO add deprecation annotation
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
@@ -2633,6 +2635,29 @@ def compile(
     guard_filter_fn = None
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
+
+    if torch.compiler.is_exporting():
+        warnings.warn(
+            "You are calling torch.compile inside torch.export region. "
+            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)"
+        )
+        from torch._higher_order_ops.utils import setup_compilation_env
+
+        # Create wrapper that always uses eager backend during export
+        def export_wrapped_fn(*args, **kwargs):
+            with setup_compilation_env() as backend:  # type: ignore[attr-defined]
+                # Force eager backend regardless of original backend
+                backend_wrapper = _TorchCompileWrapper(backend, mode, options, dynamic)
+                return torch._dynamo.optimize(
+                    backend=backend_wrapper,
+                    nopython=fullgraph,
+                    dynamic=dynamic,
+                    disable=disable,
+                    guard_filter_fn=guard_filter_fn,
+                    # pyrefly: ignore  # bad-argument-type
+                )(model)(*args, **kwargs)
+
+        return export_wrapped_fn
 
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)

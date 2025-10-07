@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import json
 import logging
 import os
 import pickle
@@ -24,6 +25,7 @@ import shutil
 import sys
 import types
 from collections.abc import Generator, Iterator
+from contextlib import nullcontext
 from typing import Any, Callable, NewType, Optional
 from typing_extensions import Never
 
@@ -96,6 +98,17 @@ class _GuardedCodeCacheEntry:
     dynamo_code: SerializedCode
 
 
+def load_guards_state(guards_state: bytes) -> Any:
+    try:
+        import torch.distributed.fsdp._fully_shard._fully_shard as _fully_shard
+
+        ctx = _fully_shard.disable_fsdp_module_new_init()
+    except ImportError:
+        ctx = nullcontext()  # type: ignore[assignment]
+    with ctx:
+        return pickle.loads(guards_state)
+
+
 _BackendId = NewType("_BackendId", str)  # __compiled_fn
 _FunctionId = NewType("_FunctionId", str)  # __resume_at
 
@@ -138,17 +151,7 @@ class SourceInfo:
 
 
 @dataclasses.dataclass
-class DynamoCaptureOutput:
-    """
-    Core information generated from Dynamo for fullgraph=True.
-    """
-
-    guarded_codes: list[_GuardedCodeCacheEntry]
-    backend_ids: list[_BackendId]
-
-
-@dataclasses.dataclass
-class _DynamoCodeCacheEntry(DynamoCaptureOutput):
+class _DynamoCodeCacheEntry:
     """
     Contains the serializable information associated with a single code object
     in dynamo. To restore an execution of compiled code, we will need the following
@@ -172,7 +175,9 @@ class _DynamoCodeCacheEntry(DynamoCaptureOutput):
     python_code: SerializedCode
     python_module: str
     function_names: list[_FunctionId]
+    guarded_codes: list[_GuardedCodeCacheEntry]
     import_sources: dict[str, str]
+    backend_ids: list[_BackendId]
     code_source: Optional[str]
     install_to_global: bool
     has_compile_id: bool = False
@@ -419,6 +424,38 @@ class PrecompileCacheEntry:
     dynamo: _DynamoCacheEntry
     backends: dict[_BackendId, Any]
 
+    @staticmethod
+    def from_cache_entry(
+        cache_entry: _DynamoCacheEntry, backends: dict[_BackendId, Any]
+    ) -> Optional["PrecompileCacheEntry"]:
+        backend_content: dict[_BackendId, Any] = {}
+
+        for code in cache_entry.codes:
+            for backend_id in code.backend_ids:
+                if backend_id not in backends:
+                    logger.warning("Backend not found")
+                    debug_str = json.dumps(
+                        {
+                            "entry": cache_entry.debug_info(),
+                            "missing_backend": backend_id,
+                        }
+                    )
+                    torch._logging.trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "dynamo_cache_bypass",
+                            "encoding": "json",
+                        },
+                        payload_fn=lambda: debug_str,
+                        expect_trace_id=False,
+                    )
+                    code.bypassed = True
+                    break
+                else:
+                    backend_content[backend_id] = backends[backend_id]
+
+        return PrecompileCacheEntry(dynamo=cache_entry, backends=backend_content)
+
 
 def _hash_source(source: str) -> str:
     sha256_hash = hashlib.sha256()
@@ -612,10 +649,6 @@ class CompilePackage:
         try:
             yield
         finally:
-            if (
-                entry.bypassed
-            ):  # Remove the code from the cache entry if it's been bypassed
-                del self._codes[code]
             entry.has_compile_id = True
             self._current_entry = None
 
@@ -729,6 +762,11 @@ class CompilePackage:
                 if entry.code_source:
                     target_code = _lookup_code(entry)
 
+                if entry.bypassed:
+                    # If the entry is bypassed, do not install backends
+                    # or guarded codes.
+                    continue
+
                 for backend_id in entry.backend_ids:
                     if backend_id not in backends:
                         raise RuntimeError(
@@ -750,7 +788,8 @@ class CompilePackage:
                     torch._dynamo.eval_frame.skip_code(target_code)
 
                 for guarded_code in entry.guarded_codes:
-                    guards_state = pickle.loads(guarded_code.guards_state)
+                    with dynamo_timed("precompile_load_guards"):
+                        guards_state = load_guards_state(guarded_code.guards_state)
                     runtime_global_scope = sys.modules[entry.python_module].__dict__
                     # The installed builtins dict might be absent from the runtime
                     # while loading guards. Populate it if it's missing.
@@ -766,12 +805,14 @@ class CompilePackage:
                         else:
                             runtime_global_scope[builtin_dict_name] = builtins_dict
                     assert isinstance(guards_state, torch._dynamo.guards.GuardsState)
-                    check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
-                        target_code,
-                        OutputGraphCommon(guards_state.output_graph),
-                        shape_code_parts=guards_state.shape_code_parts,
-                        runtime_global_scope=runtime_global_scope,
-                    )
+                    with dynamo_timed("precompile_build_guards"):
+                        check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
+                            target_code,
+                            OutputGraphCommon(guards_state.output_graph),
+                            shape_code_parts=guards_state.shape_code_parts,
+                            runtime_global_scope=runtime_global_scope,
+                            source_get_cache=guards_state.source_get_cache,
+                        )
                     _load_precompile_entry(
                         target_code,
                         check_fn_manager.guard_manager,

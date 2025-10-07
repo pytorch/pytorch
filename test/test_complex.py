@@ -48,7 +48,7 @@ class TestComplexTensor(TestCase):
     def test_all(self, device, dtype):
         # issue: https://github.com/pytorch/pytorch/issues/120875
         x = torch.tensor([1 + 2j, 3 - 4j, 5j, 6], device=device, dtype=dtype)
-        self.assertTrue(torch.all(x))  # pyrefly: ignore  # missing-attribute
+        self.assertTrue(torch.all(x))
 
     @dtypes(*complex_types())
     def test_any(self, device, dtype):
@@ -56,7 +56,7 @@ class TestComplexTensor(TestCase):
         x = torch.tensor(
             [0, 0j, -0 + 0j, -0 - 0j, 0 + 0j, 0 - 0j], device=device, dtype=dtype
         )
-        self.assertFalse(torch.any(x))  # pyrefly: ignore  # missing-attribute
+        self.assertFalse(torch.any(x))
 
     @onlyCPU
     @dtypes(*complex_types())
