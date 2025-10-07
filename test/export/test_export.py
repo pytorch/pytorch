@@ -74,7 +74,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfXpu,
@@ -971,7 +970,7 @@ graph():
 
         model = M()
         ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
-        print(ep)
+
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
 
@@ -2666,7 +2665,7 @@ class GraphModule(torch.nn.Module):
         m = M()
         x = torch.randn(3)
         ep = export(m, (x,))
-        print(ep)
+
         ufm = torch.export.unflatten(ep)
         self.assertExpectedInline(
             str(ufm.graph_module.code).strip(),
@@ -3571,7 +3570,6 @@ graph():
                     sample_input = _tensor(nz=nz)
                     ep = export(mod, (sample_input,), strict=False)
                     self.assertEqual(ep.module()(sample_input), nz)
-                    print(ep)
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
@@ -8782,7 +8780,7 @@ def forward(self, x):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         # This is because we insert sym_constrain_range in the graph now
-        error_msg = r"Invalid value range for -1 between"
+        error_msg = r"ailed for expression u0 >= 0 on node 'ge'"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
@@ -8897,7 +8895,6 @@ def forward(self, x):
                 return self.freq[pos] * self.freq[pos]
 
         ep = export(M(), (torch.tensor(1),))
-        print(ep)
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
@@ -8990,12 +8987,6 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -9018,12 +9009,6 @@ def forward(self, x):
         self.assertEqual(ep.module()(torch.tensor([5])).shape, (10, 5))
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_to_module_with_mutated_buffer(self):
@@ -10090,17 +10075,11 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         ep = export(f, (torch.tensor([3]),))
 
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
 
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
@@ -14318,9 +14297,8 @@ graph():
             """\
 def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item);  sym_constrain_range_for_size_default = None
-    ge_1 = item >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
+    ge = item >= 3
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 3 on node 'ge'");  ge = _assert_scalar_default = None
     le = item <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
     gt_1 = item > 2
@@ -14936,22 +14914,10 @@ graph():
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         # check runtime
@@ -16757,15 +16723,7 @@ class TestOneOffModelExportResult(TestCase):
 
         with torch.nn.attention.sdpa_kernel([SDPBackend.MATH]):
             ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
-            print(ep.graph)
             ep.run_decompositions()
-            print(ep.graph)
-
-    #         self.assertExpectedInline(ep.graph_module.code.strip(), """\
-    # def forward(self, arg0_1, arg1_1, arg2_1):
-    #     _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(arg0_1, arg1_1, arg2_1, 0.0, True);  arg0_1 = arg1_1 = arg2_1 = None
-    #     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
-    #     return (getitem,)""")
 
     @skipIfCrossRef
     @unittest.skipIf(
