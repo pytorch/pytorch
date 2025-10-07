@@ -8,12 +8,7 @@ from typing import Any as _Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
-from torch._C import (
-    _add_docstr,
-    _infer_size,
-    _ScalingType,
-    _SwizzleType,
-)
+from torch._C import _add_docstr, _infer_size, _ScalingType, _SwizzleType
 from torch._jit_internal import (
     _overload,
     boolean_dispatch,
