@@ -26,6 +26,8 @@ from . import config, graph_break_hints, utils
 from .bytecode_transformation import (
     add_push_null,
     add_push_null_call_function_ex,
+    create_binary_subscr,
+    create_build_tuple,
     create_call_function,
     create_call_function_ex,
     create_call_method,
@@ -398,7 +400,7 @@ class PyCodegen:
             self(i)
 
     def create_binary_subscr(self) -> Instruction:
-        return create_instruction("BINARY_SUBSCR")
+        return create_binary_subscr()
 
     def setup_globally_cached(self, name: str, value: Any) -> list[Instruction]:
         """Store value in a new global"""
@@ -514,10 +516,10 @@ class PyCodegen:
         except AttributeError:
             # desired rotate bytecode doesn't exist, generate equivalent bytecode
             return [
-                create_instruction("BUILD_TUPLE", arg=n),
+                create_build_tuple(n),
                 self.create_load_const_unchecked(rot_n_helper(n)),
                 *create_rot_n(2),
-                *create_call_function_ex(0, False),
+                *create_call_function_ex(False, False),
                 create_instruction("UNPACK_SEQUENCE", arg=n),
             ]
 

@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 
 import faulthandler
+import functools
 import itertools
 import logging
 import multiprocessing
@@ -15,13 +16,14 @@ import time
 import traceback
 import types
 import unittest
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -32,6 +34,7 @@ import torch.nn as nn
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
 from torch._logging._internal import trace_log
+from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     find_free_port,
@@ -441,11 +444,11 @@ def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
     """Skips a test for given ROCm archs - multiprocess UTs"""
 
     def decorator(func):
-        prop = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
-        arch_match = prop in arch
         reason = None
-        if TEST_WITH_ROCM and arch_match:
-            reason = f"skip_if_rocm_arch_multiprocess: test skipped on {arch}"
+        if TEST_WITH_ROCM:
+            prop = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+            if prop in arch:
+                reason = f"skip_if_rocm_arch_multiprocess: test skipped on {arch}"
 
         return unittest.skipIf(reason is not None, reason)(func)
 
@@ -771,7 +774,12 @@ class MultiProcessTestCase(TestCase):
             process = proc(
                 target=self.__class__._run,
                 name="process " + str(rank),
-                args=(rank, self._current_test_name(), self.file_name, child_conn),
+                args=(
+                    rank,
+                    self._current_test_name(),
+                    self.file_name,
+                    child_conn,
+                ),
                 kwargs={
                     "fake_pg": getattr(self, "fake_pg", False),
                 },
@@ -848,6 +856,7 @@ class MultiProcessTestCase(TestCase):
             torch._C._set_print_stack_traces_on_fatal_signal(True)
         # Show full C++ stacktraces when a Python error originating from C++ is raised.
         os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
+        common_utils.set_rng_seed()
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
@@ -1140,30 +1149,24 @@ def run_subtests(
         c10d.barrier()
 
 
-# Cannot use functools.cache as it requires python 3.9
-EFA_PROBE_RESULT = None
-
-
+@functools.cache
 def has_efa() -> bool:
     """
     If shell command `fi_info -p efa -t FI_EP_RDM` returns exit code 0 then we assume that the machine has
     Libfabric EFA interfaces and EFA software components installed,
     see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-start.html.
     """
-    global EFA_PROBE_RESULT
-    if EFA_PROBE_RESULT is not None:
-        return EFA_PROBE_RESULT
 
     try:
-        EFA_PROBE_RESULT = (
+        return (
             subprocess.run(
                 ["fi_info", "-p", "efa", "-t", "FI_EP_RDM"], check=False
             ).returncode
             == 0
         )
     except FileNotFoundError:
-        EFA_PROBE_RESULT = False
-    return EFA_PROBE_RESULT
+        pass
+    return False
 
 
 def tp_transports():
@@ -1675,6 +1678,10 @@ class MultiProcContinuousTest(TestCase):
         self.rank = cls.rank
         self.world_size = cls.world_size
         test_fn = getattr(self, test_name)
+
+        # Ensure all the ranks use the same seed.
+        common_utils.set_rng_seed()
+
         # Run the test function
         test_fn(**kwargs)
 
