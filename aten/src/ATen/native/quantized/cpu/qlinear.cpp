@@ -812,7 +812,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_impl(
 
   auto is_input_qint8 = input.scalar_type() == c10::ScalarType::QInt8;
   auto input_contig = input.expect_contiguous();
-  auto& w = *(weight_.get());
+  auto& w = *weight_;
   auto K = input.size(dim - 1), M = input.numel() / K, N = w.get_dim(1);
   auto input_dims = {M, K};
   auto input_data_type = is_input_qint8 ? dnnl::memory::data_type::s8 : dnnl::memory::data_type::u8;
