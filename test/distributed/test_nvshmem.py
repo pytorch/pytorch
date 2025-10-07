@@ -717,7 +717,8 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
 
     @skipIfRocm
     @parametrize("tile_size", [32, 128, 512])
-    def test_tile_reduce(self, tile_size: int) -> None:
+    @parametrize("dtype", [torch.float, torch.half, torch.bfloat16])
+    def test_tile_reduce(self, tile_size: int, dtype: torch.dtype) -> None:
         full_size = 1024
         assert tile_size <= full_size
 
@@ -725,7 +726,6 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
-        dtype = torch.float
         full_inp = symm_mem.empty(
             full_size, full_size, dtype=dtype, device=self.device
         ).fill_(self.rank)
@@ -754,7 +754,10 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
     @parametrize(
         "root_ratio", [1, 2]
     )  # 1: all ranks are roots, 2: half of ranks are roots
-    def test_multi_root_tile_reduce(self, tile_size: int, root_ratio: int) -> None:
+    @parametrize("dtype", [torch.float, torch.half, torch.bfloat16])
+    def test_multi_root_tile_reduce(
+        self, tile_size: int, root_ratio: int, dtype: torch.dtype
+    ) -> None:
         full_size = 2048
         num_slices_col = 2  # number of tiles on column dimension
         num_slices_row = (
@@ -767,7 +770,6 @@ class NVSHMEMTileCommTest(MultiProcContinuousTest):
         group_name = dist.group.WORLD.group_name
         symm_mem.enable_symm_mem_for_group(group_name)
 
-        dtype = torch.float
         full_inp = symm_mem.empty(
             full_size, full_size, dtype=dtype, device=self.device
         ).fill_(self.rank)

@@ -912,9 +912,18 @@ __global__ void tile_reduce_kernel(
 #endif
 }
 
-#define AT_DISPATCH_FLOAT(scalar_type, name, ...) \
-  AT_DISPATCH_SWITCH(                             \
-      scalar_type, name,                          \
+#define AT_DISPATCH_CASE_CONVERT(enum_type, scalar_type, ...)               \
+  case enum_type: {                                                         \
+    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                            \
+    using scalar_t = scalar_type;                                           \
+    return __VA_ARGS__();                                                   \
+  }
+
+#define AT_DISPATCH_NVSHMEM_FLOATS(scalar_type, name, ...)                  \
+  AT_DISPATCH_SWITCH(                                                       \
+      scalar_type, name,                                                    \
+      AT_DISPATCH_CASE_CONVERT(at::kBFloat16, __nv_bfloat16, __VA_ARGS__);  \
+      AT_DISPATCH_CASE_CONVERT(at::kHalf, __half, __VA_ARGS__);             \
       AT_DISPATCH_CASE(at::kFloat, __VA_ARGS__));
 
 void tile_reduce(
@@ -926,7 +935,6 @@ void tile_reduce(
   /* Perform a tile reduce operation on the input tensor, with the root rank
    * receiving the reduced tensor. */
   TORCH_CHECK(reduce_op == "sum", "tile_reduce: only sum is supported for now");
-  TORCH_CHECK(in_tile.dtype() == at::kFloat, "Only float is supported");
   TORCH_CHECK(in_tile.dim() == 2 && out_tile.dim() == 2, "Only 2D tensors are supported");
   TORCH_CHECK_EQ(in_tile.dtype(), out_tile.dtype());
   TORCH_CHECK_EQ(in_tile.sizes(), out_tile.sizes());
@@ -942,7 +950,7 @@ void tile_reduce(
   int nblocks = at::ceil_div(
       in_tile.numel() * in_tile.element_size(),
       (int64_t)THREADS_PER_BLOCK * 16);
-  nblocks = std::min(nblocks, 32);
+  nblocks = std::min(nblocks, 24);
 
   // Need one team per block
   auto& team_manager = TeamManager::get(device);
@@ -966,7 +974,7 @@ void tile_reduce(
       &root,
       &teams_dev};
 
-  AT_DISPATCH_FLOAT(in_tile.scalar_type(), "tile_reduce", [&]() {
+  AT_DISPATCH_NVSHMEM_FLOATS(in_tile.scalar_type(), "tile_reduce", [&]() {
     nvshmemx_collective_launch(
         (const void*)tile_reduce_kernel<scalar_t>,
         dim3(nblocks),
@@ -995,7 +1003,6 @@ void multi_root_tile_reduce(
      - `reduce_op` is the reduction operation to perform. Currently only "sum" is supported.
    */
   TORCH_CHECK(reduce_op == "sum", "tile_reduce: only sum is supported for now");
-  TORCH_CHECK(out_tile.dtype() == at::kFloat, "Only float is supported");
   TORCH_CHECK(out_tile.dim() == 2, "Only 2D tensors are supported");
   TORCH_CHECK(roots.size() == in_tiles.size(), "Number of roots must match number of tiles");
 
@@ -1014,8 +1021,9 @@ void multi_root_tile_reduce(
   // `nvshmemx::tile_sum_reduce_block`, this rank would skip the reduction
   // operation, but would still participate in the barrier.
   for (auto& in_tile : in_tiles) {
-    TORCH_CHECK(in_tile.dtype() == at::kFloat, "Only float is supported");
+    TORCH_CHECK(in_tile.dim() == 2, "Only 2D tensors are supported");
     c10d::symmetric_memory::rendezvous(in_tile, group_name);
+    TORCH_CHECK(roots[i] < world_size && roots[i] >= 0, "Invalid root");
     if (roots[i] == rank) {
       TORCH_CHECK(root == world_size, "Each rank can only be a root once");
       my_tile_idx = i;
@@ -1028,7 +1036,7 @@ void multi_root_tile_reduce(
   int nblocks = at::ceil_div(
       out_tile.numel() * out_tile.element_size(),
       (int64_t)THREADS_PER_BLOCK * 16);
-  nblocks = std::min(nblocks, 16);
+  nblocks = std::min(nblocks, 24);
 
   // Need one team per block
   auto& team_manager = TeamManager::get(device);
@@ -1049,7 +1057,7 @@ void multi_root_tile_reduce(
       &root,
       &teams_dev};
 
-  AT_DISPATCH_FLOAT(out_tile.scalar_type(), "multi_root_tile_reduce", [&]() {
+  AT_DISPATCH_NVSHMEM_FLOATS(out_tile.scalar_type(), "multi_root_tile_reduce", [&]() {
     nvshmemx_collective_launch(
         (const void*)tile_reduce_kernel<scalar_t>,
         dim3(nblocks),
