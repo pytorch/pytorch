@@ -15668,11 +15668,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureStrictV2
-    @testing.expectedFailureStrict  # annotation needs to be handled in dynamo
-    @testing.expectedFailureSerDer
     def test_preserve_annotation(self):
         class M(torch.nn.Module):
             def forward(self, x):
