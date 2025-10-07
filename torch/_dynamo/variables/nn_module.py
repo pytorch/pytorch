@@ -962,8 +962,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
 
-        name = "__call__"
-        fn = getattr(self.value_type, name)
+        if not isinstance(mod, torch.fx.GraphModule):
+            name = "__call__"
+            fn = getattr(self.value_type, name)
+        else:
+            name = "_call_impl"
+            fn = getattr(self.value_type, name)
 
         # Check if we can short circuit nn.Module._call_impl to the forward
         # method.  NB - This is done to reduce the compile time of Dynamo.
