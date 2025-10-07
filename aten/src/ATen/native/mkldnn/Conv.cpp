@@ -38,7 +38,6 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub)
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
-#include <ATen/native/ConvUtils.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
@@ -105,7 +104,7 @@ static void check_shape_forward(const Tensor& input,
     // If kernel size is incorrect
     std::ostringstream input_ss;
     std::ostringstream kernel_ss;
-    std::string separator = "";
+    std::string separator;
 
     for (int i = 0, len = input_shape.size(); i < len; ++i) {
       input_ss << separator << input_shape[i];
