@@ -161,6 +161,24 @@ skip:
     - hf_clip
     # multi gpu not always available in benchmark runners
     - simple_gpt_tp_manual
+    # skip hf and timm models in torchbench since
+    # there are already separate benchmarks for them
+    - hf_Albert
+    - hf_Bart
+    - hf_Bert
+    - hf_BigBird
+    - hf_DistilBert
+    - hf_GPT2
+    - hf_Longformer
+    - hf_Reformer
+    - hf_T5
+    - timm_efficientdet
+    - timm_efficientnet
+    - timm_nfnet
+    - timm_regnet
+    - timm_resnest
+    - timm_vision_transformer
+    - timm_vovnet
 
   device:
     cpu:
