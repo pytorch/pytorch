@@ -134,6 +134,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
     @torch._inductor.config.patch(get_patches())
+    @torch._inductor.config.patch({"triton.native_matmul": False})
     def test_raise_comms(self):
         def func(a):
             b = torch.matmul(a, a)
