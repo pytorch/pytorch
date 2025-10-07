@@ -1174,12 +1174,10 @@ class TestMemoryProfilerE2E(TestCase):
             aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 20 (AUTOGRAD_DETAIL)
             aten::sum.dim_IntList                    20 (AUTOGRAD_DETAIL)                          -> 21 (GRADIENT)
             aten::view                               21 (GRADIENT)                                 -> 21 (GRADIENT)
-            aten::detach                             21 (GRADIENT)                                 -> 21 (GRADIENT)
             aten::detach                             21 (GRADIENT)                                 -> ???
             aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 22 (AUTOGRAD_DETAIL)
             aten::sum.dim_IntList                    22 (AUTOGRAD_DETAIL)                          -> 23 (GRADIENT)
             aten::view                               23 (GRADIENT)                                 -> 23 (GRADIENT)
-            aten::detach                             23 (GRADIENT)                                 -> 23 (GRADIENT)
             aten::detach                             23 (GRADIENT)                                 -> ???""",
         )
 
@@ -1227,11 +1225,9 @@ class TestMemoryProfilerE2E(TestCase):
             aten::sum.dim_IntList                    20 (AUTOGRAD_DETAIL)                          -> 21 (GRADIENT)
             aten::view                               21 (GRADIENT)                                 -> 21 (GRADIENT)
             aten::detach                             21 (GRADIENT)                                 -> 21 (GRADIENT)
-            aten::detach                             21 (GRADIENT)                                 -> 21 (GRADIENT)
             aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 22 (AUTOGRAD_DETAIL)
             aten::sum.dim_IntList                    22 (AUTOGRAD_DETAIL)                          -> 23 (GRADIENT)
             aten::view                               23 (GRADIENT)                                 -> 23 (GRADIENT)
-            aten::detach                             23 (GRADIENT)                                 -> 23 (GRADIENT)
             aten::detach                             23 (GRADIENT)                                 -> 23 (GRADIENT)
 
             -- Optimizer --------------------------------------------------------------------------------------------
@@ -1277,10 +1273,8 @@ class TestMemoryProfilerE2E(TestCase):
             aten::t                                  7 (GRADIENT)                                  -> 7 (GRADIENT)
             aten::sum.dim_IntList                    6 (ACTIVATION)                                -> 9 (GRADIENT)
             aten::view                               9 (GRADIENT)                                  -> 9 (GRADIENT)
-            aten::detach                             9 (GRADIENT)                                  -> 9 (GRADIENT)
             aten::detach                             9 (GRADIENT)                                  -> ???
             aten::t                                  7 (GRADIENT)                                  -> 7 (GRADIENT)
-            aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
             aten::detach                             7 (GRADIENT)                                  -> ???""",
         )
 
@@ -1318,17 +1312,13 @@ class TestMemoryProfilerE2E(TestCase):
             aten::sum.dim_IntList                    6 (ACTIVATION)                                -> 9 (GRADIENT)
             aten::view                               9 (GRADIENT)                                  -> 9 (GRADIENT)
             aten::detach                             9 (GRADIENT)                                  -> 9 (GRADIENT)
-            aten::detach                             9 (GRADIENT)                                  -> 9 (GRADIENT)
             aten::t                                  7 (GRADIENT)                                  -> 7 (GRADIENT)
-            aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
             aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
 
             -- Optimizer --------------------------------------------------------------------------------------------
             aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
-            aten::detach                             7 (GRADIENT)                                  -> 7 (GRADIENT)
             aten::clone                              7 (GRADIENT)                                  -> 10 (OPTIMIZER_STATE)
             aten::add_.Tensor                        2 (PARAMETER), 10 (OPTIMIZER_STATE)           -> 2 (PARAMETER)
-            aten::detach                             9 (GRADIENT)                                  -> 9 (GRADIENT)
             aten::detach                             9 (GRADIENT)                                  -> 9 (GRADIENT)
             aten::clone                              9 (GRADIENT)                                  -> 11 (OPTIMIZER_STATE)
             aten::add_.Tensor                        3 (PARAMETER), 11 (OPTIMIZER_STATE)           -> 3 (PARAMETER)""",
