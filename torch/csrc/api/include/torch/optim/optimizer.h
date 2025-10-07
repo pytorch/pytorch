@@ -68,12 +68,12 @@ class TORCH_API OptimizerOptions {
 };
 
 // Forward declarations for optimizer option types
-class SGDOptions;
-class AdamOptions;
-class AdamWOptions;
-class AdagradOptions;
-class RMSpropOptions;
-class LBFGSOptions;
+struct SGDOptions;
+struct AdamOptions;
+struct AdamWOptions;
+struct AdagradOptions;
+struct RMSpropOptions;
+struct LBFGSOptions;
 
 /**
  * OptimizerCloneableOptions provides parameter group inheritance functionality
@@ -103,7 +103,7 @@ class LBFGSOptions;
  * comparison to distinguish explicitly set fields from default values.
  * Fields that match constructor defaults are inherited; others are preserved.
  */
-template <class Derived>
+template <typename Derived>
 class OptimizerCloneableOptions : public OptimizerOptions {
  private:
   std::unique_ptr<OptimizerOptions> clone() const override {
@@ -112,123 +112,123 @@ class OptimizerCloneableOptions : public OptimizerOptions {
 
   // SFINAE field detection - detects optimizer fields using public accessor methods
   template <class T, class Enable = void>
-  struct has_lr : std::false_type {};
+  struct _has_lr : std::false_type {};
   template <class T>
-  struct has_lr<T, std::void_t<decltype(std::declval<const T&>().lr())>>
+  struct _has_lr<T, std::void_t<decltype(std::declval<const T&>().lr())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_momentum : std::false_type {};
+  struct _has_momentum : std::false_type {};
   template <class T>
-  struct has_momentum<T, std::void_t<decltype(std::declval<const T&>().momentum())>>
+  struct _has_momentum<T, std::void_t<decltype(std::declval<const T&>().momentum())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_weight_decay : std::false_type {};
+  struct _has_weight_decay : std::false_type {};
   template <class T>
-  struct has_weight_decay<
+  struct _has_weight_decay<
       T,
       std::void_t<decltype(std::declval<const T&>().weight_decay())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_dampening : std::false_type {};
+  struct _has_dampening : std::false_type {};
   template <class T>
-  struct has_dampening<T, std::void_t<decltype(std::declval<const T&>().dampening())>>
+  struct _has_dampening<T, std::void_t<decltype(std::declval<const T&>().dampening())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_nesterov : std::false_type {};
+  struct _has_nesterov : std::false_type {};
   template <class T>
-  struct has_nesterov<T, std::void_t<decltype(std::declval<const T&>().nesterov())>>
+  struct _has_nesterov<T, std::void_t<decltype(std::declval<const T&>().nesterov())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_betas : std::false_type {};
+  struct _has_betas : std::false_type {};
   template <class T>
-  struct has_betas<T, std::void_t<decltype(std::declval<const T&>().betas())>>
+  struct _has_betas<T, std::void_t<decltype(std::declval<const T&>().betas())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_eps : std::false_type {};
+  struct _has_eps : std::false_type {};
   template <class T>
-  struct has_eps<T, std::void_t<decltype(std::declval<const T&>().eps())>>
+  struct _has_eps<T, std::void_t<decltype(std::declval<const T&>().eps())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_amsgrad : std::false_type {};
+  struct _has_amsgrad : std::false_type {};
   template <class T>
-  struct has_amsgrad<T, std::void_t<decltype(std::declval<const T&>().amsgrad())>>
+  struct _has_amsgrad<T, std::void_t<decltype(std::declval<const T&>().amsgrad())>>
       : std::true_type {};
 
   // Optimizer-specific field detection
   template <class T, class Enable = void>
-  struct has_lr_decay : std::false_type {};
+  struct _has_lr_decay : std::false_type {};
   template <class T>
-  struct has_lr_decay<T, std::void_t<decltype(std::declval<const T&>().lr_decay())>>
+  struct _has_lr_decay<T, std::void_t<decltype(std::declval<const T&>().lr_decay())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_alpha : std::false_type {};
+  struct _has_alpha : std::false_type {};
   template <class T>
-  struct has_alpha<T, std::void_t<decltype(std::declval<const T&>().alpha())>>
+  struct _has_alpha<T, std::void_t<decltype(std::declval<const T&>().alpha())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_centered : std::false_type {};
+  struct _has_centered : std::false_type {};
   template <class T>
-  struct has_centered<T, std::void_t<decltype(std::declval<const T&>().centered())>>
+  struct _has_centered<T, std::void_t<decltype(std::declval<const T&>().centered())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_initial_accumulator_value : std::false_type {};
+  struct _has_initial_accumulator_value : std::false_type {};
   template <class T>
-  struct has_initial_accumulator_value<
+  struct _has_initial_accumulator_value<
       T,
       std::void_t<decltype(std::declval<const T&>().initial_accumulator_value())>>
       : std::true_type {};
 
   // LBFGS-specific fields with appropriate types
   template <class T, class Enable = void>
-  struct has_max_iter : std::false_type {};
+  struct _has_max_iter : std::false_type {};
   template <class T>
-  struct has_max_iter<T, std::void_t<decltype(std::declval<const T&>().max_iter())>>
+  struct _has_max_iter<T, std::void_t<decltype(std::declval<const T&>().max_iter())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_max_eval : std::false_type {};
+  struct _has_max_eval : std::false_type {};
   template <class T>
-  struct has_max_eval<T, std::void_t<decltype(std::declval<const T&>().max_eval())>>
+  struct _has_max_eval<T, std::void_t<decltype(std::declval<const T&>().max_eval())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_tolerance_grad : std::false_type {};
+  struct _has_tolerance_grad : std::false_type {};
   template <class T>
-  struct has_tolerance_grad<
+  struct _has_tolerance_grad<
       T,
       std::void_t<decltype(std::declval<const T&>().tolerance_grad())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_tolerance_change : std::false_type {};
+  struct _has_tolerance_change : std::false_type {};
   template <class T>
-  struct has_tolerance_change<
+  struct _has_tolerance_change<
       T,
       std::void_t<decltype(std::declval<const T&>().tolerance_change())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_history_size : std::false_type {};
+  struct _has_history_size : std::false_type {};
   template <class T>
-  struct has_history_size<
+  struct _has_history_size<
       T,
       std::void_t<decltype(std::declval<const T&>().history_size())>>
       : std::true_type {};
 
   template <class T, class Enable = void>
-  struct has_line_search_fn : std::false_type {};
+  struct _has_line_search_fn : std::false_type {};
   template <class T>
-  struct has_line_search_fn<
+  struct _has_line_search_fn<
       T,
       std::void_t<decltype(std::declval<const T&>().line_search_fn())>>
       : std::true_type {};
@@ -272,64 +272,64 @@ class OptimizerCloneableOptions : public OptimizerOptions {
 
     // Merge fields: preserve user-set values, inherit defaults for unset values
 
-    if constexpr (has_lr<Derived>::value) {
+    if constexpr (_has_lr<Derived>::value) {
       if (user_options.lr() != constructor_defaults.lr()) {
         result->lr(user_options.lr());
       }
     }
-    if constexpr (has_momentum<Derived>::value) {
+    if constexpr (_has_momentum<Derived>::value) {
       if (user_options.momentum() != constructor_defaults.momentum()) {
         result->momentum(user_options.momentum());
       }
     }
-    if constexpr (has_weight_decay<Derived>::value) {
+    if constexpr (_has_weight_decay<Derived>::value) {
       if (user_options.weight_decay() != constructor_defaults.weight_decay()) {
         result->weight_decay(user_options.weight_decay());
       }
     }
-    if constexpr (has_dampening<Derived>::value) {
+    if constexpr (_has_dampening<Derived>::value) {
       if (user_options.dampening() != constructor_defaults.dampening()) {
         result->dampening(user_options.dampening());
       }
     }
-    if constexpr (has_nesterov<Derived>::value) {
+    if constexpr (_has_nesterov<Derived>::value) {
       if (user_options.nesterov() != constructor_defaults.nesterov()) {
         result->nesterov(user_options.nesterov());
       }
     }
-    if constexpr (has_betas<Derived>::value) {
+    if constexpr (_has_betas<Derived>::value) {
       if (user_options.betas() != constructor_defaults.betas()) {
         result->betas(user_options.betas());
       }
     }
-    if constexpr (has_eps<Derived>::value) {
+    if constexpr (_has_eps<Derived>::value) {
       if (user_options.eps() != constructor_defaults.eps()) {
         result->eps(user_options.eps());
       }
     }
-    if constexpr (has_amsgrad<Derived>::value) {
+    if constexpr (_has_amsgrad<Derived>::value) {
       if (user_options.amsgrad() != constructor_defaults.amsgrad()) {
         result->amsgrad(user_options.amsgrad());
       }
     }
 
     // Optimizer-specific fields - automatically detected and handled
-    if constexpr (has_lr_decay<Derived>::value) {
+    if constexpr (_has_lr_decay<Derived>::value) {
       if (user_options.lr_decay() != constructor_defaults.lr_decay()) {
         result->lr_decay(user_options.lr_decay());
       }
     }
-    if constexpr (has_alpha<Derived>::value) {
+    if constexpr (_has_alpha<Derived>::value) {
       if (user_options.alpha() != constructor_defaults.alpha()) {
         result->alpha(user_options.alpha());
       }
     }
-    if constexpr (has_centered<Derived>::value) {
+    if constexpr (_has_centered<Derived>::value) {
       if (user_options.centered() != constructor_defaults.centered()) {
         result->centered(user_options.centered());
       }
     }
-    if constexpr (has_initial_accumulator_value<Derived>::value) {
+    if constexpr (_has_initial_accumulator_value<Derived>::value) {
       if (user_options.initial_accumulator_value() !=
           constructor_defaults.initial_accumulator_value()) {
         result->initial_accumulator_value(
@@ -338,34 +338,34 @@ class OptimizerCloneableOptions : public OptimizerOptions {
     }
 
     // LBFGS-specific fields with appropriate types
-    if constexpr (has_max_iter<Derived>::value) {
+    if constexpr (_has_max_iter<Derived>::value) {
       if (user_options.max_iter() != constructor_defaults.max_iter()) {
         result->max_iter(user_options.max_iter());
       }
     }
-    if constexpr (has_max_eval<Derived>::value) {
+    if constexpr (_has_max_eval<Derived>::value) {
       if (user_options.max_eval() != constructor_defaults.max_eval()) {
         result->max_eval(user_options.max_eval());
       }
     }
-    if constexpr (has_tolerance_grad<Derived>::value) {
+    if constexpr (_has_tolerance_grad<Derived>::value) {
       if (user_options.tolerance_grad() !=
           constructor_defaults.tolerance_grad()) {
         result->tolerance_grad(user_options.tolerance_grad());
       }
     }
-    if constexpr (has_tolerance_change<Derived>::value) {
+    if constexpr (_has_tolerance_change<Derived>::value) {
       if (user_options.tolerance_change() !=
           constructor_defaults.tolerance_change()) {
         result->tolerance_change(user_options.tolerance_change());
       }
     }
-    if constexpr (has_history_size<Derived>::value) {
+    if constexpr (_has_history_size<Derived>::value) {
       if (user_options.history_size() != constructor_defaults.history_size()) {
         result->history_size(user_options.history_size());
       }
     }
-    if constexpr (has_line_search_fn<Derived>::value) {
+    if constexpr (_has_line_search_fn<Derived>::value) {
       if (user_options.line_search_fn() !=
           constructor_defaults.line_search_fn()) {
         result->line_search_fn(user_options.line_search_fn());
