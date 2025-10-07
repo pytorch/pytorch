@@ -521,6 +521,7 @@ class ShardingPropagator:
             )
             output_sharding.output_spec = new_output_spec
             return output_sharding
+        # only 4 ops, convolution, convolution_backward, index_select, index
         elif op_schema.op in self.op_to_rules:
             # propagate the sharding with rule
             sharding_prop_func = self.op_to_rules[op_schema.op]

@@ -490,6 +490,8 @@ def propagate_shape_and_sharding(
     - An output dimension that is a split of the input dimension can only be sharded
       if the leftmost split size is divisible by the mesh dimension
     """
+    # import fbvscode
+    # fbvscode.set_trace()
     assert len(input_src_placements) == len(mesh_sizes), (
         f"{input_src_placements} != {mesh_sizes}"
     )
@@ -543,21 +545,21 @@ def propagate_shape_and_sharding(
                 if i > 0:
                     can_shard_dim = False
                     if strict_view and input_sharded:
-                        # import fbvscode
-                        # fbvscode.set_trace()
+                        import fbvscode
+                        fbvscode.set_trace()
                         raise RuntimeError(
                             f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
                             "It cannot be performed without redistribution, which is disallowed by the current operator.",
                         )
                 elif input_sharded:
+                    import fbvscode
+                    fbvscode.set_trace()
                     assert shard_placement is not None and shard_mesh_dim is not None
                     tensor_dim_size = global_input_shape[shard_placement.dim]
                     mesh_dim_size = mesh_sizes[shard_mesh_dim]
                     if tensor_dim_size % mesh_dim_size != 0:
                         can_shard_dim = False
                         if strict_view:
-                            import fbvscode
-                            fbvscode.set_trace()
                             raise RuntimeError(
                                 f"Attempted to flatten unevenly sharded dimension {i}, "
                                 "which would require resharding the input. "
@@ -657,6 +659,13 @@ def propagate_shape_and_sharding(
     return input_tgt_placements, output_placements
 
 
+
+# register_op_strategy_map(
+#     aten.view.default,
+#     Tensor.view,
+#     schema_info=RuntimeSchemaInfo(1),
+#     strict_view=True,
+# )
 def register_op_strategy_map(
     aten_op_overload: torch._ops.OpOverload,
     local_op_name: Callable[..., torch.Tensor],
@@ -672,6 +681,7 @@ def register_op_strategy_map(
        Currently, this should be set to 'true' for any "view" ops.
        We could diverge behavior for "reshape" ops which could perform a redistribute implicitly.
     """
+    # Tensor.view: lambda input, *shape: view_groups(input.shape, shape),
     dim_map: Callable[..., DimMap] = dim_maps[local_op_name]
 
     @register_op_strategy(aten_op_overload, schema_info=schema_info)
