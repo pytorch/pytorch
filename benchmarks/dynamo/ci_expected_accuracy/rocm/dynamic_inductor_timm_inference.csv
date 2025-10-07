@@ -150,7 +150,7 @@ pit_b_224,pass,0
 
 
 
-pnasnet5large,pass,0
+pnasnet5large,fail_accuracy,0
 
 
 
@@ -158,23 +158,23 @@ poolformer_m36,pass,0
 
 
 
-regnety_002,pass,0
+regnety_002,fail_accuracy,0
 
 
 
-repvgg_a2,pass,0
+repvgg_a2,fail_accuracy,0
 
 
 
-res2net101_26w_4s,pass,0
+res2net101_26w_4s,fail_accuracy,0
 
 
 
-res2net50_14w_8s,pass,0
+res2net50_14w_8s,fail_accuracy,0
 
 
 
-res2next50,pass,0
+res2next50,fail_accuracy,0
 
 
 
@@ -206,7 +206,7 @@ swin_base_patch4_window7_224,pass,0
 
 
 
-swsl_resnext101_32x16d,pass,0
+swsl_resnext101_32x16d,fail_accuracy,0
 
 
 

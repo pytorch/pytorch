@@ -127,8 +127,7 @@ void apply_ldl_solve_cusolver(
     const Tensor& pivots,
     const Tensor& B,
     bool upper) {
-#if !(defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && \
-    CUSOLVER_VERSION >= 11102)
+#if !(defined(CUDART_VERSION) && defined(CUSOLVER_VERSION))
   TORCH_CHECK(
       false,
       "Calling torch.linalg.ldl_solve on a CUDA tensor requires compiling ",
