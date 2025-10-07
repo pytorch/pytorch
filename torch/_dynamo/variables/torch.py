@@ -77,7 +77,10 @@ from .ctx_manager import (
 )
 from .dicts import ConstDictVariable
 from .distributed import DistributedVariable, ProcessGroupVariable
-from .functions import bind_args_cached, NestedUserFunctionVariable
+from .functions import (
+    bind_args_cached,
+    NestedUserFunctionVariable,
+)
 from .lists import ListVariable, TupleVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -1220,6 +1223,45 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return ConstantVariable.create(None)
 
+        @register(torch._check)
+        def handle_check(self, tx: "InstructionTranslator", *args, **kwargs):
+            # both args are variable trackers
+            # first arg is a predicate vt, second is optional message vt
+            assert args
+
+            # emit missing proxy that was impossible to implement inside NestedUserFunctionVariable
+            # but needed to fix the issue https://github.com/pytorch/pytorch/issues/163668
+            message_eager = None
+            message_graph = None
+            if len(args) >= 2:
+                message_vt = args[1]
+
+                if message_vt.is_python_constant():
+                    message_eager = message_vt.as_python_constant()
+                    message_graph = message_eager
+                else:
+                    assert isinstance(message_vt, NestedUserFunctionVariable)
+                    assert not message_vt.has_closure()
+                    message_eager = message_vt.get_function()
+                    attr_prefix = f"_check_msg_{tx.output.graph.nodes.__len__()}"
+                    message_graph = tx.output.register_static_attr_and_return_proxy(
+                        attr_prefix, message_eager
+                    )
+            predicate_vt = args[0]
+
+            if predicate_vt.is_python_constant():
+                self.value(predicate_vt.as_python_constant(), message_eager)
+                return ConstantVariable.create(None)
+
+            predicate_proxy = predicate_vt.as_proxy()
+            tx.output.create_proxy(
+                "call_function",
+                self.value,
+                (predicate_proxy, message_graph),
+                {},
+            )
+            return ConstantVariable.create(None)
+
         return handlers
 
     def call_function(
@@ -1410,54 +1452,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     tx,
                     args=list(map(ConstantVariable.create, exc.args)),
                 )
-
-        if self.value is getattr(torch, "_check", None):
-            # both args are variable trackers
-            # first arg is a predicate vt, second is optional message vt
-            if not args:
-                unimplemented_v2(
-                    gb_type="torch._check missing predicate",
-                    context="torch._check() was called without predicate",
-                    explanation="torch._check requires a predicate argument",
-                    hints=[*graph_break_hints.USER_ERROR],
-                )
-
-            message = None
-            if len(args) >= 2:
-                message_vt = args[1]
-                try:
-                    if isinstance(message_vt, NestedUserFunctionVariable):
-                        message = (
-                            None
-                            if message_vt.has_closure()
-                            else message_vt.get_function()
-                        )
-                    else:
-                        message = message_vt.as_python_constant()
-                except NotImplementedError:
-                    unimplemented_v2(
-                        gb_type="Can't extract message from torch._check",
-                        context="torch._check() has a second argument, which is expected to be a message",
-                        explanation="Trying to build a proxy of torch._check() message, but failed to",
-                        hints=[*graph_break_hints.SUPPORTABLE],
-                    )
-
-            predicate_vt = args[0]
-
-            if predicate_vt.is_python_constant():
-                self.value(predicate_vt.as_python_constant(), message)
-                return ConstantVariable.create(None)
-
-            # emit missing proxy that was impossible to implement inside NestedUserFunctionVariable
-            # but needed to fix the issue https://github.com/pytorch/pytorch/issues/163668
-            predicate_proxy = predicate_vt.as_proxy()
-            tx.output.create_proxy(
-                "call_function",
-                self.value,
-                (predicate_proxy, message),
-                {},
-            )
-            return ConstantVariable.create(None)
 
         if self.is_tensor_method():
             name = self.value.__name__
