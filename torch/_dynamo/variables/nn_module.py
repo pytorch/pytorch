@@ -970,7 +970,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             fn = getattr(self.value_type, name)
         else:
             name = "_call_impl"
-            fn = getattr(self.value_type, name)
+            if "_call_impl" in mod.__dict__:
+                fn = getattr(mod, "_call_impl")
+            else:
+                fn = getattr(self.value_type, name)
 
         # Check if we can short circuit nn.Module._call_impl to the forward
         # method.  NB - This is done to reduce the compile time of Dynamo.
@@ -1012,9 +1015,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else nullcontext()
         )
         with ctx:
-            return variables.UserFunctionVariable(fn, source=source).call_function(
-                tx, [self] + list(args), kwargs
-            )
+            if isinstance(fn, functools.partial):
+                from .builder import VariableBuilder
+
+                partial_source = AttrSource(self.source, name) if self.source else None
+                partial_var = VariableBuilder(tx, partial_source)(fn)
+                return partial_var.call_function(tx, args, kwargs)
+            else:
+                return variables.UserFunctionVariable(fn, source=source).call_function(
+                    tx, [self] + list(args), kwargs
+                )
 
     def call_method(
         self,
@@ -1024,7 +1034,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name in ["_call_impl", "_wrapped_call_impl"]:
-            fn = getattr(self.value_type, name)
+            #fn = getattr(self.value_type, name)
+            fn = getattr(self.value, name) if name in self.value.__dict__ else getattr(self.value_type, name)
             if self.source:
                 source = self.get_source_by_walking_mro(name)
             else:
