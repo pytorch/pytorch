@@ -65,8 +65,7 @@ def grouped_mm_configs():
     return _NV_CONFIGS
 
 
-def early_config_prune(g, m, configs, named_args):
-    dtsize = 1
+def early_config_prune(g, m, dtsize, configs, named_args):
     pruned_configs = []
     for config in configs:
         kw = config.kwargs
@@ -742,7 +741,9 @@ def _tuned_grouped_mm_common(
             "USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR": triton_has_experimental_make_tensor_descriptor,
         }
 
-        for config in early_config_prune(g, m, grouped_mm_configs(), kwargs):
+        for config in early_config_prune(
+            g, m, mat_a.dtype.itemsize, grouped_mm_configs(), kwargs
+        ):
             kernel_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,

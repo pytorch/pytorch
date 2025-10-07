@@ -759,6 +759,7 @@ class TestConvolutionNN(NNTestCase):
     # For https://github.com/pytorch/pytorch/pull/1273
     # Almost identical to the above `test_Conv2d_naive_groups`
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.miopen.flags(immediate=True)
     @tf32_on_and_off(0.001)
     def test_Conv2d_groups_nobias(self):
         dev_dtypes = [("cpu", torch.float)]
@@ -804,6 +805,7 @@ class TestConvolutionNN(NNTestCase):
     # See also https://github.com/pytorch/pytorch/pull/18463#issuecomment-476563686
     # and https://github.com/pytorch/pytorch/pull/18463#issuecomment-477001024
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.miopen.flags(immediate=True)
     @tf32_on_and_off(0.001)
     def test_Conv2d_groups_nobias_v2(self):
         torch.manual_seed(123)
@@ -1411,6 +1413,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.miopen.flags(immediate=True)
     @tf32_on_and_off(0.01)
     def test_Conv2d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
@@ -1473,6 +1476,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.float, torch.double, torch.half)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.miopen.flags(immediate=True)
     @tf32_on_and_off(0.01)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
         for depth_multiplier in [1, 2]:
@@ -1565,48 +1569,49 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @dtypes(torch.double)
+    @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.miopen.flags(immediate=True)
     def test_conv_double_backward(self, device, dtype):
-        with torch.backends.cudnn.flags(enabled=True, deterministic=True):
-            # Double backward only runs with DoubleTensor due to precision reason
-            batch_size = 1
-            for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 9, [1])]:
-                for stride, padding, chan_in, chan_out, dilation in product(
-                    [1], [2], [2], [3], dilations
-                ):
-                    no_weight = stride == 2
-                    result = self.run_conv_double_back_test(
-                        kern,
-                        stride,
-                        padding,
-                        chan_in,
-                        chan_out,
-                        batch_size,
-                        inp_size,
-                        dilation,
-                        no_weight,
-                        use_cuda=True,
-                        dtype=dtype,
-                    )
-                    self.assertTrue(
-                        result,
-                        "Conv double backward test failed with parameters:"
-                        + "\nkern: "
-                        + str(kern)
-                        + "\nstride: "
-                        + str(stride)
-                        + "\npadding: "
-                        + str(padding)
-                        + "\nchan_in: "
-                        + str(chan_in)
-                        + "\nchan_out: "
-                        + str(chan_out)
-                        + "\nbatch_size: "
-                        + str(batch_size)
-                        + "\ninp_size: "
-                        + str(inp_size)
-                        + "\ndilation: "
-                        + str(dilation),
-                    )
+        # Double backward only runs with DoubleTensor due to precision reason
+        batch_size = 1
+        for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 9, [1])]:
+            for stride, padding, chan_in, chan_out, dilation in product(
+                [1], [2], [2], [3], dilations
+            ):
+                no_weight = stride == 2
+                result = self.run_conv_double_back_test(
+                    kern,
+                    stride,
+                    padding,
+                    chan_in,
+                    chan_out,
+                    batch_size,
+                    inp_size,
+                    dilation,
+                    no_weight,
+                    use_cuda=True,
+                    dtype=dtype,
+                )
+                self.assertTrue(
+                    result,
+                    "Conv double backward test failed with parameters:"
+                    + "\nkern: "
+                    + str(kern)
+                    + "\nstride: "
+                    + str(stride)
+                    + "\npadding: "
+                    + str(padding)
+                    + "\nchan_in: "
+                    + str(chan_in)
+                    + "\nchan_out: "
+                    + str(chan_out)
+                    + "\nbatch_size: "
+                    + str(batch_size)
+                    + "\ninp_size: "
+                    + str(inp_size)
+                    + "\ndilation: "
+                    + str(dilation),
+                )
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
@@ -1722,6 +1727,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         *([torch.float] if MACOS_VERSION < 14.0 else [torch.float, torch.cfloat])
     )  # Complex not supported on MacOS13
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.miopen.flags(immediate=True)
     def test_conv1d_same_padding(self, device, dtype):
         # Test padding='same' outputs the correct shape
         test_args = [
@@ -3398,6 +3404,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     )
     @dtypes(torch.float)
     @torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False)
+    @torch.backends.miopen.flags(immediate=True)
     @tf32_on_and_off(0.001)
     def test_Conv2d_naive_groups(self, device, dtype):
         # Check that grouped convolutions matches two half convolutions

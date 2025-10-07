@@ -81,6 +81,7 @@ def safe_is_leaf(t: Union[MetaTensorDesc, torch.Tensor]) -> bool:
 
 def safe_grad(t: _TensorLikeT) -> Optional[_TensorLikeT]:
     with torch._logging.hide_warnings(torch._logging._internal.safe_grad_filter):
+        # pyrefly: ignore  # bad-return
         return t.grad
 
 
@@ -415,6 +416,7 @@ class MetaTensorDescriber:
             device=t.device,
             size=t.size(),
             stride=stride,
+            # pyrefly: ignore  # bad-argument-type
             storage_offset=storage_offset,
             dynamo_dynamic_indices=list(getattr(t, "_dynamo_dynamic_indices", set())),
             dynamo_hint_overrides=getattr(t, "_dynamo_hint_overrides", {}),
@@ -539,7 +541,11 @@ class _FakeTensorViewFunc(ViewFunc["FakeTensor"]):
         tensor_visitor_fn: Optional[Callable[[torch.Tensor], FakeTensor]] = None,
     ) -> FakeTensor:
         return torch._subclasses.fake_tensor.FakeTensor._view_func_unsafe(
-            t, new_base, symint_visitor_fn, tensor_visitor_fn
+            # pyrefly: ignore  # bad-argument-type
+            t,
+            new_base,
+            symint_visitor_fn,
+            tensor_visitor_fn,
         )
 
 
@@ -1013,6 +1019,7 @@ class MetaConverter(Generic[_TensorT]):
             # Morally, the code here is same as transform_subclass, but we've
             # written it from scratch to read EmptyCreateSubclass
             outer_size = outer_size if outer_size is not None else t.size
+            # pyrefly: ignore  # bad-assignment
             outer_stride = outer_stride if outer_stride is not None else t.stride
 
             assert symbolic_context is None or isinstance(
@@ -1269,6 +1276,7 @@ class MetaConverter(Generic[_TensorT]):
                 ) -> torch.Tensor:
                     # It's possible to close over an undefined tensor (e.g. NJT's lengths).
                     if visited_t is None:
+                        # pyrefly: ignore  # bad-return
                         return None
 
                     # NB: visited_t being a Tensor here is very naughty!  Should
@@ -1399,6 +1407,7 @@ class MetaConverter(Generic[_TensorT]):
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
+                        # pyrefly: ignore  # bad-argument-type
                         r = self._backward_error(r)
                 elif t.is_nested and not t.is_traceable_wrapper_subclass:
                     # TODO: Handle this better in Dynamo?
@@ -1437,6 +1446,7 @@ class MetaConverter(Generic[_TensorT]):
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
+                        # pyrefly: ignore  # bad-argument-type
                         r = self._backward_error(r)
                 elif t.is_functorch_wrapped:
                     if t.is_view:
@@ -1533,6 +1543,7 @@ class MetaConverter(Generic[_TensorT]):
                                     )
                                     assert t.data is not None
                                     _safe_copy(r.real_tensor, t.data)  # type: ignore[attr-defined]
+                        # pyrefly: ignore  # bad-return
                         return r
 
                     r = _to_fake_tensor(t)
@@ -1682,6 +1693,7 @@ class MetaConverter(Generic[_TensorT]):
                         not (t.is_batchedtensor or t.is_gradtrackingtensor)
                         and t.is_functorch_wrapped
                     ) or t.is_legacy_batchedtensor:
+                        # pyrefly: ignore  # bad-return
                         return NotImplemented
 
                     (
@@ -1728,6 +1740,7 @@ class MetaConverter(Generic[_TensorT]):
                             # the metadata of the inner tensor.
                             # So instead, we now have a dedicated fn to set autograd history,
                             # without inadvertently changing other metadata.
+                            # pyrefly: ignore  # bad-argument-type
                             r = self._backward_error(r)
 
                     s = t.storage
@@ -1839,6 +1852,7 @@ class MetaConverter(Generic[_TensorT]):
                     nt_tensor_id=t.nested_int
                 )
 
+            # pyrefly: ignore  # bad-argument-type
             self.set_tensor_memo(t, r)
 
         return self._checked_get_tensor_memo(t)
@@ -1882,11 +1896,13 @@ class MetaConverter(Generic[_TensorT]):
                 (t._is_view() and t._base is not None and t._base.is_sparse)
             ):
                 self.miss += 1
+                # pyrefly: ignore  # bad-return
                 return NotImplemented
             else:
                 self.hit += 1
         elif torch.overrides.is_tensor_like(t):
             self.miss += 1
+            # pyrefly: ignore  # bad-return
             return NotImplemented
         else:
             # non-Tensor types don't count as hit or miss

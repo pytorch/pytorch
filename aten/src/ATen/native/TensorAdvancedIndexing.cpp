@@ -145,12 +145,6 @@
 #include <utility>
 #include <vector>
 
-namespace at::native {
-
-AdvancedIndex make_info(Tensor self, IOptTensorListRef orig);
-
-} // namespace at::native
-
 namespace at::meta {
 
 TORCH_META_FUNC(gather)
