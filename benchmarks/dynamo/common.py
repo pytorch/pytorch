@@ -2282,7 +2282,9 @@ class BenchmarkRunner:
                 del model_copy
                 empty_gpu_cache(current_device)
 
-            # Two eager runs should have exactly same result
+            # Two eager runs should have exactly same result, within tolerance.
+            # TODO If we want the above to be true, then deterministic should be set.
+            # For example, MIOpen convolutions could be implemented with non-deterministic algos.
             is_same = True
             try:
                 if (
@@ -2292,7 +2294,7 @@ class BenchmarkRunner:
                         correct_rerun_result,
                         fp64_ref=None,
                         cos_similarity=False,
-                        tol=0,
+                        tol=tolerance if torch.version.hip else 0,
                         equal_nan=self.equal_nan,
                         use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
                             name
