@@ -418,7 +418,7 @@ void OSSProxyExecutor::get_input_info_from_serialized(
     const auto& arg = named_argument["arg"];
     const auto& name = named_argument["name"].get<std::string>();
 
-    std::string custom_obj_name = "";
+    std::string custom_obj_name;
     if (arg.contains("as_custom_obj")) {
       custom_obj_name = arg["as_custom_obj"]["name"].get<std::string>();
     }

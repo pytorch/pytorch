@@ -948,17 +948,15 @@ static void validate_outputs_impl(
     TORCH_CHECK(
         isFloatingType(grad.scalar_type()) ||
         (input_is_complex == grad_is_complex));
-
-    if (metadata.grad_dtype().has_value()) {
-      if (grad.scalar_type() != metadata.grad_dtype().value()) {
-        grad = grad.to(metadata.grad_dtype().value());
-      }
-      if (grad.scalar_type() != metadata.grad_dtype().value()) {
-        std::stringstream ss;
-        ss << "invalid gradient at index " << i << " - expected dtype ";
-        ss << metadata.grad_dtype().value() << " but got " << grad.dtype();
-        TORCH_CHECK(false, format_error(ss.str()));
-      }
+    if (c10::typeMetaToScalarType(metadata.options().dtype()) !=
+        grad.scalar_type()) {
+      grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
+    }
+    if (grad.dtype() != metadata.dtype()) {
+      std::stringstream ss;
+      ss << "invalid gradient at index " << i << " - expected dtype ";
+      ss << metadata.dtype() << " but got " << grad.dtype();
+      TORCH_CHECK(false, format_error(ss.str()));
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
