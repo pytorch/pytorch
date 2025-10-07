@@ -19,6 +19,10 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         s = torch.Stream()
         weakref.ref(s)
 
+    def test_event_weakref(self):
+        e = torch.Event()
+        weakref.ref(e)
+
     def test_run_opcheck(self):
         from torch._dynamo.variables.streams import fork_stream_, join_stream_
         from torch.library import opcheck

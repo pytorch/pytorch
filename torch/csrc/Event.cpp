@@ -49,6 +49,7 @@ static PyObject* THPEvent_pynew(
   }
 
   THPEvent* self = (THPEvent*)ptr.get();
+  self->weakreflist = nullptr;
 
   // TODO: blocking and interprocess are not supported yet. To support them, the
   // flag system of c10::Event needs to be refactored. C10::Event should also
@@ -73,6 +74,7 @@ PyObject* THPEvent_new(c10::DeviceType device_type, c10::EventFlag flag) {
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   TORCH_CHECK(self, "Failed to allocate memory for Event");
   auto self_ = reinterpret_cast<THPEvent*>(self.get());
+  self_->weakreflist = nullptr;
   new (&self_->event) c10::Event(device_type, flag);
   return self.release();
 }
@@ -81,6 +83,9 @@ static void THPEvent_dealloc(THPEvent* self) {
   {
     pybind11::gil_scoped_release no_gil{};
     self->event.~Event();
+  }
+  if (self->weakreflist != nullptr) {
+    PyObject_ClearWeakRefs((PyObject*)self);
   }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -300,7 +305,7 @@ PyTypeObject THPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    offsetof(THPEvent, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPEvent_methods, /* tp_methods */
