@@ -684,9 +684,8 @@ class TestDTensorOps(DTensorOpTestBase):
                 full_tensor = mean.full_tensor()
 
             self.assertEqual(full_tensor, tensor.mean(dim=reduce_dim))
-
             if is_evenly_shardable:
-                self.assertTrue("P(avg)->R" in debug_mode.debug_string())
+                self.assertTrue("P(avg)[0]->R*" in debug_mode.debug_string())
             else:
                 self.assertTrue("S(0)[0]->R" in debug_mode.debug_string())
 
