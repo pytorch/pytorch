@@ -58,6 +58,7 @@ from ..exc import (
     raise_observed_exception,
     unimplemented_v2,
 )
+from ..graph_bytecode_inputs import get_user_object_by_index, register_user_object
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -66,6 +67,7 @@ from ..source import (
     DictGetItemSource,
     GetItemSource,
     RandomValueSource,
+    TorchSource,
     TypeDictSource,
     TypeMROSource,
     TypeSource,
@@ -792,14 +794,33 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
                 args = [stacked]
 
-            tensor_variable = wrap_fx_proxy(
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_function",
-                    self.value,
-                    *proxy_args_kwargs(args, kwargs),
-                ),
-            )
+            if issubclass(self.value, torch.Stream):
+                torch_stream_src = CallFunctionNoArgsSource(
+                    AttrSource(TorchSource(), "Stream")
+                )
+                # Register newly created stream for reconstruction
+                stream = self.value()
+                from .streams import add_dynamo_owned_stream
+
+                add_dynamo_owned_stream(stream)
+                ind = register_user_object(stream, torch_stream_src)
+                breakpoint()
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function", get_user_object_by_index, (ind,), {}
+                    ),
+                    user_obj_index=ind,
+                )
+            else:
+                tensor_variable = wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_function",
+                        self.value,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                )
 
             return tensor_variable
         elif self.value is random.Random:
