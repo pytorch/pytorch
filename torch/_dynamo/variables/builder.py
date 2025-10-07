@@ -178,7 +178,6 @@ from .ctx_manager import (
     ErrorOnGraphBreakVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
-    StreamContextVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -259,7 +258,7 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
-from .streams import EventVariable, StreamVariable
+from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     NumpyNdarrayVariable,
     supported_const_comparison_op_values,
@@ -1039,6 +1038,7 @@ class VariableBuilder:
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
+            # This refers to the device-agnostic torch.Stream
             self.install_guards(GuardBuilder.TYPE_MATCH)
             index = register_user_object(value, self.source)
             stream_proxy = self.tx.output.create_proxy(
