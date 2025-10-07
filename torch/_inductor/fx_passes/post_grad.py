@@ -216,7 +216,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_reduce_scatters_fx_bucket_size_determinator,
-                config.bucket_reduce_scatters_fx,
+                config.bucket_reduce_scatters_fx,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
@@ -236,7 +236,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             lambda graph: p(
                 graph.owning_module,
                 config.bucket_all_gathers_fx_bucket_size_determinator,
-                config.bucket_all_gathers_fx,
+                config.bucket_all_gathers_fx,  # type: ignore[arg-type]
             )
         )
         collectives_bucketing = True
