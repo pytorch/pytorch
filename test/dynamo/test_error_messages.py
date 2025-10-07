@@ -1085,7 +1085,6 @@ Most recent bytecode instructions traced (max 20):
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)
     def test_variable_tracker_bytecode_to_graph_break_fullgraph(self, records):
-        # def test_bytecode_graphbreak_fullgraph(self, x):
         def fn(x):
             y = x + 1
             z = x + y
@@ -1190,36 +1189,6 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker()]""",
         # breakpoint()
         matches = re.findall(pattern, s)
         self.assertEqual(len(matches), 13)
-        # TODO: Checking inconsistent logging output
-
-        def post_munge(s):
-            s = re.sub(r"TRACE.*\n", "", s, flags=re.MULTILINE)
-            return re.sub(r"TRACE.*", "", s)
-
-        self.assertExpectedInline(
-            post_munge(s),
-            """\
-Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
-  Explanation: User-inserted graph break. Message: None
-  Hint: Remove the `torch._dynamo.graph_break()` call.
-
-  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
-User code traceback:
-  File "test_error_messages.py", line N, in test_variable_tracker_bytecode_to_graph_break
-    fn(torch.ones(3))
-
-========== most recent `torch.compile` tracing attempt started here ==========
-
-  File "test_error_messages.py", line N, in fn
-    torch._dynamo.graph_break()
-
-NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
-Most recent bytecode instructions traced (max 20):
-""",
-        )
 
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)

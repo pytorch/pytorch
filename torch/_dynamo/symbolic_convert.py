@@ -1191,7 +1191,7 @@ class InstructionTranslatorBase(
     parent: Optional[InstructionTranslatorBase]
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
     package: Optional[CompilePackage]
-    latest_bytecode_queue: deque[str] = deque(maxlen=20)
+    latest_bytecode_queue: deque[str]
     # Store the latest bytecode before graph_break() call by user
 
     def mark_inconsistent_side_effects(self) -> None:
@@ -4933,7 +4933,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         self.generated_items = []
         self.generator_exhausted = False
         self.is_generator_from_ctx_manager = False
-        self.latest_bytecode_queue = Queue
 
     def YIELD_VALUE(self, inst: Instruction) -> None:
         top = self.pop()
