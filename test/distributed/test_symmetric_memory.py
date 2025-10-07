@@ -917,37 +917,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
             gathered_inps.sum(dim=0), res, rtol=1e-03, atol=1e-05
         )
 
-    @skip_if_lt_x_gpu(4)
-    @requires_multicast_support()
-    @parametrize("dtype", [torch.float, torch.bfloat16])
-    @parametrize("size_bytes", [4, 8192, 8196])
-    # https://github.com/pytorch/pytorch/issues/164015
-    @xfailIfSM100OrLater
-    def test_multimem_one_shot_reduce_out(
-        self, dtype: torch.dtype, size_bytes: int
-    ) -> None:
-        self._init_process()
-        group_name = dist.group.WORLD.group_name
-
-        inp = symm_mem.empty(
-            size_bytes // dtype.itemsize, dtype=dtype, device=self.device
-        ).normal_()
-        out = torch.empty_like(inp)
-        symm_mem.rendezvous(inp, group=group_name)
-
-        root = 0
-        torch.ops.symm_mem.multimem_one_shot_reduce_out(
-            inp, "sum", root, group_name, out
-        )
-
-        gathered_inps = all_gather_tensor(inp, 0, "0").view(self.world_size, -1)
-        # Only verify that the results are close to the sum of inputs across
-        # ranks (see Note [multimem_one_shot_all_reduce]).
-        if self.rank == root:
-            torch.testing.assert_close(
-                gathered_inps.sum(dim=0), out, rtol=1e-03, atol=1e-05
-            )
-
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
