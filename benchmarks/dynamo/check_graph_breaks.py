@@ -48,7 +48,6 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
                 "stable_diffusion_text_encoder",
                 "stable_diffusion_unet",
                 "timm_efficientdet",
-                "timm_nfnet",
                 "torchrec_dlrm",
                 "vgg16",
                 # LLM

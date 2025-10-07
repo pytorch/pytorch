@@ -31,14 +31,6 @@ cuda,shufflenet_v2_x1_0,128,1.3027,25.7017,27.9875,1.1015
 cuda,soft_actor_critic,256,0.9965,2.2580,4.6661,0.9995
 cuda,speech_transformer,32,1.8405,35.1645,33.3422,1.0888
 cuda,squeezenet1_1,32,1.4191,7.3454,9.4751,1.1148
-cuda,timm_efficientdet,1,1.6630,78.2697,150.9620,0.9904
-cuda,timm_efficientnet,32,1.2689,28.5348,66.3911,0.9428
-cuda,timm_nfnet,128,1.5319,79.5429,32.9961,1.1070
-cuda,timm_regnet,32,1.0564,56.9897,53.0027,0.9500
-cuda,timm_resnest,32,1.6485,14.3908,56.7240,0.9515
-cuda,timm_vision_transformer,8,1.6100,18.7736,36.9495,0.7301
-cuda,timm_vision_transformer_large,8,1.0842,170.9849,72.0604,0.9762
-cuda,timm_vovnet,32,1.0472,25.4676,24.8428,0.8843
 cuda,tts_angular,64,1.0366,6.9889,4.2683,0.9973
 cuda,vgg16,64,1.2560,52.7072,7.3733,0.9884
 cuda,yolov3,16,1.2600,54.2350,42.4711,1.0108

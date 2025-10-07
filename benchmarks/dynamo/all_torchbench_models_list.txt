@@ -51,13 +51,6 @@ soft_actor_critic
 speech_transformer
 squeezenet1_1
 tacotron2
-timm_efficientdet
-timm_efficientnet
-timm_nfnet
-timm_regnet
-timm_resnest
-timm_vision_transformer
-timm_vovnet
 tts_angular
 vgg16
 vision_maskrcnn

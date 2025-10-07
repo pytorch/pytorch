@@ -181,11 +181,6 @@ BENCHMARK_USE_SGD = {
     "speech_transformer",
     "squeezenet1_1",
     "stable_diffusion_text_encoder",
-    "timm_efficientdet",
-    "timm_nfnet",
-    "timm_resnest",
-    "timm_vision_transformer",
-    "timm_vovnet",
     "vgg16",
     # HF
     "AlbertForMaskedLM",
@@ -3841,20 +3836,6 @@ def run(runner, args, original_dir=None):
     if args.devices != ["cpu"] and (HAS_CUDA or HAS_XPU):
         global synchronize
         synchronize = torch.cuda.synchronize if HAS_CUDA else torch.xpu.synchronize
-
-    if (
-        args.devices == ["cuda"]
-        and torch.cuda.get_device_properties(0).total_memory < 25 * 2**30
-    ):
-        # OOM errors on an RTX 3090 with 24gb RAM
-        runner.skip_models.update(
-            {
-                # torchbench
-                "hf_Longformer",
-                "timm_nfnet",
-                "timm_efficientdet",
-            }
-        )
 
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)

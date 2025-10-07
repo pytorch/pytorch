@@ -37,8 +37,6 @@ tolerance:
     - soft_actor_critic
     - tacotron2
     - yolov3
-    - timm_efficientdet
-    - timm_efficientnet
     - squeezenet1_1
 
   higher_fp16:
@@ -66,7 +64,6 @@ tolerance:
 
 require_larger_multiplier_for_smaller_tensor:
   - yolov3
-  - timm_efficientnet
 
 # These benchmarks took >600s on an i9-11900K CPU
 very_slow: &VERY_SLOW_MODELS
@@ -188,10 +185,7 @@ skip:
       - moco
 
     # Skip these additional models when running on aarch64
-    cpu_aarch64:
-      # timeout on aarch64
-      - timm_regnet
-      - timm_nfnet
+    cpu_aarch64: []
 
     cuda: []
 
@@ -256,7 +250,6 @@ accuracy:
       # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
       # even for 40 GB machine. We have tested accuracy for smaller version of
       # these models
-      - timm_vision_transformer_large
       # accuracy https://github.com/pytorch/pytorch/issues/93847
       - maml
       - llama_v2_7b_16h

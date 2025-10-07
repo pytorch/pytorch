@@ -12,7 +12,6 @@ flaky_models = {
     "yolov3",
     "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
-    "timm_efficientnet",  # see https://github.com/pytorch/pytorch/issues/148699
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
     "moondream",  # discovered in https://github.com/pytorch/pytorch/pull/159291
     # discovered in https://github.com/pytorch/pytorch/issues/161419. Its not flaky but really hard to repro, so skipping it
@@ -63,12 +62,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "stable_diffusion_text_encoder",
                 "stable_diffusion_unet",
                 "swsl_resnext101_32x16d",
-                "timm_efficientdet",
-                "timm_efficientnet",
-                "timm_nfnet",
-                "timm_regnet",
-                "timm_resnest",
-                "timm_vovnet",
                 "torchrec_dlrm",
                 "vgg16",
                 # LLM
