@@ -3946,6 +3946,10 @@ def sample_inputs_conv_transpose1d(op_info, device, dtype, requires_grad, **kwar
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2,)}),
         ((1, 1, 4), (1, 2, 3), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
+        ((1, 2, 4), (2, 2, 3), None,
+         {'stride': 2, 'padding': 'valid'}),
+        ((2, 2, 4), (2, 1, 4), (2,),
+         {'stride': 1, 'padding': 'same', 'groups': 2, 'dilation': (2,)}),
         ((1, 4, 5), (4, 8, 3), None,
          {})
     )
@@ -3977,6 +3981,10 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2, 3)}),
         ((1, 1, 4, 3), (1, 2, 3, 4), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
+        ((1, 2, 4, 4), (2, 2, 3, 3), (2,),
+            {'stride': 2, 'padding': "valid"}),
+        ((1, 3, 4, 5), (3, 2, 3, 4), (2,),
+            {'stride': 1, 'padding': "same", 'dilation': 3}),
         ((2, 4, 4, 4), (4, 1, 3, 3), None, {'groups': 4}),
         ((1, 2, 5, 5), (2, 4, 3, 3), None, {})
     )
@@ -4007,6 +4015,9 @@ def sample_inputs_conv_transpose3d(op_info, device, dtype, requires_grad, **kwar
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1, 'dilation': (2, 3, 2)}),
         ((1, 1, 4, 3, 4), (1, 2, 3, 4, 5), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
+        ((1, 3, 4, 4, 4), (3, 1, 1, 1, 1), (1,), {'padding': 'same'}),
+        ((1, 1, 1, 1, 10), (1, 1, 1, 1, 4), None, {'padding': 'valid'}),
+        ((1, 1, 2, 4, 6), (1, 1, 4, 4, 4), (1,), {'padding': 'same', 'dilation': 3}),
         ((1, 4, 5, 5, 5), (4, 8, 3, 3, 3), None,
          {})
     )
