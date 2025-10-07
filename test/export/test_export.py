@@ -3571,7 +3571,6 @@ graph():
                     sample_input = _tensor(nz=nz)
                     ep = export(mod, (sample_input,), strict=False)
                     self.assertEqual(ep.module()(sample_input), nz)
-                    print(ep)
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
