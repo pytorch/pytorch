@@ -2475,6 +2475,23 @@ def meta_conv(
     return out
 
 
+if torch._C.has_zendnn:  # type: ignore[attr-defined]
+
+    @register_meta(aten.zendnn_linear_unary.default)
+    def meta_zendnn_linear_unary(
+        input, weight, bias=None, is_weight_prepacked=False, post_op="none"
+    ):
+        out_dim = list(input.size())
+        out_dim[-1] = weight.size(0)
+        return input.new_empty(out_dim)
+
+    @register_meta(aten.zendnn_weight_prepack_for_linear.default)
+    def meta_zendnn_weight_prepack_for_linear(
+        weight,
+    ):
+        return weight.new_empty(weight.shape)
+
+
 if torch._C._has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
         "mkldnn", "IMPL", "Meta"
