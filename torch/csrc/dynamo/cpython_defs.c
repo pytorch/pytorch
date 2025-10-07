@@ -2,7 +2,7 @@
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
 
-#if IS_PYTHON_3_15_PLUS
+#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
 
 const uint8_t* THP_PyOpcode_Caches = NULL;
 const int THP_PyOpcode_Caches_size = 0;
@@ -385,7 +385,7 @@ void* THP_PyObject_VirtualAlloc(size_t size) {
 void THP_PyObject_VirtualFree(void* obj, size_t size) {
   PyObjectArenaAllocator arena;
   PyObject_GetArenaAllocator(&arena);
-  return arena.free(arena.ctx, obj, size);
+  arena.free(arena.ctx, obj, size);
 }
 
 // https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L728
