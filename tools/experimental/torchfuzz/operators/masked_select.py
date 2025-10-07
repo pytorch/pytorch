@@ -20,17 +20,8 @@ class MaskedSelectOperator(Operator):
         return "torch.masked_select"
 
     def can_produce(self, output_spec: Spec) -> bool:
-        """Masked select produces a 1D tensor with data-dependent size."""
-        if not isinstance(output_spec, TensorSpec):
-            return False
-
-        # Output is always 1D with data-dependent size
-        # Be very restrictive to avoid shape mismatches
-        return (
-            len(output_spec.size) == 1
-            and output_spec.size[0] <= 10  # Reasonable size
-            and output_spec.dtype not in [torch.bool]
-        )  # Avoid bool outputs
+        """Masked select produces a 1D tensor; we'll synthesize inputs to match size."""
+        return isinstance(output_spec, TensorSpec) and len(output_spec.size) == 1
 
     def fuzz_inputs_specs(self, output_spec: Spec, num_inputs: int = 2) -> list[Spec]:
         """Generate input specs for masked_select operation."""
@@ -56,10 +47,21 @@ class MaskedSelectOperator(Operator):
     def codegen(
         self, output_name: str, input_names: list[str], output_spec: Spec
     ) -> str:
-        """Generate code for masked_select operation."""
+        """Generate code for masked_select with synthesized inputs to match size.
+
+        Constructs an input tensor and mask so that exactly k elements are selected,
+        where k = output_spec.size[0]. No data-dependent guards.
+        """
         if len(input_names) != 2:
             raise ValueError("MaskedSelectOperator requires exactly two inputs")
-
+        if not isinstance(output_spec, TensorSpec) or len(output_spec.size) != 1:
+            raise ValueError("MaskedSelectOperator requires 1D TensorSpec output")
+        k = output_spec.size[0]
+        # Build a 1D input of length >= k and a mask with first k positions True
+        # Use input's device and output dtype to avoid mismatches
         return (
-            f"{output_name} = torch.masked_select({input_names[0]}, {input_names[1]})"
+            f"_x_ms = torch.arange(max({k}, 1), device={input_names[0]}.device).to({input_names[0]}.dtype)\n"
+            f"_mask_ms = torch.zeros_like(_x_ms, dtype=torch.bool)\n"
+            f"_mask_ms[:{k}] = True\n"
+            f"{output_name} = torch.masked_select(_x_ms, _mask_ms)"
         )

@@ -97,6 +97,7 @@ def _propagate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
     if module.bias is not None:
         module.bias = nn.Parameter(cast(Tensor, module.bias)[mask])
     elif getattr(module, "_bias", None) is not None:
+        # pyrefly: ignore  # bad-assignment
         module.bias = nn.Parameter(cast(Tensor, module._bias)[mask])
 
     # get pruned biases to propagate to subsequent layer

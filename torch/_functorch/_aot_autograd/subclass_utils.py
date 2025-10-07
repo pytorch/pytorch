@@ -232,11 +232,13 @@ def unwrap_tensor_subclasses(
 
         attrs, _ = t.__tensor_flatten__()
 
+        # pyrefly: ignore  # bad-assignment
         for attr in attrs:
             inner_tensor = getattr(t, attr)
             n_desc: Any = (
                 SubclassGetAttrAOTInput(desc, attr)
                 if isinstance(desc, AOTInput)
+                # pyrefly: ignore  # bad-argument-type
                 else SubclassGetAttrAOTOutput(desc, attr)
             )
             flatten_subclass(inner_tensor, n_desc, out=out)
@@ -257,6 +259,7 @@ def unwrap_tensor_subclasses(
     descs_inner: list[AOTDescriptor] = []
 
     for x, desc in zip(wrapped_args, wrapped_args_descs):
+        # pyrefly: ignore  # bad-argument-type
         flatten_subclass(typing.cast(Tensor, x), desc, out=(xs_inner, descs_inner))
 
     return xs_inner, descs_inner
@@ -281,6 +284,7 @@ def runtime_unwrap_tensor_subclasses(
 
         for attr in attrs:
             inner_tensor = getattr(x, attr)
+            # pyrefly: ignore  # missing-attribute
             inner_meta = meta.attrs.get(attr)
             flatten_subclass(inner_tensor, inner_meta, out=out)
 
@@ -310,6 +314,7 @@ def runtime_unwrap_tensor_subclasses(
 
     for idx, x in enumerate(wrapped_args):
         if not is_traceable_wrapper_subclass(x):
+            # pyrefly: ignore  # bad-argument-type
             xs_inner.append(x)
             continue
 
