@@ -2067,11 +2067,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
                     backward_counter[stage_idx] += 1
+                    last_backward = backward_counter[stage_idx] == self._n_microbatches
+                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                     stage.backward_weight_one_chunk(
                         mb_index,
-                        last_backward=backward_counter[stage_idx]
-                        == self._n_microbatches,
+                        last_backward=last_backward,
                     )
+                    if last_backward:
+                        stage.scale_grads(grad_scale_factor)
                 else:
                     raise ValueError(f"{action=} is unknown or unsupported")
 
@@ -2112,7 +2115,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self._update_losses(self._stages, losses)
 
 
-class ScheduleLoopedBFS(PipelineScheduleMulti):
+class ScheduleLoopedBFS(_PipelineScheduleRuntime):
     """
     Breadth-First Pipeline Parallelism.
     See https://arxiv.org/abs/2211.05953 for details.
@@ -2146,6 +2149,9 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
+
+        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
+        self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank):
         n_local_stages = len(self._stages)
@@ -2313,7 +2319,7 @@ def _get_1f1b_rank_ops(
     return rank_ops
 
 
-class ScheduleInterleaved1F1B(PipelineScheduleMulti):
+class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
     """
     The Interleaved 1F1B schedule.
     See https://arxiv.org/pdf/2104.04473 for details.
@@ -2368,6 +2374,9 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
+
+        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
+        self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[Optional[_Action]]:
         def get_rank_warmup_ops(rank):
@@ -2429,7 +2438,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         )
 
 
-class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
+class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
     """
     The Interleaved Zero Bubble schedule.
     See https://arxiv.org/pdf/2401.10241 for details.
@@ -2493,6 +2502,9 @@ stage modules that have used torch.compile"
         self.pipeline_order = self._add_bubbles_to_actions(
             self.n_local_stages * self.pp_group_size,
         )
+
+        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
+        self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[Optional[_Action]]:
         def get_rank_warmup_ops(rank):
@@ -2625,7 +2637,7 @@ stage modules that have used torch.compile"
         return result
 
 
-class ScheduleZBVZeroBubble(PipelineScheduleMulti):
+class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
     """
     The Zero Bubble schedule (ZBV variant).
     See https://arxiv.org/pdf/2401.10241 Section 6 for details.
@@ -2684,6 +2696,9 @@ class ScheduleZBVZeroBubble(PipelineScheduleMulti):
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
+
+        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
+        self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[Optional[_Action]]:
         # max(2 * self.pp_group_size - 1, ...) ensure the number of microbatches is at least
