@@ -398,7 +398,9 @@ class OpDispatcher:
         kwargs_schema: dict[str, object] = {}
         local_args: list[object] = []
         local_kwargs: dict[str, object] = {}
-        compute_mesh: Optional[DeviceMesh] = None
+        compute_mesh: Optional[DeviceMesh] = try_find_mesh_from_args(
+            op_call, args_list
+        )
 
         for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
@@ -408,9 +410,6 @@ class OpDispatcher:
                     # record the first compute device mesh from args
                     compute_mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
-                compute_mesh = compute_mesh or try_find_mesh_from_args(
-                    op_call, args_list
-                )
                 args_schema.append(
                     self._try_replicate_spec_for_scalar_tensor(
                         op_call, arg, compute_mesh
@@ -427,9 +426,6 @@ class OpDispatcher:
                 local_kwargs[k] = v._local_tensor
                 kwargs_schema[k] = v._spec
             elif isinstance(v, torch.Tensor):
-                compute_mesh = compute_mesh or try_find_mesh_from_args(
-                    op_call, args_list
-                )
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
                     op_call, v, compute_mesh
                 )
