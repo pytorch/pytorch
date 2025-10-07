@@ -90,6 +90,7 @@ class DebugMode(TorchDispatchMode):
         record_faketensor=False,
         record_realtensor=True,
     ):
+        breakpoint()
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
 
@@ -107,12 +108,14 @@ class DebugMode(TorchDispatchMode):
     @classmethod
     def ignore_compile_internals(cls):
         return True
+        # return False
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 
-        self.operators.append((func, args, kwargs, self.call_depth))
+        if not torch.compiler.is_compiling():
+            self.operators.append((func, args, kwargs, self.call_depth))
 
         try:
             self.call_depth += 1
@@ -124,20 +127,22 @@ class DebugMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        # Record the operation with its call depth
-        if torch.distributed.tensor.DTensor in types:
-            self.operators.append((func, args, kwargs, self.call_depth))
-            return NotImplemented
-        elif FakeTensor in types or isinstance(
-            _get_current_dispatch_mode(), FakeTensorMode
-        ):
-            if self.record_faketensor:
-                if func != torch.ops.prim.device.default:
+        if not torch.compiler.is_compiling():\
+            # Record the operation with its call depth
+            if torch.distributed.tensor.DTensor in types:
+                self.operators.append((func, args, kwargs, self.call_depth))
+                return NotImplemented
+            elif FakeTensor in types or isinstance(
+                _get_current_dispatch_mode(), FakeTensorMode
+            ):
+                if self.record_faketensor:
+                    if func != torch.ops.prim.device.default:
+                        self.operators.append((func, args, kwargs, self.call_depth + 1))
+            elif len(types) == 0:
+                if self.record_realtensor:
                     self.operators.append((func, args, kwargs, self.call_depth + 1))
-        elif len(types) == 0:
-            if self.record_realtensor:
-                self.operators.append((func, args, kwargs, self.call_depth + 1))
 
+        # print("after", len(self.operators))
         result = func(*args, **kwargs)
 
         return result
@@ -160,14 +165,15 @@ class DebugMode(TorchDispatchMode):
     @contextlib.contextmanager
     def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
         try:
-            self.operators.append(
-                (
-                    REDISTRIBUTE_FUNC,
-                    [arg_idx, src_placement, dst_placement],
-                    {},
-                    self.call_depth + 1,
+            if not torch.compiler.is_compiling():
+                self.operators.append(
+                    (
+                        REDISTRIBUTE_FUNC,
+                        [arg_idx, src_placement, dst_placement],
+                        {},
+                        self.call_depth + 1,
+                    )
                 )
-            )
             self.call_depth += 1
             yield
         finally:

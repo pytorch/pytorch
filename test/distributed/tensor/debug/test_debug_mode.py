@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+from torch.utils._cpp_extension_versioner import Entry
 import contextlib
 
 import torch
@@ -41,8 +42,11 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
+        def fn(x, y):
+          return torch.mm(x, y).sum()
+
         with DebugMode(record_torchfunction=True) as debug_mode:
-            torch.mm(x_dtensor, y_dtensor).sum()
+            fn(x_dtensor, y_dtensor)
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
@@ -124,9 +128,28 @@ class TestDTensorDebugMode(TestCase):
         a_dt = DTensor.from_local(a, mesh, [Partial(), Replicate()], run_check=False)
         b_dt = DTensor.from_local(b, mesh, [Replicate(), Partial()], run_check=False)
 
+        def guard_filter_fn(guard_entries):
+          prefix = "___get_torch_function_mode_stack_at(0)"
+          return [
+            entry.name.startswith(prefix)
+            and not (
+              entry.name == prefix
+              and entry.guard_type == 'TYPE_MATCH'
+            )
+            for entry in guard_entries
+          ]
+
+        @torch.compile(fullgraph=True, backend="inductor", options={"guard_filter_fn": guard_filter_fn})
+        def fn(a, b):
+            return torch.einsum("bld,dnh->blnh", a, b)
+
         # Capture the operator decomposition
-        with DebugMode(record_torchfunction=True) as debug_mode:
-            torch.einsum("bld,dnh->blnh", a_dt, b_dt)
+        with DebugMode(record_torchfunction=True, record_realtensor=True) as debug_mode:
+            # torch.einsum("bld,dnh->blnh", a_dt, b_dt)
+            fn(a_dt, b_dt)
+
+        print(debug_mode.debug_string())
+        breakpoint()
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
@@ -262,13 +285,26 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
     def test_compile(self):
-        @torch.compile
+        def guard_filter_fn(guard_entries):
+          prefix = "___get_torch_function_mode_stack_at(0)"
+          return [
+            entry.name.startswith(prefix)
+            and not (
+              entry.name == prefix
+              and entry.guard_type == 'TYPE_MATCH'
+            )
+            for entry in guard_entries
+          ]
+
+        @torch.compile(fullgraph=True, backend="inductor", options={"guard_filter_fn": guard_filter_fn})
+        # @torch.compile(fullgraph=True, backend="inductor")
         def f(x):
             return x.sin().cos()
 
         x = torch.randn(8)
-        with DebugMode() as debug_mode:
+        with DebugMode(record_torchfunction=True) as debug_mode:
             f(x)
+        print(debug_mode.debug_string())
         self.assertEqual(len(debug_mode.debug_string()), 0)
 
 

@@ -317,6 +317,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         self.source = source
 
     def reconstruct(self, codegen: "PyCodegen"):
+        breakpoint()
         # This shouldn't be called unless we have a source
         assert self.source
         self.source.reconstruct(codegen)
@@ -341,6 +342,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         )
 
     def enter(self, tx):
+        breakpoint()
         from .torch import TorchInGraphFunctionVariable
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
@@ -360,6 +362,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         return ConstantVariable.create(None)
 
     def reconstruct_type(self, codegen: "PyCodegen"):
+        breakpoint()
         ty = NoEnterTorchFunctionMode
         codegen(
             AttrSource(

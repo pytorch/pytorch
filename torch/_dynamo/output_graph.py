@@ -1856,6 +1856,7 @@ class OutputGraph(OutputGraphCommon):
             cg.extend_output([create_instruction("POP_TOP")])
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
+        breakpoint()
         self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self) -> None:
