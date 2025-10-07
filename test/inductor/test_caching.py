@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from filelock import FileLock
 
-from torch._inductor.runtime.caching import config, context
+from torch._inductor.runtime.caching import config, context, exceptions
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -272,6 +272,62 @@ class ContextTest(TestCase):
         self.assertEqual(
             set(context.SelectedCompileContext.__required_keys__),
             set(context._CompileContext.forms_of_context()),
+        )
+
+
+@instantiate_parametrized_tests
+class ExceptionsTest(TestCase):
+    exception_typenames: list[str] = [
+        "CacheError",
+        "SystemError",
+        "LockTimeoutError",
+        "FileLockTimeoutError",
+        "UserError",
+        "KeyEncodingError",
+        "KeyPicklingError",
+        "ValueEncodingError",
+        "ValuePicklingError",
+        "ValueDecodingError",
+        "ValueUnPicklingError",
+    ]
+
+    @parametrize("exception_typename", exception_typenames)
+    def test_exception_is_CacheError(self, exception_typename: str) -> None:
+        """Test that all custom cache exceptions inherit from the base CacheError class.
+
+        Verifies that every exception type defined in the caching exceptions module
+        is properly derived from CacheError, ensuring consistent exception hierarchy
+        and enabling unified exception handling throughout the caching system.
+        """
+        self.assertTrue(
+            issubclass(getattr(exceptions, exception_typename), exceptions.CacheError)
+        )
+
+    def test_exception_other(self) -> None:
+        """
+        Test the inheritance relationships among custom cache exception classes.
+
+        Verifies that the exception classes in the caching exceptions module have the correct
+        subclass relationships, ensuring the exception hierarchy is as intended. This includes
+        checks for both direct and indirect inheritance between base and derived exception types.
+        """
+        self.assertTrue(issubclass(exceptions.SystemError, exceptions.CacheError))
+        self.assertTrue(issubclass(exceptions.LockTimeoutError, exceptions.SystemError))
+        self.assertTrue(
+            issubclass(exceptions.FileLockTimeoutError, exceptions.SystemError)
+        )
+        self.assertTrue(issubclass(exceptions.UserError, exceptions.CacheError))
+        self.assertTrue(issubclass(exceptions.KeyEncodingError, exceptions.UserError))
+        self.assertTrue(
+            issubclass(exceptions.KeyPicklingError, exceptions.KeyEncodingError)
+        )
+        self.assertTrue(issubclass(exceptions.ValueEncodingError, exceptions.UserError))
+        self.assertTrue(
+            issubclass(exceptions.ValuePicklingError, exceptions.ValueEncodingError)
+        )
+        self.assertTrue(issubclass(exceptions.ValueDecodingError, exceptions.UserError))
+        self.assertTrue(
+            issubclass(exceptions.ValueUnPicklingError, exceptions.ValueDecodingError)
         )
 
 
