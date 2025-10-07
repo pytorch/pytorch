@@ -1,6 +1,6 @@
 import itertools
 import logging
-from typing import Any, Callable, Union
+from typing import Any, Callable, Optional, Union
 
 import torch
 import torch._inductor.config as config
@@ -202,3 +202,113 @@ class SubgraphTemplate(KernelTemplate):
             description=description,
             make_fx_graph=make_fx_graph,
         )
+
+    def generate_custom_op_choices(
+        self,
+        name: str,
+        decompositions: list[Callable[..., Any]],
+        input_nodes: list[Buffer],
+        kwargs: Optional[dict[str, Any]] = None,
+        default_impl: Optional[Callable[..., Any]] = None,
+    ) -> list[SubgraphChoiceCaller]:
+        """
+        Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
+
+        This method extends SubgraphTemplate to support custom op decompositions,
+        allowing multiple implementations to compete in autotuning.
+
+        Args:
+            name: Base name for the choices
+            decompositions: List of decomposition functions to compare
+            input_nodes: Input nodes for the operation
+            kwargs: Additional arguments for decomposition functions
+            default_impl: Default implementation for layout inference
+
+        Returns:
+            List of SubgraphChoiceCaller instances for autotuning
+        """
+        if not decompositions:
+            return []
+
+        kwargs = kwargs or {}
+
+        # Infer layouts and ensure stride consistency for fair autotuning comparison
+        layouts = [
+            self._infer_custom_op_layout(input_nodes, [decomp], kwargs, default_impl)
+            for decomp in decompositions
+        ]
+
+        self._validate_stride_consistency(name, decompositions, layouts)
+        layout = layouts[0]  # All layouts have equivalent stride now
+
+        choices = []
+        for decomp in decompositions:
+            # Create make_fx_graph function for this decomposition
+            def make_fx_graph(*args: Any, decomp: Callable[..., Any] = decomp) -> Any:
+                import functools
+
+                from torch.fx.experimental.proxy_tensor import make_fx
+
+                # Ensure kwargs is not None for unpacking
+                decomp_kwargs = kwargs if kwargs is not None else {}
+                return make_fx(functools.partial(decomp, **decomp_kwargs))(*args)
+
+            choice = self.generate(
+                name=f"{name}_{decomp.__name__}",
+                input_nodes=input_nodes,
+                layout=layout,
+                make_fx_graph=make_fx_graph,
+                description=f"CustomOp {decomp.__name__}",
+            )
+            choices.append(choice)
+
+        return choices
+
+    def _validate_stride_consistency(
+        self,
+        op_name: str,
+        decompositions: list[Callable[..., Any]],
+        layouts: list[Layout],
+    ) -> None:
+        """Ensure all decompositions produce compatible strides for fair autotuning."""
+        if not layouts:
+            return
+
+        strides = [layout.stride for layout in layouts]
+        reference = strides[0]
+        for i, stride in enumerate(strides[1:]):
+            if stride != reference:
+                raise AssertionError(
+                    f"Stride mismatch in custom op '{op_name}' autotuning: "
+                    f"'{decompositions[i].__name__}' produces stride {stride}, "
+                    f"but '{decompositions[0].__name__}' produces {reference}. "
+                    f"All decompositions must have identical output strides."
+                )
+
+    def _infer_custom_op_layout(
+        self,
+        input_nodes: list[Buffer],
+        decompositions: list[Callable[..., Any]],
+        kwargs: dict[str, Any],
+        default_impl: Optional[Callable[..., Any]] = None,
+    ) -> Layout:
+        """Infer output layout for custom ops using the default implementation when available."""
+        import functools
+
+        from torch._inductor.ir import FixedLayout, ir_node_to_tensor
+        from torch._inductor.virtualized import V
+
+        # Use default_impl if available, otherwise use first decomposition
+        impl = default_impl if default_impl is not None else decompositions[0]
+
+        with V.fake_mode:
+            example_inputs = [ir_node_to_tensor(inp) for inp in input_nodes]
+            fn = functools.partial(impl, **kwargs)
+            output = fn(*example_inputs)
+
+            return FixedLayout(
+                device=output.device,
+                dtype=output.dtype,
+                size=output.shape,
+                stride=output.stride(),
+            )

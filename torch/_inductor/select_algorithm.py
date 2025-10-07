@@ -2825,18 +2825,7 @@ class AlgorithmSelectorCache(PersistentCache):
             if timings and all(
                 not math.isfinite(timing) for timing in timings.values()
             ):
-                # Check if this is a custom op autotuning case that can fallback
-                if self._can_fallback_to_first_choice(name, choices):
-                    log.warning(
-                        "Custom op autotuning failed for '%s' (all timings non-finite). "
-                        "Falling back to first decomposition: %s",
-                        name,
-                        choices[0].name,
-                    )
-                    # Fall through to normal empty timings handling which will use first choice
-                    timings = {}
-                else:
-                    raise NoValidChoicesError
+                raise NoValidChoicesError
 
             if (
                 has_autotuned
@@ -2930,7 +2919,6 @@ class AlgorithmSelectorCache(PersistentCache):
             )
 
         timings = do_autotuning(choices, precompile_fn)
-
         # if timings is empty, we really have no choice but to return a semi-random
         # choice. returning the first `ExternKernelCaller` is probably the safest bet
         # in this case, since it will generally be the ATen kernel. if there are no
@@ -3786,27 +3774,6 @@ class AlgorithmSelectorCache(PersistentCache):
         self.preprocessing_fns.clear()
         if not clear_defaults:
             self._register_default_preprocessing_fns()
-
-    def _can_fallback_to_first_choice(
-        self, name: str, choices: list[ChoiceCaller]
-    ) -> bool:
-        """
-        Check if this is a custom op autotuning case that can fallback to the first choice.
-
-        Custom ops with multiple decompositions can safely fallback to the first decomposition
-        when all autotuning choices fail (e.g., on CPU-only environments).
-        """
-        # Check if this appears to be a custom op autotuning case
-        # Custom op autotuning typically has names like "test_*_autotuned" and uses SubgraphChoiceCaller
-        from .codegen.subgraph import SubgraphChoiceCaller
-
-        is_custom_op_case = (
-            "_autotuned" in name
-            and len(choices) > 0
-            and all(isinstance(choice, SubgraphChoiceCaller) for choice in choices)
-        )
-
-        return is_custom_op_case
 
 
 _ALGORITHM_SELECTOR_CACHE: Optional[AlgorithmSelectorCache] = None
