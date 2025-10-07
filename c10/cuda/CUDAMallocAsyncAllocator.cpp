@@ -446,7 +446,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return !devs_initialized_flags.empty();
   }
 
-  static inline void assertValidDevice(c10::DeviceIndex device) {
+  static void assertValidDevice(c10::DeviceIndex device) {
     TORCH_CHECK(
         0 <= device && device < device_count, "Invalid device argument.");
   }
@@ -493,6 +493,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // demand, but opportunistically trims reserved memory back to threshold
     // when the memory in use is < threshold. I don't like this because it
     // introduces performance nondeterminism.
+  }
+
+  std::vector<StreamSegmentSize> getExpandableSegmentSizes(
+      c10::DeviceIndex device) override {
+    TORCH_CHECK(
+        false,
+        "CUDAMallocAsyncAllocator does not yet support getExpandableSegmentSizes.");
   }
 
   void emptyCache(/*unused*/ MempoolId_t mempool_id) override {
