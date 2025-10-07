@@ -1428,8 +1428,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         # The wait_tensor node should use all storages from the collective start node
         # plus its own direct input storages
-        self.assertTrue(collective_uses.issubset(wait_uses),
-                       "wait_tensor should use all storages from collective start operation")
+        self.assertTrue(collective_uses.issubset(wait_uses))
 
         # Verify that wait_tensor is correctly identified
         self.assertTrue(_is_wait_tensor(wait_node))
