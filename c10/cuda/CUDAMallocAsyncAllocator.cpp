@@ -446,7 +446,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return !devs_initialized_flags.empty();
   }
 
-  static inline void assertValidDevice(c10::DeviceIndex device) {
+  static void assertValidDevice(c10::DeviceIndex device) {
     TORCH_CHECK(
         0 <= device && device < device_count, "Invalid device argument.");
   }
