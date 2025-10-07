@@ -692,7 +692,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 #
 # idx = 0
 # init_grad_carries = grads
-# init_grad_additional_inputs = torch.zeros_like(g_additioanl_inputs)
+# init_grad_additional_inputs = torch.zeros_like(g_additional_inputs)
 # fw_inps = torch.cat([ctx.fw_carried_inputs, fw_outputs[:-1]])
 # while_loop(cond_fn, body_fn, (idx, init_grad_carries, init_grad_additional_inputs,), (fw_additional_inputs, fw_inps))
 
