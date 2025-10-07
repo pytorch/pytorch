@@ -14,7 +14,6 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/LinearAlgebra.h>
-#include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 #include <ATen/native/cuda/linalg/MagmaUtils.h>
 #include <ATen/native/cpu/zmath.h>
@@ -1238,7 +1237,7 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
 // Todo: cusolverDn<T>potrsBatched only supports nrhs == 1 and does not have good performance.
 //     Batched cholesky_solve is dispatched to magma.
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
-#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
+#if defined(USE_LINALG_SOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
@@ -1352,7 +1351,7 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
 }
 
 static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
-#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
+#if defined(USE_LINALG_SOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
@@ -1615,16 +1614,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   const auto preferred_backend = at::globalContext().linalgPreferredBackend();
 #ifdef USE_LINALG_SOLVER
   const auto lu_factor_cusolver = [batch_size, m, n](const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-    // In CUDA 10.2, lu_factor_looped_cusolver does not finish the computations when the input
-    // matrix is exactly singular. The returned pivots contain garbage. This breaks linalg.det
-    // Now, batched_cublas does not handle rectangular matrices, so we still dispatch to
-    // looped_cusolver even if m != n.
-#ifdef USE_ROCM
-    constexpr bool looped_correct = true;
-#else
-    constexpr bool looped_correct = CUSOLVER_VERSION >= 11100;
-#endif
-    if (m != n || (looped_correct && (batch_size == 1 || m >= 512))) {
+    if (m != n || (batch_size == 1 || m >= 512)) {
       lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
     } else {
       lu_factor_batched_cublas(input, pivots, infos, compute_pivots);
@@ -2709,7 +2699,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
 }
 
 void gels_looped(const Tensor& a, Tensor& b, Tensor& infos) {
-#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
+#if defined(USE_LINALG_SOLVER)
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Magma:
@@ -2733,7 +2723,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
   // first handle the underdetermined case (m < n)
   // this case is not supported by MAGMA or cuBLAS
   if (m < n) {
-#if defined(USE_LINALG_SOLVER) && !defined(USE_ROCM)
+#if defined(USE_LINALG_SOLVER)
     linalg_lstsq_gels(a, b, infos);
 #else
     TORCH_CHECK(

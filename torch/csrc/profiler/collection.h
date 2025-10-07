@@ -178,6 +178,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   FallbackPair device_fallback_;
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
+  std::string metadata_json_;
 };
 
 template <>
@@ -368,7 +369,8 @@ struct ExtraFields<EventType::Kineto> {
   uint64_t correlation_id_{0};
   libkineto::ActivityType activity_type_;
   Flow flow;
-  std::weak_ptr<Result> linked_activity_{};
+  std::weak_ptr<Result> linked_activity_;
+  std::string metadata_json_;
 };
 
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {

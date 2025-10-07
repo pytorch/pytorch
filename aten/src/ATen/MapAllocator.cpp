@@ -292,6 +292,28 @@ MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags,
           if (ftruncate(fd, static_cast<off_t>(size)) == -1) {
             TORCH_CHECK(false, "unable to resize file <", filename_, "> to the right size: ", c10::utils::str_error(errno), " (", errno, ")");
           }
+
+#ifdef HAVE_POSIX_FALLOCATE
+          if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
+            for (;;) {
+              if (posix_fallocate(fd, 0, static_cast<off_t>(size)) == 0) {
+                break;
+              }
+
+              if (errno == EINTR) {
+                continue;
+              }
+
+              if (errno == EINVAL || errno == EOPNOTSUPP) {
+                // the underlying filesystem does not support the operation
+                break;
+              }
+
+              TORCH_CHECK(false, "unable to allocate shared memory(shm) for file <", filename_, ">: ", c10::utils::str_error(errno), " (", errno, ")");
+            }
+          }
+#endif
+
           if (fstat(fd, &file_stat) == -1 || file_stat.st_size < static_cast<int64_t>(size)) {
 #ifndef STRIP_ERROR_MESSAGES
             int last_err = errno;
