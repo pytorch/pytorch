@@ -27,6 +27,7 @@ import numpy
 import torch
 from torch import inf, SymInt, Tensor
 from torch._C import (
+    _acc,
     _aoti,
     _cpu,
     _dynamo,
@@ -2778,4 +2779,18 @@ class _StaticCudaLauncher:
         arg_types: str,
         args: tuple[Any, ...],
         stream: _int,
+    ) -> None: ...
+
+# Defined in torch/csrc/cuda/green_context.h
+class GreenContext:
+    @staticmethod
+    def create(
+        num_sms: _int,
+        device_id: _int,
+    ) -> GreenContext: ...
+    def make_current(
+        self,
+    ) -> None: ...
+    def pop_current(
+        self,
     ) -> None: ...
