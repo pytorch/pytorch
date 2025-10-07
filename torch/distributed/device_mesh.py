@@ -1005,11 +1005,13 @@ else:
             """
             Returns the rank at the specified ``coordinate``.
             If no coordinate is provided, returns the current global rank.
+
             Args:
                 coordinate (list[int], optional): The coordinate in the mesh to query the rank for.
                     If not provided, returns the current global rank.
+
             Returns:
-                int: The rank at the specified coordinate, or the current global rank if coordinate is None.
+                The rank at the specified coordinate, or the current global rank if coordinate is None.
             """
             if coordinate is None:
                 return get_rank()
