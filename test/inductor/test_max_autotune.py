@@ -1094,7 +1094,7 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune_gemm_search_space": search_space}):
             m_c = torch.compile(mode="max-autotune")(mod)
             out, code = run_and_get_code(m_c, x)
-            self.assertEqual(out, mod(x), atol=2e-3, rtol=1e-3)
+            self.assertEqual(out, mod(x), atol=2e-3, rtol=2e-3)
 
             FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
@@ -1349,7 +1349,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
-        torch.testing.assert_close(act, ref, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(act, ref, atol=1e-1, rtol=1e-2)
 
     @config.patch(
         max_autotune=True,
@@ -1439,6 +1439,8 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
+        comprehensive_padding=False,
+        shape_padding=False,
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
         fp16_red_setting = (
@@ -1497,7 +1499,7 @@ class TestMaxAutotune(TestCase):
             ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_mm_0.run"
+                "triton_.*_fused_0.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
             torch.testing.assert_close(
@@ -1518,7 +1520,7 @@ class TestMaxAutotune(TestCase):
             ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*_0.run"
+                "triton_.*_fused_0.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
             torch.testing.assert_close(

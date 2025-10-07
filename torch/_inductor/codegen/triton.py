@@ -3175,14 +3175,34 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if self.persistent_reduction:
             default = ir.Reduction.default_value(reduction_type, src_dtype)
-            default = self._map_tuple_or_scalar(constant_repr, default)
+
+            def update_constant_dtype(constant, src_dtype, dst_dtype):
+                "update reduction constant mask value to match dst_dtype"
+
+                # int is the only mask which may not fit within lower bitwidth,
+                # because float uses inf/-inf
+                if src_dtype.is_floating_point or src_dtype == torch.bool:
+                    return constant
+
+                if src_dtype == dst_dtype or constant == 0:
+                    return constant
+
+                if constant == torch.iinfo(src_dtype).max:
+                    return torch.iinfo(dst_dtype).max
+                elif constant == torch.iinfo(src_dtype).min:
+                    return torch.iinfo(dst_dtype).min
+                else:
+                    return constant
 
             def _mask_value(value, default) -> CSEVariable:
+                default = update_constant_dtype(default, src_dtype, value.dtype)
+                default_str = self._map_tuple_or_scalar(constant_repr, default)
+
                 return self.cse.generate(
                     self.compute,
-                    where_cond(value, default),
+                    where_cond(value, default_str),
                     dtype=value.dtype,
-                    shape=value.shape if value.shape is not None else default.shape,
+                    shape=value.shape,
                 )
 
             masked_value: Union[CSEVariable, Sequence[CSEVariable]]
@@ -3191,13 +3211,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # will fallback below
                 pass
             elif isinstance(value, tuple):
-                masked_value = [_mask_value(v, d) for v, d in zip(value, default)]
+                masked_value = [_mask_value(v, d) for v, d in zip(value, default)]  # type: ignore[arg-type]
             else:
                 masked_value = _mask_value(value, default)
 
             if reduction_type in ("argmax", "argmin"):
                 assert isinstance(masked_value, CSEVariable)
                 accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
+
                 accumulator_index = str(
                     self.cse.generate(
                         self.compute,
@@ -4084,12 +4105,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     args.append(str(arg))
                 elif isinstance(arg, SymbolicCallArg):
                     hint = V.graph.sizevars.size_hint(
-                        arg.inner_expr, fallback=config.unbacked_symint_fallback
+                        arg.inner_expr,
+                        hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
                     args.append(str(hint))
                 elif isinstance(arg, sympy.Expr):
                     hint = V.graph.sizevars.size_hint(
-                        arg, fallback=config.unbacked_symint_fallback
+                        arg,
+                        hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
                     args.append(str(hint))
                 else:
@@ -4149,7 +4174,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(
-                        arg_sig.expr, hint_override=self.hint_override
+                        arg_sig.expr,
+                        hint_override=self.hint_override,
+                        fallback=config.unbacked_symint_fallback,
                     )
 
                     # Force the seed_offset to be 0 so calls to the same kernel
@@ -4160,7 +4187,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.get_current_device_or_throw()
-                    count = V.graph.sizevars.size_hint(arg_sig.count)
+                    count = V.graph.sizevars.size_hint(
+                        arg_sig.count, hint_override=self.hint_override
+                    )
                     result.writeline(
                         f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
                     )
@@ -4423,6 +4452,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "optimize_mem": optimize_mem,
             "no_x_dim": self.no_x_dim,
             "num_load": self.num_load,
+            "num_store": self.num_store,
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }

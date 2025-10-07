@@ -88,7 +88,7 @@ class PrecompileContext:
     # Protected by the compile_lock
     # _backend_artifacts_by_key organizes results by the key of each artifact.
     # Each object here must be serializable
-    _backend_artifacts_by_key: dict[str, BackendCacheArtifact[Any]] = {}
+    _backend_artifacts_by_key: dict[_BackendId, BackendCacheArtifact[Any]] = {}
 
     # On call to `serialize()`, all cache artifacts in _dynamo_cache_entries are converted
     # into DynamoCacheArtifacts and added to _new_cache_artifacts for serialization
@@ -107,7 +107,9 @@ class PrecompileContext:
         """
         Records a backend artifact to be used with dynamo cache entries
         """
-        cls._backend_artifacts_by_key[artifact.key] = copy.deepcopy(artifact)
+        cls._backend_artifacts_by_key[_BackendId(artifact.key)] = copy.deepcopy(
+            artifact
+        )
 
     @classmethod
     def record_dynamo_cache_entry(
@@ -121,7 +123,7 @@ class PrecompileContext:
         Edit the content of an existing artifact
         """
         assert key in cls._backend_artifacts_by_key, f"Key {key} not found in artifacts"
-        artifact = cls._backend_artifacts_by_key[key]
+        artifact = cls._backend_artifacts_by_key[_BackendId(key)]
         artifact.edit_contents(edit_fn)
 
     @classmethod
@@ -129,12 +131,12 @@ class PrecompileContext:
         """
         Return the backend cache artifact with the associated key
         """
-        return cls._backend_artifacts_by_key.get(key, None)
+        return cls._backend_artifacts_by_key.get(_BackendId(key), None)
 
     @staticmethod
     def dump_debug_info(
         dynamo_entries: dict[str, _DynamoCacheEntry],
-        backend_artifacts: dict[str, BackendCacheArtifact[Any]],
+        backend_artifacts: dict[_BackendId, BackendCacheArtifact[Any]],
     ) -> dict[str, Any]:
         """
         Return a JSON serializable debug dump of all entries in the precompile context
@@ -195,33 +197,11 @@ class PrecompileContext:
 
         for key, cache_entry in dynamo_entries.items():
             try:
-                backends = cache_entry.backend_ids
-                backend_content: dict[_BackendId, BackendCacheArtifact[Any]] = {}
-                for id_ in backends:
-                    if id_ not in backend_artifacts:
-                        debug_str = json.dumps(
-                            {
-                                "entry": cache_entry.debug_info,
-                                "key": key,
-                            }
-                        )
-                        logger.warning("Backend not found")
-                        torch._logging.trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "dynamo_cache_bypass",
-                                "encoding": "json",
-                            },
-                            payload_fn=lambda: debug_str,
-                            expect_trace_id=False,
-                        )
-                        continue
-                    artifact = backend_artifacts[id_]
-                    assert isinstance(artifact, BackendCacheArtifact)
-                    backend_content[id_] = artifact
-                precompile_cache_entries[key] = PrecompileCacheEntry(
-                    dynamo=cache_entry, backends=backend_content
+                result = PrecompileCacheEntry.from_cache_entry(
+                    cache_entry, backend_artifacts
                 )
+                if result is not None:
+                    precompile_cache_entries[key] = result
             except Exception as e:
                 logger.warning("Failed to create cache entry %s: %s", key, str(e))
 

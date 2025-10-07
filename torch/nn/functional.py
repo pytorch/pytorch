@@ -3649,7 +3649,7 @@ def smooth_l1_loss(
             reduction=reduction,
             beta=beta,
         )
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -3712,7 +3712,7 @@ def huber_loss(
             weight=weight,
         )
 
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -3789,7 +3789,7 @@ def l1_loss(
             reduce=reduce,
             reduction=reduction,
         )
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -3862,7 +3862,7 @@ def mse_loss(
             weight=weight,
         )
 
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
