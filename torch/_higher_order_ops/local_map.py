@@ -291,7 +291,7 @@ def create_hop_fw_bw(
             *fw_inputs,
             *[example_grads[i] for i in filtered_grads_idx],
         ]
-        fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()
+        fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()  # type: ignore[union-attr]
         joint_hop_gm = make_fx(joint_f)(*primals_and_tangents)
 
         from torch._functorch._aot_autograd.graph_compile import prepare_for_partitioner
@@ -301,13 +301,14 @@ def create_hop_fw_bw(
         prepped_joint_hop_gm = prepare_for_partitioner(
             joint_hop_gm, num_fw_inputs, num_fw_outputs
         )
-        # Also runs joint passes
-        new_fw_gm, new_bw_gm = partition_fn(
-            prepped_joint_hop_gm,
-            [],
-            num_fwd_outputs=num_fw_outputs,
-            static_lifetime_input_indices=[],
-        )
+        with disable_proxy_modes_tracing():
+            # Also runs joint passes
+            new_fw_gm, new_bw_gm = partition_fn(
+                prepped_joint_hop_gm,
+                [],
+                num_fwd_outputs=num_fw_outputs,
+                static_lifetime_input_indices=[],
+            )
 
         # Propagate meta onto fw/bw graphs, later will be set on proxied nodes
         new_fw_gm.meta["local_map_kwargs"] = local_map_kwargs
@@ -334,6 +335,7 @@ def create_hop_fw_bw(
         num_activations = (
             len(new_fw_gm.graph.find_nodes(op="output")[0].args[0]) - num_fw_outputs
         )
+        # tensors first, then symints
         assert num_activations >= 0
 
         # Validate Backward
@@ -397,6 +399,12 @@ class LocalMapAutogradOp(torch.autograd.Function):
             coerce_to_expected_memory_format,
         )
 
+        assert ctx.pos == sorted(ctx.pos), (
+            "Interleaving saved tensor activations and symints is not expected from min-cut partitioner."
+        )
+        ctx.pos = list(
+            reversed(ctx.pos)
+        )  # make saved_tensors_and_symints return symints first
         saved_activations = saved_tensors_and_symints(ctx)
         with torch._C._AutoDispatchBelowAutograd():
             # Filter out grads that are None or do not require_grad.
@@ -521,8 +529,9 @@ def proxy_mode_key_common(
     out_proxy.node.meta["local_map_kwargs"] = local_map_kwargs
 
     from torch._guards import detect_fake_mode
+
     fake_mode = detect_fake_mode(args)
-    fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()
+    fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()  # type: ignore[union-attr]
 
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
