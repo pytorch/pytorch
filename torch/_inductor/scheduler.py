@@ -50,7 +50,6 @@ from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .exc import GPUTooOldForTriton, TritonMissing
 from .fx_utils import count_flops_fx
 from .ir import (
-    assign_origin_node,
     get_device_type,
     GraphPartitionSignature,
     MultiOutput,
@@ -2685,6 +2684,10 @@ class Scheduler:
                             )
                             add_user(other_name, node, is_weak=True)
 
+            for add_dep in V.graph.additional_buffer_deps[node.get_name()]:
+                add_user(add_dep, node, is_weak=True)
+                node.add_fake_dep(WeakDep(add_dep, node.get_name()))
+
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
                 if not isinstance(read, WeakDep):
@@ -3167,15 +3170,11 @@ class Scheduler:
                         node.node.finalize_as_triton_caller(min_node_unfused)
                     continue
 
-                with ir.IRNode.current_origins(multi_node.origins):
-                    out_tensorbox = min_node_unfused.output_node()
+                out_tensorbox = min_node_unfused.output_node()
                 out_storage = out_tensorbox.data  # type: ignore[union-attr]
                 assert isinstance(out_storage, ir.StorageBox)
                 out_buffer = out_storage.data
                 assert isinstance(out_buffer, ir.OperationBuffer)
-
-                if multi_node.origin_node:
-                    assign_origin_node(out_tensorbox, multi_node.origin_node)
 
                 out_buffer.layout = multi_node.layout
                 replace_operation_buffer(multi_node, out_buffer)
@@ -4981,7 +4980,7 @@ class Scheduler:
                 if name in name_to_node
             }
             input_deallocation = {
-                name: True if name in buffer_names_to_free else False
+                name: name in buffer_names_to_free
                 for name in partition_input_names
                 if name in name_to_node
             }

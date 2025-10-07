@@ -1398,7 +1398,7 @@ def check_and_add_duplicate_pattern(
 
     new_graph_str = str(graph)
     for graph_str in equiv_pattern_reprs:
-        if not new_graph_str == graph_str:
+        if new_graph_str != graph_str:
             continue
         if skip_duplicates:
             return True
