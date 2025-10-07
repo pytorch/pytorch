@@ -158,8 +158,18 @@ AOTInductorModelContainerUpdateUserManagedConstantBuffer(
 
 // Same as AOTInductorModelContainerUpdateUserManagedConstantBuffer,
 // but no std::unordered_map crosses DLL boundaries for cross-compilation.
+// The keys in pairs are constant names in AOTI model.
 AOTI_API AOTIRuntimeError
 AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update);
+
+// The keys in pairs are original_fqn names in AOTI model.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateUserManagedConstantBufferPairsFQNNames(
     AOTInductorModelContainerHandle container_handle,
     const AOTInductorConstantMapEntry* pairs,
     size_t num_pairs,

@@ -1585,6 +1585,8 @@ class aot_inductor:
     package_constants_in_so: bool = True
 
     # Experimental. Flag to control whether to package weight separately on disk
+    # The key for the weights are FQN names, not the constant name in AOTI model.
+    # The FQN name and constant name map can be obtained using getConstantNamesToOriginalFQNs.
     package_constants_on_disk: bool = False
 
     # Experimental.  Controls automatic precompiling of common AOTI include files.
