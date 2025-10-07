@@ -11,12 +11,12 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from enum import Enum
 from functools import lru_cache
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
 from torch._dynamo import OptimizedModule
-from torch.distributed.fsdp import FSDPModule, fully_shard
+from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.nn.modules.loss import _Loss
 from torch.profiler import record_function
 
@@ -24,9 +24,6 @@ from ._utils import generate_rank_to_stage_mapping, generate_stage_to_rank_mappi
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
 from .stage import _PipelineStageBase
 
-
-if TYPE_CHECKING:
-    from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
     "get_schedule_class",
@@ -1889,15 +1886,16 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         # send ops should be waited on before step() exists, mainly for hygiene
         send_ops: list[list[dist.Work]] = []
 
-        # we track which stages are 'active' when used with FSDP, and wait on unshard before computing on stages
-        unshard_groups: dict[int, FSDPParamGroup] = {}
+        # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
+        unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
         unsharded_stages = set()
 
         def _assert_unsharded(stage_idx: int):
             """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
-            if stage_idx in unshard_groups:
-                unshard_groups[stage_idx].wait_for_unshard()
-                del unshard_groups[stage_idx]
+            if stage_idx in unshard_ops:
+                for op in unshard_ops[stage_idx]:
+                    op.wait()
+                del unshard_ops[stage_idx]
                 unsharded_stages.add(stage_idx)
             assert stage_idx in unsharded_stages, (
                 f"Attempted to compute on sharded {stage_idx=}"
@@ -1964,27 +1962,27 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         if stage_uses_fsdp:
                             assert (
                                 stage_idx not in unsharded_stages
-                                and stage_idx not in unshard_groups
+                                and stage_idx not in unshard_ops
                             ), f"Unsharding the same {stage_idx=} twice"
-                            distributed_state = fully_shard.state(stage.submod)  # type: ignore[attr-defined]
-                            for state in distributed_state._state_ctx.all_states:
-                                if state._fsdp_param_group:
-                                    group = state._fsdp_param_group
-                                    group.unshard(async_op=True)
-                                    unshard_groups[stage_idx] = group
+                            for submodule in stage.submod.modules():
+                                if not isinstance(submodule, FSDPModule):
+                                    continue
+                                handle = cast(
+                                    UnshardHandle, submodule.unshard(async_op=True)
+                                )
+                                unshard_ops[stage_idx].append(handle)
                     elif comp_type == RESHARD:
                         if stage_uses_fsdp:
                             assert stage_idx in unsharded_stages, (
                                 f"Resharding {stage_idx=} without unsharding"
                             )
-                            assert stage_idx not in unshard_groups, (
+                            assert stage_idx not in unshard_ops, (
                                 f"Resharding {stage_idx=} before finishing unshard"
                             )
-                            distributed_state = fully_shard.state(stage.submod)  # type: ignore[attr-defined]
-                            for state in distributed_state._state_ctx.all_states:
-                                if state._fsdp_param_group:
-                                    group = state._fsdp_param_group
-                                    group.reshard()
+                            for submodule in stage.submod.modules():
+                                if not isinstance(submodule, FSDPModule):
+                                    continue
+                                submodule.reshard()
                     elif comp_type == FORWARD:
                         if stage_uses_fsdp:
                             _assert_unsharded(stage_idx)
@@ -2115,7 +2113,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         while len(send_ops):
             _wait_batch_p2p(send_ops.pop())
 
-        assert len(unshard_groups) == 0, "Unused unshard group"
+        assert len(unshard_ops) == 0, "Unused unshard operations"
 
         # Return losses if there is a container passed in
         self._update_losses(self._stages, losses)
