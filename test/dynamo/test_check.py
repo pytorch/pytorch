@@ -64,7 +64,7 @@ class TestTorchCheck(TestCase):
         x = torch.randn(3)
         torch._dynamo.maybe_mark_dynamic(x, 0)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, None):
             f(x)
 
     def test_check_raises_at_runtime_when_predicate_false_constant_and_message_None(
@@ -77,7 +77,7 @@ class TestTorchCheck(TestCase):
 
         x = torch.randn(3)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, None):
             f(x)
 
     def test_check_raises_at_runtime_when_predicate_false_and_message_has_no_closure(
@@ -91,7 +91,7 @@ class TestTorchCheck(TestCase):
         x = torch.randn(3)
         torch._dynamo.maybe_mark_dynamic(x, 0)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Shape is not greater than 3"):
             f(x)
 
     def test_check_raises_at_runtime_when_predicate_false_constant_and_message_has_no_closure(
@@ -104,7 +104,7 @@ class TestTorchCheck(TestCase):
 
         x = torch.randn(3)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Shape is not greater than 3"):
             f(x)
 
     def test_check_assert_error_at_runtime_when_predicate_false_and_message_has_closure(
