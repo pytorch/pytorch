@@ -1033,7 +1033,7 @@ if(USE_COLORIZE_OUTPUT)
   set(CMAKE_COLOR_DIAGNOSTICS ON)
 endif()
 if(NOT MSVC)
-  string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
+  string(APPEND CMAKE_CXX_FLAGS " -O3 -fPIC")
 
   # This prevents use of `c10::optional`, `c10::nullopt` etc within the codebase
   string(APPEND CMAKE_CXX_FLAGS " -DC10_NODEPRECATED")
