@@ -3,8 +3,9 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import AbstractContextManager
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree

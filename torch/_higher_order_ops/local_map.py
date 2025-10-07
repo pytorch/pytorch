@@ -6,15 +6,16 @@
 # NOTE: this file may be removed once we move to a dynamo frontend
 
 import functools
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     clone_outputs_aliasing_inputs,
+    redirect_to_mode,
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
 )
@@ -22,6 +23,7 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 # Proxy the HOP instead of inlining into it
@@ -48,6 +50,10 @@ class LocalMapHOP(HigherOrderOperator):
 
 
 local_map_hop = LocalMapHOP()
+
+# Registers dispatches for SAC
+redirect_to_mode(local_map_hop, _CachingTorchDispatchMode)
+redirect_to_mode(local_map_hop, _CachedTorchDispatchMode)
 
 
 def create_hop_fw_bw(
@@ -128,9 +134,7 @@ def create_hop_fw_bw(
                         "Dynamo traced submodule should return tuple"
                     )
                     return fw_out, [
-                        True
-                        if isinstance(ret, torch.Tensor) and ret.requires_grad
-                        else False
+                        bool(isinstance(ret, torch.Tensor) and ret.requires_grad)
                         for ret in fw_out
                     ]
 
@@ -193,6 +197,7 @@ def create_hop_fw_bw(
 
 class LocalMapAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx: Any,
         fw_gm: GraphModule,
@@ -203,6 +208,8 @@ class LocalMapAutogradOp(torch.autograd.Function):
         *args: Any,
         **kwargs: Any,
     ) -> tuple[Optional[torch.Tensor], ...]:
+        from torch._functorch._aot_autograd.schemas import MemoryFormatMeta
+
         ctx.bw_gm = bw_gm
         ctx.num_fw_ins = num_fw_ins
         ctx.filtered_grads_idx = filtered_grads_idx
@@ -214,17 +221,32 @@ class LocalMapAutogradOp(torch.autograd.Function):
         saved_activations = fw_outs_with_saved_activations[num_fw_outs:]
         save_tensors_and_symints_for_backward(ctx, saved_activations)
 
+        ctx.expected_tangent_metadata = {
+            i: MemoryFormatMeta.from_tensor(fw_outs[i]) for i in filtered_grads_idx
+        }
         return fw_outs
 
     @staticmethod
     def backward(
         ctx: Any, *_grads: tuple[torch.Tensor]
     ) -> tuple[Optional[torch.Tensor], ...]:
+        from torch._functorch._aot_autograd.runtime_wrappers import (
+            coerce_to_expected_memory_format,
+        )
+
         saved_activations = saved_tensors_and_symints(ctx)
         with torch._C._AutoDispatchBelowAutograd():
             # Filter out grads that are None or do not require_grad.
             # The AOTAutograd utils we rely on force this assumption.
             grads = [_grads[i] for i in ctx.filtered_grads_idx]
+            assert len(grads) == len(ctx.expected_tangent_metadata), (
+                f"{len(grads)=} vs {len(ctx.expected_tangent_metadata)}"
+            )
+
+            for i, meta in ctx.expected_tangent_metadata.items():
+                # pyrefly: ignore  # bad-argument-type
+                grads[i] = coerce_to_expected_memory_format(grads[i], meta)
+
             grad_ins = local_map_hop(ctx.bw_gm, *saved_activations, *grads)
             if len(grad_ins) != ctx.num_fw_ins:
                 raise RuntimeError(

@@ -17,8 +17,9 @@ import sys
 import threading
 import traceback
 import warnings
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, cast, NewType, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, NewType, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._C
@@ -34,6 +35,7 @@ from .graphs import (
     is_current_stream_capturing,
     make_graphed_callables,
 )
+from .green_contexts import GreenContext
 from .streams import Event, ExternalStream, Stream
 
 
@@ -495,12 +497,14 @@ class cudaStatus:
 
 class CudaError(RuntimeError):
     def __init__(self, code: int) -> None:
+        # pyrefly: ignore  # missing-attribute
         msg = _cudart.cudaGetErrorString(_cudart.cudaError(code))
         super().__init__(f"{msg} ({code})")
 
 
 def check_error(res: int) -> None:
     r"""Raise an error if the result of a CUDA runtime API call is not success."""
+    # pyrefly: ignore  # missing-attribute
     if res != _cudart.cudaError.success:
         raise CudaError(res)
 
@@ -600,6 +604,7 @@ def get_device_capability(device: "Device" = None) -> tuple[int, int]:
     return prop.major, prop.minor
 
 
+# pyrefly: ignore  # not-a-type
 def get_device_properties(device: "Device" = None) -> _CudaDeviceProperties:
     r"""Get the properties of a device.
 
@@ -650,6 +655,7 @@ class StreamContext:
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
             if self.idx is None:
+                # pyrefly: ignore  # bad-assignment
                 self.idx = -1
 
         self.src_prev_stream = (
@@ -952,7 +958,9 @@ def _device_count_amdsmi() -> int:
             if raw_cnt <= 0:
                 return raw_cnt
             # Trim the list up to a maximum available device
+            # pyrefly: ignore  # bad-argument-type
             for idx, val in enumerate(visible_devices):
+                # pyrefly: ignore  # redundant-cast
                 if cast(int, val) >= raw_cnt:
                     return idx
     except OSError:
@@ -986,7 +994,9 @@ def _device_count_nvml() -> int:
             if raw_cnt <= 0:
                 return raw_cnt
             # Trim the list up to a maximum available device
+            # pyrefly: ignore  # bad-argument-type
             for idx, val in enumerate(visible_devices):
+                # pyrefly: ignore  # redundant-cast
                 if cast(int, val) >= raw_cnt:
                     return idx
     except OSError:
@@ -1201,8 +1211,10 @@ def get_sync_debug_mode() -> int:
 def _get_pynvml_handler(device: "Device" = None):
     if not _HAS_PYNVML:
         raise ModuleNotFoundError(
-            "pynvml does not seem to be installed or it can't be imported."
+            "nvidia-ml-py does not seem to be installed or it can't be imported."
+            # pyrefly: ignore  # invalid-inheritance
         ) from _PYNVML_ERR
+    # pyrefly: ignore  # import-error
     from pynvml import NVMLError_DriverNotLoaded
 
     try:
@@ -1219,6 +1231,7 @@ def _get_amdsmi_handler(device: "Device" = None):
     if not _HAS_PYNVML:
         raise ModuleNotFoundError(
             "amdsmi does not seem to be installed or it can't be imported."
+            # pyrefly: ignore  # invalid-inheritance
         ) from _PYNVML_ERR
     try:
         amdsmi.amdsmi_init()
@@ -1482,6 +1495,7 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "cuda") -> int
     return default_generator.get_offset()
 
 
+# pyrefly: ignore  # deprecated
 from .memory import *  # noqa: F403
 from .random import *  # noqa: F403
 
@@ -1698,6 +1712,7 @@ def _register_triton_kernels():
     def kernel_impl(*args, **kwargs):
         from torch.sparse._triton_ops import bsr_dense_mm
 
+        # pyrefly: ignore  # not-callable
         return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
     @_WrappedTritonKernel
@@ -1830,6 +1845,7 @@ __all__ = [
     "ExternalStream",
     "Stream",
     "StreamContext",
+    "GreenContext",
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",
