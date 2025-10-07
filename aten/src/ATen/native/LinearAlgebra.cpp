@@ -1415,34 +1415,42 @@ static inline bool apply_zendnn_matmul_heur(const Tensor& batch1, const Tensor& 
   for (int64_t stride : out_strides) {
     if (stride == 0) return false;
   }
-  auto mat1_sizes = batch1.sizes();
 
-  const auto value = c10::utils::get_env("ZENDNNBMM_THREADS_THRESHOLD");
+  // Extract dimensions from tensor sizes
+  auto batch1_sizes = batch1.sizes();
+  auto batch2_sizes = batch2.sizes();
 
-  const int num_threads = omp_get_max_threads();
-  int max_threads = 192;
+  // Get dimensions: BS (batch size), M, K, N
+  int64_t BS = batch1_sizes[0];  // Batch size
+  int64_t M = batch1_sizes[1];   // First matrix rows
+  int64_t K = batch1_sizes[2];   // First matrix cols / Second matrix rows
+  int64_t N = batch2_sizes[2];   // Second matrix cols
 
-  if(value.has_value()) {
-    max_threads = stoi(value.value());
+  // Heuristic conditions derived from performance experiments
+  // on various AMD CPUs
+  // Native -> return false, ZenDNN_loa -> return true
+  if (BS <= 896) {
+    if (N <= 480) {
+      if (K <= 24) {
+        return false;  // Native
+      } else {
+        return true;   // ZenDNN_loa
+      }
+    } else {
+      if (K <= 40) {
+        return true;   // ZenDNN_loa
+      } else {
+        return false;  // Native
+      }
+    }
+  } else {
+    if (M <= 44) {
+      return true;     // ZenDNN_loa
+    } else {
+      return false;    // Native
+    }
   }
-
-  //batch parallelizaion
-  int bs = mat1_sizes[0];
-  int threads_per_batch = std::max(1, num_threads/bs);
-
-  //M parallelization
-  int M_blocks = std::max(1, int((mat1_sizes[1] + threads_per_batch -1 )/threads_per_batch));
-  int m_iters  =  (mat1_sizes[1] + M_blocks - 1) / M_blocks;
-
-  int batch_iters = bs;
-  int tot_batch_loops =  batch_iters * m_iters;
-
-  if(tot_batch_loops >= num_threads && tot_batch_loops <= max_threads)
-  {
-     return true;
-  }
-
-  return false;
+  return true;
 }
 #endif
 
@@ -1823,12 +1831,13 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   };
 
 #if AT_ZENDNN_ENABLED()
-  if(at::cpu::is_amd_cpu() && at::cpu::is_avx512_supported() && at::hasZenDNN
-    && self_or_result.scalar_type() == kBFloat16)
+  const auto value = c10::utils::get_env("TORCHINDUCTOR_ENABLE_ZENDNN");
+  if((!value.has_value() || value.value() == "1") && at::cpu::is_amd_cpu()
+      && at::cpu::is_avx512_supported()
+      && self_or_result.scalar_type() == kBFloat16)
   {
-    const auto value = c10::utils::get_env("TORCHINDUCTOR_ENABLE_ZENDNN");
     bool apply_heur_zen = apply_zendnn_matmul_heur(batch1, batch2, self_or_result);
-    if(apply_heur_zen && (!value.has_value() || value.value() == "1"))
+    if(apply_heur_zen)
     {
       zendnn_baddbmm(self_or_result, batch1, batch2, beta.to<float>(), alpha.to<float>());
       return;
@@ -2866,6 +2875,7 @@ Tensor matrix_exp(const Tensor& a) {
 // TODO This should be deprecated in favor of linalg_matrix_exp_differential
 //      in FunctionsManual.cpp
 Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
+  squareCheckInputs(self, "matrix_exp_backward");
   NoTF32Guard disable_tf32;
   return backward_analytic_function_of_a_matrix(
     self, grad,
