@@ -2698,7 +2698,13 @@ from torch import (
     library as library,
     return_types as return_types,
 )
-from torch._higher_order_ops import cond as cond, while_loop as while_loop
+from torch._higher_order_ops import (
+    associative_scan as associative_scan,
+    cond as cond,
+    map as map,
+    scan as scan,
+    while_loop as while_loop,
+)
 from torch.func import vmap as vmap
 
 
