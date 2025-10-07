@@ -134,6 +134,10 @@ class TestXpu(TestCase):
                 device_properties.architecture,
                 device_capability["architecture"],
             )
+        self.assertEqual(
+            len(str(device_properties.uuid)), 36
+        )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        self.assertEqual(len(device_properties.uuid.bytes), 16)
 
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
@@ -580,6 +584,16 @@ if __name__ == "__main__":
         flags = torch.xpu.get_gencode_flags()
         for arch in arch_list:
             self.assertTrue(arch in flags)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_can_device_access_peer(self):
+        device_count = torch.xpu.device_count()
+        for device in range(device_count):
+            for peer in range(device_count):
+                self.assertEqual(
+                    torch.xpu.can_device_access_peer(device, peer),
+                    torch.xpu.can_device_access_peer(peer, device),
+                )
 
     def test_torch_version_xpu(self):
         self.assertEqual(len(torch.version.xpu), 8)

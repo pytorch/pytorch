@@ -1141,6 +1141,12 @@ class BatchClampPreGradFusion(BatchMathOpsPreGradFusion):
         super().__init__(torch.clamp, **kwargs)
 
 
+@register_fusion("batch_dropout")
+class BatchDropoutPreGradFusion(BatchMathOpsPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(torch.nn.functional.dropout, **kwargs)
+
+
 @register_fusion("batch_aten_tanh", pre_grad=False)
 class BatchTanhPostGradFusion(BatchPointwiseOpsPostGradFusion):
     def __init__(self, **kwargs) -> None:

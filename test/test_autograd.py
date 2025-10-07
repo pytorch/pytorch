@@ -3888,6 +3888,38 @@ class TestAutograd(TestCase):
         torch.autograd.grad(y, x, create_graph=True)
         torch.autograd.grad(y, x)  # should not error!
 
+    def test_custom_autograd_ac_early_stop(self):
+        refs = []
+
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x.clone()
+                ctx.save_for_backward(y)
+                refs.append(weakref.ref(y))
+                return y
+
+            @staticmethod
+            def backward(ctx, *args):
+                _ = ctx.saved_tensors
+                return None
+
+        def fn(inp):
+            return Test.apply(inp)
+
+        inp = torch.randn(5, 5, requires_grad=True)
+
+        def scope():
+            # Early-stop is true by default in non-reentrant torch.utils.checkpoint
+            out = torch.utils.checkpoint.checkpoint(fn, inp, use_reentrant=False)
+            out.sum().backward()
+
+        with disable_gc():
+            scope()
+
+            for ref in refs:
+                self.assertIsNone(ref())
+
     def test_detach(self):
         x = torch.randn(10, 10, requires_grad=True)
         y = x + 2
@@ -7920,6 +7952,35 @@ for shape in [(1,), ()]:
         for t in results:
             self.assertEqual(t.grad_fn._saved_scalars, scalars)
 
+    def test_get_data_and_hooks_from_raw_saved_variable(self):
+        def pack_hook(t):
+            return t
+
+        def unpack_hook(t):
+            return t
+
+        a = torch.tensor(2.0, requires_grad=True)
+
+        with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
+            b = a**2
+
+        c = b.exp()
+        d = c**2
+
+        pow_sv = b.grad_fn._raw_saved_self
+        exp_sv = c.grad_fn._raw_saved_result
+        pow2_sv = d.grad_fn._raw_saved_self
+
+        # Returns the packed object as-is
+        self.assertTrue(pow_sv.data is a)
+        self.assertTrue(pow_sv.unpack_hook is unpack_hook)
+        # Returns the detached data when the output/leaf is saved
+        self.assertFalse(exp_sv.data is c)
+        self.assertIsNone(exp_sv.unpack_hook)
+        # Returns the un-detached data when input is saved
+        self.assertTrue(pow2_sv.data is c)
+        self.assertIsNone(pow2_sv.unpack_hook)
+
     def test_cant_create_saved_tensors(self):
         with self.assertRaisesRegex(
             RuntimeError,
@@ -8745,6 +8806,27 @@ for shape in [(1,), ()]:
         abs_1_1j = abs(1 + 1j)
         expected.fill_(complex(abs_1_1j / 2, abs_1_1j / 2))
         self.assertEqual(z.grad, torch.view_as_real(expected))
+
+    def test_custom_function_saving_mutated_view_no_leak(self):
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.mark_dirty(x)
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                pass
+
+        def scope():
+            x = torch.tensor(1.0, requires_grad=True).clone()
+            x = x.view_as(x)
+            y = Test.apply(x)
+            return weakref.ref(x)
+
+        ref = scope()
+        self.assertIsNone(ref())
 
     def test_custom_function_return_view_in_nograd(self):
         class Alias(Function):

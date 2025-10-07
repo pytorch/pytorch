@@ -47,10 +47,14 @@ TORCH_META_FUNC(nll_loss_forward)
   TORCH_CHECK(
       target.dim() <= 1,
       "0D or 1D target tensor expected, multi-target not supported");
-
-  auto no_batch_dim = self.dim() == 1  && target.dim() == 0;
+  if (self.dim() == 1 && target.dim() == 1) {
+      TORCH_CHECK_VALUE(
+          target.size(0) == 1,
+          "For 1D input, 1D target must have size 1, but got target size: ",
+          target.size(0));
+  }
   TORCH_CHECK(
-      no_batch_dim || (self.size(0) == target.size(0)),
+      self.dim() == 1 || (self.size(0) == target.size(0)),
       "size mismatch (got input: ",
       self.sizes(),
       ", target: ",

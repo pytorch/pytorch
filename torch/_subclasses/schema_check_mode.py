@@ -113,7 +113,7 @@ class SchemaCheckMode(TorchDispatchMode):
             return name if name != "self" else "input"
 
         def unwrap(e):
-            if isinstance(e, torch.Tensor) and not type(e) == torch.Tensor:
+            if isinstance(e, torch.Tensor) and type(e) != torch.Tensor:
                 try:
                     return e.elem
                 except AttributeError:
@@ -122,7 +122,7 @@ class SchemaCheckMode(TorchDispatchMode):
 
         def parse_metadata(e):
             if isinstance(e, torch.Tensor):
-                if not type(e) == torch.Tensor:
+                if type(e) != torch.Tensor:
                     try:
                         current = e.elem
                         return (
