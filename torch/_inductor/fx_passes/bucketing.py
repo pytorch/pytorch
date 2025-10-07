@@ -189,7 +189,7 @@ def greedy_bucket_collective_by_mb(
         return []
 
     # TODO: pearce kelly algorithm for detecting cycles
-    node_descendants = collect_node_descendants(gm.graph)
+    node_descendents = collect_node_descendants(gm.graph)
 
     nodes_groups: list[list[torch.fx.Node]] = []
     cur_group: list[torch.fx.Node] = []
@@ -214,14 +214,14 @@ def greedy_bucket_collective_by_mb(
     buckets: list[list[torch.fx.Node]] = []
     for nodes in nodes_groups:
         cur_bucket: list[torch.fx.Node] = []
-        cur_bucket_descendants: OrderedSet[torch.fx.Node] = OrderedSet()
+        cur_bucket_descendents: OrderedSet[torch.fx.Node] = OrderedSet()
         cur_bucket_size_bytes: int = 0
         cur_bucket_id: int = 0
         bucket_size_bytes = int(
             bucket_cap_mb_by_bucket_idx(cur_bucket_id) * 1024 * 1024
         )
         for node in nodes:
-            if node in cur_bucket_descendants:
+            if node in cur_bucket_descendents:
                 # if there is a path from node to the current bucket, we cannot horizontally fuse (bucket)
                 continue
             assert "val" in node.meta
@@ -237,10 +237,10 @@ def greedy_bucket_collective_by_mb(
                 cur_bucket = []
                 cur_bucket_size_bytes = 0
                 cur_bucket_id += 1
-                cur_bucket_descendants = OrderedSet()
+                cur_bucket_descendents = OrderedSet()
             cur_bucket_size_bytes += size_bytes
             cur_bucket.append(node)
-            cur_bucket_descendants |= node_descendants[node]
+            cur_bucket_descendents |= node_descendents[node]
         if len(cur_bucket) > 1:
             buckets.append(cur_bucket)
     return buckets
@@ -449,7 +449,9 @@ def all_gather_merge_fn_to_trace_custom_ops(
     rank: int,
 ) -> list[torch.Tensor]:
     ag_ins = [
-        _ag_in.to(out_dtype) if _ag_in.dtype != out_dtype else _ag_in
+        torch._prims.convert_element_type(_ag_in, out_dtype)
+        if _ag_in.dtype != out_dtype
+        else _ag_in
         for _ag_in, out_dtype in zip(_ag_ins, out_dtypes)
     ]
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
