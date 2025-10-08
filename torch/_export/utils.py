@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING, Union, cast
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union, cast
 
 import torch
 from torch._guards import detect_fake_mode
@@ -1145,8 +1145,6 @@ def placeholder_naming_pass(
                 constants[new_name] = constant
                 del constants[name]
 
-from typing import Optional, Any
-
 def _root_out_spec_from_call_graph(sig) -> Optional[Any]:
     """
     Try to fetch the output spec
@@ -1181,12 +1179,12 @@ def _root_out_spec_from_call_graph(sig) -> Optional[Any]:
             return ospec
     return None
 
-def _build_output_prefixes() -> Dict[OutputKind, str]:
+def _build_output_prefixes() -> dict[OutputKind, str]:
     """
     Build output prefixes for named outputs.
     Returns mapping for output kinds.
     """
-    mapping: Dict[OutputKind, str] = {}
+    mapping: dict[OutputKind, str] = {}
     for name, pref in [
         ("USER_OUTPUT", "o_"),
         ("BUFFER_MUTATION", "b_"),
@@ -1207,23 +1205,25 @@ def _compute_output_name_map(export_graph_signature, out_spec):
     Uses early returns to avoid large nested branches.
     """
     name_map: dict[str, str] = {}
+    find_available: dict[str, int] = defaultdict(int)
+    used_names: set[str] = set()
+    output_prefixes: dict[OutputKind, str] = _build_output_prefixes()
+
+    def _assign(old: str, base: str, kind: OutputKind) -> None:
+        prefix = output_prefixes.get(kind, "o_")
+        sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
+        candidate = f"{prefix}{sanitized}"
+        _rename_without_collisions(
+            name_map, find_available, used_names, old, candidate, is_placeholder=True
+        )
 
     def _fallback():
         for spec in export_graph_signature.output_specs:
-            old = spec.arg.name
-            base = (old or spec.target or "")
-            prefix = output_prefixes.get(spec.kind, "o_")
-            sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
-            candidate = f"{prefix}{sanitized}"
-            _rename_without_collisions(
-                name_map,
-                old,
-                candidate)
+            base = (spec.arg.name or spec.target or "")
+            _assign(spec.arg.name, base, spec.kind)
         return name_map
 
-    output_prefixes: Dict[OutputKind, str] = _build_output_prefixes()
-
-    # Early return: no useful spec → fallback
+    # No useful spec - just fallback
     if out_spec is None or len(getattr(out_spec, "children_specs", [])) != 1:
         return _fallback()
 
@@ -1233,24 +1233,20 @@ def _compute_output_name_map(export_graph_signature, out_spec):
     # NamedTuple
     if hasattr(ctx, "_fields"):
         all_fields = list(ctx._fields)
-    # Dataclass (registered)
     elif isinstance(ctx, (list, tuple)) and ctx and isinstance(ctx[0], (list, tuple)):
+    # dataclass (registered)
         all_fields = list(ctx[0])
     else:
         all_fields = []
 
-    # Early return: no field names → fallback
+    # We use fallback
     if not all_fields:
         return _fallback()
 
     # We found names
     for spec, field_name in zip(export_graph_signature.output_specs, all_fields):
-        old = spec.arg.name
-        base1 = (field_name or old or spec.target or "")
-        prefix = output_prefixes.get(spec.kind, "o_")
-        sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base1).lower()
-        candidate = f"{prefix}{sanitized}"
-        _rename_without_collisions(name_map, old, candidate)
+        base = (field_name or spec.arg.name or spec.target or "")
+        _assign(spec.arg.name, base, spec.kind)
 
     return name_map
 
