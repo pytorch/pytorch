@@ -72,6 +72,12 @@ def create_hop_fw_bw(
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
 
+    local_map_kwargs = fw_gm.meta["local_map_kwargs"]  # type: ignore[attr-defined]
+    assert "in_placements" in local_map_kwargs
+    assert "out_placements" in local_map_kwargs
+    assert "device_mesh" in local_map_kwargs
+    assert len(local_map_kwargs["in_placements"]) == len(_args)
+
     dummy_aot_config = AOTConfig(
         fw_compiler=None,  # type: ignore[arg-type]
         bw_compiler=None,  # type: ignore[arg-type]
@@ -180,8 +186,6 @@ def create_hop_fw_bw(
         )
 
         # Propagate meta onto fw/bw graphs, later will be set on proxied nodes
-        local_map_kwargs = fw_gm.meta["local_map_kwargs"]  # type: ignore[attr-defined]
-
         new_fw_gm.meta["local_map_kwargs"] = local_map_kwargs
         new_bw_gm.meta["local_map_kwargs"] = {**local_map_kwargs}
         # Okay because Autoparallel assumes same sharding between param and grads
@@ -191,6 +195,40 @@ def create_hop_fw_bw(
         new_bw_gm.meta["local_map_kwargs"]["out_placements"] = local_map_kwargs[
             "in_placements"
         ]
+
+        # Validate Forward
+        fw_kwargs = new_fw_gm.meta["local_map_kwargs"]
+        expected_fw_inputs = len(fw_kwargs["in_placements"])
+        expected_fw_outputs = len(fw_kwargs["out_placements"])
+        actual_fw_inputs = len(new_fw_gm.graph.find_nodes(op="placeholder"))
+        actual_fw_outputs = num_fw_outputs
+        assert expected_fw_inputs == actual_fw_inputs
+        assert expected_fw_outputs == actual_fw_outputs
+
+        # Validate Activations
+        assert len(new_fw_gm.graph.find_nodes(op="output")) == 1
+        num_activations = (
+            len(new_fw_gm.graph.find_nodes(op="output")[0].args[0]) - num_fw_outputs
+        )
+        assert num_activations >= 0
+
+        # Validate Backward
+        bw_kwargs = new_bw_gm.meta["local_map_kwargs"]
+        expected_bw_inputs = len(bw_kwargs["in_placements"])
+        expected_bw_outputs = len(bw_kwargs["out_placements"])
+        actual_bw_inputs = (
+            len(new_bw_gm.graph.find_nodes(op="placeholder")) - num_activations
+        )
+        assert actual_bw_inputs > 0
+        assert len(new_bw_gm.graph.find_nodes(op="output")) == 1
+        actual_bw_outputs = len(new_bw_gm.graph.find_nodes(op="output")[0].args[0])
+        assert expected_bw_inputs == actual_bw_inputs
+        assert expected_bw_outputs == actual_bw_outputs
+
+        new_fw_gm.meta["num_activations"] = num_activations
+        new_fw_gm.meta["is_backward"] = False
+        new_bw_gm.meta["num_activations"] = num_activations
+        new_bw_gm.meta["is_backward"] = True
 
         return new_fw_gm, new_bw_gm, num_fw_inputs, num_fw_outputs, filtered_grads_idx
 
@@ -292,7 +330,19 @@ def fake_mode_key(
     **kwargs: Any,
 ) -> tuple[torch.Tensor]:
     with mode:
-        return gm(*args, **kwargs)
+        expected_num_inputs = len(gm.meta["local_map_kwargs"]["in_placements"])
+        if gm.meta["is_backward"]:
+            expected_num_inputs += gm.meta["num_activations"]
+        assert len(args) == expected_num_inputs
+
+        outs = gm(*args, **kwargs)
+
+        expected_num_outputs = len(gm.meta["local_map_kwargs"]["out_placements"])
+        if not gm.meta["is_backward"]:
+            expected_num_outputs += gm.meta["num_activations"]
+        assert len(outs) == expected_num_outputs
+
+        return outs
 
 
 def proxy_mode_key_common(
