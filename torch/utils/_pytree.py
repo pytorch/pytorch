@@ -22,6 +22,7 @@ import functools
 import importlib
 import importlib.metadata
 import json
+import sys
 import threading
 import types
 import warnings
