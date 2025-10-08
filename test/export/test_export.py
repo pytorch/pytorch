@@ -17,7 +17,7 @@ import weakref
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from re import escape
-from typing import Dict, List, Union
+from typing import Dict, List, Union, NamedTuple
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -98,8 +98,8 @@ from torch.utils._pytree import (
     TreeSpec,
     treespec_dumps,
     treespec_loads,
+    _register_namedtuple,
 )
-
 
 if HAS_GPU:
     import triton
@@ -16744,6 +16744,72 @@ def forward(self, q, k, v):
 
         self.assertEqual(result_non_strict, result_strict)
 
+    def test_namedtuple_output_names(self):
+        class TwoOutputs(NamedTuple):
+            sum: torch.Tensor
+            diff: torch.Tensor
+
+        # Ensure pytree knows about the NamedTuple
+        _register_namedtuple(TwoOutputs, serialized_type_name="TwoOutputs")
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                s = x + y
+                d = x - y
+                return TwoOutputs(sum=s, diff=d)
+
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        ep = export(M(), (x, y), strict=True)
+        gm = ep.module()
+
+        nodes = list(gm.graph.nodes)
+        # final node is always "output"
+        self.assertEqual(nodes[-1].name, "output")
+
+        returned = nodes[-1].args[0]
+        self.assertEqual(len(returned), 2)
+        self.assertEqual(returned[0].name, "o_sum")
+        self.assertEqual(returned[1].name, "o_diff")
+
+    def test_dataclass_output_names(self):
+
+        @dataclass
+        class ThreeDataOutputs:
+            first: torch.Tensor
+            second: torch.Tensor
+            third: torch.Tensor
+
+        # Ensure pytree/export knows about the dataclass
+        register_dataclass_as_pytree_node(
+            ThreeDataOutputs, serialized_type_name="ThreeDataOutputs"
+        )
+
+        class ThreeDataOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 3, 3, padding=1, bias=False)
+
+            def forward(self, x) -> ThreeDataOutputs:
+                y = self.conv(x)
+                a, b, c = y[:, :1], y[:, 1:2], y[:, 2:3]
+                return ThreeDataOutputs(first=a, second=b, third=c)
+
+        x = torch.randn(1, 1, 8, 8)
+
+        ep = torch.export.export(ThreeDataOutputModule(), (x,), strict=True)
+        gm = ep.module()
+
+        nodes = list(gm.graph.nodes)
+        # final node is always "output"
+        self.assertEqual(nodes[-1].name, "output")
+
+        returned = nodes[-1].args[0]
+        self.assertEqual(len(returned), 3)
+        self.assertEqual(returned[0].name, "o_first")
+        self.assertEqual(returned[1].name, "o_second")
+        self.assertEqual(returned[2].name, "o_third")
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
