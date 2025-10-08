@@ -513,7 +513,7 @@ class TestTemplateRender(TestCase):
     tmp0 = tl.load(A + xindex)
     tmp1 = tl.load(B + xindex)
     tmp2 = tmp0 + tmp1
-    {{store_output(("xindex",), "tmp2", mask="xmask")}}
+    {{store_output(("xindex",), "tmp2", mask="xmask", val_shape=("XBLOCK",))}}
     """
             ),
         )
