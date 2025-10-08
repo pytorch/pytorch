@@ -66,6 +66,7 @@ Possible improvements:
 
 import argparse
 import io
+import itertools
 import json
 import os
 import pickle
@@ -280,7 +281,7 @@ def get_model_info(
                 debug_info.append((len(raw_code), (('', '', 0), 0, 0)))
 
             code_parts = []
-            for di, di_next in zip(debug_info, debug_info[1:]):
+            for di, di_next in itertools.pairwise(debug_info):
                 start, source_range, *_ = di
                 end = di_next[0]
                 assert end > start
