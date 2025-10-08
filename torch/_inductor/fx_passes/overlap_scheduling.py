@@ -157,6 +157,16 @@ class CollectiveInfo:
         return self.exposed_time_ms != 0
 
 
+@dataclass
+class CollBucket:
+    """Track information about a bucket of collectives."""
+
+    collectives: list[fx.Node]  # Original collective starts
+    bucketed_start: Optional[fx.Node] = None  # After bucketing
+    bucketed_wait: Optional[fx.Node] = None  # After bucketing
+    total_bytes: int = 0
+
+
 class OverlapScheduler:
     """
     Scheduler that reorders operations to maximize compute-collective overlap.
@@ -614,7 +624,7 @@ class OverlapScheduler:
 
             if is_wait_tensor(node):
                 info = self.collective_info[self.wait_to_start[node]]
-                assert not info.hiding_node == curr_compute_node
+                assert info.hiding_node != curr_compute_node
                 self._handle_wait(node)
                 continue
 
