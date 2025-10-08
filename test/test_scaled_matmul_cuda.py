@@ -1420,7 +1420,7 @@ class TestFP8Matmul(TestCase):
 
         # Test wrong scale tensor size for scale_a with correct dtype
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             f".*For Block[W,w]ise.*scaling.*scale_a should have {expected_a_size} "
             f"elements.*"
             ,
@@ -1442,7 +1442,7 @@ class TestFP8Matmul(TestCase):
 
         # Test wrong scale tensor size for scale_b with correct dtype
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             f"For Block[W,w]ise.*scaling.*scale_b should have {expected_b_size} "
             f"elements.*"
             ,
@@ -1463,7 +1463,7 @@ class TestFP8Matmul(TestCase):
 
         # Test non-contiguous scale tensors with correct dtype
         with self.assertRaisesRegex(
-            RuntimeError,
+            ValueError,
             "For Block[W,w]ise.*scaling.*both scales should be contiguous"
             ,
         ):
