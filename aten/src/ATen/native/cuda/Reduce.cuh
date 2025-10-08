@@ -55,23 +55,6 @@ C10_HOST_DEVICE static void reduce_fraction(size_t &numerator, size_t &denominat
   denominator /= a;
 }
 
-C10_HOST_DEVICE static void next_pow_2(size_t x, size_t& pow2) {
-  int n = x / 2;
-    if (n == 0)
-      n = 1;
-    else {
-      n--;
-      n |= n >> 1;
-      n |= n >> 2;
-      n |= n >> 4;
-      n |= n >> 8;
-      n |= n >> 16;
-      n++;
-    }
-
-    pow2 = n;
-}
-
 //template for changing MAX_NUM_THREADS based on op dtype
 template <typename T>
 struct mnt_wrapper {
@@ -672,13 +655,22 @@ struct ReduceOp {
     }
 
     __syncthreads();
-    size_t offset = 0;
-    next_pow_2(dim_x / 2, offset);
+    // Warp-level reduction for remaining threads
+    // For non-power-of-2 sizes, we start from the next power-of-2 divided by 2
+    // and use a boundary check to avoid out-of-bounds access
+    size_t offset = 1;
+    while (offset < dim_x) {
+      offset <<= 1;
+    }
+    offset >>= 1;
     for (; offset > 0; offset >>= 1) {
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = ops.warp_shfl_down(value[i], offset);
-        value[i] = ops.combine(value[i], other);
+        // Only combine if the source thread (threadIdx.x + offset) is within bounds
+        if (threadIdx.x + offset < dim_x) {
+          value[i] = ops.combine(value[i], other);
+        }
       }
     }
     return value;
