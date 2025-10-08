@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import unittest
+from copy import deepcopy
 from typing import Callable
 
 from sympy import Symbol, sympify
@@ -207,36 +208,47 @@ instantiate_device_type_tests(TestUtils, globals())
 
 
 class TestFakeTensorUpdater(TestCase):
-    def _common_test(self, fn: Callable[..., torch.Tensor], *args: torch.Tensor):
-        backend = AotEagerAndRecordGraphs()
-        # populate the backend with a captured graph
-        torch.compile(backend=backend, fullgraph=True)(fn)(*args)
-
-        main_graph = backend.graphs[0]
+    def _delete_single_vals(self, main_graph: torch.fx.GraphModule) -> None:
         updater = FakeTensorUpdater(main_graph)
 
         def recursively_test_graph_mod(gm: torch.fx.GraphModule) -> None:
             for node in gm.graph.nodes:
-                if node.op == "placeholder":
+                # If "val" isn't in the meta dict initially, an update will
+                # likely skip the node anyway, so the logic of this test doesn't
+                # work.
+                if "val" not in node.meta:
                     continue
 
-                self.assertIn("val", node.meta)
-                dtype = node.meta["val"].dtype
-                shape = node.meta["val"].size()
-                strides = node.meta["val"].stride()
-                del node.meta["val"]
+                val: torch.Tensor = node.meta["val"]
+                dtype = val.dtype
+                shape = val.size()
+                strides = val.stride()
+                del node.meta["val"], val
 
                 self.assertEqual(updater.incremental_update(), 1)
                 self.assertIn("val", node.meta)
-                self.assertEqual(node.meta["val"].dtype, dtype)
-                self.assertEqual(node.meta["val"].size(), shape)
-                self.assertEqual(node.meta["val"].stride(), strides)
+
+                val: torch.Tensor = node.meta["val"]
+                self.assertEqual(val.dtype, dtype)
+                self.assertEqual(val.size(), shape)
+                self.assertEqual(val.stride(), strides)
 
             # iterate over subgraphs, updating *main_graph*
             for subgraph_name in (s for s in dir(gm) if s.startswith("subgraph_")):
                 subgraph = getattr(gm, subgraph_name)
                 self.assertIsInstance(subgraph, torch.fx.GraphModule)
                 recursively_test_graph_mod(subgraph)
+
+        recursively_test_graph_mod(main_graph)
+
+    def _common_test(
+        self, fn: Callable[..., torch.Tensor], *args: torch.Tensor
+    ) -> None:
+        backend = AotEagerAndRecordGraphs()
+        # populate the backend with a captured graph
+        torch.compile(backend=backend, fullgraph=True)(fn)(*args)
+
+        self._delete_single_vals(deepcopy(backend.graphs[0]))
 
     def test_hop_no_subgraph_inputs(self):
         def fn(x: torch.Tensor) -> torch.Tensor:

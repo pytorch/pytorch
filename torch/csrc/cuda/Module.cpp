@@ -303,7 +303,7 @@ at::Scalar as_scalar(PyObject* arg) {
   }
 
   if (THPUtils_checkLong(arg)) {
-    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
+    return at::Scalar(THPUtils_unpackLong(arg));
   }
 
   if (PyBool_Check(arg)) {
@@ -735,8 +735,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
         "mempool_id elements must be integers");
 
     mempool_id = c10::cuda::MempoolId_t(
-        static_cast<int64_t>(THPUtils_unpackLong(id1)),
-        static_cast<int64_t>(THPUtils_unpackLong(id2)));
+        THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
   }
 
   using c10::cuda::CUDACachingAllocator::BlockInfo;

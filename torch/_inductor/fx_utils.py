@@ -240,7 +240,9 @@ class FakeTensorUpdater:
 
         def should_process_node(node: torch.fx.Node) -> bool:
             # node.target will called with FakeTensor arguments, which is not supported
-            # by Inductor lowerings
+            # by Inductor lowerings.
+            # TODO: Investigate how to remove this. See
+            # https://github.com/pytorch/pytorch/issues/164920
             return callable(node.target) and not hasattr(
                 node.target, "_inductor_lowering_function"
             )
