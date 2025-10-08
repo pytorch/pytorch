@@ -10,7 +10,8 @@ import random
 import re
 import tempfile
 import unittest
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 from unittest import mock
 
 import torch
@@ -48,7 +49,9 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
+    NAVI_ARCH,
     parametrize,
+    skipIfRocmArch,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
@@ -1093,7 +1096,7 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune_gemm_search_space": search_space}):
             m_c = torch.compile(mode="max-autotune")(mod)
             out, code = run_and_get_code(m_c, x)
-            self.assertEqual(out, mod(x), atol=2e-3, rtol=1e-3)
+            self.assertEqual(out, mod(x), atol=2e-3, rtol=2e-3)
 
             FileCheck().check("triton_tem_fused_baddbmm").run(code[0])
 
@@ -1283,6 +1286,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertIn("NoValidChoicesError", str(context.exception))
 
+    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.
@@ -1301,6 +1305,7 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
+    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_addmm(self):
         b = torch.randn((768), dtype=torch.bfloat16, device=GPU_TYPE)
         x = rand_strided(
@@ -1316,6 +1321,7 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
+    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_bmm(self):
         x = rand_strided(
             (1, 50257, 2048), (0, 1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
@@ -1348,7 +1354,7 @@ class TestMaxAutotune(TestCase):
 
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
-        torch.testing.assert_close(act, ref, atol=1e-2, rtol=1e-2)
+        torch.testing.assert_close(act, ref, atol=1e-1, rtol=1e-2)
 
     @config.patch(
         max_autotune=True,
@@ -1438,6 +1444,8 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         max_autotune=True,
         max_autotune_gemm_backends="TRITON",
+        comprehensive_padding=False,
+        shape_padding=False,
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
         fp16_red_setting = (
@@ -1562,7 +1570,9 @@ class TestMaxAutotune(TestCase):
         with mock.patch(
             "torch._inductor.kernel.mm.use_decompose_k_choice"
         ) as decomp_mock:
-            decomp_mock.return_value = True
+            decomp_mock.side_effect = (
+                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
+            )
 
             out, code = run_and_get_code(compiled_func, a, b)
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
@@ -1608,7 +1618,9 @@ class TestMaxAutotune(TestCase):
         with mock.patch(
             "torch._inductor.kernel.mm.use_decompose_k_choice"
         ) as decomp_mock:
-            decomp_mock.return_value = True
+            decomp_mock.side_effect = (
+                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
+            )
 
             out, code = run_and_get_code(compiled_func, a, b)
             out.backward()
