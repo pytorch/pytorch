@@ -410,9 +410,3 @@ class _BatchSamplerIterator(Iterator[list[int]], Stateful):
             # We skip x samples if underlying sampler is not stateful
             for _ in range(self.samples_yielded):
                 next(self.sampler_iter)
-
-    def update_state_dict(self) -> None:
-        if isinstance(self.sampler_iter, Stateful) and hasattr(
-            self.sampler_iter, "update_state_dict"
-        ):
-            self.sampler_iter.update_state_dict()

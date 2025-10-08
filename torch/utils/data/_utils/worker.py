@@ -21,18 +21,18 @@ T = TypeVar("T")
 
 
 # Stateful functionality
-def _try_to_serialize(obj: Any) -> Optional[dict[str, Any]]:
-    """Try to serialize an object if it implements Stateful protocol."""
+def _try_get_state_dict(obj: Any) -> Optional[dict[str, Any]]:
+    """Try to get state_dict from an object if it implements Stateful protocol."""
     if isinstance(obj, Stateful):
         return obj.state_dict()
     return None
 
 
-def _try_to_deserialize(obj: T, state_dict: dict[str, Any]) -> T:
-    """Try to deserialize an object if it implements Stateful protocol."""
+def _try_load_state_dict(obj: T, state_dict: dict[str, Any]) -> T:
+    """Try to load state_dict into an object if it implements Stateful protocol."""
     if isinstance(obj, Stateful) and state_dict is not None:
         obj.load_state_dict(state_dict)
-    return obj
+    return None
 
 
 if TYPE_CHECKING:
