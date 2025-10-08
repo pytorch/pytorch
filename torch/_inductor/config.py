@@ -2029,6 +2029,9 @@ class test_configs:
     # to be migrated when ready for use
     aten_fx_overlap_scheduling = False
 
+    # insert ordering deps for overlap
+    aten_fx_overlap_insert_overlap_deps = True
+
     # to be migrated when ready for use
     aten_fx_overlap_preserving_bucketing = False
 

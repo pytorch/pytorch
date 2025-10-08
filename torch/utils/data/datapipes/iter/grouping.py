@@ -203,7 +203,9 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         drop_remaining: bool = False,
     ):
         _check_unpickable_fn(group_key_fn)
+        # pyrefly: ignore  # invalid-type-var
         self.datapipe = datapipe
+        # pyrefly: ignore  # invalid-type-var
         self.group_key_fn = group_key_fn
 
         self.keep_key = keep_key
@@ -214,9 +216,11 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.guaranteed_group_size = None
         if group_size is not None and buffer_size is not None:
             assert 0 < group_size <= buffer_size
+            # pyrefly: ignore  # bad-assignment
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
             assert group_size is not None and 0 < guaranteed_group_size <= group_size
+            # pyrefly: ignore  # bad-assignment
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
         self.wrapper_class = DataChunk

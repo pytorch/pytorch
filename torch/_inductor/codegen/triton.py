@@ -2279,7 +2279,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 num_dims = max(
                     2,
-                    len(self.range_tree_nodes),
+                    # range_tree.nodes only includes the entries for the range tree
+                    # len(range_tree.nodes) <= self.range_tree_nodes
+                    len(range_tree.nodes),
                     (
                         index.count(FloorDiv(index_var, denom))
                         + index.count(ModularIndexing(index_var, denom, modulo))
@@ -4452,6 +4454,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "optimize_mem": optimize_mem,
             "no_x_dim": self.no_x_dim,
             "num_load": self.num_load,
+            "num_store": self.num_store,
             "num_reduction": self.num_reduction,
             **self.inductor_meta_common(),
         }
