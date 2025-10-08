@@ -79,7 +79,7 @@ def try_import_cutlass() -> bool:
             import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
             import cutlass_library  # type: ignore[import-not-found]
         except ImportError as e:
-            log.warning(
+            log.warning(  # noqa:G200
                 "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
                 str(e),
             )
@@ -164,7 +164,7 @@ def try_import_cutlass() -> bool:
 
             return True
         except ImportError as e:
-            log.debug(
+            log.debug(  # noqa:G200
                 "Failed to import CUTLASS packages: %s, ignoring the CUTLASS backend.",
                 str(e),
             )
