@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -142,7 +143,7 @@ class WeightNormSparsifier(BaseSparsifier):
 
         data = data.repeat(1, values_per_block, 1)
 
-        threshold_idx = int(round(sparsity_level * num_blocks))
+        threshold_idx = round(sparsity_level * num_blocks)
         threshold_idx = max(0, min(num_blocks - 1, threshold_idx))  # Sanity check
         _, sorted_idx = torch.topk(data, k=threshold_idx, dim=2, largest=False)
 
@@ -234,6 +235,7 @@ class WeightNormSparsifier(BaseSparsifier):
             ww = self.norm_fn(getattr(module, tensor_name))
             tensor_mask = self._make_tensor_mask(
                 data=ww,
+                # pyrefly: ignore  # missing-attribute
                 input_shape=ww.shape,
                 sparsity_level=sparsity_level,
                 sparse_block_shape=sparse_block_shape,

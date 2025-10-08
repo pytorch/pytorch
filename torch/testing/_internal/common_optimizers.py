@@ -528,7 +528,7 @@ def optim_inputs_func_adam(device, dtype=None):
             params=None,
             kwargs={
                 "lr": torch.tensor(0.001),
-                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "betas": (torch.tensor([[[0.9]]]), torch.tensor([[0.99]])),
                 "amsgrad": True,
                 "capturable": True,
             },
@@ -1955,7 +1955,7 @@ optim_db: list[OptimizerInfo] = [
         supports_complex=False,
         skips=(
             # Note on numerical differences: `compile` applies different matmul tuning,
-            # which leads to deviations compared to eager mode. In the Newton–Schulz
+            # which leads to deviations compared to eager mode. In the Newton-Schulz
             # iteration for orthogonalization, computations are done in bfloat16, further
             # amplifying these numerical differences.
             DecorateInfo(
