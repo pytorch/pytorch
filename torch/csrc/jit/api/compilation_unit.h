@@ -67,7 +67,7 @@ struct TORCH_API CompilationUnit {
     if (auto r = find_function(name)) {
       return *r;
     }
-    TORCH_CHECK(false, "attempted to get undefined function ", name.name());
+    TORCH_FAIL("attempted to get undefined function ", name.name());
   }
 
   void set_optimized(bool o) {

@@ -66,7 +66,7 @@ std::pair<std::string, std::string> getSpecDetails(
             inputSpec.get_user_input().get_arg().get_as_custom_obj().get_name(),
             "USER_INPUT");
       } else {
-        TORCH_CHECK(false, "Unsupported USER_INPUT argument type.");
+        TORCH_FAIL("Unsupported USER_INPUT argument type.");
       }
       break;
     case torch::_export::InputSpec::Tag::CONSTANT_INPUT:
@@ -74,9 +74,9 @@ std::pair<std::string, std::string> getSpecDetails(
           inputSpec.get_constant_input().get_name(), "CONSTANT_INPUT");
       break;
     case torch::_export::InputSpec::Tag::TOKEN:
-      TORCH_CHECK(false, "Token inputs not implemented yet.");
+      TORCH_FAIL("Token inputs not implemented yet.");
     default:
-      TORCH_CHECK(false, "Unknown InputSpec tag encountered.");
+      TORCH_FAIL("Unknown InputSpec tag encountered.");
   }
 }
 
@@ -143,7 +143,7 @@ void checkInputNames(
       "Graph node names:\n[{}]",
       fmt::join(sigNames, ", "),
       fmt::join(graphNames, ", "));
-  TORCH_CHECK(false, errorMsg);
+  TORCH_FAIL(errorMsg);
 }
 
 void checkOutputNames(
@@ -164,7 +164,7 @@ void checkOutputNames(
           "Graph node names:\n[{}]",
           fmt::join(validNames, ", "),
           fmt::join(graphNames, ", "));
-      TORCH_CHECK(false, errorMsg);
+      TORCH_FAIL(errorMsg);
     }
   }
 }
@@ -199,7 +199,7 @@ GraphSignature::GraphSignature(const torch::_export::GraphSignature& storage) {
           userInputs_.emplace_back(userInputArg.get_as_custom_obj().get_name());
         } else {
           // TODO: handle other types
-          TORCH_CHECK(false, "Non tensor inputs not implemented yet.");
+          TORCH_FAIL("Non tensor inputs not implemented yet.");
         }
         break;
       }
@@ -243,10 +243,10 @@ GraphSignature::GraphSignature(const torch::_export::GraphSignature& storage) {
         break;
       }
       case torch::_export::InputSpec::Tag::TOKEN: {
-        TORCH_CHECK(false, "Token inputs not implemented yet.");
+        TORCH_FAIL("Token inputs not implemented yet.");
       }
       default:
-        TORCH_CHECK(false, "Unknown InputSpec tag encountered.");
+        TORCH_FAIL("Unknown InputSpec tag encountered.");
         break;
     }
   }
@@ -305,10 +305,10 @@ GraphSignature::GraphSignature(const torch::_export::GraphSignature& storage) {
             outputSpec.get_user_input_mutation().get_user_input_name());
         break;
       case torch::_export::OutputSpec::Tag::TOKEN: {
-        TORCH_CHECK(false, "Token outputs not implemented yet.");
+        TORCH_FAIL("Token outputs not implemented yet.");
       }
       default:
-        TORCH_CHECK(false, "Unknown OutputSpec tag encountered.");
+        TORCH_FAIL("Unknown OutputSpec tag encountered.");
     }
   }
 

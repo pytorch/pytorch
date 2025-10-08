@@ -25,7 +25,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     bool training,
     double exponential_average_factor,
     double epsilon) {
-  TORCH_CHECK(false, "cudnn_batch_norm: ATen not compiled with cuDNN support");
+  TORCH_FAIL("cudnn_batch_norm: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> cudnn_batch_norm_out(

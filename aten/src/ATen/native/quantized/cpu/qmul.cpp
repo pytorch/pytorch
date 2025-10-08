@@ -418,7 +418,7 @@ class QMulOnednn final {
     other, other_scale, other_zero_point,
     output_scale, output_zero_point, output_dtype);
 #endif
-  TORCH_CHECK(false, "Unimplemented (int8 mul tensor with onednn)");
+ TORCH_FAIL("Unimplemented (int8 mul tensor with onednn)");
   }
 };
 

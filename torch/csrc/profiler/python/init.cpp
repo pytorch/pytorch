@@ -696,7 +696,7 @@ void initPythonBindings(PyObject* module) {
         } else if (mode_s == "dladdr") {
           mode = torch::unwind::Mode::dladdr;
         } else {
-          TORCH_CHECK(false, "unexpected mode ", mode_s);
+          TORCH_FAIL("unexpected mode ", mode_s);
         }
         std::vector<void*> frames_p;
         frames_p.reserve(frames.size());

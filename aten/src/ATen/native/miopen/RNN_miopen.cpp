@@ -34,7 +34,7 @@ namespace at::native {
             bool batch_first, double fn_dropout, bool fn_train, bool fn_bidirectional,
             IntArrayRef fn_batch_sizes, const std::optional<Tensor>& fn_dropout_state_opt
             ) {
-        TORCH_CHECK(false, "miopen_rnn : ATen not compiled with MIOpen support.");
+       TORCH_FAIL("miopen_rnn : ATen not compiled with MIOpen support.");
     }
 
     std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
@@ -43,7 +43,7 @@ namespace at::native {
             double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const std::optional<Tensor>& dropout_state_opt,
             const Tensor& reserve, std::array<bool, 4> output_mask
             ) {
-        TORCH_CHECK(false, "miopen_rnn_backward: ATen not compiled with MIOpen support.");
+       TORCH_FAIL("miopen_rnn_backward: ATen not compiled with MIOpen support.");
     }
 
 } //namespace at::native
@@ -136,7 +136,7 @@ struct RNNDescriptorParams {
                 {
                     std::ostringstream oss;
                     oss << "unrecognized miopen RNN mode " << fn_mode;
-                    TORCH_CHECK(false, oss.str());
+                   TORCH_FAIL(oss.str());
                 }
         }
     }
@@ -400,7 +400,7 @@ int64_t _num_linear_layers(miopenRNNMode_t mode) {
         case miopenRNNTANH:
             return 2;
         default:
-            TORCH_CHECK(false, "Unknown miopen RNN mode : ", mode);
+           TORCH_FAIL("Unknown miopen RNN mode : ", mode);
     }
 }
 
@@ -882,7 +882,7 @@ std::tuple<Tensor, Tensor> unpack_hidden(const std::tuple<Tensor, Tensor>& hidde
 template<typename hidden_type>
 hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
     static_assert(std::is_same_v<hidden_type, void>, "pack_hidden not implemented for this type");
-    TORCH_CHECK(false, "NOT IMPLEMENTED");
+   TORCH_FAIL("NOT IMPLEMENTED");
 }
 
 template<>

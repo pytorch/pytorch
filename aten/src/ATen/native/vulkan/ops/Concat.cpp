@@ -197,7 +197,7 @@ Tensor cat_feature_mult4ch(
 }
 
 Tensor cat_width(const MaterializedITensorListRef& tensors, vTensor& v_output) {
-  // TORCH_CHECK(false, "Vulkan cat not implemented for width dimension!");
+  // TORCH_FAIL("Vulkan cat not implemented for width dimension!");
   api::Context* const context = api::context();
 
   uvec3 src_offset{};

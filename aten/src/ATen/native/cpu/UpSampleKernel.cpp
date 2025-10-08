@@ -2024,7 +2024,7 @@ void cpu_upsample_genNd_backward_aa(
     at::parallel_for(
         0, channels, at::internal::GRAIN_SIZE / output_slice_size / 4, loop2d);
   } else {
-    TORCH_CHECK(false, "Unsupported tensor ndim");
+   TORCH_FAIL("Unsupported tensor ndim");
   }
 
   if (!grad_input_.is_contiguous()) {

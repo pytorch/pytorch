@@ -15,7 +15,7 @@ void mkldnn_matmul(
     const Tensor &result,
     float beta,
     float alpha) {
-  TORCH_CHECK(false, "mkldnn_matmul: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_matmul: ATen not compiled with MKLDNN support");
 }
 
 bool use_mkldnn_bf16_matmul(

@@ -25,7 +25,7 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
   } else if (scalar_type == at::kQInt8) {
     return CUDNN_DATA_INT8;
   }
-  TORCH_CHECK(false, "TensorDescriptor does not support ", scalar_type);
+ TORCH_FAIL("TensorDescriptor does not support ", scalar_type);
 }
 
 } // anonymous namespace
@@ -56,7 +56,7 @@ void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArr
 void TensorDescriptor::set(cudnnDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad, bool nhwc) {
   size_t dim = t_sizes.size();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
-    TORCH_CHECK(false, "cuDNN supports only up to ", CUDNN_DIM_MAX, " dimensions");
+   TORCH_FAIL("cuDNN supports only up to ", CUDNN_DIM_MAX, " dimensions");
   int size[CUDNN_DIM_MAX];
   int stride[CUDNN_DIM_MAX];
   for (const auto i : c10::irange(dim)) {
@@ -125,7 +125,7 @@ void TensorDescriptor::print() { std::cout << *this; }
 void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad) {
   auto dim = t.ndimension();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
-  TORCH_CHECK(false, "cuDNN supports only up to ", CUDNN_DIM_MAX, " dimensions");
+ TORCH_FAIL("cuDNN supports only up to ", CUDNN_DIM_MAX, " dimensions");
   // NB: It is possible for this test to be insufficient, because the
   // Tensor passed in to set the filter descriptor may not be the actual
   // Tensor whose data pointer is passed to cuDNN.  Nevertheless,

@@ -47,13 +47,13 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
       paddingMode = MPSGraphPaddingModeZero;
       break;
     case GridSamplerPadding::Border:
-      TORCH_CHECK(false, "MPS: Unsupported Border padding mode");
+      TORCH_FAIL("MPS: Unsupported Border padding mode");
       break;
     case GridSamplerPadding::Reflection:
       paddingMode = align_corners == true ? MPSGraphPaddingModeReflect : MPSGraphPaddingModeSymmetric;
       break;
     default:
-      TORCH_CHECK(false, "MPS: Unrecognised Padding Mode: ", padding_mode);
+      TORCH_FAIL("MPS: Unrecognised Padding Mode: ", padding_mode);
   }
 
   switch (static_cast<GridSamplerInterpolation>(interpolation_mode)) {
@@ -64,10 +64,10 @@ static void grid_sampler_2d_mps_impl(Tensor& output,
       samplingMode = MPSGraphResizeNearest;
       break;
     case GridSamplerInterpolation::Bicubic:
-      TORCH_CHECK(false, "MPS: Unsupported Bicubic interpolation");
+      TORCH_FAIL("MPS: Unsupported Bicubic interpolation");
       break;
     default:
-      TORCH_CHECK(false, "MPS: Unrecognised interpolation mode: ", interpolation_mode);
+      TORCH_FAIL("MPS: Unrecognised interpolation mode: ", interpolation_mode);
       break;
   }
 
@@ -163,13 +163,13 @@ static void grid_sampler_template(Tensor& output,
     case GridSamplerInterpolation::Bilinear:
       break;
     case GridSamplerInterpolation::Nearest:
-      TORCH_CHECK(false, op_name, ": Unsupported Nearest interpolation");
+      TORCH_FAIL(op_name, ": Unsupported Nearest interpolation");
       break;
     case GridSamplerInterpolation::Bicubic:
-      TORCH_CHECK(false, op_name, ": Unsupported Bicubic interpolation");
+      TORCH_FAIL(op_name, ": Unsupported Bicubic interpolation");
       break;
     default:
-      TORCH_CHECK(false, op_name, ": Unrecognised interpolation mode: ", _interpolation_mode);
+      TORCH_FAIL(op_name, ": Unrecognised interpolation mode: ", _interpolation_mode);
   }
 
   switch (padding_mode) {
@@ -178,7 +178,7 @@ static void grid_sampler_template(Tensor& output,
     case GridSamplerPadding::Reflection:
       break;
     default:
-      TORCH_CHECK(false, op_name, ": Unrecognised Padding Mode: ", _padding_mode);
+      TORCH_FAIL(op_name, ": Unrecognised Padding Mode: ", _padding_mode);
   }
 
   auto input_size = input.sizes();

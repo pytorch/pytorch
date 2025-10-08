@@ -470,7 +470,7 @@ sdpa_nested_preprocessing_backward(
 
   if (!(q_batch_size == k_batch_size && q_batch_size == v_batch_size) ||
       !(q_num_heads == k_num_heads && k_num_heads == v_num_heads)) {
-        TORCH_CHECK(false, "Broadcasted NestedTensor inputs is currently not supported for backwards.");
+       TORCH_FAIL("Broadcasted NestedTensor inputs is currently not supported for backwards.");
   }
 
   const int64_t num_heads = query.size(1);

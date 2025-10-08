@@ -30,7 +30,7 @@ inline std::string THPUtils_unpackString(PyObject* obj) {
     TORCH_CHECK(data, "error unpacking string as utf-8");
     return std::string(data, (size_t)size);
   }
-  TORCH_CHECK(false, "unpackString: expected bytes or unicode object");
+  TORCH_FAIL("unpackString: expected bytes or unicode object");
 }
 
 // Unpacks PyBytes (PyString) or PyUnicode as std::string_view
@@ -52,7 +52,7 @@ inline std::string_view THPUtils_unpackStringView(PyObject* obj) {
     TORCH_CHECK(data, "error unpacking string as utf-8");
     return std::string_view(data, (size_t)size);
   }
-  TORCH_CHECK(false, "unpackString: expected bytes or unicode object");
+  TORCH_FAIL("unpackString: expected bytes or unicode object");
 }
 
 inline PyObject* THPUtils_packString(const char* str) {

@@ -41,7 +41,7 @@ Weights::Weights(
       } else if (value.isCustomClass()) {
         customObjs_[name] = value;
       } else {
-        TORCH_CHECK(false, "Unknown constant type: ", value.tagKind());
+        TORCH_FAIL("Unknown constant type: ", value.tagKind());
       }
     }
   }
@@ -91,7 +91,7 @@ Weights::Weights(
         if (weightsMeta_.find(tensorName) != weightsMeta_.end()) {
           tensorMeta = weightsMeta_.at(tensorName);
         } else {
-          TORCH_CHECK(false, "Tensor meta not found for: ", tensorName);
+          TORCH_FAIL("Tensor meta not found for: ", tensorName);
         }
 
         if (tensorDataSize == 0 && tensorMeta->numel() > 0) {
@@ -193,7 +193,7 @@ Weights::Weights(
             isUsed);
         weightIndex++;
       } else {
-        TORCH_CHECK(false, "Unknown constant path: ", fileName);
+        TORCH_FAIL("Unknown constant path: ", fileName);
       }
     }
   };
@@ -213,7 +213,7 @@ Weights::Weights(
     if (!c10::starts_with(
             fileName,
             torch::_export::archive_spec::CUSTOM_OBJ_FILENAME_PREFIX)) {
-      TORCH_CHECK(false, "Unknown constant path: ", fileName);
+      TORCH_FAIL("Unknown constant path: ", fileName);
     }
     std::string customObjPath = std::string{constantPathPrefix} + fileName;
     LOG(INFO) << "Loading custom object from: " << customObjPath;
@@ -266,7 +266,7 @@ at::Tensor Weights::at(const std::string& name) const {
     return it->second;
   }
 
-  TORCH_CHECK(false, name, " not found in Weights ", toString());
+  TORCH_FAIL(name, " not found in Weights ", toString());
 }
 
 at::Tensor& Weights::at(const std::string& name) {
@@ -275,7 +275,7 @@ at::Tensor& Weights::at(const std::string& name) {
     return it->second;
   }
 
-  TORCH_CHECK(false, name, " not found in Weights ", toString());
+  TORCH_FAIL(name, " not found in Weights ", toString());
 }
 
 bool Weights::contains(const std::string& name) const {
@@ -288,7 +288,7 @@ c10::IValue Weights::getCustomObj(const std::string& name) const {
     return it->second;
   }
 
-  TORCH_CHECK(false, "Custom objects ", name, " not found in Weights");
+  TORCH_FAIL("Custom objects ", name, " not found in Weights");
 }
 
 c10::IValue Weights::getCustomObjByFileName(const std::string& name) const {

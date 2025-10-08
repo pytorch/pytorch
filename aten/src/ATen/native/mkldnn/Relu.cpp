@@ -14,15 +14,15 @@
 namespace at::native {
 
 Tensor mkldnn_relu(const Tensor& input) {
-  TORCH_CHECK(false, "mkldnn_relu: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_relu: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_relu_(Tensor& input) {
-  TORCH_CHECK(false, "mkldnn_relu_: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_relu_: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_relu_backward(const Tensor& grad_output, const Tensor& input, const Scalar& threshold) {
-  TORCH_CHECK(false, "mkldnn_relu_backward: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_relu_backward: ATen not compiled with MKLDNN support");
 }
 
 }

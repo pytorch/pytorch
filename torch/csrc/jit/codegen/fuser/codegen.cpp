@@ -74,7 +74,7 @@ static const char* scalarTypeName(const at::ScalarType type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
-      TORCH_CHECK(false, "unknown scalar type");
+      TORCH_FAIL("unknown scalar type");
   }
 }
 
@@ -99,7 +99,7 @@ static std::string variableType(const c10::Type& t) {
     return calcScalarTypeName(*scalar_type);
   }
   // something went wrong with the type analysis during shape propagation
-  TORCH_CHECK(false, "unknown type during JIT fusion code generation");
+  TORCH_FAIL("unknown type during JIT fusion code generation");
 }
 
 static std::string typeCastedValueName(
@@ -128,7 +128,7 @@ static std::string typeCastedValueName(
     return vn;
   }
   // something went wrong with the type analysis during shape propagation
-  TORCH_CHECK(false, "unknown type during JIT fusion code generation");
+  TORCH_FAIL("unknown type during JIT fusion code generation");
 }
 
 // Writes RHS of special handling "simple mappable" ops
@@ -153,10 +153,10 @@ static std::string encodeSpecialRHS(const Node* n, at::jit::TemplateEnv& env) {
       env.s("1", valueName(min));
       return format("(${0} < ${1} ? ${1} : ${0})", env);
     } else {
-      TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
+      TORCH_FAIL("At least one of 'min' or 'max' must not be None");
     }
   } else {
-    TORCH_CHECK(false, "Cannot encode RHS of the node, op not supported");
+    TORCH_FAIL("Cannot encode RHS of the node, op not supported");
   }
 }
 

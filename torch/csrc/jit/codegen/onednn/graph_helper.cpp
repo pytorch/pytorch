@@ -337,7 +337,7 @@ static dnnl::engine::kind getLlgaEngineKind(DeviceType type) {
     case DeviceType::CPU:
       return dnnl::engine::kind::cpu;
     default:
-      TORCH_CHECK(false, "Not support device type ", type);
+      TORCH_FAIL("Not support device type ", type);
   }
 }
 

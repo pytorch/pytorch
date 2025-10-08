@@ -556,6 +556,9 @@ namespace c10::detail {
         ", ",                                 \
         __VA_ARGS__));                        \
   }
+
+#define TORCH_FAIL(...) TORCH_CHECK(false, __VA_ARGS__)
+
 #else
 #define TORCH_CHECK(cond, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
@@ -570,6 +573,9 @@ namespace c10::detail {
         ", ",                                 \
         ##__VA_ARGS__));                      \
   }
+
+#define TORCH_FAIL(...) TORCH_CHECK(false, ##__VA_ARGS__)
+
 #endif
 
 #else
@@ -583,6 +589,9 @@ namespace c10::detail {
         static_cast<uint32_t>(__LINE__),         \
         TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
   }
+
+#define TORCH_FAIL(...) TORCH_CHECK(false, __VA_ARGS__)
+
 #else
 #define TORCH_CHECK(cond, ...)                     \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {            \
@@ -592,8 +601,10 @@ namespace c10::detail {
         static_cast<uint32_t>(__LINE__),           \
         TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
-#endif
 
+#define TORCH_FAIL(...) TORCH_CHECK(false, ##__VA_ARGS__)
+
+#endif
 #endif
 
 // An utility macro that does what `TORCH_CHECK` does if compiled in the host
@@ -710,7 +721,7 @@ namespace c10::detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-[[deprecated("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
+[[deprecated("AT_ERROR(msg) is deprecated, useTORCH_FAIL(msg)
 instead.")]]
 */
 inline void deprecated_AT_ERROR() {}
@@ -763,7 +774,7 @@ inline void deprecated_AT_ASSERTM() {}
 
 // Deprecated alias; this alias was deprecated because it represents extra API
 // surface that makes it hard for people to understand what macro to use.
-// Use TORCH_CHECK(false, ...) or TORCH_INTERNAL_ASSERT(false, ...) to
+// UseTORCH_FAIL(...) or TORCH_INTERNAL_ASSERT(false, ...) to
 // unconditionally fail at a line of code.
 #define AT_ERROR(...)                                                        \
   do {                                                                       \

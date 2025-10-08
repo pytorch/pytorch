@@ -92,7 +92,7 @@ static void pool2d_template(const Tensor& input,
   } else if (suggested_memory_format == at::MemoryFormat::Contiguous) {
     TORCH_CHECK((ndims == 3 || ndims == 4), "non-empty 3D or 4D (batch mode) tensor expected for input");
   } else {
-    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+    TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 
   int padH = safe_downcast<int, int64_t>(padding[0]);
@@ -549,7 +549,7 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
     if (min_idx < 0 || max_idx >= output_image_size) {
       int64_t error_idx = (min_idx < 0) ? min_idx : max_idx;
-      TORCH_CHECK(false, "Found an invalid max index: ", error_idx, " for output tensor of shape ", output_size_);
+      TORCH_FAIL("Found an invalid max index: ", error_idx, " for output tensor of shape ", output_size_);
     }
   }
 

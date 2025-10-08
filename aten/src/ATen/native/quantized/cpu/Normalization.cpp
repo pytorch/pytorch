@@ -373,7 +373,7 @@ Tensor q_batch_norm_impl(
     qy = q_batch_norm3d_impl<ReluFused>(
         qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
   } else {
-    TORCH_CHECK(false, "quantized::batch_norm only support 2d, 3d, 4d or 5d inputs.");
+   TORCH_FAIL("quantized::batch_norm only support 2d, 3d, 4d or 5d inputs.");
   }
   return qy;
 }

@@ -218,7 +218,7 @@ Tensor quantized_clone(
         self.options().memory_format(memory_format),
         std::nullopt);
   } else {
-    TORCH_CHECK(false, "clone for quantized Tensor only works for \
+   TORCH_FAIL("clone for quantized Tensor only works for \
       PerTensorAffine and PerChannelAffine qscheme right now");
   }
 
@@ -339,7 +339,7 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
   TORCH_CHECK_VALUE(input_row != nullptr, "input tensor is empty and has no data");
 
   if (numel < 0 || numel > input_tensor.numel()) {
-    TORCH_CHECK(false, "numel is out of the bound of input tensor");
+   TORCH_FAIL("numel is out of the bound of input tensor");
   }
 
   TORCH_CHECK(numel <= input_tensor.numel(), "numel ", numel,

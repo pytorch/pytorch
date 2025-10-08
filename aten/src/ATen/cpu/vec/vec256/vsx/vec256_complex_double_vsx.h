@@ -510,16 +510,16 @@ class Vectorized<ComplexDbl> {
   }
 
   Vectorized<ComplexDbl> operator<(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
   Vectorized<ComplexDbl> operator<=(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
   Vectorized<ComplexDbl> operator>(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
   Vectorized<ComplexDbl> operator>=(const Vectorized<ComplexDbl>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
 
   Vectorized<ComplexDbl> eq(const Vectorized<ComplexDbl>& other) const {

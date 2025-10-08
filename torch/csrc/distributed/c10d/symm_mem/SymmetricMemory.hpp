@@ -51,7 +51,7 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual size_t get_signal_pad_size() = 0;
 
   virtual size_t get_offset() {
-    TORCH_CHECK(false, "NYI");
+    TORCH_FAIL("NYI");
   }
 
   virtual bool has_multicast_support() = 0;
@@ -83,17 +83,17 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual c10::Device get_device() = 0;
 
   virtual const std::vector<int>& get_rank_to_global_rank() {
-    TORCH_CHECK(false, "NYI");
+    TORCH_FAIL("NYI");
   }
 
   virtual int* get_rank_to_global_rank_dev() {
-    TORCH_CHECK(false, "NYI");
+    TORCH_FAIL("NYI");
   }
 
   // Returns true if *all* peers within the group are accessible via direct
   // memory load and store.
   virtual bool world_within_direct_access() {
-    TORCH_CHECK(false, "NYI");
+    TORCH_FAIL("NYI");
   }
 };
 

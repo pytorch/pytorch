@@ -49,7 +49,7 @@ void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntAr
 void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad, bool nhwc) {
   size_t dim = t_sizes.size();
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
-    TORCH_CHECK(false, "MIOpen supports only up to ", MIOPEN_DIM_MAX, " dimensions");
+   TORCH_FAIL("MIOpen supports only up to ", MIOPEN_DIM_MAX, " dimensions");
   int size[MIOPEN_DIM_MAX];
   int stride[MIOPEN_DIM_MAX];
   for (const auto i : c10::irange(dim)) {
@@ -107,7 +107,7 @@ void TensorDescriptor::print() { std::cout << *this; }
 void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad) {
   auto dim = t.ndimension();
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
-  TORCH_CHECK(false, "MIOpen supports only up to ", MIOPEN_DIM_MAX, " dimensions");
+ TORCH_FAIL("MIOpen supports only up to ", MIOPEN_DIM_MAX, " dimensions");
   // NB: It is possible for this test to be insufficient, because the
   // Tensor passed in to set the filter descriptor may not be the actual
   // Tensor whose data pointer is passed to cuDNN.  Nevertheless,

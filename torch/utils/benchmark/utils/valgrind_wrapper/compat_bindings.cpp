@@ -12,7 +12,7 @@ bool _valgrind_supported_platform() {
 
 void _valgrind_toggle() {
 #if defined(NVALGRIND)
-  TORCH_CHECK(false, "Valgrind is not supported.");
+ TORCH_FAIL("Valgrind is not supported.");
 #else
   CALLGRIND_TOGGLE_COLLECT;
 #endif
@@ -20,7 +20,7 @@ void _valgrind_toggle() {
 
 void _valgrind_toggle_and_dump_stats() {
 #if defined(NVALGRIND)
-  TORCH_CHECK(false, "Valgrind is not supported.");
+ TORCH_FAIL("Valgrind is not supported.");
 #else
   // NB: See note in Module.cpp
   CALLGRIND_TOGGLE_COLLECT;

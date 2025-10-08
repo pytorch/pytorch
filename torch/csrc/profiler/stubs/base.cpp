@@ -44,7 +44,7 @@ struct DefaultStubs : public ProfilerStubs {
 
  private:
   void fail() const {
-    TORCH_CHECK(false, name_, " used in profiler but not enabled.");
+    TORCH_FAIL(name_, " used in profiler but not enabled.");
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)

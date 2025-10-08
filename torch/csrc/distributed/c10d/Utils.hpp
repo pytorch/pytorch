@@ -97,7 +97,7 @@ inline std::string getCvarString(
   std::string ret(def);
 
   if (env.empty()) {
-    TORCH_CHECK(false, "No environment variables passed");
+    TORCH_FAIL("No environment variables passed");
     return ret;
   }
 
@@ -122,7 +122,7 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
   int ret = def;
 
   if (env.empty()) {
-    TORCH_CHECK(false, "No environment variables passed");
+    TORCH_FAIL("No environment variables passed");
     return ret;
   }
 
@@ -140,7 +140,7 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
     try {
       ret = std::stoi(val.value());
     } catch (std::exception&) {
-      TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
+      TORCH_FAIL("Invalid value for environment variable: " + env[i]);
     }
   }
 
@@ -151,7 +151,7 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
   bool ret = def;
 
   if (env.empty()) {
-    TORCH_CHECK(false, "No environment variables passed");
+    TORCH_FAIL("No environment variables passed");
     return ret;
   }
 
@@ -179,7 +179,7 @@ inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
         val == "false") {
       ret = false;
     } else {
-      TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
+      TORCH_FAIL("Invalid value for environment variable: " + env[i]);
       return ret;
     }
   }
@@ -423,16 +423,16 @@ inline at::Tensor newLikeFlat(
     std::vector<std::vector<at::Tensor>>& tensors,
     size_t deviceIdx) {
   if (tensors.empty() || tensors[0].empty()) {
-    TORCH_CHECK(false, "Received an empty list");
+    TORCH_FAIL("Received an empty list");
   }
   if (deviceIdx >= tensors.size()) {
-    TORCH_CHECK(false, "Invalid device index");
+    TORCH_FAIL("Invalid device index");
   }
   auto& t = tensors[deviceIdx][0];
   auto device = t.device();
   for (const auto i : c10::irange(1, tensors[deviceIdx].size())) {
     if (tensors[deviceIdx][i].device() != device) {
-      TORCH_CHECK(false, "Expecting all tensors on the same device");
+      TORCH_FAIL("Expecting all tensors on the same device");
     }
   }
   at::DeviceGuard gpuGuard(device);
@@ -448,7 +448,7 @@ inline at::Tensor newLikeFlat(
     std::vector<at::Tensor>& tensors,
     bool preserve_strides = true) {
   if (tensors.empty()) {
-    TORCH_CHECK(false, "Received an empty list");
+    TORCH_FAIL("Received an empty list");
   }
   auto& t = tensors[0];
   at::DeviceGuard gpuGuard(t.device());

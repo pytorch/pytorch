@@ -26,13 +26,13 @@ Tensor _bincount_cpu_template(
     const Tensor& weights,
     int64_t minlength) {
   if (minlength < 0) {
-    TORCH_CHECK(false, "minlength should be >= 0");
+   TORCH_FAIL("minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
     return at::zeros({minlength}, kLong);
   }
   if (self.dim() != 1 || *self.min().data_ptr<input_t>() < 0) {
-    TORCH_CHECK(false, "bincount only supports 1-d non-negative integral inputs.");
+   TORCH_FAIL("bincount only supports 1-d non-negative integral inputs.");
   }
 
   // Ensure max_val < 2 ^ 63 - 1 (9223372036854775807)
@@ -48,7 +48,7 @@ Tensor _bincount_cpu_template(
 
   bool has_weights = weights.defined();
   if (has_weights && (weights.dim() != 1 || weights.size(0) != self.size(0))) {
-    TORCH_CHECK(false, "weights should be 1-d and have the same length as input");
+   TORCH_FAIL("weights should be 1-d and have the same length as input");
   }
 
   Tensor output;

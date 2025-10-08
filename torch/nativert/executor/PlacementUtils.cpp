@@ -20,7 +20,7 @@ bool isSameDevice(const c10::Device& a, const c10::Device& b) {
   if (a.is_meta()) {
     return b.is_meta();
   }
-  TORCH_CHECK(false, "Unsupported device type", a, " and ", b);
+  TORCH_FAIL("Unsupported device type", a, " and ", b);
   return false;
 }
 } // namespace torch::nativert

@@ -40,7 +40,7 @@ class TORCH_API MapAllocator {
   }
   int fd() const {
 #ifdef _WIN32
-    TORCH_CHECK(false, "MapAllocator::fd() is unsupported on Windows");
+    TORCH_FAIL("MapAllocator::fd() is unsupported on Windows");
 #else
     return fd_;
 #endif

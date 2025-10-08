@@ -1097,7 +1097,7 @@ at::Tensor _weight_int4pack_mm_cuda(
 
 #if defined(USE_ROCM)
   if (!isCDNA2orLater(A.device().index())) {
-    TORCH_CHECK(false, "_weight_int4pack_mm_cuda is only supported on AMD gpu arch greater than or equal to CDNA2");
+   TORCH_FAIL("_weight_int4pack_mm_cuda is only supported on AMD gpu arch greater than or equal to CDNA2");
   }
 #endif
 
@@ -1268,7 +1268,7 @@ at::Tensor _weight_int4pack_mm_cuda(
 
   return C_final;
 #endif
-  TORCH_CHECK(false, "_weight_int4pack_mm_cuda is not available for build.")
+ TORCH_FAIL("_weight_int4pack_mm_cuda is not available for build.")
   return C_final;
 }
 
@@ -1292,7 +1292,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
 
 #if defined(USE_ROCM)
   if (!isCDNA2orLater(in.device().index())) {
-    TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is only supported on AMD gpu arch greater than or equal to CDNA2");
+   TORCH_FAIL("_convert_weight_to_int4pack_cuda is only supported on AMD gpu arch greater than or equal to CDNA2");
   }
 #endif
 
@@ -1347,7 +1347,7 @@ at::Tensor _convert_weight_to_int4pack_cuda(
 
   return out;
 #endif
-  TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is not available for build.")
+ TORCH_FAIL("_convert_weight_to_int4pack_cuda is not available for build.")
   return out;
 }
 

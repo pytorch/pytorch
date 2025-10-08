@@ -19,7 +19,7 @@ c10::IValue dynamicToIValue(const nlohmann::json& obj) {
   } else if (obj.is_number_integer()) {
     return obj.get<int64_t>();
   } else {
-    TORCH_CHECK(false, "Unsupported dynamic type: ", obj);
+    TORCH_FAIL("Unsupported dynamic type: ", obj);
   }
 }
 
@@ -163,7 +163,7 @@ class PytreeNodeRegistry {
                   if (it != dict.end()) {
                     ivalueApply(fn, it->value(), spec.children(i));
                   } else {
-                    TORCH_CHECK(false, "input arg is missing key ", key);
+                    TORCH_FAIL("input arg is missing key ", key);
                   }
                 }
                 i++;
@@ -620,7 +620,7 @@ c10::TypePtr ITreeSpec::toAtenType() const {
           dynamicToIValue(context_[0]).type(), children_[0].toAtenType());
     }
   } else {
-    TORCH_CHECK(false, "Unsupported uniform name: ", uniformName());
+    TORCH_FAIL("Unsupported uniform name: ", uniformName());
   }
 }
 

@@ -62,7 +62,7 @@ class DictNodeImpl : public DictNodeImplBase {
     if (loc != dict_.end()) {
       return loc->second;
     }
-    TORCH_CHECK(false, "Cannot get non-existent key");
+    TORCH_FAIL("Cannot get non-existent key");
   }
 
  private:

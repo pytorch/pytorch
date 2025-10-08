@@ -172,7 +172,7 @@ void convertType(F converter, const char* name, void* slot, PyObject* item) {
   if (PyErr_Occurred()) {
     std::string msg = "Failed to convert argument to ";
     msg += name;
-    TORCH_CHECK(false, msg);
+    TORCH_FAIL(msg);
   }
   *reinterpret_cast<FINAL*>(slot) = static_cast<FINAL>(temp);
 }
@@ -241,7 +241,7 @@ void parseKernelArgs(
         break;
       }
       default:
-        TORCH_CHECK(false, "Unknown type passed in: ", typeChar);
+        TORCH_FAIL("Unknown type passed in: ", typeChar);
     }
     // Save the pointer to this slot.
     kernelArgs[i] = slot;

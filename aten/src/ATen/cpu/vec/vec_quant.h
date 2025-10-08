@@ -145,7 +145,7 @@ static inline void pack_vnni4(
     }
   }
 #else
-  TORCH_CHECK(false, "pack_vnni4 is only supported when AVX-512 is supported")
+  TORCH_FAIL("pack_vnni4 is only supported when AVX-512 is supported")
 #endif
 }
 

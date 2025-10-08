@@ -70,7 +70,7 @@ class GreenContext {
         c10::cuda::DriverAPI::get()->cuCtxFromGreenCtx_(&context_, green_ctx_));
     TORCH_CHECK(context_, "Green ctx conversion to regular ctx failed!");
 #else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+    TORCH_FAIL("Green Context is only supported on CUDA 12.8+!");
 #endif
   }
 
@@ -83,7 +83,7 @@ class GreenContext {
     }
     return std::make_unique<GreenContext>(device_id.value(), num_sms);
 #else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+    TORCH_FAIL("Green Context is only supported on CUDA 12.8+!");
 #endif
   }
 
@@ -99,7 +99,7 @@ class GreenContext {
     context_ = std::exchange(other.context_, nullptr);
     parent_stream_ = std::exchange(other.parent_stream_, nullptr);
 #else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+    TORCH_FAIL("Green Context is only supported on CUDA 12.8+!");
 #endif
   }
 
@@ -128,7 +128,7 @@ class GreenContext {
     }
     return *this;
 #else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+    TORCH_FAIL("Green Context is only supported on CUDA 12.8+!");
 #endif
   }
 
@@ -137,7 +137,7 @@ class GreenContext {
     C10_CUDA_DRIVER_CHECK(
         c10::cuda::DriverAPI::get()->cuGreenCtxDestroy_(green_ctx_));
 #else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+    TORCH_FAIL("Green Context is only supported on CUDA 12.8+!");
 #endif
   }
 
@@ -146,7 +146,7 @@ class GreenContext {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
     return context_;
 #else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+    TORCH_FAIL("Green Context is only supported on CUDA 12.8+!");
 #endif
   }
 
@@ -183,7 +183,7 @@ class GreenContext {
     ev.block(default_stream);
     c10::cuda::setCurrentCUDAStream(default_stream);
 #else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+    TORCH_FAIL("Green Context is only supported on CUDA 12.8+!");
 #endif
   }
 
@@ -199,7 +199,7 @@ class GreenContext {
         popped == context_, "expected popped context to be the current ctx");
     ev.block(c10::cuda::getStreamFromExternal(parent_stream_, device_id_));
 #else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
+    TORCH_FAIL("Green Context is only supported on CUDA 12.8+!");
 #endif
   }
 

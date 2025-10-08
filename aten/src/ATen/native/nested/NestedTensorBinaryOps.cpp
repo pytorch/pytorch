@@ -136,7 +136,7 @@ static Tensor NestedTensor_elementwise_Tensor(
       } else if (op_name == "mul") {
         nested_dense_elementwise_stub(self.device().type(), result, self, other_, NESTED_DENSE_OP::MUL);
       } else {
-        TORCH_CHECK(false, "Unsupported nested dense elementwise op: ", op_name, ".");
+       TORCH_FAIL("Unsupported nested dense elementwise op: ", op_name, ".");
       }
       return result;
     }

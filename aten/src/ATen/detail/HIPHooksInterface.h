@@ -19,12 +19,12 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   ~HIPHooksInterface() override = default;
 
   void init() const override {
-    TORCH_CHECK(false, "Cannot initialize HIP without ATen_hip library.");
+   TORCH_FAIL("Cannot initialize HIP without ATen_hip library.");
   }
 
   const Generator& getDefaultGenerator(
       [[maybe_unused]] DeviceIndex device_index = -1) const override {
-    TORCH_CHECK(false, "Cannot initialize HIP without ATen_hip library.");
+   TORCH_FAIL("Cannot initialize HIP without ATen_hip library.");
   }
 
   virtual bool hasHIP() const {
@@ -40,7 +40,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   }
 
   Allocator* getPinnedMemoryAllocator() const override {
-    TORCH_CHECK(false, "Pinned memory requires HIP.");
+   TORCH_FAIL("Pinned memory requires HIP.");
   }
 
   virtual int getNumGPUs() const {
@@ -48,7 +48,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   }
 
   bool hasPrimaryContext(DeviceIndex /*device_index*/ ) const override {
-    TORCH_CHECK(false, "Cannot check primary context without ATen_hip library.");
+   TORCH_FAIL("Cannot check primary context without ATen_hip library.");
   }
 };
 

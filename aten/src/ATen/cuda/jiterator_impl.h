@@ -109,7 +109,7 @@ struct OffsetCalculatorVariant {
       AT_FOR_8_CASES(DEFINE_CASE)
 #undef DEFINE_CASE
       default:
-        TORCH_CHECK(false, "OffsetCalculatorVariant is not implemented for num_tensor = ", num);
+       TORCH_FAIL("OffsetCalculatorVariant is not implemented for num_tensor = ", num);
     }
   }
 
@@ -140,7 +140,7 @@ struct ArrayVariant {
 #undef DEFINE_CASE
 
       default:
-        TORCH_CHECK(false, "ArrayVariant is not implemented for ntensors = ", ntensors);
+       TORCH_FAIL("ArrayVariant is not implemented for ntensors = ", ntensors);
     }
 
     std::visit([&](auto& a) {
@@ -174,7 +174,7 @@ struct TrivialOffsetCalculatorVariant {
 #undef DEFINE_CASE
 
       default:
-        TORCH_CHECK(false, "TrivialOffsetCalculatorVariant is not implemented for num_tensors = ", num);
+       TORCH_FAIL("TrivialOffsetCalculatorVariant is not implemented for num_tensors = ", num);
     }
   }
 
@@ -203,7 +203,7 @@ struct LoadWithCastVariant {
 #undef DEFINE_CASE
 
       default:
-        TORCH_CHECK(false, "LoadWithCastVariant is not implemented for ninputs = ", arity);
+       TORCH_FAIL("LoadWithCastVariant is not implemented for ninputs = ", arity);
     }
   }
 
@@ -232,7 +232,7 @@ struct StoreWithCastVariant {
 #undef DEFINE_CASE
 
       default:
-        TORCH_CHECK(false, "StoreWithCastVariant is not implemented for noutputs = ", num);
+       TORCH_FAIL("StoreWithCastVariant is not implemented for noutputs = ", num);
     }
   }
 

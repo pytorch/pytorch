@@ -98,7 +98,7 @@ Tensor empty_strided_unknown_quantized(
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
 
-  TORCH_CHECK(false, "empty_strided not supported on quantized tensors yet see https://github.com/pytorch/pytorch/issues/74540")
+ TORCH_FAIL("empty_strided not supported on quantized tensors yet see https://github.com/pytorch/pytorch/issues/74540")
 
 }
 
@@ -112,7 +112,7 @@ Tensor empty_affine_quantized_other_backends_stub(
     double,
     int64_t,
     std::optional<c10::MemoryFormat>) {
-  TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
+ TORCH_FAIL("Creation of quantized tensor requires quantized dtype like torch.quint8");
 }
 
 Tensor empty_per_channel_affine_quantized_other_backends_stub(
@@ -125,7 +125,7 @@ Tensor empty_per_channel_affine_quantized_other_backends_stub(
     std::optional<Device>,
     std::optional<bool>,
     std::optional<c10::MemoryFormat>) {
-  TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
+ TORCH_FAIL("Creation of quantized tensor requires quantized dtype like torch.quint8");
 }
 
 // Create an empty quantized Tensor with size, based on the options

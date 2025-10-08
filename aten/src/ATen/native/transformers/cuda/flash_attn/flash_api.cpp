@@ -824,7 +824,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         const at::Tensor philox_offset) {
 
     #ifdef FLASHATTENTION_DISABLE_BACKWARD
-        TORCH_CHECK(false, "This flash attention build does not support backward.");
+       TORCH_FAIL("This flash attention build does not support backward.");
     #endif
     if (is_causal) { window_size_right = 0; }
     auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -1033,7 +1033,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
 {
 
     #ifdef FLASHATTENTION_DISABLE_BACKWARD
-        TORCH_CHECK(false, "This flash attention build does not support backward.");
+       TORCH_FAIL("This flash attention build does not support backward.");
     #endif
 
     if (is_causal) { window_size_right = 0; }

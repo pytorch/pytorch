@@ -593,7 +593,7 @@ struct ExpandableSegment {
               err != ENOSYS,
               "The kernel on this machine does not support the pidfd_getfd syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
               "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
-          TORCH_CHECK(false, "pidfd_getfd: ", c10::utils::str_error(err));
+          TORCH_FAIL("pidfd_getfd: ", c10::utils::str_error(err));
         }
         CUmemGenericAllocationHandle handle = 0;
         C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
@@ -2144,9 +2144,9 @@ class DeviceCachingAllocator {
           get_private_pool_head_blocks(pool->second.get());
       return std::make_unique<PrivatePoolState>(id, private_pool_head_blocks);
     } else if (graph_pools_freeable.count(id)) {
-      TORCH_CHECK(false, "Not expected to checkpoint freeable graph");
+      TORCH_FAIL("Not expected to checkpoint freeable graph");
     } else {
-      TORCH_CHECK(false, "Could not find pool of id");
+      TORCH_FAIL("Could not find pool of id");
     }
   }
 
@@ -3845,7 +3845,7 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
     Block* block = get_allocated_block(ptr, true /* remove */);
     if (!block) {
-      TORCH_CHECK(false, "invalid device pointer: ", ptr);
+      TORCH_FAIL("invalid device pointer: ", ptr);
     }
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
@@ -3985,7 +3985,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   void* getBaseAllocation(void* ptr, size_t* outSize) override {
     Block* block = get_allocated_block(ptr);
     if (!block) {
-      TORCH_CHECK(false, "invalid device pointer: ", ptr);
+      TORCH_FAIL("invalid device pointer: ", ptr);
     }
     return device_allocator[block->device]->getBaseAllocation(block, outSize);
   }
@@ -3993,7 +3993,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   ShareableHandle shareIpcHandle(void* ptr) override {
     Block* block = get_allocated_block(ptr);
     if (!block) {
-      TORCH_CHECK(false, "invalid device pointer: ", ptr);
+      TORCH_FAIL("invalid device pointer: ", ptr);
     }
     return device_allocator[block->device]->shareIpcHandle(block);
   }

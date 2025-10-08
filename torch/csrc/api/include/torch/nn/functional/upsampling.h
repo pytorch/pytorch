@@ -19,10 +19,10 @@ inline std::vector<int64_t> _interp_output_size(
   auto [input, size, scale_factor, recompute_scale_factor] =
       std::move(closed_over_args);
   if (size == std::nullopt && scale_factor == std::nullopt) {
-    TORCH_CHECK(false, "either size or scale_factor should be defined");
+    TORCH_FAIL("either size or scale_factor should be defined");
   }
   if (size != std::nullopt && scale_factor != std::nullopt) {
-    TORCH_CHECK(false, "only one of size or scale_factor should be defined");
+    TORCH_FAIL("only one of size or scale_factor should be defined");
   }
   if (scale_factor != std::nullopt) {
     if (static_cast<int64_t>(scale_factor.value().size()) != dim) {
@@ -187,11 +187,11 @@ inline Tensor interpolate(
         *align_corners,
         scale_factor_list.at(0));
   } else if (input.dim() == 3 && std::get_if<enumtype::kBilinear>(&mode)) {
-    TORCH_CHECK(false, "Got 3D input, but bilinear mode needs 4D input");
+    TORCH_FAIL("Got 3D input, but bilinear mode needs 4D input");
   } else if (input.dim() == 3 && std::get_if<enumtype::kTrilinear>(&mode)) {
-    TORCH_CHECK(false, "Got 3D input, but trilinear mode needs 5D input");
+    TORCH_FAIL("Got 3D input, but trilinear mode needs 5D input");
   } else if (input.dim() == 4 && std::get_if<enumtype::kLinear>(&mode)) {
-    TORCH_CHECK(false, "Got 4D input, but linear mode needs 3D input");
+    TORCH_FAIL("Got 4D input, but linear mode needs 3D input");
   } else if (input.dim() == 4 && std::get_if<enumtype::kBilinear>(&mode)) {
     TORCH_CHECK(
         align_corners != std::nullopt, "align_corners should be specified.");
@@ -210,11 +210,11 @@ inline Tensor interpolate(
         scale_factor_list.at(0),
         scale_factor_list.at(1));
   } else if (input.dim() == 4 && std::get_if<enumtype::kTrilinear>(&mode)) {
-    TORCH_CHECK(false, "Got 4D input, but trilinear mode needs 5D input");
+    TORCH_FAIL("Got 4D input, but trilinear mode needs 5D input");
   } else if (input.dim() == 5 && std::get_if<enumtype::kLinear>(&mode)) {
-    TORCH_CHECK(false, "Got 5D input, but linear mode needs 3D input");
+    TORCH_FAIL("Got 5D input, but linear mode needs 3D input");
   } else if (input.dim() == 5 && std::get_if<enumtype::kBilinear>(&mode)) {
-    TORCH_CHECK(false, "Got 5D input, but bilinear mode needs 4D input");
+    TORCH_FAIL("Got 5D input, but bilinear mode needs 4D input");
   } else if (input.dim() == 5 && std::get_if<enumtype::kTrilinear>(&mode)) {
     TORCH_CHECK(
         align_corners != std::nullopt, "align_corners should be specified.");

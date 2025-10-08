@@ -23,7 +23,7 @@ MPSGraphFFTScalingMode normalization_to_ScalingMode(int64_t normalization) {
     default:
       break;
   }
-  TORCH_CHECK(false, "Unsupported normalization type", normalization);
+  TORCH_FAIL("Unsupported normalization type", normalization);
 }
 
 NSArray<NSNumber*>* IntArrayToNSArray(IntArrayRef arr) {

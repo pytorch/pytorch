@@ -21,12 +21,12 @@ namespace at {
 // operations inside of vmap while we gather user feedback.
 
 template <typename... Args> static Tensor unsupportedRandomOp(Args... args) {
-  TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
+ TORCH_FAIL("vmap: We do not yet support calling random operations inside of vmap. ",
               "Please perform random operations outside of vmap as a workaround");
 }
 
 template <typename... Args> static Tensor& unsupportedRandomOp_(Args... args) {
-  TORCH_CHECK(false, "vmap: We do not yet support calling random operations inside of vmap. ",
+ TORCH_FAIL("vmap: We do not yet support calling random operations inside of vmap. ",
               "Please perform random operations outside of vmap as a workaround");
 }
 

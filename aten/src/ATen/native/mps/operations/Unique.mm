@@ -77,7 +77,7 @@ static std::array<MPSGraphTensor*, 4> buildUniqueGraph(const Tensor& self,
     length = 1;
     for (const auto i : c10::irange([shape count])) {
       if (c10::mul_overflows(length, [shape[i] unsignedIntValue], &length)) {
-        TORCH_CHECK(false, "RuntimeError: Tensor size overflow");
+        TORCH_FAIL("RuntimeError: Tensor size overflow");
       }
     }
 

@@ -923,7 +923,7 @@ static void validate_outputs_impl(
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
     ss << input_metadata_container.size() << ", but got " << grads.size();
-    TORCH_CHECK(false, format_error(ss.str()));
+    TORCH_FAIL(format_error(ss.str()));
   }
   for (const auto i : c10::irange(grads.size())) {
     if (!has_input_metadata(input_metadata_container[i])) {
@@ -935,7 +935,7 @@ static void validate_outputs_impl(
       // FIXME: TestJit.test_ge_optimized fails this assertion.
       // std::stringstream ss;
       // ss << "undefined gradient at index " << i;
-      // TORCH_CHECK(false, format_error(ss.str()));
+      // TORCH_FAIL(format_error(ss.str()));
       continue;
     }
 
@@ -956,7 +956,7 @@ static void validate_outputs_impl(
       std::stringstream ss;
       ss << "invalid gradient at index " << i << " - expected dtype ";
       ss << metadata.dtype() << " but got " << grad.dtype();
-      TORCH_CHECK(false, format_error(ss.str()));
+      TORCH_FAIL(format_error(ss.str()));
     }
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
@@ -973,7 +973,7 @@ static void validate_outputs_impl(
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected layout ";
         ss << metadata.layout() << " but got " << grad.layout();
-        TORCH_CHECK(false, format_error(ss.str()));
+        TORCH_FAIL(format_error(ss.str()));
       }
     }
 
@@ -988,7 +988,7 @@ static void validate_outputs_impl(
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - expected device ";
           ss << metadata.device() << " but got " << grad.device();
-          TORCH_CHECK(false, format_error(ss.str()));
+          TORCH_FAIL(format_error(ss.str()));
         }
       }
     }
@@ -1175,7 +1175,7 @@ void Engine::evaluate_function(
 
     if (it == dependencies.end()) {
       auto name = next.function->name();
-      TORCH_CHECK(false, "dependency not found for ", name);
+      TORCH_FAIL("dependency not found for ", name);
     } else if (--it->second == 0) {
       dependencies.erase(it);
       is_ready = true;

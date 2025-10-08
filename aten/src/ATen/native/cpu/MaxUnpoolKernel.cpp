@@ -83,11 +83,11 @@ void cpu_max_unpool(
 
   if (optional_error_index) {
     if constexpr (is_3d) {
-      TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
+     TORCH_FAIL("Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_depth,
           "x", output_height, "x", output_width, ")");
     } else {
-      TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
+     TORCH_FAIL("Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_height,
           "x", output_width, ")");
     }
@@ -151,7 +151,7 @@ void cpu_max_unpool_channels_last(
   });
 
   if (optional_error_index) {
-    TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
+   TORCH_FAIL("Found an invalid max index: ", optional_error_index.value(),
         " (output volumes are of size ", output_height,
         "x", output_width, ")");
   }
@@ -223,12 +223,12 @@ void cpu_max_unpool_backward(
 
   if (optional_error_index) {
     if (is_3d) {
-      TORCH_CHECK(false, "invalid max index ", optional_error_index.value(),
+     TORCH_FAIL("invalid max index ", optional_error_index.value(),
           ", odepth= ", output_depth,
           ", owidth= ", output_width,
           ", oheight= ", output_height);
     } else {
-      TORCH_CHECK(false, "invalid max index ", optional_error_index.value(),
+     TORCH_FAIL("invalid max index ", optional_error_index.value(),
           ", owidth= ", output_width,
           ", oheight= ", output_height);
     }
@@ -257,7 +257,7 @@ void max_unpool2d_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 

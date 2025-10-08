@@ -46,13 +46,12 @@ TEST(WarningTest, JustPrintWarning) {
 }
 
 TEST(ExceptionTest, ErrorFormatting) {
-  expectThrowsEq(
-      []() { TORCH_CHECK(false, "This is invalid"); }, "This is invalid");
+  expectThrowsEq([]() { TORCH_FAIL("This is invalid"); }, "This is invalid");
 
   expectThrowsEq(
       []() {
         try {
-          TORCH_CHECK(false, "This is invalid");
+          TORCH_FAIL("This is invalid");
         } catch (Error& e) {
           TORCH_RETHROW(e, "While checking X");
         }
@@ -63,7 +62,7 @@ TEST(ExceptionTest, ErrorFormatting) {
       []() {
         try {
           try {
-            TORCH_CHECK(false, "This is invalid");
+            TORCH_FAIL("This is invalid");
           } catch (Error& e) {
             TORCH_RETHROW(e, "While checking X");
           }
@@ -82,7 +81,7 @@ static int getAssertionArgument() {
 }
 
 static void failCheck() {
-  TORCH_CHECK(false, "message ", getAssertionArgument());
+  TORCH_FAIL("message ", getAssertionArgument());
 }
 
 static void failInternalAssert() {

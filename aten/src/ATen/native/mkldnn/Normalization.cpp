@@ -26,7 +26,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
     bool train,
     double momentum,
     double eps) {
-  TORCH_CHECK(false, "mkldnn_batch_norm: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_batch_norm: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
@@ -35,14 +35,14 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
     bool train,
     double eps,
     std::array<bool,3> grad_input_mask) {
-  TORCH_CHECK(false, "mkldnn_batch_norm_backward: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_batch_norm_backward: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
     IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
     double eps, bool inplace) {
-  TORCH_CHECK(false, "mkldnn_layer_norm_last_index_weight_bias_f32: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_layer_norm_last_index_weight_bias_f32: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit(
@@ -50,7 +50,7 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit(
     bool train,
     double momentum,
     double eps) {
-  TORCH_CHECK(false, "_mkldnn_batch_norm_legit: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("_mkldnn_batch_norm_legit: ATen not compiled with MKLDNN support");
 }
 
 
@@ -59,13 +59,13 @@ std::tuple<Tensor, Tensor, Tensor> _mkldnn_batch_norm_legit_no_stats(
     bool train,
     double momentum,
     double eps) {
-  TORCH_CHECK(false, "_mkldnn_batch_norm_legit_no_stats: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("_mkldnn_batch_norm_legit_no_stats: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_with_update_mkldnn(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     Tensor& running_mean, Tensor& running_var, double momentum, double eps) {
-  TORCH_CHECK(false, "_batch_norm_with_update_mkldnn: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("_batch_norm_with_update_mkldnn: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
@@ -73,7 +73,7 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
     bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
-  TORCH_CHECK(false, "_new_batch_norm_backward_mkldnn: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("_new_batch_norm_backward_mkldnn: ATen not compiled with MKLDNN support");
 }
 
 } // namespace at::native
@@ -192,7 +192,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm(
           x, m, v, w, b, y, eps);
     } else {
       // TODO: keep running estimates.
-      TORCH_CHECK(false, "mkldnn_batch_norm: mkldnn inference is not keep running estimates.");
+     TORCH_FAIL("mkldnn_batch_norm: mkldnn inference is not keep running estimates.");
     }
     return std::make_tuple(
         new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),

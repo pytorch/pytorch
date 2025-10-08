@@ -120,7 +120,7 @@ inline bool THPUtils_unpackBool(PyObject* obj) {
   } else if (obj == Py_False) {
     return false;
   } else {
-    TORCH_CHECK(false, "couldn't convert python object to boolean");
+    TORCH_FAIL("couldn't convert python object to boolean");
   }
 }
 

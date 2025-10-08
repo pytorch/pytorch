@@ -18,19 +18,19 @@ bool _ge(const char* op, c10::SymNodeImpl* lhs, c10::SymNodeImpl* rhs) {
       if (*mb_si == *mb_si2) {
         return lhs->nested_int_coeff() >= rhs->nested_int_coeff();
       }
-      TORCH_CHECK(false, "nested int ", op, ": Relation is indeterminate");
+     TORCH_FAIL("nested int ", op, ": Relation is indeterminate");
     }
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (rhs->constant_int() && *rhs->constant_int() <= 2) {
       return true;
     }
-    TORCH_CHECK(false, "nested int ", op, ": Relation is indeterminate");
+   TORCH_FAIL("nested int ", op, ": Relation is indeterminate");
   } else if (rhs->nested_int()) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (lhs->constant_int() && *lhs->constant_int() < 2) {
       return false;
     }
-    TORCH_CHECK(false, "nested int ", op, ": Relation is indeterminate");
+   TORCH_FAIL("nested int ", op, ": Relation is indeterminate");
   }
   TORCH_INTERNAL_ASSERT(false, "expect at least one nested int");
 }

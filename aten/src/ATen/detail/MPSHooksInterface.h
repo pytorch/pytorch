@@ -17,7 +17,7 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   // this fails the implementation if MPSHooks functions are called, but
   // MPS backend is not present.
   #define FAIL_MPSHOOKS_FUNC(func) \
-    TORCH_CHECK(false, "Cannot execute ", func, "() without MPS backend.");
+   TORCH_FAIL("Cannot execute ", func, "() without MPS backend.");
 
   ~MPSHooksInterface() override = default;
 
@@ -79,7 +79,7 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   Device getDeviceFromPtr(void* data) const override {
-    TORCH_CHECK(false, "Cannot get device of pointer on MPS without ATen_mps library. ");
+   TORCH_FAIL("Cannot get device of pointer on MPS without ATen_mps library. ");
   }
   virtual void releaseEvent(uint32_t event_id) const {
     FAIL_MPSHOOKS_FUNC(__func__);

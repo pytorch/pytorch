@@ -97,7 +97,7 @@ inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
           at::convert<at::Float8_e8m0fnu, double>(THPUtils_unpackDouble(obj));
       break;
     default:
-      TORCH_CHECK(false, "store_scalar: invalid type");
+      TORCH_FAIL("store_scalar: invalid type");
   }
 }
 
@@ -161,7 +161,7 @@ inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
       return PyFloat_FromDouble(
           at::convert<double, at::Float8_e8m0fnu>(*(at::Float8_e8m0fnu*)data));
     default:
-      TORCH_CHECK(false, "load_scalar: invalid type");
+      TORCH_FAIL("load_scalar: invalid type");
   }
 }
 

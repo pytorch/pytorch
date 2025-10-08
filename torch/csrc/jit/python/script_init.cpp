@@ -820,7 +820,7 @@ void initJitScriptBindings(PyObject* module) {
                   if (self.has_property(name)) {
                     auto prop = self.get_property(name);
                     if (!prop.setter_func.has_value()) {
-                      TORCH_CHECK(false, "can't set attribute");
+                      TORCH_FAIL("can't set attribute");
                     }
                     // wrap the Method into callable PyObject
                     auto setter_func = py::cast(prop.setter_func);

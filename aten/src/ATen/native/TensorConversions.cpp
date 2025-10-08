@@ -1043,7 +1043,7 @@ static inline void _to_sparse_check_arguments(
   auto layout_from_valid = layout_from == kStrided || layout_from == kSparse ||
       at::sparse_csr::is_sparse_compressed(layout_from);
   if (!layout_from_valid) {
-    TORCH_CHECK(false, funcname, ": unexpected source layout ", layout_from);
+    TORCH_FAIL(funcname, ": unexpected source layout ", layout_from);
   }
 
   if (layout_from == kStrided) {
@@ -1100,12 +1100,12 @@ static inline void _to_sparse_check_arguments(
   auto layout_from_valid = layout_from == kStrided || layout_from == kSparse ||
       at::sparse_csr::is_sparse_compressed(layout_from);
   if (!layout_from_valid) {
-    TORCH_CHECK(false, funcname, ": unexpected source layout ", layout_from);
+    TORCH_FAIL(funcname, ": unexpected source layout ", layout_from);
   }
   auto layout_to_valid = layout_to == kStrided || layout_to == kSparse ||
       at::sparse_csr::is_sparse_compressed(layout_to);
   if (!layout_to_valid) {
-    TORCH_CHECK(false, funcname, ": unexpected source layout ", layout_from);
+    TORCH_FAIL(funcname, ": unexpected source layout ", layout_from);
   }
 
   if (layout_from == kSparse && layout_to != kSparse) {

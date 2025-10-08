@@ -2666,19 +2666,19 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   }
 
   Vectorized<T> lt(const Vectorized<T>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
 
   Vectorized<T> le(const Vectorized<T>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
 
   Vectorized<T> gt(const Vectorized<T>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
 
   Vectorized<T> ge(const Vectorized<T>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
 };
 
@@ -2772,22 +2772,22 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
                                                                               \
   Vectorized<typex> C10_ALWAYS_INLINE operator<(                              \
       const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    TORCH_CHECK(false, "not supported for complex numbers");                  \
+    TORCH_FAIL("not supported for complex numbers");                          \
   }                                                                           \
                                                                               \
   Vectorized<typex> C10_ALWAYS_INLINE operator<=(                             \
       const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    TORCH_CHECK(false, "not supported for complex numbers");                  \
+    TORCH_FAIL("not supported for complex numbers");                          \
   }                                                                           \
                                                                               \
   Vectorized<typex> C10_ALWAYS_INLINE operator>(                              \
       const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    TORCH_CHECK(false, "not supported for complex numbers");                  \
+    TORCH_FAIL("not supported for complex numbers");                          \
   }                                                                           \
                                                                               \
   Vectorized<typex> C10_ALWAYS_INLINE operator>=(                             \
       const Vectorized<typex>& a, const Vectorized<typex>& b) {               \
-    TORCH_CHECK(false, "not supported for complex numbers");                  \
+    TORCH_FAIL("not supported for complex numbers");                          \
   }
 
 ZVECTOR_OPERATORS(c10::complex<float>)

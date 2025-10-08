@@ -17,7 +17,7 @@ variable_list Error::apply(variable_list&& inputs) {
 }
 
 variable_list Error::apply(variable_list&& inputs) const {
-  TORCH_CHECK(false, msg);
+  TORCH_FAIL(msg);
 }
 
 void Error::compiled_args(CompiledNodeArgs& args) const {

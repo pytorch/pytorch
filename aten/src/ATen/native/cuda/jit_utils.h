@@ -239,7 +239,7 @@ inline std::string typeName(ScalarType t) {
     switch (t) {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(TYPE_NAME_CASE)
       default:
-          TORCH_CHECK(false, "invalid type for jiterator");
+         TORCH_FAIL("invalid type for jiterator");
     }
 }
 #undef TYPE_NAME_CASE

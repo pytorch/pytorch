@@ -53,7 +53,7 @@ mem_eff_forward_ck(
       attn_bias_);           // attn_bias
   } else {
     // seqstart_q is only set in nested tensor path which CK does not support
-    TORCH_CHECK(false, "Nested Tensors not supported with CK backend.");
+   TORCH_FAIL("Nested Tensors not supported with CK backend.");
     return std::make_tuple(at::Tensor{},
                            at::Tensor{},
                            at::Tensor{},

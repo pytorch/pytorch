@@ -383,7 +383,7 @@ void adaptive_avg_pool2d_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -404,7 +404,7 @@ void adapative_avg_pool2d_backward_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -827,7 +827,7 @@ void adaptive_avg_pool3d_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -848,7 +848,7 @@ void adapative_avg_pool3d_backward_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 

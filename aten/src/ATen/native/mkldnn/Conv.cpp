@@ -25,7 +25,7 @@ namespace at::native {
 Tensor mkldnn_convolution(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
-  TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
 
 REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_backward_stub)
@@ -112,7 +112,7 @@ static void check_shape_forward(const Tensor& input,
       separator = " x ";
     }
 
-    TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
+   TORCH_FAIL("Calculated padded input size per channel: (", input_ss.str(), "). "
                 "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
   }
 }

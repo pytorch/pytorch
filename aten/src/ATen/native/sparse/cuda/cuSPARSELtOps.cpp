@@ -90,7 +90,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       break;
 #endif
     default:
-      TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt/hipSparseLt compressed matrix");
+     TORCH_FAIL("Unsupported dtype for cuSPARSELt/hipSparseLt compressed matrix");
       break;
   }
 
@@ -580,7 +580,7 @@ int64_t _cslt_sparse_mm_search(
 namespace at::native {
 
 at::Tensor _cslt_compress(const Tensor& sparse_input) {
-  TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
+ TORCH_FAIL("cuSPARSELt not supported on your machine.");
 }
 
 at::Tensor _cslt_sparse_mm(
@@ -593,7 +593,7 @@ at::Tensor _cslt_sparse_mm(
     int64_t alg_id,
     int64_t split_k,
     int64_t split_k_mode) {
-  TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
+ TORCH_FAIL("cuSPARSELt not supported on your machine.");
 }
 
 int64_t _cslt_sparse_mm_search(
@@ -603,7 +603,7 @@ int64_t _cslt_sparse_mm_search(
     const std::optional<Tensor>& alpha_opt,
     const std::optional<c10::ScalarType> out_dtype,
     bool transpose_result) {
-  TORCH_CHECK(false, "cuSPARSELt not supported on your machine.");
+ TORCH_FAIL("cuSPARSELt not supported on your machine.");
 }
 
 } // namespace at::native

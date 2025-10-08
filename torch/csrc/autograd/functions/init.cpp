@@ -49,7 +49,7 @@ struct UndefinedGradCtor {
 
 struct NoCtor {
   Node* operator()(PyObject* args) {
-    TORCH_CHECK(false, "Cannot construct");
+    TORCH_FAIL("Cannot construct");
   }
 };
 

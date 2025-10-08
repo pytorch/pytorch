@@ -34,7 +34,7 @@ void listIndex<at::Tensor>(Stack& stack) {
   if (pos != list.end()) {
     push(stack, static_cast<int64_t>(std::distance(list.begin(), pos)));
   } else {
-    TORCH_CHECK(false, "'", elem, "' is not in list");
+    TORCH_FAIL("'", elem, "' is not in list");
   }
 }
 
@@ -107,7 +107,7 @@ void listRemove<at::Tensor>(Stack& stack) {
   if (pos != list.end()) {
     list.erase(pos);
   } else {
-    TORCH_CHECK(false, "list.remove(x): x not in list");
+    TORCH_FAIL("list.remove(x): x not in list");
   }
 }
 
@@ -205,7 +205,7 @@ void listPopImpl(Stack& stack, const char* empty_message) {
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
 
   if (list_size == 0) {
-    TORCH_CHECK(false, empty_message);
+    TORCH_FAIL(empty_message);
   }
 
   push(stack, getItem(list, idx));

@@ -151,17 +151,17 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
       case sdp::SDPBackend::cudnn_attention:
         if (ctx.userEnabledCuDNNSDP() &&
             can_use_cudnn_attention(kernel_params, print_debug)) {
-          TORCH_CHECK(false, "Invalid backend");
+          TORCH_FAIL("Invalid backend");
         }
         break;
       case sdp::SDPBackend::efficient_attention:
         if (ctx.userEnabledMemEfficientSDP() &&
             can_use_mem_efficien_attention(kernel_params, print_debug)) {
-          TORCH_CHECK(false, "Invalid backend");
+          TORCH_FAIL("Invalid backend");
         }
         break;
       default:
-        TORCH_CHECK(false, "Invalid backend");
+        TORCH_FAIL("Invalid backend");
     }
   }
   // If we have gotten to this point then two things have happened:

@@ -34,7 +34,7 @@ void norm_kernel_cuda(TensorIterator& iter, const Scalar& val) {
   } else if (val.isFloatingPoint()) {
     p = val.to<double>();
   } else {
-    TORCH_CHECK(false, "norm_kernel_cuda_impl expects norm to be integer or float");
+   TORCH_FAIL("norm_kernel_cuda_impl expects norm to be integer or float");
   }
   if (iter.numel() == 0) {
     iter.output().fill_((p < 0) ? INFINITY : 0);

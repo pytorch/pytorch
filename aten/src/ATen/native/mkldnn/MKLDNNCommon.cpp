@@ -62,7 +62,7 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
     case ScalarType::Float8_e5m2:
       return ideep::tensor::data_type::f8_e5m2;
     default:
-      TORCH_CHECK(false, "get_mkldnn_dtype: unsupported data type");
+     TORCH_FAIL("get_mkldnn_dtype: unsupported data type");
   }
 }
 
@@ -86,7 +86,7 @@ at::Tensor mkldnn_tensor_from_data_ptr(
   // groups is needed for grouped conv
   deserialized_ideep_desc = ideep::tensor::desc(vector_serialized_md);
 #else
-  TORCH_CHECK(false, "Unexpected IDeep version to do weight deserialization.");
+ TORCH_FAIL("Unexpected IDeep version to do weight deserialization.");
 #endif
 
   auto a = ideep::tensor(deserialized_ideep_desc, data_ptr);
@@ -182,7 +182,7 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data
               tensor.data_ptr()};
   }
   else {
-    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/half/int8/fp8 tensor input", tensor.scalar_type());
+   TORCH_FAIL("itensor_view_from_dense expects float/bfloat16/half/int8/fp8 tensor input", tensor.scalar_type());
   }
 }
 

@@ -238,21 +238,21 @@ void SparseCsrTensorImpl::set_member_tensors(
 }
 
 IntArrayRef SparseCsrTensorImpl::strides_custom() const {
-  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have strides");
+ TORCH_FAIL("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have strides");
 }
 SymIntArrayRef SparseCsrTensorImpl::sym_strides_custom() const {
-  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have strides");
+ TORCH_FAIL("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have strides");
 }
 void SparseCsrTensorImpl::set_size(int64_t dim, int64_t new_size) {
-  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_size.");
+ TORCH_FAIL("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_size.");
 }
 void SparseCsrTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
-  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_stride.");
+ TORCH_FAIL("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_stride.");
 }
 void SparseCsrTensorImpl::set_storage_offset(int64_t storage_offset) {
-  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_storage_offset.");
+ TORCH_FAIL("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_storage_offset.");
 }
 c10::SymBool SparseCsrTensorImpl::sym_is_contiguous_custom(MemoryFormat) const {
-  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have is_contiguous");
+ TORCH_FAIL("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have is_contiguous");
 }
 } // namespace at

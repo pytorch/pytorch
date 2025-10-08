@@ -872,7 +872,7 @@ void ExportModule(
     } else {
       message << "Error while opening file: " << errno << '\n';
     }
-    TORCH_CHECK(false, message.str());
+    TORCH_FAIL(message.str());
   }
   ExportModule(
       module,

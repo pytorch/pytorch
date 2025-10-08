@@ -115,7 +115,7 @@ bool cudnn_is_acceptable(const Tensor& self) {
 Tensor& detach_(Tensor& self) {
   // this just exists to give us a hook in VariableType and an entry in
   // Declarations.yaml
-  // TORCH_CHECK(false, "detach_ is not implemented for Tensor");
+  // TORCH_FAIL("detach_ is not implemented for Tensor");
   return self;
 }
 

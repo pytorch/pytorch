@@ -180,7 +180,7 @@ struct CollectiveFingerPrint {
             ss << std::get<1>(diff_result);
           }
 
-          TORCH_CHECK(false, ss.str());
+          TORCH_FAIL(ss.str());
         }
       }
     }
@@ -597,7 +597,7 @@ void ProcessGroupWrapper::runCollectiveChecks(
         collective_info,
         ". Error: \n",
         e.what());
-    TORCH_CHECK(false, err_msg);
+    TORCH_FAIL(err_msg);
   }
   // Will throw if an ill-formed collective is detected.
   finger_print.verify(glooBackend_);

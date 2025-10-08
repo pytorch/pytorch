@@ -422,19 +422,19 @@ class Vectorized<c10::complex<float>> {
   }
   Vectorized<c10::complex<float>> operator<(
       const Vectorized<c10::complex<float>>& /*other*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> operator<=(
       const Vectorized<c10::complex<float>>& /*other*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> operator>(
       const Vectorized<c10::complex<float>>& /*other*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
   Vectorized<c10::complex<float>> operator>=(
       const Vectorized<c10::complex<float>>& /*other*/) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_FAIL("not supported for complex numbers");
   }
 
   Vectorized<c10::complex<float>> eq(

@@ -212,7 +212,7 @@ static void norm_kernel_tensor_iterator_impl(
   } else if (p.isFloatingPoint()) {
     val = p.to<double>();
   } else {
-    TORCH_CHECK(false, "norm_kernel_cpu expects norm to be integer or float");
+   TORCH_FAIL("norm_kernel_cpu expects norm to be integer or float");
   }
   if (iter.numel() == 0) {
     iter.output().fill_((val < 0) ? INFINITY : 0);

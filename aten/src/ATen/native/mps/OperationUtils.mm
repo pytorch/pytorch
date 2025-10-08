@@ -268,7 +268,7 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
     case ScalarType::UInt16:
       return "ushort";
     default:
-      TORCH_CHECK(false, "Undefined type ", scalar_type);
+      TORCH_FAIL("Undefined type ", scalar_type);
       return "Undefined";
   }
 }
@@ -761,7 +761,7 @@ std::string get_mem_format_string(c10::MemoryFormat memory_format) {
       mem_format_key = "ChannelsLast";
       break;
     default:
-      TORCH_CHECK(false, "Invalid memory format", memory_format);
+      TORCH_FAIL("Invalid memory format", memory_format);
   }
 
   return mem_format_key;
@@ -873,7 +873,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
     if ([error domain] == MTLLibraryErrorDomain && [error code] == MTLLibraryErrorCompileFailure) {
       throw c10::SyntaxError([[error localizedDescription] UTF8String]);
     }
-    TORCH_CHECK(false, "Failed to create metal library, error: ", [[error description] UTF8String]);
+    TORCH_FAIL("Failed to create metal library, error: ", [[error description] UTF8String]);
   }
   return library;
 }

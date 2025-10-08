@@ -48,7 +48,7 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
   double guard_float(
       const char* file [[maybe_unused]],
       int64_t line [[maybe_unused]]) override {
-    TORCH_CHECK(false, "not a float");
+    TORCH_FAIL("not a float");
   }
   int64_t int_() override {
     TORCH_CHECK(is_int(), "not an int");

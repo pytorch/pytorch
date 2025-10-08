@@ -344,7 +344,7 @@ static std::vector<std::optional<c10::SymInt>> pyListToVecOptInt(
         PyErr_SetString(
             PyExc_TypeError,
             "Size or stride list item is not a valid integer.");
-        TORCH_CHECK(false, "Size or stride list item is not a valid integer.");
+        TORCH_FAIL("Size or stride list item is not a valid integer.");
       }
       vec.emplace_back(c10::SymInt(value));
     }
@@ -4018,14 +4018,14 @@ class DictGuardManager : public GuardManager {
       const py::object& a,
       const std::string& source,
       const py::object& b) {
-    TORCH_CHECK(false, "Can not add an accessor to DictGuardManager");
+    TORCH_FAIL("Can not add an accessor to DictGuardManager");
   }
 
   void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) override {
     // If you are calling this, you probably want to go through a key, value
     // child manager and then add a leaf guard on them. DictGuardManager already
     // has TYPE_MATCH and LENGTH_CHECK built in.
-    TORCH_CHECK(false, "DictGuardManager does not support a leaf_guard");
+    TORCH_FAIL("DictGuardManager does not support a leaf_guard");
   }
 
   // Debug helper - Returning raw pointers because we can't return unique_ptr
@@ -5235,7 +5235,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     } else if (_prop == TensorProperty::STORAGE_OFFSET) {
       opt_value = tensor.sym_storage_offset().maybe_as_int();
     } else {
-      TORCH_CHECK(false, "Unknown property");
+      TORCH_FAIL("Unknown property");
     }
 
     if (!opt_value.has_value()) {

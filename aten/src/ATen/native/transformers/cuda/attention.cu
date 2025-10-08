@@ -1259,7 +1259,7 @@ _flash_attention_forward(
       std::move(debug_attn_mask));
 
 #endif
-  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+ TORCH_FAIL("USE_FLASH_ATTENTION was not enabled for build.")
   return std::make_tuple(
       Tensor(),
       Tensor(),
@@ -1434,7 +1434,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
 
     logsumexp = lse;
 #else
-    TORCH_CHECK(false, "Attempting to use CK mem_eff_forward backend in a build that has not built CK");
+   TORCH_FAIL("Attempting to use CK mem_eff_forward backend in a build that has not built CK");
 #endif
   } else { // use aotriton
 #ifndef DISABLE_AOTRITON
@@ -1468,7 +1468,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       is_causal = true;
 #if AOTRITON_V3_API == 0
       if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) != custom_mask_type) {
-        TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
+       TORCH_FAIL("[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
       }
 #endif
     }
@@ -1582,7 +1582,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
                      stream);
     }
 #else
-    TORCH_CHECK(false, "Attempting to use AOTriton mem_eff_forward backend in a build that has not built AOTriton");
+   TORCH_FAIL("Attempting to use AOTriton mem_eff_forward backend in a build that has not built AOTriton");
 #endif
   } // CK BACKEND
 #else
@@ -1769,12 +1769,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       // TODO: why isn't this being set in the kernel?
       max_seqlen_k_.has_value() ? max_seqlen_k_.value() : max_seqlen_k);
 #endif
-  TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
+ TORCH_FAIL("USE_MEM_EFF_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{}, 0, 0);
 }
 
 Tensor triton_scaled_dot_attention(const Tensor& q, const Tensor& k, const Tensor& v, double dropout_p){
-  TORCH_CHECK(false, "This operator should be overridden in python before use");
+ TORCH_FAIL("This operator should be overridden in python before use");
   return at::Tensor();
 }
 
@@ -1869,7 +1869,7 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
                                        0,
                                        stream);
 #else
-  TORCH_CHECK(false, "_fill_mem_eff_dropout_mask_ is only enabled with aotriton");
+ TORCH_FAIL("_fill_mem_eff_dropout_mask_ is only enabled with aotriton");
 #endif
 #else
   at::PhiloxCudaState rng_engine_inputs;
@@ -1889,7 +1889,7 @@ at::Tensor& _fill_mem_eff_dropout_mask_(
 
   return self;
 #endif
-  TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
+ TORCH_FAIL("USE_MEM_EFF_ATTENTION was not enabled for build.")
   return self;
 }
 

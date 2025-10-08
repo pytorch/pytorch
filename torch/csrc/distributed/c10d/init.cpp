@@ -3951,19 +3951,19 @@ such as `dist.all_reduce(tensor, async_op=True)`.
         add("key3", 3);
         add("key3", 2);
         if (get("key") != "6") {
-          TORCH_CHECK(false, "assertion failed");
+          TORCH_FAIL("assertion failed");
         }
         if (get("key0") != "value0") {
-          TORCH_CHECK(false, "assertion failed");
+          TORCH_FAIL("assertion failed");
         }
         if (get("key1") != "value1") {
-          TORCH_CHECK(false, "assertion failed");
+          TORCH_FAIL("assertion failed");
         }
         if (get("key2") != "value2") {
-          TORCH_CHECK(false, "assertion failed");
+          TORCH_FAIL("assertion failed");
         }
         if (get("key3") != "15") {
-          TORCH_CHECK(false, "assertion failed");
+          TORCH_FAIL("assertion failed");
         }
 
         auto cloned = store->clone();

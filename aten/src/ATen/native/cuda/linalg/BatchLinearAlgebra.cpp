@@ -1386,7 +1386,7 @@ For more information see MAGMA's documentation for POTRS routine.
 template <typename scalar_t>
 static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 #if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(false, "cholesky_inverse: MAGMA library not found in compilation. Please rebuild with MAGMA.");
+ TORCH_FAIL("cholesky_inverse: MAGMA library not found in compilation. Please rebuild with MAGMA.");
 #else
   // magmaCholeskyInverse (magma_dpotri_gpu) is slow because internally
   // it transfers data several times between GPU and CPU and calls lapack routine on CPU
@@ -1475,7 +1475,7 @@ template <typename scalar_t>
 static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
 #if !AT_MAGMA_ENABLED()
   // This should never be thrown if the calling functions are correct.
-  TORCH_CHECK(false, "linalg.lu_factor: PyTorch was not compiled with MAGMA support.");
+ TORCH_FAIL("linalg.lu_factor: PyTorch was not compiled with MAGMA support.");
 #else
   // magmaLu and magmaLuNoPiv require infos and pivots tensor to be on CPU
   // the data is later copied back to the appropriate output tensor
@@ -1767,7 +1767,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
 #ifdef USE_LINALG_SOLVER
   return orgqr_helper_cusolver(result, tau); // cusolver
 #else
-  TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
+ TORCH_FAIL("Calling torch.orgqr on a CUDA tensor requires compiling ",
     "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
 #endif
 }
@@ -2574,7 +2574,7 @@ REGISTER_CUDA_DISPATCH(lu_solve_stub, &lu_solve_kernel)
 template <typename scalar_t>
 static void apply_gels(const Tensor& a, Tensor& b, Tensor& infos) {
 #if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(false, "torch.linalg.lstsq: MAGMA library not found in "
+ TORCH_FAIL("torch.linalg.lstsq: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   auto trans = MagmaNoTrans;

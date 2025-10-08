@@ -46,7 +46,7 @@ std::vector<std::vector<at::Tensor>> waitFuture(
     } else if (result.isTensorList()) {
       outputTensors.emplace_back(result.toTensorVector());
     } else {
-      TORCH_CHECK(false, "future result should be tensor list or none");
+      TORCH_FAIL("future result should be tensor list or none");
     }
   }
   return outputTensors;
@@ -77,7 +77,7 @@ void testAllreduce(int iter = 1000) {
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
       if (data[j] != static_cast<float>(expected)) {
-        TORCH_CHECK(false, "BOOM!");
+        TORCH_FAIL("BOOM!");
       }
     }
   }
@@ -109,7 +109,7 @@ void testBroadcast(int iter = 10000) {
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
       if (data[j] != static_cast<float>(expected)) {
-        TORCH_CHECK(false, "BOOM!");
+        TORCH_FAIL("BOOM!");
       }
     }
   }
@@ -139,7 +139,7 @@ void testReduce(int iter = 10000) {
       auto data = outputTensors[i][0].data_ptr<float>();
       for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
         if (data[j] != static_cast<float>(expected)) {
-          TORCH_CHECK(false, "BOOM!");
+          TORCH_FAIL("BOOM!");
         }
       }
     }
@@ -178,7 +178,7 @@ void testAllgather(int iter = 10000) {
       auto data = outputTensors[i][j].data_ptr<float>();
       for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
         if (data[k] != static_cast<float>(expected)) {
-          TORCH_CHECK(false, "BOOM!");
+          TORCH_FAIL("BOOM!");
         }
       }
     }
@@ -212,7 +212,7 @@ void testAllgatherBase(int iter = 10000) {
       auto data = outputTensors[i][0][j].data_ptr<float>();
       for (auto k = 0; k < outputTensors[i][0][j].numel(); ++k) {
         if (data[k] != static_cast<float>(expected)) {
-          TORCH_CHECK(false, "BOOM!");
+          TORCH_FAIL("BOOM!");
         }
       }
     }
@@ -252,7 +252,7 @@ void testReduceScatter(int iter = 10000) {
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
       if (data[j] != static_cast<float>(expected)) {
-        TORCH_CHECK(false, "BOOM!");
+        TORCH_FAIL("BOOM!");
       }
     }
   }
@@ -286,7 +286,7 @@ void testReduceScatterBase(int iter = 10000) {
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
       if (data[j] != static_cast<float>(expected)) {
-        TORCH_CHECK(false, "BOOM!");
+        TORCH_FAIL("BOOM!");
       }
     }
   }
@@ -328,7 +328,7 @@ void testGather(int iter = 10000) {
         auto data = outputTensors[i][j].data_ptr<float>();
         for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
           if (data[k] != static_cast<float>(expected)) {
-            TORCH_CHECK(false, "BOOM!");
+            TORCH_FAIL("BOOM!");
           }
         }
       }
@@ -336,7 +336,7 @@ void testGather(int iter = 10000) {
   } else {
     for (const auto i : c10::irange(iter)) {
       if (!outputTensors[i].empty()) {
-        TORCH_CHECK(false, "BOOM!");
+        TORCH_FAIL("BOOM!");
       }
     }
   }
@@ -377,7 +377,7 @@ void testScatter(int iter = 1) {
       auto data = outputTensors[i][0].data_ptr<float>();
       for (auto k = 0; k < outputTensors[i][0].numel(); ++k) {
         if (data[k] != static_cast<float>(expected)) {
-          TORCH_CHECK(false, "BOOM!");
+          TORCH_FAIL("BOOM!");
         }
       }
     }
@@ -431,13 +431,13 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
   // Verify outputs
   for (const auto i : c10::irange(iter)) {
     if (recvAnysource && srcRanks[i] != 0) {
-      TORCH_CHECK(false, "src rank is wrong for recvAnysource");
+      TORCH_FAIL("src rank is wrong for recvAnysource");
     }
     const auto expected = i;
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
       if (data[j] != static_cast<float>(expected)) {
-        TORCH_CHECK(false, "BOOM!");
+        TORCH_FAIL("BOOM!");
       }
     }
   }
@@ -446,7 +446,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
 void testBackendName() {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   if (pg->getBackendName() != std::string(c10d::MPI_BACKEND_NAME)) {
-    TORCH_CHECK(false, "BOOM!");
+    TORCH_FAIL("BOOM!");
   }
 }
 

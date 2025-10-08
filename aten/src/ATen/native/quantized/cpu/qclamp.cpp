@@ -117,7 +117,7 @@ Tensor quantized_clamp_impl(
     } else if (min) {
       qclamp_min_stub(qx.device().type(), qx, *min, qy);
     } else {
-      TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
+     TORCH_FAIL("At least one of 'min' or 'max' must not be None");
     }
   }
   return qy;

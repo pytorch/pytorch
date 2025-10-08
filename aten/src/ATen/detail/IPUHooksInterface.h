@@ -12,22 +12,22 @@ struct TORCH_API IPUHooksInterface : AcceleratorHooksInterface {
   ~IPUHooksInterface() override = default;
 
   void init() const override {
-    TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
+   TORCH_FAIL("Cannot initialize IPU without ATen_ipu library.");
   }
 
   bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
-    TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
+   TORCH_FAIL("Cannot initialize IPU without ATen_ipu library.");
     return false;
   }
 
   const Generator& getDefaultGenerator(
       [[maybe_unused]] DeviceIndex device_index = -1) const override {
-    TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
+   TORCH_FAIL("Cannot initialize IPU without ATen_ipu library.");
   }
 
   Generator getNewGenerator(
       DeviceIndex /*device_index*/ = -1) const override {
-    TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
+   TORCH_FAIL("Cannot initialize IPU without ATen_ipu library.");
   }
 };
 

@@ -171,7 +171,7 @@ struct sha1 {
       if (bit_count_high <= 0xFFFFFFFE) {
         ++bit_count_high;
       } else {
-        TORCH_CHECK(false, "sha1 too many bytes");
+        TORCH_FAIL("sha1 too many bytes");
       }
     }
   }

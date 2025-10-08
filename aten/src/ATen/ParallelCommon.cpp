@@ -105,7 +105,7 @@ int intraop_default_num_threads() {
   // Intraop thread pool size should be determined by mobile cpuinfo.
   // We should hook up with the logic in caffe2/utils/threadpool if we ever need
   // call this API for mobile.
-  TORCH_CHECK(false, "Undefined intraop_default_num_threads on mobile.");
+ TORCH_FAIL("Undefined intraop_default_num_threads on mobile.");
 #else
   size_t nthreads = get_env_num_threads("OMP_NUM_THREADS", 0);
   nthreads = get_env_num_threads("MKL_NUM_THREADS", nthreads);

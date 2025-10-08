@@ -576,7 +576,7 @@ Tensor empty_like_quantized(
         // See Note [Explicit nullopt MemoryFormat argument]
         std::nullopt);
   } else {
-    TORCH_CHECK(false, "Unsupported qscheme: ", toString(qscheme));
+    TORCH_FAIL("Unsupported qscheme: ", toString(qscheme));
   }
 }
 

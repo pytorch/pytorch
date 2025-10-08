@@ -9,32 +9,32 @@
 
 namespace torch::utils {
 PyObject* tensor_to_numpy(const at::Tensor&, bool) {
-  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
+  TORCH_FAIL("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_numpy(
     PyObject* obj,
     bool warn_if_not_writeable /*=true*/) {
-  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
+  TORCH_FAIL("PyTorch was compiled without NumPy support");
 }
 
 bool is_numpy_available() {
-  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
+  TORCH_FAIL("PyTorch was compiled without NumPy support");
 }
 
 bool is_numpy_int(PyObject* obj) {
-  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
+  TORCH_FAIL("PyTorch was compiled without NumPy support");
 }
 bool is_numpy_scalar(PyObject* obj) {
-  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
+  TORCH_FAIL("PyTorch was compiled without NumPy support");
 }
 at::Tensor tensor_from_cuda_array_interface(
     PyObject* obj,
     std::optional<c10::Device> device_opt) {
-  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
+  TORCH_FAIL("PyTorch was compiled without NumPy support");
 }
 
 void warn_numpy_not_writeable() {
-  TORCH_CHECK(false, "PyTorch was compiled without NumPy support");
+  TORCH_FAIL("PyTorch was compiled without NumPy support");
 }
 
 // No-op stubs.

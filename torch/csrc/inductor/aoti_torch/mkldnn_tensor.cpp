@@ -30,7 +30,7 @@ at::Tensor mkldnn_tensor_from_data_ptr(
 #else
 
 void* data_ptr_from_mkldnn(at::Tensor* mkldnn_tensor) {
-  TORCH_CHECK(false, "MKL-DNN build is disabled");
+  TORCH_FAIL("MKL-DNN build is disabled");
 }
 
 at::Tensor mkldnn_tensor_from_data_ptr(
@@ -40,7 +40,7 @@ at::Tensor mkldnn_tensor_from_data_ptr(
     at::Device device,
     const uint8_t* opaque_metadata,
     int64_t opaque_metadata_size) {
-  TORCH_CHECK(false, "MKL-DNN build is disabled");
+  TORCH_FAIL("MKL-DNN build is disabled");
 }
 
 #endif

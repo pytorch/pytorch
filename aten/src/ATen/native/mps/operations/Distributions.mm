@@ -378,7 +378,7 @@ Tensor& random_mps_(Tensor& self, int64_t from, std::optional<int64_t> to_opt, s
         }
       });
     } else {
-      TORCH_CHECK(false, "random_mps_ handles only integral, floating-point and boolean types");
+      TORCH_FAIL("random_mps_ handles only integral, floating-point and boolean types");
     }
     templates::check_from_to_in_range(from, to - 1, self.dtype());
   } else {
@@ -386,7 +386,7 @@ Tensor& random_mps_(Tensor& self, int64_t from, std::optional<int64_t> to_opt, s
     // range = 2^64
 
     // TODO - should we error out in case max is beyond MPS limit (INT32_MAX)?
-    TORCH_CHECK(false, "random_mps_ currently does not handle the lowest() -> max() range");
+    TORCH_FAIL("random_mps_ currently does not handle the lowest() -> max() range");
   }
 
   return mps::random_mps_impl<int64_t>(

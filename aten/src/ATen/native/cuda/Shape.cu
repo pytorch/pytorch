@@ -362,7 +362,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
     outputParam.tensorSize[nDims - 1] = out.size(1);
     outputParam.tensorStride[nDims - 1] = out.stride(1);
   } else {
-    TORCH_CHECK(false, "unsupported memory format");
+   TORCH_FAIL("unsupported memory format");
   }
 
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();

@@ -205,7 +205,7 @@ inline std::string layoutToString(
     case kSparseBsc:
       return (upper ? "BSC" : (lower ? "bsc" : "Bsc"));
     default:
-      TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
+      TORCH_FAIL("Not a sparse compressed layout:", layout);
       return "";
   }
 }
@@ -250,7 +250,7 @@ inline std::string compressedDimName(Layout layout) {
     case kSparseBsc:
       return "column block";
     default:
-      TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
+      TORCH_FAIL("Not a sparse compressed layout:", layout);
       return "";
   }
 }
@@ -266,7 +266,7 @@ inline std::string plainDimName(Layout layout) {
     case kSparseBsc:
       return "row block";
     default:
-      TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
+      TORCH_FAIL("Not a sparse compressed layout:", layout);
       return "";
   }
 }
@@ -339,7 +339,7 @@ inline Layout flip_compressed_layout(Layout layout) {
     case kSparseBsc:
       return kSparseBsr;
     default:
-      TORCH_CHECK(false, "Not a sparse compressed layout:", layout);
+      TORCH_FAIL("Not a sparse compressed layout:", layout);
       return kSparseCsr;
   }
 }

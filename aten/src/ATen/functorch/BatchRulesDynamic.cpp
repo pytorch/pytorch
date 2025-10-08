@@ -19,7 +19,7 @@ namespace at::functorch {
 
 namespace {
 void unsupportedDynamicOp(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-    TORCH_CHECK(false, "vmap: We do not support batching operators that can output dynamic shape. ",
+   TORCH_FAIL("vmap: We do not support batching operators that can output dynamic shape. ",
         "Attempted to vmap over ", op.schema().operator_name(), ". ",
         "Please voice your support in https://github.com/pytorch/functorch/issues/256");
 }

@@ -112,7 +112,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       case BackendType::CUSTOM:
         return "custom";
       default:
-        TORCH_CHECK(false, "THis should never happen!");
+        TORCH_FAIL("THis should never happen!");
     }
   }
 

@@ -24,7 +24,7 @@
       using scalar_t = cutlass::bfloat16_t;                                    \
       func();                                                                  \
     } else {                                                                   \
-      TORCH_CHECK(false, "Only fp32, half & bf16 supported at the moment"); \
+     TORCH_FAIL("Only fp32, half & bf16 supported at the moment"); \
     }                                                                          \
   }
 

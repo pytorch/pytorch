@@ -428,7 +428,7 @@ void bf16bf16_grouped_mm(
 #if defined(BUILD_GG_KERNEL)
   dispatch_bf16_grouped_kernel_on_ab_transpose(mat_a, mat_b, offs, bias, out);
 #else
-  TORCH_CHECK(false, "grouped mm is not supported on your system");
+ TORCH_FAIL("grouped mm is not supported on your system");
 #endif
 }
 

@@ -465,7 +465,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
      std::optional<Device> device,
      std::optional<bool> pin_memory) {
   if (!layout) {
-    TORCH_CHECK(false, "sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
+   TORCH_FAIL("sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
@@ -593,7 +593,7 @@ Tensor sparse_compressed_tensor(
     std::optional<bool> pin_memory) {
 
   if (!layout) {
-    TORCH_CHECK(false, "sparse_compressed_tensor expected sparse compressed tensor layout but got none");
+   TORCH_FAIL("sparse_compressed_tensor expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
@@ -622,7 +622,7 @@ Tensor sparse_compressed_tensor(
     std::optional<bool> pin_memory) {
 
   if (!layout) {
-    TORCH_CHECK(false, "sparse_compressed_tensor expected sparse compressed tensor layout but got none");
+   TORCH_FAIL("sparse_compressed_tensor expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
@@ -840,19 +840,19 @@ Tensor row_indices_sparse_csr(const Tensor& self) {
 }
 
 Tensor crow_indices_default(const Tensor& self) {
-  TORCH_CHECK(false, "crow_indices expected sparse row compressed tensor layout but got ", self.layout());
+ TORCH_FAIL("crow_indices expected sparse row compressed tensor layout but got ", self.layout());
 }
 
 Tensor col_indices_default(const Tensor& self) {
-  TORCH_CHECK(false, "col_indices expected sparse row compressed tensor layout but got ", self.layout());
+ TORCH_FAIL("col_indices expected sparse row compressed tensor layout but got ", self.layout());
 }
 
 Tensor ccol_indices_default(const Tensor& self) {
-  TORCH_CHECK(false, "ccol_indices expected sparse column compressed tensor layout but got ", self.layout());
+ TORCH_FAIL("ccol_indices expected sparse column compressed tensor layout but got ", self.layout());
 }
 
 Tensor row_indices_default(const Tensor& self) {
-  TORCH_CHECK(false, "row_indices expected sparse column compressed tensor layout but got ", self.layout());
+ TORCH_FAIL("row_indices expected sparse column compressed tensor layout but got ", self.layout());
 }
 
 int64_t sparse_dim_sparse_csr(const SparseCsrTensor& self) {
@@ -965,7 +965,7 @@ Tensor empty_like_sparse_csr(
   } else if (options.layout() == kStrided) {
     return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
   } else {
-    TORCH_CHECK(false, "Layout ", options.layout(), " is not supported");
+   TORCH_FAIL("Layout ", options.layout(), " is not supported");
   }
 }
 

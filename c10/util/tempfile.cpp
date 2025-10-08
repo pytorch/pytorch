@@ -162,7 +162,7 @@ TempDir make_tempdir(std::string_view name_prefix) {
       "Error generating temporary directory: ",
       c10::utils::str_error(errno));
 #else // defined(_WIN32)
-  TORCH_CHECK(false, "Error generating temporary directory");
+  TORCH_FAIL("Error generating temporary directory");
 #endif // defined(_WIN32)
 }
 } // namespace c10

@@ -62,7 +62,7 @@ static void setSignalHandler(
     std::ostringstream oss;
     oss << "An error occurred while setting handler for " << strsignal(signal)
         << ".";
-    TORCH_CHECK(false, oss.str());
+    TORCH_FAIL(oss.str());
   }
 }
 
@@ -150,7 +150,7 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set.clear();
-        TORCH_CHECK(false, error_msg);
+        TORCH_FAIL(error_msg);
       } else if (
           infop.si_code == CLD_KILLED ||
           infop.si_code == CLD_DUMPED) { // killed by signal
@@ -166,7 +166,7 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set.clear();
-        TORCH_CHECK(false, error_msg);
+        TORCH_FAIL(error_msg);
       }
     }
   }

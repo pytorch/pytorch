@@ -329,7 +329,7 @@ static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha
     gemm(&params);
   }
   else {
-    TORCH_CHECK(false, "unreachable");
+   TORCH_FAIL("unreachable");
   }
 }
 
@@ -466,7 +466,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 #if defined(USE_ROCM)
     bool okay = true;
     if (is_float_output_with_half_input) {
-      TORCH_CHECK(false, "float output with half input is not enabled for ROCm");
+     TORCH_FAIL("float output with half input is not enabled for ROCm");
     } else {
       AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
@@ -517,7 +517,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         [&] {
         auto tuning_ctx = at::cuda::tunable::getTuningContext();
         if (tuning_ctx->IsTunableOpEnabled()) {
-          TORCH_CHECK(false, "Tunable GEMM is not supported for float output with reduced float input");
+         TORCH_FAIL("Tunable GEMM is not supported for float output with reduced float input");
         }
         else {
           okay = at::cuda::blas::gemm_and_bias<scalar_t, float>(
@@ -1043,9 +1043,9 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   }
 #else
 #if !defined(USE_ROCM) && defined(CUDA_VERSION)
-  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for CUDA ", CUDA_VERSION);
+ TORCH_FAIL("_int_mm_out_cuda not compiled for CUDA ", CUDA_VERSION);
 #else
-  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for this platform.");
+ TORCH_FAIL("_int_mm_out_cuda not compiled for this platform.");
 #endif
 #endif
 
@@ -1420,7 +1420,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
                 out.scalar_type() == ScalarType::Half,
                 "Block-wise scaling only supports BFloat16 or Half output types");
 #else
-    TORCH_CHECK(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
+   TORCH_FAIL("Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
 #endif
   }
 #endif
@@ -1532,7 +1532,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
         TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N)
       }
       else {
-        TORCH_CHECK(false, "unreachable");
+       TORCH_FAIL("unreachable");
       }
     }),
     kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_FLOATING_TYPES));
@@ -1664,7 +1664,7 @@ namespace {
     } else if (using_mxfp8) {
       _check_scales_mxfp8(mat, scale, dim, arg_idx);
     } else {
-      TORCH_CHECK(false, "scale must be float32 or float8_e8m0fnu, but got ", scale.dtype());
+     TORCH_FAIL("scale must be float32 or float8_e8m0fnu, but got ", scale.dtype());
     }
   }
 }
@@ -1796,7 +1796,7 @@ bool use_fast_accum) {
       out);
   return out;
 #else
-  TORCH_CHECK(false, "grouped gemm is not supported without USE_FBGEMM_GENAI on ROCM")
+ TORCH_FAIL("grouped gemm is not supported without USE_FBGEMM_GENAI on ROCM")
 #endif
 
 #endif

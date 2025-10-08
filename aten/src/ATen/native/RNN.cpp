@@ -266,10 +266,10 @@ struct QuantizedCellParams : public CellParamsBase {
   const Scalar zero_point_hh;
 
   Tensor matmul_ih(const Tensor& input) const override {
-    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+   TORCH_FAIL("matmul is not supported with quantized cell params");
   }
   Tensor matmul_hh(const Tensor& h) const override {
-    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+   TORCH_FAIL("matmul is not supported with quantized cell params");
   }
   Tensor linear_ih(const Tensor& input) const override {
     return at::fbgemm_linear_int8_weight_fp32_activation(
@@ -405,10 +405,10 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
   bool reduce_range_;
 
   Tensor matmul_ih(const Tensor& input) const override {
-    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+   TORCH_FAIL("matmul is not supported with quantized cell params");
   }
   Tensor matmul_hh(const Tensor& h) const override {
-    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+   TORCH_FAIL("matmul is not supported with quantized cell params");
   }
 
   Tensor linear_ih(const Tensor& input_ih) const override {
@@ -489,10 +489,10 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
   const Tensor b_hh_;
 
   Tensor matmul_ih(const Tensor& /* unused */) const override {
-    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+   TORCH_FAIL("matmul is not supported with quantized cell params");
   }
   Tensor matmul_hh(const Tensor& /* unused */) const override {
-    TORCH_CHECK(false, "matmul is not supported with quantized cell params");
+   TORCH_FAIL("matmul is not supported with quantized cell params");
   }
   Tensor linear_ih(const Tensor& input) const override {
     return packed_ih->apply_dynamic(input);

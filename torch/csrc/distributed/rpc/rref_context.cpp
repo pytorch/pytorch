@@ -108,7 +108,7 @@ void RRefContext::handleException(const JitFuture& jitFuture) {
   if (jitFuture.hasError()) {
     auto errMsg = jitFuture.tryRetrieveErrorMessage();
     VLOG(1) << "Got exception: " << errMsg;
-    TORCH_CHECK(false, errMsg);
+    TORCH_FAIL(errMsg);
   }
 }
 
@@ -169,7 +169,7 @@ void RRefContext::checkRRefLeaks(bool ignoreRRefLeak) {
         << "GC has deleted them before calling shutdown(): \n"
         << ss.str();
     if (!ignoreRRefLeak) {
-      TORCH_CHECK(false, ss.str());
+      TORCH_FAIL(ss.str());
     }
   }
 }

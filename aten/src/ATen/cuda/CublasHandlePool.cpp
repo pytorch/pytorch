@@ -74,7 +74,7 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error) {
     case rocblas_status_internal_error:
         return HIPBLAS_STATUS_INTERNAL_ERROR;
     }
-    TORCH_CHECK(false, "HIPBLAS_STATUS_INVALID_ENUM");
+   TORCH_FAIL("HIPBLAS_STATUS_INVALID_ENUM");
 }
 
 static hipblasStatus_t hipblasSetWorkspace_replacement(hipblasHandle_t handle, void* addr, size_t size) {

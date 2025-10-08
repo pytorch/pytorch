@@ -36,7 +36,7 @@ c10::intrusive_ptr<c10::ivalue::Future> PythonCommHook::runHook(
         type.attr("__module__").cast<std::string>(),
         ".",
         type.attr("__qualname__").cast<std::string>());
-    TORCH_CHECK(false, errMsg);
+    TORCH_FAIL(errMsg);
   }
 }
 

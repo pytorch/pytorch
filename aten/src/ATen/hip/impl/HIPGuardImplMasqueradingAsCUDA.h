@@ -125,7 +125,7 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
         hip_flag = hipEventDefault;
         break;
       default:
-        TORCH_CHECK(false, "HIP event received unknown flag");
+       TORCH_FAIL("HIP event received unknown flag");
     }
 
     C10_HIP_CHECK(hipEventCreateWithFlags(hip_event, hip_flag));

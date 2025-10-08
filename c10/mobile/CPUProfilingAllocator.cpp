@@ -78,7 +78,7 @@ bool validate_allocation_plan(
           "must have preceded deallocate event.");
       allocations.erase(it);
     } else {
-      TORCH_CHECK(false, "ProfilingAllocator: Invalid event type.");
+      TORCH_FAIL("ProfilingAllocator: Invalid event type.");
     }
   }
   return true;

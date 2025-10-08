@@ -43,9 +43,9 @@ void warnDeprecatedDataPtr() {
 [[noreturn]] void StorageImpl::throw_data_ptr_access_error() const {
   if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
+    TORCH_FAIL(*extra_meta_->custom_data_ptr_error_msg_);
   }
-  TORCH_CHECK(false, "Cannot access data pointer of Storage that is invalid.");
+  TORCH_FAIL("Cannot access data pointer of Storage that is invalid.");
 }
 
 void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {

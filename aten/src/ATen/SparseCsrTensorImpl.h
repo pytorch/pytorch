@@ -104,7 +104,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
         layout_ = layout;
         break;
       default:
-        TORCH_CHECK(false, "unsupported layout ", layout);
+        TORCH_FAIL("unsupported layout ", layout);
     }
   }
 

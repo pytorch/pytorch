@@ -27,7 +27,7 @@ Tensor empty_mkldnn(IntArrayRef sizes, std::optional<ScalarType> dtype, std::opt
 #else
 
 Tensor empty_mkldnn(IntArrayRef sizes, std::optional<ScalarType> dtype, std::optional<Layout> layout, std::optional<Device> device, std::optional<bool> pin_memory, std::optional<c10::MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(false, "empty_mkldnn: MKL-DNN build is disabled");
+ TORCH_FAIL("empty_mkldnn: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()

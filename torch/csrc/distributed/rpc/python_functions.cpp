@@ -48,7 +48,7 @@ IValue toPyIValue(const Message& message) {
       return jit::toIValue(value, PyObjectType::get());
     }
     default: {
-      TORCH_CHECK(false, "Unrecognized response message type ", msgType);
+      TORCH_FAIL("Unrecognized response message type ", msgType);
     }
   }
 }

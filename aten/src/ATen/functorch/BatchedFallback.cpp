@@ -510,7 +510,7 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
 }
 
 void vmapErrorFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  TORCH_CHECK(false, "Error: ", op.operator_name(), " requires special handling, and does not yet have a batching rule. Feel free to file a github issue!");
+ TORCH_FAIL("Error: ", op.operator_name(), " requires special handling, and does not yet have a batching rule. Feel free to file a github issue!");
 }
 
 } // namespace at::functorch

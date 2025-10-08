@@ -290,7 +290,7 @@ inline size_t elementSize(ScalarType t) {
   switch (t) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CASE_ELEMENTSIZE_CASE)
     default:
-      TORCH_CHECK(false, "Unknown ScalarType");
+      TORCH_FAIL("Unknown ScalarType");
   }
 #undef CASE_ELEMENTSIZE_CASE
 }
@@ -399,13 +399,13 @@ inline bool isSignedType(ScalarType t) {
     case ScalarType::QInt32:
     case ScalarType::QUInt4x2:
     case ScalarType::QUInt2x4:
-      TORCH_CHECK(false, "isSignedType not supported for quantized types");
+      TORCH_FAIL("isSignedType not supported for quantized types");
     case ScalarType::Bits1x8:
     case ScalarType::Bits2x4:
     case ScalarType::Bits4x2:
     case ScalarType::Bits8:
     case ScalarType::Bits16:
-      TORCH_CHECK(false, "Bits types are undefined");
+      TORCH_FAIL("Bits types are undefined");
       CASE_ISSIGNED(UInt16);
       CASE_ISSIGNED(UInt32);
       CASE_ISSIGNED(UInt64);
@@ -450,7 +450,7 @@ inline bool isSignedType(ScalarType t) {
       // Do not add default here, but rather define behavior of every new entry
       // here.  `-Wswitch-enum` would raise a warning in those cases.
   }
-  TORCH_CHECK(false, "Unknown ScalarType ", t);
+  TORCH_FAIL("Unknown ScalarType ", t);
 #undef CASE_ISSIGNED
 }
 
@@ -490,7 +490,7 @@ inline ScalarType toComplexType(ScalarType t) {
     case ScalarType::ComplexDouble:
       return ScalarType::ComplexDouble;
     default:
-      TORCH_CHECK(false, "Unknown Complex ScalarType for ", t);
+      TORCH_FAIL("Unknown Complex ScalarType for ", t);
   }
 }
 

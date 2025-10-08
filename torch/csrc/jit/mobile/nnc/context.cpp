@@ -228,7 +228,7 @@ void Function::init_execution_state() const {
     } else if (torch::isCustomClass(ivalue)) {
       arguments.emplace_back(ivalue.toObjectRef().getSlot(0).toCapsule().get());
     } else {
-      TORCH_CHECK(false, "Invalid parameter: ", ivalue);
+      TORCH_FAIL("Invalid parameter: ", ivalue);
     }
   }
 

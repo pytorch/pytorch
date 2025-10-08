@@ -239,7 +239,7 @@ void PackedConvWeight<kSpatialDim>::GetQuantizationParams(
       output_multiplier_float->at(i) = act_times_w_scale->at(i) / out_scale;
     }
   } else {
-    TORCH_CHECK(false, "[QConv", kSpatialDim, "D] Unknown quantization scheme");
+   TORCH_FAIL("[QConv", kSpatialDim, "D] Unknown quantization scheme");
   }
 }
 
@@ -1686,7 +1686,7 @@ static at::Tensor _quantized_convolution_onednn(
     }
   }
 #else
-  TORCH_CHECK(false, "Unexpected IDeep version to do qconv calculation.");
+ TORCH_FAIL("Unexpected IDeep version to do qconv calculation.");
 #endif
 
   const ideep::zero_point_t src_zero_points = ideep::zero_point_t(1, act_zero_point);
@@ -1943,7 +1943,7 @@ namespace at::native {
         /*unary_attr*/attr, /*unary_scalars*/scalars, /*unary_algorithm*/algorithm
     );
 #else
-    TORCH_CHECK(false, "Unimplemented as onednn is not available.")
+   TORCH_FAIL("Unimplemented as onednn is not available.")
 #endif
   }
 
@@ -1978,7 +1978,7 @@ namespace at::native {
         /*unary_attr*/attr, /*unary_scalars*/scalars, /*unary_algorithm*/algorithm
     );
 #else
-    TORCH_CHECK(false, "Unimplemented as onednn is not available.")
+   TORCH_FAIL("Unimplemented as onednn is not available.")
 #endif
   }
 
@@ -2032,7 +2032,7 @@ namespace at::native {
         unary_attr, unary_scalars, unary_algorithm
     );
 #else
-    TORCH_CHECK(false, "Unimplemented as onednn is not available.")
+   TORCH_FAIL("Unimplemented as onednn is not available.")
 #endif
   }
 

@@ -157,7 +157,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
     at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
 #else
-    TORCH_CHECK(false, "built without USE_CUDA");
+    TORCH_FAIL("built without USE_CUDA");
 #endif
   } else {
     at::native::resize_bytes_nocuda(storage, newsize);
@@ -344,7 +344,7 @@ static PyObject* THPStorage_fromBuffer(
       if (it != decode_map.end()) {
         it->second(storage->mutable_data(), src + offset, do_byte_swap, count);
       } else {
-        TORCH_CHECK(false, "Unknown type: ", scalar_type);
+        TORCH_FAIL("Unknown type: ", scalar_type);
       }
     }
   }

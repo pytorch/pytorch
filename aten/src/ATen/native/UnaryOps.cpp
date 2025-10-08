@@ -608,7 +608,7 @@ Tensor imag(const Tensor& self) {
     }
     return at::select(real_tensor, real_tensor.dim() - 1, 1);
   } else {
-    TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
+   TORCH_FAIL("imag is not implemented for tensors with non-complex dtypes.");
   }
 }
 

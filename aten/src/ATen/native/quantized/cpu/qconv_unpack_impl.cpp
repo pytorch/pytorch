@@ -80,7 +80,7 @@ std::tuple<at::Tensor, std::optional<at::Tensor>> PackedConvWeight<
                   scales.toType(c10::kDouble),
                   zero_points.toType(c10::kLong));
   } else {
-    TORCH_CHECK(false, "Unsupported qscheme: ", toString(q_scheme));
+   TORCH_FAIL("Unsupported qscheme: ", toString(q_scheme));
   }
   int8_t* unpacked_weights_p =
       reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());

@@ -53,7 +53,7 @@ inline size_t DictKeyHash::operator()(const IValue& ivalue) const {
   } else if (ivalue.isDevice()) {
     return std::hash<Device>()(ivalue.toDevice());
   } else {
-    TORCH_CHECK(false, "Can't hash IValues with tag '", ivalue.tagKind(), "'");
+   TORCH_FAIL("Can't hash IValues with tag '", ivalue.tagKind(), "'");
   }
 }
 

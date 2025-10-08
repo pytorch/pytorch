@@ -1219,7 +1219,7 @@ void triangular_solve_out_sparse_csr(
     }
   }
 #ifdef USE_ROCM
-  TORCH_CHECK(false, "ROCm is not supported");
+ TORCH_FAIL("ROCm is not supported");
 #else
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
   // It should be possible to use mixed memory format

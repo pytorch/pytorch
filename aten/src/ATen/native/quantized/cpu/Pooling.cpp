@@ -742,7 +742,7 @@ class QMaxPool_arr_args final {
       return at::quantized_max_pool2d(qx, kernel_size, stride, padding,
                                       dilation, ceil_mode);
     }
-    TORCH_CHECK(false, "MaxPool", kSpatialDim, "D is not supported.");
+   TORCH_FAIL("MaxPool", kSpatialDim, "D is not supported.");
   }
 };
 

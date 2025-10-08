@@ -58,7 +58,7 @@ at::Tensor InputMetadata::maybe_reduce(
     const std::function<std::string(const std::string&)>& format_error) const {
   auto fail = [&]() {
     const auto message = incompatible_shape_error_message(i, grad);
-    TORCH_CHECK(false, format_error(message.str()));
+    TORCH_FAIL(format_error(message.str()));
   };
 
   // Nested tensor makes my brain explode, so I've just hard-coded the logic

@@ -211,7 +211,7 @@ std::ostream& operator<<(std::ostream& out, const Type& ty) {
               out << "CustomObj";
               break;
             default:
-              TORCH_CHECK(false, "Unhandled type");
+              TORCH_FAIL("Unhandled type");
           }
         } else if constexpr (is_same_v<T, Type::CustomObjData>) {
           out << "CustomObj: " << arg.classFqn;
@@ -609,7 +609,7 @@ void Graph::finalize() {
         userOutputs_.emplace_back(std::move(constantOutputs_[constantIndex]));
         constantIndex++;
       } else {
-        TORCH_CHECK(false, "No more constant outputs available");
+        TORCH_FAIL("No more constant outputs available");
       }
     }
   }
@@ -1189,7 +1189,7 @@ Constant convertAtomicConstant(std::string_view symbol) {
     return maybeDouble.value();
   }
 
-  TORCH_CHECK(false, "unhandled symbol: ", symbol);
+  TORCH_FAIL("unhandled symbol: ", symbol);
 }
 
 Constant convertListConstant(std::string_view source) {
@@ -1219,7 +1219,7 @@ Constant convertListConstant(std::string_view source) {
       } else if (auto boolPtr = std::get_if<bool>(&val)) {
         type = *boolPtr;
       } else {
-        TORCH_CHECK(false, "constant lists only support int, float, bool");
+        TORCH_FAIL("constant lists only support int, float, bool");
       }
     } else {
       TORCH_CHECK(
@@ -1259,7 +1259,7 @@ Constant convertListConstant(std::string_view source) {
     }
     return inner;
   }
-  TORCH_CHECK(false, "constant lists only support int, float, bool");
+  TORCH_FAIL("constant lists only support int, float, bool");
 }
 
 namespace {

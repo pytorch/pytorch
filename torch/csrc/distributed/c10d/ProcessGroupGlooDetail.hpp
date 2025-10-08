@@ -17,68 +17,68 @@
 #include <gloo/scatter.h>
 
 #ifdef _WIN32
-#define GENERATE_ALL_TYPES(type, func, ...)      \
-  switch (type) {                                \
-    case ::at::ScalarType::Float:                \
-      func<float>(__VA_ARGS__);                  \
-      break;                                     \
-    case ::at::ScalarType::Double:               \
-      func<double>(__VA_ARGS__);                 \
-      break;                                     \
-    case ::at::ScalarType::Half:                 \
-      func<c10::Half>(__VA_ARGS__);              \
-      break;                                     \
-    case ::at::ScalarType::BFloat16:             \
-      func<c10::BFloat16>(__VA_ARGS__);          \
-      break;                                     \
-    case ::at::ScalarType::Char:                 \
-      func<int8_t>(__VA_ARGS__);                 \
-      break;                                     \
-    case ::at::ScalarType::Byte:                 \
-    case ::at::ScalarType::Bool:                 \
-      func<uint8_t>(__VA_ARGS__);                \
-      break;                                     \
-    case ::at::ScalarType::Int:                  \
-      func<int32_t>(__VA_ARGS__);                \
-      break;                                     \
-    case ::at::ScalarType::Long:                 \
-      func<int64_t>(__VA_ARGS__);                \
-      break;                                     \
-    default:                                     \
-      TORCH_CHECK(false, "Invalid scalar type"); \
+#define GENERATE_ALL_TYPES(type, func, ...) \
+  switch (type) {                           \
+    case ::at::ScalarType::Float:           \
+      func<float>(__VA_ARGS__);             \
+      break;                                \
+    case ::at::ScalarType::Double:          \
+      func<double>(__VA_ARGS__);            \
+      break;                                \
+    case ::at::ScalarType::Half:            \
+      func<c10::Half>(__VA_ARGS__);         \
+      break;                                \
+    case ::at::ScalarType::BFloat16:        \
+      func<c10::BFloat16>(__VA_ARGS__);     \
+      break;                                \
+    case ::at::ScalarType::Char:            \
+      func<int8_t>(__VA_ARGS__);            \
+      break;                                \
+    case ::at::ScalarType::Byte:            \
+    case ::at::ScalarType::Bool:            \
+      func<uint8_t>(__VA_ARGS__);           \
+      break;                                \
+    case ::at::ScalarType::Int:             \
+      func<int32_t>(__VA_ARGS__);           \
+      break;                                \
+    case ::at::ScalarType::Long:            \
+      func<int64_t>(__VA_ARGS__);           \
+      break;                                \
+    default:                                \
+      TORCH_FAIL("Invalid scalar type");    \
   }
 
 #define HOST_NAME_MAX 256
 #else
-#define GENERATE_ALL_TYPES(type, func, args...)  \
-  switch (type) {                                \
-    case ::at::ScalarType::Float:                \
-      func<float>(args);                         \
-      break;                                     \
-    case ::at::ScalarType::Double:               \
-      func<double>(args);                        \
-      break;                                     \
-    case ::at::ScalarType::Half:                 \
-      func<c10::Half>(args);                     \
-      break;                                     \
-    case ::at::ScalarType::BFloat16:             \
-      func<c10::BFloat16>(args);                 \
-      break;                                     \
-    case ::at::ScalarType::Char:                 \
-      func<int8_t>(args);                        \
-      break;                                     \
-    case ::at::ScalarType::Byte:                 \
-    case ::at::ScalarType::Bool:                 \
-      func<uint8_t>(args);                       \
-      break;                                     \
-    case ::at::ScalarType::Int:                  \
-      func<int32_t>(args);                       \
-      break;                                     \
-    case ::at::ScalarType::Long:                 \
-      func<int64_t>(args);                       \
-      break;                                     \
-    default:                                     \
-      TORCH_CHECK(false, "Invalid scalar type"); \
+#define GENERATE_ALL_TYPES(type, func, args...) \
+  switch (type) {                               \
+    case ::at::ScalarType::Float:               \
+      func<float>(args);                        \
+      break;                                    \
+    case ::at::ScalarType::Double:              \
+      func<double>(args);                       \
+      break;                                    \
+    case ::at::ScalarType::Half:                \
+      func<c10::Half>(args);                    \
+      break;                                    \
+    case ::at::ScalarType::BFloat16:            \
+      func<c10::BFloat16>(args);                \
+      break;                                    \
+    case ::at::ScalarType::Char:                \
+      func<int8_t>(args);                       \
+      break;                                    \
+    case ::at::ScalarType::Byte:                \
+    case ::at::ScalarType::Bool:                \
+      func<uint8_t>(args);                      \
+      break;                                    \
+    case ::at::ScalarType::Int:                 \
+      func<int32_t>(args);                      \
+      break;                                    \
+    case ::at::ScalarType::Long:                \
+      func<int64_t>(args);                      \
+      break;                                    \
+    default:                                    \
+      TORCH_FAIL("Invalid scalar type");        \
   }
 #endif
 
@@ -130,23 +130,23 @@ ReduceFunc toFunction(const ReduceOp& r) {
     case ReduceOp::MAX:
       return ReduceFunc(&::gloo::max<T>);
     case ReduceOp::BAND:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BAND with non-integral dtype");
+      TORCH_FAIL("Cannot use ReduceOp.BAND with non-integral dtype");
       break;
     case ReduceOp::BOR:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BOR with non-integral dtype");
+      TORCH_FAIL("Cannot use ReduceOp.BOR with non-integral dtype");
       break;
     case ReduceOp::BXOR:
-      TORCH_CHECK(false, "Cannot use ReduceOp.BXOR with non-integral dtype");
+      TORCH_FAIL("Cannot use ReduceOp.BXOR with non-integral dtype");
       break;
     case ReduceOp::PREMUL_SUM:
-      TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
+      TORCH_FAIL("Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
     case ReduceOp::UNUSED:
     default:
       break;
   }
 
-  TORCH_CHECK(false, "Unhandled ReduceOp");
+  TORCH_FAIL("Unhandled ReduceOp");
 }
 
 // Bitwise AND with SFINAE guard for integral types.
@@ -201,14 +201,14 @@ ReduceFunc toFunction(const ReduceOp& r) {
     case ReduceOp::BXOR:
       return ReduceFunc(&bxor<T>);
     case ReduceOp::PREMUL_SUM:
-      TORCH_CHECK(false, "Cannot use ReduceOp.PREMUL_SUM with Gloo");
+      TORCH_FAIL("Cannot use ReduceOp.PREMUL_SUM with Gloo");
       break;
     case ReduceOp::UNUSED:
     default:
       break;
   }
 
-  TORCH_CHECK(false, "Unhandled ReduceOp");
+  TORCH_FAIL("Unhandled ReduceOp");
 }
 
 template <typename T, typename O>

@@ -915,7 +915,7 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
     });
     return result;
   } else {
-    TORCH_CHECK(false, "Tiling of batch matmul for larger than 2**32 entries only available from MacOS15 onwards");
+    TORCH_FAIL("Tiling of batch matmul for larger than 2**32 entries only available from MacOS15 onwards");
   }
 }
 

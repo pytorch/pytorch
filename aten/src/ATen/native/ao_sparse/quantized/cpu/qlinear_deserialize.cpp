@@ -272,7 +272,7 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
         w_zero_points_.begin(),
         add_128);
   } else {
-    TORCH_CHECK(false, "Unsupported quantization scheme.");
+   TORCH_FAIL("Unsupported quantization scheme.");
   }
 
   deserialized_bcsr_row_block_indices_ =

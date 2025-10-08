@@ -937,11 +937,11 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
         break;
       case SDPBackend::overrideable:
         if (ctx.userEnabledOverrideableSDP()) {
-          TORCH_CHECK(false, "Invalid backend");
+         TORCH_FAIL("Invalid backend");
         }
         break;
       default:
-        TORCH_CHECK(false, "Invalid backend");
+       TORCH_FAIL("Invalid backend");
     }
   }
   // If we have gotten to this point then two things have happened:

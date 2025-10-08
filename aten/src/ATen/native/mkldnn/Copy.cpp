@@ -14,7 +14,7 @@
 namespace at::native {
 
 Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
-  TORCH_CHECK(false, "copy_mkldnn_: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("copy_mkldnn_: ATen not compiled with MKLDNN support");
 }
 
 } // namespace at::native

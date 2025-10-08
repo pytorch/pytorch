@@ -386,7 +386,7 @@ inline void resize_reduction(
   } else if (shape.empty()) {
     meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype).layout(kStrided));
   } else {
-    TORCH_CHECK(false, "resize_reduction: support for output with ", self.layout(), " layout is not implemented yet");
+   TORCH_FAIL("resize_reduction: support for output with ", self.layout(), " layout is not implemented yet");
   }
   namedinference::propagate_names_for_reduction(
       meta.maybe_get_output(), self, dims_, keepdim);

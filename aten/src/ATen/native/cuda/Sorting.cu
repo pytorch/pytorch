@@ -184,7 +184,7 @@ struct KthValueLauncher {
       int64_t slice_size) {
     dim3 grid;
     if (!getGridFromTiles(num_slices, grid)) {
-      TORCH_CHECK(false, "slices are too many");
+     TORCH_FAIL("slices are too many");
     }
 
     dim3 block(std::min(
@@ -221,7 +221,7 @@ struct MedianLauncher {
       int64_t slice_size) {
     dim3 grid;
     if (!getGridFromTiles(num_slices, grid)) {
-      TORCH_CHECK(false, "slices are too many");
+     TORCH_FAIL("slices are too many");
     }
 
     dim3 block(std::min(

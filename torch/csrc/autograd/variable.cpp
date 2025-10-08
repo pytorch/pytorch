@@ -119,7 +119,7 @@ ViewInfo ViewInfo::chain(
              "does not support as_strided(). This is not supported.");
         view_func = std::make_unique<ErroringViewFunc>(error_msg);
         rev_view_func = [=](const at::Tensor& root_view) {
-          TORCH_CHECK(false, error_msg);
+          TORCH_FAIL(error_msg);
           return root_view;
         };
       }
@@ -623,7 +623,7 @@ const at::TensorBase& VariableHooks::base(const at::TensorBase& self) const {
         "Can't get base of non-backward view Tensor");
     return diff_view_meta->get_backward_view().base_;
   } else {
-    TORCH_CHECK(false, "Can't get base of non-view Tensor");
+    TORCH_FAIL("Can't get base of non-view Tensor");
   }
 }
 
@@ -847,7 +847,7 @@ void handle_view_on_rebase(
       TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
     }
 
-    TORCH_CHECK(false, msg);
+    TORCH_FAIL(msg);
   }
 }
 

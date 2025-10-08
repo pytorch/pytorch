@@ -322,7 +322,7 @@ void PyRRef::backwardOwnerRRef(
     try {
       value = torch::jit::toIValue(obj, c10::TensorType::get());
     } catch (py::cast_error& e) {
-      TORCH_CHECK(false, "RRef should contain a tensor for .backward()");
+      TORCH_FAIL("RRef should contain a tensor for .backward()");
     }
   }
 

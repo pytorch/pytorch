@@ -131,7 +131,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclBfloat16;
 #endif
     default:
-      TORCH_CHECK(false, "Unconvertible NCCL type ", type);
+      TORCH_FAIL("Unconvertible NCCL type ", type);
   }
 }
 
@@ -517,7 +517,7 @@ void get_unique_id(ncclUniqueId& id) {
   using namespace torch::cuda::nccl::detail;
   NCCL_CHECK(ncclGetUniqueId(to_nccl_unique_id(&id)));
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -632,7 +632,7 @@ void broadcast(
         stream));
   }
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -681,7 +681,7 @@ void reduce(
         stream));
   }
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -732,7 +732,7 @@ void all_reduce(
         stream));
   }
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -774,7 +774,7 @@ void reduce_scatter(
         stream));
   }
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -824,7 +824,7 @@ void all_gather(
 #endif
   }
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -869,10 +869,10 @@ void all2all_single_equal_split(
 #endif
 #endif
 #else
-  TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
+  TORCH_FAIL("all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -939,10 +939,10 @@ void all2all_single_unequal_split(
 #endif
 #endif
 #else
-  TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
+  TORCH_FAIL("all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -987,10 +987,10 @@ void all2all(
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
 #endif
 #else
-  TORCH_CHECK(false, "all2all is only supported for NCCL lib version >= 2.7.0");
+  TORCH_FAIL("all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -1023,10 +1023,10 @@ void send(
       comm);
 #endif
 #else
-  TORCH_CHECK(false, "Send is only supported for NCCL lib version >= 2.7.0");
+  TORCH_FAIL("Send is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -1059,10 +1059,10 @@ void recv(
       comm);
 #endif
 #else
-  TORCH_CHECK(false, "Recv is only supported for NCCL lib version >= 2.7.0");
+  TORCH_FAIL("Recv is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -1108,10 +1108,10 @@ void gather(
 #endif
 
 #else
-  TORCH_CHECK(false, "gather is only supported for NCCL lib version >= 2.7.0");
+  TORCH_FAIL("gather is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 
@@ -1161,10 +1161,10 @@ void scatter(
   NCCL_CHECK_TIMEOUT(ncclGroupEnd(), _comm);
 #endif
 #else
-  TORCH_CHECK(false, "scatter is only supported for NCCL lib version >= 2.7.0");
+  TORCH_FAIL("scatter is only supported for NCCL lib version >= 2.7.0");
 #endif
 #else
-  TORCH_CHECK(false, "PyTorch built without NCCL support");
+  TORCH_FAIL("PyTorch built without NCCL support");
 #endif
 }
 

@@ -360,7 +360,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   PyTuple_SET_ITEM(tuple.get(), 7, _event_sync_required.release());
   return tuple.release();
 #else
-  TORCH_CHECK(false, "CUDA is not available");
+  TORCH_FAIL("CUDA is not available");
 #endif
   END_HANDLE_TH_ERRORS
 }
@@ -402,7 +402,7 @@ static PyObject* THPStorage_releaseIPCCounter(
   }
   Py_RETURN_NONE;
 #else
-  TORCH_CHECK(false, "CUDA is not available");
+  TORCH_FAIL("CUDA is not available");
 #endif
   END_HANDLE_TH_ERRORS
 }
@@ -557,7 +557,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
 
   return THPStorage_NewWithStorage(THPStorageClass, std::move(base));
 #else
-  TORCH_CHECK(false, "CUDA is not available");
+  TORCH_FAIL("CUDA is not available");
 #endif
   END_HANDLE_TH_ERRORS
 }

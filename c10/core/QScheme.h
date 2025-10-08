@@ -43,7 +43,7 @@ inline std::string toString(QScheme qscheme) {
     case kPerChannelAffineFloatQParams:
       return "per_channel_affine_float_qparams";
     default:
-      TORCH_CHECK(false, "Unrecognized qscheme: ", static_cast<int>(qscheme));
+      TORCH_FAIL("Unrecognized qscheme: ", static_cast<int>(qscheme));
   }
 }
 

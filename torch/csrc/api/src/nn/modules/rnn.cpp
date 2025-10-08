@@ -35,7 +35,7 @@ static CuDNNMode get_cudnn_mode_for_rnn(
   } else if (std::holds_alternative<enumtype::kGRU>(mode)) {
     return CuDNNMode::GRU;
   } else {
-    TORCH_CHECK(false, "Unknown mode: ", torch::enumtype::get_enum_name(mode));
+    TORCH_FAIL("Unknown mode: ", torch::enumtype::get_enum_name(mode));
   }
 }
 
@@ -333,7 +333,7 @@ void RNNImplBase<Derived>::check_hidden_size(
     msg = std::regex_replace(
         msg, std::regex("\\{1\\}"), c10::str(expected_hidden_size_vec));
     msg = std::regex_replace(msg, std::regex("\\{2\\}"), c10::str(hx.sizes()));
-    TORCH_CHECK(false, msg);
+    TORCH_FAIL(msg);
   }
 }
 

@@ -85,7 +85,7 @@ static inline void slow_conv_transpose2d_shape_check(
       check_dim_size(bias, 1, 0, weight.size(1));
     }
   } else if (!weight_nullable) {
-    TORCH_CHECK(false, "weight tensor is expected to be non-nullable");
+   TORCH_FAIL("weight tensor is expected to be non-nullable");
   }
 
   int ndim = input.dim();

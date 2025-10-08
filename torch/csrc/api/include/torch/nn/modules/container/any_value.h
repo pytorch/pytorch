@@ -94,7 +94,7 @@ class AnyValue {
     Placeholder& operator=(Placeholder&&) = delete;
     virtual ~Placeholder() = default;
     virtual std::unique_ptr<Placeholder> clone() const {
-      TORCH_CHECK(false, "clone() should only be called on `AnyValue::Holder`");
+      TORCH_FAIL("clone() should only be called on `AnyValue::Holder`");
     }
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::type_info& type_info;

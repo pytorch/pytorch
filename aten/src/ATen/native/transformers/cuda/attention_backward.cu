@@ -184,7 +184,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
   }
 #endif
-  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.");
+ TORCH_FAIL("USE_FLASH_ATTENTION was not enabled for build.");
   return std::make_tuple(Tensor(), Tensor(), Tensor());
 }
 
@@ -530,7 +530,7 @@ _efficient_attention_backward(
                      philox_offset);
     grad_bias = dBias;
 #else
-    TORCH_CHECK(false, "Attempting to use CK mem_eff_backward backend in a build that has not built CK");
+   TORCH_FAIL("Attempting to use CK mem_eff_backward backend in a build that has not built CK");
 #endif
   } else {
 #ifndef DISABLE_AOTRITON
@@ -552,7 +552,7 @@ _efficient_attention_backward(
       is_causal = true;
 #if AOTRITON_V3_API == 0
       if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) != custom_mask_type) {
-        TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
+       TORCH_FAIL("[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
       }
 #endif
     }
@@ -700,7 +700,7 @@ _efficient_attention_backward(
       } //used_fused_bwd
     } // cuseqlen.has_value
 #else  // DISABLE_AOTRITON
-    TORCH_CHECK(false, "Attempting to use aotriton mem_eff_backward backend in a build that has not built AOTriton");
+   TORCH_FAIL("Attempting to use aotriton mem_eff_backward backend in a build that has not built AOTriton");
 #endif
   } // Use CK
 #else // USE_CUDA
@@ -967,7 +967,7 @@ _efficient_attention_backward(
 #endif // USE_ROCM
   return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v), std::move(grad_bias));
   #endif // defined(USE_MEM_EFF_ATTENTION)
-  TORCH_CHECK(false, "USE_MEM_EFF_ATTENTION was not enabled for build.")
+ TORCH_FAIL("USE_MEM_EFF_ATTENTION was not enabled for build.")
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
 }
 

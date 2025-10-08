@@ -289,7 +289,7 @@ static variable_list unwrap_variables(PyObject* py_variables) {
       results[i] = THPVariable_Unpack(item);
     } else {
       // this should never happen, but just in case...
-      TORCH_CHECK(false, "expected variable but got ", Py_TYPE(item)->tp_name);
+      TORCH_FAIL("expected variable but got ", Py_TYPE(item)->tp_name);
     }
   }
   return results;

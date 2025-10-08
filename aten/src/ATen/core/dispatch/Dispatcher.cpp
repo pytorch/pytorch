@@ -154,9 +154,9 @@ OperatorHandle Dispatcher::findSchemaOrThrow(const char* name, const char* overl
     // missing schema
     auto it2 = findOp({name, overload_name});
     if (!it2.has_value()) {
-      TORCH_CHECK(false, "Could not find schema for ", name, ".", overload_name);
+     TORCH_FAIL("Could not find schema for ", name, ".", overload_name);
     } else {
-      TORCH_CHECK(false, "Could not find schema for ", name, ".", overload_name,
+     TORCH_FAIL("Could not find schema for ", name, ".", overload_name,
         " but we found an implementation; did you forget to def() the operator?");
     }
   }

@@ -112,7 +112,7 @@ struct C10_API DeviceGuardImplInterface {
    * Get the default stream for a given device.
    */
   virtual Stream getDefaultStream(Device) const {
-    TORCH_CHECK(false, "Backend doesn't support acquiring a default stream.")
+    TORCH_FAIL("Backend doesn't support acquiring a default stream.")
   }
 
   /**
@@ -121,7 +121,7 @@ struct C10_API DeviceGuardImplInterface {
   virtual Stream getStreamFromGlobalPool(Device, bool isHighPriority = false)
       const {
     (void)isHighPriority; // Suppress unused variable warning
-    TORCH_CHECK(false, "Backend doesn't support acquiring a stream from pool.")
+    TORCH_FAIL("Backend doesn't support acquiring a stream from pool.")
   }
 
   /**
@@ -131,7 +131,7 @@ struct C10_API DeviceGuardImplInterface {
    */
   virtual Stream getNewStream(Device, int priority = 0) const {
     (void)priority;
-    TORCH_CHECK(false, "Backend doesn't support create a new Stream.")
+    TORCH_FAIL("Backend doesn't support create a new Stream.")
   }
 
   /**
@@ -158,7 +158,7 @@ struct C10_API DeviceGuardImplInterface {
       const Stream& /*stream*/,
       const DeviceIndex /*device_index*/,
       const c10::EventFlag /*flag*/) const {
-    TORCH_CHECK(false, "Backend doesn't support events.");
+    TORCH_FAIL("Backend doesn't support events.");
   }
 
   /**
@@ -170,7 +170,7 @@ struct C10_API DeviceGuardImplInterface {
    * additional commands until that version of the event is marked as recorded.
    */
   virtual void block(void* /*event*/, const Stream& /*stream*/) const {
-    TORCH_CHECK(false, "Backend doesn't support events.");
+    TORCH_FAIL("Backend doesn't support events.");
   }
 
   /**
@@ -180,7 +180,7 @@ struct C10_API DeviceGuardImplInterface {
    * Returns false otherwise.
    */
   virtual bool queryEvent(void* /*event*/) const {
-    TORCH_CHECK(false, "Backend doesn't support events.");
+    TORCH_FAIL("Backend doesn't support events.");
   }
 
   /**
@@ -195,7 +195,7 @@ struct C10_API DeviceGuardImplInterface {
    * asynchronous execution has completed running on the device.
    */
   virtual bool queryStream(const Stream& /*stream*/) const {
-    TORCH_CHECK(false, "Backend doesn't support querying streams.");
+    TORCH_FAIL("Backend doesn't support querying streams.");
   }
 
   /**
@@ -203,7 +203,7 @@ struct C10_API DeviceGuardImplInterface {
    * enqueued on the stream has completed running on the device.
    */
   virtual void synchronizeStream(const Stream& /*stream*/) const {
-    TORCH_CHECK(false, "Backend doesn't support synchronizing streams.");
+    TORCH_FAIL("Backend doesn't support synchronizing streams.");
   }
 
   /**
@@ -211,7 +211,7 @@ struct C10_API DeviceGuardImplInterface {
    * recorded on the event has completed running on the device.
    */
   virtual void synchronizeEvent(void* /*event*/) const {
-    TORCH_CHECK(false, "Backend doesn't support synchronizing events.");
+    TORCH_FAIL("Backend doesn't support synchronizing events.");
   }
 
   /**
@@ -238,7 +238,7 @@ struct C10_API DeviceGuardImplInterface {
       void* /*event1*/,
       void* /*event2*/,
       const DeviceIndex /*device_index*/) const {
-    TORCH_CHECK(false, "Backend doesn't support elapsedTime.");
+    TORCH_FAIL("Backend doesn't support elapsedTime.");
   }
 
   /**
@@ -295,13 +295,13 @@ struct NoOpDeviceGuardImpl : public DeviceGuardImplInterface {
       const Stream& /*stream*/,
       const DeviceIndex /*device_index*/,
       const EventFlag /*flag*/) const override {
-    TORCH_CHECK(false, D, " backend doesn't support events.");
+    TORCH_FAIL(D, " backend doesn't support events.");
   }
   void block(void* /*event*/, const Stream& /*stream*/) const override {
-    TORCH_CHECK(false, D, " backend doesn't support events.")
+    TORCH_FAIL(D, " backend doesn't support events.")
   }
   bool queryEvent(void* /*event*/) const override {
-    TORCH_CHECK(false, D, " backend doesn't support events.")
+    TORCH_FAIL(D, " backend doesn't support events.")
   }
   void destroyEvent(void* /*event*/, const DeviceIndex /*device_index*/)
       const noexcept override {}

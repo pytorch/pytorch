@@ -74,7 +74,7 @@ template <>
 float getDurationFromEvent<c10::Event>(
     c10::Event& startEvent,
     c10::Event& endEvent) {
-  TORCH_CHECK(false, "getDuration not supported by c10::Event.");
+  TORCH_FAIL("getDuration not supported by c10::Event.");
 }
 
 // For any third party library that uses the flight recorder, if one wants to

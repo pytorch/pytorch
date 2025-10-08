@@ -222,7 +222,7 @@ std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
     makeDeviceForInterface(const std::string& interfaceName, bool lazyInit) {
   auto device = makeGlooDevice(interfaceName, "", lazyInit);
   if (!device) {
-    TORCH_CHECK(false, "makeDeviceForInterface(): unsupported gloo device");
+    TORCH_FAIL("makeDeviceForInterface(): unsupported gloo device");
   }
   return device;
 }
@@ -231,7 +231,7 @@ std::shared_ptr<::gloo::transport::Device> GlooDeviceFactory::
     makeDeviceForHostname(const std::string& hostname, bool lazyInit) {
   auto device = makeGlooDevice("", hostname, lazyInit);
   if (!device) {
-    TORCH_CHECK(false, "makeDeviceForHostname(): unsupported gloo device");
+    TORCH_FAIL("makeDeviceForHostname(): unsupported gloo device");
   }
   return device;
 }

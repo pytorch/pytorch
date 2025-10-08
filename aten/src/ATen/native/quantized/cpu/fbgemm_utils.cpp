@@ -469,7 +469,7 @@ int register_linear_params() {
                   return std::apply(PackedLinearWeightsOnednn::prepack, std::move(state));
                 }
 #endif // #if AT_MKLDNN_ENABLED()
-                TORCH_CHECK(false, "Unknown qengine");
+               TORCH_FAIL("Unknown qengine");
               })
               .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
                   return std::get<1>(self->unpack());

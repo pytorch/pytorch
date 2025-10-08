@@ -344,7 +344,7 @@ inline void addInputs(
     Node* n,
     const char* name,
     const std::vector<bool>& value) {
-  TORCH_CHECK(false, "Tracing a list of bool type is currently not supported!");
+  TORCH_FAIL("Tracing a list of bool type is currently not supported!");
 }
 
 template <typename T>

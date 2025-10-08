@@ -52,7 +52,7 @@ dnnl::memory::format_tag get_dnnl_default_format(
       return dnnl::memory::format_tag::abcdefghijkl;
     default:
       if (!allow_undef) {
-        TORCH_CHECK(false, "oneDNN doesn't support tensor dimension > 12");
+        TORCH_FAIL("oneDNN doesn't support tensor dimension > 12");
       }
       return dnnl::memory::format_tag::undef;
   }

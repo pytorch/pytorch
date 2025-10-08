@@ -1399,7 +1399,7 @@ namespace at::native {
         post_op_name, post_op_args, post_op_algorithm
     );
 #endif
-    TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
+   TORCH_FAIL("Unimplemented (int8 linear with packed weight and bias)");
   }
 
   Tensor QLinearOnednn::run_pointwise_binary_tensor(
@@ -1435,7 +1435,7 @@ namespace at::native {
         unary_post_op, unary_post_op_args, unary_post_op_algorithm
     );
 #endif
-    TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
+   TORCH_FAIL("Unimplemented (int8 linear with packed weight and bias)");
   }
 
   Tensor _weight_int4pack_mm_cpu_tensor(
@@ -1564,7 +1564,7 @@ class QLinearOnednn final {
         post_op_name, post_op_args, post_op_algorithm
     );
 #endif
-    TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
+   TORCH_FAIL("Unimplemented (int8 linear with packed weight and bias)");
   }
 
   static Tensor run_pointwise_binary(
@@ -1596,7 +1596,7 @@ class QLinearOnednn final {
         unary_post_op, unary_post_op_args, unary_post_op_algorithm
     );
 #endif
-    TORCH_CHECK(false, "Unimplemented (int8 linear with packed weight and bias)");
+   TORCH_FAIL("Unimplemented (int8 linear with packed weight and bias)");
   }
 };
 

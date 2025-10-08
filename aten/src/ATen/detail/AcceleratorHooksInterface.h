@@ -41,7 +41,7 @@ struct TORCH_API AcceleratorHooksInterface {
   virtual bool hasPrimaryContext(DeviceIndex device_index) const = 0;
 
   virtual void init() const {
-    TORCH_CHECK(false, "Backend doesn`t support init()");
+   TORCH_FAIL("Backend doesn`t support init()");
   }
 
   virtual DeviceIndex deviceCount() const {
@@ -49,21 +49,21 @@ struct TORCH_API AcceleratorHooksInterface {
   }
 
   virtual void setCurrentDevice(DeviceIndex device) const {
-    TORCH_CHECK(false, "Backend doesn't support setCurrentDevice()");
+   TORCH_FAIL("Backend doesn't support setCurrentDevice()");
   }
 
   virtual DeviceIndex getCurrentDevice() const {
-    TORCH_CHECK(false, "Backend doesn't support getCurrentDevice()");
+   TORCH_FAIL("Backend doesn't support getCurrentDevice()");
     return -1;
   }
 
   virtual DeviceIndex exchangeDevice(DeviceIndex device) const {
-    TORCH_CHECK(false, "Backend doesn't support exchangeDevice()");
+   TORCH_FAIL("Backend doesn't support exchangeDevice()");
     return -1;
   }
 
   virtual DeviceIndex maybeExchangeDevice(DeviceIndex device) const {
-    TORCH_CHECK(false, "Backend doesn't support maybeExchangeDevice()");
+   TORCH_FAIL("Backend doesn't support maybeExchangeDevice()");
     return -1;
   }
 
@@ -72,22 +72,22 @@ struct TORCH_API AcceleratorHooksInterface {
   }
 
   virtual Allocator* getPinnedMemoryAllocator() const {
-    TORCH_CHECK(false, "Backend doesn't support getPinnedMemoryAllocator()");
+   TORCH_FAIL("Backend doesn't support getPinnedMemoryAllocator()");
     return nullptr;
   }
 
   virtual Device getDeviceFromPtr(void* data) const {
-    TORCH_CHECK(false, "Backend doesn't support getDeviceFromPtr()");
+   TORCH_FAIL("Backend doesn't support getDeviceFromPtr()");
   }
 
   virtual const Generator& getDefaultGenerator(
       [[maybe_unused]] DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Backend doesn`t support getDefaultGenerator()");
+   TORCH_FAIL("Backend doesn`t support getDefaultGenerator()");
   }
 
   virtual Generator getNewGenerator(
       [[maybe_unused]] DeviceIndex device_index = -1) const {
-    TORCH_CHECK(false, "Backend doesn`t support getNewGenerator()");
+   TORCH_FAIL("Backend doesn`t support getNewGenerator()");
   }
 };
 

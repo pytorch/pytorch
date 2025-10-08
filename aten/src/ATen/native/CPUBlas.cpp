@@ -956,7 +956,7 @@ static inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
   } else if (dtype == ScalarType::Char) {
     return dnnl::memory::data_type::s8;
   } else {
-    TORCH_CHECK(false, "get_dnnl_dtype expects float/bfloat16/half/int8 tensor input");
+   TORCH_FAIL("get_dnnl_dtype expects float/bfloat16/half/int8 tensor input");
   }
 }
 
@@ -1178,7 +1178,7 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     if (could_pack(dt_in)) {
       (*pack).execute(in, out);
     } else {
-      TORCH_CHECK(false, "No need to pack");
+     TORCH_FAIL("No need to pack");
     }
   }
 
@@ -1389,7 +1389,7 @@ void pack(
 #if defined(ONEDNN_UKERNEL_ENABLED)
   Pack::call(K, N, ld_in, ld_out, dt_in, dt_out, in, out);
 #else
-  TORCH_CHECK(false, "pack is only supported on X64 with oneDNN ukernel enabled");
+ TORCH_FAIL("pack is only supported on X64 with oneDNN ukernel enabled");
 #endif
 }
 

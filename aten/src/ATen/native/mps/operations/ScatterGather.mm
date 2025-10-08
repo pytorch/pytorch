@@ -380,7 +380,7 @@ static void scatter_reduce_two_mps_kernel(const Tensor& self,
       TORCH_CHECK(self.scalar_type() != kLong, "not supported for torch.int64");
       return scatter_mps_general(self, dim, index, src, self, "scatter_reduce_two_mps", "amax");
   }
-  TORCH_CHECK(false, "Unsupported reduction type: ", static_cast<int>(reduce));
+  TORCH_FAIL("Unsupported reduction type: ", static_cast<int>(reduce));
 }
 
 REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_mps_kernel);

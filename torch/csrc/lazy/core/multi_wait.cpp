@@ -32,7 +32,7 @@ void MultiWait::Wait(double wait_seconds) {
   if (!cv_.wait_for(lock, std::chrono::duration<double>(wait_seconds), [this] {
         return completed_count_ >= count_;
       })) {
-    TORCH_CHECK(false, "Timeout");
+    TORCH_FAIL("Timeout");
   }
   if (exptr_ != nullptr) {
     std::rethrow_exception(exptr_);

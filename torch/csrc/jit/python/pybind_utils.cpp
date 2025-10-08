@@ -533,7 +533,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 #ifdef USE_RPC
       return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
 #else
-      TORCH_CHECK(false, "RRef is only supported with the distributed package");
+      TORCH_FAIL("RRef is only supported with the distributed package");
 #endif
     } break;
     case TypeKind::PyObjectType: {
@@ -712,7 +712,7 @@ py::object toPyObject(IValue ivalue) {
             std::move(ivalue).toRRef());
     return py::cast(torch::distributed::rpc::PyRRef(RRefPtr));
 #else
-    TORCH_CHECK(false, "RRef is only supported with the distributed package");
+    TORCH_FAIL("RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
@@ -757,7 +757,7 @@ py::object toPyObject(IValue ivalue) {
         c10::static_intrusive_pointer_cast<distributed::rpc::RRef>(
             ivalue.toRRef())));
 #else
-    TORCH_CHECK(false, "RRef is only supported with the distributed package");
+    TORCH_FAIL("RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isSymInt()) {
     return py::cast(std::move(ivalue).toSymInt());
