@@ -72,7 +72,7 @@ class CheckpointWriter:
         self,
         config: CheckpointWriterConfig,
         rank_info: RankInfo,
-        barrier: Optional[Barrier] = None,
+        barrier: Barrier | None = None,
         commit_hook: Optional[WriterHook] = None,
     ):
         """
