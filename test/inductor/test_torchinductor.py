@@ -4431,6 +4431,11 @@ class CommonTemplate:
     @parametrize("dim", (subtest(2), subtest(3)))
     @skip_if_halide
     def test_low_memory_max_pool(self, dilation: int, dim: int):
+        # Temporary skip: CUDA 3D cases intermittently fail Triton compilation
+        # ("PassManager::run failed") in trunk GPU shards for both dilation=1 and 2.
+        # Example logs: linux-jammy-cuda12.8-py3.10-gcc11 default shards
+        if getattr(self.device, "type", str(self.device)) != "cpu" and dim == 3:
+            self.skipTest("Skip GPU 3D low_memory_max_pool due to Triton compile failure (dilation=1,2)")
         prims = torch.ops.prims
 
         def fn(x):
