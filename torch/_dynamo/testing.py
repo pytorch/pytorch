@@ -507,9 +507,9 @@ def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 
 
 def skipIfOnlyNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
-    if sys.version_info == (3, 12):
-        return fn
-    return unittest.skip("Requires Python 3.12")(fn)
+    if sys.version_info < (3, 12) or sys.version_info >= (3, 13):
+        return unittest.skip("Requires Python 3.12")
+    return fn
 
 
 def xfailIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
