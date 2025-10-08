@@ -22,9 +22,10 @@ import platform
 import sys
 import textwrap
 import threading
+import warnings
+from collections.abc import Callable as _Callable
 from typing import (
     Any as _Any,
-    Callable as _Callable,
     get_origin as _get_origin,
     Optional as _Optional,
     overload as _overload,
@@ -283,16 +284,26 @@ if sys.platform == "win32":
 
 
 def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
-    # Libraries can either be in path/nvidia/lib_folder/lib or path/lib_folder/lib
+    # Libraries can either be in
+    # path/nvidia/lib_folder/lib or
+    # path/nvidia/cuXX/lib (since CUDA 13.0) or
+    # path/lib_folder/lib
+    from torch.version import cuda as cuda_version
+
     nvidia_lib_paths = glob.glob(
         os.path.join(path, "nvidia", lib_folder, "lib", lib_name)
     )
+    if cuda_version is not None:
+        maj_cuda_version = cuda_version.split(".")[0]
+        nvidia_lib_paths += glob.glob(
+            os.path.join(path, "nvidia", f"cu{maj_cuda_version}", "lib", lib_name)
+        )
     lib_paths = glob.glob(os.path.join(path, lib_folder, "lib", lib_name))
 
     return nvidia_lib_paths + lib_paths
 
 
-def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
+def _preload_cuda_deps(lib_folder: str, lib_name: str, required: bool = True) -> None:  # type: ignore[valid-type]
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == "Linux", "Should only be called on Linux"
@@ -303,9 +314,10 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
         if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
             break
-    if not lib_path:
+    if not lib_path and required:
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
-    ctypes.CDLL(lib_path)
+    if lib_path:
+        ctypes.CDLL(lib_path)
 
 
 # See Note [Global dependencies]
@@ -330,12 +342,13 @@ def _load_global_deps() -> None:
         try:
             with open("/proc/self/maps") as f:
                 _maps = f.read()
-            # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
-            if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
+
+            # libtorch_global_deps.so always depends in cudart, check if its installed and loaded
+            if "libcudart.so" not in _maps:
                 return
             # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
-            # Please note that order are important for CUDA-11.8 , as nvjitlink does not exist there
             _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
+            _preload_cuda_deps("cuda_nvrtc", "libnvrtc-builtins.so.*[0-9]")
             _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
         except Exception:
             pass
@@ -343,8 +356,6 @@ def _load_global_deps() -> None:
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
-        from torch.version import cuda as cuda_version
-
         cuda_libs: dict[str, str] = {
             "cublas": "libcublas.so.*[0-9]",
             "cudnn": "libcudnn.so.*[0-9]",
@@ -358,7 +369,6 @@ def _load_global_deps() -> None:
             "cusparselt": "libcusparseLt.so.*[0-9]",
             "cusolver": "libcusolver.so.*[0-9]",
             "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
             "nvshmem": "libnvshmem_host.so.*[0-9]",
             "cufile": "libcufile.so.*[0-9]",
         }
@@ -370,6 +380,9 @@ def _load_global_deps() -> None:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
+
+        # libnvToolsExt is Optional Dependency
+        _preload_cuda_deps("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
@@ -1416,17 +1429,6 @@ def use_deterministic_algorithms(
     :attr:`torch.utils.deterministic.fill_uninitialized_memory` is turned on.
     See the documentation for that attribute for more information.
 
-    A handful of CUDA operations are nondeterministic if the CUDA version is
-    10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
-    or ``CUBLAS_WORKSPACE_CONFIG=:16:8`` is set. See the CUDA documentation for more
-    details: `<https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility>`_
-    If one of these environment variable configurations is not set, a :class:`RuntimeError`
-    will be raised from these operations when called with CUDA tensors:
-
-        * :func:`torch.mm`
-        * :func:`torch.mv`
-        * :func:`torch.bmm`
-
     Note that deterministic operations tend to have worse performance than
     nondeterministic operations.
 
@@ -1688,9 +1690,10 @@ def _check(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(RuntimeError, cond, message)
+    _check_with(RuntimeError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
+# TODO add deprecation annotation
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
@@ -1737,7 +1740,7 @@ def _check_index(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(IndexError, cond, message)
+    _check_with(IndexError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
 def _check_value(cond, message=None):  # noqa: F811
@@ -1755,7 +1758,7 @@ def _check_value(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(ValueError, cond, message)
+    _check_with(ValueError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
 def _check_type(cond, message=None):  # noqa: F811
@@ -1773,7 +1776,7 @@ def _check_type(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(TypeError, cond, message)
+    _check_with(TypeError, cond, message)  # pyrefly: ignore  # bad-argument-type
 
 
 def _check_not_implemented(cond, message=None):  # noqa: F811
@@ -1791,7 +1794,12 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(NotImplementedError, cond, message)
+    _check_with(
+        NotImplementedError,
+        cond,
+        # pyrefly: ignore  # bad-argument-type
+        message,
+    )
 
 
 def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
@@ -2601,7 +2609,7 @@ def compile(
         def fn(model: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
             if model is None:
                 raise RuntimeError("Model can't be None")
-            return compile(
+            return compile(  # pyrefly: ignore  # no-matching-overload
                 model,
                 fullgraph=fullgraph,
                 dynamic=dynamic,
@@ -2628,6 +2636,29 @@ def compile(
     guard_filter_fn = None
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
+
+    if torch.compiler.is_exporting():
+        warnings.warn(
+            "You are calling torch.compile inside torch.export region. "
+            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)"
+        )
+        from torch._higher_order_ops.utils import setup_compilation_env
+
+        # Create wrapper that always uses eager backend during export
+        def export_wrapped_fn(*args, **kwargs):
+            with setup_compilation_env() as backend:  # type: ignore[attr-defined]
+                # Force eager backend regardless of original backend
+                backend_wrapper = _TorchCompileWrapper(backend, mode, options, dynamic)
+                return torch._dynamo.optimize(
+                    backend=backend_wrapper,
+                    nopython=fullgraph,
+                    dynamic=dynamic,
+                    disable=disable,
+                    guard_filter_fn=guard_filter_fn,
+                    # pyrefly: ignore  # bad-argument-type
+                )(model)(*args, **kwargs)
+
+        return export_wrapped_fn
 
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
@@ -2819,10 +2850,7 @@ def _import_device_backends():
     from importlib.metadata import entry_points
 
     group_name = "torch.backends"
-    if sys.version_info < (3, 10):
-        backend_extensions = entry_points().get(group_name, ())
-    else:
-        backend_extensions = entry_points(group=group_name)
+    backend_extensions = entry_points(group=group_name)
 
     for backend_extension in backend_extensions:
         try:

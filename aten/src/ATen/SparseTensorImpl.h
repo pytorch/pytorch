@@ -229,14 +229,14 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   }
 
   void resize_(int64_t sparse_dim, int64_t dense_dim, ArrayRef<int64_t> size) {
-    return _resize_(sparse_dim, dense_dim, size);
+    _resize_(sparse_dim, dense_dim, size);
   }
 
   void resize_(
       int64_t sparse_dim,
       int64_t dense_dim,
       ArrayRef<c10::SymInt> size) {
-    return _resize_(sparse_dim, dense_dim, size);
+    _resize_(sparse_dim, dense_dim, size);
   }
 
   // NOTE: this function will resize the sparse tensor and also set `indices`
