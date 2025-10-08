@@ -27,6 +27,21 @@ pytorch_main_components
 
 ```{toctree}
 :maxdepth: 1
+:caption: torch.compiler
+
+../torch.compiler.md
+```
+
+```{toctree}
+:caption: Getting Started
+:maxdepth: 2
+:hidden:
+
+torch.compiler_get_started
+```
+
+```{toctree}
+:maxdepth: 1
 :caption: Beyond the Basics
 
 ```

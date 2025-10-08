@@ -127,3 +127,11 @@ torch.compiler_custom_backends
 torch.compiler_transformations
 torch.compiler_ir
 ```
+
+```{toctree}
+:caption: Getting Started
+:maxdepth: 2
+:hidden:
+
+torch.compiler_get_started
+```
