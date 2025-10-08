@@ -291,7 +291,9 @@ def einsum_strategy(op_schema: OpSchema) -> OpStrategy:
     # einsum signature: einsum(equation, *operands)
     # args_schema: [equation_str, OpStrategy1, OpStrategy2, ...]
     equation = op_schema.args_schema[0]
-    assert isinstance(equation, str), f"Expected einsum equation to be str, got {type(equation)}"
+    assert isinstance(equation, str), (
+        f"Expected einsum equation to be str, got {type(equation)}"
+    )
 
     # Generate strategies using the einsum strategy generator
     # This function handles all the complex logic for batch dims,

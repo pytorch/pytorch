@@ -840,7 +840,9 @@ class TestLocalDTensorOps(TestDTensorOps):
         # Before the fix, this would fail with:
         # AssertionError: aten.einsum.default: no default implementation registered
         with torch.inference_mode():
-            r_dtensor_replicate = torch.einsum("a b c, a d e c -> b d e", X_replicate, Y_replicate)
+            r_dtensor_replicate = torch.einsum(
+                "a b c, a d e c -> b d e", X_replicate, Y_replicate
+            )
 
         # Verification: result should match local computation
         r_local = torch.einsum("a b c, a d e c -> b d e", X_local, Y_local)
@@ -849,7 +851,9 @@ class TestLocalDTensorOps(TestDTensorOps):
         self.assertEqual(r_dtensor_replicate.placements, (Replicate(),))
 
         # Also test outside inference mode to ensure general functionality
-        r_dtensor_eager = torch.einsum("a b c, a d e c -> b d e", X_replicate, Y_replicate)
+        r_dtensor_eager = torch.einsum(
+            "a b c, a d e c -> b d e", X_replicate, Y_replicate
+        )
         self.assertEqual(r_dtensor_eager.to_local(), r_local)
         self.assertEqual(r_dtensor_eager.placements, (Replicate(),))
 
