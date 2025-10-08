@@ -92,6 +92,7 @@ class FilterDataFramesPipe(DFIterDataPipe):
         size = None
         all_buffer = []
         filter_res = []
+        # pyrefly: ignore  # bad-assignment
         for df in self.source_datapipe:
             if size is None:
                 size = len(df.index)
