@@ -268,6 +268,38 @@ def scaled_mm_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
+    aten.einsum.default, schema_info=RuntimeSchemaInfo(needs_pytree=True)
+)
+def einsum_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Sharding strategy for torch.einsum operator.
+
+    This handles einsum operations with DTensor inputs, supporting
+    various sharding patterns for batch dimensions, contracting dimensions,
+    and free dimensions based on the einsum equation.
+
+    The needs_pytree=True flag is crucial because einsum accepts
+    variable-length operands as torch.einsum(equation, *operands).
+
+    Note: Currently supports einsum with up to 2 tensor operands and single output.
+    Multi-operand einsum (3+ tensors) is not yet supported and will raise an assertion.
+
+    See gen_einsum_strategies() in _einsum_strategy.py for details on supported
+    sharding patterns.
+    """
+    mesh = op_schema.get_mesh_from_args()
+    # einsum signature: einsum(equation, *operands)
+    # args_schema: [equation_str, OpStrategy1, OpStrategy2, ...]
+    equation = op_schema.args_schema[0]
+    assert isinstance(equation, str), f"Expected einsum equation to be str, got {type(equation)}"
+
+    # Generate strategies using the einsum strategy generator
+    # This function handles all the complex logic for batch dims,
+    # contracting dims, and free dims
+    return gen_einsum_strategies(equation, mesh, linearity=False)
+
+
+@register_op_strategy(
     aten._scaled_dot_product_flash_attention.default, schema_info=RuntimeSchemaInfo(5)
 )
 def scaled_dot_product_flash_attention_strategy(op_schema: OpSchema) -> OpStrategy:

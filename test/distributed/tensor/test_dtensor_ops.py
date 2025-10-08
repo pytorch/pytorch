@@ -817,6 +817,74 @@ class TestLocalDTensorOps(TestDTensorOps):
     def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
         self.assertEqual(x, y, msg)
 
+    def test_einsum_inference_mode(self):
+        """
+        Test that einsum works correctly with DTensor in inference_mode.
+
+        This is a regression test for GitHub issue #157631 where einsum
+        would fail with AssertionError in inference_mode because the
+        operator was not properly registered in the DTensor sharding system.
+        """
+        self.mesh = init_device_mesh(DEVICE_TYPE, (self.world_size,))
+
+        torch.manual_seed(42)
+        X_local = torch.randn(3, 4, 5, device=DEVICE_TYPE)
+        Y_local = torch.randn(3, 6, 7, 5, device=DEVICE_TYPE)
+
+        # Test 1: Replicate placement - tests basic dispatching logic
+        placements_replicate = [Replicate()]
+        X_replicate = distribute_tensor(X_local, self.mesh, placements_replicate)
+        Y_replicate = distribute_tensor(Y_local, self.mesh, placements_replicate)
+
+        # The core of the test: ensure this does not raise an AssertionError
+        # Before the fix, this would fail with:
+        # AssertionError: aten.einsum.default: no default implementation registered
+        with torch.inference_mode():
+            r_dtensor_replicate = torch.einsum("a b c, a d e c -> b d e", X_replicate, Y_replicate)
+
+        # Verification: result should match local computation
+        r_local = torch.einsum("a b c, a d e c -> b d e", X_local, Y_local)
+
+        self.assertEqual(r_dtensor_replicate.to_local(), r_local)
+        self.assertEqual(r_dtensor_replicate.placements, (Replicate(),))
+
+        # Also test outside inference mode to ensure general functionality
+        r_dtensor_eager = torch.einsum("a b c, a d e c -> b d e", X_replicate, Y_replicate)
+        self.assertEqual(r_dtensor_eager.to_local(), r_local)
+        self.assertEqual(r_dtensor_eager.placements, (Replicate(),))
+
+        # Test 2: Shard placement on batch dimension - validates sharding strategy
+        # Shard on dimension 'a' (dim 0) which is a batch dimension in the equation
+        placements_shard = [Shard(0)]
+        X_shard = distribute_tensor(X_local, self.mesh, placements_shard)
+        Y_shard = distribute_tensor(Y_local, self.mesh, placements_shard)
+
+        with torch.inference_mode():
+            r_dtensor_shard = torch.einsum("a b c, a d e c -> b d e", X_shard, Y_shard)
+
+        # Output should be Replicate since batch dim 'a' is contracted/reduced
+        # (it appears in inputs but not in output "b d e")
+        self.assertEqual(r_dtensor_shard.full_tensor(), r_local)
+        self.assertEqual(r_dtensor_shard.placements, (Replicate(),))
+
+        # Test 3: Free dimension sharding - shard on a dimension that appears in output
+        # Create new tensors where we can shard on a free dimension
+        A_local = torch.randn(4, 8, device=DEVICE_TYPE)  # shape: (i, j)
+        B_local = torch.randn(8, 6, device=DEVICE_TYPE)  # shape: (j, k)
+
+        # Shard A on dim 0 (free dimension 'i')
+        A_shard = distribute_tensor(A_local, self.mesh, [Shard(0)])
+        B_replicate = distribute_tensor(B_local, self.mesh, [Replicate()])
+
+        with torch.inference_mode():
+            # Matrix multiply: ij,jk->ik
+            C_dtensor = torch.einsum("ij,jk->ik", A_shard, B_replicate)
+
+        C_local = torch.einsum("ij,jk->ik", A_local, B_local)
+        self.assertEqual(C_dtensor.full_tensor(), C_local)
+        # Output should be sharded on dim 0 since input A is sharded on free dim 'i'
+        self.assertEqual(C_dtensor.placements, (Shard(0),))
+
 
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)
 instantiate_device_type_tests(
