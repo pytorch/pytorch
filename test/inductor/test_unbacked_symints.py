@@ -361,11 +361,11 @@ class TestUnbackedSymints(InductorTestCase):
                     inp = args[0]
 
                     start = inp.slice_bounds[0].item()
-                    torch._check_is_size(start)
+                    torch._check(start >= 0)
                     torch._check(start <= inp.size(0))
 
                     length = (args[0].slice_bounds[1] - args[0].slice_bounds[0]).item()
-                    torch._check_is_size(length)
+                    torch._check(length >= 0)
                     torch._check(start + length <= inp.size(0))
 
                     return CustomSliceSubclass(
