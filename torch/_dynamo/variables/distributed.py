@@ -154,7 +154,7 @@ class PlacementClassVariable(DistributedVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
-            inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
+            inspect.getattr_static(self.value, "__new__", None) == object.__new__
             and self.source
         ):
             # NOTE: we don't need to track mutations to the placement class as they
@@ -251,6 +251,11 @@ class DeviceMeshVariable(DistributedVariable):
             return ConstantVariable.create(self.value.ndim)
         if name == "device_type":
             return ConstantVariable.create(self.value.device_type)
+        if name == "mesh_dim_names":
+            source = self.source
+            if source:
+                source = AttrSource(base=source, member="mesh_dim_names")
+            return VariableTracker.build(tx, self.value.mesh_dim_names, source)
         return super().var_getattr(tx, name)
 
     def call_method(
