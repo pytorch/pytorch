@@ -1561,6 +1561,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
         # TODO: hack, now wait for reduce scatter events to finish
         for stage in self._stages:
+            print(f"waiting on reduce scatters for stage {stage.stage_index}")
             for event in stage.reduce_scatter_events:
                 torch.cuda.current_stream().wait_event(event)
 

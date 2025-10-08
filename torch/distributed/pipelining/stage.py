@@ -667,7 +667,7 @@ class _PipelineStageBase(ABC):
 
                     for state in distributed_state._state_ctx.all_states:
                         if state._fsdp_param_group:
-                            state._fsdp_param_group.post_backward()
+                            state._fsdp_param_group.post_backward(reduce_scatter_events=self.reduce_scatter_events)
 
                     # it would be much better if pipelining backward invoked .backward so autograd hooks
                     # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,

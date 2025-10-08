@@ -291,7 +291,7 @@ class FSDPState(_State):
         return grad
 
     def _root_post_backward_final_callback(
-        self, reduce_scatter_events: list[Any]
+        self, reduce_scatter_events: Optional[list[Any]] = None
     ) -> None:
         if not compiled_autograd_enabled():
             logger.debug("FSDP::root_post_backward")
@@ -304,7 +304,7 @@ class FSDPState(_State):
                 ):
                     # Run post-backward in case forward inputs did not require
                     # gradient so the autograd backward did not run
-                    fsdp_param_group.post_backward()
+                    fsdp_param_group.post_backward(reduce_scatter_events=reduce_scatter_events)
                 state._training_state = TrainingState.IDLE
                 if fsdp_param_group:
                     fsdp_param_group._training_state = TrainingState.IDLE
@@ -313,12 +313,15 @@ class FSDPState(_State):
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
                 if self._comm_ctx.reduce_scatter_state is not None:
-                    # self._device_handle.current_stream().wait_event(
-                    #     self._comm_ctx.reduce_scatter_state.event
-                    # )
-                    reduce_scatter_events.append(
-                        self._comm_ctx.reduce_scatter_state.event
-                    )
+                    if reduce_scatter_events is None:
+                        print("IM DOING A WAIT, BAD!!!!!!")
+                        self._device_handle.current_stream().wait_event(
+                            self._comm_ctx.reduce_scatter_state.event
+                        )
+                    else:
+                        reduce_scatter_events.append(
+                            self._comm_ctx.reduce_scatter_state.event
+                        )
                     self._comm_ctx.reduce_scatter_state = None
             self._state_ctx.post_backward_final_callback_queued = False
 

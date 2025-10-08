@@ -484,7 +484,7 @@ class FSDPParamGroup:
             if default_prefetch and not compiled_autograd_enabled():
                 self._backward_prefetch()
 
-    def post_backward(self, *unused: Any):
+    def post_backward(self, *unused: Any, reduce_scatter_events: Optional[list[Any]] = None):
         # This method should be idempotent and safe to call even when this
         # FSDP parameter group was not used in backward (should be a no-op)
         if not compiled_autograd_enabled():
@@ -526,9 +526,17 @@ class FSDPParamGroup:
                 self.comm_ctx.reduce_scatter_state is not None
                 and self.comm_ctx.reduce_scatter_state.event is not None
             ):
-                self.device_handle.current_stream().wait_event(
-                    self.comm_ctx.reduce_scatter_state.event
-                )
+                print(f"{reduce_scatter_events=}")
+                if reduce_scatter_events is not None:
+                    print("in post_backward, adding this reduce scatter event")
+                    reduce_scatter_events.append(
+                        self.comm_ctx.reduce_scatter_state.event
+                    )
+                else:
+                    print("IM DOING A WAIT, BAD!!")
+                    self.device_handle.current_stream().wait_event(
+                        self.comm_ctx.reduce_scatter_state.event
+                    )
             self.comm_ctx.reduce_scatter_state = None
             all_reduce_pg = self._all_reduce_process_group if self._is_hsdp else None
             all_reduce_stream: torch.cuda.Stream
