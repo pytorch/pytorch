@@ -238,6 +238,7 @@ class Dispatcher:
                         "To use a variadic union type place the desired types "
                         "inside of a tuple, e.g., [(int, str)]"
                     )
+                # pyrefly: ignore  # bad-specialization
                 new_signature.append(Variadic[typ[0]])
             else:
                 new_signature.append(typ)
