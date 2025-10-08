@@ -898,6 +898,7 @@ class ComboKernel(Kernel):
             result.writeline(f"return {', '.join(var_names)},")
 
         result.writelines(["\n", "\n", "def call(args):"])
+        device = V.graph.get_current_device_or_throw()
         index = V.graph.get_current_device_or_throw().index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
@@ -932,7 +933,7 @@ class ComboKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
+                f"ms = benchmarker.benchmark(lambda: call(args), fn_args=tuple(), fn_kwargs=dict(), device={device.type},rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")

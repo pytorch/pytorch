@@ -110,7 +110,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_func([*sym_inputs, *args])
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
-        return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
+        return benchmarker.benchmark(
+            lambda sym_inputs, args: bm_func([*sym_inputs, *args]),
+            fn_args=(sym_inputs, args),
+            fn_kwargs=dict(),
+        )
 
     def hash_key(self) -> str:
         return "-".join(

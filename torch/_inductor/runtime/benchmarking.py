@@ -92,6 +92,11 @@ def time_and_count(
 
 
 class Benchmarker:
+    """
+    A device-agnostic benchmarking utility for measuring the runtime of
+    inductor generated callables.
+    """
+
     def __init__(self: Self) -> None:
         pass
 
@@ -101,6 +106,7 @@ class Benchmarker:
         fn: Callable[..., Any],
         fn_args: tuple[Any, ...],
         fn_kwargs: dict[str, Any],
+        device: Optional[Union[str, torch.device]] = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark `fn(*fn_args, *fn_kwargs)` and return the runtime, in milliseconds (the
@@ -109,7 +115,8 @@ class Benchmarker:
         device-specific implementations, like `benchmark_cpu` and `benchmark_gpu`. Raises
         `ValueError(...)` if we can't safely infer the device type of `fn`; for example,
         if multiple device types are found in `fn_args` and `fn_kwargs`, or if no device
-        types are found.
+        types are found. To bypass device inference, provide the device to the `device`
+        parameter.
 
         Arguments:
         - fn: The function to benchmark.
@@ -117,25 +124,35 @@ class Benchmarker:
         - fn_kwargs: The function's kwargs.
 
         Keyword Arguments:
+        - device: Which device to use for benchmarking. If not provided the device will be attempted
+        to be inferred from `fn_args` and `fn_kwargs`.
         - **kwargs: The benchmarking implementation's kwargs.
 
         Returns:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
-        inferred_device = None
-        # pyrefly: ignore  # bad-assignment
-        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
-            if not isinstance(arg_or_kwarg, torch.Tensor):
-                continue
-            if inferred_device is None:
-                inferred_device = arg_or_kwarg.device
-            elif arg_or_kwarg.device != inferred_device:
-                raise ValueError(
-                    "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
-                )
+        inferred_device: Optional[torch.device] = None
+        if device is not None:
+            inferred_device = (
+                torch.device(device) if isinstance(device, str) else device
+            )
+        else:
+            # pyrefly: ignore  # bad-assignment
+            for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
+                if not isinstance(arg_or_kwarg, torch.Tensor):
+                    continue
+                if inferred_device is None:
+                    inferred_device = arg_or_kwarg.device
+                elif arg_or_kwarg.device != inferred_device:
+                    raise ValueError(
+                        "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                    )
+
         if inferred_device is None:
             raise ValueError(
-                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
+                "Can't safely infer the device type of `fn` with no device types"
+                " in `fn_args` or `fn_kwargs` and `device` not explicitly provided!"
+                " You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."
             )
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         if inferred_device == torch.device("cpu"):
@@ -207,7 +224,7 @@ class TritonBenchmarker(Benchmarker):
         """Benchmark the GPU callable, `_callable`, and return the runtime, in milliseconds.
 
         Arguments:
-        - _callable: The GPU callable to benchmark.
+        - _callable: The callable to benchmark.
 
         Keyword Arguments:
         - quantiles: Optionally, a tuple of floats denoting the requested quantiles.
@@ -232,6 +249,9 @@ class TritonBenchmarker(Benchmarker):
         elif "return_mode" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)
         return self.triton_do_bench(_callable, **kwargs, return_mode="median")
+
+    benchmark_cpu = triton_do_bench_wrapper  # type: ignore[assignment]
+    benchmark_gpu = triton_do_bench_wrapper  # type: ignore[assignment]
 
 
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
