@@ -274,7 +274,6 @@ class PassManager:
                 logger.debug("Running pass '%s'", fn_name)
 
                 try:
-                    # pyrefly: ignore  # not-callable
                     res = fn(module)
 
                     if not isinstance(res, PassResult) and not hasattr(
