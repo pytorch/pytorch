@@ -202,7 +202,7 @@ ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
 ARG nvcc_threads=4
 ENV NVCC_THREADS=$nvcc_threads
-ARG torch_cuda_arch_list='8.0;8.6;8.9;9.0'
+ARG torch_cuda_arch_list='8.0 8.6 8.9 9.0'
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 ARG USE_SCCACHE
@@ -297,15 +297,27 @@ RUN echo "[INFO] Listing current directory before torch install step:" && \
     echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
 
+# Install build and runtime dependencies, this is needed for flashinfer install
+COPY requirements/build.txt requirements/build.txt
+COPY use_existing_torch.py use_existing_torch.py
+RUN python3 use_existing_torch.py
+RUN cat requirements/build.txt
+
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
     if ! python3 -m uv --version > /dev/null 2>&1; then \
         python3 -m pip install uv==0.8.4; \
     fi
+
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # Use copy mode to avoid hardlink failures with Docker cache mounts
 ENV UV_LINK_MODE=copy
+
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -r requirements/build.txt
+
 
 # Default mount file as placeholder, this just avoid the mount error
 ARG TORCH_WHEELS_PATH="./requirements"
@@ -332,13 +344,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Install xformers wheel from previous stage
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/xformers/*.whl --verbose
-
 # Build flashinfer from source.
 ARG torch_cuda_arch_list='8.0;8.9;9.0a;10.0a;12.0'
 # install package for build flashinfer
 # see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
 
-RUN pip install build==1.3.0
 RUN pip freeze | grep -E 'setuptools|packaging|build'
 
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}

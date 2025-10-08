@@ -206,6 +206,7 @@ def cudagraphs(dynamo_model: torch.fx.GraphModule, dynamo_inputs: Sequence[Any])
             assert manager is not None
 
             def fn(inputs: list[Any]) -> Any:
+                # pyrefly: ignore  # missing-attribute
                 manager.set_to_running_backward()
                 return aot_model(inputs)
 
