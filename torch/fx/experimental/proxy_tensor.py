@@ -60,7 +60,6 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import (
-    _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
     TorchDispatchMode,
@@ -84,16 +83,17 @@ if TYPE_CHECKING:
     from torch.types import IntLikeType
 
 __all__ = [
+    "DecompositionInterpreter",
     "PythonKeyTracer",
     "dispatch_trace",
-    "make_fx",
-    "DecompositionInterpreter",
-    "py_sym_types",
     "get_innermost_proxy_mode",
     "get_proxy_mode",
     "handle_sym_dispatch",
-    "maybe_enable_thunkify",
+    "is_sym_tracing",
+    "make_fx",
     "maybe_disable_thunkify",
+    "maybe_enable_thunkify",
+    "py_sym_types",
 ]
 
 _ProxyTracer = Union["PythonKeyTracer", "_GraphAppendingTracerEx"]
@@ -412,7 +412,7 @@ def get_proxy_slot(
         else:
             if isinstance(default, _NoDefault):
                 raise RuntimeError(
-                    f"{obj} ({id(obj)})is not tracked with proxy for {tracer}"
+                    f"{obj} ({id(obj)}) is not tracked with proxy for {tracer}"
                 )
             return default
     else:
@@ -1498,7 +1498,19 @@ _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_m
 )
 
 
+class _CurrentProxyTorchDispatchModeState(threading.local):
+    # If this is non-None then it overrides the current ProxyTorchDispatchMode
+    # for SymNode tracing. See disable_proxy_modes_tracing().
+    #
+    # Note: Since we use `None` as our "don't override" sentinel we don't have a
+    # way to enable operator tracing but disable sym tracing... but that would
+    # be weird, right?
+    sym_mode_override: ProxyTorchDispatchMode | None = None
+
+
 class ProxyTorchDispatchMode(TorchDispatchMode):
+    _global_state = _CurrentProxyTorchDispatchModeState()
+
     # Ensure this is read-only; this exists only for legacy reasons
     @property
     def enable_tracing(self) -> bool:
@@ -1522,10 +1534,16 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.PROXY
-        # Every time we enter a mode, we maintain a stack telling us what the previous
-        # ProxyTorchDispatchMode state was (if there was any).
+        # Every time we enter a mode, we maintain a stack telling us what the
+        # previous ProxyTorchDispatchMode state was (if there was any) as well
+        # as the previous _global_state.sym_mode_override.
         # This lets us properly reset the state on exit.
-        self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
+        #
+        # QUESTION (ako): Should this be a class variable instead? Kind of weird
+        # that it's per-instance...
+        self.enter_stack: list[
+            tuple[ProxyTorchDispatchMode | None, ProxyTorchDispatchMode | None]
+        ] = []
         self.decomp_layers: int = 0
         from torch._inductor import config
 
@@ -1549,8 +1567,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     def __enter__(self) -> Self:
         # Stash and store the previous proxy mode (there may or may not be one)
-        maybe_prev_proxy_mode = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
-        self.enter_stack.append(maybe_prev_proxy_mode)
+        prev_proxy_mode: ProxyTorchDispatchMode | None = _unset_infra_mode(
+            torch._C._TorchDispatchModeKey.PROXY
+        )
+        prev_sym_mode = self._global_state.sym_mode_override
+        self.enter_stack.append((prev_proxy_mode, prev_sym_mode))
+        # We're entering a new ProxyTorchDispatchMode - disable the sym_mode_override.
+        self._global_state.sym_mode_override = None
         return super().__enter__()
 
     def __exit__(
@@ -1562,9 +1585,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         b = super().__exit__(exc_type, exc_value, traceback)
 
         # Re-enable the previous proxy mode, if there was one.
-        mb_previous_proxy_mode = self.enter_stack.pop()
-        if mb_previous_proxy_mode is not None:
-            _push_mode(mb_previous_proxy_mode)
+        prev_proxy_mode, prev_sym_mode = self.enter_stack.pop()
+        if prev_proxy_mode is not None:
+            _push_mode(prev_proxy_mode)
+        self._global_state.sym_mode_override = prev_sym_mode
 
         return b
 
@@ -1612,9 +1636,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         args: tuple[object, ...],
         kwargs: dict[str, object],
     ) -> object:
-        # Peephole optimize multiply by one
+        # Peephole optimize
         # NB: be careful not to trigger guards here!
         if func == operator.mul:
+            # multiply by one
             if isinstance(args[1], int) and args[1] == 1:
                 return args[0]
             elif isinstance(args[0], int) and args[0] == 1:
@@ -2477,6 +2502,26 @@ def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     return pre_dispatch_mode or mode
 
 
+def _get_proxy_torch_dispatch_mode_sym_tracing() -> ProxyTorchDispatchMode | None:
+    return ProxyTorchDispatchMode._global_state.sym_mode_override or get_proxy_mode()
+
+
+def is_sym_tracing() -> bool:
+    """
+    Return True if symbolic shape operations (such as `SymNode * SymNode`)
+    will be traced by a ProxyTorchDispatchMode. This can either be from an
+    active ProxyTorchDispatchMode or a sym_mode_override.
+    """
+    return _get_proxy_torch_dispatch_mode_sym_tracing() is not None
+
+
+class _NoSymDispatch:
+    pass
+
+
+no_sym_dispatch = _NoSymDispatch()
+
+
 def handle_sym_dispatch(
     func: Callable[_P, R],
     args: _P.args,  # type: ignore[valid-type]  # not allowed to use _P.args here
@@ -2487,8 +2532,12 @@ def handle_sym_dispatch(
     SymInt/SymFloat/SymBool dispatch trace on a function that operates on
     these arguments.
     """
-    mode = get_proxy_mode()
+
+    mode = _get_proxy_torch_dispatch_mode_sym_tracing()
     assert mode
+
+    # Temporary disable the proxy mode (AND sym_mode_override!) while we run
+    # the op.
     # Have to do it manually, because we're not doing the normal torch
     # dispatch machinery which disables it for us
     with disable_proxy_modes_tracing():
@@ -2498,8 +2547,49 @@ def handle_sym_dispatch(
 
 
 @contextmanager
-def disable_proxy_modes_tracing() -> Generator[ProxyTorchDispatchMode, None, None]:
-    return _disable_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
+def disable_proxy_modes_tracing(
+    trace_symbolic_shapes: bool = False,
+) -> Generator[ProxyTorchDispatchMode, None, None]:
+    """
+    Temporarily disable the current PROXY dispatcher.
+
+    If `trace_symbolic_shapes` is True then disables dispatch tracing but continues
+    tracing symbolic expressions (like `s1*s2`).
+
+    Why might you need this?  Let's say you have some code which is tracing an
+    operation and in the middle needs to do some FakeTensor operations to
+    compute a size but it doesn't want those temporary operations to be added to
+    the graph - so it disables tracing. If it uses the result of those
+    operations and they contain a SymNode then the proxy will not know the
+    provinance of the SymNode and will raise an exception.
+
+    Be careful when using this because the automatic disabling of the dispatch
+    mode that you get won't apply to this override!
+    """
+    saved_sym_mode_override = ProxyTorchDispatchMode._global_state.sym_mode_override
+    mode_unset = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
+    if trace_symbolic_shapes:
+        # Make sure that if they already override the mode we use that, not just
+        # blindly set from the current mode.
+        #
+        # TODO: What's the right thing to do if we have a nesting like this?
+        # Currently does NOT trace syms in the inner code. Do we need to
+        # remember the "last" dispatch mode too?
+        #
+        #     disable:
+        #         disable(trace=True):
+        #             ...
+        #
+        new_sym_mode_override = saved_sym_mode_override or mode_unset
+    else:
+        new_sym_mode_override = None
+    ProxyTorchDispatchMode._global_state.sym_mode_override = new_sym_mode_override
+    try:
+        yield mode_unset
+    finally:
+        ProxyTorchDispatchMode._global_state.sym_mode_override = saved_sym_mode_override
+        if mode_unset is not None:
+            _push_mode(mode_unset)
 
 
 def maybe_handle_decomp(
