@@ -17,6 +17,7 @@ from torch._utils import ExceptionWrapper
 from . import HAS_NUMPY, IS_WINDOWS, MP_STATUS_CHECK_INTERVAL, signal_handling
 from .stateful import Stateful
 
+
 T = TypeVar("T")
 
 
@@ -28,7 +29,7 @@ def _try_get_state_dict(obj: Any) -> Optional[dict[str, Any]]:
     return None
 
 
-def _try_load_state_dict(obj: T, state_dict: dict[str, Any]) -> T:
+def _try_load_state_dict(obj: T, state_dict: dict[str, Any]) -> None:
     """Try to load state_dict into an object if it implements Stateful protocol."""
     if isinstance(obj, Stateful) and state_dict is not None:
         obj.load_state_dict(state_dict)

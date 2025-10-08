@@ -447,27 +447,15 @@ class DataLoader(Generic[_T_co]):
         torch.set_vital("Dataloader", "enabled", "True")  # type: ignore[attr-defined]
 
     def _get_iterator(self) -> _BaseDataLoaderIter:
-        if self.stateful:
-            return self._get_stateful_iterator()
-        elif self.num_workers == 0:
-            return _SingleProcessDataLoaderIter(self)
+        if self.num_workers == 0:
+            # _SingleProcessDataLoaderIter handles both stateful and non-stateful modes
+            iterator = _SingleProcessDataLoaderIter(self, self.next_iter_state)
+            # Clear the next_iter_state after passing it to the iterator
+            self.next_iter_state = None
+            return iterator
         else:
             self.check_worker_number_rationality()
             return _MultiProcessingDataLoaderIter(self)
-
-    def _get_stateful_iterator(
-        self,
-    ) -> _StatefulSingleProcessDataLoaderIter:
-        """Create a stateful iterator that supports state_dict/load_state_dict."""
-
-        iterator: _StatefulSingleProcessDataLoaderIter = (
-            _StatefulSingleProcessDataLoaderIter(self, self.next_iter_state)
-        )
-
-        # Important: Clear the next_iter_state after passing it to the iterator
-        # This matches the behavior of the original StatefulDataLoader
-        self.next_iter_state = None
-        return iterator
 
     @property
     def multiprocessing_context(self):
@@ -543,7 +531,6 @@ class DataLoader(Generic[_T_co]):
             and self._iterator is not None
             and getattr(self._iterator, "_finished", False)
         ):
-
             self._iterator = self._get_iterator()
 
         return self._iterator
@@ -867,75 +854,7 @@ class _BaseDataLoaderIter:
 
 
 class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
-    def __init__(self, loader):
-        super().__init__(loader)
-        if self._timeout != 0:
-            raise AssertionError("_SingleProcessDataLoaderIter requires timeout == 0")
-        if self._num_workers != 0:
-            raise AssertionError(
-                "_SingleProcessDataLoaderIter requires num_workers == 0"
-            )
-
-        # Adds forward compatibilities so classic DataLoader can work with DataPipes:
-        #   Taking care of distributed sharding
-        if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
-            # For BC, use default SHARDING_PRIORITIES
-            torch.utils.data.graph_settings.apply_sharding(
-                self._dataset, self._world_size, self._rank
-            )
-
-        self._dataset_fetcher = _DatasetKind.create_fetcher(
-            self._dataset_kind,
-            self._dataset,
-            self._auto_collation,
-            self._collate_fn,
-            self._drop_last,
-        )
-
-    def _next_data(self):
-        index = self._next_index()  # may raise StopIteration
-        data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
-        if self._pin_memory:
-            data = _utils.pin_memory.pin_memory(data, self._pin_memory_device)
-        return data
-
-
-class _StatefulBaseDataLoaderIter(_BaseDataLoaderIter):
-    """Base class for stateful dataloader iterators."""
-
-    def __init__(self, loader: DataLoader) -> None:
-        super().__init__(loader)
-        self._sampler_iter_yielded = 0
-        self._finished = False
-
-    def _reset(self, loader, first_iter=False):
-        super()._reset(loader, first_iter)
-        self._sampler_iter_yielded = 0
-        self._finished = False
-
-    def _next_index(self):
-        idx = super()._next_index()  # may raise StopIteration
-        self._sampler_iter_yielded += 1
-        return idx
-
-    def state_dict(self):
-        """Return the state dictionary of the iterator."""
-        raise NotImplementedError
-
-    def load_state_dict(self, state_dict):
-        """Load the state dictionary of the iterator."""
-        raise NotImplementedError
-
-    def __next__(self):
-        try:
-            return super().__next__()
-        except StopIteration:
-            self._finished = True
-            raise
-
-
-class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
-    """Single-process stateful dataloader iterator."""
+    """Single-process dataloader iterator with optional stateful support."""
 
     _NUM_YIELDED = "_num_yielded"
 
@@ -944,6 +863,12 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
         assert self._timeout == 0
         assert self._num_workers == 0
 
+        # Stateful mode additions
+        self.stateful = loader.stateful
+        if self.stateful:
+            self._sampler_iter_yielded = 0
+            self._finished = False
+
         # Adds forward compatibilities so classic DataLoader can work with DataPipes:
         #   Taking care of distributed sharding
         if isinstance(self._dataset, (IterDataPipe, MapDataPipe)):
@@ -952,7 +877,7 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
                 self._dataset, self._world_size, self._rank
             )
 
-        if next_iter_state is not None:
+        if self.stateful and next_iter_state is not None:
             self.load_state_dict(next_iter_state)
         else:
             self._dataset_fetcher = _DatasetKind.create_fetcher(
@@ -963,8 +888,43 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
                 self._drop_last,
             )
 
+    def _reset(self, loader, first_iter=False):
+        super()._reset(loader, first_iter)
+        if self.stateful:
+            self._sampler_iter_yielded = 0
+            self._finished = False
+
+    def _next_index(self):
+        idx = super()._next_index()  # may raise StopIteration
+        if self.stateful:
+            self._sampler_iter_yielded += 1
+        return idx
+
+    def _next_data(self):
+        index = self._next_index()  # may raise StopIteration
+        data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+        if self._pin_memory:
+            data = _utils.pin_memory.pin_memory(data, self._pin_memory_device)
+        return data
+
+    def __next__(self):
+        if self.stateful:
+            try:
+                return super().__next__()
+            except StopIteration:
+                self._finished = True
+                raise
+        else:
+            return super().__next__()
+
     def state_dict(self):
         """Return the state dictionary for checkpointing."""
+        if not self.stateful:
+            raise RuntimeError(
+                "state_dict() is only supported for stateful iterators. "
+                "Create DataLoader with stateful=True."
+            )
+
         if self._dataset_kind == _DatasetKind.Iterable:
             fetcher_state = {
                 _StateKeys.DATASET_ITER_STATE: _try_get_state_dict(
@@ -994,6 +954,12 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
 
     def load_state_dict(self, state_dict):
         """Load state from a checkpoint."""
+        if not self.stateful:
+            raise RuntimeError(
+                "load_state_dict() is only supported for stateful iterators. "
+                "Create DataLoader with stateful=True."
+            )
+
         assert (
             self._NUM_YIELDED in state_dict
         ), f"State doesn't contain key '{self._NUM_YIELDED}' expected for single process dataloader"
@@ -1075,13 +1041,6 @@ class _StatefulSingleProcessDataLoaderIter(_StatefulBaseDataLoaderIter):
                     for _ in range(self._num_yielded):
                         next(self)
         self._finished = state_dict[_StateKeys.ITERATOR_FINISHED]
-
-    def _next_data(self):
-        index = self._next_index()  # may raise StopIteration
-        data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
-        if self._pin_memory:
-            data = _utils.pin_memory.pin_memory(data, self._pin_memory_device)
-        return data
 
 
 class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):

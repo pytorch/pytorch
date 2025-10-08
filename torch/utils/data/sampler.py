@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
-import itertools
 from collections.abc import Iterable, Iterator, Sequence, Sized
-from typing import Any, Dict, Generic, Iterator, List, Optional, Sized, TypeVar, Union
+from typing import Any, Generic, Optional, TypeVar, Union
 
 import torch
 
 from ._utils.stateful import Stateful
+
 
 # Note: For benchmarking changes to samplers, see:
 # /benchmarks/data/samplers_bench.py
@@ -381,19 +381,19 @@ class _BatchSamplerIterator(Iterator[list[int]], Stateful):
             return batch
         except StopIteration:
             if self.drop_last or len(batch) == 0:
-                raise StopIteration
+                raise
             else:
                 return batch
 
-    def state_dict(self) -> Dict[str, Any]:
-        sd: Dict[str, Any] = {self._SAMPLES_YIELDED: self.samples_yielded}
+    def state_dict(self) -> dict[str, Any]:
+        sd: dict[str, Any] = {self._SAMPLES_YIELDED: self.samples_yielded}
         if isinstance(self.sampler, Stateful):
             sd[self._SAMPLER_STATE] = self.sampler.state_dict()
         if isinstance(self.sampler_iter, Stateful):
             sd[self._SAMPLER_ITER_STATE] = self.sampler_iter.state_dict()
         return sd
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         self.samples_yielded = state_dict[self._SAMPLES_YIELDED]
         if self._SAMPLER_STATE in state_dict:
             assert isinstance(self.sampler, Stateful)
