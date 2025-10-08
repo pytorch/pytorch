@@ -534,6 +534,7 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
 
     return list(sym_vars)
 
+
 def next_power_of_2(n: int) -> int:
     """Return the smallest power of 2 greater than or equal to n"""
     n -= 1
@@ -1462,9 +1463,14 @@ class Reduction(Loops):
         reduction_ranges = V.graph.sizevars.guard_int_seq(reduction_ranges)
 
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
-        
+
         is_contiguous = False
-        if input_node and len(reduction_ranges) == 1 and reduction_type == "sum":
+        if (
+            input_node
+            and len(reduction_ranges) == 1
+            and reduction_type == "sum"
+            and input_node.maybe_get_stride()
+        ):
             strides = input_node.get_stride()
             sizes = input_node.get_size()
             reduction_index = -1
@@ -1503,7 +1509,10 @@ class Reduction(Loops):
                     # acc_num, acc_num+num_accs, acc_num+2*num_accs, ...
                     acc_value = functools.reduce(
                         combine_fn,
-                        (value_fn(index, (i,)) for i in range(acc_num, rnumel, num_accs))
+                        (
+                            value_fn(index, (i,))
+                            for i in range(acc_num, rnumel, num_accs)
+                        ),
                     )
                     accs.append(acc_value)
                 # Combine all accumulators
@@ -1525,11 +1534,12 @@ class Reduction(Loops):
                     for i in range(rnumel):
                         # Only combine if source thread (i + offset) is within bounds
                         if i + offset < rnumel:
-                            thread_values[i] = combine_fn(thread_values[i], thread_values[i + offset])
+                            thread_values[i] = combine_fn(
+                                thread_values[i], thread_values[i + offset]
+                            )
                     offset = offset // 2
 
                 return thread_values[0]
-
 
         value_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Any]
         if reduction_type in ("argmin", "argmax"):
