@@ -74,7 +74,6 @@ else:
             self.mesh_stack: list[DeviceMesh] = []
             # TODO: Move the bookkeeping maps from _MeshEnv to DeviceMesh.
             self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
-            self.mesh_dim_group_options: dict[int, BackendConfig] = {}
             # Record flatten mesh name to its flattened mesh in root mesh.
             self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
 
@@ -575,9 +574,6 @@ else:
                     pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
                         -1, self.mesh.size(dim)
                     )
-
-                    # Respect dim group options specified via _MeshEnv.set_dim_group_options().
-                    # Inherit from the parent group if no options are specified for the group.
                     backend, pg_options = backend_override[dim]
 
                     # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
