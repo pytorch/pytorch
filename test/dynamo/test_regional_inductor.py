@@ -6,11 +6,16 @@ import torch.fx.traceback as fx_traceback
 import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
 from torch._inductor.test_case import run_tests
-
-# from torch._inductor.utils import run_and_get_code
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.fx.passes.regional_inductor import compile_fx_annotated_nodes_with_inductor
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import (
+    create_block_mask,
+    flex_attention,
+    flex_attention_hop,
+)
+
+# from torch._inductor.utils import run_and_get_code
+from torch.testing._internal import common_utils
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -173,13 +178,118 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             fn,
             backend=aot_eager_regional_inductor(),
             fullgraph=True,
-            # fn, backend="inductor", fullgraph=True
         )
 
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
-        # the invoke_subgraph is called twice - but the inside code is compiled
-        # once - so in total 2 (1 fwd + 1 bwd)
+        # flex in forward and flex_backward in backward
         self.assertEqual(len(codes), 2)
+
+    @requires_cuda_and_triton
+    @common_utils.parametrize(
+        "ops_to_save",
+        [
+            [
+                torch.ops.aten.mm.default,
+            ],
+            [
+                flex_attention_hop,
+            ],
+            [torch.ops.aten.mm.default, flex_attention_hop],
+        ],
+    )
+    def test_selective_ac_flex(self, device, ops_to_save):
+        class FlexAttentionModule(torch.nn.Module):
+            def __init__(self, hidden_size, num_heads):
+                super().__init__()
+                self.hidden_size = hidden_size
+                self.num_heads = num_heads
+                self.head_dim = hidden_size // num_heads
+
+                # In-projections (query, key, value)
+                self.q_proj = torch.nn.Linear(hidden_size, hidden_size)
+                self.k_proj = torch.nn.Linear(hidden_size, hidden_size)
+                self.v_proj = torch.nn.Linear(hidden_size, hidden_size)
+
+                # Out-projection
+                self.out_proj = torch.nn.Linear(hidden_size, hidden_size)
+
+            def forward(self, x):
+                batch_size, seq_len, _ = x.size()
+
+                # Project queries, keys, and values
+                q = (
+                    self.q_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+                k = (
+                    self.k_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+                v = (
+                    self.v_proj(x)
+                    .view(batch_size, seq_len, self.num_heads, self.head_dim)
+                    .transpose(1, 2)
+                )
+
+                # Apply flex attention
+                attn_output = flex_attention(
+                    q,
+                    k,
+                    v,
+                )
+
+                # Reshape output
+                attn_output = (
+                    attn_output.transpose(1, 2)
+                    .contiguous()
+                    .view(batch_size, seq_len, self.hidden_size)
+                )
+
+                # Out projection
+                output = self.out_proj(attn_output)
+
+                return output
+
+        from torch.utils.checkpoint import (
+            checkpoint,
+            create_selective_checkpoint_contexts,
+        )
+
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts, ops_to_save
+        )
+
+        # Define a model that uses FlexAttention with selective activation checkpointing
+        class SacModule(torch.nn.Module):
+            def __init__(self, hidden_size, num_heads, context_fn):
+                super().__init__()
+                self.flex_attn = FlexAttentionModule(hidden_size, num_heads)
+                self.context_fn = context_fn
+
+            def forward(self, x):
+                def flex_attn_fn(x):
+                    return self.flex_attn(x)
+
+                output = checkpoint(
+                    flex_attn_fn,
+                    x,
+                    use_reentrant=False,
+                    context_fn=self.context_fn,
+                )
+
+                return output
+
+        flex_module = SacModule(hidden_size=512, num_heads=8, context_fn=context_fn).to(
+            "cuda", dtype=torch.bfloat16
+        )
+        x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+
+        # Run without compilation
+        output_module = flex_module(x)
+        compiled_module = torch.compile(flex_module)
+        output_compiled = compiled_module(x)
 
 
 if __name__ == "__main__":
