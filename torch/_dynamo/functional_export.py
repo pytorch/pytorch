@@ -250,6 +250,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             else:
                 placeholder.node.meta["val"] = self.flat_inputs[i]
 
+            # pyrefly: ignore  # unsupported-operation
             self.new_input_nodes[i] = placeholder
 
     def _create_placeholder_mapping(self) -> None:
@@ -324,12 +325,18 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         # Copy module metadata like the original implementation
         if hasattr(self.module, "meta"):
+            # pyrefly: ignore  # unsupported-operation
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
+                # pyrefly: ignore  # index-error
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
+                    # pyrefly: ignore  # index-error
                     "dynamo_flat_name_to_original_fqn"
                 ]
+            # pyrefly: ignore  # unsupported-operation
             if "dynamo_compile_id" in self.module.meta:
+                # pyrefly: ignore  # index-error
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
+                    # pyrefly: ignore  # index-error
                     "dynamo_compile_id"
                 ]
 
@@ -361,8 +368,11 @@ def _suggest_or_raise_constraint_violation(
             torch._ops.OpOverloadPacket | torch._ops.OpOverload,
         )
     ):
+        # pyrefly: ignore  # unbound-name
         dim_constraints.solve()
+        # pyrefly: ignore  # unbound-name
         forced_specializations = dim_constraints.forced_specializations()
+        # pyrefly: ignore  # unbound-name
         msg = dim_constraints.prettify_results(
             inspect.signature(orig_callable),  # type: ignore[attr-defined]
             dynamic_shapes,
@@ -383,9 +393,11 @@ def _suggest_or_raise_constraint_violation(
                 )
 
         # Error if we have any constraints on static values
+        # pyrefly: ignore  # unbound-name
         for k in shape_env.var_to_range.keys():
             if isinstance(k, sympy.Integer):
                 constraint_violation_error = ConstraintViolationError(
+                    # pyrefly: ignore  # unbound-name
                     f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
                     "It appears that you're trying to set a constraint on a "
                     f"value which we evaluated to have a static value of {k}. "

@@ -1416,14 +1416,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C.unify_type_list",
         "torch._C.vitals_enabled",
         "torch._C.wait",
-        "torch._cast_Byte",
-        "torch._cast_Char",
-        "torch._cast_Double",
-        "torch._cast_Float",
-        "torch._cast_Half",
-        "torch._cast_Int",
-        "torch._cast_Long",
-        "torch._cast_Short",
         "torch._choose_qparams_per_tensor",
         "torch._chunk_cat",
         "torch._coalesce",
@@ -3005,6 +2997,7 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                 obj = torch_dir + k[len("torch/") :]
             if obj is not None:
                 if is_annotate_wrapped_function(obj):
+                    # pyrefly: ignore  # missing-attribute
                     obj = obj.__wrapped__
                 if is_lru_cache_wrapped_function(obj):
                     obj = obj.__wrapped__
