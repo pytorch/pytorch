@@ -1872,7 +1872,7 @@ class OutputGraph(OutputGraphCommon):
             node.meta.pop("creation_timestamp", None)
 
         grad_enabled = torch.is_grad_enabled()
-        for node1, node2 in zip(nodes, nodes[1:]):
+        for node1, node2 in itertools.pairwise(nodes):
             if (
                 node1.target is torch._C._set_grad_enabled
                 and tuple(node1.args) == (not grad_enabled,)

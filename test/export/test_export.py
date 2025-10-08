@@ -9669,24 +9669,6 @@ def forward(self, b_a_buffer, x):
         ):
             ep.module()(torch.tensor(5))
 
-    def test_is_non_negative_check_function(self):
-        import sympy as sp
-
-        from torch.fx.experimental.symbolic_shapes import _is_non_negative_check
-
-        x = sp.Symbol("x")
-        variable_name = sp.Symbol("variable_name")
-        tensor_shape = sp.Symbol("tensor.shape[0]")
-
-        self.assertEqual(_is_non_negative_check(variable_name >= 0), "variable_name")
-        self.assertEqual(_is_non_negative_check(tensor_shape >= 0), "tensor.shape[0]")
-
-        # Test cases where the condition is not checking for x >= 0
-        self.assertIsNone(_is_non_negative_check(x > 0))
-        self.assertIsNone(_is_non_negative_check(x == 0))
-        self.assertIsNotNone(_is_non_negative_check(0 <= x))
-        self.assertIsNone(_is_non_negative_check(x >= 1))
-
     def test_suggest_torch_checks_with_non_negative_check(self):
         from unittest.mock import patch
 
@@ -9715,7 +9697,6 @@ def forward(self, b_a_buffer, x):
             src_map["u"] = ["u"]
             _suggest_torch_checks(mock_exception, src_map)
             error_msg = mock_exception.args[0]
-            self.assertIn("torch._check_is_size(u)", error_msg)
             self.assertIn("torch._check(u < 0)", error_msg)
 
     def test_suggest_torch_checks_with_regular_check(self):

@@ -1018,7 +1018,7 @@ def break_graph_if_unsupported(
     return decorator
 
 
-class BytecodeDistpatchTableMeta(type):
+class BytecodeDispatchTableMeta(type):
     """Installs a `cls.dispatch_table` on every subclass to speed up calls to self.OPCODE()"""
 
     def __init__(cls: type, name: str, bases: Any, dct: Any) -> None:
@@ -1143,7 +1143,7 @@ class ExceptionStack:
 
 
 class InstructionTranslatorBase(
-    metaclass=BytecodeDistpatchTableMeta,
+    metaclass=BytecodeDispatchTableMeta,
 ):
     output: OutputGraph
     symbolic_locals: dict[str, VariableTracker]
