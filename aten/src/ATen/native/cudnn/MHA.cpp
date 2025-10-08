@@ -1540,9 +1540,10 @@ void run_cudnn_SDP_fprop_nestedtensor(
   }
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
-  auto rag_q_off = cum_seqlen_q.mul(h_q * d_qk);
-  auto rag_k_off = cum_seqlen_kv.mul(h_k * d_v);
-  auto rag_v_off = cum_seqlen_kv.mul(h_v * d_v);
+  auto rag_q_off = cum_seqlen_q.mul(q.stride(-3));
+  auto rag_k_off = cum_seqlen_kv.mul(k.stride(-3));
+  auto rag_v_off = cum_seqlen_kv.mul(v.stride(-3));
+  auto rag_o_off = cum_seqlen_q.mul(o.stride(-3));
   auto rag_stats_off = cum_seqlen_q.mul(h_q);
   std::unordered_map<int64_t, void*> variant_pack = {
       {Q, q.data_ptr()},
@@ -1551,7 +1552,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
       {SCALE, &scaling_factor},
       {O, o.data_ptr()},
       {RAG_Q_OFF, rag_q_off.data_ptr()},
-      {RAG_O_OFF, rag_q_off.data_ptr()},
+      {RAG_O_OFF, rag_o_off.data_ptr()},
       {RAG_K_OFF, rag_k_off.data_ptr()},
       {RAG_V_OFF, rag_v_off.data_ptr()},
       {SEQ_LEN_Q, seqlen_q.data_ptr()},
@@ -1776,9 +1777,10 @@ void run_cudnn_SDP_bprop_nestedtensor(
 
   auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
   auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
-  auto rag_q_off = cum_seqlen_q.mul(h_q * d_qk);
-  auto rag_k_off = cum_seqlen_kv.mul(h_k * d_v);
-  auto rag_v_off = cum_seqlen_kv.mul(h_v * d_v);
+  auto rag_q_off = cum_seqlen_q.mul(q.stride(-3));
+  auto rag_k_off = cum_seqlen_kv.mul(k.stride(-3));
+  auto rag_v_off = cum_seqlen_kv.mul(v.stride(-3));
+  auto rag_o_off = cum_seqlen_q.mul(o.stride(-3));
   auto rag_stats_off = cum_seqlen_q.mul(h_q);
 
   auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -1856,7 +1858,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
       {DV, dV.data_ptr()},
       {SCALE, &scaling_factor},
       {RAG_Q_OFF, rag_q_off.data_ptr()},
-      {RAG_O_OFF, rag_q_off.data_ptr()},
+      {RAG_O_OFF, rag_o_off.data_ptr()},
       {RAG_K_OFF, rag_k_off.data_ptr()},
       {RAG_V_OFF, rag_v_off.data_ptr()},
       {RAG_LSE_OFF, rag_stats_off.data_ptr()},
