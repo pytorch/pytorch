@@ -1076,16 +1076,16 @@ else:
             )
 
         def get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
-            if self.mesh_dim_names is None:
-                raise ValueError("No `mesh_dim_names` found.")
-            try:
-                mesh_dim = self.mesh_dim_names.index(mesh_dim_name)
-            except ValueError as err:
+            if self.mesh_dim_names is None or len(self.mesh_dim_names) == 0:
                 raise KeyError(
-                    f"Mesh dimension name {mesh_dim_name} not found in device_mesh.mesh_dim_names "
-                    f"{self.mesh_dim_names}"
-                ) from err
-            return mesh_dim
+                    "No `mesh_dim_names` found.",
+                )
+            if mesh_dim_name not in self.mesh_dim_names:
+                raise KeyError(
+                    f"Mesh dimension '{mesh_dim_name}' does not exist.",
+                    f"Available mesh dimensions are: mesh_dim_names={self.mesh_dim_names}",
+                )
+            return not_none(self.mesh_dim_names.index(mesh_dim_name))
 
     def _normalize_backend_override(
         backend_override: dict[
