@@ -53,8 +53,8 @@ def move_cutlass_compiled_cache() -> None:
         filename = os.path.basename(cutlass_cppgen.CACHE_FILE)
         shutil.move(cutlass_cppgen.CACHE_FILE, os.path.join(cache_dir(), filename))
         log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
-    except OSError as e:
-        log.warning("Failed to move CUTLASS compiled cache file: %s", e)
+    except OSError:
+        log.warning("Failed to move CUTLASS compiled cache file", exc_info=True)
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
