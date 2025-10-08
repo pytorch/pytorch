@@ -13,11 +13,13 @@ import torch._inductor
 import torch._inductor.decomposition
 import torch.nn.functional as F
 from torch import nn
+from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
 from torch._dynamo.variables.higher_order_ops import LocalMapWrappedHigherOrderVariable
 from torch._functorch.aot_autograd import (
     aot_export_joint_with_descriptors,
     boxed_nop_preserve_node_meta,
 )
+from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.utils.checkpoint import create_selective_checkpoint_contexts
@@ -36,7 +38,9 @@ from torch.testing._internal.common_utils import (
 )
 
 
-nested_compile_region = torch.compiler.nested_compile_region
+def normalize_gm_subgraph_names(gm: torch.fx.GraphModule, subgraph_name: str):
+    gm_str = gm.print_readable(print_output=False)
+    return normalize_gm(gm_str.replace(subgraph_name, "subgraph_name"))
 
 
 @contextmanager
@@ -98,6 +102,16 @@ def ap_style_initial_capture(model, inputs):
             bw_compiler=boxed_nop_preserve_node_meta,
         )
         unused.close()
+
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "ap_style_initial_capture_joint",
+            "encoding": "json",
+        },
+        payload_fn=lambda: joint_with_descriptors.graph_module.print_readable(),
+    )
+
     return joint_with_descriptors.graph_module
 
 
@@ -260,8 +274,6 @@ class TestLocalMap(TestCase):
         nheads = 16
         seq_len = 16
 
-        from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm
-
         backend = EagerAndRecordGraphs()
 
         model = create_model(cp_decorated, nheads, dim1, dim2)
@@ -279,8 +291,10 @@ class TestLocalMap(TestCase):
         if not TEST_WITH_CROSSREF:
             self.assertEqual(len(backend.graphs), 2)
             self.assertEqual(
-                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-                normalize_gm(backend.graphs[1].print_readable(print_output=False)),
+                normalize_gm_subgraph_names(backend.graphs[0], "cp_decorated"),
+                normalize_gm_subgraph_names(
+                    backend.graphs[1], "context_parallel_attention"
+                ),
             )
             self.assertExpectedInline(
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
@@ -310,8 +324,8 @@ class GraphModule(torch.nn.Module):
         unflatten_2: "f32[8, 16, 16, 6]" = v.unflatten(-1, (16, -1));  v = None
         v_1: "f32[8, 16, 16, 6]" = unflatten_2.permute(0, 2, 1, 3);  unflatten_2 = None
 
-        subgraph_0 = self.subgraph_0
-        local_map_hop = torch.ops.higher_order.local_map_hop(subgraph_0, q_1, k_1, v_1);  subgraph_0 = q_1 = k_1 = v_1 = None
+        cp_decorated_0 = self.cp_decorated_0
+        local_map_hop = torch.ops.higher_order.local_map_hop(cp_decorated_0, q_1, k_1, v_1);  cp_decorated_0 = q_1 = k_1 = v_1 = None
         o: "f32[8, 16, 16, 6]" = local_map_hop[0];  local_map_hop = None
 
         permute_3: "f32[8, 16, 16, 6]" = o.permute(0, 2, 1, 3);  o = None
@@ -330,7 +344,7 @@ class GraphModule(torch.nn.Module):
         o_6: "f32[8, 16, 96]" = o0 + o_5;  o0 = o_5 = None
         return (o_6,)
 
-    class subgraph_0(torch.nn.Module):
+    class cp_decorated_0(torch.nn.Module):
         def forward(self, q_1: "f32[1, 2, 4, 6]", k_1: "f32[1, 2, 16, 6]", v_1: "f32[1, 2, 16, 6]"):
             out: "f32[1, 2, 4, 6]" = torch._C._nn.scaled_dot_product_attention(query = q_1, key = k_1, value = v_1, is_causal = False);  q_1 = k_1 = v_1 = None
             return (out,)
@@ -346,7 +360,7 @@ class GraphModule(torch.nn.Module):
         nheads = 16
         seq_len = 16
 
-        from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
+        from torch._dynamo.testing import AotEagerAndRecordGraphs
 
         backend = AotEagerAndRecordGraphs()
 
@@ -369,16 +383,22 @@ class GraphModule(torch.nn.Module):
         if not TEST_WITH_CROSSREF:
             self.assertEqual(len(backend.graphs), 2)
             self.assertEqual(
-                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-                normalize_gm(backend.graphs[1].print_readable(print_output=False)),
+                normalize_gm_subgraph_names(backend.graphs[0], "cp_decorated"),
+                normalize_gm_subgraph_names(
+                    backend.graphs[1], "context_parallel_attention"
+                ),
             )
             self.assertEqual(
-                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
-                normalize_gm(backend.fw_graphs[1].print_readable(print_output=False)),
+                normalize_gm_subgraph_names(backend.fw_graphs[0], "cp_decorated"),
+                normalize_gm_subgraph_names(
+                    backend.fw_graphs[1], "context_parallel_attention"
+                ),
             )
             self.assertEqual(
-                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                normalize_gm(backend.bw_graphs[1].print_readable(print_output=False)),
+                normalize_gm_subgraph_names(backend.bw_graphs[0], "cp_decorated"),
+                normalize_gm_subgraph_names(
+                    backend.bw_graphs[1], "context_parallel_attention"
+                ),
             )
             self.assertEqual(
                 len(
@@ -423,26 +443,13 @@ class GraphModule(torch.nn.Module):
         nheads = 16
         seq_len = 16
 
-        from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-
-        backend = AotEagerAndRecordGraphs()
-
         model = create_model(
             cp_decorated, nheads, dim1, dim2, sac_policy=save_scalar_muls
         ).to(torch.bfloat16)
         inputs = (
             torch.randn(bs, seq_len, dim1, requires_grad=True, dtype=torch.bfloat16),
         )
-        try:
-            with enable_local_map_wrapping():
-                out = torch.compile(model, backend=backend)(*inputs)
-            out.sum().backward()
-        except AttributeError as e:
-            # TODO: get rid of this when we can install as a subgraph
-            self.assertTrue(
-                "module 'torch._higher_order_ops.local_map' has no attribute 'call_local_map'"
-                in str(e)
-            )
+        cp_decorated_joint = ap_style_initial_capture(model, inputs)
 
         model = create_model(
             cp_function, nheads, dim1, dim2, sac_policy=save_scalar_muls
@@ -450,62 +457,28 @@ class GraphModule(torch.nn.Module):
         inputs = (
             torch.randn(bs, seq_len, dim1, requires_grad=True, dtype=torch.bfloat16),
         )
-        try:
-            with enable_local_map_wrapping():
-                out = torch.compile(model, backend=backend)(*inputs)
-            out.sum().backward()
-        except AttributeError as e:
-            # TODO: get rid of this when we can install as a subgraph
-            self.assertTrue(
-                "module 'torch._higher_order_ops.local_map' has no attribute 'call_local_map'"
-                in str(e)
-            )
+        cp_function_joint = ap_style_initial_capture(model, inputs)
 
-        # TODO: re-enable tests on backward when we can install as a subgraph
-        if not TEST_WITH_CROSSREF:
-            self.assertEqual(len(backend.graphs), 2)
-            self.assertEqual(
-                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-                normalize_gm(backend.graphs[1].print_readable(print_output=False)),
-            )
-            self.assertEqual(
-                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
-                normalize_gm(backend.fw_graphs[1].print_readable(print_output=False)),
-            )
-            # self.assertEqual(
-            #     normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-            #     normalize_gm(backend.bw_graphs[1].print_readable(print_output=False)),
-            # )
-            self.assertEqual(
-                len(
-                    backend.graphs[0].graph.find_nodes(
-                        op="call_function",
-                        target=torch._higher_order_ops.wrap.tag_activation_checkpoint,
-                    )
-                ),
-                1,
-            )
-            # TODO: add joint to the testing compile backend
-            fw_outs = {
-                n.name
-                for n in backend.fw_graphs[0].graph.find_nodes(op="output")[0].args[0]
-            }
-            # bw_ins = {
-            #     n.name for n in backend.bw_graphs[0].graph.find_nodes(op="placeholder")
-            # }
-            for node in backend.fw_graphs[0].graph.nodes:
-                if "recompute" in node.meta:
+        self.assertEqual(
+            normalize_gm_subgraph_names(cp_decorated_joint, "cp_decorated"),
+            normalize_gm_subgraph_names(
+                cp_function_joint, "context_parallel_attention"
+            ),
+        )
+
+        # Assert only top-level, local_map handles its own AC
+        def check_checkpoint_tags(gm):
+            for node in gm.graph.nodes:
+                is_backward_node = (
+                    node.meta.get("partitioner_tag", None) == "is_backward"
+                )
+                if node.op == "call_function" and not is_backward_node:
                     expected = save_scalar_muls(None, node.target, None, None)
                     actual = node.meta["recompute"]
                     self.assertEqual(expected, actual)
-                    if actual == torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE:
-                        self.assertTrue(node.name in fw_outs)
-                    #     self.assertTrue(node.name in fw_outs and node.name in bw_ins)
-                    # elif (
-                    #     actual == torch.utils.checkpoint.CheckpointPolicy.MUST_RECOMPUTE
-                    # ):
-                    #     # can still be in fw_outs for post-graph bytecode
-                    #     self.assertFalse(node.name in bw_ins)
+
+        check_checkpoint_tags(cp_decorated_joint)
+        check_checkpoint_tags(cp_function_joint)
 
     @unittest.skipIf(*get_skip_reasons())
     def test_local_map_dynamo_mismatch_placements(self):
@@ -598,20 +571,22 @@ class GraphModule(torch.nn.Module):
         with FakeTensorMode():
             inputs = (torch.randn(80, 80, requires_grad=True),)
         gm = ap_style_initial_capture(model, inputs)
-        fw_node, bw_node = [n for n in gm.graph.nodes if "call_local_map" in n.name]
+        fw_node, bw_node = [n for n in gm.graph.nodes if "local_map" in n.name]
 
         # Graph should not be aware that Fake key used local shapes
         fw_inputs = fw_node.args
-        assert len(fw_inputs) == 1
-        self.assertEqual(fw_inputs[0].meta["val"].shape, (80, 80))
+        assert len(fw_inputs) == 2
+        self.assertEqual(fw_inputs[0].op, "get_attr")
+        self.assertEqual(fw_inputs[1].meta["val"].shape, (80, 80))
 
-        fw_outputs = fw_node.args
+        fw_outputs = fw_node.meta["val"]
         assert len(fw_outputs) == 1
-        self.assertEqual(fw_outputs[0].meta["val"].shape, (80, 80))
+        self.assertEqual(fw_outputs[0].shape, (80, 80))
 
         bw_inputs = bw_node.args
-        assert len(bw_inputs) == 1
-        self.assertEqual(bw_inputs[0].meta["val"].shape, (80, 80))
+        assert len(bw_inputs) == 2
+        self.assertEqual(bw_inputs[0].op, "get_attr")
+        self.assertEqual(bw_inputs[1].meta["val"].shape, (80, 80))
 
         bw_outputs = bw_node.meta["val"]
         assert len(bw_outputs) == 1
@@ -719,6 +694,72 @@ class GraphModule(torch.nn.Module):
         with FakeTensorMode():
             inputs = (torch.randn(80, 80),)
         ap_style_initial_capture(model, inputs)
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_using_device_mesh_inside_local_map(self):
+        @local_map(
+            out_placements=((Shard(0), Shard(0), Replicate()),),
+            in_placements=(
+                (Shard(0), Shard(0), Replicate()),
+                None,
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def sharded_pointwise(x, mesh):
+            tp_group = mesh.get_group("tp")
+            # Gather across tp (mesh dim 1)
+            handle = (
+                torch.distributed._functional_collectives.all_gather_tensor_autograd(
+                    x, gather_dim=0, group=tp_group
+                )
+            )
+            x_full = torch.distributed._functional_collectives.wait_tensor(handle)
+            return x_full + 10
+
+        class MyModule(torch.nn.Module):
+            def forward(module_self, x):
+                return sharded_pointwise(x, self.mesh)
+
+        model = MyModule()
+        with FakeTensorMode():
+            inputs = (torch.randn(64, 64, requires_grad=True),)
+        joint_gm = ap_style_initial_capture(model, inputs)
+        self.assertExpectedInline(
+            normalize_gm(joint_gm.print_readable(print_output=False)),
+            """\
+class inner_f(torch.nn.Module):
+    def forward(self, primals, tangents):
+        primals_1: "f32[64, 64]"; tangents_1: "f32[512, 64]";
+
+        primals_1, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+        sharded_pointwise0 = self.sharded_pointwise0
+        local_map_hop = torch.ops.higher_order.local_map_hop(sharded_pointwise0, primals_1);  sharded_pointwise0 = primals_1 = None
+        getitem: "f32[512, 64]" = local_map_hop[0]
+        getitem_1: "f32[1, 64]" = local_map_hop[1];  local_map_hop = None
+        sharded_pointwise_backward0 = self.sharded_pointwise_backward0
+        local_map_hop_1 = torch.ops.higher_order.local_map_hop(sharded_pointwise_backward0, getitem_1, tangents_1);  sharded_pointwise_backward0 = getitem_1 = tangents_1 = None
+        getitem_2: "f32[64, 64]" = local_map_hop_1[0];  local_map_hop_1 = None
+        return pytree.tree_unflatten([getitem, getitem_2], self._out_spec)
+
+    class sharded_pointwise0(torch.nn.Module):
+        def forward(self, primals_0: "f32[1, 64]"):
+            all_gather_into_tensor: "f32[8, 64]" = torch.ops._c10d_functional.all_gather_into_tensor.default(primals_0, 8, '33');  primals_0 = None
+            wait_tensor: "f32[8, 64]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+            wait_tensor_1: "f32[8, 64]" = torch.ops._c10d_functional.wait_tensor.default(wait_tensor);  wait_tensor = None
+            add: "f32[8, 64]" = torch.ops.aten.add.Tensor(wait_tensor_1, 10);  wait_tensor_1 = None
+            zeros: "f32[8, 64]" = torch.ops.aten.zeros.default([8, 64], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
+            reduce_scatter_tensor: "f32[1, 64]" = torch.ops._c10d_functional.reduce_scatter_tensor.default(zeros, 'sum', 8, '33');  zeros = None
+            wait_tensor_2: "f32[1, 64]" = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor);  wait_tensor_2 = None
+            return (add, reduce_scatter_tensor)
+
+    class sharded_pointwise_backward0(torch.nn.Module):
+        def forward(self, reduce_scatter_tensor: "f32[1, 64]", tangents_0: "f32[8, 64]"):
+            wait_tensor_2: "f32[1, 64]" = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor);  reduce_scatter_tensor = None
+            return (wait_tensor_2,)
+""",
+        )
 
 
 if __name__ == "__main__":

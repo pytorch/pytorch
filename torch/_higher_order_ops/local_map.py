@@ -5,7 +5,6 @@
 
 # NOTE: this file may be removed once we move to a dynamo frontend
 
-import functools
 from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any, Callable, Optional, Sequence, TypeAlias
@@ -22,7 +21,11 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx import GraphModule
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch.fx.experimental.proxy_tensor import (
+    ProxyTorchDispatchMode,
+    PythonKeyTracer,
+    track_tensor_tree,
+)
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -205,6 +208,7 @@ def create_hop_fw_bw(
     assert "out_placements" in local_map_kwargs
     assert "device_mesh" in local_map_kwargs
     assert len(local_map_kwargs["in_placements"]) == len(_args)
+    subgraph_name = fw_gm.meta.get("subgraph_name", None)
 
     dummy_aot_config = AOTConfig(
         fw_compiler=None,  # type: ignore[arg-type]
@@ -352,8 +356,12 @@ def create_hop_fw_bw(
 
         new_fw_gm.meta["num_activations"] = num_activations
         new_fw_gm.meta["is_backward"] = False
+        if subgraph_name is not None:
+            new_fw_gm.meta["subgraph_name"] = subgraph_name
         new_bw_gm.meta["num_activations"] = num_activations
         new_bw_gm.meta["is_backward"] = True
+        if subgraph_name is not None:
+            new_bw_gm.meta["subgraph_name"] = subgraph_name + "_backward"
 
         return new_fw_gm, new_bw_gm, num_fw_inputs, num_fw_outputs, filtered_grads_idx
 
@@ -484,8 +492,8 @@ def fake_mode_key(
         return global_outs
 
 
-def proxy_mode_key_common(
-    call_hop: Callable[..., Any],
+@local_map_hop.py_impl(ProxyTorchDispatchMode)
+def proxy_mode_key(
     proxy_mode: ProxyTorchDispatchMode,
     gm: GraphModule,
     *args: Any,
@@ -494,13 +502,27 @@ def proxy_mode_key_common(
     assert proxy_mode is not None, (
         "Mode should always be enabled for python fallback key"
     )
+    assert isinstance(proxy_mode.tracer, PythonKeyTracer), "Not supported."
     assert len(kwargs) == 0
 
-    example_out = call_hop(*args, **kwargs)
-    proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # type: ignore[union-attr]
+    example_out = local_map_hop(gm, *args, **kwargs)
+
+    # Take our best guess of the user function name
+    subgraph_name = (
+        gm.meta["subgraph_name"] if "subgraph_name" in gm.meta else gm._get_name()
+    )
+    subgraph_name = proxy_mode.tracer.get_fresh_qualname(subgraph_name)
+    proxy_mode.tracer.root.register_module(subgraph_name, gm)
+    proxy_args = pytree.tree_map(
+        proxy_mode.tracer.unwrap_proxy,
+        (
+            gm,
+            *args,
+        ),
+    )  # type: ignore[union-attr]
 
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", call_hop, proxy_args, {}
+        "call_function", local_map_hop, proxy_args, {}
     )
 
     # extract local_map args, post-dispatch operates on GraphModules
@@ -509,23 +531,11 @@ def proxy_mode_key_common(
 
     # propagate local_map args to the call_function node
     out_proxy.node.meta["local_map_kwargs"] = local_map_kwargs
+    # very hacky. but pre-dispatch make-fx doesn't support autograd functions
+    out_proxy.node.meta["val"] = example_out
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
-
-
-@local_map_hop.py_impl(ProxyTorchDispatchMode)
-def proxy_mode_key(
-    proxy_mode: ProxyTorchDispatchMode,
-    gm: GraphModule,
-    *args: Any,
-    **kwargs: Any,
-) -> tuple[torch.Tensor]:
-    # TODO: get rid of this when we can install as a subgraph
-    def call_local_map(*_args: Any, **_kwargs: Any) -> Any:
-        return functools.partial(local_map_hop, gm)(*_args, **_kwargs)
-
-    return proxy_mode_key_common(call_local_map, proxy_mode, gm, *args, **kwargs)
 
 
 # Running HOP in eager with real tensors

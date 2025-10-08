@@ -38,6 +38,10 @@ def _replace_with_hop_helper(
         if isinstance(output_args, (tuple, list)):
             call_func_node.meta["val"] = tuple(arg.meta["val"] for arg in output_args)
         elif isinstance(output_args, torch.fx.Node):
+            if "val" not in output_args.meta:
+                assert "example_value" in output_args.meta
+                output_args.meta["val"] = output_args.meta["example_value"]
+
             call_func_node.meta["val"] = (output_args.meta["val"],)
 
     with graph.inserting_before(node):
