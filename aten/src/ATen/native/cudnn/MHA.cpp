@@ -380,8 +380,8 @@ struct MHAGraphCache {
   }
 
   template <typename... Args>
-  std::pair<iterator, bool> emplace(Args&&... args) {
-    return engine_cache.emplace(std::forward<Args>(args)...);
+  std::pair<iterator, bool> try_emplace(const KeyType& key, Args&&... args) {
+    return engine_cache.try_emplace(key, std::forward<Args>(args)...);
   }
 };
 
@@ -1393,7 +1393,7 @@ void run_cudnn_SDP_fprop(
       is_causal,
       return_softmaxstats,
       false);
-  auto [cache_it, not_found] = getMHAGraphCache_().emplace(key, nullptr);
+  auto [cache_it, not_found] = getMHAGraphCache_().try_emplace(key, nullptr);
   if (not_found) {
     cache_it->second = build_graph(
         b,
@@ -1667,7 +1667,7 @@ void run_cudnn_SDP_bprop(
       true,
       false);
   auto [cache_it, not_found] =
-      getMHAGraphBackwardCache_().emplace(key, nullptr);
+      getMHAGraphBackwardCache_().try_emplace(key, nullptr);
   if (not_found) {
     cache_it->second = build_graph_backward(
         b,
