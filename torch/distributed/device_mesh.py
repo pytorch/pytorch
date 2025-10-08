@@ -210,7 +210,7 @@ else:
                     "The submesh can only be a 1D mesh."
                 )
                 child_mesh_dim_name = child_mesh_dim_names[0]
-                return root_mesh.get_mesh_dim_by_name(child_mesh_dim_name)
+                return root_mesh._get_mesh_dim_by_name(child_mesh_dim_name)
             return None
 
         @staticmethod
@@ -322,7 +322,7 @@ else:
             """
             Return all the submeshes of a given mesh dimension of the device mesh.
             """
-            mesh_dim = device_mesh.get_mesh_dim_by_name(mesh_dim_name)
+            mesh_dim = device_mesh._get_mesh_dim_by_name(mesh_dim_name)
             layout = device_mesh._layout[mesh_dim]
             pg_ranks_by_dim = layout.remap_to_tensor(
                 device_mesh.mesh,
@@ -811,7 +811,7 @@ else:
                 return not_none(_resolve_process_group(dim_group_name))
             else:
                 mesh_dim = (
-                    self.get_mesh_dim_by_name(mesh_dim)
+                    self._get_mesh_dim_by_name(mesh_dim)
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
@@ -1075,7 +1075,7 @@ else:
                 self, mesh_dim_name, backend_override_tuple
             )
 
-        def get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
+        def _get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
             if self.mesh_dim_names is None or len(self.mesh_dim_names) == 0:
                 raise KeyError(
                     "No `mesh_dim_names` found.",

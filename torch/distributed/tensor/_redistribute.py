@@ -16,7 +16,8 @@ import torch.distributed.tensor._api as dtensor
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import (
     DTensorSpec,
-    TensorDimTuple,
+    ShardOrder,
+    ShardOrderEntry,
     TensorMeta,
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
@@ -86,7 +87,7 @@ class DTensorRedistributePlanner:
     @dataclasses.dataclass(frozen=True, slots=True)
     class DistState:
         placements: tuple[Placement, ...]
-        tensor_dim_to_mesh_dim: TensorDimTuple
+        tensor_dim_to_mesh_dim: ShardOrder
         _hash: Optional[int] = dataclasses.field(
             default=None, init=False, repr=False, compare=False
         )
@@ -139,23 +140,20 @@ class DTensorRedistributePlanner:
         return x
 
     @staticmethod
-    def _dict_to_TensorDimTuple(x: dict[int, list[int]]) -> TensorDimTuple:
-        """Convert dict to TensorDimTuple"""
+    def _dict_to_ShardOrder(x: dict[int, list[int]]) -> ShardOrder:
+        """Convert dict to ShardOrder"""
         return tuple(
-            tuple(item)
-            for item in (
-                [key] + value if isinstance(value, list) else [key, value]
-                for key, value in sorted(x.items())
-                if value
-            )
+            ShardOrderEntry(tensor_dim=key, mesh_dims=tuple(value))
+            for key, value in sorted(x.items())
+            if value
         )
 
     @staticmethod
-    def _TensorDimTuple_to_dict(x: TensorDimTuple) -> dict[int, list[int]]:
-        """Convert TensorDimTuple to dict with tensor dim as key"""
+    def _ShardOrder_to_dict(x: ShardOrder) -> dict[int, list[int]]:
+        """Convert ShardOrder to dict with tensor dim as key"""
         tensor_mesh_dim_dict = defaultdict(list)
-        for dim_key, *dim_tuple in x:
-            tensor_mesh_dim_dict[dim_key] = list(dim_tuple)
+        for entry in x:
+            tensor_mesh_dim_dict[entry.tensor_dim] = list(entry.mesh_dims)
         return tensor_mesh_dim_dict
 
     @staticmethod
@@ -163,7 +161,7 @@ class DTensorRedistributePlanner:
         mesh: DeviceMesh,
         transform_infos: Sequence[_TransformInfo],
         src_placement: tuple[Placement, ...],
-        src_shard_order: Optional[TensorDimTuple] = None,
+        src_shard_order: Optional[ShardOrder] = None,
     ) -> str:
         """
         Generate a string representation of the sequence of state transitions
@@ -174,7 +172,7 @@ class DTensorRedistributePlanner:
             transform_infos: A sequence of _TransformInfo objects describing each
                 transformation step.
             src_placement: The initial tuple of Placement objects.
-            src_shard_order: (Optional) The initial TensorDimTuple representing
+            src_shard_order: (Optional) The initial ShardOrder representing
                 the mapping of tensor dimensions to mesh dimensions. If None,
                 the default sparse shard order is computed from src_placement and mesh.
 
@@ -187,7 +185,7 @@ class DTensorRedistributePlanner:
                 src_placement
             )
         cur_placement = list(src_placement)
-        shard_order_dict = DTensorRedistributePlanner._TensorDimTuple_to_dict(
+        shard_order_dict = DTensorRedistributePlanner._ShardOrder_to_dict(
             src_shard_order
         )
         cur_state = DTensorRedistributePlanner.DistState(
@@ -212,7 +210,7 @@ class DTensorRedistributePlanner:
             cur_placement[transform_info.mesh_dim] = dst_dim_placement
             new_state = DTensorRedistributePlanner.DistState(
                 tuple(cur_placement),
-                DTensorRedistributePlanner._dict_to_TensorDimTuple(shard_order_dict),
+                DTensorRedistributePlanner._dict_to_ShardOrder(shard_order_dict),
             )
             state_list.append(new_state)
         return "->".join([str(s) for s in state_list])
