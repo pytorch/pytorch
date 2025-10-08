@@ -612,17 +612,9 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
   if (is_view) {
     // Note that this won't be used if a TensorList is returned.
     aliased_input_idx_val = aliased_input_idx.value();
-
     non_tensor_stack.reserve(num_arguments);
     for (const auto i : c10::irange(num_arguments)) {
-      if ((*stack)[stack_start + i].isTensor()) {
-        non_tensor_stack.push_back({});
-        TORCH_CHECK(
-            i == aliased_input_idx_val,
-            "Internal error in ADInplaceOrView fallback, unknown Tensor in the stack");
-      } else {
-        non_tensor_stack.push_back((*stack)[stack_start + i]);
-      }
+      non_tensor_stack.push_back((*stack)[stack_start + i]);
     }
   }
 
@@ -686,6 +678,16 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
       TORCH_CHECK(
           num_returns == 1,
           "ADInplaceOrView fallback only support single output view functions");
+
+      // Remove the Tensor from the original stack
+      for (const auto i : c10::irange(num_arguments)) {
+        if (non_tensor_stack[i].isTensor()) {
+          TORCH_CHECK(
+              i == aliased_input_idx_val,
+              "Internal error in ADInplaceOrView fallback, unknown Tensor in the stack");
+          non_tensor_stack[i] = {};
+        }
+      }
 
       auto view_func = std::make_unique<GenericViewFunc>(
           non_tensor_stack, aliased_input_idx_val, op);
