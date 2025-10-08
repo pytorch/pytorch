@@ -1177,7 +1177,6 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker()]""",
 
         pattern = r"TRACE.*"
         s = munge_exc(records[0].getMessage(), skip=0)
-        # breakpoint()
         matches = re.findall(pattern, s)
         self.assertEqual((len(matches) > 10), True)
         self.assertEqual((len(matches) <= 20), True)
