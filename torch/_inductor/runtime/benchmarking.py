@@ -146,13 +146,10 @@ class Benchmarker:
         WARNING: if `fn` mutates `fn_args` or `fn_kwargs`, benchmarking may fail unexpectedly.
         For example, if `fn` cleares a mutable object, subsequent invocations of `fn` during
         benchmarking will fail. In such cases, `fn` should handle cloning its arguments internally.
-        If device inference is required, `Benchmarker.infer_device` can be used prior to calling
         this method without any arguments for `fn_args` and `fn_kwargs`.
 
         Arguments:
         - fn: The function to benchmark.
-        - fn_args: The function's arguments.
-        - fn_kwargs: The function's kwargs.
 
         Keyword Arguments:
         - device: Which device to use for benchmarking. If not provided the device will be attempted
@@ -274,7 +271,7 @@ class TritonBenchmarker(Benchmarker):
         """Benchmark the GPU callable, `_callable`, and return the runtime, in milliseconds.
 
         Arguments:
-        - _callable: The GPU callable to benchmark.
+        - _callable: The callable to benchmark.
 
         Keyword Arguments:
         - quantiles: Optionally, a tuple of floats denoting the requested quantiles.
@@ -299,6 +296,9 @@ class TritonBenchmarker(Benchmarker):
         elif "return_mode" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)
         return self.triton_do_bench(_callable, **kwargs, return_mode="median")
+
+    benchmark_cpu = triton_do_bench_wrapper  # type: ignore[assignment]
+    benchmark_gpu = triton_do_bench_wrapper  # type: ignore[assignment]
 
 
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
