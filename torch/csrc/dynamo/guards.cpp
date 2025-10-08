@@ -196,7 +196,16 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_sizes,
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
-  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
+  // Mask to exclude Python keys, that can be artifically off during compilation,
+  // due to ignore_compile_internals being set on custom TorchDispatchModes.
+  constexpr auto mode_key_mask = c10::DispatchKeySet({
+    c10::DispatchKey::Python,
+    c10::DispatchKey::PythonTLSSnapshot,
+  });
+  auto stored_keys = c10::DispatchKeySet::from_raw_repr(dispatch_key_) - mode_key_mask;
+  auto current_keys = state.apply(dispatch_key_set) - mode_key_mask;
+
+  if (stored_keys.raw_repr() != current_keys.raw_repr() ||
       dtype_ != dtype || device_index_ != device.index() ||
       requires_grad_ != requires_grad) {
     return false;
@@ -4278,31 +4287,44 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
       py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
+
+    // Designate custom torch function modes to ignore for guard comparisons
+    py::object avoid_module = py::module_::import("torch.utils._debug_mode");
+    PyTypeObject* avoid_type = (PyTypeObject*)avoid_module.attr("DebugMode").ptr();
     for (Py_ssize_t idx = 0; idx < len; idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
       auto type = Py_TYPE(mode);
-      this->_ref_stack.push_back(type);
+      if (type != avoid_type) {
+        this->_ref_stack.push_back(type);
+      }
     }
   }
 
   template <typename T>
   bool check_nopybind_template(T* value) {
     // Ignore value arg, only used to satisfy the interface
-    const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
+    const size_t real_len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
     const size_t ref_stack_size = this->_ref_stack.size();
 
-    if (len != ref_stack_size) {
-      return false;
-    }
-
-    for (int64_t idx = 0; (size_t)idx < len; idx++) {
+    // Avoid this custom torch function mode for guard comparisons
+    py::object avoid_module = py::module_::import("torch.utils._debug_mode");
+    PyTypeObject* avoid_type = (PyTypeObject*)avoid_module.attr("DebugMode").ptr();
+    size_t compare_len = 0;
+    size_t skip = 0;
+    for (int64_t idx = 0; (size_t)idx < real_len; idx++) {
       std::shared_ptr<c10::SafePyObject> mode =
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
-      if (mode_type != _ref_stack.at(idx)) {
+      if (mode_type == avoid_type) {
+        skip += 1;
+      } else if (_ref_stack.size() <= idx - skip || mode_type != _ref_stack.at(idx - skip)) {
         return false;
       }
+    }
+
+    if (compare_len != ref_stack_size) {
+      return false;
     }
 
     return true;

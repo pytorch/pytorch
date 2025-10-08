@@ -98,8 +98,7 @@ class DebugMode(TorchDispatchMode):
         self.record_faketensor = record_faketensor
         self.record_realtensor = record_realtensor
 
-        self.operators = []
-        self.call_depth = 0
+        self.reset_logs()
 
     # Without this override, running torch.compile under DebugMode
     # will force torch.compile to always use the “eager” backend
@@ -112,7 +111,12 @@ class DebugMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        self.operators.append((func, args, kwargs, self.call_depth))
+        if not (
+            type(func).__name__ == "method-wrapper"
+            and func.__name__ == "__get__"
+        ):
+            # filter out known noise
+            self.operators.append((func, args, kwargs, self.call_depth))
 
         try:
             self.call_depth += 1
@@ -143,11 +147,27 @@ class DebugMode(TorchDispatchMode):
         return result
 
     def __enter__(self):
-        self.operators = []
-        self.call_depth = 0
+        self.reset_logs()
 
         if self.record_torchfunction:
+            from torch._dynamo.guards import _register_global_guard_filter_fn
+
+            _torch_function_stack_index = torch._C._len_torch_function_stack()
             torch._C._push_on_torch_function_stack(self)
+
+            def guard_filter_fn(guard_entries):
+                kw = f"___get_torch_function_mode_stack_at({_torch_function_stack_index})"
+                return [
+                    (
+                        kw not in entry.name
+                        or (entry.name == kw and entry.guard_type == "TYPE_MATCH")
+                    )
+                    and entry.guard_type != "TENSOR_MATCH"
+                    for entry in guard_entries
+                ]
+
+            self._guard_filter_fn = guard_filter_fn
+            _register_global_guard_filter_fn(guard_filter_fn)  
 
         super().__enter__()
         return self
@@ -156,7 +176,14 @@ class DebugMode(TorchDispatchMode):
     def __exit__(self, *args):
         super().__exit__(*args)
         if self.record_torchfunction:
+            from torch._dynamo.guards import _remove_global_guard_filter_fn
+
             torch._C._pop_torch_function_stack()
+            _remove_global_guard_filter_fn(self._guard_filter_fn)
+
+    def reset_logs(self):
+        self.operators = []
+        self.call_depth = 0
 
     @contextlib.contextmanager
     def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
