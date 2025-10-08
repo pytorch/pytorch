@@ -71,7 +71,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.node import Node
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
@@ -214,7 +214,7 @@ _NodeOrNodes: TypeAlias = Union[
 ]
 
 
-def _is_static(x: object) -> bool:
+def _is_static(x: object) -> TypeIs[Union[int, Integer]]:
     return isinstance(x, (int, Integer))
 
 
@@ -352,7 +352,7 @@ def get_stride_order(
 
 
 @overload
-def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None: ...
+def ir_node_to_tensor(x: None, guard_shape: bool = True) -> None: ...
 
 
 @overload
@@ -433,10 +433,7 @@ def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
-def is_aligned_realized_tensor_hint(
-    x: Union[Buffer, TensorBox], alignment: int
-) -> bool:
-    # Use this as a hint. This won't guard since size_hint doesn't guard.
+def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
     if (
         not isinstance(x, IRNode)
         or x.maybe_get_stride() is None
@@ -445,16 +442,16 @@ def is_aligned_realized_tensor_hint(
     ):
         return False
 
-    aligned_strides = all(
-        (V.graph.sizevars.size_hint_or_throw(x.get_stride()[i]) % alignment) == 0
-        for i in range(len(x.get_stride()) - 1)
+    aligned_strides = sympy.And(
+        *(sympy.Eq(Mod(s, alignment), 0) for s in x.get_stride()[:-1])
     )
-    # if the last dim size is <= 1, stride doesn't matter
-    aligned_last_dim = (
-        V.graph.sizevars.size_hint_or_throw(x.get_stride()[-1]) == 1
-        or V.graph.sizevars.size_hint_or_throw(x.get_size()[-1]) <= 1
+    aligned_last_dim = sympy.Or(
+        sympy.Eq(x.get_stride()[-1], 1), sympy.Le(x.get_size()[-1], 1)
     )
-    return aligned_last_dim and aligned_strides
+    is_aligned = sympy.And(aligned_strides, aligned_last_dim)
+
+    # Make sure to guard to recompile when necessary.
+    return V.graph.sizevars.guard_or_false(is_aligned)
 
 
 def significant_strides_equal(
@@ -472,9 +469,7 @@ def significant_strides_equal(
 
         if not V.graph.sizevars.statically_known_equals(
             s1, s2
-        ) and not V.graph.sizevars.symbolic_hint(s1) == V.graph.sizevars.symbolic_hint(
-            s2
-        ):
+        ) and V.graph.sizevars.symbolic_hint(s1) != V.graph.sizevars.symbolic_hint(s2):
             return False
 
     return True
@@ -2888,7 +2883,7 @@ class ExpandView(BaseView):
                 # guarded because the meta formula was expected to have taught
                 # us this equality.
                 assert sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0, (
-                    "Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
+                    f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
                 )
         return new_size
 
@@ -3744,6 +3739,15 @@ class Layout(OutputSpec):
         ):
             return in_strides
 
+        # Skip padding the strides for dynamic shapes based on config.pad_dynamic_shape
+        # Checking both shape and strides, as there are cases where only one is dynamic
+        is_dynamic = not all(
+            isinstance(s, (int, sympy.Integer))
+            for s in itertools.chain(in_strides, size)
+        )
+        if not config.pad_dynamic_shapes and is_dynamic:
+            return in_strides
+
         shape_env = V.graph._shape_env if hasattr(V.graph, "_shape_env") else None
 
         def contains_unbacked_symints(expr: sympy.Expr | int) -> bool:
@@ -4223,7 +4227,7 @@ class Buffer(IRNode, CodegenSymbol):
         assert self.name, self
         return self.name
 
-    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+    def get_example(self) -> Union[torch.Tensor, torch.SymInt]:
         if isinstance(self.layout, Layout):
             return self.layout.get_example()
         raise NotImplementedError(type(self.layout).__name__)
@@ -5437,7 +5441,7 @@ class ConcatKernel(NopKernel):
                 return True
 
             # otherwise, check equality of layouts
-            if not len(src.get_stride()) == len(dst.get_stride()):
+            if len(src.get_stride()) != len(dst.get_stride()):
                 return False
 
             return all(
@@ -5599,10 +5603,22 @@ class ExternKernel(InputsKernel):
             self.apply_constraint()
             self.freeze_layout()
 
-    def codegen_comment(self, wrapper: PythonWrapperCodegen) -> None:
+    def codegen_comment(
+        self, wrapper: PythonWrapperCodegen, kernel_name: Optional[str] = None
+    ) -> None:
         origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
             wrapper.make_comment(origin_str)
+
+        if not kernel_name:
+            kernel_name = self.try_get_kernel_name()
+        if kernel_name:
+            from .debug import set_kernel_post_grad_provenance_tracing
+
+            debug_handle = set_kernel_post_grad_provenance_tracing(
+                self, kernel_name, is_extern=True
+            )
+            wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         raise NotImplementedError
@@ -5646,24 +5662,28 @@ class ExternKernel(InputsKernel):
                 f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"
             )
 
-    def get_kernel_name(self) -> str:
+    def try_get_kernel_name(self) -> Optional[str]:
         from .codegen.cpp_wrapper_cpu import CppWrapperCpu
 
         device = d.type if (d := self.get_device()) else V.graph.device_type
         if V.graph.fx_wrapper:
-            assert self.python_kernel_name is not None
             return self.python_kernel_name
         elif V.graph.cpp_wrapper:
             assert isinstance(V.graph.wrapper_code, CppWrapperCpu), type(
                 V.graph.wrapper_code
             )
-            assert self.cpp_kernel_name is not None
+            if self.cpp_kernel_name is None:
+                return None
             return V.graph.wrapper_code.get_c_shim_func_name(
                 self.cpp_kernel_name, device
             )
         else:
-            assert self.python_kernel_name is not None
             return self.python_kernel_name
+
+    def get_kernel_name(self) -> str:
+        name = self.try_get_kernel_name()
+        assert name is not None
+        return name
 
     @staticmethod
     def copy_input(x: IRNode) -> Union[TensorBox, ShapeAsConstantBuffer]:
@@ -6797,7 +6817,7 @@ class UserDefinedTritonKernel(ExternKernel):
             else:
                 raise NotImplementedError(f"Unsupported arg type: {type(arg)}: {arg}")
 
-        self.codegen_comment(wrapper)
+        self.codegen_comment(wrapper, new_name)
         wrapper.generate_kernel_call(
             new_name,
             args,
@@ -7232,6 +7252,7 @@ class DynamicSelectStorageOffset(ExternKernel):
         base_offset: Union[sympy.Symbol, int],
         base_dim_stride: Union[sympy.Symbol, int],
         size: Union[sympy.Symbol, int],
+        clamp: bool,
     ) -> None:
         super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
         # This node codegen the following:
@@ -7241,6 +7262,7 @@ class DynamicSelectStorageOffset(ExternKernel):
         self.base_offset = base_offset
         self.base_dim_stride = base_dim_stride
         self.size = size
+        self.clamp = clamp
 
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.unbacked_offset_symbol])
@@ -7251,7 +7273,59 @@ class DynamicSelectStorageOffset(ExternKernel):
         return get_free_symbols(self.index, unbacked_only)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        wrapper.codegen_dynamic_select_index(self)
+        wrapper.codegen_dynamic_select_index(self, clamp=self.clamp)
+
+
+class DynamicSliceSize(ExternKernel):
+    """
+    Computes the output size of a slice call, handling the correct semantics in codegen.
+    We do this for flexible handling for unbacked indices (to not data-dependent error).
+
+    Slicing has 4 semantics for indices, i.e. x[start:] could be:
+    1) start < -x.size(0)            -> x[0:]                    # negative out-of-bounds
+    2) start in [-x.size(0), 0)      -> x[x.size(0) + start:]    # negative slicing
+    3) start in [0, x.size(0))       -> x[start:]                # standard slicing
+    4) start >= x.size(0)            -> empty slice              # positive out-of-bounds
+
+    If the appropriate semantics are known beforehand, the output size is computed based on
+    the start & end indices. If not (with unbacked indices), a new unbacked symbol is created
+    to represent the output size, and codegen handles computing the correct case.
+    """
+
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
+
+    def should_allocate(self) -> bool:
+        return False
+
+    def __init__(
+        self,
+        unbacked_size_symbol: sympy.Symbol,
+        start: Union[sympy.Symbol, int],
+        end: Union[sympy.Symbol, int],
+        step: Union[sympy.Symbol, int],
+        size: Union[sympy.Symbol, int],
+    ):
+        super().__init__(None, NoneLayout(device=torch.device("cpu")), [])
+        # This node codegen
+        self.unbacked_size_symbol = unbacked_size_symbol
+        self.start = start
+        self.end = end
+        self.step = step
+        self.size = size
+
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet([self.unbacked_size_symbol])
+
+    def get_free_symbol_uses(
+        self, unbacked_only: bool = False
+    ) -> OrderedSet[sympy.Symbol]:
+        return get_free_symbols(self.start, unbacked_only).union(
+            get_free_symbols(self.end, unbacked_only)
+        )
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        wrapper.codegen_dynamic_slice_size(self)
 
 
 class DynamicScalar(ExternKernel):
@@ -7550,7 +7624,25 @@ class FallbackKernel(ExternKernelAlloc):
         return get_schema_info(self.op_overload).is_mutable()
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
-        return self.alias_names
+        assert isinstance(
+            self.op_overload, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+        ), (
+            f"Fails to create FallbackKernel for {self.op_overload}: "
+            f"{type(self.op_overload)} not supported"
+        )
+
+        # See [Note: FallbackKernel supported operators]: for a mutating
+        # op that is auto-functionalizable, its outputs does NOT
+        # alias any of the inputs.
+        if (
+            not isinstance(self.op_overload, torch._ops.HigherOrderOperator)
+            and "_c10d_functional" not in self.op_overload.name()
+            and self.op_overload._schema.is_mutable
+            and can_auto_functionalize(self.op_overload)
+        ):
+            return []
+        else:
+            return self.alias_names
 
     def get_mutation_names(self) -> Sequence[str]:
         assert len(self.mutation_names) <= 1
@@ -8624,6 +8716,17 @@ class WhileLoop(ExternKernel):
 
         return result
 
+    @staticmethod
+    def _maybe_wrap_as_tensor_box(out: IRNode) -> IRNode:
+        if isinstance(out, TensorBox):
+            return out
+        elif isinstance(out, (StorageBox, ReinterpretView)):
+            return TensorBox(out)
+        elif isinstance(out, MultiOutput):
+            return TensorBox.create(out)
+        else:
+            raise RuntimeError(f"NYI unsupported output type: {type(out)}")
+
     @classmethod
     def create(
         cls,
@@ -8646,9 +8749,21 @@ class WhileLoop(ExternKernel):
             ret = []
             for tb, fk in zip(tensor_boxes, fake_tensors):
                 if isinstance(fk, torch.Tensor):
+                    # Subgraph lowering always return StorageBox as graph_outputs because
+                    # it realizes the outputs.
+                    #
+                    # However, require_exact_strides is expecting TensorBox
+                    # e.g. in require_exact_strides when an expand happens,
+                    # the fake tensor's stride is (0, 0, 0) but the storage
+                    # box might have a different stride so lowering.slice_
+                    # is used to make the stride consistent and it expects input to
+                    # be TensorBox.
+                    #
+                    # So we wrap the inputs as tensor boxes if they're not yet.
+                    new_tb = WhileLoop._maybe_wrap_as_tensor_box(tb)
                     ret.append(
                         ExternKernel.require_exact_strides(
-                            tb, fk.stride(), allow_padding=False
+                            new_tb, fk.stride(), allow_padding=False
                         )
                     )
                 else:
@@ -8995,6 +9110,7 @@ class _CollectiveKernel(FallbackKernel):
         assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
+            V.graph.mark_buffer_mutated(tensor_arg.get_name())
 
         device = tensor_args[0].get_device()
         packed = cls(

@@ -2,7 +2,8 @@
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import Any, Optional, Union, TypeVar, Callable
+from typing import Any, Optional, Union, TypeVar
+from collections.abc import Callable
 from collections.abc import Iterator
 from typing_extensions import ParamSpec
 from collections import defaultdict
@@ -148,6 +149,7 @@ def conv_flop_count(
 @register_flop_formula([aten.convolution, aten._convolution, aten.cudnn_convolution, aten._slow_conv2d_forward])
 def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
     """Count flops for convolution."""
+    # pyrefly: ignore  # bad-argument-type
     return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
 
@@ -675,7 +677,9 @@ class FlopCounterMode:
         if depth is None:
             depth = 999999
 
+
         import tabulate
+
         tabulate.PRESERVE_WHITESPACE = True
         header = ["Module", "FLOP", "% Total"]
         values = []
@@ -782,7 +786,7 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        if func not in {torch.ops.higher_order.cond, }:
+        if func is not torch.ops.higher_order.cond:
             return NotImplemented
 
         # The flop counter for cond counts the upper bound of flops.
