@@ -59,7 +59,6 @@ class TestBundledInputs(TestCase):
         # despite having nominally large bundled inputs.
         augmented_size = model_size(sm)
 
-        # pyrefly: ignore  # missing-attribute
         self.assertLess(augmented_size, original_size + (1 << 12))
 
         loaded = save_and_load(sm)
@@ -67,15 +66,12 @@ class TestBundledInputs(TestCase):
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
         self.assertEqual(len(inflated), len(samples))
 
-        # pyrefly: ignore  # missing-attribute
         self.assertTrue(loaded(*inflated[0]) is inflated[0][0])
 
         for idx, inp in enumerate(inflated):
-            # pyrefly: ignore  # missing-attribute
             self.assertIsInstance(inp, tuple)
             self.assertEqual(len(inp), 1)
 
-            # pyrefly: ignore  # missing-attribute
             self.assertIsInstance(inp[0], torch.Tensor)
             if idx != 5:
                 # Strides might be important for benchmarking.
@@ -144,7 +140,6 @@ class TestBundledInputs(TestCase):
         inflated = loaded.get_all_bundled_inputs()
         self.assertEqual(inflated, samples)
 
-        # pyrefly: ignore  # missing-attribute
         self.assertTrue(loaded(*inflated[0]) == "first 1")
 
     def test_multiple_methods_with_inputs(self):
@@ -192,7 +187,6 @@ class TestBundledInputs(TestCase):
 
         # Check running and size helpers
 
-        # pyrefly: ignore  # missing-attribute
         self.assertTrue(loaded(*inflated[0]) is inflated[0][0])
         self.assertEqual(loaded.get_num_bundled_inputs(), len(samples))
 
@@ -426,7 +420,6 @@ class TestBundledInputs(TestCase):
         augmented_size = model_size(sm)
         # assert the size has not increased more than 8KB
 
-        # pyrefly: ignore  # missing-attribute
         self.assertLess(augmented_size, original_size + (1 << 13))
 
         loaded = save_and_load(sm)
