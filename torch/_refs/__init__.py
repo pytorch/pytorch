@@ -3379,7 +3379,6 @@ def native_layer_norm(
     torch._check(
         input.ndim >= normalized_ndim
         and sym_eq(
-            # pyrefly: ignore  # bad-argument-type
             input.shape[(input.ndim - normalized_ndim) :],
             # pyrefly: ignore  # bad-argument-type
             tuple(normalized_shape),

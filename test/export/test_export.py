@@ -9669,24 +9669,6 @@ def forward(self, b_a_buffer, x):
         ):
             ep.module()(torch.tensor(5))
 
-    def test_is_non_negative_check_function(self):
-        import sympy as sp
-
-        from torch.fx.experimental.symbolic_shapes import _is_non_negative_check
-
-        x = sp.Symbol("x")
-        variable_name = sp.Symbol("variable_name")
-        tensor_shape = sp.Symbol("tensor.shape[0]")
-
-        self.assertEqual(_is_non_negative_check(variable_name >= 0), "variable_name")
-        self.assertEqual(_is_non_negative_check(tensor_shape >= 0), "tensor.shape[0]")
-
-        # Test cases where the condition is not checking for x >= 0
-        self.assertIsNone(_is_non_negative_check(x > 0))
-        self.assertIsNone(_is_non_negative_check(x == 0))
-        self.assertIsNotNone(_is_non_negative_check(0 <= x))
-        self.assertIsNone(_is_non_negative_check(x >= 1))
-
     def test_suggest_torch_checks_with_non_negative_check(self):
         from unittest.mock import patch
 
@@ -9715,7 +9697,6 @@ def forward(self, b_a_buffer, x):
             src_map["u"] = ["u"]
             _suggest_torch_checks(mock_exception, src_map)
             error_msg = mock_exception.args[0]
-            self.assertIn("torch._check_is_size(u)", error_msg)
             self.assertIn("torch._check(u < 0)", error_msg)
 
     def test_suggest_torch_checks_with_regular_check(self):
@@ -10392,13 +10373,9 @@ graph():
     %x : [num_users=2] = placeholder[target=x]
     %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
-    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach,), kwargs = {})
-    %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
     %clone : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%c_lifted_tensor_0,), kwargs = {})
-    %detach_3 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
-    %detach_4 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_3,), kwargs = {})
-    %detach_5 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_4,), kwargs = {})
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach_2, %detach_5), kwargs = {})
+    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_1), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
     return (mul_1,)""",
@@ -15687,11 +15664,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureStrictV2
-    @testing.expectedFailureStrict  # annotation needs to be handled in dynamo
-    @testing.expectedFailureSerDer
     def test_preserve_annotation(self):
         class M(torch.nn.Module):
             def forward(self, x):
