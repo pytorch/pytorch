@@ -42,8 +42,7 @@ from .batchnorm import (
     SyncBatchNorm,
 )
 from .channelshuffle import ChannelShuffle
-from .container import (  # pyrefly: ignore  # deprecated
-    # pyrefly: ignore  # deprecated
+from .container import (
     Container,
     ModuleDict,
     ModuleList,
@@ -84,7 +83,7 @@ from .instancenorm import (
     LazyInstanceNorm2d,
     LazyInstanceNorm3d,
 )
-from .loss import (  # pyrefly: ignore  # deprecated
+from .loss import (
     BCELoss,
     BCEWithLogitsLoss,
     CosineEmbeddingLoss,
@@ -101,7 +100,6 @@ from .loss import (  # pyrefly: ignore  # deprecated
     MultiLabelSoftMarginLoss,
     MultiMarginLoss,
     NLLLoss,
-    # pyrefly: ignore  # deprecated
     NLLLoss2d,
     PoissonNLLLoss,
     SmoothL1Loss,
