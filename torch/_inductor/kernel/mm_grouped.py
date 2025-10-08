@@ -346,16 +346,16 @@ triton_grouped_mm_source = r"""
 {%- if K_IS_VARYING %}
                     if k_block_offset + BLOCK_K > k_size:
                         group_offs = k_block_offset + tl.arange(0, BLOCK_K)
-                        mask = group_offs < k_size
+                        k_mask = group_offs < k_size
 {%- if A_IS_K_MAJOR %}
-                        a = tl.where(mask[None, :], a, 0)
+                        a = tl.where(k_mask[None, :], a, 0)
 {%- else %}
-                        a = tl.where(mask[:, None], a, 0)
+                        a = tl.where(k_mask[:, None], a, 0)
 {%- endif %}
 {%- if B_IS_K_MAJOR %}
-                        b = tl.where(mask[None, :], b, 0)
+                        b = tl.where(k_mask[None, :], b, 0)
 {%- else %}
-                        b = tl.where(mask[:, None], b, 0)
+                        b = tl.where(k_mask[:, None], b, 0)
 {%- endif %}
 {%- endif %}
 
