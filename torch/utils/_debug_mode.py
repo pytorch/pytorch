@@ -47,11 +47,7 @@ def _tensor_debug_string(tensor, tensor_memo=None) -> str:
     else:
         raise RuntimeError(f"Unsupported tensor type: {type(tensor)}")
 
-    tensor_id = (
-        f"${tensor_memo.get(tensor)}"
-        if tensor_memo and tensor in tensor_memo
-        else ""
-    )
+    tensor_id = f"${tensor_memo.get(tensor)}" if tensor_memo and tensor in tensor_memo else ""
     return f"{prefix}{tensor_id}: {base_str}"
 
 
@@ -240,12 +236,19 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
-    def debug_string(self, show_ids: bool = False) -> str:
+    def debug_string(self, show_outputs: bool = False, show_ids: bool = False) -> str:
         with torch._C.DisableTorchFunction():
             result = ""
             tensor_memo = self._tensor_memo if show_ids else None
             result += "\n".join(
-                "  " + "  " * depth + _op_to_str(op, *args, output=self._output_info.get(idx), tensor_memo=tensor_memo, **kwargs)
+                "  "
+                + "  " * depth
+                + _op_to_str(
+                    op,
+                    *args,
+                    output=self._output_info.get(idx) if show_outputs else None,
+                    tensor_memo=tensor_memo, **kwargs
+                )
                 for idx, (op, args, kwargs, depth) in enumerate(self.operators)
             )
         return result
