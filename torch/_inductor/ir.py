@@ -534,6 +534,18 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
 
     return list(sym_vars)
 
+def next_power_of_2(n: int) -> int:
+    """Return the smallest power of 2 greater than or equal to n"""
+    n -= 1
+    n |= n >> 1
+    n |= n >> 2
+    n |= n >> 4
+    n |= n >> 8
+    n |= n >> 16
+    n |= n >> 32
+    n += 1
+    return n
+
 
 class IRNode:
     """Base class for all intermediate representation (IR) nodes in TorchInductor.
@@ -1444,12 +1456,26 @@ class Reduction(Loops):
         reduction_ranges: Sequence[_IntLike],
         reduction_type: str,
         src_dtype: torch.dtype,
+        input_node: Optional[IRNode] = None,
     ) -> Callable[[Sequence[_IntLike]], OpsValue]:
         """Convert inner_fn from a reduction to an pointwise"""
         reduction_ranges = V.graph.sizevars.guard_int_seq(reduction_ranges)
 
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
         
+        is_contiguous = False
+        if input_node and len(reduction_ranges) == 1 and reduction_type == "sum":
+            strides = input_node.get_stride()
+            sizes = input_node.get_size()
+            reduction_index = -1
+            for i, s in enumerate(strides[:-1]):
+                if V.graph.sizevars.statically_known_equals(s, 1):
+                    reduction_index = i
+                    break
+
+            if sizes[reduction_index] == reduction_ranges[0]:
+                is_contiguous = True
+
         # Number of default accumulators for thread_reduce for eager
         # to emulate reduction order
         def fn(index: Sequence[_IntLike]) -> Any:
@@ -1465,23 +1491,45 @@ class Reduction(Loops):
                     ),
                 )
 
-            # num_accs based on vt0 in aten/native/cuda/Reduce.cuh
-            num_accs = 4
             rnumel = reduction_ranges[0]
-            accs = []
-            for acc_num in range(min(num_accs, rnumel)):
-                accs.append(
-                    functools.reduce(
+            if not is_contiguous:
+                # Non contiguous reduction -> thread independently reduces with multiple
+                # accumulators to remove dependencies between unrolled loops.
+                # num_accs based on vt0 in aten/native/cuda/Reduce.cuh
+                num_accs = 4
+                accs = []
+                for acc_num in range(min(num_accs, rnumel)):
+                    # Each accumulator reduces elements at positions:
+                    # acc_num, acc_num+num_accs, acc_num+2*num_accs, ...
+                    acc_value = functools.reduce(
                         combine_fn,
-                        (
-                            value_fn(index, rindex)
-                            for rindex in itertools.product(
-                                *[range(acc_num, x, num_accs) for x in reduction_ranges]
-                            )
-                        ),
+                        (value_fn(index, (i,)) for i in range(acc_num, rnumel, num_accs))
                     )
-                )
-            return functools.reduce(combine_fn, accs)
+                    accs.append(acc_value)
+                # Combine all accumulators
+                return functools.reduce(combine_fn, accs)
+            else:
+                # Reduction tree simulating warp shuffle
+                # Find next power-of-2 >= rnumel, then divide by 2 to start reduction
+                # to match the C++ logic in block_x_reduce in Reduce.cuh
+                offset = next_power_of_2(rnumel) // 2
+                # Initialize thread values: each thread starts with its own element
+                thread_values = {}
+                for i in range(rnumel):
+                    thread_values[i] = value_fn(index, (i,))
+
+                # Simulate warp shuffle reduction with boundary checks
+                # This matches the C++ warp shuffle logic where threads combine
+                # with elements at (threadIdx.x + offset) if that's within bounds
+                while offset > 0:
+                    for i in range(rnumel):
+                        # Only combine if source thread (i + offset) is within bounds
+                        if i + offset < rnumel:
+                            thread_values[i] = combine_fn(thread_values[i], thread_values[i + offset])
+                    offset = offset // 2
+
+                return thread_values[0]
+
 
         value_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Any]
         if reduction_type in ("argmin", "argmax"):
@@ -1584,7 +1632,7 @@ class Reduction(Loops):
                 device=device,
                 dtype=dst_dtype,
                 inner_fn=cls._unroll_reduction_fn(
-                    inner_fn, reduction_ranges, reduction_type, src_dtype
+                    inner_fn, reduction_ranges, reduction_type, src_dtype, input_node
                 ),
                 ranges=ranges,
             )
