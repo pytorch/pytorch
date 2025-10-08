@@ -171,12 +171,11 @@ from user code:
         torch.compile(fn001, backend="eager")(torch.randn(1))
 
         record = self.getRecord(records, "Graph break in user code")
-        msg = re.sub(r"TRACE.*\n", "", record.getMessage(), flags=re.MULTILINE)
 
         # TODO: This should also report the enclosing frames; need to plumb
         # frame object to it
         self.assertExpectedInline(
-            munge_exc(re.sub(r"TRACE.*", "", msg)),
+            munge_exc(record.getMessage()),
             """\
 Graph break in user code at test_exc.py:N
 Graph Break Reason: Call to `torch._dynamo.graph_break()`
@@ -193,7 +192,6 @@ User code traceback:
     return fn002(x)
   File "test_exc.py", line N, in fn002
     torch._dynamo.graph_break()
-Most recent bytecode instructions traced (max 20):
 """,  # noqa: B950
         )
 

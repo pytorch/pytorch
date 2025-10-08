@@ -608,7 +608,7 @@ def log_graph_break(
         # This log line MUST contain the string "Graph break in user code",
         # This log line is exercised from
         #   python test/dynamo/test_exc.py -k test_graph_break_log
-        if latest_bytecode_log:
+        if latest_bytecode_log and config.verbose:
             user_stack_trace += "Most recent bytecode instructions traced (max 20):\n"
             user_stack_trace += latest_bytecode_log
 
