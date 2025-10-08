@@ -9,7 +9,7 @@ from typing import Any, Optional
 import torch
 import numpy as np
 
-# pyrefly: ignore  # import-error
+
 from google.protobuf import struct_pb2
 
 from tensorboard.compat.proto.summary_pb2 import (

@@ -514,6 +514,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "all_to_all_vdev_2d_offset(Tensor input, Tensor(a!) out, Tensor in_splits_offsets, Tensor(a!) out_splits_offsets, str group_name) -> ()");
   m.def(
       "tile_reduce(Tensor in_tile, Tensor(a!) out_tile, int root, str group_name, str reduce_op='sum') -> ()");
+  m.def(
+      "multi_root_tile_reduce(Tensor[] in_tiles, Tensor(a!) out_tile, int[] roots, str group_name, str reduce_op='sum') -> ()");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {
