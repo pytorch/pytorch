@@ -1416,7 +1416,7 @@ class TestFP8Matmul(TestCase):
             if recipe == "nvfp4"
             else ScalingType.BlockWise1x32
         )
-        swizzle = SwizzleType.Swizzle_32_4_4
+        swizzle = SwizzleType.SWIZZLE_32_4_4
 
         # Test wrong scale tensor size for scale_a with correct dtype
         with self.assertRaisesRegex(
