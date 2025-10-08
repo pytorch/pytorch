@@ -82,6 +82,13 @@ Some of the most commonly used backends include:
 
 ## Read More
 
+
+```{toctree}
+:caption: START HERE!!
+:maxdepth: 2
+:hidden:
+
+```
 ```{toctree}
 :caption: Getting Started for PyTorch Users
 :maxdepth: 2
@@ -101,6 +108,13 @@ torch.compiler_performance_dashboard
 torch.compiler_inductor_provenance
 ```
 
+
+```{toctree}
+:caption: THEN GO HERE!!
+:maxdepth: 2
+:hidden:
+
+```
 ```{toctree}
 :caption: torch.compile Programming Model
 :maxdepth: 2
@@ -126,12 +140,4 @@ torch.compiler_fake_tensor
 torch.compiler_custom_backends
 torch.compiler_transformations
 torch.compiler_ir
-```
-
-```{toctree}
-:caption: Getting Started
-:maxdepth: 2
-:hidden:
-
-torch.compiler_get_started
 ```
