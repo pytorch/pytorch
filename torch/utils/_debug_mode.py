@@ -163,13 +163,10 @@ class DebugMode(TorchDispatchMode):
         try:
             self.call_depth += 1
             result = func(*args, **kwargs)
+            self._track_op_output(op_index, result)
+            return result
         finally:
             self.call_depth -= 1
-
-        # Track output
-        self._track_op_output(op_index, result)
-
-        return result
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
@@ -181,7 +178,6 @@ class DebugMode(TorchDispatchMode):
         # Record the operation with its call depth
         op_index = None
         if torch.distributed.tensor.DTensor in types:
-            op_index = len(self.operators)
             self.operators.append((func, args, kwargs, self.call_depth))
             return NotImplemented
         elif FakeTensor in types or isinstance(
