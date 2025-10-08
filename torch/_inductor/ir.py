@@ -2890,6 +2890,13 @@ class ExpandView(BaseView):
         old_size = x.get_size()
         old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
         assert len(new_size) == len(old_size)
+
+        # Check if either tensor has a zero-sized dimension
+        has_zero_dim = any(
+            sizevars.guard_or_false(sympy.Eq(dim, 0))
+            for dim in itertools.chain(new_size, [d for d in old_size if d is not None])
+        )
+
         for i in range(len(new_size)):
             if new_size[i] == -1:
                 assert old_size[i] is not None
@@ -2904,10 +2911,15 @@ class ExpandView(BaseView):
                 # NB: new_size[i] == old_size[i] is expected to already be
                 # guarded because the meta formula was expected to have taught
                 # us this equality.
-                # pyrefly: ignore  # unsupported-operation
-                assert sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0, (
-                    f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
-                )
+                # If either tensor has a zero dimension, the result will be empty
+                # regardless of dimension mismatch, so we can skip the check.
+                if not has_zero_dim:
+                    # pyrefly: ignore  # unsupported-operation
+                    assert (
+                        sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0
+                    ), (
+                        f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
+                    )
         return new_size
 
     @classmethod

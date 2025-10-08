@@ -534,13 +534,22 @@ def broadcast_symbolic_shapes(a, b):
     are symbolic sympy formulas.
     """
     output = []
+    # Check if either tensor has a zero-sized dimension anywhere
+    has_zero_dim = any(
+        V.graph.sizevars.guard_or_false(sympy.Eq(dim, 0))
+        for dim in itertools.chain(a, b)
+    )
+
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
         if V.graph.sizevars.is_size_one_or_false(y):
             output.append(x)
         elif V.graph.sizevars.is_size_one_or_false(x):
             output.append(y)
         else:
-            V.graph.sizevars.check_equals(x, y)
+            # If either tensor has a zero dimension, the result will be empty
+            # regardless of dimension mismatch, so we can skip the strict check
+            if not has_zero_dim:
+                V.graph.sizevars.check_equals(x, y)
             if len(sympy.expand(y).free_symbols) < len(sympy.expand(x).free_symbols):
                 output.append(y)  # prefer shorter formula
             else:
