@@ -198,11 +198,13 @@ bool TensorCheck::check(
   if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
       dtype_ != dtype || device_index_ != device.index() ||
       requires_grad_ != requires_grad) {
+    std::cout << "tensor check 1 failed" << std::endl;
     return false;
   }
 
   auto ndim = sym_sizes.size();
   if (ndim != static_cast<size_t>(dim_)) {
+    std::cout << "tensor check 2 failed" << std::endl;
     return false;
   }
 
@@ -213,6 +215,7 @@ bool TensorCheck::check(
     auto known_stride = strides_[i];
     if (known_size.has_value()) {
       if (known_size.value() != sizes[i]) {
+        std::cout << "tensor check 1 failed" << std::endl;
         return false;
       }
     }
@@ -645,7 +648,7 @@ struct GlobalStateGuard {
 
   bool check() const {
     auto& ctx = at::globalContext();
-    return (_grad_mode == at::GradMode::is_enabled() &&
+    auto out = (_grad_mode == at::GradMode::is_enabled() &&
             _autocast_state == AutocastState() &&
             _torch_function == torch::torch_function_enabled() &&
             _torch_function_all_disabled ==
@@ -661,6 +664,8 @@ struct GlobalStateGuard {
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
         _default_dtype == at::get_default_dtype();
+    std::cout << "global state guard: " << out << std::endl;
+    return out;
   }
 
   std::string reason() const {
@@ -1680,10 +1685,12 @@ class LAMBDA_GUARD : public LeafGuard {
     if (x == nullptr) {
       // An exception is caught in the lambda function.
       PyErr_Clear();
+      std::cout << "LAMBDA_GUARD failed" << std::endl;
       return false;
     }
     bool result = PyObject_IsTrue(x);
     Py_DECREF(x);
+    std::cout << "LAMBDA_GUARD: " << result << std::endl;
     return result;
   }
 
@@ -1720,7 +1727,9 @@ class TYPE_MATCH : public LeafGuard {
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return Py_TYPE(value) == (void*)_expected;
+    auto out = Py_TYPE(value) == (void*)_expected;
+    std::cout << "TYPE_MATCH " << out << "; expected: " << _expected << ", received: " << py::str((PyObject*)Py_TYPE(value)) << std::endl;
+    return out;
   }
 
  private:
@@ -1740,7 +1749,9 @@ class ID_MATCH : public LeafGuard {
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    return value == (void*)_expected;
+    auto out = value == (void*)_expected;
+    std::cout << "ID MATCH " << out << "; expected: " << _expected << std::endl;
+    return out;
   }
 
  private:
@@ -1800,14 +1811,17 @@ class EQUALS_MATCH : public LeafGuard {
     if (value != _value.ptr()) {
       // Check type
       if (Py_TYPE(value) != _value_type) {
+        std::cout << "EQUALS_MATCH failed" << std::endl;
         return false;
       }
       int result = PyObject_RichCompareBool(value, _value.ptr(), Py_EQ);
       // Check for exception
       if (result == -1) {
         PyErr_Clear();
+        std::cout << "EQUALS_MATCH failed" << std::endl;
         return false;
       }
+      std::cout << "EQUALS_MATCH: " << result << std::endl;
       return result;
     }
     return true;
@@ -2079,7 +2093,9 @@ class NO_HASATTR : public LeafGuard {
         _attr_name(std::move(attr_name)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    return PyObject_HasAttr(value, _attr_name.ptr()) == 0;
+    auto out = PyObject_HasAttr(value, _attr_name.ptr()) == 0;
+    std::cout << "NO_HASATTR: " << out << std::endl;
+    return out;
   }
 
  private:
@@ -2295,6 +2311,7 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
     if (!insertion.second) {
       // No need to clear _unique_tensors, reset_state will do
       // it.
+      std::cout << "NO_TENSOR_ALIASING failed" << std::endl;
       return false;
     }
     return true;
@@ -4272,36 +4289,83 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
       const py::list& initial_stack,
       py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
-    Py_ssize_t len = PyList_Size(initial_stack.ptr());
-    for (Py_ssize_t idx = 0; idx < len; idx++) {
+
+    auto avoid_type = (PyTypeObject*)py::module_::import("torch.utils._debug_mode").attr("DebugMode").ptr();
+    for (Py_ssize_t idx = 0; idx < PyList_Size(initial_stack.ptr()); idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
       auto type = Py_TYPE(mode);
-      this->_ref_stack.push_back(type);
+      // std::cout << "type: " << py::str(py::handle(mode)) << std::endl;
+      // std::cout << "avoid_type: " << py::str(py::handle((PyObject*)avoid_type)) << std::endl;
+      if (type != avoid_type) {
+        this->_ref_stack.push_back(type);
+      }
     }
   }
 
   template <typename T>
   bool check_nopybind_template(T* value) {
     // Ignore value arg, only used to satisfy the interface
-    const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
+    const size_t real_len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
     const size_t ref_stack_size = this->_ref_stack.size();
 
-    if (len != ref_stack_size) {
-      return false;
-    }
-
-    for (int64_t idx = 0; (size_t)idx < len; idx++) {
+    auto avoid_type = (PyTypeObject*)(py::module_::import("torch.utils._debug_mode").attr("DebugMode").ptr());
+    size_t effective_len = 0;
+    size_t n_skip = 0;
+    for (int64_t idx = 0; (size_t)idx < real_len; idx++) {
       std::shared_ptr<c10::SafePyObject> mode =
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
-
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
-      if (mode_type != _ref_stack.at(idx)) {
+      if (mode_type == avoid_type) {
+        n_skip += 1;
+      } else if (_ref_stack.size() <= idx - n_skip || mode_type != _ref_stack.at(idx - n_skip)) {
+        std::cout << "guard failed" << std::endl;
         return false;
       }
     }
 
+    if (effective_len != ref_stack_size) {
+      std::cout << "guard failed" << std::endl;
+      return false;
+    }
+
+    std::cout << "TORCH_FUNCTION guard passed" << std::endl;
     return true;
   }
+  // TORCH_FUNCTION_MODE_STACK(
+  //     RootGuardManager* root_guard_manager,
+  //     const py::list& initial_stack,
+  //     py::object verbose_code_parts)
+  //     : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+  //   Py_ssize_t len = PyList_Size(initial_stack.ptr());
+  //   for (Py_ssize_t idx = 0; idx < len; idx++) {
+  //     PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
+  //     auto type = Py_TYPE(mode);
+  //     this->_ref_stack.push_back(type);
+  //   }
+  // }
+
+  // template <typename T>
+  // bool check_nopybind_template(T* value) {
+  //   // Ignore value arg, only used to satisfy the interface
+  //   const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
+  //   const size_t ref_stack_size = this->_ref_stack.size();
+
+  //   if (len != ref_stack_size) {
+  //     return false;
+  //   }
+
+  //   for (int64_t idx = 0; (size_t)idx < len; idx++) {
+  //     std::shared_ptr<c10::SafePyObject> mode =
+  //         at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+
+  //     PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
+  //     if (mode_type != _ref_stack.at(idx)) {
+  //       return false;
+  //     }
+  //   }
+
+  //   return true;
+  // }
 
   bool check_nopybind(PyObject* value) override {
     return check_nopybind_template(value);
@@ -4386,10 +4450,13 @@ class TENSOR_MATCH : public LeafGuard {
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     if (Py_TYPE(value) != _tensor_check->pytype) {
+      std::cout << "TENSOR_MATCH failed:" << std::endl;
       return false;
     }
-    return _tensor_check->check(
+    auto out = _tensor_check->check(
         _root_guard_manager->_local_state, THPVariable_Unpack(value));
+    std::cout << "TENSOR_MATCH: " << out << " for " << _tensor_name << std::endl;
+    return out;
   }
 
   GuardDebugInfo check_verbose_nopybind(

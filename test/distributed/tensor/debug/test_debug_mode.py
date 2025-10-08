@@ -271,6 +271,27 @@ class TestDTensorDebugMode(TestCase):
             f(x)
         self.assertEqual(len(debug_mode.debug_string()), 0)
 
+    def test_compile_w_aot_eager(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        x = torch.randn(1, 8, requires_grad=False)
+        y = torch.randn(1, 32, requires_grad=True)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
+
+        @torch.compile(backend="aot_eager")
+        def fn(a, b):
+            return torch.mm(a, b).sum()
+
+        with DebugMode(record_torchfunction=False) as debug_mode:
+            fn(x_dtensor, y_dtensor)
+
+            breakpoint()
+            debug_mode.clear_logs()
+            fn(x_dtensor, y_dtensor)
+            fn(x_dtensor, y_dtensor)
+        print(debug_mode.debug_string())
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 

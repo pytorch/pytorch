@@ -3422,6 +3422,21 @@ def pickle_guards_state(state: GuardsState, guard_tree_values: dict[int, Any]) -
     return buf.getvalue()
 
 
+_GLOBAL_GUARD_FILTER_FN: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None
+
+
+def _register_global_guard_filter_fn(
+    fn: Callable[[list[GuardFilterEntry]], list[bool]]
+) -> None:
+    global _GLOBAL_GUARD_FILTER_FN
+    _GLOBAL_GUARD_FILTER_FN = fn
+
+
+def _remove_global_guard_filter_fn() -> None:
+    global _GLOBAL_GUARD_FILTER_FN
+    _GLOBAL_GUARD_FILTER_FN = None
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -3500,7 +3515,7 @@ class CheckFunctionManager:
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
 
-        if guard_filter_fn:
+        if guard_filter_fn or _GLOBAL_GUARD_FILTER_FN:
             # If we're filtering guards, we need to build it an extra time first
             # because filtering depends on the builder/guard_manager results
             builder, guard_manager = self.build_guards(
@@ -3542,9 +3557,13 @@ class CheckFunctionManager:
                     orig_guard=guard,
                 )
 
-            filter_results = guard_filter_fn(
-                [make_guard_filter_entry(guard) for guard in sorted_guards]
-            )
+            guard_entries = [make_guard_filter_entry(guard) for guard in sorted_guards]
+            filter_results = [True] * len(sorted_guards)
+            if guard_filter_fn:
+                filter_results = [x and y for x, y in zip(filter_results, guard_filter_fn(guard_entries))]
+            if _GLOBAL_GUARD_FILTER_FN:
+                filter_results = [x and y for x, y in zip(filter_results, _GLOBAL_GUARD_FILTER_FN(guard_entries))]
+
             assert len(filter_results) == len(sorted_guards)
             assert all(type(x) == bool for x in filter_results)
             sorted_guards = [
@@ -4232,6 +4251,7 @@ def get_guard_fail_reason_helper(
     # For test_export_with_map_cond, the check_verbose fail even without the
     # C++ guard manager. We need to fix the issue to remove the comment.
     # assert not guard_debug_info.result
+    breakpoint()
     if not guard_debug_info.result:
         verbose_code_parts = guard_debug_info.verbose_code_parts
         # verbose_code_parts is either the actual reason (e.g. in case of
@@ -4324,6 +4344,7 @@ def get_and_maybe_log_recompilation_reasons(
             cache_entry.compile_id,
             skip_logging,
         )
+        breakpoint()
         if reason:
             reasons.append(reason)
         cache_entry = cache_entry.next

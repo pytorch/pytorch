@@ -100,6 +100,7 @@ class DebugMode(TorchDispatchMode):
 
         self.operators = []
         self.call_depth = 0
+        self.start = False
 
     # Without this override, running torch.compile under DebugMode
     # will force torch.compile to always use the “eager” backend
@@ -112,7 +113,8 @@ class DebugMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        self.operators.append((func, args, kwargs, self.call_depth))
+        if not torch.compiler.is_compiling():
+            self.operators.append((func, args, kwargs, self.call_depth))
 
         try:
             self.call_depth += 1
@@ -126,17 +128,20 @@ class DebugMode(TorchDispatchMode):
 
         # Record the operation with its call depth
         if torch.distributed.tensor.DTensor in types:
-            self.operators.append((func, args, kwargs, self.call_depth))
+            if not torch.compiler.is_compiling():
+                self.operators.append((func, args, kwargs, self.call_depth))
             return NotImplemented
         elif FakeTensor in types or isinstance(
             _get_current_dispatch_mode(), FakeTensorMode
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    self.operators.append((func, args, kwargs, self.call_depth + 1))
+                    if not torch.compiler.is_compiling():
+                        self.operators.append((func, args, kwargs, self.call_depth + 1))
         elif len(types) == 0:
             if self.record_realtensor:
-                self.operators.append((func, args, kwargs, self.call_depth + 1))
+                if not torch.compiler.is_compiling():
+                    self.operators.append((func, args, kwargs, self.call_depth + 1))
 
         result = func(*args, **kwargs)
 
@@ -147,7 +152,24 @@ class DebugMode(TorchDispatchMode):
         self.call_depth = 0
 
         if self.record_torchfunction:
-            torch._C._push_on_torch_function_stack(self)
+            from torch._dynamo.guards import _register_global_guard_filter_fn
+
+            with torch._C.DisableTorchFunction():
+                _torch_function_stack_index = torch._C._len_torch_function_stack()
+                torch._C._push_on_torch_function_stack(self)
+
+                def guard_filter_fn(guard_entries):
+                    kw = f"___get_torch_function_mode_stack_at({_torch_function_stack_index})"
+                    return [
+                        (
+                            kw not in entry.name
+                            or (entry.name == kw and entry.guard_type == "TYPE_MATCH")
+                        )
+                        and entry.guard_type != "TENSOR_MATCH"
+                        for entry in guard_entries
+                    ]
+
+                _register_global_guard_filter_fn(guard_filter_fn)            
 
         super().__enter__()
         return self
@@ -155,19 +177,24 @@ class DebugMode(TorchDispatchMode):
     def __exit__(self, *args):
         super().__exit__(*args)
         if self.record_torchfunction:
-            torch._C._pop_torch_function_stack()
+            with torch._C.DisableTorchFunction():
+                from torch._dynamo.guards import _remove_global_guard_filter_fn
+
+                torch._C._pop_torch_function_stack()
+                _remove_global_guard_filter_fn()
 
     @contextlib.contextmanager
     def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
         try:
-            self.operators.append(
-                (
-                    REDISTRIBUTE_FUNC,
-                    [arg_idx, src_placement, dst_placement],
-                    {},
-                    self.call_depth + 1,
+            if not torch.compiler.is_compiling():
+                self.operators.append(
+                    (
+                        REDISTRIBUTE_FUNC,
+                        [arg_idx, src_placement, dst_placement],
+                        {},
+                        self.call_depth + 1,
+                    )
                 )
-            )
             self.call_depth += 1
             yield
         finally:
@@ -181,6 +208,9 @@ class DebugMode(TorchDispatchMode):
                 for op, args, kwargs, depth in self.operators
             )
         return result
+
+    def clear_logs(self) -> None:
+        self.operators = []
 
 
 def get_active_debug_mode() -> Optional[DebugMode]:
