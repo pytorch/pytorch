@@ -181,7 +181,6 @@ def scaled_mm_wrap(
     use_fast_accum=False,
     bias=None,
     wrap_v2=wrap,
-    use_deprecated_api=False,
 ):
     if not wrap_v2:
         return torch._scaled_mm(
@@ -212,7 +211,6 @@ def scaled_mm_wrap(
             swizzle_b=swizzle_b,
             bias=bias,
             output_dtype=out_dtype,
-            use_deprecated_scaled_mm=use_deprecated_api,
         )
         return out
 

@@ -6554,37 +6554,6 @@ def scaled_mm(
         contraction_dim: describe which dimensions are :math:`K` in the matmul.
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
-    use_deprecated_api = kwargs.pop("use_deprecated_scaled_mm", False)
-    if len(kwargs) > 0:
-        raise RuntimeError("kwargs contains unexpected entries, ", kwargs.keys())
-
-    if use_deprecated_api:
-
-        def check_valid_scale_passed(
-            scale: tuple[Tensor, ...] | list[Tensor] | Tensor,
-        ) -> Tensor:
-            if isinstance(scale, (list, tuple)):
-                if len(scale) > 1:
-                    raise RuntimeError(
-                        "deprecated api only accepts single scales, got", len(scale)
-                    )
-                return scale[0]
-            else:
-                return scale
-
-        scale_a_checked = check_valid_scale_passed(scale_a)
-        scale_b_checked = check_valid_scale_passed(scale_b)
-
-        return torch._scaled_mm(
-            mat_a,
-            mat_b,
-            scale_a_checked,
-            scale_b_checked,
-            bias=bias,
-            scale_result=None,
-            out_dtype=output_dtype,
-            use_fast_accum=use_fast_accum,
-        )
 
     def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
         if v is None:

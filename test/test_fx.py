@@ -4657,7 +4657,6 @@ class TestFunctionalTracing(JitTestCase):
         "adaptive_avg_pool3d": LEN_ERROR,
         "adaptive_max_pool2d_with_indices": LEN_ERROR,
         "adaptive_max_pool3d_with_indices": LEN_ERROR,
-        "scaled_mm": LEN_ERROR,
         "instance_norm": CONTROL_FLOW,
         "adaptive_max_pool1d": PROXY_ITERABLE,
         "adaptive_max_pool2d": PROXY_ITERABLE,
