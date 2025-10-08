@@ -616,6 +616,7 @@ class TestFP8Matmul(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"torch._scaled_mm with 128x blockwise scaling requires explicit out_dtype"):
             torch._scaled_mm(a, b, scale_a, scale_b)
+
     @onlyCUDA
     def test_float8_bias(self, device) -> None:
         if device != "cpu" and torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8:
