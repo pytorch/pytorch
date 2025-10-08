@@ -139,7 +139,7 @@ class DebugMode(TorchDispatchMode):
 
     def _track_tensor_ids(self, obj):
         """Recursively assign IDs to all tensors in a pytree."""
-        tree_map_only(torch.Tensor, self._track_tensor_ids, obj)
+        tree_map_only(torch.Tensor, self._assign_tensor_id, obj)
 
     def _track_op_output(self, op_index, result):
         """Assign IDs to output tensors and store in output_info."""
