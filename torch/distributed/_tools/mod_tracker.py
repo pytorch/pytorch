@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import warnings
 import weakref
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 from torch.autograd.graph import register_multi_grad_hook
