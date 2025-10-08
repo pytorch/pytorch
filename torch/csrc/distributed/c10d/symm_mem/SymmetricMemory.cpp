@@ -458,6 +458,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
   m.def(
+      "multimem_one_shot_reduce_out(Tensor input, str reduce_op, int root, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.def(
       "multimem_all_gather_out(Tensor input, str group_name, Tensor(a!) out) -> Tensor(a!)");
   m.def(
       "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
@@ -510,6 +512,10 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name, int? major_align=None) -> ()");
   m.def(
       "all_to_all_vdev_2d_offset(Tensor input, Tensor(a!) out, Tensor in_splits_offsets, Tensor(a!) out_splits_offsets, str group_name) -> ()");
+  m.def(
+      "tile_reduce(Tensor in_tile, Tensor(a!) out_tile, int root, str group_name, str reduce_op='sum') -> ()");
+  m.def(
+      "multi_root_tile_reduce(Tensor[] in_tiles, Tensor(a!) out_tile, int[] roots, str group_name, str reduce_op='sum') -> ()");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {
