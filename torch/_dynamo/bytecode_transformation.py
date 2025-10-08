@@ -1239,7 +1239,7 @@ def add_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> Non
 
 def remove_graph_break_if_leaf_instructions(instructions: list[Instruction]) -> None:
     new_insts = []
-    for inst, next_inst in zip(instructions, instructions[1:]):
+    for inst, next_inst in itertools.pairwise(instructions):
         if (
             inst.opname == "NOP"
             and inst.argval == "GRAPH_BREAK_IF_LEAF"

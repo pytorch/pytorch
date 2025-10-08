@@ -471,7 +471,6 @@ def _check_input_constraints_for_graph(
         elif isinstance(node_val, torch.SymInt):
             _check_symint(
                 node_val,
-                # pyrefly: ignore  # bad-argument-type
                 arg,
                 range_constraints,
                 unification_map,

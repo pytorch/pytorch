@@ -1820,6 +1820,7 @@ class MetaConverter(Generic[_TensorT]):
 
                     # TODO: Use a valid grad-specific symbolic context instead of recycling
                     # the one from t. This isn't correct if e.g. t._is_view() != t.grad._is_view().
+                    # pyrefly: ignore  # unbound-name
                     r.grad = self.meta_tensor(
                         t.grad,
                         shape_env,
@@ -1827,12 +1828,15 @@ class MetaConverter(Generic[_TensorT]):
                         AttrSource(source, "grad"),
                         symbolic_context,
                     )
+                # pyrefly: ignore  # unbound-name
                 torch._C._set_conj(r, t.is_conj)
+                # pyrefly: ignore  # unbound-name
                 torch._C._set_neg(r, t.is_neg)
             # This can be skipped if necessary for performance reasons
             skip_leaf = (
                 t.is_gradtrackingtensor and t.level == GRAD_TENSOR_SENTINEL_VALUE
             )
+            # pyrefly: ignore  # unbound-name
             assert_metadata_eq(assert_eq, t, r, skip_symbolic=True, skip_leaf=skip_leaf)
             # Thanks to storage resizing, it's possible to end up with a tensor
             # that advertises a real size, but has a storage that actually has zero bytes.
@@ -1840,14 +1844,18 @@ class MetaConverter(Generic[_TensorT]):
             from torch.fx.experimental.symbolic_shapes import guard_or_false
 
             if t.storage is not None and guard_or_false(t.storage.size == 0):
+                # pyrefly: ignore  # unbound-name
                 r.untyped_storage().resize_(0)
 
             if t.is_parameter:
+                # pyrefly: ignore  # unbound-name
                 r._is_param = True
 
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None:
+                # pyrefly: ignore  # unbound-name
                 assert _is_fake_tensor(r)
+                # pyrefly: ignore  # unbound-name
                 r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
                 )
