@@ -15,8 +15,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.triton_utils import requires_gpu
 from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 class TestDynamic(DTensorTestBase):
@@ -50,7 +50,7 @@ class TestDynamic(DTensorTestBase):
                 return emb
 
             arg0 = torch.randint(
-                low=0, high=100, size=(2, 512), dtype=torch.int64, device="cuda"
+                low=0, high=100, size=(2, 512), dtype=torch.int64, device=GPU_TYPE
             )
             arg0 = DTensor.from_local(arg0, device_mesh, placements)
 

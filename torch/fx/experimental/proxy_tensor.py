@@ -69,7 +69,7 @@ from torch.utils._thunk import Thunk
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary, WeakTensorKeyDictionary
 
 from ._backward_state import BackwardState
-from .sym_node import SymNode, wrap_node
+from .sym_node import SymNode
 
 
 if TYPE_CHECKING:
@@ -93,7 +93,6 @@ __all__ = [
     "make_fx",
     "maybe_disable_thunkify",
     "maybe_enable_thunkify",
-    "no_sym_dispatch",
     "py_sym_types",
 ]
 
@@ -2527,35 +2526,18 @@ no_sym_dispatch = _NoSymDispatch()
 
 
 def handle_sym_dispatch(
-    func: Callable[_P, R], *args: _P.args, **kwargs: _P.kwargs
-) -> R | _NoSymDispatch:
+    func: Callable[_P, R],
+    args: _P.args,  # type: ignore[valid-type]  # not allowed to use _P.args here
+    kwargs: _P.kwargs,  # type: ignore[valid-type]  # not allowed to use _P.kwargs here
+) -> R:
     """
-    Attempt to do a SymNode dispatch trace on a function. If the function
-    was able to be traced the traced result is returned otherwise the singleton
-    `no_sym_dispatch` is returned.
+    Call into the currently active proxy tracing mode to do a
+    SymInt/SymFloat/SymBool dispatch trace on a function that operates on
+    these arguments.
     """
 
-    mode = ProxyTorchDispatchMode._global_state.sym_mode_override or get_proxy_mode()
-    if not mode:
-        return no_sym_dispatch
-
-    # Recursively turn the SymNodes in an arg into SymInt/SymFloat/SymBool.
-    def _wrap_node(arg: Any) -> Any:
-        if arg is None:
-            return None
-        elif isinstance(arg, list):
-            return [_wrap_node(a) for a in arg]
-        elif isinstance(arg, tuple):
-            return tuple(_wrap_node(a) for a in arg)
-        elif isinstance(arg, SymNode):
-            # Turn the SymNode into a SymInt/SymFloat/SymBool
-            return wrap_node(arg)
-        elif isinstance(arg, (int, bool, float)):
-            return arg
-        else:
-            raise RuntimeError(f"Unhandled arg type {type(arg)} in _wrap_node()")
-
-    args = _wrap_node(args)
+    mode = _get_proxy_torch_dispatch_mode_sym_tracing()
+    assert mode
 
     # Temporary disable the proxy mode (AND sym_mode_override!) while we run
     # the op.
@@ -2569,12 +2551,12 @@ def handle_sym_dispatch(
 
 @contextmanager
 def disable_proxy_modes_tracing(
-    trace_symbolics: bool = False,
+    trace_symbolic_shapes: bool = False,
 ) -> Generator[ProxyTorchDispatchMode, None, None]:
     """
     Temporarily disable the current PROXY dispatcher.
 
-    If `trace_symbolics` is True then disables dispatch tracing but continues
+    If `trace_symbolic_shapes` is True then disables dispatch tracing but continues
     tracing symbolic expressions (like `s1*s2`).
 
     Why might you need this?  Let's say you have some code which is tracing an
@@ -2589,7 +2571,7 @@ def disable_proxy_modes_tracing(
     """
     saved_sym_mode_override = ProxyTorchDispatchMode._global_state.sym_mode_override
     mode_unset = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
-    if trace_symbolics:
+    if trace_symbolic_shapes:
         # Make sure that if they already override the mode we use that, not just
         # blindly set from the current mode.
         #
