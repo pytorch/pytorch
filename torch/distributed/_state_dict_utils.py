@@ -3,8 +3,8 @@ import copy
 import io
 import math
 import weakref
-from collections.abc import Mapping, MutableMapping
-from typing import Any, Callable, cast, NamedTuple, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Mapping, MutableMapping
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.cuda._pin_memory_utils as pin_memory_utils
