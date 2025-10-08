@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/headeronly/util/shim_utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/headeronly/util/shim_utils.h>
 
 #include <memory>
 
@@ -21,7 +21,7 @@ inline void delete_parallel_guard(void* ptr) {
 }
 } // namespace
 
-// RAII wrapper for ABI-stable ThreadIdGuard using shim APIs
+
 class ThreadIdGuard {
  public:
   explicit ThreadIdGuard() = delete;
@@ -36,7 +36,7 @@ class ThreadIdGuard {
   std::unique_ptr<ThreadIdGuardOpaque, DeleterFnPtr> guard_;
 };
 
-// RAII wrapper for ABI-stable ParallelGuard using shim APIs
+
 class ParallelGuard {
  public:
   explicit ParallelGuard() = delete;

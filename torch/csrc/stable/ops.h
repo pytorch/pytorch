@@ -244,35 +244,26 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
   return to<torch::stable::Tensor>(stack[0]);
 }
 
-template <typename F>
-struct Trampoline {
-  static void invoke(int64_t begin, int64_t end, void* ctx) {
-    ParallelGuard guard(true);
-    F* fn = static_cast<F*>(ctx);
-    (*fn)(begin, end);
-  }
-};
-
 namespace internal {
-// We expect this to be the stable version of the OpenMP variant of the
-// invoke_parallel op with identical semantics to the existing parallel_for op.
-// This is copy pasted from aten/src/ATen/ParallelOpenMP.h except that we
-// replace ThreadIdGuard with the shim-ed version.
-// Requiring the extension to link against the OpenMP library to use
-// invoke_parallel matches the existing semantic.
-#ifdef _OPENMP
 
 // Copied from aten/src/ATen/Parallel.h
 inline int64_t divup(int64_t x, int64_t y) {
   return (x + y - 1) / y;
 }
 
+// We expect this to be the stable version of the OpenMP variant of the
+// invoke_parallel op with identical semantics to the existing invoke_parallel.
+// This is copy pasted from aten/src/ATen/ParallelOpenMP.h except that we
+// replace ThreadIdGuard with the shim-ed version.
+// Requiring the extension to link against the OpenMP library to use
+// invoke_parallel matches the existing semantic.
 template <typename F>
 inline void invoke_parallel(
     int64_t begin,
     int64_t end,
     int64_t grain_size,
     const F& f) {
+#ifdef _OPENMP
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
 
@@ -303,8 +294,23 @@ inline void invoke_parallel(
   if (eptr) {
     std::rethrow_exception(eptr);
   }
-}
+#else
+  STD_TORCH_CHECK(false, "Attempting to call torch::stable::invoke_parallel "
+    "without OPENMP. Internal error, should not have gotten here");
 #endif
+}
+
+// For the ParallelNative path, this helps with converting C++ lambdas
+// etc. to a C-style function pointer expected by the C-shim
+template <typename F>
+struct Trampoline {
+  static void invoke(int64_t begin, int64_t end, void* ctx) {
+    ParallelGuard guard(true);
+    F* fn = static_cast<F*>(ctx);
+    (*fn)(begin, end);
+  }
+};
+
 } // namespace internal
 
 #ifdef _OPENMP
@@ -314,7 +320,7 @@ inline void invoke_parallel(
 #endif
 
 // We expect this to be the ABI stable version of parallel_for with identical
-// semantics to at::parallel_for
+// semantics to at::paralålel_for
 template <class F>
 inline void parallel_for(
     const int64_t begin,
@@ -341,6 +347,7 @@ inline void parallel_for(
     }
 
     if (aoti_torch_get_parallel_openmp_enabled()) {
+      // From above check we know EXTENSION_HAS_OPENMP == 1
       // For parallel openmp path (default), we call internal::invoke_parallel
       // defined in this header so inlining of f still happens
       internal::invoke_parallel(
@@ -356,11 +363,10 @@ inline void parallel_for(
           begin,
           end,
           grain_size,
-          &Trampoline<F>::invoke,
+          &internal::Trampoline<F>::invoke,
           const_cast<void*>(static_cast<const void*>(&f))));
     }
   } else {
-    STD_TORCH_CHECK(false, "shouldn't be here");
     ThreadIdGuard tid_guard(0);
     ParallelGuard guard(true);
     f(begin, end);
