@@ -2076,15 +2076,29 @@ TORCH_CHECK(false, "Calling torch.linalg.eig on a CUDA tensor requires compiling
 #endif
 }
 
-// This is a type dispatching helper function for 'apply_linalg_eig'
 void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
   // This function calculates the non-symmetric eigendecomposition in-place
   // tensors should be in batched column major memory format
   // the content of eigenvalues, eigenvectors and infos is overwritten by 'apply_linalg_eig'
 
   // apply_linalg_eig modifies the provided input matrix in-place, therefore we need a copy
-  // MAGMA doesn't have GPU interface for the eigendecomposition and it forces us to transfer 'input' to CPU
+  // MAGMA doesn't have GPU interface for the eigendecomposition, and it forces us to transfer 'input' to CPU
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
+#if defined(USE_CUSOLVER_64_BIT) && defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+  // ───────────────────────────────────────────────
+  // New CUDA 12.6+ path using cuSOLVER Xgeev
+  // ───────────────────────────────────────────────
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Cusolver:
+    default:
+      linalg_eig_cusolver(eigenvalues, eigenvectors, infos, compute_eigenvectors);
+      return;
+    case at::LinalgBackend::Magma:
+      break; // fallback to CPU path below
+  }
+#endif
+
   Tensor input_working_copy = at::empty(input.sizes(), input.options().device(kCPU));
   input_working_copy.transpose_(-2, -1);  // make input_working_copy to have Fortran contiguous memory layout
   input_working_copy.copy_(input);

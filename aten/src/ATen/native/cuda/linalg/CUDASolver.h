@@ -674,6 +674,47 @@ template <>
 void xsyevd<c10::complex<double>, double>(
     CUDASOLVER_XSYEVD_ARGTYPES(c10::complex<double>, double));
 
+
+
+// new xgeev implementation
+
+#define CUDASOLVER_XGEEV_BUFFERSIZE_ARGTYPES(scalar_t, value_t)              \
+cusolverDnHandle_t handle, cusolverDnParams_t params,                      \
+cusolverEigMode_t jobvl, cusolverEigMode_t jobvr, int64_t n,           \
+const scalar_t* A, int64_t lda, const value_t* W,                      \
+const value_t* VL, int64_t ldvl, const value_t* VR, int64_t ldvr,      \
+size_t* workspaceInBytesOnDevice, size_t* workspaceInBytesOnHost
+
+template <class scalar_t, class value_t = scalar_t>
+void xgeev_bufferSize(
+    CUDASOLVER_XGEEV_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
+  static_assert(false&&sizeof(scalar_t),
+      "at::cuda::solver::xgeev_bufferSize: not implemented");
+}
+
+template <>
+void xgeev_bufferSize<double>(
+    CUDASOLVER_XGEEV_BUFFERSIZE_ARGTYPES(double, double));
+
+#define CUDASOLVER_XGEEV_ARGTYPES(scalar_t, value_t)                        \
+cusolverDnHandle_t handle, cusolverDnParams_t params,                      \
+cusolverEigMode_t jobvl, cusolverEigMode_t jobvr, int64_t n, scalar_t *A, \
+int64_t lda, value_t *W, value_t *VL, int64_t ldvl, value_t *VR, int64_t ldvr, \
+scalar_t *bufferOnDevice, size_t workspaceInBytesOnDevice, scalar_t *bufferOnHost,               \
+size_t workspaceInBytesOnHost, int *info
+
+template <class scalar_t, class value_t = scalar_t>
+void xgeev(CUDASOLVER_XGEEV_ARGTYPES(scalar_t, value_t)) {
+  static_assert(false&&sizeof(scalar_t),
+      "at::cuda::solver::xgeev: not implemented");
+}
+
+template <>
+void xgeev<double>(CUDASOLVER_XGEEV_ARGTYPES(double, double));
+
+// end new implementation
+
+
 #endif // USE_CUSOLVER_64_BIT
 
 #ifdef USE_CUSOLVER_64_BIT_XSYEV_BATCHED

@@ -1625,6 +1625,49 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 #endif
 }
 
+
+// ---------------------------------------------------------------------------
+// cuSOLVERDnXgeev (CUDA >= 12.6 Update 2 / cuSOLVER >= 11.7.2)
+// ---------------------------------------------------------------------------
+#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+
+void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool compute_eigenvectors) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(eigenvalues.is_cuda());
+  TORCH_WARN("Entered experimental cuSOLVER Xgeev path");
+
+  cusolverDnHandle_t handle = at::cuda::getCurrentCUDASolverDnHandle();
+  cusolverDnParams_t params = nullptr;
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
+
+  const double* A = nullptr;
+  const double* W = nullptr;
+  const double* VL = nullptr;
+  const double* VR = nullptr;
+
+
+  // Query workspace (dummy for now)
+  size_t ws_dev = 0, ws_host = 0;
+  cuda::solver::xgeev_bufferSize(
+      handle,
+      params,
+      CUSOLVER_EIG_MODE_VECTOR,
+      CUSOLVER_EIG_MODE_VECTOR,
+      3, // dummy n
+      A,
+      3,
+      W,
+      VL,
+      3,
+      VR,
+      3,
+      &ws_dev,
+      &ws_host);
+
+  TORCH_WARN("linalg_eig_cusolver_xgeev: bufferSize query complete (placeholder)");
+}
+
+#endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.

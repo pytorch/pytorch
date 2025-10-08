@@ -1954,6 +1954,60 @@ void xsyevd<c10::complex<double>, double>(
       workspaceInBytesOnHost,
       info));
 }
+
+
+// ---------------------------------------------------------------------------
+// Experimental: cuSOLVERDnXgeev (CUDA >= 12.8)
+// Placeholder to verify build detection of cuSOLVER version.
+// Implementation will follow in later revision.
+// ---------------------------------------------------------------------------
+#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+#pragma message("Compiling with cuSOLVER >= 11.7.2 — Xgeev bindings enabled")
+
+template <>
+void xgeev_bufferSize<double>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobvl,
+    cusolverEigMode_t jobvr,
+    int64_t n,
+    const double* A,
+    int64_t lda,
+    const double* W,
+    const double* VL,
+    int64_t ldvl,
+    const double* VR,
+    int64_t ldvr,
+    size_t* workspaceInBytesOnDevice,
+    size_t* workspaceInBytesOnHost) {
+  TORCH_WARN("xgeev_bufferSize<double> not implemented yet");
+}
+
+template <>
+void at::cuda::solver::xgeev<double, double>(
+    cusolverDnHandle_t handle,
+    cusolverDnParams_t params,
+    cusolverEigMode_t jobvl,
+    cusolverEigMode_t jobvr,
+    int64_t n,
+    double* A,
+    int64_t lda,
+    double* W,
+    double* VL,
+    int64_t ldvl,
+    double* VR,
+    int64_t ldvr,
+    double* bufferOnDevice,
+    size_t workspaceInBytesOnDevice,
+    double* bufferOnHost,
+    size_t workspaceInBytesOnHost,
+    int* info) {
+  TORCH_WARN("xgeev<double> not implemented yet");
+}
+
+
+#endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+
 #endif // USE_CUSOLVER_64_BIT
 
 #ifdef USE_CUSOLVER_64_BIT_XSYEV_BATCHED
