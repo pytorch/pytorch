@@ -3333,7 +3333,6 @@ def get_fake_value(
         UserError,
         UserErrorType,
     )
-    from .variables.streams import stream_state_mgr
 
     op = node.op
 
@@ -3348,27 +3347,13 @@ def get_fake_value(
     if (
         torch._dynamo.config.use_graph_deduplication
         or torch._dynamo.config.track_nodes_for_deduplication
-        or stream_state_mgr.in_stream_context()
     ):
-        flat_args = _get_flat_args(node, {})
-        if stream_state_mgr.in_stream_context():
-            for arg in flat_args:
-                if isinstance(arg, torch.fx.Node):
-                    stream_state_mgr.track_node(arg)
-
-        if (
-            torch._dynamo.config.use_graph_deduplication
-            or torch._dynamo.config.track_nodes_for_deduplication
-        ):
-            flat_args_kwargs = get_fake_values_from_nodes(
-                tx, flat_args, allow_non_graph_fake
-            )
-            id_to_initial_version = {
-                id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
-            }
-        else:
-            flat_args_kwargs = []
-            id_to_initial_version = {}
+        flat_args_kwargs = get_fake_values_from_nodes(
+            tx, _get_flat_args(node, {}), allow_non_graph_fake
+        )
+        id_to_initial_version = {
+            id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
+        }
     else:
         flat_args_kwargs = []
         id_to_initial_version = {}
@@ -3516,9 +3501,6 @@ def get_fake_value(
         _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
-
-    if stream_state_mgr.in_stream_context():
-        stream_state_mgr.track_internal_node(node)
 
     if (
         torch._dynamo.config.use_graph_deduplication
@@ -4717,6 +4699,35 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     }
 
     return tensor_dict
+
+
+# This is useful for reconstructing within the Dynamo graph the non-graph-input objects
+# whose lifetime is governed by the user.
+# e.g. torch.cuda.Event is a prime example.
+user_obj_id_to_weakref: dict[int, weakref.ReferenceType[object]] = {}
+
+
+# TODO: mlazos to remove after replacing w/ above API
+def get_user_object_from_id(obj_id: int) -> Any:
+    obj = user_obj_id_to_weakref[obj_id]()
+    assert obj is not None, "User object is no longer alive"
+    return obj
+
+
+def store_user_object_weakref(obj: object) -> None:
+    obj_id = id(obj)
+    try:
+        user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+    except TypeError as e:
+        from .exc import unimplemented_v2
+
+        unimplemented_v2(
+            gb_type="Failed to make weakref to User Object when storing by ID",
+            context=f"user_objected: {obj}",
+            explanation="Object does not allow us to make a weakref to it",
+            hints=[],
+            from_exc=e,
+        )
 
 
 class CompileTimeInstructionCounter:
