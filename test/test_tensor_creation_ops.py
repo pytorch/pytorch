@@ -26,11 +26,9 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     set_default_tensor_type,
     TEST_SCIPY,
-    IS_PPC,
     IS_WINDOWS,
     IS_FBCODE,
     IS_SANDCASTLE,
-    IS_S390X,
     IS_ARM64,
     parametrize,
     xfailIfTorchDynamo,
@@ -1053,7 +1051,6 @@ class TestTensorCreation(TestCase):
     # errors with UBSAN. These casts are deliberate in PyTorch, however, and
     # NumPy may have the same behavior.
     @onlyNativeDeviceTypes
-    @unittest.skipIf(IS_PPC, "Test is broken on PowerPC, see https://github.com/pytorch/pytorch/issues/39671")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_finite(self, device, dtype):
         min = torch.finfo(torch.float).min
@@ -1085,7 +1082,6 @@ class TestTensorCreation(TestCase):
     # NB: torch.uint16, torch.uint32, torch.uint64 excluded as this
     # nondeterministically fails, warning "invalid value encountered in cast"
     @onlyCPU
-    @unittest.skipIf(IS_S390X, "Test fails for int16 on s390x. Needs investigation.")
     @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_float_to_int_conversion_nonfinite(self, device, dtype):
         vals = (float('-inf'), float('inf'), float('nan'))
