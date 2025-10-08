@@ -1809,12 +1809,10 @@ AOTITorchError aoti_torch_invoke_parallel(
     AOTIParallelLambda lambda,
     void* ctx) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    // Wrap the lambda+ctx pair into a callable object for invoke_parallel
     auto wrapper = [lambda, ctx](int64_t chunk_begin, int64_t chunk_end) {
       lambda(chunk_begin, chunk_end, ctx);
     };
 
-    // Call PyTorch internal invoke_parallel with the wrapper
     at::internal::invoke_parallel(begin, end, grain_size, wrapper);
   });
 }
