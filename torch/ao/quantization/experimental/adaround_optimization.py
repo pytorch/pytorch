@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 from torch.ao.quantization.experimental.adaround_fake_quantize import (
@@ -126,6 +127,7 @@ class AdaptiveRoundingOptimizer:
     @torch.no_grad()
     def feed_forward(self, x, weight, module):
         if isinstance(module, torch.nn.Conv1d):
+            # pyrefly: ignore  # no-matching-overload
             out = torch.nn.functional.conv1d(
                 x,
                 weight,

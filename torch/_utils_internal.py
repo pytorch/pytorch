@@ -5,7 +5,8 @@ import os
 import sys
 import tempfile
 import typing_extensions
-from typing import Any, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -83,7 +84,12 @@ def compile_time_strobelight_meta(
     ) -> Callable[_P, _T]:
         @functools.wraps(function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-            if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
+            if "skip" in kwargs and isinstance(
+                # pyrefly: ignore  # unsupported-operation
+                skip := kwargs["skip"],
+                int,
+            ):
+                # pyrefly: ignore  # unbound-name
                 kwargs["skip"] = skip + 1
 
             # This is not needed but we have it here to avoid having profile_compile_time
@@ -326,7 +332,10 @@ def deprecated():
 
         # public deprecated alias
         alias = typing_extensions.deprecated(
-            warning_msg, category=UserWarning, stacklevel=1
+            # pyrefly: ignore  # bad-argument-type
+            warning_msg,
+            category=UserWarning,
+            stacklevel=1,
         )(func)
 
         alias.__name__ = public_name
