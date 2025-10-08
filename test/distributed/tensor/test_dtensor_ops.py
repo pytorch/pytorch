@@ -7,7 +7,13 @@ import warnings
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.distributed.tensor import distribute_tensor, DTensor, init_device_mesh, Replicate, Shard
+from torch.distributed.tensor import (
+    distribute_tensor,
+    DTensor,
+    init_device_mesh,
+    Replicate,
+    Shard,
+)
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -713,7 +719,9 @@ class TestDTensorOps(DTensorOpTestBase):
         # Before the fix, this would fail with:
         # AssertionError: aten.einsum.default: no default implementation registered
         with torch.inference_mode():
-            r_dtensor_replicate = torch.einsum("a b c, a d e c -> b d e", X_replicate, Y_replicate)
+            r_dtensor_replicate = torch.einsum(
+                "a b c, a d e c -> b d e", X_replicate, Y_replicate
+            )
 
         # Verification: result should match local computation
         r_local = torch.einsum("a b c, a d e c -> b d e", X_local, Y_local)
@@ -722,7 +730,9 @@ class TestDTensorOps(DTensorOpTestBase):
         self.assertEqual(r_dtensor_replicate.placements, (Replicate(),))
 
         # Also test outside inference mode to ensure general functionality
-        r_dtensor_eager = torch.einsum("a b c, a d e c -> b d e", X_replicate, Y_replicate)
+        r_dtensor_eager = torch.einsum(
+            "a b c, a d e c -> b d e", X_replicate, Y_replicate
+        )
         self.assertEqual(r_dtensor_eager.to_local(), r_local)
         self.assertEqual(r_dtensor_eager.placements, (Replicate(),))
 
