@@ -18,18 +18,14 @@ from torch._inductor import comms
 from torch._inductor.virtualized import ops
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
-from torch.fx.experimental.symbolic_shapes import (
-    has_free_unbacked_symbols,
-    statically_known_true,
-    sym_eq,
-)
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher
 from ..codegen.common import custom_backend_passes
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
-from ..lowering import lowerings as L, make_pointwise, make_reduction, transform_args
+from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
     Arg,
@@ -183,11 +179,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 config._fuse_ddp_communication_passes,
                 config._fuse_ddp_bucket_size,
             )
-        )
-
-    if config.triton.native_matmul:
-        GraphTransformObserver(gm, "native_matmul_pass").apply_graph_pass(
-            native_matmul_pass
         )
 
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
@@ -769,11 +760,7 @@ def is_valid_mm_plus_mm(match: Match):
         return False
 
     if config.triton.native_matmul:
-        if (
-            match.kwargs["mat1"].meta["val"].device.type == "cuda"
-            and config.cuda_backend == "triton"
-        ):
-            return False
+        return False
 
     return True
 
@@ -1516,205 +1503,6 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
 
     # pyrefly: ignore  # bad-argument-type
     match.replace_by_example(repl, [inp, mat1, mat2])
-
-
-def native_matmul_pass(graph: torch.fx.Graph):
-    """
-    Lower matmul-related operations (e.g., torch.matmul / torch.bmm / torch.addmm)
-    into native matmul IR using `ops.dot`. When we see a matmul pattern
-    (C[y, x] = A[y, r] * B[r, x]), the core idea is to emulate a broadcasted
-    multiply followed by a sum.
-
-    For example, given `C = torch.matmul(A, B)`, this can be rewritten as:
-
-        Prod = A.unsqueeze(-1) * B.unsqueeze(0)
-        C = Prod.sum(dim=1)
-
-    Instead of explicitly using `ops.mul` and `ops.reduction("sum")`, we lower
-    these into `ops.dot` (pointwise) and `ops.reduction("dot")`. These IR nodes
-    are semantically equivalent to the `ops.mul` + `ops.reduction("sum")`
-    combination, but are lowered to `tl.dot` during the code generation phase.
-    """
-    graph_pass = [
-        PatternMatcherPass(),
-        PatternMatcherPass(),
-    ]
-
-    def register_lowering_pattern(
-        pattern, extra_check, pass_dict
-    ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-        return pattern_matcher.register_lowering_pattern(
-            pattern, extra_check, pass_dict=pass_dict
-        )
-
-    def native_matmul_extra_check(match):
-        mat1 = match.kwargs["mat1"].meta["val"]
-        mat2 = match.kwargs["mat2"].meta["val"]
-
-        if not config.triton.native_matmul:
-            return False
-
-        # If tma matmul is on, don't do native matmul
-        if (
-            config.triton.enable_persistent_tma_matmul
-            and torch.utils._triton.has_triton_tma_device()
-        ):
-            raise AssertionError("native matmul doesn't support tma codegen yet")
-
-        # Currently only enable native matmul for default indexing
-        # TODO : support block ptr
-        if config.triton.use_block_ptr:
-            raise AssertionError("native matmul doesn't support block_ptr codegen yet")
-
-        # Currently only enable native matmul for triton on GPU.
-        if not (mat1.device.type == "cuda" and config.cuda_backend == "triton"):
-            return False
-
-        # Currently, tl.dot only supports following dtypes
-        triton_supported_dtype = [
-            torch.int8,
-            torch.uint8,
-            torch.float16,
-            torch.bfloat16,
-            torch.float32,
-        ]
-        if mat1.dtype not in triton_supported_dtype:
-            return False
-        if mat2.dtype not in triton_supported_dtype:
-            return False
-
-        # (..., M, K) @ (..., K, N)
-        M, K = mat1.shape[-2], mat1.shape[-1]
-        K, N = mat2.shape[-2], mat2.shape[-1]
-
-        # if shape is unbacked symint, skip
-        if any(map(has_free_unbacked_symbols, [M, K, N])):
-            return False
-
-        # Skip if size is zero or one.
-        # TODO : support when size is one
-        if M <= 1 or K <= 1 or N <= 1:
-            return False
-
-        return True
-
-    # TODO : support aten.baddmm
-    @register_graph_pattern(
-        CallFunction(
-            aten.addmm,
-            KeywordArg("inp"),
-            KeywordArg("mat1"),
-            KeywordArg("mat2"),
-            beta=KeywordArg("beta"),
-            alpha=KeywordArg("alpha"),
-        ),
-        pass_dict=graph_pass[0],
-        extra_check=native_matmul_extra_check,
-    )
-    def addmm_to_mm_and_add(match: Match, inp, mat1, mat2, beta, alpha):
-        # constant propagation does not work well, so manually simplify it.
-        def repl(inp, x1, x2, beta, alpha):
-            result = 0
-            if beta != 0:
-                result = result + (inp if beta == 1 else beta * inp)
-            if alpha != 0:
-                result = result + ((x1 @ x2) if alpha == 1 else alpha * (x1 @ x2))
-            return result
-
-        match.replace_by_example(repl, [inp, mat1, mat2, beta, alpha])
-
-    @register_graph_pattern(
-        CallFunction(
-            aten.baddbmm,
-            KeywordArg("inp"),
-            KeywordArg("mat1"),
-            KeywordArg("mat2"),
-            beta=KeywordArg("beta"),
-            alpha=KeywordArg("alpha"),
-        ),
-        pass_dict=graph_pass[0],
-        extra_check=native_matmul_extra_check,
-    )
-    def baddbmm_to_bmm_and_badd(match: Match, inp, mat1, mat2, beta, alpha):
-        # constant propagation does not work well, so manually simplify it.
-        def repl(inp, x1, x2, beta, alpha):
-            result = 0
-            if beta != 0:
-                result = result + (inp if beta == 1 else beta * inp)
-            if alpha != 0:
-                result = result + ((x1 @ x2) if alpha == 1 else alpha * (x1 @ x2))
-            return result
-
-        match.replace_by_example(repl, [inp, mat1, mat2, beta, alpha])
-
-    @register_lowering_pattern(
-        CallFunction(aten.mm, KeywordArg("mat1"), KeywordArg("mat2")),
-        extra_check=native_matmul_extra_check,
-        pass_dict=graph_pass[1],
-    )
-    def lower_mm_native(match: Match, mat1, mat2):
-        mat1 = L[aten.unsqueeze](mat1, -1)
-        mat2 = L[aten.unsqueeze](mat2, 0)
-        args, kwargs = transform_args(
-            args=[mat1, mat2],
-            kwargs={},
-            broadcast=True,
-            type_promotion_kind=None,
-            convert_input_to_bool=False,
-        )  # Handles broadcasting the arguments
-
-        if config.triton.codegen_upcast_to_fp32 and mat1.dtype in [
-            torch.float16,
-            torch.bfloat16,
-        ]:
-
-            def _to_dtype(x):
-                return ops.to_dtype(x, mat1.dtype, use_compute_types=False)
-
-            args = [make_pointwise(_to_dtype)(x) for x in args]
-
-        mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(
-            mul_pointwise,
-            1,
-        )
-        return dot_reduction
-
-    @register_lowering_pattern(
-        CallFunction(aten.bmm, KeywordArg("mat1"), KeywordArg("mat2")),
-        extra_check=native_matmul_extra_check,
-        pass_dict=graph_pass[1],
-    )
-    def lower_bmm_native(match: Match, mat1, mat2):
-        mat1 = L[aten.unsqueeze](mat1, -1)
-        mat2 = L[aten.unsqueeze](mat2, 1)
-        args, kwargs = transform_args(
-            args=[mat1, mat2],
-            kwargs={},
-            broadcast=True,
-            type_promotion_kind=None,
-            convert_input_to_bool=False,
-        )  # Handles broadcasting the arguments
-
-        if config.triton.codegen_upcast_to_fp32 and mat1.dtype in [
-            torch.float16,
-            torch.bfloat16,
-        ]:
-
-            def _to_dtype(x):
-                return ops.to_dtype(x, mat1.dtype, use_compute_types=False)
-
-            args = [make_pointwise(_to_dtype)(x) for x in args]
-
-        mul_pointwise = make_pointwise(ops.dot)(*args)
-        dot_reduction = make_reduction("dot")(
-            mul_pointwise,
-            2,
-        )
-        return dot_reduction
-
-    graph_pass[0].apply(graph)
-    graph_pass[1].apply(graph)
 
 
 def is_valid_addmm_fusion(match):
