@@ -506,8 +506,7 @@ struct GenericViewFunc : public ViewFunc {
 
   at::Tensor operator()(const at::Tensor& new_base) const override {
     torch::jit::Stack local_stack = non_tensor_stack_;
-    auto hmmm = c10::IValue(new_base);
-    local_stack.at(aliased_input_idx_val_) = hmmm;
+    local_stack.at(aliased_input_idx_val_) = c10::IValue(new_base);
 
     op_.callBoxed(local_stack);
     auto& result = local_stack[local_stack.size() - 1];
