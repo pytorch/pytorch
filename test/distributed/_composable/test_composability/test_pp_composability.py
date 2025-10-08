@@ -369,7 +369,7 @@ class ComposabilityTest(MultiProcessTestCase):
         torch.distributed.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_if_lt_x_gpu(8)
+    @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
     )
@@ -391,7 +391,6 @@ class ComposabilityTest(MultiProcessTestCase):
         ],
     )
     def test_replicate_pp(self, ScheduleClass, MixedPrecisionParam):
-        _device_raii = torch.device(device_type, self.device)
         torch.accelerator.set_device_index(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
         torch.distributed.init_process_group(
@@ -605,7 +604,7 @@ class ComposabilityTest(MultiProcessTestCase):
         torch.distributed.destroy_process_group()
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_if_lt_x_gpu(8)
+    @skip_if_lt_x_gpu(4)
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
     )
@@ -620,7 +619,6 @@ class ComposabilityTest(MultiProcessTestCase):
         ],
     )
     def test_replicate_pp_grads(self, ScheduleClass):
-        _device_raii = torch.device(device_type, self.device)
         torch.accelerator.set_device_index(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
         torch.distributed.init_process_group(
@@ -874,8 +872,6 @@ class ComposabilityTest(MultiProcessTestCase):
             for optimizer in optimizers:
                 optimizer.step()
             ref_optimizer.step()
-
-            # torch.distributed.breakpoint()
 
             check_gradient_parity(
                 pipeline_model_parameter_dict, ref_model_parameter_dict
