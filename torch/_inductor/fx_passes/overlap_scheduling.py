@@ -679,6 +679,7 @@ class OverlapScheduler:
             node_ancestors=self.node_ancestors,
             scheduled=self.scheduled,
             max_bucket_memory_gb=1.0,  # Could make this configurable
+            max_coll_distance=self.max_node_distance,
         )
         bucketer.bucket_collectives()
 
