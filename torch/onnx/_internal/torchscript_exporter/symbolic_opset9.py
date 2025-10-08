@@ -14,8 +14,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import Callable, TYPE_CHECKING
-from typing_extensions import deprecated
+from typing import TYPE_CHECKING
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -33,7 +32,7 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.types import Number
 
@@ -1051,6 +1050,7 @@ def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=No
     leftover = size % split_size
     if leftover:
         splits.append(leftover)
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
 
@@ -1068,6 +1068,7 @@ def split_with_sizes(g: jit_utils.GraphContext, self, split_sizes, dim, _outputs
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "split_with_sizes", 9, 11, "Dynamic number of outputs not supported", self
         )
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=_outputs)
 
 
@@ -1365,8 +1366,7 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
             "get_pool_ceil_padding", "input size not accessible", input
         )
     ceiled_output_dim = [
-        int(math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])))
-        + 1
+        math.ceil((dim[i] + 2 * padding[i] - kernel_size[i]) / float(stride[i])) + 1
         for i in range(0, len(padding))
     ]
     # ensure last pooling starts inside
@@ -1706,6 +1706,7 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         k = [int(dim[i] / output_size[i]) for i in range(0, len(dim))]
         # call max_poolxd_with_indices to get indices in the output
         if type == "MaxPool":
+            # pyrefly: ignore  # not-callable
             return fn(g, input, k, k, (0,) * len(dim), (1,) * len(dim), False)
         output = g.op(type, input, kernel_shape_i=tuple_fn(k), strides_i=tuple_fn(k))
         return output
@@ -1760,6 +1761,7 @@ def constant_pad_nd(g: jit_utils.GraphContext, input, padding, value):
         )
 
     padding = _convert_padding_node(padding)
+    # pyrefly: ignore  # bad-argument-type
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
     return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, value_f=value, opset_before=11
@@ -1813,6 +1815,7 @@ def _pad_circular(g: jit_utils.GraphContext, input: _C.Value, pad: _C.Value):
 def reflection_pad(g: jit_utils.GraphContext, input, padding):
     mode = "reflect"
     padding = _convert_padding_node(padding)
+    # pyrefly: ignore  # bad-argument-type
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
     return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
@@ -1825,6 +1828,7 @@ def reflection_pad(g: jit_utils.GraphContext, input, padding):
 def replication_pad(g: jit_utils.GraphContext, input, padding):
     mode = "edge"
     padding = _convert_padding_node(padding)
+    # pyrefly: ignore  # bad-argument-type
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
     return symbolic_helper._op_with_optional_float_cast(
         g, "Pad", input, pads_i=paddings, mode_s=mode, opset_before=11
@@ -1961,8 +1965,8 @@ def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         @functools.wraps(fn)
         def wrap_with_cast(g, input, other):
-            to_cast_func = globals()[f"_cast_{to_type}"]
-            return fn(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
+            to_i = symbolic_helper.cast_pytorch_to_onnx[to_type]
+            return fn(g, g.op("Cast", input, to_i=to_i), g.op("Cast", other, to_i=to_i))
 
         return wrap_with_cast
 
@@ -2205,6 +2209,7 @@ def where(g: jit_utils.GraphContext, condition, self=None, other=None, _outputs=
         return symbolic_helper._unbind_helper(
             g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs
         )
+    # pyrefly: ignore  # bad-argument-type
     return g.op("Where", condition, self, other)
 
 
@@ -2380,6 +2385,7 @@ def _convolution_mode(
         "group_i": groups,
     }
 
+    # pyrefly: ignore  # bad-argument-type
     n = g.op("Conv", *args, **kwargs)
 
     if (
@@ -2724,10 +2730,12 @@ def native_layer_norm(
 
     # variance = e((x - e(x))^2), and (x - e(x)) is the numerator in the layer_norm formula
     if g.opset < 18:
+        # pyrefly: ignore  # no-matching-overload
         variance = g.op("ReduceMean", pow(g, numerator, two_cst), axes_i=axes)
     else:
         variance = g.op(
             "ReduceMean",
+            # pyrefly: ignore  # no-matching-overload
             pow(g, numerator, two_cst),
             g.op("Constant", value_t=torch.tensor(axes, dtype=torch.long)),
         )
@@ -3066,10 +3074,12 @@ def pairwise_distance(g: jit_utils.GraphContext, input1, input2, p, eps, keepdim
     )
     summation = symbolic_helper._reducesum_helper(
         g,
+        # pyrefly: ignore  # no-matching-overload
         pow(g, sub(g, input1, input2), p),
         axes_i=[-1],
         keepdims_i=symbolic_helper._parse_arg(keepdim, "i"),
     )
+    # pyrefly: ignore  # no-matching-overload
     return pow(g, summation, inv_p)
 
 
@@ -3179,6 +3189,7 @@ def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 @_onnx_symbolic("aten::maximum")
 @symbolic_helper.quantized_args(True, True)
 def maximum(g: jit_utils.GraphContext, input, other):
+    # pyrefly: ignore  # no-matching-overload
     return max(g, input, dim_or_y=other)
 
 
@@ -3191,6 +3202,7 @@ def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 @_onnx_symbolic("aten::minimum")
 @symbolic_helper.quantized_args(True, True)
 def minimum(g: jit_utils.GraphContext, input, other):
+    # pyrefly: ignore  # no-matching-overload
     return min(g, input, dim_or_y=other)
 
 
@@ -3318,60 +3330,6 @@ def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_co
     symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11, input)
 
 
-@_onnx_symbolic("aten::_cast_Byte")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.UINT8)
-
-
-@_onnx_symbolic("aten::_cast_Char")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT8)
-
-
-@_onnx_symbolic("aten::_cast_Short")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT16)
-
-
-@_onnx_symbolic("aten::_cast_Int")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
-
-
-@_onnx_symbolic("aten::_cast_Long")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
-
-
-@_onnx_symbolic("aten::_cast_Half")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT16)
-
-
-@_onnx_symbolic("aten::_cast_Float")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
-
-
-@_onnx_symbolic("aten::_cast_Double")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
-
-
-@_onnx_symbolic("aten::_cast_Bool")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Bool(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL)
-
-
 @_onnx_symbolic("aten::empty")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty(
@@ -3487,6 +3445,7 @@ def zeros_like(
             input, _type_utils.JitScalarType.FLOAT
         )
     else:
+        # pyrefly: ignore  # bad-argument-type
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
         "ConstantOfShape",
@@ -3546,6 +3505,7 @@ def ones_like(
             input, _type_utils.JitScalarType.FLOAT
         )
     else:
+        # pyrefly: ignore  # bad-argument-type
         scalar_type = _type_utils.JitScalarType(dtype)
     return g.op(
         "ConstantOfShape",
@@ -4536,7 +4496,7 @@ def lstm_cell(g: jit_utils.GraphContext, self, hidden, w_ih, w_hh, b_ih, b_hh):
     weight = (
         (w_ih, w_hh, b_ih, b_hh) if symbolic_helper._is_tensor(b_ih) else (w_ih, w_hh)
     )
-    has_biases = True if symbolic_helper._is_tensor(b_ih) else False
+    has_biases = bool(symbolic_helper._is_tensor(b_ih))
     _, h_outs, c_outs = _generic_rnn(
         g,
         "LSTM",
@@ -5535,6 +5495,7 @@ def linalg_matrix_norm(
             g, g.op("Abs", self), axes_i=[dim[0]], keepdims_i=keepdim
         )
         if ord_value > 0:
+            # pyrefly: ignore  # no-matching-overload
             result, _indices = max(
                 g,
                 sum,
@@ -5542,6 +5503,7 @@ def linalg_matrix_norm(
                 keepdim=keepdim,
             )
         else:
+            # pyrefly: ignore  # no-matching-overload
             result, _indices = min(
                 g,
                 sum,
@@ -5905,7 +5867,9 @@ def as_strided(g: jit_utils.GraphContext, self, sizes, strides, offset=None):
             else:
                 ind = g.op("Add", ind, tmp_ind)
         if offset:
+            # pyrefly: ignore  # bad-argument-type
             ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Gather", self_1d, ind)
 
 
@@ -6188,6 +6152,7 @@ def _euclidean_dist(g: jit_utils.GraphContext, x1, x2):
     assert rank is not None
     x1_norm = symbolic_helper._reducesum_helper(
         g,
+        # pyrefly: ignore  # no-matching-overload
         pow(g, x1, symbolic_helper._generate_wrapped_number(g, 2.0)),
         axes_i=[-1],
         keepdims_i=True,
@@ -6195,6 +6160,7 @@ def _euclidean_dist(g: jit_utils.GraphContext, x1, x2):
     x1_pad = ones_like(g, x1_norm)
     x2_norm = symbolic_helper._reducesum_helper(
         g,
+        # pyrefly: ignore  # no-matching-overload
         pow(g, x2, symbolic_helper._generate_wrapped_number(g, 2.0)),
         axes_i=[-1],
         keepdims_i=True,

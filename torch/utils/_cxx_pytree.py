@@ -706,6 +706,7 @@ def tree_map_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
+    # pyrefly: ignore  # no-matching-overload
     return tree_map(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -766,6 +767,7 @@ def tree_map_only_(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
+    # pyrefly: ignore  # no-matching-overload
     return tree_map_(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -1079,6 +1081,7 @@ def key_get(obj: Any, kp: KeyPath) -> Any:
 
 
 with python_pytree._NODE_REGISTRY_LOCK:
+    # pyrefly: ignore  # bad-assignment
     python_pytree._cxx_pytree_imported = True
     args, kwargs = (), {}  # type: ignore[var-annotated]
     for args, kwargs in python_pytree._cxx_pytree_pending_imports:
