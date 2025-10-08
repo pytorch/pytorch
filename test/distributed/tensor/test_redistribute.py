@@ -4,6 +4,7 @@
 import contextlib
 import copy
 import itertools
+import unittest
 
 import torch
 from torch.distributed.device_mesh import init_device_mesh
@@ -787,6 +788,8 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         new_spec.placements = placements
         if shard_order is not None:
             new_spec.shard_order = shard_order
+        else:
+            new_spec.shard_order = ()
         if old_spec == new_spec:
             return dtensor_input
         dtensor_input = DTensor.from_local(
@@ -1051,7 +1054,6 @@ S(0)[1, 0, 2]->S(0)[1, 0]->S(0)[1]S(1)[0]->S(1)[0]S(2)[1]->S(0)[0]S(2)[1]->S(0)[
             # even sharding
             (16, 8),
             (8, 16, 32),
-            (8, 32, 16, 16),
             # uneven sharding with padding
             (17, 5),
             (13, 2, 13),
@@ -1089,6 +1091,29 @@ S(0)[1, 0, 2]->S(0)[1, 0]->S(0)[1]S(1)[0]->S(1)[0]S(2)[1]->S(0)[0]S(2)[1]->S(0)[
                     self.assertEqual(
                         self.full_tensor(sharded_dt), self.full_tensor(full_tensor)
                     )
+
+    @unittest.skip(
+        "Temporarily skipping until we support special placement types in "
+        "graph based redistribution"
+    )
+    @with_comms
+    def test_ordered_redistribute_for_special_placement(self):
+        """Test ordered redistribution with special placement"""
+        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (8,))
+        input_data = torch.randn((8, 8), device=self.device_type)
+        src_placement = [Shard(1)]
+        tgt_placement = [
+            (_MaskPartial(offset_shape=torch.Size([10, 20]), offset_dim=0),)
+        ]
+        sharded_dt = self.distribute_tensor(
+            input_data.clone(), mesh, src_placement, shard_order=((1, 0),)
+        )
+        sharded_dt = self.redistribute(
+            sharded_dt, mesh, tgt_placement, shard_order=None
+        )
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import dataclasses
+import itertools
 import logging
 import weakref
 from collections import defaultdict
@@ -413,6 +414,8 @@ class DTensorRedistributePlanner:
 
         return all_next_state
 
+    # TODO(zpcore): if the dst_state contains special placement like
+    # `_MaskPartial`, we will never reach that state. Need to support this case.
     def find_min_cost_path(
         self, src_state: DistState, dst_state: DistState
     ) -> list["DTensorRedistributePlanner.DistState"]:
@@ -495,7 +498,7 @@ class DTensorRedistributePlanner:
         dst_state = self.DistState(dst_spec.placements, dst_spec.shard_order)
         transform_infos: list[_TransformInfo] = []
         state_path = self.find_min_cost_path(src_state, dst_state)
-        for cur_state, nxt_state in zip(state_path[:-1], state_path[1:]):
+        for cur_state, nxt_state in itertools.pairwise(state_path):
             # find the mesh_dim that is different between cur_state and nxt_state
             if cur_state.placements != nxt_state.placements:
                 # skip the transition of device order permutation (no-op)
@@ -519,6 +522,7 @@ class DTensorRedistributePlanner:
                                 logical_shape=logical_shape,
                             )
                         )
+
         return transform_infos
 
     def generate_greedy_transform_infos(
@@ -651,10 +655,9 @@ def _gen_transform_infos_non_cached(
     device_mesh = src_spec.device_mesh
     src_shard_order = src_spec.shard_order
     dst_shard_order = dst_spec.shard_order
+    # DTensorSpec should automatically generate shard_order, and it can be () if
+    # no shard.
     assert src_shard_order is not None and dst_shard_order is not None
-    if not src_shard_order == dst_shard_order:
-        # force using use_graph_based_transform in order to support device order mutation
-        use_graph_based_transform = True
     if use_graph_based_transform is None:
         if all(
             DTensorSpec.is_default_device_order(order)
