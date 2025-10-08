@@ -14,7 +14,7 @@ import torch._dynamo.config
 import torch._dynamo.test_case
 import torch.utils._pytree as python_pytree
 from torch._dynamo.exc import ResumePrologueTracingError, Unsupported
-from torch._dynamo.testing import skipIfNotPy312
+from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -1082,21 +1082,11 @@ User code traceback:
             torch._dynamo.graph_break()
             return z
 
-        # assertRaises suppresses the traceback, so manually catch
-        e = None
-        try:
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
-        except Exception as exn:
-            e = exn
-
-        self.assertIsNotNone(e)
-        msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
-        self.assertExpectedInline(
-            munge_exc(msg, skip=0),
-            """Traceback (most recent call last):
-  File "test_error_messages.py", line N, in test_latest_bytecode_to_graph_break_fullgraph
-    torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
-torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
+        self.assertExpectedInlineMunged(
+            Unsupported,
+            lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
+            """\
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
@@ -1107,11 +1097,10 @@ torch._dynamo.exc.Unsupported: Call to `torch._dynamo.graph_break()`
 from user code:
    File "test_error_messages.py", line N, in fn
     torch._dynamo.graph_break()
-
 """,
         )
 
-    @skipIfNotPy312
+    @skipIfOnlyNotPy312
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)
     def test_latest_bytecode_to_graph_break_python_versioning(self, records):
