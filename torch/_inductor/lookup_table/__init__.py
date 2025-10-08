@@ -24,9 +24,11 @@ Usage:
     V.set_choices_handler(MyCustomChoices())
 """
 
+from . import recorder
 from .choices import LookupTableChoices
 
 
 __all__ = [
     "LookupTableChoices",
+    "recorder",
 ]
