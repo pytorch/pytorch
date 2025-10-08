@@ -49,7 +49,9 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_WINDOWS,
+    NAVI_ARCH,
     parametrize,
+    skipIfRocmArch,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
@@ -799,6 +801,9 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(), "B200 doesn't support sm carveout"
+    )
     @parametrize("carveout", (None, 0, 27))
     @parametrize("op", ("mm", "scaled_mm"))
     def test_honor_sm_carveout_with_triton_tma(self, carveout, op: str):
@@ -1284,6 +1289,7 @@ class TestMaxAutotune(TestCase):
 
         self.assertIn("NoValidChoicesError", str(context.exception))
 
+    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_mm(self):
         """
         Make sure the triton template can work with non-contiguous inputs without crash.
@@ -1302,6 +1308,7 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
+    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_addmm(self):
         b = torch.randn((768), dtype=torch.bfloat16, device=GPU_TYPE)
         x = rand_strided(
@@ -1317,6 +1324,7 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
+    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_bmm(self):
         x = rand_strided(
             (1, 50257, 2048), (0, 1, 50304), dtype=torch.bfloat16, device=GPU_TYPE
@@ -1485,7 +1493,7 @@ class TestMaxAutotune(TestCase):
             ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*.run"
+                "triton_.*_fused_0.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
             torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
@@ -1499,7 +1507,7 @@ class TestMaxAutotune(TestCase):
             ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*.run"
+                "triton_.*_fused_0.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
             torch.testing.assert_close(
@@ -1520,7 +1528,7 @@ class TestMaxAutotune(TestCase):
             ).run(code[0])
         else:
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*.run"
+                "triton_.*_fused_0.run"
             ).check("decompose_k").run(code[0])
             check_divisors(code)
             torch.testing.assert_close(
@@ -1571,7 +1579,7 @@ class TestMaxAutotune(TestCase):
 
             out, code = run_and_get_code(compiled_func, a, b)
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*.run"
+                "triton_.*_fused_0.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                 r"2\*s[0-9]+"
             ).check_regex("s[0-9]+ = 32").run(code[0])
@@ -1621,7 +1629,7 @@ class TestMaxAutotune(TestCase):
             out.backward()
 
             FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*.run"
+                "triton_.*_fused_0.run"
             ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
                 r"256\*s[0-9]+"
             ).check_regex("s[0-9]+ = 8").run(
