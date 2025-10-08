@@ -533,6 +533,7 @@ class GraphModule(torch.nn.Module):
             self.graph._tracer_cls
             and "<locals>" not in self.graph._tracer_cls.__qualname__
         ):
+            # pyrefly: ignore  # bad-assignment
             self._tracer_cls = self.graph._tracer_cls
 
         self._tracer_extras = {}
@@ -546,6 +547,7 @@ class GraphModule(torch.nn.Module):
         self._erase_node_hooks: list[Callable] = []
         # Used to remove hooks from deepcopied graph modules within a context manager.
         self._deepcopy_hooks: list[Callable] = []
+        self.shape_env = None  # optional not always set even when dynamic shapes exist.
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842

@@ -139,7 +139,6 @@ def evaluate_platform_supports_mxfp8_grouped_gemm():
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
 PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
 PLATFORM_SUPPORTS_FP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_fp8_grouped_gemm())
-PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: TEST_CUDA and SM100OrLater)
 PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mxfp8_grouped_gemm())
 
 if TEST_NUMBA:
@@ -170,26 +169,26 @@ def initialize_cuda_context_rng():
 
 @contextlib.contextmanager
 def tf32_off():
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
     try:
-        torch.backends.cuda.matmul.fp32_precision = 'ieee'
+        torch.backends.cuda.matmul.allow_tf32 = False
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
             yield
     finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
-    old_fp32_precision = torch.backends.cuda.matmul.fp32_precision
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
     old_precision = self.precision
     try:
-        torch.backends.cuda.matmul.fp32_precision = 'tf32'
+        torch.backends.cuda.matmul.allow_tf32 = True
         self.precision = tf32_precision
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
             yield
     finally:
-        torch.backends.cuda.matmul.fp32_precision = old_fp32_precision
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
         self.precision = old_precision
 
 

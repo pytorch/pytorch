@@ -747,12 +747,11 @@ class _TorchDynamoContext:
                     # Create a fresh CompilePackage
                     self._package.initialize(fn, None, ignore_inlined_sources=False)
                 else:
-                    cache_entry, backends = result
                     try:
                         self._package.initialize(
-                            fn, cache_entry, ignore_inlined_sources=False
+                            fn, result.dynamo, ignore_inlined_sources=False
                         )
-                        self._package.install(backends)
+                        self._package.install(result.backends)
                     except RuntimeError as e:
                         log.warning("Failed to load entry from dynamo cache: %s", e)
                         self._package.initialize(fn, None, ignore_inlined_sources=False)
@@ -2039,6 +2038,7 @@ def export(
                 automatic_dynamic_shapes=False,
                 capture_dynamic_output_shape_ops=True,
                 capture_scalar_outputs=True,
+                constant_fold_autograd_profiler_enabled=True,
                 prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
             ),
             _compiling_state_context(),

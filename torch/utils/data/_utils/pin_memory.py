@@ -67,7 +67,10 @@ def pin_memory(data):
                 clone.update({k: pin_memory(sample) for k, sample in data.items()})
                 return clone
             else:
-                return type(data)({k: pin_memory(sample) for k, sample in data.items()})  # type: ignore[call-arg]
+                return type(data)(
+                    # pyrefly: ignore  # bad-argument-count
+                    {k: pin_memory(sample, device) for k, sample in data.items()}
+                )  # type: ignore[call-arg]
         except TypeError:
             # The mapping type may not support `copy()` / `update(mapping)`
             # or `__init__(iterable)`.
