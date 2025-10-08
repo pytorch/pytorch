@@ -250,7 +250,7 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-py3.10-gcc11-full-debug-build-only:
+  linux-jammy-py3_10-gcc11-full-debug-build-only:
     name: linux-jammy-py3.10-gcc11-full-debug-build-only
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
