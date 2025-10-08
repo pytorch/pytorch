@@ -214,7 +214,9 @@ class inner_f(torch.nn.Module):
         where: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le, 0.0, add_4);  le = add_4 = None
         view_of: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(where)
         view_of_1: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of);  view_of = None
-        le_1: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(view_of_1, 0.0);  view_of_1 = None
+        view_of_2: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
+        view_of_3: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of_2);  view_of_2 = None
+        le_1: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(view_of_3, 0.0);  view_of_3 = None
         where_1: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le_1, 0.0, tangents_1);  le_1 = tangents_1 = None
         broadcast_in_dim_10: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(squeeze_2, [1, 3], [1]);  squeeze_2 = None
         broadcast_in_dim_11: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_10, [1, 3, 1], [0, 1]);  broadcast_in_dim_10 = None

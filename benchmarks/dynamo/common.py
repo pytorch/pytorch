@@ -123,8 +123,6 @@ CI_SKIP_OPTIMIZER = {
     # HF
     "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
-    "MobileBertForQuestionAnswering",  # Stack issue in fx
-    "PegasusForConditionalGeneration",  # OOM
 }
 
 try:
@@ -192,17 +190,11 @@ BENCHMARK_USE_SGD = {
     # HF
     "AlbertForMaskedLM",
     "BartForCausalLM",
-    "BartForConditionalGeneration",
-    "BlenderbotSmallForCausalLM",
-    "BlenderbotSmallForConditionalGeneration",
-    "DebertaV2ForQuestionAnswering",  # eager OOM
     "ElectraForCausalLM",
     "M2M100ForConditionalGeneration",
     "MBartForCausalLM",
-    "MBartForConditionalGeneration",
     "OPTForCausalLM",
     "PLBartForCausalLM",
-    "PLBartForConditionalGeneration",
     "PegasusForCausalLM",
     "TrOCRForCausalLM",
     "XGLMForCausalLM",
@@ -3789,7 +3781,6 @@ def run(runner, args, original_dir=None):
             torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         if args.only is not None and args.only in {
-            "DebertaForQuestionAnswering",
             "nvidia_deeprecommender",
             "crossvit_9_240",
         }:
