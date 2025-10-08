@@ -30,7 +30,7 @@ class OpKernel_prim_listpack : public OpKernel {
         type_ = c10::OptionalType::create(c10::TensorType::get());
         break;
       default:
-        TORCH_CHECK(false, "Unsupported list type: ", listType);
+        TORCH_FAIL("Unsupported list type: ", listType);
     }
   }
 

@@ -528,7 +528,7 @@ static Tensor get_mkldnn_serialized_md(const Tensor& self) {
 #if IDEEP_PREREQ(3, 4, 1, 2)
   serialized_wei_desc = packed_w_desc.get_blob();
 #else
-      TORCH_CHECK(false, "Unexpected IDeep version to do weight serialization.");
+     TORCH_FAIL("Unexpected IDeep version to do weight serialization.");
 #endif
   Tensor serialized_md = at::from_blob((void*)serialized_wei_desc.data(), {(int64_t)serialized_wei_desc.size()}, at::TensorOptions(at::kByte));
   auto res = at::empty_like(serialized_md);
@@ -563,11 +563,11 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
 #else
 
 Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, std::optional<ScalarType> dtype, std::optional<bool> masked_grad) {
-  TORCH_CHECK(false, "MKL-DNN build is disabled");
+ TORCH_FAIL("MKL-DNN build is disabled");
 }
 
 Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype) {
-  TORCH_CHECK(false, "MKL-DNN build is disabled");
+ TORCH_FAIL("MKL-DNN build is disabled");
 }
 
 Tensor mkldnn_reorder_conv2d_weight(
@@ -577,7 +577,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     IntArrayRef dilation,
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
-  TORCH_CHECK(false, "mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
+ TORCH_FAIL("mkldnn_reorder_conv2d_weight: MKL-DNN build is disabled");
 }
 
 Tensor mkldnn_reorder_conv3d_weight(
@@ -587,7 +587,7 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef dilation,
     int64_t groups,
     c10::OptionalArrayRef<int64_t> input_size) {
-  TORCH_CHECK(false, "mkldnn_reorder_conv3d_weight: MKL-DNN build is disabled");
+ TORCH_FAIL("mkldnn_reorder_conv3d_weight: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()

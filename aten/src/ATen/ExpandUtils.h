@@ -78,7 +78,7 @@ inline void check_defined(
     const char* api_name) {
   for (auto& t : tensors) {
     if (!t.get().defined()) {
-      TORCH_CHECK(false, api_name, "(...) called with an undefined Tensor");
+      TORCH_FAIL(api_name, "(...) called with an undefined Tensor");
     }
   }
 }

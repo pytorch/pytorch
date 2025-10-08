@@ -66,7 +66,7 @@ C10_CLANG_DIAGNOSTIC_POP()
   if (error) {
     std::string compilationError = error.localizedDescription.UTF8String;
     std::string deviceInfo = self.description.UTF8String;
-    TORCH_CHECK(false, compilationError + "\n" + deviceInfo);
+   TORCH_FAIL(compilationError + "\n" + deviceInfo);
   }
   return _device && _library && _commandQueue;
 }

@@ -132,7 +132,7 @@ std::optional<AutocastScope> parseAutocast(
     //
     // TODO: better error message
     //
-    TORCH_CHECK(false, "Unsupported autocast syntax");
+    TORCH_FAIL("Unsupported autocast syntax");
   }
 
   return std::nullopt;
@@ -331,7 +331,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
                 parseAutocast(node->input(), current_state())) {
           if (node->hasUses()) {
             // TODO: better error message
-            TORCH_CHECK(false, "`with autocast() as ...` is not supported");
+            TORCH_FAIL("`with autocast() as ...` is not supported");
           }
           TORCH_INTERNAL_ASSERT(
               !incompatible_amp.has_value() || !incompatible_amp.value(),
@@ -493,7 +493,7 @@ void handleBlock(Block* block, AutocastContext initial_state) {
       // Banned in autocast, see binary_cross_entropy_banned()
       case aten::binary_cross_entropy:
         if (current_state()) {
-          TORCH_CHECK(false, "Unsafe to autocast");
+          TORCH_FAIL("Unsafe to autocast");
         }
     }
 

@@ -130,7 +130,7 @@ bool InterpreterState::run(Stack& stack) {
           if (inst.X < 0 ||
               static_cast<size_t>(inst.X) >= code.op_names_.size() ||
               static_cast<size_t>(inst.X) >= code.operators_.size()) {
-            TORCH_CHECK(false, "Can't load op with index: ", inst.X);
+            TORCH_FAIL("Can't load op with index: ", inst.X);
           }
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               code.op_names_[inst.X].name, debug_handle, stack);
@@ -141,7 +141,7 @@ bool InterpreterState::run(Stack& stack) {
           if (inst.X < 0 ||
               static_cast<size_t>(inst.X) >= code.op_names_.size() ||
               static_cast<size_t>(inst.X) >= code.operators_.size()) {
-            TORCH_CHECK(false, "Can't load op with index: ", inst.X);
+            TORCH_FAIL("Can't load op with index: ", inst.X);
           }
           stack.emplace_back(inst.N);
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
@@ -156,7 +156,7 @@ bool InterpreterState::run(Stack& stack) {
         case INTERFACE_CALL: {
           if (inst.X < 0 ||
               static_cast<size_t>(inst.X) >= code.constants_.size()) {
-            TORCH_CHECK(false, "Can't load constant with index: ", inst.X);
+            TORCH_FAIL("Can't load constant with index: ", inst.X);
           }
           if (inst.N == 0 || inst.N > stack.size()) {
             TORCH_CHECK(
@@ -205,7 +205,7 @@ bool InterpreterState::run(Stack& stack) {
         case LOADC:
           if (inst.X < 0 ||
               static_cast<size_t>(inst.X) >= code.constants_.size()) {
-            TORCH_CHECK(false, "Can't load constant with index: ", inst.X);
+            TORCH_FAIL("Can't load constant with index: ", inst.X);
           }
           stack.emplace_back(code.constants_[inst.X]);
           frame.step();
@@ -362,7 +362,7 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         default:
-          TORCH_CHECK(false, toString(inst.op), " is invalid.");
+          TORCH_FAIL(toString(inst.op), " is invalid.");
       }
 
       if (!prev_value) {

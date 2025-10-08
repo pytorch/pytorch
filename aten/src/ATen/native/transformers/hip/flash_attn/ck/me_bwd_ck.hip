@@ -74,7 +74,7 @@ mem_eff_backward_ck(
 
   } else {
     // cu_seqlens only has a value in the nested tensor path which CK does not support
-    TORCH_CHECK(false, "Nested Tensors not supported with CK backend.");
+   TORCH_FAIL("Nested Tensors not supported with CK backend.");
     return std::make_tuple(at::Tensor{}, at::Tensor{}, at::Tensor{}, at::Tensor{});
     // TODO: Fix nested tensor(varlen) path
     /*

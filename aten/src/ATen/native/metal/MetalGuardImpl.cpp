@@ -45,13 +45,13 @@ struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const Stream& stream,
       const DeviceIndex device_index,
       const EventFlag flag) const override {
-    TORCH_CHECK(false, "Metal backend doesn't support events.");
+   TORCH_FAIL("Metal backend doesn't support events.");
   }
   void block(void* event, const Stream& stream) const override {
-    TORCH_CHECK(false, "Metal backend doesn't support events.")
+   TORCH_FAIL("Metal backend doesn't support events.")
   }
   bool queryEvent(void* event) const override {
-    TORCH_CHECK(false, "Metal backend doesn't support events.")
+   TORCH_FAIL("Metal backend doesn't support events.")
   }
   void destroyEvent(void* event, const DeviceIndex device_index) const
       noexcept override {}

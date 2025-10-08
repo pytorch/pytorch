@@ -967,7 +967,7 @@ static size_t findArgument(
       return i;
     }
   }
-  TORCH_CHECK(false, "Couldn't find an argument called ", unqualName);
+  TORCH_FAIL("Couldn't find an argument called ", unqualName);
 }
 
 static size_t findArgument(const FunctionSchema& the_schema, Symbol name) {

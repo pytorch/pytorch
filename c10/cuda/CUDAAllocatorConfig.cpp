@@ -98,7 +98,7 @@ size_t CUDAAllocatorConfig::parseMaxSplitSize(
     val1 = std::min(val1, (std::numeric_limits<size_t>::max() / mb));
     m_max_split_size = val1 * 1024 * 1024;
   } else {
-    TORCH_CHECK(false, "Error, expecting max_split_size_mb value", "");
+    TORCH_FAIL("Error, expecting max_split_size_mb value", "");
   }
   return i;
 }
@@ -119,7 +119,7 @@ size_t CUDAAllocatorConfig::parseMaxNonSplitRoundingSize(
     val1 = std::min(val1, (std::numeric_limits<size_t>::max() / mb));
     m_max_non_split_rounding_size = val1 * 1024 * 1024;
   } else {
-    TORCH_CHECK(false, "Error, expecting max_non_split_rounding_mb value", "");
+    TORCH_FAIL("Error, expecting max_non_split_rounding_mb value", "");
   }
   return i;
 }
@@ -219,7 +219,7 @@ size_t CUDAAllocatorConfig::parseRoundUpPower2Divisions(
           val1);
     }
   } else {
-    TORCH_CHECK(false, "Error, expecting roundup_power2_divisions value", "");
+    TORCH_FAIL("Error, expecting roundup_power2_divisions value", "");
   }
   return i;
 }
@@ -256,7 +256,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
         " != ",
         get()->name());
   } else {
-    TORCH_CHECK(false, "Error parsing backend value", "");
+    TORCH_FAIL("Error parsing backend value", "");
   }
   return i;
 #undef PYTORCH_TOKEN1
@@ -291,7 +291,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
         "Allocator backend parsed at runtime != "
         "allocator backend parsed at load time");
   } else {
-    TORCH_CHECK(false, "Error parsing backend value", "");
+    TORCH_FAIL("Error parsing backend value", "");
   }
   return i;
 #endif // USE_ROCM

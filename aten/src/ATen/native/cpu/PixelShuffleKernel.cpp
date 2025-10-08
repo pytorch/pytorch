@@ -213,7 +213,7 @@ void pixel_shuffle_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -241,7 +241,7 @@ void pixel_unshuffle_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 

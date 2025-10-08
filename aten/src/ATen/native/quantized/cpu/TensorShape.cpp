@@ -64,7 +64,7 @@ bool all_inputs_sharing_qparams(const MaterializedITensorListRef& qxs) {
         is_valid &= qxs[i].get().q_per_channel_scales().isclose(qxs[0].get().q_per_channel_scales(), 0, QPARAM_THRESHOLD, false).all().item().to<bool>();
       is_valid &= qxs[i].get().q_per_channel_zero_points().equal(qxs[0].get().q_per_channel_zero_points());
     } else {
-        TORCH_CHECK(false, "Unrecognized qscheme:", toString(qxs[0].get().qscheme()));
+       TORCH_FAIL("Unrecognized qscheme:", toString(qxs[0].get().qscheme()));
     }
   }
   return is_valid;

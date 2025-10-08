@@ -277,18 +277,18 @@ c10::SymBool NestedTensorImpl::sym_is_contiguous_custom(MemoryFormat) const {
   return nested_tensor_impl_is_contiguous(this);
 }
 IntArrayRef NestedTensorImpl::sizes_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
+ TORCH_FAIL("Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
 }
 c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
+ TORCH_FAIL("Internal error: NestedTensorImpl doesn't support sizes. Please file an issue.");
 }
 
 c10::SymIntArrayRef NestedTensorImpl::sym_strides_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue.");
+ TORCH_FAIL("Internal error: NestedTensorImpl doesn't support strides. Please file an issue.");
 }
 
 IntArrayRef NestedTensorImpl::strides_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue.");
+ TORCH_FAIL("Internal error: NestedTensorImpl doesn't support strides. Please file an issue.");
 }
 
 const char* NestedTensorImpl::tensorimpl_type_name() const {

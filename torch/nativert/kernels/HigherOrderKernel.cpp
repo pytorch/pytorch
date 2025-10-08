@@ -33,7 +33,7 @@ HigherOrderKernel::HigherOrderKernel(
     TORCH_CHECK(!node_->attributes().empty());
     TORCH_CHECK(node_->inputs().size() == 1);
   } else {
-    TORCH_CHECK(false, "Unknown higher order op: ", opName);
+    TORCH_FAIL("Unknown higher order op: ", opName);
   }
 }
 
@@ -51,7 +51,7 @@ void HigherOrderKernel::computeInternal(ExecutionFrame& executionFrame) const {
       } else if (cond.isBool()) {
         branchIdx = cond.toBool() ? 0 : 1;
       } else {
-        TORCH_CHECK(false, "Unsupported type for cond predicate");
+        TORCH_FAIL("Unsupported type for cond predicate");
       }
       ExecutionFrame branchFrame(*std::get<std::unique_ptr<Graph>>(
           node_->attributes()[branchIdx].value));
@@ -104,7 +104,7 @@ void HigherOrderKernel::computeInternal(ExecutionFrame& executionFrame) const {
       break;
     }
     default:
-      TORCH_CHECK(false, "Unknown higher order op");
+      TORCH_FAIL("Unknown higher order op");
   }
 }
 

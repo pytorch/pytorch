@@ -165,7 +165,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else {
-        TORCH_CHECK(false, "unreachable");
+       TORCH_FAIL("unreachable");
       }
 
     } else {
@@ -315,7 +315,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else {
-        TORCH_CHECK(false, "unreachable");
+       TORCH_FAIL("unreachable");
       }
     }
   } else {
@@ -465,7 +465,7 @@ void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
             (CUDABLAS_GEMM_ARGS(float));
       }
       else {
-        TORCH_CHECK(false, "unreachable");
+       TORCH_FAIL("unreachable");
       }
     }
   }

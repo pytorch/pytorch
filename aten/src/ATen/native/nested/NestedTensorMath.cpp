@@ -753,7 +753,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
           }
         }
         else {
-          TORCH_CHECK(false, "invalid shape dimension ", size_reshaped);
+         TORCH_FAIL("invalid shape dimension ", size_reshaped);
         }
       }
       // See Note [Special size rule for nested tensor]

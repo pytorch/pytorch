@@ -31,7 +31,7 @@ int register_linear_params() {
                   return PackedLinearWeightQnnp::deserialize(state);
                 }
 #endif // USE_FBGEMM
-                TORCH_CHECK(false, "Unknown qengine");
+               TORCH_FAIL("Unknown qengine");
               });
   // (1) we can't (easily) return the static initializer itself because it can have a different type because of selective build
   // (2) we can't return void and be able to call the function in the global scope

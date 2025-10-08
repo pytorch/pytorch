@@ -539,7 +539,7 @@ static Tensor cross_entropy_loss_prob_target(
       case Reduction::None:
         return -(input * target * weight_).sum(class_dim);
       default:
-        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
+       TORCH_FAIL("Invalid reduction type encountered in cross_entropy: ", reduction);
     }
   } else {
     switch (reduction) {
@@ -554,7 +554,7 @@ static Tensor cross_entropy_loss_prob_target(
       case Reduction::None:
         return -(input * target).sum(class_dim);
       default:
-        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
+       TORCH_FAIL("Invalid reduction type encountered in cross_entropy: ", reduction);
     }
   }
 }
@@ -620,7 +620,7 @@ static Tensor cross_entropy_loss_label_smoothing(
         ret = smooth_loss;
         break;
       default:
-        TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
+       TORCH_FAIL("Invalid reduction type encountered in cross_entropy: ", reduction);
     }
     return (1 - label_smoothing) * nllloss + ret * (label_smoothing / n_classes);
 }

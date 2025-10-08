@@ -211,7 +211,7 @@ static PyObject* THPStream_record_event(
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(accepted_args),
           &_event)) {
-    TORCH_CHECK(false, "parse record_event arg fails");
+    TORCH_FAIL("parse record_event arg fails");
   }
   if (_event != Py_None) {
     // Increase the refcount of the event to avoid it being destroyed.

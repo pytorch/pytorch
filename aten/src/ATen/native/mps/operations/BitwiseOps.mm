@@ -172,7 +172,7 @@ static void _bitwise_op_out_mps(const Tensor& self,
     } else if (op_name == "rshift") {
       output.fill_(c10::Scalar(self.item<int64_t>() >> other.item<int64_t>()));
     } else {
-      TORCH_CHECK(false, "Unknown operation to be performed over scalars ", op_name);
+      TORCH_FAIL("Unknown operation to be performed over scalars ", op_name);
     }
   } else if (is_other_scalar) {
     handle_binary_op(self.contiguous(), other, output, fmt::format("bitwise_{}_tensor_scalar", op_name));

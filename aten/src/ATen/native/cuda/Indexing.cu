@@ -1448,7 +1448,7 @@ TORCH_IMPL_FUNC(index_reduce_cuda_out)
   } else if (reduce == "amin") {
     index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MIN, reduce_minimum, result);
   } else {
-    TORCH_CHECK(false, "reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
+   TORCH_FAIL("reduce argument must be either prod, mean, amax or amin, got ", reduce, ".");
   }
 }
 

@@ -149,7 +149,7 @@ FusedKernelCUDA::FusedKernelCUDA(
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
     std::vector<char> log(logsize);
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
-    TORCH_CHECK(false, std::string(log.data(), log.size()));
+    TORCH_FAIL(std::string(log.data(), log.size()));
   }
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });

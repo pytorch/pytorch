@@ -92,7 +92,7 @@ class SimpleResolver : public torch::jit::Resolver {
       py::object obj = py::globals()["SimpleValueError"];
       return std::make_shared<MyPythonExceptionValue>(obj);
     }
-    TORCH_CHECK(false, "resolveValue: can not resolve '", name, "{}'");
+    TORCH_FAIL("resolveValue: can not resolve '", name, "{}'");
   }
 
   torch::jit::TypePtr resolveType(

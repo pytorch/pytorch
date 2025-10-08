@@ -26,7 +26,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
 // this fails the implementation if MTIAHooks functions are called, but
 // MTIA backend is not present.
 #define FAIL_MTIAHOOKS_FUNC(func) \
-  TORCH_CHECK(false, "Cannot execute ", func, "() without MTIA backend.");
+ TORCH_FAIL("Cannot execute ", func, "() without MTIA backend.");
 
   ~MTIAHooksInterface() override = default;
 

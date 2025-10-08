@@ -108,7 +108,7 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
             (CUDABLAS_GEMM_ARGS(at::Half));
       }
       else {
-        TORCH_CHECK(false, "unreachable");
+       TORCH_FAIL("unreachable");
       }
 
 
@@ -199,7 +199,7 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
             (CUDABLAS_GEMM_ARGS(at::Half));
       }
       else {
-        TORCH_CHECK(false, "unreachable");
+       TORCH_FAIL("unreachable");
       }
     }
   } else {
@@ -292,7 +292,7 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
             (CUDABLAS_GEMM_ARGS(at::Half));
       }
       else {
-        TORCH_CHECK(false, "unreachable");
+       TORCH_FAIL("unreachable");
       }
     }
   }
@@ -449,7 +449,7 @@ void dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
             (CUDABLAS_GEMM_ARGS(at::Half));
       }
       else {
-        TORCH_CHECK(false, "unreachable");
+       TORCH_FAIL("unreachable");
       }
   } else {
          if(transa_ && transb_) { // col , col
@@ -592,7 +592,7 @@ void dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
             (CUDABLAS_GEMM_ARGS(at::Half));
       }
       else {
-        TORCH_CHECK(false, "unreachable");
+       TORCH_FAIL("unreachable");
       }
   }
 }

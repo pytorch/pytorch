@@ -588,7 +588,7 @@ mobile::Module _load_mobile_from_bytes(
           data, size, device, &extra_files);
     }
     default: {
-      TORCH_CHECK(false, "Format error");
+      TORCH_FAIL("Format error");
     }
   }
 }
@@ -704,7 +704,7 @@ void _load_extra_only_for_mobile(
       break;
     }
     default: {
-      TORCH_CHECK(false, "Format error");
+      TORCH_FAIL("Format error");
     }
   }
 }

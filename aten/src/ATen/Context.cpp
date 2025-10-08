@@ -58,7 +58,7 @@ Float32Backend str2backend(const std::string& name) {
     return Float32Backend::CUDA;
   else if (name == "mkldnn")
     return Float32Backend::MKLDNN;
-  TORCH_CHECK(false, "Unknown backend: ", name);
+ TORCH_FAIL("Unknown backend: ", name);
 }
 
 Float32Op str2op(const std::string& name) {
@@ -70,7 +70,7 @@ Float32Op str2op(const std::string& name) {
     return Float32Op::RNN;
   else if (name == "matmul")
     return Float32Op::MATMUL;
-  TORCH_CHECK(false, "Unknown op: ", name);
+ TORCH_FAIL("Unknown op: ", name);
 }
 
 Float32Precision str2precision(const std::string& name) {
@@ -82,7 +82,7 @@ Float32Precision str2precision(const std::string& name) {
     return Float32Precision::TF32;
   else if (name == "bf16")
     return Float32Precision::BF16;
-  TORCH_CHECK(false, "Unknown precision: ", name);
+ TORCH_FAIL("Unknown precision: ", name);
 }
 
 std::string precision2str(Float32Precision prec) {
@@ -96,7 +96,7 @@ std::string precision2str(Float32Precision prec) {
     case Float32Precision::BF16:
       return "bf16";
   }
-  TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
+ TORCH_FAIL("Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
 
 Context::Context() = default;
@@ -701,7 +701,7 @@ void Context::setQEngine(at::QEngine e) {
     quantized_engine.store(e);
     return;
   }
-  TORCH_CHECK(false, "quantized engine ", toString(e), " is not supported");
+ TORCH_FAIL("quantized engine ", toString(e), " is not supported");
 }
 
 const std::vector<at::QEngine>& Context::supportedQEngines() {
@@ -847,7 +847,7 @@ void Context::setAllowFP16ReductionCPU(bool b) {
     // NOLINTNEXTLINE(facebook-hte-MissingBraces)
     if (true)
 #endif
-      TORCH_CHECK(false, "Float16 arithmetic is not supported by the CPU!");
+     TORCH_FAIL("Float16 arithmetic is not supported by the CPU!");
   }
   allow_fp16_reduction_cpu = b;
 }

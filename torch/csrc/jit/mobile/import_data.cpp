@@ -250,7 +250,7 @@ static std::map<std::string, at::Tensor> _load_parameters_bytes(
     }
 
     default:
-      TORCH_CHECK(false, "Unrecognized data format");
+      TORCH_FAIL("Unrecognized data format");
   }
   return map;
 }

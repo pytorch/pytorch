@@ -73,7 +73,7 @@ inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
     case at::kJagged:
       return stream << "Jagged";
     default:
-      TORCH_CHECK(false, "Unknown layout");
+      TORCH_FAIL("Unknown layout");
   }
 }
 

@@ -951,7 +951,7 @@ struct TORCH_API IValue final {
       return toSymBool();
     else if (isUnsigned())
       return toUInt();
-    TORCH_CHECK(false, "IValue is not a Scalar");
+   TORCH_FAIL("IValue is not a Scalar");
   }
 
   // Device

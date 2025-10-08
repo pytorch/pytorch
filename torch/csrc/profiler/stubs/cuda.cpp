@@ -36,7 +36,7 @@ static void cudaCheck(cudaError_t result, const char* file, int line) {
     } else {
       ss << cudaGetErrorString(result);
     }
-    TORCH_CHECK(false, ss.str());
+    TORCH_FAIL(ss.str());
   }
 }
 #define TORCH_CUDA_CHECK(result) cudaCheck(result, __FILE__, __LINE__);

@@ -714,7 +714,7 @@ inline DispatchKey computeDispatchKey(
               device_.type());
       }
     default:
-      TORCH_CHECK(false, "Unsupported layout: ", layout_);
+      TORCH_FAIL("Unsupported layout: ", layout_);
   }
 }
 

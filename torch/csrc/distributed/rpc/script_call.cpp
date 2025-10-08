@@ -154,7 +154,7 @@ std::shared_ptr<Operator> ScriptCall::matchOperator(
     }
   }
 
-  TORCH_CHECK(false, "Cannot find matching operator for schema ", str_schema);
+  TORCH_FAIL("Cannot find matching operator for schema ", str_schema);
 }
 
 } // namespace torch::distributed::rpc

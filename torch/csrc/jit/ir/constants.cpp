@@ -54,7 +54,7 @@ Value* insertConstant(
   if (value) {
     return *value;
   }
-  TORCH_CHECK(false, "Unsupported value kind: ", val.tagKind());
+  TORCH_FAIL("Unsupported value kind: ", val.tagKind());
 }
 
 // IValue -> Constant node
@@ -214,7 +214,7 @@ std::optional<IValue> toIValue(const Value* v) {
     const auto& class_val = node->ival(attr::value);
     return class_val;
   } else {
-    TORCH_CHECK(false, "constant literal not supported for: ", type->str());
+    TORCH_FAIL("constant literal not supported for: ", type->str());
   }
 }
 

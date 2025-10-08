@@ -112,7 +112,7 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(
     AllocInfo info = get_alloc_info(filename);
     socket->register_allocation(info);
   } catch (std::exception& e) {
-    TORCH_CHECK(false, e.what());
+   TORCH_FAIL(e.what());
   }
 }
 

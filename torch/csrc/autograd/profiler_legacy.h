@@ -97,7 +97,7 @@ struct TORCH_API LegacyEvent {
       case EventKind::MemoryAlloc:
         return "memory_alloc";
     }
-    TORCH_CHECK(false, "unknown event kind");
+    TORCH_FAIL("unknown event kind");
   }
 
   EventKind kind() const {

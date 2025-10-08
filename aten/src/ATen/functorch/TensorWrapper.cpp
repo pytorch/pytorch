@@ -137,7 +137,7 @@ c10::intrusive_ptr<TensorImpl> TensorWrapper::shallow_copy_and_detach(
 }
 
 void TensorWrapper::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
-  TORCH_CHECK(false, "mutating directly with `.data` inside functorch transform is not allowed.");
+ TORCH_FAIL("mutating directly with `.data` inside functorch transform is not allowed.");
 }
 
 TensorWrapper::TensorWrapper(

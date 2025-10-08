@@ -21,7 +21,7 @@ c10::OperatorHandle getOperatorForTarget(
 
   size_t numAtoms = atoms.size();
   if (numAtoms < 3) {
-    TORCH_CHECK(false, "Invalid target: ", target);
+    TORCH_FAIL("Invalid target: ", target);
   }
 
   const std::string_view ns = atoms[numAtoms - 3];

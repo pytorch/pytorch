@@ -22,7 +22,7 @@ inline Tensor pad(
     } else if (std::holds_alternative<enumtype::kCircular>(mode)) {
       return at::padding_mode::circular;
     }
-    TORCH_CHECK(false, "Unrecognised padding mode");
+    TORCH_FAIL("Unrecognised padding mode");
   }();
 
   std::optional<double> fill_value;

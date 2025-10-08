@@ -19,7 +19,7 @@ static void resize_storage_bytes_(const Tensor& variable, SymInt new_size) {
     at::native::resize_bytes_cuda(
         variable.storage().unsafeGetStorageImpl(), new_size.expect_int());
 #else
-    TORCH_CHECK(false, "built without cuda");
+    TORCH_FAIL("built without cuda");
 #endif
   } else {
     at::native::resize_bytes_nocuda(variable.storage(), new_size);

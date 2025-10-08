@@ -206,7 +206,7 @@ static c10::intrusive_ptr<ProcessGroupGloo::AsyncWork> makeAllreduceCUDAWork(
     return c10::make_intrusive<AsyncSparseAllreduceCUDAWork>(
         std::move(context), inputs, tag, seq, timeout);
   } else {
-    TORCH_CHECK(false, "ProcessGroupGloo::allreduce: unsupported layout");
+    TORCH_FAIL("ProcessGroupGloo::allreduce: unsupported layout");
   }
 }
 

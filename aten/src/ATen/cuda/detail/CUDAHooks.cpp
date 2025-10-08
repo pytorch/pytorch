@@ -330,7 +330,7 @@ long CUDAHooks::versionCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_VERSION;
 #else
-  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+ TORCH_FAIL("Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
 #endif
 }
 
@@ -340,7 +340,7 @@ long CUDAHooks::versionMIOpen() const {
          MIOPEN_VERSION_MINOR * 100 +
          MIOPEN_VERSION_PATCH;
 #else
-  TORCH_CHECK(false, "Cannot query MIOpen version if ATen_cuda is not built with ROCm");
+ TORCH_FAIL("Cannot query MIOpen version if ATen_cuda is not built with ROCm");
 #endif
 }
 

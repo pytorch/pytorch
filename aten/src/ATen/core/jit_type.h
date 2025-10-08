@@ -1750,7 +1750,7 @@ inline TypePtr TensorType::fromNumberType(const Type& typ) {
   } else if (typ.kind() == NumberType::Kind) {
     return TensorType::create(std::nullopt, at::kCPU, {}, std::nullopt);
   }
-  TORCH_CHECK(false, "Unknown number type: ", typ.str());
+ TORCH_FAIL("Unknown number type: ", typ.str());
 }
 inline TypePtr TensorType::fromBoolType() {
   return TensorType::createContiguous(at::kBool, at::kCPU, {});

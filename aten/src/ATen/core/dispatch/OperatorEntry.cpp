@@ -343,7 +343,7 @@ SafeKernelFunction OperatorEntry::getComputedKernelForDispatchKey(
 
 const std::vector<at::Tag>& OperatorEntry::getTags() const {
   #if defined C10_MOBILE
-    TORCH_CHECK(false, "tags are not saved for Mobile");
+   TORCH_FAIL("tags are not saved for Mobile");
   #else
     return tags_;
   #endif

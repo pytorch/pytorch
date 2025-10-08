@@ -74,11 +74,11 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
   }
 
   double guard_float(const char* file, int64_t line) override {
-    TORCH_CHECK(false, "not a float");
+   TORCH_FAIL("not a float");
   }
 
   bool guard_bool(const char* file, int64_t line) override {
-    TORCH_CHECK(false, "not a bool");
+   TORCH_FAIL("not a bool");
   }
 
   int64_t int_() override {
@@ -150,7 +150,7 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
 
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
   c10::SymNode name(const c10::SymNode& other) override {           \
-    TORCH_CHECK(false, #name " not supported by NestedIntSymNode"); \
+   TORCH_FAIL(#name " not supported by NestedIntSymNode"); \
   }
 
   DEFINE_BINARY_NOT_SUPPORTED(add)
@@ -168,7 +168,7 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
 
 #define DEFINE_NOT_SUPPORTED(name)                                     \
   c10::SymNode name() override {                                       \
-    TORCH_CHECK(false, #name " is not supported by NestedIntSymNode"); \
+   TORCH_FAIL(#name " is not supported by NestedIntSymNode"); \
   }
 
   DEFINE_NOT_SUPPORTED(sym_not)

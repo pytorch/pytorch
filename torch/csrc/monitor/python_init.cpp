@@ -59,7 +59,7 @@ struct type_caster<torch::monitor::data_value_t> {
       std::string& str = std::get<std::string>(src);
       return THPUtils_packString(str);
     }
-    TORCH_CHECK(false, "unknown data_value_t type");
+    TORCH_FAIL("unknown data_value_t type");
   }
 };
 } // namespace pybind11::detail

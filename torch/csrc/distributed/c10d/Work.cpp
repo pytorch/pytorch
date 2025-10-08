@@ -69,7 +69,7 @@ int Work::sourceRank() const {
 }
 
 std::vector<at::Tensor> Work::result() {
-  TORCH_CHECK(false, "result() not implemented.");
+  TORCH_FAIL("result() not implemented.");
 }
 
 void Work::synchronize() {
@@ -90,7 +90,7 @@ bool Work::wait(std::chrono::milliseconds timeout) {
     if (!completed_) {
       // Throw exception if the wait operation timed out and the work was not
       // completed.
-      TORCH_CHECK(false, "Operation timed out!");
+      TORCH_FAIL("Operation timed out!");
     }
   }
   if (exception_) {
@@ -111,14 +111,14 @@ void Work::blockCurrentStream() {
 }
 
 void Work::abort() {
-  TORCH_CHECK(false, "Work::abort not implemented.");
+  TORCH_FAIL("Work::abort not implemented.");
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> Work::getFuture(){
-    TORCH_CHECK(false, "Work::getFuture not implemented.")}
+    TORCH_FAIL("Work::getFuture not implemented.")}
 
 c10::intrusive_ptr<c10::ivalue::Future> Work::getFutureResult() {
-  TORCH_CHECK(false, "Work::getFutureResult not implemented.")
+  TORCH_FAIL("Work::getFutureResult not implemented.")
 }
 
 void Work::finish(std::exception_ptr exception) {
@@ -147,11 +147,11 @@ void Work::finishAndThrow(std::exception_ptr exception) {
 }
 
 float Work::getDuration() const {
-  TORCH_CHECK(false, "This Backend doesn't support getDuration.");
+  TORCH_FAIL("This Backend doesn't support getDuration.");
 }
 
 uint64_t Work::getSequencenumber() const {
-  TORCH_CHECK(false, "This Backend doesn't support getSequencenumber.");
+  TORCH_FAIL("This Backend doesn't support getSequencenumber.");
 }
 
 class FutureWrappingWork : public Work {
@@ -174,7 +174,7 @@ class FutureWrappingWork : public Work {
   }
 
   int sourceRank() const override {
-    TORCH_CHECK(false, "FutureWrappingWork::sourceRank() not implemented");
+    TORCH_FAIL("FutureWrappingWork::sourceRank() not implemented");
   }
 
   std::vector<at::Tensor> result() override {
@@ -191,7 +191,7 @@ class FutureWrappingWork : public Work {
   }
 
   void abort() override {
-    TORCH_CHECK(false, "FutureWrappingWork::abort() not implemented");
+    TORCH_FAIL("FutureWrappingWork::abort() not implemented");
   }
 
   c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {

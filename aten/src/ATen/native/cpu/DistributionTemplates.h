@@ -49,7 +49,7 @@ void random_full_64_bits_range_kernel(TensorIteratorBase& iter, RNG generator) {
         return random(generator);
       });
     } else {
-      TORCH_CHECK(false, "random_full_64_bits_range_kernel_cpu handles only int64, double, float and bfloat16");
+     TORCH_FAIL("random_full_64_bits_range_kernel_cpu handles only int64, double, float and bfloat16");
     }
   });
 }

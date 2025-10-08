@@ -181,7 +181,7 @@ void spgemm_cutlass(
         tensor_e_dtype = at::kInt;
         break;
     default:
-        TORCH_CHECK(false, __func__, ": invalid size of meta tensor datatype "
+       TORCH_FAIL(__func__, ": invalid size of meta tensor datatype "
                  "encountered");
     }
     TORCH_CHECK(tensor_e.dtype() == tensor_e_dtype,
@@ -423,7 +423,7 @@ void spgemm_cutlass_dispatch_layouts(
         }
     }
 
-    TORCH_CHECK(false, __func__, "_dispatch_layouts: Combination of ",
+   TORCH_FAIL(__func__, "_dispatch_layouts: Combination of ",
              tensor_a_row_major ? "row-major" : "column_major", " and ",
              tensor_b_row_major ? "row-major" : "column_major",
              " layouts for input tensors is not supported");
@@ -527,7 +527,7 @@ Tensor sparse_semi_structured_mad_op(
       const std::optional<Tensor>& input_opt, const Scalar& alpha,
       const Scalar& beta, const std::optional<c10::ScalarType> out_dtype_opt) {
 #if defined(USE_ROCM) || defined(_MSC_VER)
-    TORCH_CHECK(false, __func__, " : CUTLASS not supported");
+   TORCH_FAIL(__func__, " : CUTLASS not supported");
     return Tensor{};
 #else
     // No need to check that all tensors are on CUDA device, as this
@@ -857,7 +857,7 @@ static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
 std::tuple<Tensor, Tensor>
 _to_sparse_semi_structured(const Tensor& dense) {
 #if defined(USE_ROCM) || defined(_MSC_VER)
-  TORCH_CHECK(false, __func__, " : CUTLASS not supported");
+ TORCH_FAIL(__func__, " : CUTLASS not supported");
   return std::make_tuple(Tensor{}, Tensor{});
 #else
   // Check dimensions of the dense matrix.
@@ -882,7 +882,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
     ksparse = 2;
     dense_elems_per_meta_elem = 8;
   } else {
-    TORCH_CHECK(false, "_to_sparse_semi_structured: Invalid dense argument datatype ",
+   TORCH_FAIL("_to_sparse_semi_structured: Invalid dense argument datatype ",
              dense.dtype(), " encountered");
   }
 
@@ -890,12 +890,12 @@ _to_sparse_semi_structured(const Tensor& dense) {
   const auto dense_ncols = dense.size(1);
 
   if (dense_nrows % (meta_dtype == at::kShort ? 32 : 16) != 0) {
-    TORCH_CHECK(false, "_to_sparse_semi_structured: Number of rows of dense matrix must "
+   TORCH_FAIL("_to_sparse_semi_structured: Number of rows of dense matrix must "
              "be divisible by ", (meta_dtype == at::kShort ? 32 : 16),
              ", but it is ", dense_nrows);
   }
   if (dense_ncols % dense_elems_per_meta_elem != 0) {
-    TORCH_CHECK(false, "_to_sparse_semi_structured: Number of columns of dense matrix "
+   TORCH_FAIL("_to_sparse_semi_structured: Number of columns of dense matrix "
              "must be divisible by ", dense_elems_per_meta_elem, ", but it is ",
              dense_ncols);
   }
@@ -936,7 +936,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
         } else if (mask_elems == std::make_tuple(0, 0, 1, 1)) {
           meta_quadruple = 14; // 1110
         } else {
-          TORCH_CHECK(false, "_to_sparse_semi_structured: dense argument does not match ",
+         TORCH_FAIL("_to_sparse_semi_structured: dense argument does not match ",
                    (dense.dtype() != at::kFloat) ? "2:4" : "1:2",
                    "sparsity pattern");
         }

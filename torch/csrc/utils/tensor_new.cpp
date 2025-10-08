@@ -159,7 +159,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
       case ScalarType::Half:
         return ScalarType::ComplexHalf;
       default:
-        TORCH_CHECK(false, "invalid default scalar type for complex");
+        TORCH_FAIL("invalid default scalar type for complex");
     }
   }
   if (THPVariable_Check(obj)) {
@@ -197,7 +197,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
     }
     return scalarType;
   }
-  TORCH_CHECK(false, "Could not infer dtype of ", Py_TYPE(obj)->tp_name);
+  TORCH_FAIL("Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }
 
 void recursive_store(
@@ -689,7 +689,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
     return new_with_sizes(
         options, scalar_type, deviceOptional, r.symintlist(0));
   }
-  TORCH_CHECK(false, "new(): invalid arguments");
+  TORCH_FAIL("new(): invalid arguments");
 }
 
 // NB: device_idx here is NOT a DeviceIndex, but index into PythonArgs
@@ -808,7 +808,7 @@ static Tensor legacy_tensor_generic_ctor_new(
     return legacy_new_from_sequence(
         options, scalar_type, deviceOptional, r.pyobject(0));
   }
-  TORCH_CHECK(false, "new(): invalid arguments");
+  TORCH_FAIL("new(): invalid arguments");
 }
 
 // Handles ONLY torch.Tensor
@@ -1072,7 +1072,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
                values.options().layout(layout).pinned_memory(pin_memory))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD1));
   }
-  TORCH_CHECK(false, name + ": invalid arguments");
+  TORCH_FAIL(name + ": invalid arguments");
 }
 
 Tensor sparse_compressed_tensor_ctor(
@@ -1274,7 +1274,7 @@ Tensor sparse_coo_tensor_ctor(
                inferred_options.dtype(inferred_scalar_type).layout(at::kSparse))
         .set_requires_grad(r.toBool(ARG_REQUIRES_GRAD2));
   }
-  TORCH_CHECK(false, "sparse_coo_tensor(): invalid arguments");
+  TORCH_FAIL("sparse_coo_tensor(): invalid arguments");
 }
 
 void _validate_sparse_coo_tensor_args(
@@ -1504,7 +1504,7 @@ Tensor tensor_ctor(
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
   }
-  TORCH_CHECK(false, "tensor(): invalid arguments");
+  TORCH_FAIL("tensor(): invalid arguments");
 }
 
 Tensor as_tensor(
@@ -1523,7 +1523,7 @@ Tensor as_tensor(
         /*copy_numpy=*/false,
         /*type_inference=*/type_inference);
   }
-  TORCH_CHECK(false, "tensor(): invalid arguments");
+  TORCH_FAIL("tensor(): invalid arguments");
 }
 
 Tensor new_tensor(
@@ -1561,7 +1561,7 @@ Tensor new_tensor(
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
   }
-  TORCH_CHECK(false, "new_tensor(): invalid arguments");
+  TORCH_FAIL("new_tensor(): invalid arguments");
 }
 
 Tensor tensor_frombuffer(

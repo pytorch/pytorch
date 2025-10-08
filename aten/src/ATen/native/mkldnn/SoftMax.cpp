@@ -17,7 +17,7 @@ Tensor mkldnn_softmax(
     const Tensor& self,
     const int64_t dim,
     const bool half_to_float) {
-  TORCH_CHECK(false, "mkldnn_softmax: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_softmax: ATen not compiled with MKLDNN support");
 }
 
 } // namespace at::native

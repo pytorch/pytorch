@@ -72,7 +72,7 @@ void KernelFactory::registerHandler(
   auto& registry = getKernelFactoryRegistry();
   registry.withLock([&](auto&& reg) {
     if (reg.handlers.find(name) != reg.handlers.end()) {
-      TORCH_CHECK(false, "Handler for ", name, " already registered");
+      TORCH_FAIL("Handler for ", name, " already registered");
     }
     reg.handlers.emplace(name, std::move(handler));
   });
@@ -210,7 +210,7 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
       }
       opsWithoutStaticDispatchCount[opName] += 1;
     } else {
-      TORCH_CHECK(false, "Unsupported operator: ", target);
+      TORCH_FAIL("Unsupported operator: ", target);
     }
   }
 

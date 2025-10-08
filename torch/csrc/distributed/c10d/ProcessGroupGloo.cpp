@@ -69,7 +69,7 @@ void logAndThrow(
     const std::string& logMessage,
     const std::string& errorMessage) {
   LOG(ERROR) << logMessage;
-  TORCH_CHECK(false, errorMessage);
+  TORCH_FAIL(errorMessage);
 }
 
 // For monitoredBarrier, checks remaining time left to finish processing ranks
@@ -590,7 +590,7 @@ ProcessGroupGloo::ProcessGroupGloo(
       local_id_(process_group_id++) {
   auto& devices = options_->devices;
   if (devices.empty()) {
-    TORCH_CHECK(false, "No device(s) specified");
+    TORCH_FAIL("No device(s) specified");
   }
 
   // Create and connect a context for every device.
@@ -934,7 +934,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::broadcast(
     std::vector<at::Tensor>& inputs,
     const BroadcastOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, "ProcessGroupGloo::broadcast: " + msg);
+    TORCH_FAIL("ProcessGroupGloo::broadcast: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -978,7 +978,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::broadcast(
         seq_,
         opts.timeout);
   } else {
-    TORCH_CHECK(false, "Invalid backend");
+    TORCH_FAIL("Invalid backend");
   }
 
   enqueue(work);
@@ -989,7 +989,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce(
     std::vector<at::Tensor>& inputs,
     const AllreduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, "ProcessGroupGloo::allreduce: " + msg);
+    TORCH_FAIL("ProcessGroupGloo::allreduce: " + msg);
   };
 
   assertNonEmpty(invalidArgument, inputs);
@@ -1043,7 +1043,7 @@ static c10::intrusive_ptr<ProcessGroupGloo::AsyncWork> makeAllreduceCPUWork(
     return c10::make_intrusive<AsyncSparseAllreduceWork>(
         std::move(context), inputs, tag, seq, timeout);
   } else {
-    TORCH_CHECK(false, "ProcessGroupGloo::allreduce: unsupported layout");
+    TORCH_FAIL("ProcessGroupGloo::allreduce: unsupported layout");
   }
 }
 
@@ -1077,7 +1077,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, "ProcessGroupGloo::allreduce_coalesced: " + msg);
+    TORCH_FAIL("ProcessGroupGloo::allreduce_coalesced: " + msg);
   };
   assertNonEmpty(invalidArgument, tensors);
 
@@ -1127,7 +1127,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allreduce_coalesced(
       invalidArgument("unsupported layout");
     }
   } else {
-    TORCH_CHECK(false, "Invalid backend");
+    TORCH_FAIL("Invalid backend");
   }
   enqueue(work);
   return work;
@@ -1287,7 +1287,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce(
     std::vector<at::Tensor>& inputs,
     const ReduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, "ProcessGroupGloo::reduce: " + msg);
+    TORCH_FAIL("ProcessGroupGloo::reduce: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -1333,7 +1333,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::reduce(
         seq_,
         opts.timeout);
   } else {
-    TORCH_CHECK(false, "Invalid backend");
+    TORCH_FAIL("Invalid backend");
   }
   enqueue(work);
   return work;
@@ -1562,7 +1562,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather(
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, "ProcessGroupGloo::allgather: " + msg);
+    TORCH_FAIL("ProcessGroupGloo::allgather: " + msg);
   };
 
   if (inputs.empty()) {
@@ -1618,7 +1618,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather(
     work = c10::make_intrusive<AsyncAllgatherCUDAWork>(
         std::move(context), outputs, inputs, tag, seq_, opts.timeout);
   } else {
-    TORCH_CHECK(false, "Invalid backend");
+    TORCH_FAIL("Invalid backend");
   }
   enqueue(work);
   return work;
@@ -1710,7 +1710,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
     std::vector<at::Tensor>& input_list,
     const AllgatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, "ProcessGroupGloo::allgather_coalesced: " + msg);
+    TORCH_FAIL("ProcessGroupGloo::allgather_coalesced: " + msg);
   };
 
   if (input_list.empty()) {
@@ -1936,7 +1936,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::gather(
     std::vector<at::Tensor>& inputs,
     const GatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, "ProcessGroupGloo::gather: " + msg);
+    TORCH_FAIL("ProcessGroupGloo::gather: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -2001,7 +2001,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::gather(
         seq_,
         opts.timeout);
   } else {
-    TORCH_CHECK(false, "Invalid backend");
+    TORCH_FAIL("Invalid backend");
   }
   enqueue(work);
   return work;
@@ -2150,7 +2150,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::scatter(
     std::vector<std::vector<at::Tensor>>& inputs,
     const ScatterOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, "ProcessGroupGloo::scatter: " + msg);
+    TORCH_FAIL("ProcessGroupGloo::scatter: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -2214,7 +2214,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::scatter(
         seq_,
         opts.timeout);
   } else {
-    TORCH_CHECK(false, "Invalid backend");
+    TORCH_FAIL("Invalid backend");
   }
   enqueue(work);
   return work;
@@ -2414,7 +2414,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
     std::vector<int64_t>& inputCounts,
     const AllToAllOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    TORCH_CHECK(false, "ProcessGroupGloo::alltoall_base: " + msg);
+    TORCH_FAIL("ProcessGroupGloo::alltoall_base: " + msg);
   };
 
   TORCH_CHECK(
@@ -2462,14 +2462,14 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall_base(
 
 static at::Tensor& checkSingleTensor(std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
-    TORCH_CHECK(false, "ProcessGroupGloo::send takes a single tensor");
+    TORCH_FAIL("ProcessGroupGloo::send takes a single tensor");
   }
   auto& tensor = tensors[0];
   if (!tensor.is_contiguous()) {
-    TORCH_CHECK(false, "input tensor has to be contiguous");
+    TORCH_FAIL("input tensor has to be contiguous");
   }
   if (tensor.is_sparse()) {
-    TORCH_CHECK(false, "input tensor has to be dense");
+    TORCH_FAIL("input tensor has to be dense");
   }
   return tensor;
 }

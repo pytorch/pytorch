@@ -144,15 +144,15 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       input_specs = extra_json["inputs"].get<std::vector<TensorSpec>>();
       output_specs = extra_json["outputs"].get<std::vector<TensorSpec>>();
     } catch (std::exception& exn) {
-      TORCH_CHECK(false, "Parsing model dict failed!");
+     TORCH_FAIL("Parsing model dict failed!");
     }
 
     if (!type_validity(input_specs) || !type_validity(output_specs)) {
-      TORCH_CHECK(false, "Compiling model failed, only float type tensors supported");
+     TORCH_FAIL("Compiling model failed, only float type tensors supported");
     }
 
     if (![PTMCoreMLCompiler compileModel:model modelID:modelID]) {
-      TORCH_CHECK(false, "Compiling MLModel failed");
+     TORCH_FAIL("Compiling MLModel failed");
     }
 
     NSError *error = nil;

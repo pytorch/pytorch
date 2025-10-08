@@ -46,7 +46,7 @@
     INT_SWITCH_CASE(k_world_size, 4, __VA_ARGS__);                       \
     INT_SWITCH_CASE(k_world_size, 2, __VA_ARGS__);                       \
     default: {                                                           \
-      TORCH_CHECK(false, "Not implemented for world_size=", world_size); \
+     TORCH_FAIL("Not implemented for world_size=", world_size); \
     }                                                                    \
   }
 
@@ -56,7 +56,7 @@
     INT_SWITCH_CASE(k_alignment, 8, __VA_ARGS__);                     \
     INT_SWITCH_CASE(k_alignment, 4, __VA_ARGS__);                     \
     default: {                                                        \
-      TORCH_CHECK(false, "Not implemented for alignment=", alignment); \
+     TORCH_FAIL("Not implemented for alignment=", alignment); \
     }                                                                 \
   }
 
@@ -998,7 +998,7 @@ at::Tensor multimem_all_reduce_(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
-  TORCH_CHECK(false, "multimem_all_reduce_: requires CUDA 12.3+.");
+ TORCH_FAIL("multimem_all_reduce_: requires CUDA 12.3+.");
   return input;
 }
 
@@ -1007,7 +1007,7 @@ at::Tensor multimem_one_shot_all_reduce_out(
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
-  TORCH_CHECK(false, "multimem_one_shot_all_reduce_out: requires CUDA 12.3+.");
+ TORCH_FAIL("multimem_one_shot_all_reduce_out: requires CUDA 12.3+.");
   return out;
 }
 
@@ -1015,7 +1015,7 @@ at::Tensor multimem_one_shot_all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
-  TORCH_CHECK(false, "multimem_one_shot_all_reduce: requires CUDA 12.3+.");
+ TORCH_FAIL("multimem_one_shot_all_reduce: requires CUDA 12.3+.");
   return input;
 }
 
@@ -1023,7 +1023,7 @@ at::Tensor multimem_all_gather_out(
     const at::Tensor& input,
     std::string group_name,
     at::Tensor out) {
-  TORCH_CHECK(false, "multimem_all_gather_out: requires CUDA 12.3+.");
+ TORCH_FAIL("multimem_all_gather_out: requires CUDA 12.3+.");
   return out;
 }
 
@@ -1032,7 +1032,7 @@ at::Tensor one_shot_all_reduce_out(
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
-  TORCH_CHECK(false, "one_shot_all_reduce_out: requires CUDA 12.3+.");
+ TORCH_FAIL("one_shot_all_reduce_out: requires CUDA 12.3+.");
   return out;
 }
 
@@ -1042,7 +1042,7 @@ at::Tensor one_shot_all_reduce_copy_out(
     std::string reduce_op,
     std::string group_name,
     at::Tensor out) {
-  TORCH_CHECK(false, "one_shot_all_reduce_copy_out: requires CUDA 12.3+.");
+ TORCH_FAIL("one_shot_all_reduce_copy_out: requires CUDA 12.3+.");
   return out;
 }
 
@@ -1050,7 +1050,7 @@ at::Tensor one_shot_all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
     std::string group_name) {
-  TORCH_CHECK(false, "one_shot_all_reduce: requires CUDA 12.3+.");
+ TORCH_FAIL("one_shot_all_reduce: requires CUDA 12.3+.");
   return input;
 }
 
@@ -1059,7 +1059,7 @@ at::Tensor one_shot_all_reduce_copy(
     const at::Tensor& local_input,
     std::string reduce_op,
     std::string group_name) {
-  TORCH_CHECK(false, "one_shot_all_reduce_copy: requires CUDA 12.3+.");
+ TORCH_FAIL("one_shot_all_reduce_copy: requires CUDA 12.3+.");
   return input;
 }
 
@@ -1067,7 +1067,7 @@ at::Tensor two_shot_all_reduce_(
     at::Tensor input,
     std::string reduce_op,
     std::string group_name) {
-  TORCH_CHECK(false, "two_shot_all_reduce_: requires CUDA 12.3+.");
+ TORCH_FAIL("two_shot_all_reduce_: requires CUDA 12.3+.");
   return input;
 }
 
@@ -1076,7 +1076,7 @@ at::Tensor two_shot_all_reduce_out(
     std::string reduce_op,
     std::string group_name,
     at::Tensor output) {
-  TORCH_CHECK(false, "two_shot_all_reduce_out: requires CUDA 12.3+.");
+ TORCH_FAIL("two_shot_all_reduce_out: requires CUDA 12.3+.");
   return output;
 }
 
@@ -1085,7 +1085,7 @@ at::Tensor reduce_scatter_out(
     std::string group_name,
     bool split_last_dim,
     at::Tensor output) {
-  TORCH_CHECK(false, "reduce_scatter_out: requires CUDA 12.3+.");
+ TORCH_FAIL("reduce_scatter_out: requires CUDA 12.3+.");
   return output;
 }
 } // namespace

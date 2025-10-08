@@ -29,7 +29,7 @@ static inline void maybe_resize_storage_mps(TensorImpl* self, uint64_t new_size)
 
   auto storage = self->storage().unsafeGetStorageImpl();
   if (!storage) {
-    TORCH_CHECK(false, "Tensor: invalid null storage");
+   TORCH_FAIL("Tensor: invalid null storage");
   }
   uint64_t new_size_bytes = (new_size + self->storage_offset()) * self->dtype().itemsize();
   if (new_size_bytes > self->storage().nbytes()) {

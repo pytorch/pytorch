@@ -38,7 +38,7 @@ static rocblas_operation hipOperationToRocOperation(hipblasOperation_t op)
     case HIPBLAS_OP_C:
         return rocblas_operation_conjugate_transpose;
     }
-    TORCH_CHECK(false, "HIPBLAS_STATUS_INVALID_ENUM");
+   TORCH_FAIL("HIPBLAS_STATUS_INVALID_ENUM");
 }
 static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
 {
@@ -61,7 +61,7 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
     case rocblas_status_internal_error:
         return HIPBLAS_STATUS_INTERNAL_ERROR;
     }
-    TORCH_CHECK(false, "HIPBLAS_STATUS_INVALID_ENUM");
+   TORCH_FAIL("HIPBLAS_STATUS_INVALID_ENUM");
 }
 // hipblas does not have hipblasSetMathMode
 #define hipblasSetMathMode(handle, flags) HIPBLAS_STATUS_SUCCESS
@@ -568,7 +568,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 
 template <typename Dtype, typename C_Dtype = Dtype>
 inline void bgemm_internal_cublas(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
-  TORCH_CHECK(false, "at::cuda::blas::bgemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
+ TORCH_FAIL("at::cuda::blas::bgemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
 }
 
 template <>
@@ -840,7 +840,7 @@ void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Hal
 {
   if (at::globalContext().allowFP16AccumulationCuBLAS()) {
     // Do not allow fp16 reductions with fp32 output
-    TORCH_CHECK(false, "bgemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
+   TORCH_FAIL("bgemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
@@ -850,7 +850,7 @@ void bgemm_internal<at::Half, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::Hal
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
+   TORCH_FAIL("gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif
   else {
@@ -868,7 +868,7 @@ void bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at:
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
+   TORCH_FAIL("gemm input type at::BFloat16 and output type float is not supported for ROCm");
   }
 #endif
   else {
@@ -917,7 +917,7 @@ inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
     bgemm(&params);
   }
   else {
-    TORCH_CHECK(false, "unreachable");
+   TORCH_FAIL("unreachable");
   }
 }
 
@@ -1000,7 +1000,7 @@ void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
 
     if (prop->major < 8)
-      TORCH_CHECK(false, "bgemm input type at::BFloat16 and output type float is only supported for CUDA devices with compute capability 8.0 or higher");
+     TORCH_FAIL("bgemm input type at::BFloat16 and output type float is only supported for CUDA devices with compute capability 8.0 or higher");
   #endif
   // TODO: Support tuning for BFloat16 inputs and FP32 output
   bgemm_internal<at::BFloat16, float>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
@@ -1010,7 +1010,7 @@ void bgemm<at::BFloat16, float>(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16
 
 template <typename Dtype, typename C_Dtype = Dtype>
 inline void gemm_internal_cublas(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(Dtype, C_Dtype)) {
-  TORCH_CHECK(false, "at::cuda::blas::gemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
+ TORCH_FAIL("at::cuda::blas::gemm: not implemented for input type ", typeid(Dtype).name(), " and output type ", typeid(C_Dtype).name());
 }
 
 template <>
@@ -1351,7 +1351,7 @@ void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half,
 {
   if (at::globalContext().allowFP16AccumulationCuBLAS()) {
     // Do not allow fp16 reductions with fp32 output
-    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
+   TORCH_FAIL("gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
@@ -1359,7 +1359,7 @@ void gemm_internal<at::Half, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::Half,
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
+   TORCH_FAIL("gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif
   else {
@@ -1375,7 +1375,7 @@ void gemm_internal<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::B
   }
 #if defined(USE_ROCM) && !defined(_MSC_VER)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
+   TORCH_FAIL("gemm input type at::Half and output type float is not supported for ROCm");
   }
 #endif
   else {
@@ -1420,7 +1420,7 @@ inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(DType, C_Dtype)) {
     gemm(&params);
   }
   else {
-    TORCH_CHECK(false, "unreachable");
+   TORCH_FAIL("unreachable");
   }
 }
 
@@ -1503,7 +1503,7 @@ void gemm<at::BFloat16, float>(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(at::BFloat16, 
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
 
     if (prop->major < 8)
-      TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is only supported for CUDA devices with compute capability 8.0 or higher");
+     TORCH_FAIL("gemm input type at::BFloat16 and output type float is only supported for CUDA devices with compute capability 8.0 or higher");
   #endif
   // TODO: Support Tuning for bf16-fp32 gemm
   gemm_internal<at::BFloat16, float>(CUDABLAS_GEMM_ARGS(at::BFloat16));
@@ -1529,14 +1529,14 @@ bool gemm_and_bias(
 
   if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
     #ifdef USE_ROCM
-    TORCH_CHECK(false, "gemm input type at::BFloat16 and output type float is not supported for ROCm");
+   TORCH_FAIL("gemm input type at::BFloat16 and output type float is not supported for ROCm");
     #endif
   } else if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::Half>) {
     #ifdef USE_ROCM
-    TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported for ROCm");
+   TORCH_FAIL("gemm input type at::Half and output type float is not supported for ROCm");
     #endif
     if (at::globalContext().allowFP16AccumulationCuBLAS())
-      TORCH_CHECK(false, "gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
+     TORCH_FAIL("gemm input type at::Half and output type float is not supported with allowFP16AccumulationCuBLAS");
   }
 
   using opmath_t = at::opmath_type<Dtype>;
@@ -1826,7 +1826,7 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fa
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
 #endif // USE_ROCM
 #else
-      TORCH_CHECK(false, "scaled_gemm with `torch.float8_e8m0fnu` scales of 1x32 blocks is only supported for CUDA 12.8 and above");
+     TORCH_FAIL("scaled_gemm with `torch.float8_e8m0fnu` scales of 1x32 blocks is only supported for CUDA 12.8 and above");
 #endif // if CUDA_VERSION >= 12080
 
     case ScalingType::BlockWise1x16:
@@ -1834,7 +1834,7 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fa
 #if CUDA_VERSION >= 12080
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
 #else
-      TORCH_CHECK(false, "scaled_gemm with `torch.float8_e4m3fn` scales of 1x16 blocks is only supported for CUDA 12.8 and above");
+     TORCH_FAIL("scaled_gemm with `torch.float8_e4m3fn` scales of 1x16 blocks is only supported for CUDA 12.8 and above");
 #endif // if CUDA_VERSION >= 12080
 
     case ScalingType::RowWise:
@@ -1846,7 +1846,7 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fa
       // the SCALE_POINTER_VEC_EXT attributed.
       return 0;
 #else
-      TORCH_CHECK(false, "scaled_gemm with rowwise scaling is only supported for CUDA 12.9 and above");
+     TORCH_FAIL("scaled_gemm with rowwise scaling is only supported for CUDA 12.9 and above");
 #endif // if CUDA_VERSION >= 12090
 
     case ScalingType::BlockWise1x128:
@@ -1855,7 +1855,7 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fa
 #if CUDA_VERSION >= 12090
       return CUBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F;
 #else
-      TORCH_CHECK(false, "scaled_gemm with 1x128 blockwise scaling is only supported for CUDA 12.9 and above");
+     TORCH_FAIL("scaled_gemm with 1x128 blockwise scaling is only supported for CUDA 12.9 and above");
 #endif // if CUDA_VERSION >= 12090
 
     case ScalingType::BlockWise128x128:
@@ -1864,7 +1864,7 @@ int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fa
 #if CUDA_VERSION >= 12090
       return CUBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F;
 #else
-      TORCH_CHECK(false, "scaled_gemm with 128x128 blockwise scaling is only supported for CUDA 12.9 and above");
+     TORCH_FAIL("scaled_gemm with 128x128 blockwise scaling is only supported for CUDA 12.9 and above");
 #endif // if CUDA_VERSION >= 12090
 
 case ScalingType::TensorWise:

@@ -15,11 +15,11 @@
 namespace at::native {
 
 Tensor mkldnn_gelu(const Tensor& input, std::string_view approximate) {
-  TORCH_CHECK(false, "mkldnn_gelu: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_gelu: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, std::string_view approximate) {
-  TORCH_CHECK(false, "mkldnn_gelu_backward: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_gelu_backward: ATen not compiled with MKLDNN support");
 }
 
 }

@@ -145,7 +145,7 @@ at::ScalarType LlgaTensorDesc::aten_scalar_type() const {
     case data_type::u8:
       return at::ScalarType::QUInt8;
     default:
-      TORCH_CHECK(false, "Invalid data type ", static_cast<size_t>(dtype_));
+      TORCH_FAIL("Invalid data type ", static_cast<size_t>(dtype_));
   }
 }
 

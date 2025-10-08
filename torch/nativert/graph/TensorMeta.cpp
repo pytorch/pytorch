@@ -8,7 +8,7 @@ c10::ScalarType convertJsonScalarType(
     const torch::_export::ScalarType& scalarType) {
   switch (scalarType) {
     case torch::_export::ScalarType::UNKNOWN:
-      TORCH_CHECK(false, "scalar type is not properly set");
+      TORCH_FAIL("scalar type is not properly set");
     case torch::_export::ScalarType::BYTE:
       return c10::ScalarType::Byte;
     case torch::_export::ScalarType::CHAR:
@@ -46,7 +46,7 @@ c10::ScalarType convertJsonScalarType(
     case torch::_export::ScalarType::FLOAT8E5M2FNUZ:
       return c10::ScalarType::Float8_e5m2fnuz;
     default:
-      TORCH_CHECK(false, "unknown scalar type", static_cast<int>(scalarType));
+      TORCH_FAIL("unknown scalar type", static_cast<int>(scalarType));
   }
 }
 
@@ -54,7 +54,7 @@ c10::MemoryFormat convertJsonMemoryFormat(
     const torch::_export::MemoryFormat& memoryFormat) {
   switch (memoryFormat) {
     case torch::_export::MemoryFormat::Unknown:
-      TORCH_CHECK(false, "got unknown scalar type");
+      TORCH_FAIL("got unknown scalar type");
     case torch::_export::MemoryFormat::ContiguousFormat:
       return c10::MemoryFormat::Contiguous;
     case torch::_export::MemoryFormat::ChannelsLast:
@@ -72,7 +72,7 @@ c10::MemoryFormat convertJsonMemoryFormat(
 c10::Layout convertJsonLayout(const torch::_export::Layout& layout) {
   switch (layout) {
     case torch::_export::Layout::Unknown:
-      TORCH_CHECK(false, "got unknown layout");
+      TORCH_FAIL("got unknown layout");
     case torch::_export::Layout::SparseCoo:
       // TODO is this the right translation
       return c10::Layout::Sparse;
@@ -89,7 +89,7 @@ c10::Layout convertJsonLayout(const torch::_export::Layout& layout) {
     case torch::_export::Layout::Strided:
       return c10::Layout::Strided;
     default:
-      TORCH_CHECK(false, "unknown layout", static_cast<int>(layout));
+      TORCH_FAIL("unknown layout", static_cast<int>(layout));
   }
 }
 

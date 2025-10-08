@@ -757,7 +757,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
     torch::jit::Function* lt_func =
         checkObjectSortSchema(v.type()->expect<ClassType>(), why_not);
     if (!lt_func) {
-      TORCH_CHECK(false, why_not.str());
+     TORCH_FAIL(why_not.str());
     }
 
     return [lt_func](const IValue& a, const IValue& b) {
@@ -773,7 +773,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
     };
   }
 
-  TORCH_CHECK(false, "IValues of type: ", v.tagKind(), " are not comparable");
+ TORCH_FAIL("IValues of type: ", v.tagKind(), " are not comparable");
 }
 
 IValueComparator getGreaterThanComparator(const IValue& v) {
@@ -970,7 +970,7 @@ IValue IValue::deepcopy(
       copy = *this;
     } break;
     default: {
-      TORCH_CHECK(false, "Can't deepcopy IValue with tag: ", tagKind());
+     TORCH_FAIL("Can't deepcopy IValue with tag: ", tagKind());
     }
   }
   // NB: this doesn't work if an object contains itself, and it may
@@ -983,7 +983,7 @@ IValue IValue::deepcopy(
 }
 
 void IValue::reportToTensorTypeError() const {
-  TORCH_CHECK(false, "Expected Tensor but got ", tagKind());
+ TORCH_FAIL("Expected Tensor but got ", tagKind());
 }
 
 std::string ivalue::Object::name() const {
@@ -1053,7 +1053,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
       }
       err << ". Please define serialization methods via def_pickle() for "
             "this class.";
-      TORCH_CHECK(false, err.str());
+      TORCH_FAIL(err.str());
     }
     object->setSlot(i, slots_[i].deepcopy(memo, device));
   }

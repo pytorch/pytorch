@@ -2240,7 +2240,7 @@ Call this whenever a new thread is created in order to propagate values from
 #if defined(USE_VALGRIND)
     CALLGRIND_TOGGLE_COLLECT;
 #else
-      TORCH_CHECK(false, "Valgrind is not supported.");
+     TORCH_FAIL("Valgrind is not supported.");
 #endif
   });
 
@@ -2252,7 +2252,7 @@ Call this whenever a new thread is created in order to propagate values from
     CALLGRIND_TOGGLE_COLLECT;
     CALLGRIND_DUMP_STATS;
 #else
-      TORCH_CHECK(false, "Valgrind is not supported.");
+     TORCH_FAIL("Valgrind is not supported.");
 #endif
   });
 
@@ -2713,7 +2713,7 @@ Call this whenever a new thread is created in order to propagate values from
         return at::native::_get_cudnn_batch_norm_reserve_space_size(
             input, training);
 #else
-        TORCH_CHECK(false, "PyTorch was not built with cuda");
+        TORCH_FAIL("PyTorch was not built with cuda");
 #endif
       },
       py::arg("input"),

@@ -113,7 +113,7 @@ uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size) {
     }
 
     default:
-      TORCH_CHECK(false, "Unrecognized data format");
+      TORCH_FAIL("Unrecognized data format");
   }
 }
 
@@ -127,7 +127,7 @@ uint64_t _get_model_bytecode_version(
         model_version);
     return static_cast<uint64_t>(model_version);
   }
-  TORCH_CHECK(false, "Failed to get bytecode version.");
+  TORCH_FAIL("Failed to get bytecode version.");
 }
 
 /********************** Operator Version **********************/

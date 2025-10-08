@@ -90,7 +90,7 @@ bool is_coalesced_sparse(const SparseTensor& self) {
 }
 
 bool is_coalesced_default(const Tensor& self) {
-  TORCH_CHECK(false, "is_coalesced expected sparse coordinate tensor layout but got ", self.layout());
+ TORCH_FAIL("is_coalesced expected sparse coordinate tensor layout but got ", self.layout());
   return false;
 }
 
@@ -123,7 +123,7 @@ Tensor indices_sparse(const Tensor& self) {
 }
 
 Tensor indices_default(const Tensor& self) {
-  TORCH_CHECK(false, "indices expected sparse coordinate tensor layout but got ", self.layout());
+ TORCH_FAIL("indices expected sparse coordinate tensor layout but got ", self.layout());
 }
 
 Tensor values_sparse(const Tensor& self) {
@@ -134,7 +134,7 @@ Tensor values_sparse(const Tensor& self) {
 }
 
 Tensor values_default(const Tensor& self) {
-  TORCH_CHECK(false, "values expected sparse tensor layout but got ", self.layout());
+ TORCH_FAIL("values expected sparse tensor layout but got ", self.layout());
 }
 
 /******************************************************************************
@@ -159,7 +159,7 @@ static SparseTensor new_sparse(
     C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
 #undef DO_CASE
     default:
-      TORCH_CHECK(false, "device type not supported for sparse ", device_or_default(device))
+     TORCH_FAIL("device type not supported for sparse ", device_or_default(device))
   }
   return detail::make_tensor<SparseTensorImpl>(
       DispatchKeySet(dispatch_key),

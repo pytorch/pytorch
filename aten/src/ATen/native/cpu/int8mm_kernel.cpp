@@ -351,7 +351,7 @@ inline void tinygemm_kernel(
       LAUNCH_TINYGEMM_KERNEL(MB_SIZE, 4);                        \
       break;                                                     \
     default:                                                     \
-      TORCH_CHECK(false, "Unsupported n block size: ", nb_size); \
+     TORCH_FAIL("Unsupported n block size: ", nb_size); \
       break;                                                     \
   }
 
@@ -408,7 +408,7 @@ void int8pack_mm_kernel_(
           LAUNCH_TINYGEMM_NB_SIZE(4);
           break;
         default:
-          TORCH_CHECK(false, "Unsupported m block size: ", mb_size);
+         TORCH_FAIL("Unsupported m block size: ", mb_size);
       }
 
       // move to the next index

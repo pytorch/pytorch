@@ -394,7 +394,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
             " after ",
             timeout_.count(),
             " ms");
-        TORCH_CHECK(false, err);
+        TORCH_FAIL(err);
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
       continue;
@@ -484,7 +484,7 @@ void FileStore::wait(
     const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - start);
     if (timeout != kNoTimeout && elapsed > timeout) {
-      TORCH_CHECK(false, "Wait timeout");
+      TORCH_FAIL("Wait timeout");
     }
 
     /* sleep override */

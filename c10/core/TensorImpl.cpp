@@ -295,7 +295,7 @@ void TensorImpl::throw_cannot_call_with_symbolic(const char* meth) const {
 void TensorImpl::throw_storage_access_error() const {
   if (extra_meta_ && extra_meta_->custom_storage_error_msg_) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    TORCH_CHECK(false, *extra_meta_->custom_storage_error_msg_);
+    TORCH_FAIL(*extra_meta_->custom_storage_error_msg_);
   }
   TORCH_CHECK_NOT_IMPLEMENTED(
       false, "Cannot access storage of ", tensorimpl_type_name());
@@ -304,7 +304,7 @@ void TensorImpl::throw_storage_access_error() const {
 void TensorImpl::throw_data_ptr_access_error() const {
   if (extra_meta_ && extra_meta_->custom_data_ptr_error_msg_) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    TORCH_CHECK(false, *extra_meta_->custom_data_ptr_error_msg_);
+    TORCH_FAIL(*extra_meta_->custom_data_ptr_error_msg_);
   }
   TORCH_CHECK(
       false, "Cannot access data pointer of Tensor that doesn't have storage");
@@ -955,7 +955,7 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
       break;
     }
     case MemoryFormat::Preserve:
-      TORCH_CHECK(false, "unsupported memory format ", memory_format);
+      TORCH_FAIL("unsupported memory format ", memory_format);
       // Cleaning warning messages, no need to break as TORCH_CHECK(false)
       // terminates flow.
       // break;

@@ -324,7 +324,7 @@ struct OptionalArgCaster {
       std::vector<uint8_t> cast_values(values.begin(), values.end());
       f.setArg(idx, cast_values);
     } else {
-      TORCH_CHECK(false, "Unsupported cast instruction ", default_cast);
+      TORCH_FAIL("Unsupported cast instruction ", default_cast);
     }
   }
 
@@ -353,7 +353,7 @@ struct OptionalArgCaster {
     } else if (cast_str == "uint8") {
       f.setArg(idx, static_cast<uint8_t>(value));
     } else {
-      TORCH_CHECK(false, "Unsupported cast instruction ", default_cast);
+      TORCH_FAIL("Unsupported cast instruction ", default_cast);
     }
   }
 
@@ -382,7 +382,7 @@ struct OptionalArgCaster {
         }
         f.setArg(idx, tl_ptrs);
       } else {
-        TORCH_CHECK(false, "Unexpected argument types");
+        TORCH_FAIL("Unexpected argument types");
       }
     } else if (py::isinstance<py::float_>(arg)) {
       auto value = arg.cast<float>();
@@ -391,7 +391,7 @@ struct OptionalArgCaster {
       auto value = arg.cast<int64_t>();
       setValue(f, idx, value);
     } else {
-      TORCH_CHECK(false, "Unsupported argument type");
+      TORCH_FAIL("Unsupported argument type");
     }
   }
 

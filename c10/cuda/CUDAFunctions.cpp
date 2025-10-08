@@ -157,7 +157,7 @@ void device_synchronize() {
 // operations, to raise proper error or warning
 void warn_or_error_on_sync() {
   if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_ERROR) {
-    TORCH_CHECK(false, "called a synchronizing CUDA operation");
+    TORCH_FAIL("called a synchronizing CUDA operation");
   } else if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_WARN) {
     TORCH_WARN("called a synchronizing CUDA operation");
   }
@@ -183,7 +183,7 @@ std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
 
 namespace _internal {
 static bool dummyHasPrimaryContext([[maybe_unused]] DeviceIndex device_index) {
-  TORCH_CHECK(false, "Should never been called");
+  TORCH_FAIL("Should never been called");
 }
 static bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;
 

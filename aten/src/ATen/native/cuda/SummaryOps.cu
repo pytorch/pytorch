@@ -252,7 +252,7 @@ Tensor _bincount_cuda_template(
     const Tensor& weights,
     int64_t minlength) {
   if (minlength < 0) {
-    TORCH_CHECK(false, "minlength should be >= 0");
+   TORCH_FAIL("minlength should be >= 0");
   }
   if (self.dim() == 1 && self.numel() == 0) {
     return at::zeros(
@@ -265,12 +265,12 @@ Tensor _bincount_cuda_template(
   if (self.dim() != 1 ||
       (!std::is_same_v<input_t, uint8_t> &&
        *self.min().cpu().const_data_ptr<input_t>() < 0)) {
-    TORCH_CHECK(false, "bincount only supports 1-d non-negative integral inputs.");
+   TORCH_FAIL("bincount only supports 1-d non-negative integral inputs.");
   }
 
   bool has_weights = weights.defined();
   if (has_weights && (weights.dim() != 1 || weights.size(0) != self.size(0))) {
-    TORCH_CHECK(false, "weights should be 1-d and have the same length as input");
+   TORCH_FAIL("weights should be 1-d and have the same length as input");
   }
 
   const int64_t nbins =
@@ -313,7 +313,7 @@ Tensor _histc_cuda_template(
     at::acc_type<input_t, /*is_cuda=*/true> min,
     at::acc_type<input_t, /*is_cuda=*/true> max) {
   if (nbins <= 0) {
-    TORCH_CHECK(false, "bins must be > 0");
+   TORCH_FAIL("bins must be > 0");
   }
   Tensor output = at::zeros(
       {nbins},
@@ -402,7 +402,7 @@ Tensor _histc_cuda(
     const Scalar& min,
     const Scalar& max) {
   if (self.scalar_type() == ScalarType::Half) {
-    TORCH_CHECK(false, "HalfTensor is not supported");
+   TORCH_FAIL("HalfTensor is not supported");
   }
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic for floating types because of atomicAdd usage

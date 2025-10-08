@@ -39,7 +39,7 @@ PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {
   if (interpreter) {
     return *interpreter;
   }
-  TORCH_CHECK(false, "cannot access PyObject for Tensor - no interpreter set");
+  TORCH_FAIL("cannot access PyObject for Tensor - no interpreter set");
 }
 
 bool PyObjectSlot::owns_pyobj() {

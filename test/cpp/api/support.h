@@ -90,7 +90,7 @@ inline void assert_tensor_equal(
 
     if ((a.scalar_type() == torch::kBool) !=
         (b.scalar_type() == torch::kBool)) {
-      TORCH_CHECK(false, "Was expecting both tensors to be bool type.");
+      TORCH_FAIL("Was expecting both tensors to be bool type.");
     } else {
       if (a.scalar_type() == torch::kBool && b.scalar_type() == torch::kBool) {
         // we want to respect precision but as bool doesn't support subtraction,

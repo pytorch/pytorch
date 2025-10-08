@@ -239,7 +239,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 
   if (!self.is_quantized() && src.is_quantized()) {
-    TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
+   TORCH_FAIL("Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
   }
 
   if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
@@ -355,7 +355,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   {
     NoNamesGuard guard;
     if (self._is_zerotensor()) {
-     TORCH_CHECK(false, "ZeroTensors are immutable. Please materialize the tensor using `.clone()`, if you want a mutable zero tensor.");
+    TORCH_FAIL("ZeroTensors are immutable. Please materialize the tensor using `.clone()`, if you want a mutable zero tensor.");
     }
     if (src._is_zerotensor()) {
       return self.zero_();

@@ -48,7 +48,7 @@ ucc_datatype_t to_ucc_dType(at::Tensor _tensor) {
   try {
     return ucc_dtype_map.at(_tensor.scalar_type());
   } catch (const std::out_of_range&) {
-    TORCH_CHECK(false, "Not supported data type for UCC");
+    TORCH_FAIL("Not supported data type for UCC");
   }
 }
 
@@ -74,14 +74,14 @@ ucc_reduction_op_t to_ucc_reduceOp(
       // bitwise and
       return UCC_OP_MIN;
     } else if (_op == ReduceOp::AVG) {
-      TORCH_CHECK(false, "Cannot use ReduceOp.AVG with boolean inputs");
+      TORCH_FAIL("Cannot use ReduceOp.AVG with boolean inputs");
     }
   }
 
   try {
     return ucc_op_map.at(_op);
   } catch (const std::out_of_range&) {
-    TORCH_CHECK(false, "Not supported ReduceOp for UCC");
+    TORCH_FAIL("Not supported ReduceOp for UCC");
   }
 }
 

@@ -18,7 +18,7 @@ inline ReductionType get_reduction_enum(const std::string_view& reduce) {
   } else if (reduce == "prod") {
     return ReductionType::PROD;
   } else {
-    TORCH_CHECK(false, "reduce argument must be either sum, prod, mean, amax or amin, got ", reduce);
+   TORCH_FAIL("reduce argument must be either sum, prod, mean, amax or amin, got ", reduce);
   }
 }
 
@@ -32,7 +32,7 @@ inline ReductionType get_operator_enum(const std::string_view reduce, bool use_n
     } else if (reduce == "multiply") {
       return ReductionType::PROD;
     } else {
-      TORCH_CHECK(false, "reduce argument must be either add or multiply.")
+     TORCH_FAIL("reduce argument must be either add or multiply.")
     }
   }
 }

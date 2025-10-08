@@ -188,7 +188,7 @@ std::optional<std::function<void(Stack&)>> makeOperatorFunction(
         if (op->hasSchema()) {
           pArgs = &op->schema().arguments();
         } else {
-          TORCH_CHECK(false, "arguments are missing for operator ", opname);
+          TORCH_FAIL("arguments are missing for operator ", opname);
         }
       } else {
         return std::nullopt;

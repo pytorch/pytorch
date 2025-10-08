@@ -193,7 +193,7 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
         w_zero_points_compact.mutable_data_ptr<int8_t>(),
         std::move(subtract_128));
   } else {
-    TORCH_CHECK(false, "Unsupported quantization scheme.");
+   TORCH_FAIL("Unsupported quantization scheme.");
   }
 
   at::Tensor wrapped_row_values;

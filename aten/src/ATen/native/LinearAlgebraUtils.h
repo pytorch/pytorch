@@ -269,7 +269,7 @@ inline double _get_epsilon(const ScalarType& sc_type) {
     case at::ScalarType::Double:
       return std::numeric_limits<double>::epsilon();
     default:
-      TORCH_CHECK(false, "This function doesn't handle types other than float and double");
+     TORCH_FAIL("This function doesn't handle types other than float and double");
   }
 }
 
@@ -382,7 +382,7 @@ inline std::tuple<bool, bool> _parse_qr_mode(std::string_view mode) {
     compute_q = false;
     reduced = true; // this is actually irrelevant in this mode
   } else {
-      TORCH_CHECK(false, "qr received unrecognized mode '", mode,
+     TORCH_FAIL("qr received unrecognized mode '", mode,
                   "' but expected one of 'reduced' (default), 'r', or 'complete'");
   }
   return std::make_tuple(compute_q, reduced);

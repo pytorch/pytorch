@@ -170,12 +170,12 @@ void TCPStoreMasterDaemon::stop() {
         if (errno == EAGAIN) {
           continue;
         }
-        TORCH_CHECK(false, "Failed to write the control pipe:", errno);
+        TORCH_FAIL("Failed to write the control pipe:", errno);
       }
       break;
     }
     if (written_bytes == 0) {
-      TORCH_CHECK(false, "Failed to write the control pipe");
+      TORCH_FAIL("Failed to write the control pipe");
     }
 
     // close the write end of the pipe
@@ -296,7 +296,7 @@ void TCPStoreMasterDaemon::query(int socket) {
   } else if (qt == QueryType::CANCEL_WAIT) {
     cancelWaitHandler(socket);
   } else {
-    TORCH_CHECK(false, "Unexpected query type");
+    TORCH_FAIL("Unexpected query type");
   }
 }
 

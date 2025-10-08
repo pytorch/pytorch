@@ -56,7 +56,7 @@ namespace c10 {
 #ifdef C10_HOST_DEVICE
 #define ERROR_UNSUPPORTED_CAST CUDA_KERNEL_ASSERT(false);
 #else
-#define ERROR_UNSUPPORTED_CAST TORCH_CHECK(false, "Unexpected scalar type");
+#define ERROR_UNSUPPORTED_CASTTORCH_FAIL("Unexpected scalar type") ;
 #endif
 
 // Fetch a value with dynamic type src_type from ptr, and cast it to static type

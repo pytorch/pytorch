@@ -55,16 +55,16 @@ struct VulkanGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     (void)stream;
     (void)device_index;
     (void)flag;
-    TORCH_CHECK(false, "VULKAN backend doesn't support events.");
+    TORCH_FAIL("VULKAN backend doesn't support events.");
   }
   void block(void* event, const Stream& stream) const override {
     (void)event;
     (void)stream;
-    TORCH_CHECK(false, "VULKAN backend doesn't support events.")
+    TORCH_FAIL("VULKAN backend doesn't support events.")
   }
   bool queryEvent(void* event) const override {
     (void)event;
-    TORCH_CHECK(false, "VULKAN backend doesn't support events.")
+    TORCH_FAIL("VULKAN backend doesn't support events.")
   }
   void destroyEvent(void* event, const DeviceIndex device_index)
       const noexcept override {

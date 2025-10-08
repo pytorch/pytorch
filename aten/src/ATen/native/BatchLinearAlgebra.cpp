@@ -1634,7 +1634,7 @@ void _linalg_check_errors(
       TORCH_CHECK_LINALG(false, api_name, batch_str,
           ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
     } else if (api_name.find("lu_factor") != api_name.npos) {
-      TORCH_CHECK(false, api_name, batch_str,
+     TORCH_FAIL(api_name, batch_str,
           ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
           "If you still want to perform the factorization, consider calling linalg.lu(A, pivot) or "
           "linalg.lu_factor_ex(A, pivot)");
@@ -1699,7 +1699,7 @@ Tensor inverse(const Tensor& A) {
 template<typename scalar_t>
 static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos) {
 #if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "cholesky_solve: LAPACK library not found in compilation");
+ TORCH_FAIL("cholesky_solve: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 
@@ -3015,13 +3015,13 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
     if (values.is_complex()) {
       values = at::complex_out(values, real_values, imag_values);
     } else {
-      TORCH_CHECK(false, "torch.linalg.eig: imaginary part of eigenvalues is non-zero, can't safely cast eigenvalues to non-complex dtype.")
+     TORCH_FAIL("torch.linalg.eig: imaginary part of eigenvalues is non-zero, can't safely cast eigenvalues to non-complex dtype.")
     }
     if (compute_eigenvectors) {
       if (vectors.is_complex()) {
           vectors = linalg_eig_make_complex_eigenvectors(vectors, values, maybe_complex_vectors);
       } else {
-        TORCH_CHECK(false, "torch.linalg.eig: imaginary part of eigenvectors is non-zero, can't safely cast eigenvectors to non-complex dtype.")
+       TORCH_FAIL("torch.linalg.eig: imaginary part of eigenvectors is non-zero, can't safely cast eigenvectors to non-complex dtype.")
       }
     }
   }

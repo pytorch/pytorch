@@ -516,24 +516,24 @@ Constant constantToValue(
     case torch::_export::Argument::Tag::AS_TENSOR:
     case torch::_export::Argument::Tag::AS_TENSORS:
     case torch::_export::Argument::Tag::AS_OPTIONAL_TENSORS:
-      TORCH_CHECK(false, "Tensor values are symbolic, not constant.");
+      TORCH_FAIL("Tensor values are symbolic, not constant.");
     case torch::_export::Argument::Tag::AS_SYM_INT:
     case torch::_export::Argument::Tag::AS_SYM_INTS:
     case torch::_export::Argument::Tag::AS_SYM_BOOL:
     case torch::_export::Argument::Tag::AS_SYM_BOOLS:
-      TORCH_CHECK(false, "Symint/Symbool Values are symbolic, not constant.");
+      TORCH_FAIL("Symint/Symbool Values are symbolic, not constant.");
     case torch::_export::Argument::Tag::AS_CUSTOM_OBJ:
-      TORCH_CHECK(false, "custom obj is symbolic, not constant");
+      TORCH_FAIL("custom obj is symbolic, not constant");
     case torch::_export::Argument::Tag::AS_OPERATOR:
       return jsonArg.get_as_operator();
     case torch::_export::Argument::Tag::AS_SYM_FLOAT: {
-      TORCH_CHECK(false, "SymFloat is not yet implemented");
+      TORCH_FAIL("SymFloat is not yet implemented");
     }
     case torch::_export::Argument::Tag::AS_SYM_FLOATS: {
-      TORCH_CHECK(false, "SymFloats is not yet implemented");
+      TORCH_FAIL("SymFloats is not yet implemented");
     }
     default:
-      TORCH_CHECK(false, "Got unknown json argument");
+      TORCH_FAIL("Got unknown json argument");
   }
 }
 

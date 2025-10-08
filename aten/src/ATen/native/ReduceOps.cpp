@@ -2265,7 +2265,7 @@ TORCH_IMPL_FUNC(hash_tensor_out) (const Tensor& self, IntArrayRef dim, bool keep
       }
       return;
     default:
-      TORCH_CHECK(false, "Unknown hash_tensor mode: ", mode);
+     TORCH_FAIL("Unknown hash_tensor mode: ", mode);
   }
 }
 

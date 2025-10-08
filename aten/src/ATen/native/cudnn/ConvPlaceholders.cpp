@@ -34,7 +34,7 @@ at::Tensor cudnn_convolution(
     bool benchmark,
     bool deterministic,
     bool allow_tf32) {
-  TORCH_CHECK(false, "cudnn_convolution: ATen not compiled with cuDNN support");
+  TORCH_FAIL("cudnn_convolution: ATen not compiled with cuDNN support");
 }
 
 at::Tensor& cudnn_convolution_out(

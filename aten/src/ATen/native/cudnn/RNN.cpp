@@ -66,7 +66,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_bidirectional,
     IntArrayRef fn_batch_sizes,
     const std::optional<Tensor>& fn_dropout_state_opt) {
-  TORCH_CHECK(false, "_cudnn_rnn: ATen not compiled with cuDNN support");
+  TORCH_FAIL("_cudnn_rnn: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
@@ -181,7 +181,7 @@ struct RNNDescriptorParams {
       default: {
         std::ostringstream oss;
         oss << "unrecognized cuDNN RNN mode " << fn_mode;
-        TORCH_CHECK(false, oss.str());
+        TORCH_FAIL(oss.str());
       }
     }
   }
@@ -581,7 +581,7 @@ int64_t _num_linear_layers(cudnnRNNMode_t mode) {
     case CUDNN_RNN_TANH:
       return 2;
     default:
-      TORCH_CHECK(false, "unknown cuDNN RNN mode ", mode);
+      TORCH_FAIL("unknown cuDNN RNN mode ", mode);
   }
 }
 

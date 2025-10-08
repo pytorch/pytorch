@@ -200,7 +200,7 @@ static std::string_view padding_mode_string(padding_mode m) {
     case padding_mode::constant:
       return "constant";
   }
-  TORCH_CHECK(false, "Invalid padding mode (", static_cast<int64_t>(m), ")");
+ TORCH_FAIL("Invalid padding mode (", static_cast<int64_t>(m), ")");
 }
 
 

@@ -60,7 +60,7 @@ void PerfEvent::Init() {
 
   auto const it = EventTable.find(name_);
   if (it == EventTable.end()) {
-    TORCH_CHECK(false, "Unsupported profiler event name: ", name_);
+    TORCH_FAIL("Unsupported profiler event name: ", name_);
   }
 
   struct perf_event_attr attr{};

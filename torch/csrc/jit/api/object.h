@@ -70,7 +70,7 @@ struct TORCH_API Object {
           "'");
       _ivalue()->setSlot(*slot, std::move(v));
     } else {
-      TORCH_CHECK(false, "Module has no attribute '", name, "'");
+      TORCH_FAIL("Module has no attribute '", name, "'");
     }
   }
 
@@ -108,7 +108,7 @@ struct TORCH_API Object {
     if (auto method = find_method(name)) {
       return *method;
     }
-    TORCH_CHECK(false, "Method '", name, "' is not defined.");
+    TORCH_FAIL("Method '", name, "' is not defined.");
   }
 
   const std::vector<Method> get_methods() const {
@@ -137,7 +137,7 @@ struct TORCH_API Object {
             prop.name, Method(_ivalue(), prop.getter), std::move(setter)};
       }
     }
-    TORCH_CHECK(false, "Property '", name, "' is not defined.");
+    TORCH_FAIL("Property '", name, "' is not defined.");
   }
 
   const std::vector<Property> get_properties() const {

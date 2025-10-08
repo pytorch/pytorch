@@ -42,7 +42,7 @@ inline Tensor affine_grid(
   }
 
   if (*std::min_element(size.begin(), size.end()) <= 0) {
-    TORCH_CHECK(false, "Expected non-zero, positive output size. Got ", size);
+    TORCH_FAIL("Expected non-zero, positive output size. Got ", size);
   }
 
   return torch::affine_grid_generator(theta, size, align_corners);

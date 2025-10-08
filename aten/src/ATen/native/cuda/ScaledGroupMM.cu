@@ -546,7 +546,7 @@ void f8f8bf16_grouped_mm(
   dispatch_fp8_grouped_gemm_on_bias_dtype(
       mat_a, mat_b, scale_a, scale_b, offs, bias, use_fast_accum, out);
 #else
-  TORCH_CHECK(false, "grouped mm is not supported on your system");
+ TORCH_FAIL("grouped mm is not supported on your system");
 #endif
 }
 

@@ -108,7 +108,7 @@ void computeRepeatIndices(const index_t* repeat_ptr,
   } else if constexpr (std::is_same_v<index_t, int64_t>) {
     scalar_type = "int64_t";
   } else {
-    TORCH_CHECK(false, "repeat_interleave: unsupported indexing data type");
+    TORCH_FAIL("repeat_interleave: unsupported indexing data type");
   }
 
   MPSStream* mpsStream = getCurrentMPSStream();

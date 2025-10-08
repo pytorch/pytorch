@@ -73,7 +73,7 @@ void XNNCompiler::compileModel(
         break;
       }
       default: {
-        TORCH_CHECK(false, "Unhandled value type found in deserialization");
+        TORCH_FAIL("Unhandled value type found in deserialization");
       }
     }
   }
@@ -94,7 +94,7 @@ void XNNCompiler::compileModel(
         break;
       }
       default:
-        TORCH_CHECK(false, "Unhandled node type found in deserialization");
+        TORCH_FAIL("Unhandled node type found in deserialization");
     }
   }
 

@@ -165,7 +165,7 @@ mixed_dtypes_linear_dispatch_bias_activation(
           ElementInputB,
           fastertransformer::EpilogueOpNoBias>(input, weight, scale, bias);
       }
-      TORCH_CHECK(false, "mixed_dtypes_linear_dispatch_bias_activation: Activation \"",
+     TORCH_FAIL("mixed_dtypes_linear_dispatch_bias_activation: Activation \"",
                activation, "\" is not supported");
       return Tensor{};
     }
@@ -186,7 +186,7 @@ mixed_dtypes_linear_dispatch_bias_activation(
             ElementInputB,
             fastertransformer::EpilogueOpBiasSilu>(input, weight, scale, bias);
       }
-      TORCH_CHECK(false, "mixed_dtypes_linear_dispatch_bias_activation: Activation \"",
+     TORCH_FAIL("mixed_dtypes_linear_dispatch_bias_activation: Activation \"",
                activation, "\" is not supported");
       return Tensor{};
     }
@@ -199,7 +199,7 @@ _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
                      const std::optional<Tensor>& bias_opt,
                      const std::optional<std::string_view> activation_opt) {
 #if defined(USE_ROCM) || defined(_MSC_VER)
-  TORCH_CHECK(false, "_mixed_dtypes_linear: not compiled for this platform");
+ TORCH_FAIL("_mixed_dtypes_linear: not compiled for this platform");
   return Tensor{};
 #else
   const auto bias = bias_opt.has_value() ? *bias_opt : Tensor{};

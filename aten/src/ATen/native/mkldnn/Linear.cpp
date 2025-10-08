@@ -29,22 +29,22 @@ namespace at::native {
 Tensor mkldnn_linear(
     const Tensor& self,
     const Tensor& weight, const std::optional<Tensor>& bias_opt) {
-  TORCH_CHECK(false, "mkldnn_linear: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_linear: ATen not compiled with MKLDNN support");
 }
 Tensor mkldnn_linear_backward_input(
     IntArrayRef input_size, const Tensor& grad_output, const Tensor& weight) {
-  TORCH_CHECK(false, "mkldnn_linear_backward_input: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_linear_backward_input: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor> mkldnn_linear_backward_weights(
     const Tensor& grad_output, const Tensor& input, const Tensor& weight, bool bias_defined) {
-  TORCH_CHECK(false, "mkldnn_linear_backward_weights: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_linear_backward_weights: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
     const Tensor& input, const Tensor& grad_output_t,
     const Tensor& weight, std::array<bool,3> output_mask) {
-  TORCH_CHECK(false, "mkldnn_linear_backward: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_linear_backward: ATen not compiled with MKLDNN support");
 }
 
 Tensor&

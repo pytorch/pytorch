@@ -786,7 +786,7 @@ void OSSProxyExecutor::call_function(
         break;
       }
       default:
-        TORCH_CHECK(false, "Unsupported dynamic arg type: ", dynamic_arg_type);
+        TORCH_FAIL("Unsupported dynamic arg type: ", dynamic_arg_type);
     }
   }
 
@@ -850,7 +850,7 @@ void OSSProxyExecutor::call_function(
         if (stack_tensor.has_value()) {
           *tensor = stack_tensor.value();
         } else {
-          TORCH_CHECK(false, "Expected tensor, got None");
+          TORCH_FAIL("Expected tensor, got None");
         }
       } else {
         index++;

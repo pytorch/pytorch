@@ -9,7 +9,7 @@ namespace detail {
 C10_EXPORT void _ThrowRuntimeTypeLogicError(const std::string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
-  TORCH_CHECK(false, msg);
+  TORCH_FAIL(msg);
 }
 } // namespace detail
 

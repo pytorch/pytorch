@@ -338,7 +338,7 @@ static Tensor get_unwrapped(const Tensor& tensor) {
         at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
     return functional->value();
   }
-  TORCH_CHECK(false, "No wrappers present!");
+  TORCH_FAIL("No wrappers present!");
 }
 
 static int64_t maybe_get_level(const Tensor& tensor) {

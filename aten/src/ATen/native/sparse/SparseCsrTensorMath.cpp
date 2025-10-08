@@ -241,7 +241,7 @@ static Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const
   // NOTE: intersection_binary_op_with_wrapped_scalar_ assumes scalar.numel() == 1.
   const auto broadcasted_shape = infer_size(sparse.sizes(), scalar.sizes());
   if (sparse.sizes() != broadcasted_shape) {
-    TORCH_CHECK(false, op_name, "(): output with shape ", sparse.sizes(), " does not match ",
+   TORCH_FAIL(op_name, "(): output with shape ", sparse.sizes(), " does not match ",
         "the broadcast shape ", broadcasted_shape);
   }
   auto values = sparse.values();

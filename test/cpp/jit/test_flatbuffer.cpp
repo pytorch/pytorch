@@ -1858,11 +1858,11 @@ class TestAllocator : public flatbuffers::Allocator {
   }
 
   uint8_t* allocate(size_t) override {
-    TORCH_CHECK(false, "allocate() should not be called");
+    TORCH_FAIL("allocate() should not be called");
   }
   uint8_t* reallocate_downward(uint8_t*, size_t, size_t, size_t, size_t)
       override {
-    TORCH_CHECK(false, "reallocate_downward() should not be called");
+    TORCH_FAIL("reallocate_downward() should not be called");
   }
 
  private:

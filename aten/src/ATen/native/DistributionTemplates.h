@@ -127,7 +127,7 @@ inline void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMet
       CHECK_OUT_OF_BOUNDS(to_inc, "to - 1", min, max, dtype);
     }), AT_EXPAND(AT_INTEGRAL_TYPES), kUInt16, kUInt32, kBool);
   } else {
-    TORCH_CHECK(false, "check_random_bounds handles only integral, floating-point and boolean types");
+   TORCH_FAIL("check_random_bounds handles only integral, floating-point and boolean types");
   }
 }
 
@@ -169,7 +169,7 @@ at::Tensor& random_from_to_impl(at::Tensor& self, int64_t from, std::optional<in
         }
       }), AT_EXPAND(AT_INTEGRAL_TYPES_V2), kBool);
     } else {
-      TORCH_CHECK(false, "random_from_to_impl handles only integral, floating-point and boolean types");
+     TORCH_FAIL("random_from_to_impl handles only integral, floating-point and boolean types");
     }
     check_from_to_in_range(from, to_inc, self.dtype());
     CHECK_EMPTY_AND_RETURN(self);

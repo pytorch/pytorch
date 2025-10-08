@@ -1007,7 +1007,7 @@ class LinearDynamicFp16Onednn final {
     return linear_dynamic_fp16_with_onednn_weight(
         act, onednn_weight, bias, /*relu_fused*/false);
 #endif
-    TORCH_CHECK(false, "Unimplemented (linear_dynamic_fp16_with_onednn_weight)");
+   TORCH_FAIL("Unimplemented (linear_dynamic_fp16_with_onednn_weight)");
   }
 
   static Tensor run_relu(
@@ -1018,7 +1018,7 @@ class LinearDynamicFp16Onednn final {
     return linear_dynamic_fp16_with_onednn_weight(
         act, onednn_weight, bias, /*relu_fused*/true);
 #endif
-    TORCH_CHECK(false, "Unimplemented (linear_dynamic_fp16_with_onednn_weight)");
+   TORCH_FAIL("Unimplemented (linear_dynamic_fp16_with_onednn_weight)");
   }
 
 };

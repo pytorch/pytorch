@@ -29,7 +29,7 @@ void* _dlsym(void* handle, const char* name) {
 
 char* _dlerror() {
 #if defined(_WIN32)
-  TORCH_CHECK(false, "dlerror not supported on Windows");
+  TORCH_FAIL("dlerror not supported on Windows");
 #else
   return dlerror();
 #endif
@@ -45,7 +45,7 @@ struct DlcloseDeleter {
   void operator()(void* p) const {
     if (p) {
 #if defined(_WIN32)
-      TORCH_CHECK(false, "Windows is not supported");
+      TORCH_FAIL("Windows is not supported");
 #else
       dlclose(p);
 #endif

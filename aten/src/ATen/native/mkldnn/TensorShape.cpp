@@ -19,23 +19,23 @@
 namespace at::native {
 
 Tensor mkldnn_view(const Tensor& self, IntArrayRef size) {
-  TORCH_CHECK(false, "mkldnn_reshape: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_reshape: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
-  TORCH_CHECK(false, "mkldnn_reshape: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_reshape: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(false, "mkldnn_clone: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_clone: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
-  TORCH_CHECK(false, "mkldnn_transpose: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_transpose: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
-  TORCH_CHECK(false, "mkldnn_transpose_: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_transpose_: ATen not compiled with MKLDNN support");
 }
 
 } // namespace at::native
@@ -91,7 +91,7 @@ Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
 }
 
 Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
-  TORCH_CHECK(false, "mkldnn_transpose_: in-place mkldnn operations are not supported yet");
+ TORCH_FAIL("mkldnn_transpose_: in-place mkldnn operations are not supported yet");
 }
 
 } // namespace at

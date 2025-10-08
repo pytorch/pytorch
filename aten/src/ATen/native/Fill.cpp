@@ -103,7 +103,7 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
   if (nDims > 2) {
     for (const auto i : c10::irange(1, nDims)) {
       if (self.sym_size(i) != height) {
-        TORCH_CHECK(false, "all dimensions of input must be of equal length");
+       TORCH_FAIL("all dimensions of input must be of equal length");
       }
     }
   }

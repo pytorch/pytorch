@@ -260,7 +260,7 @@ Tensor& copy_(Tensor& dst, const Tensor& src) {
     if (dst.device().is_cpu()) {
       pack_vulkan_to_cpu(v_src, dst);
     } else {
-      TORCH_CHECK(false, "Unsupported!");
+      TORCH_FAIL("Unsupported!");
     }
   } else {
     TORCH_INTERNAL_ASSERT(
@@ -304,7 +304,7 @@ at::Tensor from_vulkan(vTensor& v_src) {
       v_src_memory_format = c10::MemoryFormat::ChannelsLast;
       break;
     default:
-      TORCH_CHECK(false, "No corresponding memory format");
+      TORCH_FAIL("No corresponding memory format");
   }
 
   at::Tensor ret = at::empty(v_src.sizes(), opt).to(v_src_memory_format);

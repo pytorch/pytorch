@@ -1041,7 +1041,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           at::Tensor t = pop(stack).toTensor();
           if (t.dim() == 0) {
-            TORCH_CHECK(false, "len() of a 0-d tensor");
+            TORCH_FAIL("len() of a 0-d tensor");
           }
           push(stack, t.sizes()[0]);
         },
@@ -1488,7 +1488,7 @@ void dictPop(Stack& stack) {
     if (has_default) {
       push(stack, default_value);
     } else {
-      TORCH_CHECK(false, "KeyError: ", key);
+      TORCH_FAIL("KeyError: ", key);
     }
   } else {
     // note: before erase
@@ -1508,7 +1508,7 @@ void dictDelete(Stack& stack) {
 void dictPopItem(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   if (dict.empty()) {
-    TORCH_CHECK(false, "popitem(): dictionary is empty");
+    TORCH_FAIL("popitem(): dictionary is empty");
   }
   auto head_item = dict.begin();
 
@@ -2683,7 +2683,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
         TORCH_SELECTIVE_SCHEMA(
             "aten::warn(str message, int stacklevel=2) -> ()"),
         [](Stack& stack) {
-          TORCH_CHECK(false, "warn is implemented directly in the interpreter");
+          TORCH_FAIL("warn is implemented directly in the interpreter");
         },
         aliasAnalysisFromSchema()),
 

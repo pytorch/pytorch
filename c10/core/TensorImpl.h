@@ -2453,7 +2453,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         break;
       }
       case MemoryFormat::Preserve:
-        TORCH_CHECK(false, "unsupported memory format ", memory_format);
+        TORCH_FAIL("unsupported memory format ", memory_format);
         // Cleaning warning messages, no need to break as TORCH_CHECK(false)
         // terminates flow.
         // break;

@@ -130,7 +130,7 @@ void format(Stack& stack, size_t num_inputs) {
     }
     ss << format.substr(begin, loc - begin);
     if (used_args >= args.size()) {
-      TORCH_CHECK(false, "Too few arguments for format string: ", format);
+      TORCH_FAIL("Too few arguments for format string: ", format);
     }
     ss << args[used_args];
     begin = loc + 2;
@@ -273,7 +273,7 @@ void listUnpack(Stack& stack, size_t num_outputs) {
 
 void tupleConstruct(Stack& stack, size_t num_inputs) {
   if (num_inputs > stack.size()) {
-    TORCH_CHECK(false, "Invalid number of inputs: ", num_inputs);
+    TORCH_FAIL("Invalid number of inputs: ", num_inputs);
   }
   switch (num_inputs) {
     case 0:

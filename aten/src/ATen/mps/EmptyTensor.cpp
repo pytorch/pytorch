@@ -69,13 +69,13 @@ TensorBase empty_mps(
     }
     return tensor;
   } else {
-    TORCH_CHECK(false, MPS_ERROR_RUNTIME_TOO_LOW)
+   TORCH_FAIL(MPS_ERROR_RUNTIME_TOO_LOW)
   }
 #else
-  TORCH_CHECK(false, MPS_ERROR_NOT_COMPILED)
+ TORCH_FAIL(MPS_ERROR_NOT_COMPILED)
 #endif
 #else
-  TORCH_CHECK(false, MPS_ERROR_NOT_COMPILED)
+ TORCH_FAIL(MPS_ERROR_NOT_COMPILED)
 #endif
 }
 
@@ -112,13 +112,13 @@ TensorBase empty_strided_mps(
     }
     return result;
   } else {
-    TORCH_CHECK(false, MPS_ERROR_RUNTIME_TOO_LOW)
+   TORCH_FAIL(MPS_ERROR_RUNTIME_TOO_LOW)
   }
 #else
-  TORCH_CHECK(false, MPS_ERROR_NOT_COMPILED)
+ TORCH_FAIL(MPS_ERROR_NOT_COMPILED)
 #endif
 #else
-  TORCH_CHECK(false, MPS_ERROR_NOT_COMPILED)
+ TORCH_FAIL(MPS_ERROR_NOT_COMPILED)
 #endif
 }
 

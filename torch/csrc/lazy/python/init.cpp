@@ -213,7 +213,7 @@ void initLazyBindings(PyObject* module) {
 #if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
     torch::lazy::InitTorchScriptBackend();
 #else
-      TORCH_CHECK(false, "TorchScript backend not yet supported in FBCODE/OVRSOURCE builds");
+     TORCH_FAIL("TorchScript backend not yet supported in FBCODE/OVRSOURCE builds");
 #endif // !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
   });
 

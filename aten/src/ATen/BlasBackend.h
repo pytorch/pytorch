@@ -20,7 +20,7 @@ inline std::string BlasBackendToString(at::BlasBackend backend) {
     case BlasBackend::Ck:
       return "at::BlasBackend::Ck";
     default:
-      TORCH_CHECK(false, "Unknown blas backend");
+      TORCH_FAIL("Unknown blas backend");
   }
 }
 

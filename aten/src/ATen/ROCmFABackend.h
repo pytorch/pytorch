@@ -18,7 +18,7 @@ inline std::string ROCmFABackendToString(at::ROCmFABackend backend) {
     case ROCmFABackend::Ck:
       return "at::ROCmFABackend::Ck";
     default:
-      TORCH_CHECK(false, "Unknown ROCm flash attention backend")
+      TORCH_FAIL("Unknown ROCm flash attention backend")
   }
 }
 

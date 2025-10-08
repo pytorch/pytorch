@@ -527,7 +527,7 @@ void reflection_pad2d_kernel_impl(const Tensor& output, const Tensor& input, Int
         break;
       }
       default:
-        TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+       TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
     }
   }
 }
@@ -551,7 +551,7 @@ void reflection_pad2d_backward_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -573,7 +573,7 @@ void reflection_pad3d_kernel_impl(const Tensor& output, const Tensor& input, Int
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
   }
 }
 
@@ -596,7 +596,7 @@ void reflection_pad3d_backward_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
   }
 }
 
@@ -636,7 +636,7 @@ void replication_pad2d_kernel_impl(const Tensor& output, const Tensor& input, In
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -659,7 +659,7 @@ void replication_pad2d_backward_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -681,7 +681,7 @@ void replication_pad3d_kernel_impl(const Tensor& output, const Tensor& input, In
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
   }
 }
 
@@ -704,7 +704,7 @@ void replication_pad3d_backward_kernel_impl(
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
+     TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast3d, Contiguous");
   }
 }
 

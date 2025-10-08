@@ -190,7 +190,7 @@ RegisterOperators reg({
         prim::TypeCheck /* (...)  -> (..., bool) */,
         [](const Node* /* node */) -> Operation {
           return [](Stack& /* stack */) {
-            TORCH_CHECK(false, "prim::TypeCheck not yet implemented"); // NOLINT
+            TORCH_FAIL("prim::TypeCheck not yet implemented"); // NOLINT
           };
         },
         aliasAnalysisSpecialCase()),
@@ -206,14 +206,12 @@ RegisterOperators reg({
         aliasAnalysisSpecialCase()),
     Operator(
         "prim::Guard(Tensor(a) t) -> Tensor(a)",
-        [](Stack& stack) {
-          TORCH_CHECK(false, "Should be replaced by prim::BailOut");
-        },
+        [](Stack& stack) { TORCH_FAIL("Should be replaced by prim::BailOut"); },
         aliasAnalysisFromSchema()),
     Operator(
         "prim::BailOut(...) -> Tensor(a)",
         [](Stack& /* stack */) {
-          TORCH_CHECK(false, "prim::BailOut not yet implemented"); // NOLINT
+          TORCH_FAIL("prim::BailOut not yet implemented"); // NOLINT
         },
         aliasAnalysisFromSchema()),
     Operator(
@@ -318,7 +316,7 @@ RegisterOperators reg({
     Operator(
         "aten::wait(Future(t) self) -> t",
         [](Stack& stack) {
-          TORCH_CHECK(false, "wait is implemented directly in the interpreter");
+          TORCH_FAIL("wait is implemented directly in the interpreter");
         },
         aliasAnalysisSpecialCase()),
     Operator(

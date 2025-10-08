@@ -171,7 +171,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
           or_flag = orEventEnableTiming;
           break;
         default:
-          TORCH_CHECK(false, "Received unknown flag");
+         TORCH_FAIL("Received unknown flag");
       }
 
       orEventCreateWithFlags(&or_event, or_flag);

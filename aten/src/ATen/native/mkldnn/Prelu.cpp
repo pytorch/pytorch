@@ -8,11 +8,11 @@
 namespace at::native {
 
 Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
-  TORCH_CHECK(false, "mkldnn_prelu: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_prelu: ATen not compiled with MKLDNN support");
 }
 
 std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, const Tensor& input, const Tensor& weight) {
-  TORCH_CHECK(false, "mkldnn_prelu_backward: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_prelu_backward: ATen not compiled with MKLDNN support");
 }
 
 }

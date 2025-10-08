@@ -311,7 +311,7 @@ public:
       otype = complex_output ? CUDA_C_16F : CUDA_R_16F;
       exec_type = CUDA_C_16F;
     } else {
-      TORCH_CHECK(false, "cuFFT doesn't support tensor of type: ", dtype);
+     TORCH_FAIL("cuFFT doesn't support tensor of type: ", dtype);
     }
 
     // disable auto allocation of workspace to use THC allocator

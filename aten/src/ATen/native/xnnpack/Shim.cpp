@@ -48,7 +48,7 @@ Tensor convolution2d(
     const IntArrayRef,
     const IntArrayRef,
     const int64_t) {
-  TORCH_CHECK(false, internal::kError);
+ TORCH_FAIL(internal::kError);
 }
 
 bool use_linear(
@@ -62,7 +62,7 @@ Tensor linear(
     const Tensor&,
     const Tensor&,
     const Tensor&) {
-  TORCH_CHECK(false, internal::kError);
+ TORCH_FAIL(internal::kError);
 }
 
 bool use_max_pool2d(
@@ -86,7 +86,7 @@ Tensor max_pool2d(
     const bool,
     const float,
     const float) {
-  TORCH_CHECK(false, internal::kError);
+ TORCH_FAIL(internal::kError);
 }
 
 } // namespace at::native::xnnpack

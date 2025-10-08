@@ -248,7 +248,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
       wgt_scales[i] = 1.0f / weight.q_per_channel_scales()[i].item<float>(); // Scales of ONEDNN and PyTorch are reciprocal
     }
   } else {
-    TORCH_CHECK(false, "Unsupported qscheme: ", toString(qtype));
+   TORCH_FAIL("Unsupported qscheme: ", toString(qtype));
   }
 
   // Prepack weight
@@ -688,7 +688,7 @@ class QLinearPackWeightInt8Onednn final {
 #if AT_MKLDNN_ENABLED()
     return pack_weight_to_onednn_tensor(weight, input_shape);
 #else
-    TORCH_CHECK(false, "Unimplemented as onednn is not available.");
+   TORCH_FAIL("Unimplemented as onednn is not available.");
 #endif
   }
 };
@@ -703,7 +703,7 @@ class QLinearPackWeightFp16Onednn final {
 #if AT_MKLDNN_ENABLED()
     return pack_weight_to_fp16_onednn_tensor(weight, input_shape);
 #else
-    TORCH_CHECK(false, "Unimplemented as onednn is not available.");
+   TORCH_FAIL("Unimplemented as onednn is not available.");
 #endif
   }
 };

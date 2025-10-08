@@ -1149,7 +1149,7 @@ auto FunctionParameter::_check(
     case ParameterType::DISPATCH_KEY_SET:
       return py::isinstance<c10::DispatchKeySet>(py::handle(obj));
     default:
-      TORCH_CHECK(false, "unknown parameter type");
+      TORCH_FAIL("unknown parameter type");
   }
 }
 
@@ -1206,7 +1206,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::DISPATCH_KEY_SET:
       return "DispatchKeySet";
     default:
-      TORCH_CHECK(false, "unknown parameter type");
+      TORCH_FAIL("unknown parameter type");
   }
 }
 
@@ -1360,7 +1360,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     } else if (str == "torch.int64") {
       default_scalartype = at::ScalarType::Long;
     } else {
-      TORCH_CHECK(false, "invalid default value for ScalarType: " + str);
+      TORCH_FAIL("invalid default value for ScalarType: " + str);
     }
   } else if (type_ == ParameterType::LAYOUT) {
     if (str == "None") {
@@ -1370,7 +1370,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     } else if (str == "torch.sparse_coo") {
       default_layout = at::Layout::Sparse;
     } else {
-      TORCH_CHECK(false, "invalid default value for layout: " + str);
+      TORCH_FAIL("invalid default value for layout: " + str);
     }
   } else if (type_ == ParameterType::DEVICE) {
     TORCH_CHECK(str == "None", "invalid device: " + str);
@@ -1404,7 +1404,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
   } else if (type_ == ParameterType::QSCHEME) { // NOLINT
     // throw std::runtime_error("ParameterType::QSCHEME");
   } else {
-    TORCH_CHECK(false, "unknown parameter type");
+    TORCH_FAIL("unknown parameter type");
   }
   default_value = str;
 }
@@ -1419,7 +1419,7 @@ FunctionSignature::FunctionSignature(const std::string& fmt, int index)
       deprecated(false) {
   auto open_paren = fmt.find('(');
   if (open_paren == std::string::npos) {
-    TORCH_CHECK(false, "missing opening parenthesis: " + fmt);
+    TORCH_FAIL("missing opening parenthesis: " + fmt);
   }
   name = fmt.substr(0, open_paren);
 

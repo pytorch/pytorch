@@ -17,10 +17,10 @@ c10::SymBool UndefinedTensorImpl::sym_is_contiguous_custom(
   return is_contiguous_default(format);
 }
 IntArrayRef UndefinedTensorImpl::strides_custom() const {
-  TORCH_CHECK(false, "strides() called on an undefined Tensor");
+  TORCH_FAIL("strides() called on an undefined Tensor");
 }
 SymIntArrayRef UndefinedTensorImpl::sym_strides_custom() const {
-  TORCH_CHECK(false, "sym_strides() called on an undefined Tensor");
+  TORCH_FAIL("sym_strides() called on an undefined Tensor");
 }
 
 #ifdef DEBUG
@@ -32,7 +32,7 @@ bool UndefinedTensorImpl::has_storage() const {
 #endif
 
 void UndefinedTensorImpl::set_storage_offset(int64_t) {
-  TORCH_CHECK(false, "set_storage_offset() called on an undefined Tensor");
+  TORCH_FAIL("set_storage_offset() called on an undefined Tensor");
 }
 
 const char* UndefinedTensorImpl::tensorimpl_type_name() const {

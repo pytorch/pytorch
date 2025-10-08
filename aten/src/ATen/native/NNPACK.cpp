@@ -25,7 +25,7 @@ at::Tensor _nnpack_spatial_convolution(
     const Tensor& weight, const std::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
-  TORCH_CHECK(false, "nnpack_spatial_convolution: ATen not compiled with NNPACK support");
+ TORCH_FAIL("nnpack_spatial_convolution: ATen not compiled with NNPACK support");
 }
 
 bool _nnpack_available() {
@@ -113,7 +113,7 @@ struct Workspace {
     // Won't work on Windows, but NNPACK doesn't support Windows either
     auto res = posix_memalign(&buffer, nnpack_memory_alignment_boundary, size);
     if (res != 0) {
-      TORCH_CHECK(false, "posix_memalign failed:", c10::utils::str_error(errno), " (", errno, ")");
+     TORCH_FAIL("posix_memalign failed:", c10::utils::str_error(errno), " (", errno, ")");
     }
     return;
   }
@@ -186,7 +186,7 @@ Tensor _nnpack_spatial_convolution(
       weight.device().type() != kCPU || weight.scalar_type() != kFloat ||
       output.device().type() != kCPU || output.scalar_type() != kFloat ||
       (bias.defined() && (bias.device().type() != kCPU || bias.scalar_type() != kFloat))) {
-    TORCH_CHECK(false, "Mismatched Tensor types in NNPack convolutionOutput");
+   TORCH_FAIL("Mismatched Tensor types in NNPack convolutionOutput");
   }
 
   const auto algorithm = nnp_convolution_algorithm_auto;

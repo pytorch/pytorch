@@ -43,7 +43,7 @@ inline char BlasOpToString(BlasOp op) {
     case BlasOp::T:
       return 'T';
   }
-  TORCH_CHECK(false, "unrecognized BlasOp");
+ TORCH_FAIL("unrecognized BlasOp");
   return 'N';
 }
 

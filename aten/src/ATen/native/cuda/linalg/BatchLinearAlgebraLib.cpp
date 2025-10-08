@@ -527,7 +527,7 @@ template<typename scalar_t>
 static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
     const Tensor& infos, bool full_matrices, bool compute_uv) {
 #ifndef CUDART_VERSION
-  TORCH_CHECK(false, "gesvda: Batched version is supported only with cuBLAS backend.")
+ TORCH_FAIL("gesvda: Batched version is supported only with cuBLAS backend.")
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   int m = cuda_int_cast(A.size(-2), "m");
@@ -688,7 +688,7 @@ void svd_cusolver(const Tensor& A,
     // We do a transpose here to make it also work for (m < n) matrices.
     svd_cusolver_gesvdaStridedBatched(A, U, S, V, info, full_matrices, compute_uv);
   } else {
-    TORCH_CHECK(false, "torch.linalg.svd: unknown svd driver ", driver_v, " in svd_cusolver computation. ", check_svd_doc);
+   TORCH_FAIL("torch.linalg.svd: unknown svd driver ", driver_v, " in svd_cusolver computation. ", check_svd_doc);
   }
 
   // Need convergence check

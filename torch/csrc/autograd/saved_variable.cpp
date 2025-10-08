@@ -194,7 +194,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
                "that failed to compute its gradient. The variable in question "
                "was changed in there or anywhere later. Good luck!";
       }
-      TORCH_CHECK(false, message.str());
+      TORCH_FAIL(message.str());
     }
   }
 

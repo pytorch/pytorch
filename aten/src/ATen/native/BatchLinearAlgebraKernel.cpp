@@ -104,7 +104,7 @@ For more information see LAPACK's documentation for POTRI routine.
 template <typename scalar_t>
 void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 #if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "cholesky_inverse: LAPACK library not found in compilation");
+ TORCH_FAIL("cholesky_inverse: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 
@@ -164,7 +164,7 @@ std::enable_if_t<c10::is_complex<T>::value, int> lapack_work_to_int(const T val)
 template <typename scalar_t>
 void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& infos, bool compute_eigenvectors) {
 #if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "Calling torch.linalg.eig on a CPU tensor requires compiling ",
+ TORCH_FAIL("Calling torch.linalg.eig on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -409,7 +409,7 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 template <typename scalar_t>
 inline void apply_orgqr(Tensor& self, const Tensor& tau) {
 #if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "Calling torch.orgqr on a CPU tensor requires compiling ",
+ TORCH_FAIL("Calling torch.orgqr on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   // Some LAPACK implementations might not work well with empty matrices:
@@ -658,7 +658,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& rank, Tensor& singular_val
 template <typename scalar_t>
 void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
 #if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "Calling torch.ormqr on a CPU tensor requires compiling ",
+ TORCH_FAIL("Calling torch.ormqr on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -1047,7 +1047,7 @@ static void apply_svd(const Tensor& A,
                       const Tensor& Vh,
                       const Tensor& info) {
 #if !AT_BUILD_WITH_LAPACK()
-  TORCH_CHECK(false, "svd: LAPACK library not found in compilation");
+ TORCH_FAIL("svd: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   const auto A_data = A.data_ptr<scalar_t>();

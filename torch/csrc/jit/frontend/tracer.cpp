@@ -474,7 +474,7 @@ std::pair<std::shared_ptr<TracingState>, Stack> trace(
     // varied on subsequent invocations of the trace.  Any other variables
     // will be treated as constants.
     if (isTracing()) {
-      TORCH_CHECK(false, "Tracing can't be nested");
+      TORCH_FAIL("Tracing can't be nested");
     }
     auto state = std::make_shared<TracingState>();
     setTracingState(state);
@@ -727,7 +727,7 @@ void addInputs(
     Node* n,
     const char* name,
     std::optional<at::DimnameList> value) {
-  TORCH_CHECK(false, "NYI: Named tensors are not supported with the tracer");
+  TORCH_FAIL("NYI: Named tensors are not supported with the tracer");
 }
 void addInputs(
     Node* n,

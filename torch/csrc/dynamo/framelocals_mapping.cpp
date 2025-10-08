@@ -29,7 +29,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   _framelocals.resize(co->co_nlocalsplus, nullptr);
 
 #if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
-  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
+  TORCH_FAIL("Python 3.15+ / 3.14 on Windows not supported");
 #elif IS_PYTHON_3_14_PLUS
   if (!frame->stackpointer) {
     return;
@@ -64,7 +64,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 
   auto offset = co->co_nlocalsplus - co->co_nfreevars;
 #if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
-  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
+  TORCH_FAIL("Python 3.15+ / 3.14 on Windows not supported");
 #elif IS_PYTHON_3_14_PLUS
   for (int i = 0; i < offset; i++) {
     update_framelocals(i, PyStackRef_AsPyObjectBorrow(frame->localsplus[i]));
@@ -78,7 +78,7 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   // Get references to closure variables
 #if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
   PyObject* closure;
-  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
+  TORCH_FAIL("Python 3.15+ / 3.14 on Windows not supported");
 #else
   PyObject* closure = FUNC(frame)->func_closure;
 #endif

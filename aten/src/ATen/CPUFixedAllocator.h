@@ -12,11 +12,11 @@
 namespace at {
 
 static void* cpu_fixed_malloc(void*, ptrdiff_t) {
-  TORCH_CHECK(false, "attempting to resize a tensor view of an external blob");
+  TORCH_FAIL("attempting to resize a tensor view of an external blob");
 }
 
 static void* cpu_fixed_realloc(void*, void*, ptrdiff_t) {
-  TORCH_CHECK(false, "attempting to resize a tensor view of an external blob");
+  TORCH_FAIL("attempting to resize a tensor view of an external blob");
 }
 
 static void cpu_fixed_free(void* state, void* allocation) {

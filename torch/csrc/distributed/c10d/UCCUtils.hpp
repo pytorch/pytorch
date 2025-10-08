@@ -34,7 +34,7 @@ namespace c10d {
     if (result != UCC_OK) {                             \
       std::string err;                                  \
       TORCH_UCC_GET_ERROR_MSG(err, _error_msg, result); \
-      TORCH_CHECK(false, err);                          \
+      TORCH_FAIL(err);                                  \
     }                                                   \
   } while (0)
 
@@ -48,7 +48,7 @@ namespace c10d {
       if (_request != nullptr) {                            \
         ucc_collective_finalize(_request);                  \
       }                                                     \
-      TORCH_CHECK(false, err);                              \
+      TORCH_FAIL(err);                                      \
     }                                                       \
   } while (0)
 

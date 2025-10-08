@@ -112,7 +112,7 @@ THPObjectPtr _unicode_dispatch(PyObject* str) {
       return F::apply(str, PyUnicode_4BYTE_DATA(str), length);
     default:
       // This should be impossible - throw to make the compiler happy.
-      TORCH_CHECK(false, "unreachable");
+      TORCH_FAIL("unreachable");
   }
 }
 

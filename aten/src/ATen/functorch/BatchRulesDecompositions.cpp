@@ -29,7 +29,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
 }
 
 static void unsupportedData(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-    TORCH_CHECK(false, "mutating directly with `.data` under vmap transform is not allowed.");
+   TORCH_FAIL("mutating directly with `.data` under vmap transform is not allowed.");
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {

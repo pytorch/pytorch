@@ -13,7 +13,7 @@ struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
   ~HPUHooksInterface() override = default;
 
   void init() const override {
-    TORCH_CHECK(false, "Cannot initialize HPU without HPU backend");
+   TORCH_FAIL("Cannot initialize HPU without HPU backend");
   }
 
   virtual bool hasHPU() const {

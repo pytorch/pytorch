@@ -54,7 +54,7 @@ static inline api::ScalarType convert_dtype(const c10::ScalarType dtype) {
   switch (dtype) {
     VK_FORALL_SCALAR_TYPES(DEFINE_CASE)
     default:
-      TORCH_CHECK(false, "Not a supported Vulkan ScalarType!");
+      TORCH_FAIL("Not a supported Vulkan ScalarType!");
   }
 #undef DEFINE_CASE
 }
@@ -71,7 +71,7 @@ static inline c10::ScalarType convert_dtype(const api::ScalarType dtype) {
   switch (dtype) {
     VK_FORALL_SCALAR_TYPES(DEFINE_CASE)
     default:
-      TORCH_CHECK(false, "Not a supported c10::ScalarType!");
+      TORCH_FAIL("Not a supported c10::ScalarType!");
   }
 #undef DEFINE_CASE
 }

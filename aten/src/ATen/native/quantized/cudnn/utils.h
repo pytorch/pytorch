@@ -118,13 +118,13 @@ struct PackedConvWeightCudnn : public ConvPackedParamsBase<kSpatialDim> {
   at::Tensor apply_dynamic(
     const at::Tensor& input,
     bool reduce_range) override {
-    TORCH_CHECK(false, "apply_dynamic is currently not reported");
+   TORCH_FAIL("apply_dynamic is currently not reported");
   }
 
   at::Tensor apply_dynamic_relu(
     const at::Tensor& input,
     bool reduce_range) {
-    TORCH_CHECK(false, "apply_dynamic_relu is currently not reported");
+   TORCH_FAIL("apply_dynamic_relu is currently not reported");
   }
 
   std::tuple<at::Tensor, std::optional<at::Tensor>> unpack() override;

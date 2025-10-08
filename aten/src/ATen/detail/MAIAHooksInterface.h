@@ -14,16 +14,16 @@ struct TORCH_API MAIAHooksInterface : AcceleratorHooksInterface {
   ~MAIAHooksInterface() override = default;
 
   void init() const override {
-    TORCH_CHECK(false, "Cannot initialize MAIA without ATen_maia library.");
+   TORCH_FAIL("Cannot initialize MAIA without ATen_maia library.");
   }
 
   bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
-    TORCH_CHECK(false, "Cannot initialize MAIA without ATen_maia library.");
+   TORCH_FAIL("Cannot initialize MAIA without ATen_maia library.");
     return false;
   }
 
   virtual std::string showConfig() const {
-    TORCH_CHECK(false, "Cannot query detailed MAIA version information.");
+   TORCH_FAIL("Cannot query detailed MAIA version information.");
   }
 };
 

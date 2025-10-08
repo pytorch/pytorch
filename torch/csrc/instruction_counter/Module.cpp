@@ -21,7 +21,7 @@ namespace torch::instruction_counter {
 
 static long start() {
 #if !defined(__linux__)
-  TORCH_CHECK(false, "This systems seems not to be Linux");
+  TORCH_FAIL("This systems seems not to be Linux");
 #else
 
   // Construct base perf_event_attr struct
@@ -52,7 +52,7 @@ static long start() {
 
 static uint64_t end(int fd) {
 #if !defined(__linux__)
-  TORCH_CHECK(false, "This systems seems not to be Linux");
+  TORCH_FAIL("This systems seems not to be Linux");
 #else
   // Disable the event group
   if (ioctl(fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP) == -1) {

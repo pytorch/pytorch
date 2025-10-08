@@ -143,7 +143,7 @@ inline Tensor embedding_bag(
         "max mode does not support scaling the gradient by the frequency");
     TORCH_CHECK(!sparse, "max mode does not support sparse weights");
   } else {
-    TORCH_CHECK(false, "mode has to be one of sum, mean or max");
+    TORCH_FAIL("mode has to be one of sum, mean or max");
   }
 
   if (max_norm != std::nullopt) {

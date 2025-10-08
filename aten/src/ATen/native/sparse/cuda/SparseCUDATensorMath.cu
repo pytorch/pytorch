@@ -737,7 +737,7 @@ cudaDataType getTensorCudaDataType(Tensor self) {
       cuda_data_type = CUDA_R_64F;
       break;
     default:
-      TORCH_CHECK(false, "Tensor types must be either float32 or float64");
+     TORCH_FAIL("Tensor types must be either float32 or float64");
       break;
   }
   return cuda_data_type;

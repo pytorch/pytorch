@@ -15,19 +15,19 @@
 namespace at::native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
-  TORCH_CHECK(false, "mkldnn_sigmoid: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_sigmoid: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_sigmoid_(Tensor& self) {
-  TORCH_CHECK(false, "mkldnn_sigmoid_: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_sigmoid_: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_tanh(const Tensor& self) {
-  TORCH_CHECK(false, "mkldnn_tanh: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_tanh: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_tanh_(Tensor& self) {
-  TORCH_CHECK(false, "mkldnn_tanh_: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_tanh_: ATen not compiled with MKLDNN support");
 }
 
 } // namespace at::native

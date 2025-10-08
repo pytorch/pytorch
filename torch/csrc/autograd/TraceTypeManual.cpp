@@ -245,12 +245,12 @@ static void general_trace_function(
           tracer::addInputs(
               node, args[i].name().c_str(), iter->toBoolList().vec());
         } else {
-          TORCH_CHECK(false, "unsupported input list type: ", elem_type->str());
+          TORCH_FAIL("unsupported input list type: ", elem_type->str());
         }
       } else if (iter->isObject()) {
         tracer::addInputs(node, args[i].name().c_str(), iter->toObject());
       } else {
-        TORCH_CHECK(false, "unsupported input type: ", type->str());
+        TORCH_FAIL("unsupported input type: ", type->str());
       }
     }
     graph->insertNode(node);

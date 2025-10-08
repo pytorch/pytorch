@@ -1345,7 +1345,7 @@ void batch_norm_cpu_kernel(Tensor& output, const Tensor& input,
           save_mean, save_invstd, running_mean, running_var, train, eps);
     });
   } else {
-    TORCH_CHECK(false, "batch_norm_cpu_kernel: expecting input to be contiguous.");
+   TORCH_FAIL("batch_norm_cpu_kernel: expecting input to be contiguous.");
   }
 }
 
@@ -1365,7 +1365,7 @@ void batch_norm_cpu_collect_stats_kernel(
       batch_norm_cpu_collect_stats_channels_last_impl<scalar_t>(mean, var_sum, input);
     });
   } else {
-    TORCH_CHECK(false, "batch_norm_cpu_collect_stats_kernel: expecting input to be contiguous.");
+   TORCH_FAIL("batch_norm_cpu_collect_stats_kernel: expecting input to be contiguous.");
   }
 }
 
@@ -1390,7 +1390,7 @@ void batch_norm_cpu_backward_kernel(Tensor& grad_input, Tensor& grad_weight, Ten
           grad_output, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps);
     });
   } else {
-    TORCH_CHECK(false, "batch_norm_cpu_backward_kernel: expecting input to be contiguous.");
+   TORCH_FAIL("batch_norm_cpu_backward_kernel: expecting input to be contiguous.");
   }
 }
 

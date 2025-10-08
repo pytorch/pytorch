@@ -710,7 +710,7 @@ static void check_shape_forward(const at::Tensor& input,
         separator = " x ";
       }
 
-      TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
+     TORCH_FAIL("Calculated padded input size per channel: (", input_ss.str(), "). "
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
@@ -1059,7 +1059,7 @@ Tensor _convolution_mode_symint(
     return at::convolution_symint(
         input, weight, bias, stride, {{0}}, dilation, false, {{0}}, groups);
   }
-  TORCH_CHECK(false, "Invalid padding string: '", padding, "'");
+ TORCH_FAIL("Invalid padding string: '", padding, "'");
 }
 
 at::Tensor conv1d_padding_symint(
@@ -1202,7 +1202,7 @@ static ConvBackend _select_conv_backend(
   if (at::symint::size<T>(input, 0) == 0 || at::symint::size<T>(input, 1) == 0) {
     return input.is_mkldnn() ? ConvBackend::MkldnnEmpty : ConvBackend::Empty;
   } else if (at::symint::numel<T>(input) == 0) {
-    TORCH_CHECK(false, "Only zero batch or zero channel inputs are supported, but got input shape: ", at::symint::sizes<T>(input));
+   TORCH_FAIL("Only zero batch or zero channel inputs are supported, but got input shape: ", at::symint::sizes<T>(input));
   }
 
   if (params.is_depthwise(input, weight)) {
@@ -1295,7 +1295,7 @@ static ConvBackend _select_conv_backend(
   }
 
   // Error out if no suitable backend was found.
-  TORCH_CHECK(false, "unsupported ConvNd parameters");
+ TORCH_FAIL("unsupported ConvNd parameters");
 }
 
 // Selects a backend for convolution based on the inputs and params.
@@ -1380,7 +1380,7 @@ static at::Tensor _convolution_nogroup_backend(
       return at::slow_conv_transpose3d(
           input, weight, kernel_size, bias, params.stride, params.padding, params.output_padding, params.dilation);
     default:
-      TORCH_CHECK(false, "Unsupported conv nogroup backend encountered");
+     TORCH_FAIL("Unsupported conv nogroup backend encountered");
   }
 }
 
@@ -1947,7 +1947,7 @@ static std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogr
         input.device().type(), grad_output, input, weight, kernel_size, params.stride, params.padding,
         params.output_padding, params.dilation, output_mask);
     default:
-      TORCH_CHECK(false, "Unsupported conv nogroup backend encountered");
+     TORCH_FAIL("Unsupported conv nogroup backend encountered");
   }
 }
 
@@ -2232,10 +2232,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     }
     // Backward is not supported for these backends.
     case ConvBackend::Winograd3x3Depthwise:
-      TORCH_CHECK(false, "Backward is not supported for depthwise 3x3 winograd");
+     TORCH_FAIL("Backward is not supported for depthwise 3x3 winograd");
       break;
     case ConvBackend::Xnnpack2d:
-      TORCH_CHECK(false, "Backward is not supported for xnnpack");
+     TORCH_FAIL("Backward is not supported for xnnpack");
       break;
   }
 

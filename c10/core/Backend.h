@@ -144,7 +144,7 @@ inline Backend dispatchKeyToBackend(DispatchKey t) {
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {
-    TORCH_CHECK(false, "Unrecognized tensor type ID: ", t);
+    TORCH_FAIL("Unrecognized tensor type ID: ", t);
   }
 }
 
@@ -287,9 +287,9 @@ inline DeviceType backendToDeviceType(Backend b) {
     case Backend::QuantizedPrivateUse1:
       return DeviceType::PrivateUse1;
     case Backend::Undefined:
-      TORCH_CHECK(false, "Undefined backend is not a valid device type");
+      TORCH_FAIL("Undefined backend is not a valid device type");
     default:
-      TORCH_CHECK(false, "Unknown backend");
+      TORCH_FAIL("Unknown backend");
   }
 }
 

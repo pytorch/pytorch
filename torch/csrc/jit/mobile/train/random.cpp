@@ -41,11 +41,11 @@ std::optional<std::vector<size_t>> RandomSampler::next(size_t batch_size) {
 }
 
 void RandomSampler::save(serialize::OutputArchive& archive) const {
-  TORCH_CHECK(false, "Serialization of RandomSampler not supported on mobile.");
+  TORCH_FAIL("Serialization of RandomSampler not supported on mobile.");
 }
 
 void RandomSampler::load(serialize::InputArchive& archive) {
-  TORCH_CHECK(false, "Serialization of RandomSampler not supported on mobile.");
+  TORCH_FAIL("Serialization of RandomSampler not supported on mobile.");
 }
 
 size_t RandomSampler::index() const noexcept {

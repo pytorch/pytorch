@@ -55,7 +55,7 @@ static int64_t _default_cross_dim(const std::optional<int64_t> &dimension, SymIn
       return i;
     }
   }
-  TORCH_CHECK(false, "no dimension of size 3 in input");
+ TORCH_FAIL("no dimension of size 3 in input");
 }
 
 Tensor cross(const Tensor & input, const Tensor & other, const std::optional<int64_t> dimension) {

@@ -2187,7 +2187,7 @@ void initJITBindings(PyObject* module) {
           py::pickle(
               /* __getstate__ */
               [](const PythonFutureWrapper& /* unused */) {
-                TORCH_CHECK(false, "Can not pickle torch.futures.Future");
+                TORCH_FAIL("Can not pickle torch.futures.Future");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy Pybind API's
                 // requirement.
@@ -2195,7 +2195,7 @@ void initJITBindings(PyObject* module) {
               },
               /* __setstate__ */
               [](const py::tuple& /* unused */) {
-                TORCH_CHECK(false, "Can not unpickle torch.futures.Future");
+                TORCH_FAIL("Can not unpickle torch.futures.Future");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy PyBind's API
                 // requirement.
@@ -2224,7 +2224,7 @@ void initJITBindings(PyObject* module) {
           py::pickle(
               /* __getstate__ */
               [](const PythonAwaitWrapper& /* unused */) {
-                TORCH_CHECK(false, "Can not pickle torch.jit._Await");
+                TORCH_FAIL("Can not pickle torch.jit._Await");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy Pybind API's
                 // requirement.
@@ -2232,7 +2232,7 @@ void initJITBindings(PyObject* module) {
               },
               /* __setstate__ */
               [](const py::tuple& /* unused */) {
-                TORCH_CHECK(false, "Can not unpickle torch.jit._Await");
+                TORCH_FAIL("Can not unpickle torch.jit._Await");
                 // Note that this return has no meaning since we always
                 // throw, it's only here to satisfy PyBind's API
                 // requirement.

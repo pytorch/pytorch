@@ -110,7 +110,7 @@ static inline void pack_vnni2(
     }
   }
 #else
-  TORCH_CHECK(false, "pack_vnni2 is only supported when avx512 is supported")
+  TORCH_FAIL("pack_vnni2 is only supported when avx512 is supported")
 #endif
 }
 

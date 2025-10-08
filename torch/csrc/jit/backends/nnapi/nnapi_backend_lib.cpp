@@ -74,7 +74,7 @@ class NnapiBackend : public PyTorchBackendInterface {
         fixed_inputs.push_back(
             tensorInp.get(i).permute({0, 2, 3, 1}).contiguous());
       } else {
-        TORCH_CHECK(false, "Invalid mem_fmt");
+        TORCH_FAIL("Invalid mem_fmt");
       }
     }
 

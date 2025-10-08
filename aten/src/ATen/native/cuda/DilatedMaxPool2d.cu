@@ -503,7 +503,7 @@ const Tensor& indices) {
           C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
-        default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+        default:TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
       }
     }
   );
@@ -653,7 +653,7 @@ const Tensor& gradInput) {
           C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
-        default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+        default:TORCH_FAIL("Unsupported memory format. Supports only ChannelsLast, Contiguous");
       }
     }
   );

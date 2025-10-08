@@ -22,27 +22,27 @@ Tensor& mkldnn_add_out(
     const Scalar& alpha,
     Tensor& result
     ) {
-  TORCH_CHECK(false, "mkldnn_add_out: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_add_out: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_add(const Tensor& self, const Tensor& other, const Scalar& alpha) {
-  TORCH_CHECK(false, "mkldnn_add: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_add: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_add_(Tensor& self, const Tensor& other, const Scalar& alpha) {
-  TORCH_CHECK(false, "mkldnn_add_: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_add_: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_mul_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_CHECK(false, "mkldnn_mul_out: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_mul_out: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_mul(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(false, "mkldnn_mul: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_mul: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_mul_(Tensor& self, const Tensor& other) {
-  TORCH_CHECK(false, "mkldnn_mul_: ATen not compiled with MKLDNN support");
+ TORCH_FAIL("mkldnn_mul_: ATen not compiled with MKLDNN support");
 }
 
 } // namespace at::native

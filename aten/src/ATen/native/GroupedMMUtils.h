@@ -29,7 +29,7 @@ inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
     TORCH_CHECK(tensor_strides[end_dim - 1] % alignment == 0, "strides should be multiple of 16 bytes");
     return false;
   } else {
-    TORCH_CHECK(false, "Invalid strides/sizes, got ", mat.strides(), " for strides and ", mat.sizes(), " for sizes");
+   TORCH_FAIL("Invalid strides/sizes, got ", mat.strides(), " for strides and ", mat.sizes(), " for sizes");
   }
 }
 

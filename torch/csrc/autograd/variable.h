@@ -397,7 +397,7 @@ struct ErroringViewFunc : public ViewFunc {
   ErroringViewFunc(std::string error_msg) : error_msg(std::move(error_msg)) {}
   ~ErroringViewFunc() override = default;
   at::Tensor operator()(const at::Tensor&) const override {
-    TORCH_CHECK(false, error_msg);
+    TORCH_FAIL(error_msg);
   }
   std::unique_ptr<ViewFunc> clone_and_set(
       std::optional<std::vector<c10::SymInt>> = std::nullopt,

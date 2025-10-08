@@ -2008,7 +2008,7 @@ static Tensor alias_with_sizes_and_strides(
 
 Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
+    TORCH_FAIL("reshape is not implemented for sparse tensors");
   }
 
   if (self.is_contiguous_or_false() && !self.is_mkldnn()) {
@@ -2079,7 +2079,7 @@ Tensor _reshape_copy_symint(
 // minimize breakages.
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
-    TORCH_CHECK(false, "reshape is not implemented for sparse tensors");
+    TORCH_FAIL("reshape is not implemented for sparse tensors");
   }
   DimVector shape = infer_size_dv(proposed_shape, self.numel());
 
@@ -4223,7 +4223,7 @@ static inline void handle_unflatten_exception(
     int64_t dim,
     SymIntArrayRef sizes) {
   if (!strstr(e.what(), "is invalid for input of size")) {
-    TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
+    TORCH_FAIL("unflatten got an unexpected error:\n", e.what());
   }
 
   if (self.has_names()) {

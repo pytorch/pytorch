@@ -18,7 +18,7 @@ inline std::string LinalgBackendToString(at::LinalgBackend backend) {
     case LinalgBackend::Magma:
       return "at::LinalgBackend::Magma";
     default:
-      TORCH_CHECK(false, "Unknown linalg backend");
+      TORCH_FAIL("Unknown linalg backend");
   }
 }
 

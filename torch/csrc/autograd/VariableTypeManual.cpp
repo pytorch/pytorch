@@ -245,7 +245,7 @@ const Tensor& resize_(
     std::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   if (self.requires_grad()) {
-    TORCH_CHECK(false, "cannot resize variables that require grad");
+    TORCH_FAIL("cannot resize variables that require grad");
   }
   {
     at::AutoDispatchBelowAutograd mode;
@@ -254,7 +254,7 @@ const Tensor& resize_(
   }
 
   if (self._fw_grad(/* level */ 0).defined()) {
-    TORCH_CHECK(false, "cannot resize variables that has a forward grad");
+    TORCH_FAIL("cannot resize variables that has a forward grad");
   }
 
   return self;
@@ -268,7 +268,7 @@ const Tensor& resize_as_(
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (self.requires_grad()) {
-    TORCH_CHECK(false, "cannot resize variables that require grad");
+    TORCH_FAIL("cannot resize variables that require grad");
   }
   {
     at::AutoDispatchBelowAutograd mode;
@@ -281,7 +281,7 @@ const Tensor& resize_as_(
 
   // Handle fw grad
   if (self._fw_grad(/* level */ 0).defined()) {
-    TORCH_CHECK(false, "cannot resize variables that has a forward grad");
+    TORCH_FAIL("cannot resize variables that has a forward grad");
   }
 
   return self;

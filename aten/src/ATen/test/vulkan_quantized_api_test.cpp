@@ -2204,7 +2204,7 @@ at::Tensor apply_cpu_quantized_binary_op(
   } else if (strcmp(op_name, "quantized::div") == 0) {
     return at::div(input1_cpu_deq, input2_cpu_deq);
   } else {
-    TORCH_CHECK(false, "Invalid op");
+   TORCH_FAIL("Invalid op");
   }
 }
 
@@ -2227,7 +2227,7 @@ at::Tensor apply_vulkan_quantized_binary_op(
     return at::native::vulkan::ops::quantized_div(
         input1_vk_q, input2_vk_q, out_scale, out_zero_point);
   } else {
-    TORCH_CHECK(false, "Invalid op");
+   TORCH_FAIL("Invalid op");
   }
 }
 
