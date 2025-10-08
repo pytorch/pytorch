@@ -528,9 +528,11 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
         if t == -1:
             var, counter = gen_dvar(counter)
             t2_type.append(var)
+            # pyrefly: ignore  # bad-argument-type
             num_constraints.append(BinConstraintD(var, Dyn, op_neq))
 
         else:
+            # pyrefly: ignore  # bad-argument-type
             num_constraints.append(BinConstraintD(t, Dyn, op_neq))
             t2_type.append(t)  # type: ignore[arg-type]
 
@@ -1475,6 +1477,7 @@ class ConstraintGenerator:
 
         all_constraints = []
 
+        # pyrefly: ignore  # missing-attribute
         for n in graph.nodes:
             (constraints, counter) = self.generate_constraints_node(n, counter)
             all_constraints += constraints
