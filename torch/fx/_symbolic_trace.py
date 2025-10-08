@@ -603,6 +603,7 @@ class Tracer(TracerBase):
                             in inspect.signature(self.create_proxy).parameters
                         ):
                             kwargs["proxy_factory_fn"] = (
+                                # pyrefly: ignore  # unsupported-operation
                                 None
                                 if not self.param_shapes_constant
                                 else lambda node: ParameterProxy(
@@ -890,7 +891,7 @@ class Tracer(TracerBase):
         new_tracer = Tracer.__new__(Tracer)
 
         for k, v in self.__dict__.items():
-            if k in {"_autowrap_search"}:
+            if k == "_autowrap_search":
                 new_obj = copy.copy(v)
             else:
                 new_obj = copy.deepcopy(v, memo)

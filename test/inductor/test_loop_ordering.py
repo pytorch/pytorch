@@ -3,6 +3,7 @@
 import contextlib
 import os
 import unittest
+from unittest import skipUnless
 
 import numpy as np
 import sympy
@@ -18,7 +19,7 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.scheduler import SchedulerNode
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
-from torch._inductor.utils import run_and_get_code, sympy_index_symbol
+from torch._inductor.utils import is_big_gpu, run_and_get_code, sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
@@ -558,6 +559,83 @@ class LoopOrderingTest(TestCase):
 
             ms = do_bench(lambda: opt_f(x))
             print(f"{ms=:.3f}")
+
+    @inductor_config.patch(
+        {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "test_configs.max_mm_configs": 4,
+        }
+    )
+    @skipUnless(HAS_GPU and is_big_gpu(), "Need big gpu for max-autotune")
+    def test_interaction_with_triton_template(self):
+        """
+        Make sure the dependency prefix for TritonTempalate and its
+        prologue match.
+        """
+
+        @torch.compile
+        def f(x, y):
+            return (x.expand([1, y.shape[0]]) + 1) @ y
+
+        x = torch.randn([1, 1], device=GPU_TYPE)
+        y = torch.randn([64, 128], device=GPU_TYPE)
+
+        out, code = run_and_get_code(f, x, y)
+
+        # well when benchmark_kernel flag is on, we have one more .run
+        # call in the benchmarking code.
+        FileCheck().check("def call(").check_count(
+            ".run(", 1 + int(inductor_config.benchmark_kernel), exactly=True
+        ).run(code[0])
+
+    def test_fuse_with_scalar_shared_memory(self):
+        """
+        Make sure if we can fuse two nodes sharing a scalar before,
+        we can still do it with LOAF applied.
+
+        This is not really a big deal. But some tests rely on this and
+        less number of kernels has some small benefits.
+        """
+
+        @torch.compile
+        def f(x):
+            return torch.mean(x)
+
+        x = torch.randn([5, 5], device=GPU_TYPE)
+        out, code = run_and_get_code(f, x)
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(code[0])
+
+    def test_3dred_pw_2d_outer_red(self):
+        """
+        Test a pattern as follows. We have a 3d contiguous tensor [m, n, k] as input.
+        1. do reduction on the k dimension and get a [m, n] tensor
+        2. do a pointwise operation on this [m, n] tensor (and realize the computation)
+        3. do a outer reduction on the output of step 2 on the m dimension.
+
+        Each of these step generate a kernel before fusion.
+        Without any loop reorder, kernel 1 and kernel 2 will get fused. And kernel 3 will be separeate.
+
+        But if we reorder the loop for kernel 2, then kernel 2 will get fused with kernel 3.
+        And the fused kernel-2-3 can not be fused with kernel 1.
+
+        The older version of LOAF algorithm will do reorder in this case. But there is no real
+        benefits. There are even some slight downsides
+        1. the original fusion without loop reordering is more natural
+        2. fusion kernel 1 with kernel 2 may help precision when the output of kernel 1 is in low precision.
+           By fusion kernel 1 and kernel 2, the pointwise operation will operate on fp32 precision thanks
+           to fusion.
+        """
+        M, N, K = 64, 64, 64
+
+        def f(x):
+            x = x.sum(dim=-1)
+            x = x + 1  # can be more complex like sigmoid or other ops
+            return x, x.sum(dim=0)
+
+        x = torch.randn(M, N, K, device=GPU_TYPE)
+        self.do_acc_test(f, x)
+        self.assertEqual(0, metrics.num_loop_reordering)
 
 
 @inductor_config.patch(

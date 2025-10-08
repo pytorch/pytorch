@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
+import functools
 import operator
 import warnings
 from collections import namedtuple
@@ -245,6 +246,7 @@ def graph_module_from_producer_nodes(
 
 
 # TODO: delete
+@functools.cache
 def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
     """
     Returns the unique device for a module, or None if no device is found.
@@ -718,6 +720,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
                     a = a.args[0][0]  # type: ignore[assignment,index]
                 else:
                     a = a.args[0]  # type: ignore[assignment]
+        # pyrefly: ignore  # bad-return
         return a
 
     all_match_patterns = [
