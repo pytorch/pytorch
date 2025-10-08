@@ -28,6 +28,10 @@ runs:
         echo "instance-type: $(get_ec2_metadata instance-type)"
         echo "system info $(uname -a)"
 
+    - name: Print GPU info (if present)
+      shell: bash
+      run: if [ -f /usr/bin/nvidia-smi ]; then nvidia-smi; fi
+
     - name: Check if in a container runner
       shell: bash
       id: check_container_runner
