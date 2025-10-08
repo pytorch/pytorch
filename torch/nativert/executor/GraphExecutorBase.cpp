@@ -81,22 +81,24 @@ ProfileMetrics GraphExecutorBase::benchmarkIndividualNodes(
 
   // Execute kernels
   caffe2::Timer timer;
-  for (uint32_t i = 0; i < mainRuns; i++) {
-    for (auto inputs : inputsList) {
-      const auto& inputValues = graph_.userInputs();
+  executionFrame.withManagedMemory([&](auto) {
+    for (uint32_t i = 0; i < mainRuns; i++) {
+      for (auto inputs : inputsList) {
+        const auto& inputValues = graph_.userInputs();
 
-      TORCH_CHECK(inputValues.size() == inputs.size());
-      for (size_t j = 0; j < inputValues.size(); j++) {
-        executionFrame.setIValue(inputValues[j]->id(), std::move(inputs[j]));
-      }
-      for (NodeIndex nodeIdx = 0; nodeIdx < nodeKernels_.size(); ++nodeIdx) {
-        timer.Start();
-        nodeKernels_[nodeIdx]->compute(executionFrame);
-        float millis = timer.MilliSeconds();
-        results.timePerNode[nodeIdx] += millis;
+        TORCH_CHECK(inputValues.size() == inputs.size());
+        for (size_t j = 0; j < inputValues.size(); j++) {
+          executionFrame.setIValue(inputValues[j]->id(), std::move(inputs[j]));
+        }
+        for (NodeIndex nodeIdx = 0; nodeIdx < nodeKernels_.size(); ++nodeIdx) {
+          timer.Start();
+          nodeKernels_[nodeIdx]->compute(executionFrame);
+          float millis = timer.MilliSeconds();
+          results.timePerNode[nodeIdx] += millis;
+        }
       }
     }
-  }
+  });
 
   // Summarize results
   const float numTotalIters =

@@ -149,6 +149,19 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function detect_cuda_arch() {
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    if command -v nvidia-smi; then
+      TORCH_CUDA_ARCH_LIST=$(nvidia-smi --query-gpu=compute_cap --format=csv | tail -n 1)
+    elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+      # There won't be nvidia-smi in nogpu tests, so just set TORCH_CUDA_ARCH_LIST to the default
+      # minimum supported value here
+      TORCH_CUDA_ARCH_LIST=8.0
+    fi
+    export TORCH_CUDA_ARCH_LIST
+  fi
+}
+
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
@@ -229,7 +242,6 @@ function install_torchrec_and_fbgemm() {
 
     pip_install tabulate  # needed for newer fbgemm
     pip_install patchelf  # needed for rocm fbgemm
-    pushd /tmp
 
     local wheel_dir=dist/fbgemm_gpu
     local found_whl=0
@@ -245,12 +257,20 @@ function install_torchrec_and_fbgemm() {
     if [ "${found_whl}" == "0" ]; then
       git clone --recursive https://github.com/pytorch/fbgemm
       pushd fbgemm/fbgemm_gpu
-      git checkout "${fbgemm_commit}"
-      python setup.py bdist_wheel \
-        --build-variant=rocm \
-        -DHIP_ROOT_DIR="${ROCM_PATH}" \
-        -DCMAKE_C_FLAGS="-DTORCH_USE_HIP_DSA" \
-        -DCMAKE_CXX_FLAGS="-DTORCH_USE_HIP_DSA"
+      git checkout "${fbgemm_commit}" --recurse-submodules
+      # until the fbgemm_commit includes the tbb patch
+      patch <<'EOF'
+--- a/FbgemmGpu.cmake
++++ b/FbgemmGpu.cmake
+@@ -184,5 +184,6 @@ gpu_cpp_library(
+     fbgemm_gpu_tbe_cache
+     fbgemm_gpu_tbe_optimizers
+     fbgemm_gpu_tbe_utils
++    tbb
+   DESTINATION
+     fbgemm_gpu)
+EOF
+      python setup.py bdist_wheel --build-variant=rocm
       popd
 
       # Save the wheel before cleaning up
@@ -264,7 +284,6 @@ function install_torchrec_and_fbgemm() {
     done
 
     rm -rf fbgemm
-    popd
   else
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     pip_build_and_install "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#subdirectory=fbgemm_gpu" dist/fbgemm_gpu
@@ -281,30 +300,6 @@ function clone_pytorch_xla() {
     git submodule update --init --recursive
     popd
   fi
-}
-
-function checkout_install_torchbench() {
-  local commit
-  commit=$(get_pinned_commit torchbench)
-  git clone https://github.com/pytorch/benchmark torchbench
-  pushd torchbench
-  git checkout "$commit"
-
-  if [ "$1" ]; then
-    python install.py --continue_on_fail models "$@"
-  else
-    # Occasionally the installation may fail on one model but it is ok to continue
-    # to install and test other models
-    python install.py --continue_on_fail
-  fi
-
-  # TODO (huydhn): transformers-4.44.2 added by https://github.com/pytorch/benchmark/pull/2488
-  # is regressing speedup metric. This needs to be investigated further
-  pip install transformers==4.38.1
-
-  echo "Print all dependencies after TorchBench is installed"
-  python -mpip freeze
-  popd
 }
 
 function install_torchao() {

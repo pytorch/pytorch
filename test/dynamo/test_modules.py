@@ -699,6 +699,17 @@ class LazyModuleKwArgs(LazyModuleMixin, torch.nn.Module):
         return self.layer(x, y=y)
 
 
+class LazyModuleBadInferParams(LazyModuleMixin, torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def initialize_parameters(self, *args, **kwargs):
+        self.foo += 1
+
+    def forward(self, x, y):
+        return self.layer(x, y=y)
+
+
 class LazyParentModule(LazyModuleMixin, torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -1653,6 +1664,32 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         exp_res = m(x, y)
         self.assertTrue(torch.allclose(exp_res, opt_m(x, y)))
+
+    def test_lazy_module_bad_params(self):
+        m = LazyModuleBadInferParams()
+        x = [torch.rand([5, 5])] * 3
+        y = [torch.rand([5, 5])] * 2
+        # Note that this raises from within dynamo code, with no exception handling.
+        with self.assertRaises(AttributeError) as cm:
+            opt_m = torch.compile(backend="eager")(m)
+            exp_res = opt_m(x, y)
+
+    def test_lazy_module_bad_params_call_function(self):
+        class holder:
+            x = LazyModuleBadInferParams()
+
+            def apply(self, x, y):
+                self.x(x, y)
+
+        def m(x, y):
+            h = holder()
+            return h.apply(x, y)
+
+        x = [torch.rand([5, 5])] * 3
+        y = [torch.rand([5, 5])] * 2
+        opt_m = torch.compile(backend="eager")(m)
+        with self.assertRaises(AttributeError):
+            exp_res = opt_m(x, y)
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -3384,6 +3421,58 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         x = torch.randn(1)
         compiled_mod = torch.compile(mod, backend="eager")
         compiled_mod(x)
+
+    def test_trace_delattr(self):
+        TMP_PREFIX = "_tmp_"
+
+        def pre_forward_rename_hook(module: torch.nn.Module, _input: torch.Tensor):
+            param_name = "weight"
+            original_param = getattr(module, param_name)
+            setattr(module, TMP_PREFIX + param_name, original_param)
+            new_param = original_param + 1.0
+            delattr(module, param_name)
+            setattr(module, param_name, new_param)
+
+        def post_forward_restore_hook(
+            module: torch.nn.Module, _input: torch.Tensor, _output: torch.Tensor
+        ):
+            param_name = "weight"
+            tmp_param_name = TMP_PREFIX + param_name
+            original_param = getattr(module, tmp_param_name)
+            delattr(module, param_name)
+            setattr(module, param_name, original_param)
+            delattr(module, tmp_param_name)
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        torch.manual_seed(0)
+        model = SimpleModel()
+
+        model.linear.register_forward_pre_hook(pre_forward_rename_hook)
+        model.linear.register_forward_hook(post_forward_restore_hook)
+
+        input_tensor = torch.randn(4, 10)
+
+        eager_output = model(input_tensor)
+        assert hasattr(model.linear, "weight")
+        assert not hasattr(model.linear, "_tmp_weight")
+
+        torch.manual_seed(0)
+        model_to_compile = SimpleModel()
+        model_to_compile.linear.register_forward_pre_hook(pre_forward_rename_hook)
+        model_to_compile.linear.register_forward_hook(post_forward_restore_hook)
+
+        compiled_model = torch.compile(model_to_compile, fullgraph=True)
+        compiled_output = compiled_model(input_tensor)
+        assert hasattr(model.linear, "weight")
+        assert not hasattr(compiled_model.linear, "_tmp_weight")
+        torch.testing.assert_close(eager_output, compiled_output)
 
 
 devices = ["cuda", "hpu", "xpu"]

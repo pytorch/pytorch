@@ -1215,9 +1215,9 @@ different device.
 
 Args:
     src (Tensor): the source tensor to copy from
-    non_blocking (bool): if ``True`` and this copy is between CPU and GPU,
+    non_blocking (bool, optional): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
-        cases, this argument has no effect.
+        cases, this argument has no effect. Default: ``False``
 """,
 )
 
@@ -1383,9 +1383,9 @@ If this object is already in CUDA memory and on the correct device,
 then no copy is performed and the original object is returned.
 
 Args:
-    device (:class:`torch.device`): The destination GPU device.
+    device (:class:`torch.device`, optional): The destination GPU device.
         Defaults to the current CUDA device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
+    non_blocking (bool, optional): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
@@ -1403,9 +1403,9 @@ If this object is already in MTIA memory and on the correct device,
 then no copy is performed and the original object is returned.
 
 Args:
-    device (:class:`torch.device`): The destination MTIA device.
+    device (:class:`torch.device`, optional): The destination MTIA device.
         Defaults to the current MTIA device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
+    non_blocking (bool, optional): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
@@ -1423,9 +1423,9 @@ If this object is already in IPU memory and on the correct device,
 then no copy is performed and the original object is returned.
 
 Args:
-    device (:class:`torch.device`): The destination IPU device.
+    device (:class:`torch.device`, optional): The destination IPU device.
         Defaults to the current IPU device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
+    non_blocking (bool, optional): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
@@ -1443,9 +1443,9 @@ If this object is already in XPU memory and on the correct device,
 then no copy is performed and the original object is returned.
 
 Args:
-    device (:class:`torch.device`): The destination XPU device.
+    device (:class:`torch.device`, optional): The destination XPU device.
         Defaults to the current XPU device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
+    non_blocking (bool, optional): If ``True`` and the source is in pinned memory,
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
@@ -1612,7 +1612,7 @@ This function modifies the input tensor in-place, and returns the input tensor.
 
 Arguments:
     fill_value (Scalar): the fill value
-    wrap (bool): the diagonal 'wrapped' after N columns for tall matrices.
+    wrap (bool, optional): the diagonal 'wrapped' after N columns for tall matrices. Default: ``False``
 
 Example::
 
@@ -3640,7 +3640,7 @@ Keyword args:
         tensor. Pad the out tensor with `fill_value` if the `size` is larger
         than total number of non-zero elements, truncate out tensor if `size`
         is smaller. The size must be a non-negative integer.
-    fill_value (int): the value to fill the output tensor with when `size` is larger
+    fill_value (int, optional): the value to fill the output tensor with when `size` is larger
         than the total number of non-zero elements. Default is `-1` to represent
         invalid index.
 
@@ -3848,7 +3848,7 @@ contain duplicate elements.
 Args:
     index (LongTensor): the indices into self
     source (Tensor): the tensor containing values to copy from
-    accumulate (bool): whether to accumulate into self
+    accumulate (bool, optional): whether to accumulate into self. Default: ``False``
 
 Example::
 

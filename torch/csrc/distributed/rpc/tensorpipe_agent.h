@@ -74,8 +74,6 @@ struct TORCH_API ChannelRegistration {
 
 TORCH_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
-constexpr auto kDefaultNumWorkerThreads = 16;
-
 struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
   TensorPipeRpcBackendOptions(
       int numWorkerThreads,

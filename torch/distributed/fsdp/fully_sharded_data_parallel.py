@@ -6,10 +6,10 @@ import functools
 import math
 import traceback
 import warnings
-from collections.abc import Generator, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import contextmanager
 from enum import auto, Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -120,9 +120,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     This is inspired by `Xu et al. <https://arxiv.org/abs/2004.13336>`_ as
     well as the ZeRO Stage 3 from `DeepSpeed <https://www.deepspeed.ai/>`_.
     FullyShardedDataParallel is commonly shortened to FSDP.
-
-    To understand FSDP internals, refer to the
-    :ref:`fsdp_notes`.
 
     Example::
 

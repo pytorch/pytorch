@@ -353,6 +353,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             logs_specs=self._logs_specs,
             log_line_prefixes=log_line_prefixes,
             start_method=self._start_method,
+            numa_options=spec.numa_options,
         )
 
         return self._pcontext.pids()

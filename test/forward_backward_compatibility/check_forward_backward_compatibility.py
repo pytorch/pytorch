@@ -139,6 +139,17 @@ ALLOW_LIST = [
     # These ops are defined in torch/csrc/distributed/c10d/Ops.cpp
     # TODO: add back restriction when c10d ops can be exported
     ("c10d::.*", datetime.date(9999, 1, 1)),
+    # Previously MPS_only did not support backward
+    ("aten::_fused_rms_norm", datetime.date(2025, 12, 30)),
+    # These casting ops were deprecated in PyTorch 1
+    ("aten::_cast_Half", datetime.date(9999, 1, 1), None, True),
+    ("aten::_cast_Short", datetime.date(9999, 1, 1), None, True),
+    ("aten::_cast_Long", datetime.date(9999, 1, 1), None, True),
+    ("aten::_cast_Int", datetime.date(9999, 1, 1), None, True),
+    ("aten::_cast_Float", datetime.date(9999, 1, 1), None, True),
+    ("aten::_cast_Double", datetime.date(9999, 1, 1), None, True),
+    ("aten::_cast_Char", datetime.date(9999, 1, 1), None, True),
+    ("aten::_cast_Byte", datetime.date(9999, 1, 1), None, True),
 ]
 
 ALLOW_LIST_COMPILED = [

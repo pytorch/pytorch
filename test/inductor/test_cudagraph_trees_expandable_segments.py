@@ -8,13 +8,13 @@ import sys
 import torch
 from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-if HAS_CUDA:
+if HAS_CUDA_AND_TRITON:
     try:
         from .test_cudagraph_trees import CudaGraphTreeTests
     except ImportError:
@@ -32,7 +32,12 @@ from tools.stats.import_test_stats import get_disabled_tests  # @manual
 sys.path.remove(str(REPO_ROOT))
 
 if __name__ == "__main__":
-    if torch.cuda.is_available() and not IS_JETSON and not IS_WINDOWS and HAS_CUDA:
+    if (
+        torch.cuda.is_available()
+        and not IS_JETSON
+        and not IS_WINDOWS
+        and HAS_CUDA_AND_TRITON
+    ):
         get_disabled_tests(".")
 
         torch.cuda.memory._set_allocator_settings("expandable_segments:True")

@@ -707,9 +707,8 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
 }
 
 void GraphTask::exec_post_processing() {
-  if (!not_ready_.empty()) {
-    throw std::runtime_error("could not compute gradients for some functions");
-  }
+  TORCH_CHECK(
+      not_ready_.empty(), "could not compute gradients for some functions");
 
   // set the thread_local current_graph_task_ as more callbacks can be installed
   // by existing final callbacks.
@@ -979,13 +978,13 @@ static void validate_outputs_impl(
     }
 
     if (grad.device() != metadata.device()) {
-      // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but
-      // should be eventually removed
-      if (!(metadata.is_tensor_subclass() ||
-            grad.unsafeGetTensorImpl()->is_python_dispatch())) {
-        if (grad.dim() == 0) {
-          grad = grad.to(metadata.device());
-        } else {
+      if (grad.dim() == 0) {
+        grad = grad.to(metadata.device());
+      } else {
+        // quick hack for: https://github.com/pytorch/pytorch/issues/65016 but
+        // should be eventually removed
+        if (!(metadata.is_tensor_subclass() ||
+              grad.unsafeGetTensorImpl()->is_python_dispatch())) {
           std::stringstream ss;
           ss << "invalid gradient at index " << i << " - expected device ";
           ss << metadata.device() << " but got " << grad.device();
@@ -1149,12 +1148,13 @@ void Engine::evaluate_function(
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
-        std::stringstream ss;
-        ss << "Function '" << fn.name() << "' returned nan values in its " << i
-           << "th output.";
-        throw std::runtime_error(ss.str());
-      }
+      TORCH_CHECK(
+          !output.defined() || !isnan(output)._is_any_true().item<bool>(),
+          "Function '",
+          fn.name(),
+          "' returned nan values in its ",
+          i,
+          "th output.");
     }
   }
 
@@ -1175,7 +1175,7 @@ void Engine::evaluate_function(
 
     if (it == dependencies.end()) {
       auto name = next.function->name();
-      throw std::runtime_error(std::string("dependency not found for ") + name);
+      TORCH_CHECK(false, "dependency not found for ", name);
     } else if (--it->second == 0) {
       dependencies.erase(it);
       is_ready = true;

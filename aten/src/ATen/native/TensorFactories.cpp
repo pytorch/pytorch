@@ -23,14 +23,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_cast_Byte_native.h>
-#include <ATen/ops/_cast_Char_native.h>
-#include <ATen/ops/_cast_Double_native.h>
-#include <ATen/ops/_cast_Float_native.h>
-#include <ATen/ops/_cast_Half_native.h>
-#include <ATen/ops/_cast_Int_native.h>
-#include <ATen/ops/_cast_Long_native.h>
-#include <ATen/ops/_cast_Short_native.h>
 #include <ATen/ops/_dim_arange_native.h>
 #include <ATen/ops/_efficientzerotensor_native.h>
 #include <ATen/ops/_empty_affine_quantized.h>
@@ -1640,6 +1632,9 @@ Tensor zeros_symint(
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
+  for (const auto& dim_size : size) {
+    TORCH_CHECK(dim_size >= 0, "zeros: Dimension size must be non-negative.");
+  }
   Layout layout_ = layout.value_or(Layout::Strided);
   if (at::sparse_csr::is_sparse_compressed(layout_)) {
     return zeros_sparse_compressed_symint(

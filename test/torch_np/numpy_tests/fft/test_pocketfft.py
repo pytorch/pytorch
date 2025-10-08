@@ -372,7 +372,7 @@ class TestFFTThreadSafe(TestCase):
             assert_allclose(
                 q.get(timeout=5),
                 expected,
-                atol=2e-14
+                atol=2e-14,
                 # msg="Function returned wrong value in multithreaded context",
             )
 

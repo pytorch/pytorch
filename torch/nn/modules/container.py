@@ -109,6 +109,7 @@ class Sequential(Module):
     def __init__(self, *args: Module) -> None: ...
 
     @overload
+    # pyrefly: ignore  # inconsistent-overload
     def __init__(self, arg: OrderedDict[str, Module]) -> None: ...
 
     def __init__(self, *args):
@@ -170,6 +171,9 @@ class Sequential(Module):
             )
 
     def pop(self, key: Union[int, slice]) -> Module:
+        """
+        Pop ``key`` from self.
+        """
         v = self[key]
         del self[key]
         return v
@@ -240,6 +244,9 @@ class Sequential(Module):
     # TestScript.test_sequential_intermediary_types).  Cannot annotate
     # with Any as TorchScript expects a more precise type
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         for module in self:
             input = module(input)
         return input
@@ -466,6 +473,7 @@ class ModuleList(Module):
         return self
 
     def pop(self, key: Union[int, slice]) -> Module:
+        # pyrefly: ignore  # index-error
         v = self[key]
         del self[key]
         return v
@@ -617,9 +625,11 @@ class ModuleDict(Module):
                         "ModuleDict update sequence element "
                         "#" + str(j) + " should be Iterable; is" + type(m).__name__
                     )
+                # pyrefly: ignore  # bad-argument-type
                 if not len(m) == 2:
                     raise ValueError(
                         "ModuleDict update sequence element "
+                        # pyrefly: ignore  # bad-argument-type
                         "#" + str(j) + " has length " + str(len(m)) + "; 2 is required"
                     )
                 # modules can be Mapping (what it's typed at), or a list: [(name1, module1), (name2, module2)]
@@ -678,6 +688,7 @@ class ParameterList(Module):
     def __getitem__(self, idx: int) -> Any: ...
 
     @overload
+    # pyrefly: ignore  # inconsistent-overload
     def __getitem__(self: T, idx: slice) -> T: ...
 
     def __getitem__(self, idx):
@@ -746,6 +757,9 @@ class ParameterList(Module):
         return self
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         child_lines = []
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):
@@ -760,9 +774,11 @@ class ParameterList(Module):
                     size_str,
                     device_str,
                 )
+                # pyrefly: ignore  # bad-argument-type
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
+                    # pyrefly: ignore  # bad-argument-type
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
 
@@ -970,9 +986,11 @@ class ParameterDict(Module):
                         "ParameterDict update sequence element "
                         "#" + str(j) + " should be Iterable; is" + type(p).__name__
                     )
+                # pyrefly: ignore  # bad-argument-type
                 if not len(p) == 2:
                     raise ValueError(
                         "ParameterDict update sequence element "
+                        # pyrefly: ignore  # bad-argument-type
                         "#" + str(j) + " has length " + str(len(p)) + "; 2 is required"
                     )
                 # parameters as length-2 list too cumbersome to type, see ModuleDict.update comment
@@ -993,9 +1011,11 @@ class ParameterDict(Module):
                     size_str,
                     device_str,
                 )
+                # pyrefly: ignore  # bad-argument-type
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
+                    # pyrefly: ignore  # bad-argument-type
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
         tmpstr = "\n".join(child_lines)

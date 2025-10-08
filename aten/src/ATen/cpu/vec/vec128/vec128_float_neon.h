@@ -4,12 +4,9 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/sve/sve_helper.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
-
-#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
-#include <sleef.h>
-#endif
 
 // Sleef offers vectorized versions of some transcedentals
 // such as sin, cos, tan etc..
@@ -33,12 +30,6 @@ inline namespace CPU_CAPABILITY {
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
-#endif
-
-#if defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
-#define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
-#else
-#define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
 template <int index, bool mask_val>
@@ -83,7 +74,9 @@ class Vectorized<float> {
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = vmovq_n_f32(0);
+  }
   Vectorized(float32x4_t v) : values(v) {}
   Vectorized(float val) : values{vdupq_n_f32(val)} {}
   Vectorized(float val0, float val1, float val2, float val3)
@@ -92,6 +85,12 @@ class Vectorized<float> {
   operator float32x4_t() const {
     return values;
   }
+#ifdef CPU_CAPABILITY_SVE128
+  Vectorized(svfloat32_t v) : values(svget_neonq(v)) {}
+  operator svfloat32_t() const {
+    return svset_neonq(svundef_f32(), values);
+  }
+#endif
   template <int64_t mask>
   static Vectorized<float> blend(
       const Vectorized<float>& a,
@@ -583,11 +582,27 @@ Vectorized<float> inline fmadd(
 }
 
 template <>
+Vectorized<float> inline fnmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return Vectorized<float>(vfmsq_f32(c, a, b));
+}
+
+template <>
 Vectorized<float> inline fmsub(
     const Vectorized<float>& a,
     const Vectorized<float>& b,
     const Vectorized<float>& c) {
   return Vectorized<float>(vnegq_f32(vfmsq_f32(c, a, b)));
+}
+
+template <>
+Vectorized<float> inline fnmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return Vectorized<float>(vnegq_f32(vfmaq_f32(c, a, b)));
 }
 
 inline Vectorized<float> Vectorized<float>::erf() const {

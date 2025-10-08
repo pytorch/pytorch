@@ -77,7 +77,9 @@ Single-node multi-worker
 .. note:: ``--nproc-per-node`` may be
           ``"gpu"`` (spawn one process per GPU),
           ``"cpu"`` (spawn one process per CPU),
+          ``"xpu"`` (spawn one process per XPU),
           ``"auto"`` (equivalent to ``"gpu"`` if CUDA is available,
+          else equivalent to ``"xpu"`` if XPU is available,
           else equivalent to ``"cpu"``),
           or an integer specifying the number of processes.
           See `torch.distributed.run.determine_local_world_size
@@ -371,8 +373,9 @@ import os
 import sys
 import uuid
 from argparse import ArgumentParser, REMAINDER
+from collections.abc import Callable
 from importlib import metadata
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -382,6 +385,10 @@ from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import elastic_launch, LaunchConfig
+from torch.numa.binding import (
+    AffinityMode as _AffinityMode,  # Signify as private with _
+    NumaOptions as _NumaOptions,
+)
 from torch.utils.backend_registration import _get_custom_mod_func
 
 
@@ -409,7 +416,7 @@ def get_args_parser() -> ArgumentParser:
         action=env,
         type=str,
         default="1",
-        help="Number of workers per node; supported values: [auto, cpu, gpu, int].",
+        help="Number of workers per node; supported values: [auto, cpu, gpu, xpu, int].",
     )
 
     #
@@ -616,6 +623,42 @@ def get_args_parser() -> ArgumentParser:
         "Can be used to override custom logging behavior.",
     )
 
+    parser.add_argument(
+        "--numa-binding",
+        "--numa_binding",
+        type=str,
+        choices=[mode.value for mode in _AffinityMode],
+        default=None,
+        help="""
+        If provided, we will affinitize the worker processes based on NUMA nodes
+        for better performance. (E.g., preferring to allocate memory locally and run on CPUs on the
+        same NUMA node.)
+
+        NOTE: This is currently only supported for GPUs, and we assume
+        that the LOCAL_RANK process corresponds to the GPU with index LOCAL_RANK. If this is not
+        accurate for your workload, this feature may be a pessimization.
+
+        Available options are:
+          - node: Processes are bound to cpu cores within a NUMA node. This is a good starting point,
+          but other options may perform even slightly better in some cases.
+          - socket: Processes are bound to cpu cores within a socket.
+          - exclusive: Processes are bound to exclusive sets of cpu cores within a NUMA node.
+          - core-complex: Processes are bound to cpu cores in a core-complex.
+          NOTE: The core-complex option might not achieve optimal performance on architectures
+          featuring a single L3 cache per socket.""",
+    )
+
+    parser.add_argument(
+        "--signals-to-handle",
+        "--signals_to_handle",
+        action=env,
+        type=str,
+        default="SIGTERM,SIGINT,SIGHUP,SIGQUIT",
+        help="Comma-separated list of signals to handle and forward to subprocesses. "
+        "Default: SIGTERM,SIGINT,SIGHUP,SIGQUIT. "
+        "Common additional signals: SIGUSR1,SIGUSR2 (used in SLURM environments).",
+    )
+
     #
     # Positional arguments.
     #
@@ -665,21 +708,20 @@ def determine_local_world_size(nproc_per_node: str):
                 raise ValueError("Cuda is not available.") from e
             device_type = "gpu"
             num_proc = torch.cuda.device_count()
+        elif nproc_per_node == "xpu":
+            if not torch.xpu.is_available():
+                raise ValueError("Xpu is not available.") from e
+            device_type = "xpu"
+            num_proc = torch.xpu.device_count()
         elif nproc_per_node == torch._C._get_privateuse1_backend_name():
             if not _get_custom_mod_func("is_available")():
                 raise ValueError(f"{nproc_per_node} is not available.") from e
             device_type = nproc_per_node
             num_proc = _get_custom_mod_func("device_count")()
         elif nproc_per_node == "auto":
-            if torch.cuda.is_available():
-                num_proc = torch.cuda.device_count()
-                device_type = "gpu"
-            elif (
-                hasattr(torch, torch._C._get_privateuse1_backend_name())
-                and _get_custom_mod_func("is_available")()
-            ):
-                num_proc = _get_custom_mod_func("device_count")()
-                device_type = torch._C._get_privateuse1_backend_name()
+            if torch.accelerator.is_available():
+                num_proc = torch.accelerator.device_count()
+                device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
             else:
                 num_proc = os.cpu_count()
                 device_type = "cpu"
@@ -729,14 +771,9 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
     logs_specs_cls = None
     if logs_specs_name is not None:
         eps = metadata.entry_points()
-        if hasattr(eps, "select"):  # >= 3.10
-            group = eps.select(group="torchrun.logs_specs")
-            if group.select(name=logs_specs_name):
-                logs_specs_cls = group[logs_specs_name].load()
-
-        elif specs := eps.get("torchrun.logs_specs"):  # < 3.10
-            if entrypoint_list := [ep for ep in specs if ep.name == logs_specs_name]:
-                logs_specs_cls = entrypoint_list[0].load()
+        group = eps.select(group="torchrun.logs_specs")
+        if group.select(name=logs_specs_name):
+            logs_specs_cls = group[logs_specs_name].load()
 
         if logs_specs_cls is None:
             raise ValueError(
@@ -809,6 +846,11 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         tee=Std.from_str(args.tee),
         local_ranks_filter=ranks,
     )
+    numa_options = (
+        None
+        if args.numa_binding is None
+        else _NumaOptions(affinity_mode=_AffinityMode(args.numa_binding))
+    )
 
     config = LaunchConfig(
         min_nodes=min_nodes,
@@ -826,6 +868,8 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         local_addr=args.local_addr,
         logs_specs=logs_specs,
         event_log_handler=args.event_log_handler,
+        numa_options=numa_options,
+        signals_to_handle=args.signals_to_handle,
     )
 
     with_python = not args.no_python

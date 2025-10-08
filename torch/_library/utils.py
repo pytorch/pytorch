@@ -2,23 +2,13 @@
 import dataclasses
 import inspect
 import sys
-import warnings
-from collections.abc import Iterable, Iterator
-from typing import Any, Callable, Union
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, Literal, Optional, overload, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
-
-
-def warn_deploy(stacklevel=3):
-    warnings.warn(
-        "Python torch.library APIs do nothing under torch::deploy (multipy). "  # codespell:ignore multipy
-        "Please instead use C++ custom operator registration APIs.",
-        RuntimeWarning,
-        stacklevel=stacklevel,
-    )
 
 
 @dataclasses.dataclass
@@ -145,7 +135,7 @@ def mutates_and_returns_first_arg(op: OpOverload):
     if op.namespace != "aten":
         return False
     schema = op._schema
-    if not len(schema.returns) == 1:
+    if len(schema.returns) != 1:
         return False
     if schema.returns[0].alias_info is None:
         return False
@@ -351,13 +341,13 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
     """
     custom operators' outputs must not alias any inputs or other outputs.
     """
-    storages = {id(t.untyped_storage()) for t in prev if isinstance(t, torch.Tensor)}
+    storages = {t.untyped_storage()._cdata for t in prev if isinstance(t, torch.Tensor)}
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
     for tensor in iter_tensors(tuple_result, {}):
-        key = id(tensor.untyped_storage())
-        if id(tensor.untyped_storage()) in storages:
+        key = tensor.untyped_storage()._cdata
+        if tensor.untyped_storage()._cdata in storages:
             raise RuntimeError(
                 f"{name} (with implementation in {get_module()}): "
                 f"The output of this custom operator (1) must not "
@@ -509,6 +499,20 @@ tags_by_priority = [
     _C.Tag.needs_fixed_stride_order,
     _C.Tag.flexible_layout,
 ]
+
+
+# Case 1: with_default=True (or omitted). Return type is guaranteed to be a Tag.
+@overload
+def get_layout_constraint_tag(
+    fn: Any, *, with_default: Literal[True] = True
+) -> _C.Tag: ...
+
+
+# Case 2: with_default=False. Return type can be a Tag or None.
+@overload
+def get_layout_constraint_tag(
+    fn: Any, *, with_default: Literal[False]
+) -> Optional[_C.Tag]: ...
 
 
 def get_layout_constraint_tag(fn, *, with_default=True):

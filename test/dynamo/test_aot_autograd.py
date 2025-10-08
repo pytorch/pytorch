@@ -910,7 +910,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 7|aten.view.default||l__self___fc1
 6|aten.t.default||l__self___fc1
 5|aten.view.default||l__self___fc1
-4|aten.view.default||
+4|aten.view.default||flatten
 2|aten.detach.default||l__self___relu1
 2|aten.detach.default||l__self___relu1
 2|aten.threshold_backward.default||l__self___relu1
@@ -1339,6 +1339,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_donated_buffer6(self):
         if is_dynamic_shape_test(self._testMethodName):
             # parameters should not be dynamic shape

@@ -27,6 +27,7 @@ import warnings
 
 from _codecs import encode
 from collections import Counter, OrderedDict
+from collections.abc import Callable
 from pickle import (
     APPEND,
     APPENDS,
@@ -68,7 +69,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Callable, Union
+from typing import Any, Union
 
 import torch
 from torch._utils import _sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
@@ -403,9 +404,12 @@ class Unpickler:
                     func not in _get_allowed_globals().values()
                     and func not in _get_user_allowed_globals().values()
                 ):
-                    raise UnpicklingError(
+                    error_msg = (
                         f"Trying to call reduce for unrecognized function {func}"
                     )
+                    if hasattr(func, "__self__"):
+                        error_msg += f" which belongs to {func.__self__}"
+                    raise UnpicklingError(error_msg)
                 result = func(*args)
                 if func in torch._tensor_classes and "sparse" in func.__module__:
                     _sparse_tensors_to_validate.append(result)
@@ -517,7 +521,7 @@ class Unpickler:
             elif key[0] == BINPERSID[0]:
                 pid = self.stack.pop()
                 # Only allow persistent load of storage
-                if type(pid) is not tuple and not type(pid) is not int:
+                if type(pid) is not tuple and type(pid) is not int:
                     raise UnpicklingError(
                         f"persistent_load id must be tuple or int, but got {type(pid)}"
                     )

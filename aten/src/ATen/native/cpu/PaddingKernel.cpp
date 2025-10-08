@@ -156,7 +156,7 @@ void cpu_padding(
   int64_t offset_h = ndim >= 2 ? p.offsets[ndim - 2] : 0;
   int64_t offset_w = p.offsets[ndim - 1];
 
-  // do vectorized copy whe output is overlapped with input on W,
+  // do vectorized copy when output is overlapped with input on W,
   // only applies to positive padding
   auto loop = [=](scalar_t* out, const scalar_t* in, bool positive_padding) {
     if (positive_padding) {

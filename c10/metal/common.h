@@ -9,7 +9,6 @@
 #define C10_METAL_CONSTEXPR constexpr
 #endif
 
-#if !defined(__METAL__) || __METAL_VERSION__ >= 310
 #define C10_METAL_ALL_TYPES_FUNCTOR(_) \
   _(Byte, 0)                           \
   _(Char, 1)                           \
@@ -22,19 +21,6 @@
   _(ComplexFloat, 9)                   \
   _(Bool, 11)                          \
   _(BFloat16, 15)
-#else
-#define C10_METAL_ALL_TYPES_FUNCTOR(_) \
-  _(Byte, 0)                           \
-  _(Char, 1)                           \
-  _(Short, 2)                          \
-  _(Int, 3)                            \
-  _(Long, 4)                           \
-  _(Half, 5)                           \
-  _(Float, 6)                          \
-  _(ComplexHalf, 8)                    \
-  _(ComplexFloat, 9)                   \
-  _(Bool, 11)
-#endif
 
 namespace c10 {
 namespace metal {

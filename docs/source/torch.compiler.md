@@ -26,6 +26,9 @@ written in Python and it marks the transition of PyTorch from C++ to Python.
   which results in capturing the backwards pass "ahead-of-time". This enables
   acceleration of both forwards and backwards pass using TorchInductor.
 
+To better understand how `torch.compile` tracing behavior on your code, or to
+learn more about the internals of `torch.compile`, please refer to the [`torch.compile` programming model](compile/programming_model.md).
+
 :::{note}
 In some cases, the terms `torch.compile`, TorchDynamo, `torch.compiler`
 might be used interchangeably in this documentation.
@@ -79,48 +82,48 @@ Some of the most commonly used backends include:
 
 ## Read More
 
-```{eval-rst}
-.. toctree::
-   :caption: Getting Started for PyTorch Users
-   :maxdepth: 1
+```{toctree}
+:caption: Getting Started for PyTorch Users
+:maxdepth: 2
 
-   torch.compiler_get_started
-   torch.compiler_api
-   torch.compiler.config
-   torch.compiler_fine_grain_apis
-   torch.compiler_backward
-   torch.compiler_aot_inductor
-   torch.compiler_inductor_profiling
-   torch.compiler_profiling_torch_compile
-   torch.compiler_faq
-   torch.compiler_troubleshooting
-   torch.compiler_performance_dashboard
-   torch.compiler_inductor_provenance
+torch.compiler_get_started
+torch.compiler_api
+torch.compiler.config
+torch.compiler_dynamic_shapes
+torch.compiler_fine_grain_apis
+torch.compiler_backward
+torch.compiler_aot_inductor
+torch.compiler_inductor_profiling
+torch.compiler_profiling_torch_compile
+torch.compiler_faq
+torch.compiler_troubleshooting
+torch.compiler_performance_dashboard
+torch.compiler_inductor_provenance
 ```
 
-% _If you want to contribute a developer-level topic
-%  that provides in-depth overview of a torch._dynamo feature,
-%  add in the below toc.
+```{toctree}
+:caption: torch.compile Programming Model
+:maxdepth: 2
 
-```{eval-rst}
-.. toctree::
-   :caption: Deep Dive for PyTorch Developers
-   :maxdepth: 1
-
-   torch.compiler_dynamo_overview
-   torch.compiler_dynamo_deepdive
-   torch.compiler_dynamic_shapes
-   torch.compiler_nn_module
-   torch.compiler_cudagraph_trees
-   torch.compiler_fake_tensor
+compile/programming_model
 ```
 
-```{eval-rst}
-.. toctree::
-   :caption: HowTo for PyTorch Backend Vendors
-   :maxdepth: 1
+```{toctree}
+:caption: Deep Dive for PyTorch Developers
+:maxdepth: 1
 
-   torch.compiler_custom_backends
-   torch.compiler_transformations
-   torch.compiler_ir
+torch.compiler_dynamo_overview
+torch.compiler_dynamo_deepdive
+torch.compiler_nn_module
+torch.compiler_cudagraph_trees
+torch.compiler_fake_tensor
+```
+
+```{toctree}
+:caption: HowTo for PyTorch Backend Vendors
+:maxdepth: 1
+
+torch.compiler_custom_backends
+torch.compiler_transformations
+torch.compiler_ir
 ```

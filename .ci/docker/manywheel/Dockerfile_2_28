@@ -130,7 +130,8 @@ ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/op
 RUN for cpython_version in "cp312-cp312" "cp313-cp313" "cp313-cp313t"; do \
     /opt/python/${cpython_version}/bin/python -m pip install setuptools wheel; \
     done;
-
+ADD ./common/patch_libstdc.sh patch_libstdc.sh
+RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
 
 # cmake-3.18.4 from pip; force in case cmake3 already exists
 RUN yum install -y python3-pip && \
@@ -175,6 +176,6 @@ ENV XPU_DRIVER_TYPE ROLLING
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 ADD ./common/install_xpu.sh install_xpu.sh
-ENV XPU_VERSION 2025.1
+ENV XPU_VERSION 2025.2
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd

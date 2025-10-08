@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from contextlib import contextmanager, ExitStack, nullcontext
+from collections.abc import Callable, Iterable, Sequence
+from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, overload, TypeVar, Union
+from typing import Any, Optional, overload, TypeVar, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -95,17 +96,8 @@ def _maybe_run_with_interpreter(fn):
 
 def _maybe_compile_and_run_fn(fn, *args):
     if not torch.compiler.is_dynamo_compiling():
-        from torch._dynamo.backends.debugging import (
-            make_eager_backend_with_torch_function_mode,
-        )
-
-        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-                if metadata_mode:
-                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
-                else:
-                    backend = "eager"
-                return torch.compile(fn, backend=backend, fullgraph=True)(*args)
+        with setup_compilation_env() as backend:  # type: ignore[attr-defined]
+            return torch.compile(fn, backend=backend, fullgraph=True)(*args)
     else:
         return fn(*args)
 
@@ -118,9 +110,10 @@ def reenter_make_fx(fn):
         assert _CURRENT_MAKE_FX_TRACER is not None, (
             "Cannot reenter make_fx when we're not under a make_fx tracing session"
         )
-        return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+        gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
+        return gm
 
     return wrapped
 
@@ -233,6 +226,34 @@ def check_meta_consistency(
 
 
 @contextmanager
+def setup_compilation_env():
+    """
+    Context manager that sets up proper environment and backend when invoking torch.compile
+    inside torch.export region or inside HOP.
+    """
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_modes,
+    )
+    from torch.fx.experimental.proxy_tensor import (
+        _temp_remove_pre_dispatch_torch_function_mode,
+    )
+
+    with (
+        _set_compilation_env(),
+        torch._dynamo.utils.disable_cache_limit(),
+        _temp_remove_pre_dispatch_torch_function_mode() as pre_dispatch_mode,
+        _temp_remove_metadata_torch_function_mode() as metadata_mode,
+    ):
+        modes = [
+            mode for mode in (pre_dispatch_mode, metadata_mode) if mode is not None
+        ]
+        if modes:
+            yield make_eager_backend_with_torch_function_modes(modes)
+        else:
+            yield "eager"
+
+
+@contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
     _old_allow_empty_graphs = torch._dynamo.config.allow_empty_graphs
@@ -249,6 +270,7 @@ def _set_compilation_env():
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        # pyrefly: ignore  # bad-assignment
         torch._dynamo.config.allow_empty_graphs = True
         torch._dynamo.config.capture_scalar_outputs = True
         yield
@@ -260,11 +282,12 @@ def _set_compilation_env():
 
 # The invariant here is that we always trace the branch with fake tensor
 def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
-    fake_mode = detect_fake_mode(inputs)
-    tracing_mode = "real"
-    if fake_mode is None:
-        fake_mode = nullcontext()
-        tracing_mode = "fake"
+    fake_mode_det = detect_fake_mode(inputs)
+    fake_mode: AbstractContextManager = nullcontext()
+    tracing_mode = "fake"
+    if fake_mode_det is not None:
+        fake_mode = fake_mode_det
+        tracing_mode = "real"
 
     # Note: we need to turn off proxy tensor mode to avoid tracing infra
     # code that happens in make_fx e.g. we now call as_strided when wrapping tensor
@@ -276,9 +299,12 @@ def _maybe_fake_tracing(fn, inputs: list[Any], pre_dispatch):
             pre_dispatch=pre_dispatch,
             _error_on_data_dependent_ops=False,
         )(*inputs)
-        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:
+        if not isinstance(fake_mode, nullcontext) and fake_mode.shape_env is not None:  # type: ignore[attr-defined]
             insert_deferred_runtime_asserts(
-                gm, fake_mode.shape_env, "hoo_maybe_fake_tracing", export=True
+                gm,
+                fake_mode.shape_env,  # type: ignore[attr-defined]
+                "hoo_maybe_fake_tracing",
+                export=True,  # type: ignore[attr-defined]
             )
         return gm
 
@@ -415,6 +441,7 @@ def unique_graph_name_with_root(
 ) -> tuple[int, str]:
     next_name = None
     i = 0
+    # pyrefly: ignore  # bad-assignment
     while not next_name:
         candidate = f"{prefix}_{i}"
         if hasattr(root, candidate):
@@ -475,8 +502,7 @@ def prepare_fw_with_masks(fn):
     def fw_with_masks(*args):
         fw_out = fn(*args)
         return fw_out, [
-            True if isinstance(ret, torch.Tensor) and ret.requires_grad else False
-            for ret in fw_out
+            bool(isinstance(ret, torch.Tensor) and ret.requires_grad) for ret in fw_out
         ]
 
     return fw_with_masks
@@ -493,11 +519,17 @@ def prepare_fw_with_masks_all_requires_grad(fn):
         # require_gradness reasoning much easier.
         if pytree.tree_any_only(torch.Tensor, lambda t: t.requires_grad, args):
             fw_out = pytree.tree_map_only(
-                torch.Tensor, lambda x: x.requires_grad_(True), fw_out
+                torch.Tensor,
+                lambda x: x.requires_grad_(True) if x.dtype.is_floating_point else x,
+                fw_out,
             )
-        return fw_out, pytree.tree_map_only(
-            torch.Tensor, lambda x: x.requires_grad, fw_out
-        )
+
+        def _query_requires_grad(t: torch.Tensor) -> bool:
+            if torch._is_functional_tensor(t):
+                t = torch._from_functional_tensor(t)
+            return t.requires_grad
+
+        return fw_out, pytree.tree_map_only(torch.Tensor, _query_requires_grad, fw_out)
 
     return fw_with_masks
 
@@ -712,6 +744,101 @@ def saved_tensors_and_symints(ctx):
     return tuple(args)
 
 
+def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
+    assert sum(chunk_sizes) == len(iterable), (
+        "the sum of all chunks needs to match the length of the iterable."
+    )
+    elements = []
+    idx = 0
+    for size in chunk_sizes:
+        elements.append(iterable[idx : idx + size])
+        idx += size
+    return elements
+
+
+def _clone_aliasing_output(inputs: Sequence[Any], outputs: Sequence[Any]):
+    # For tensors whose grad is None, create zero tensors as gradients
+    # This invariant is useful for cudagraph.
+
+    # Elimitate input-output, output-output aliasing
+    seen_input_storages = {
+        StorageWeakRef(t._typed_storage())
+        for t in inputs
+        if isinstance(t, torch.Tensor)
+    }
+    seen_output_storages = set()
+    final_outputs = []
+    for out in outputs:
+        if isinstance(out, torch.Tensor):
+            out_storage = StorageWeakRef(out._typed_storage())
+            if (
+                out_storage in seen_input_storages
+                or out_storage in seen_output_storages
+            ):
+                out = out.clone()
+            seen_output_storages.add(StorageWeakRef(out._typed_storage()))
+        final_outputs.append(out)
+    return final_outputs
+
+
+def create_bw_fn(
+    fn: Callable, args: tuple[Any, ...], return_fw_outputs: bool = False
+) -> Callable:
+    """
+    For a fn that accepts flat inputs and returns flat outputs:
+        fw_out = fn(*args),
+    this function returns:
+        grad_args = bw_fn(*args_and_grad_output)
+    with the following invariants:
+      1. args + fw_out has an 1-1 correspondence to args_and_grad_output
+      2. grad_args has an 1-1 corresponsence to args
+      3. for tensor arg whose requires_grad is False, its corresponding grad in
+         grad_args will be a zero tensor with the same shape.
+    """
+
+    from torch._functorch.aot_autograd import AOTConfig, create_joint
+
+    # pyrefly: ignore  # missing-module-attribute
+    from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
+
+    dummy_aot_config = AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+    n_primals = len(args)
+
+    bw_fn = create_joint(
+        prepare_fw_with_masks_all_requires_grad(fn), aot_config=dummy_aot_config
+    )
+
+    def flat_fn(*args_and_grad_outs):
+        primals = args_and_grad_outs[:n_primals]
+        tangents = args_and_grad_outs[n_primals:]
+        fw_outs, grad_args = bw_fn(primals, tangents)
+        assert len(args) == len(grad_args)
+
+        # For tensors whose grad is None, create zero tensors as gradients
+        # This invariant is useful for cudagraph.
+        grad_args = [
+            torch.zeros_like(arg)
+            if isinstance(arg, torch.Tensor) and grad is None
+            else grad
+            for grad, arg in zip(grad_args, primals)
+        ]
+
+        final_grads = _clone_aliasing_output(args_and_grad_outs, grad_args)
+        if return_fw_outputs:
+            return *fw_outs, *final_grads
+        return final_grads
+
+    return flat_fn
+
+
 def get_dummy_aot_autograd_config():
     from torch._functorch.aot_autograd import AOTConfig
 
@@ -729,6 +856,40 @@ def get_dummy_aot_autograd_config():
 # Slices off the first element of a given dimension
 def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
+
+
+# Returns a mask whether a list element is a tensor or not
+def get_tensor_mask(tensor_list: Iterable[Any]) -> list[bool]:
+    return [bool(isinstance(v, torch.Tensor)) for v in tensor_list]
+
+
+def mask_list(
+    mask: list[bool], inp: list[Any], other: Optional[list[Any]] = None
+) -> list[Any]:
+    # Masks elements on an `inp` list.
+    # If other is None, then the elements of the `inp` list where the mask is False are removed
+    # If other is not None, then the elements of the `inp` list where the mask is False are
+    # replaced with the elements of the `other` list
+    assert len(mask) == len(inp), (
+        "The length of the mask needs to be identical to the length of the input"
+    )
+    if other is not None:
+        assert len(inp) == len(other), (
+            "If an input and an other list is provided, they need to have the same length"
+        )
+        return [i if m else o for m, i, o in zip(mask, inp, other)]
+    else:
+        return [i for m, i in zip(mask, inp) if m]
+
+
+def first_slice_copy_with_grad(li: Iterable[Any]) -> list[Any]:
+    # First_slice_copy does not keep the original requires_grad flag,
+    # but we need it for materialize_as_graph
+    # in order to compute the correct gradients
+    # The reason why first_slice_copy doesn't keep requires_grad flag is
+    # because it's called in torch.autograd.Function.backward/forward.
+    slc = [first_slice_copy(x).requires_grad_(x.requires_grad) for x in li]
+    return slc
 
 
 # Reports the difference between meta of two tensors in a string
@@ -781,13 +942,17 @@ def check_input_alias_and_mutation(
         inp_out_alias_map,
         out_out_alias_map,
         mutated_inputs,
-    ) = check_input_alias_and_mutation_return_outputs(gm, fake_args)[:-1]
+    ) = check_input_alias_and_mutation_return_outputs(gm)[:-1]
+    # pyrefly: ignore  # bad-return
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
+
+
+def _tensor_storage(t) -> StorageWeakRef:
+    return StorageWeakRef(t._typed_storage())
 
 
 def check_input_alias_and_mutation_return_outputs(
     gm: torch.fx.GraphModule,
-    fake_args: Union[list[FakeTensor], tuple[FakeTensor, ...]],
 ) -> tuple[
     dict[int, int],
     dict[int, int],
@@ -795,139 +960,68 @@ def check_input_alias_and_mutation_return_outputs(
     list[int],
     Union[tuple[Any, ...], list[Any]],
 ]:
-    # This function can be called under autograd, functional, proxy and fake tensor mode.
-    # We need to return either a fake tensor or a real tensor depending on the mode.
-    # to detect the input mutation/aliasing.
-    with (
-        disable_proxy_modes_tracing(),
-        disable_functional_mode(),
-        suspend_functionalization(),
-    ):
+    def _get_example_value(n):
+        if not isinstance(n, torch.fx.Node):
+            return n
+        else:
+            return n.meta["val"] if "val" in n.meta else n.meta["example_value"]
 
-        def _from_functional_tensor(t: torch.Tensor) -> torch.Tensor:
-            if isinstance(t, FunctionalTensor) or torch._is_functional_tensor(t):
-                return torch.empty_strided(
-                    t.size(),
-                    t.stride(),
-                    dtype=t.dtype,
-                    requires_grad=t.requires_grad,
-                    device=t.device,
-                )
-            return t
+    fake_args = [
+        _get_example_value(n)
+        for n in gm.graph.find_nodes(op="placeholder")
+        if isinstance(n, torch.fx.Node) and "val" in n.meta
+    ]
+    outputs = [
+        _get_example_value(n)
+        for n in pytree.tree_flatten(gm.graph.find_nodes(op="output")[0].args[0])[0]
+    ]
 
-        fake_args = pytree.tree_map_only(
-            torch.Tensor, _from_functional_tensor, fake_args
-        )
-    # We want to disable active functional, proxy and fake modes if any.
-    # to create a encapsulated environment for fake tensor prop
-    with torch.utils._python_dispatch._disable_current_modes():
-        """This function returns mutated inputs, inp-inp alias, inp-out alias, out-out alias
-        in the graph module gm. It checks whether input tensor versions have
-        changed after run gm once to detect mutation and checks tensor storage
-        to detect alias.
-        """
+    # We need to analyze the original fake_args to detect
+    # inp-inp alias.
+    inp_storage_map = {
+        _tensor_storage(inp): i
+        for i, inp in enumerate(fake_args)
+        if isinstance(inp, torch.Tensor)
+    }
+    out_storage_map = {
+        _tensor_storage(out): i
+        for i, out in enumerate(outputs)
+        if isinstance(out, torch.Tensor)
+    }
+    inp_inp_alias_map = {
+        i: inp_storage_map[_tensor_storage(inp)]
+        for i, inp in enumerate(fake_args)
+        if isinstance(inp, torch.Tensor) and inp_storage_map[_tensor_storage(inp)] != i
+    }
+    out_out_alias_map = {
+        i: out_storage_map[_tensor_storage(out)]
+        for i, out in enumerate(outputs)
+        if isinstance(out, torch.Tensor) and out_storage_map[_tensor_storage(out)] != i
+    }
+    inp_out_alias_map = {
+        i: out_storage_map[_tensor_storage(inp)]
+        for i, inp in enumerate(fake_args)
+        if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
+    }
+    mutated_inputs = []
+    for node in gm.graph.nodes:
+        if node.op == "call_function" and isinstance(
+            node.target, torch._ops.OpOverload
+        ):
+            for arg_node, arg_schema in zip(node.args, node.target._schema.arguments):
+                if arg_schema.is_write:
+                    arg_val = _get_example_value(arg_node)
+                    assert isinstance(arg_val, torch.Tensor)
+                    if _tensor_storage(arg_val) in inp_storage_map:
+                        mutated_inputs.append(inp_storage_map[_tensor_storage(arg_val)])
 
-        def _tensor_version(t) -> Optional[int]:
-            if isinstance(t, torch.Tensor):
-                if not isinstance(t, FakeTensor):
-                    raise RuntimeError("Only fake tensor is allowed")
-                return t._version
-            return None
-
-        def _tensor_storage(t) -> StorageWeakRef:
-            return StorageWeakRef(t._typed_storage())
-
-        def _get_shape_env(
-            fake_args,
-        ) -> Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv]:
-            # detect_fake_mode requires there could be only one active fake mode. This
-            # restricts the usage of this function because the global TracingContext
-            # has a persistent fake mode but fake tensors can be created
-            # outside of the tracing context (e.g. in testing).
-            # Instead, we just look at fake_args fake tensor mode
-            if len(fake_args) == 0:
-                return torch.fx.experimental.symbolic_shapes.ShapeEnv()
-
-            for arg in fake_args:
-                if isinstance(arg, FakeTensor):
-                    return arg.fake_mode.shape_env
-            return None
-
-        # Clone the fake args to avoid mutating the original fake args
-        with ExitStack() as ctx_stack:
-            # We need to reuse prev_fake_mode's shape env to resolve
-            # the runtime assertions for unbacked symbols.
-            new_fake_mode = torch._subclasses.FakeTensorMode(
-                shape_env=_get_shape_env(fake_args),
-                allow_non_fake_inputs=False,
-            )
-            # We need to temporarily turn inference_mode off because
-            # under inference mode, tensor version counter is not tracked.
-            no_inference_mode_ctx = torch.inference_mode(False)
-            ctx_stack.enter_context(new_fake_mode)
-            ctx_stack.enter_context(no_inference_mode_ctx)
-            if new_fake_mode.shape_env is not None:
-                ctx_stack.enter_context(
-                    new_fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                )
-
-            # create new fake tensors in new fake mode to avoid mutating original tensors
-            cloned = [
-                torch.empty_strided(
-                    arg.size(),
-                    arg.stride(),
-                    dtype=arg.dtype,
-                    device=arg.device,
-                    requires_grad=arg.requires_grad,
-                    layout=arg.layout,
-                )
-                if isinstance(arg, torch.Tensor)
-                else arg
-                for arg in fake_args
-            ]
-            before = [_tensor_version(arg) for arg in cloned]
-            outputs = gm(*cloned)
-            outputs = [outputs] if not isinstance(outputs, (list, tuple)) else outputs
-            after = [_tensor_version(arg) for arg in cloned]
-            mutated_inputs = [
-                i for i, (v1, v2) in enumerate(zip(before, after)) if v1 != v2
-            ]
-        # We need to analyze the original fake_args to detect
-        # inp-inp alias.
-        inp_storage_map = {
-            _tensor_storage(inp): i
-            for i, inp in enumerate(fake_args)
-            if isinstance(inp, torch.Tensor)
-        }
-        inp_inp_alias_map = {
-            i: inp_storage_map[_tensor_storage(inp)]
-            for i, inp in enumerate(fake_args)
-            if isinstance(inp, torch.Tensor)
-            and inp_storage_map[_tensor_storage(inp)] != i
-        }
-        out_storage_map = {
-            _tensor_storage(out): i
-            for i, out in enumerate(outputs)
-            if isinstance(out, torch.Tensor)
-        }
-        out_out_alias_map = {
-            i: out_storage_map[_tensor_storage(out)]
-            for i, out in enumerate(outputs)
-            if isinstance(out, torch.Tensor)
-            and out_storage_map[_tensor_storage(out)] != i
-        }
-        inp_out_alias_map = {
-            i: out_storage_map[_tensor_storage(inp)]
-            for i, inp in enumerate(cloned)
-            if isinstance(inp, torch.Tensor) and _tensor_storage(inp) in out_storage_map
-        }
-        return (
-            inp_inp_alias_map,
-            inp_out_alias_map,
-            out_out_alias_map,
-            mutated_inputs,
-            outputs,
-        )
+    return (
+        inp_inp_alias_map,
+        inp_out_alias_map,
+        out_out_alias_map,
+        mutated_inputs,
+        outputs,
+    )
 
 
 registered_hop_fake_fns: dict[torch._ops.OpOverload, Callable] = {}
@@ -1046,7 +1140,7 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
 
 def materialize_as_graph(
     fn: Callable,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     include_key_set: Optional[torch._C.DispatchKeySet] = None,
     exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
     force_enable_grad=False,
@@ -1061,12 +1155,22 @@ def materialize_as_graph(
         with suspend_functionalization(), disable_functional_mode():
             with disable_proxy_modes_tracing():
                 unfunc_t = [_from_fun(arg) for arg in args]
+
             with contextlib.ExitStack() as stack:
+                stack.enter_context(
+                    torch.utils._python_dispatch._disable_current_modes()
+                )
                 stack.enter_context(
                     torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
                 )
                 if force_enable_grad:
                     stack.enter_context(torch.enable_grad())
+                # fake_mode is needed because parent tracer's fake_mode might
+                # be None but the associated inputs have fake mode or there
+                # is a global tracing context with fake mode. We nneed to
+                # make sure the fake mode when tracing subgraph is consistent.
+                if fake_mode := detect_fake_mode(unfunc_t):
+                    stack.enter_context(fake_mode)
                 return _maybe_reenter_make_fx(fn)(*unfunc_t)
 
     gm = _materialize_as_graph_inner()
@@ -1139,3 +1243,13 @@ def _has_gen_schema(op: HigherOrderOperator):
     return hasattr(type(op), method) and getattr(type(op), method) is not getattr(
         HigherOrderOperator, method
     )
+
+
+def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+    assert len(data) == len(masks)
+    return [item for item, keep in zip(data, masks) if keep]
+
+
+def fill_none_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
+    data_iter = iter(data)
+    return [next(data_iter) if kept else None for kept in masks]
