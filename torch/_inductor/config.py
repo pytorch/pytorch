@@ -2005,6 +2005,9 @@ external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 
 class lookup_table:
+    # Enable/disable lookup table choices system (defaults to True)
+    active: bool = True
+
     # Lookup table for template config overrides
     table: Optional[dict[str, list[dict[str, Any]]]] = None
 

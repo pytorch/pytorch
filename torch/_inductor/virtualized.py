@@ -207,9 +207,9 @@ def _choices_default():
 
     We virtualize InductorChoices to allow changing inductor heuristics from out of tree.
     """
-    from torch._inductor.choices import InductorChoices
+    from torch._inductor.lookup_table.choices import LookupTableChoices
 
-    rv = InductorChoices()
+    rv = LookupTableChoices()
     setattr(threadlocal, _choices._key, rv)
     return rv
 
