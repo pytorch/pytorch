@@ -110,6 +110,12 @@ automatic_dynamic_shapes = True
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
 
+# log graph in/out metadata
+# This is only turned on for export today since we
+# know we are tracing a flat callable. later, this
+# can extended to other use cases as well.
+log_graph_in_out_metadata = False
+
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
 # If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,
@@ -668,6 +674,11 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
+
+# Does not graph break on torch.autograd._profiler_enabled if set to True. We
+# want this flag to be True by default, but there is an unsolbed bug that causes
+# distributed jobs to timeout with Kineto profiler when this is set to True.
+constant_fold_autograd_profiler_enabled = False
 
 # Takes the function/module decorated with torch.compile and passes it through a
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
