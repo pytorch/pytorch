@@ -4429,6 +4429,7 @@ class CommonTemplate:
 
     @parametrize("dilation", (1, 2))
     @parametrize("dim", (subtest(2), subtest(3)))
+    @skip_if_halide
     def test_low_memory_max_pool(self, dilation: int, dim: int):
         prims = torch.ops.prims
 
