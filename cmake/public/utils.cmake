@@ -441,7 +441,7 @@ function(torch_compile_options libname)
 
   # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
   target_compile_options(${libname} PRIVATE
-      $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O2>)
+      $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O3>)
 
 endfunction()
 
