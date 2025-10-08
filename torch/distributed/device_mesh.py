@@ -74,7 +74,6 @@ else:
             self.mesh_stack: list[DeviceMesh] = []
             # TODO: Move the bookkeeping maps from _MeshEnv to DeviceMesh.
             self.child_to_root_mapping: dict[DeviceMesh, DeviceMesh] = {}
-            self.mesh_dim_group_options: dict[int, BackendConfig] = {}
             # Record flatten mesh name to its flattened mesh in root mesh.
             self.root_to_flatten_mapping: dict[DeviceMesh, dict[str, DeviceMesh]] = {}
 
@@ -239,14 +238,6 @@ else:
                     f"Available mesh dimensions are: mesh_dim_names={device_mesh.mesh_dim_names}",
                 )
             return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
-
-        def _set_mesh_dim_group_options(
-            self,
-            dim: int,
-            backend: Optional[str],
-            pg_options: Optional[C10dBackend.Options] = None,
-        ) -> None:
-            self.mesh_dim_group_options[dim] = (backend, pg_options)
 
         def _get_slice_mesh_layout(self, device_mesh, mesh_dim_names) -> _MeshLayout:
             """
@@ -449,6 +440,11 @@ else:
             self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
             if backend_override is None:
                 backend_override = ((None, None),) * self.mesh.ndim
+            elif len(backend_override) != self.mesh.ndim:
+                raise ValueError(
+                    f"backend_override should have the same length as the number of mesh dimensions, "
+                    f"but got {len(backend_override)} and {self.mesh.ndim}."
+                )
             # Internal bookkeeping for the device mesh.
             self._layout = (
                 _layout
@@ -554,8 +550,6 @@ else:
             if (
                 self.mesh.ndim == 1
                 and self.mesh.numel() == get_world_size()
-                and _mesh_resources.mesh_dim_group_options.get(0, (None, None))
-                == (None, None)
                 and backend_override[0] == (None, None)
             ):
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
@@ -580,21 +574,7 @@ else:
                     pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
                         -1, self.mesh.size(dim)
                     )
-
-                    # Respect dim group options specified via _MeshEnv.set_dim_group_options().
-                    # Inherit from the parent group if no options are specified for the group.
-                    if dim in _mesh_resources.mesh_dim_group_options:
-                        if backend_override[dim] != (None, None):
-                            raise RuntimeError(
-                                f"Dimension {dim} present both in the backend_override argument "
-                                "and via _mesh_resources._set_mesh_dim_group_options"
-                            )
-                        (
-                            backend,
-                            pg_options,
-                        ) = _mesh_resources.mesh_dim_group_options[dim]
-                    else:
-                        backend, pg_options = backend_override[dim]
+                    backend, pg_options = backend_override[dim]
 
                     # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
                     # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
