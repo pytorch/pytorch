@@ -1426,6 +1426,15 @@ class f(torch.nn.Module):
                 f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
             )
 
+    @fresh_cache()
+    def test_slice_backed_size_oblivious(self):
+        @torch.compile(backend="inductor", fullgraph=True, dynamic=True)
+        def f(x):
+            return x[:5]
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            f(torch.randn(10, 10))
+
     def test_baddbmm_symint(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
 

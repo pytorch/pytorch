@@ -439,7 +439,7 @@ def collect_fw_donated_buffer_idxs(
     """
 
     storage_refs = set()
-    # pyrefly: ignore  # bad-assignment
+
     for t in itertools.chain(fw_ins, user_fw_outs, bw_outs):
         # Only access storage if a tensor has storage (not sparse)
         if t is not None and isinstance(t, FakeTensor) and not is_sparse_any(t):
