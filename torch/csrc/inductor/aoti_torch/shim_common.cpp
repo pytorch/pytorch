@@ -1413,28 +1413,28 @@ static StableIValue from_ivalue(
     case c10::TypeKind::TensorType: {
       AtenTensorHandle ath = torch::aot_inductor::new_tensor_handle(
           std::move(const_cast<at::Tensor&>(ivalue.toTensor())));
-      return from(ath);
+      return torch::stable::detail::from(ath);
     }
     case c10::TypeKind::IntType: {
-      return from(ivalue.toInt());
+      return torch::stable::detail::from(ivalue.toInt());
     }
     case c10::TypeKind::FloatType: {
-      return from(ivalue.toDouble());
+      return torch::stable::detail::from(ivalue.toDouble());
     }
     case c10::TypeKind::BoolType: {
-      return from(ivalue.toBool());
+      return torch::stable::detail::from(ivalue.toBool());
     }
     case c10::TypeKind::ScalarTypeType: {
-      return from(ivalue.toScalarType());
+      return torch::stable::detail::from(ivalue.toScalarType());
     }
     case c10::TypeKind::DeviceObjType: {
-      return from(ivalue.toDevice());
+      return torch::stable::detail::from(ivalue.toDevice());
     }
     case c10::TypeKind::LayoutType: {
-      return from(ivalue.toLayout());
+      return torch::stable::detail::from(ivalue.toLayout());
     }
     case c10::TypeKind::MemoryFormatType: {
-      return from(ivalue.toMemoryFormat());
+      return torch::stable::detail::from(ivalue.toMemoryFormat());
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
@@ -1444,17 +1444,18 @@ static StableIValue from_ivalue(
       // able to follow the patterned semantic of every other case here in one
       // line:
       //
-      // return from<std::optional<inner_type::t>>(ivalue.toInnerTypeT()));
+      // return
+      // torch::stable::detail::from<std::optional<inner_type::t>>(ivalue.toInnerTypeT()));
       //
       // BUT we do NOT have that type inner_type::t readily available, so we
       // will manually unwrap and recursively call. This implementation MUST
-      // be kept in sync with from<std::optional<T>> function in
-      // torch/csrc/stable/library.h
+      // be kept in sync with torch::stable::detail::from<std::optional<T>>
+      // function in torch/csrc/stable/stableivalue_conversions.h
       if (ivalue.isNone()) {
-        return from(std::nullopt);
+        return torch::stable::detail::from(std::nullopt);
       }
       StableIValue* sivp = new StableIValue(from_ivalue(inner_type, ivalue));
-      return from(sivp);
+      return torch::stable::detail::from(sivp);
     }
     default: {
       TORCH_CHECK(
@@ -1471,30 +1472,32 @@ static c10::IValue to_ivalue(
   switch (type->kind()) {
     case c10::TypeKind::TensorType: {
       auto ret_raiiath = torch::aot_inductor::RAIIAtenTensorHandle(
-          to<AtenTensorHandle>(stable_ivalue));
+          torch::stable::detail::to<AtenTensorHandle>(stable_ivalue));
       return (c10::IValue(*torch::aot_inductor::tensor_handle_to_tensor_pointer(
           ret_raiiath.get())));
     }
     case c10::TypeKind::IntType: {
-      return c10::IValue(to<int64_t>(stable_ivalue));
+      return c10::IValue(torch::stable::detail::to<int64_t>(stable_ivalue));
     }
     case c10::TypeKind::FloatType: {
-      return c10::IValue(to<double>(stable_ivalue));
+      return c10::IValue(torch::stable::detail::to<double>(stable_ivalue));
     }
     case c10::TypeKind::BoolType: {
-      return c10::IValue(to<bool>(stable_ivalue));
+      return c10::IValue(torch::stable::detail::to<bool>(stable_ivalue));
     }
     case c10::TypeKind::ScalarTypeType: {
-      return c10::IValue(to<c10::ScalarType>(stable_ivalue));
+      return c10::IValue(
+          torch::stable::detail::to<c10::ScalarType>(stable_ivalue));
     }
     case c10::TypeKind::DeviceObjType: {
-      return c10::IValue(to<c10::Device>(stable_ivalue));
+      return c10::IValue(torch::stable::detail::to<c10::Device>(stable_ivalue));
     }
     case c10::TypeKind::LayoutType: {
-      return c10::IValue(to<c10::Layout>(stable_ivalue));
+      return c10::IValue(torch::stable::detail::to<c10::Layout>(stable_ivalue));
     }
     case c10::TypeKind::MemoryFormatType: {
-      return c10::IValue(to<c10::MemoryFormat>(stable_ivalue));
+      return c10::IValue(
+          torch::stable::detail::to<c10::MemoryFormat>(stable_ivalue));
     }
     case c10::TypeKind::OptionalType: {
       auto inner_type = type->castRaw<at::OptionalType>()->getElementType();
@@ -1504,16 +1507,17 @@ static c10::IValue to_ivalue(
       // able to follow the patterned semantic of every other case here in one
       // line:
       //
-      // return c10::IValue(to<std::optional<inner_type::t>>(stable_ivalue));
+      // return
+      // c10::IValue(torch::stable::detail::to<std::optional<inner_type::t>>(stable_ivalue));
       //
       // BUT we do NOT have that type inner_type::t readily available, so we
       // will manually unwrap and recursively call. This implementation MUST
-      // be kept in sync with the to<T> function in
-      // torch/csrc/stable/library.h
-      if (stable_ivalue == from(std::nullopt)) {
+      // be kept in sync with the torch::stable::detail::to<T> function in
+      // torch/csrc/stable/stableivalue_conversions.h
+      if (stable_ivalue == torch::stable::detail::from(std::nullopt)) {
         return c10::IValue();
       }
-      auto sivp = to<StableIValue*>(stable_ivalue);
+      auto sivp = torch::stable::detail::to<StableIValue*>(stable_ivalue);
       auto ival = to_ivalue(inner_type, *sivp);
       delete sivp;
       return ival;

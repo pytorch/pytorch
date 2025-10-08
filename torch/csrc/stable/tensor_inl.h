@@ -17,7 +17,8 @@ using torch::headeronly::ScalarType;
 inline ScalarType Tensor::scalar_type() const {
   int32_t dtype;
   TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
-  return to<ScalarType>(from(dtype));
+  return torch::stable::detail::to<ScalarType>(
+      torch::stable::detail::from(dtype));
 }
 
 } // namespace torch::stable
