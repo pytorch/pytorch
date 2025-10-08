@@ -11,7 +11,7 @@ import re
 from collections.abc import Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, TYPE_CHECKING, Union, cast
 
 import torch
 from torch._guards import detect_fake_mode
@@ -1070,6 +1070,114 @@ def placeholder_naming_pass(
                 constants[new_name] = constant
                 del constants[name]
 
+from typing import Optional, Any
+
+def _root_out_spec_from_call_graph(sig) -> Optional[Any]:
+    """
+    Try to fetch the output spec
+    from export_graph_signature.module_call_graph.
+    Returns the TreeSpec or None.
+    """
+    mcg = getattr(sig, "module_call_graph", None)
+    if mcg is None:
+        return None
+
+    # Find root node
+    root = getattr(mcg, "root", None)
+    if root is None:
+        nodes = getattr(mcg, "nodes", None) or mcg
+        if isinstance(nodes, (list, tuple)) and nodes:
+            # If root is marked
+            root = next((n for n in nodes if getattr(n, "is_root", False)), nodes[0])
+
+    if root is None:
+        return None
+
+    for holder in (root,
+                   getattr(root, "call_spec", None),
+                   getattr(root, "schema", None),
+                   getattr(root, "context", None)):
+        if holder is None:
+            continue
+        ospec = getattr(holder, "out_spec", None)
+        if ospec is None:
+            ospec = getattr(holder, "pytree_out_spec", None)
+        if ospec is not None:
+            return ospec
+    return None
+
+def _build_output_prefixes() -> Dict[OutputKind, str]:
+    """
+    Build output prefixes for named outputs.
+    Returns mapping for output kinds.
+    """
+    mapping: Dict[OutputKind, str] = {}
+    for name, pref in [
+        ("USER_OUTPUT", "o_"),
+        ("BUFFER_MUTATION", "b_"),
+        ("CUSTOM_OBJ", "obj_"),
+        ("CONSTANT_TENSOR", "c_"),
+        ("LIFTED_TENSOR_CONSTANT", "c_"),
+        ("USER_INPUT_MUTATION", "o_"),
+        ("TOKEN", "token"),
+    ]:
+        kind = getattr(OutputKind, name, None)
+        if kind is not None:
+            mapping[cast(OutputKind, kind)] = pref
+    return mapping
+
+def _compute_output_name_map(export_graph_signature, out_spec):
+    """
+    Build a name_map for outputs using `out_spec`.
+    Uses early returns to avoid large nested branches.
+    """
+    name_map: dict[str, str] = {}
+
+    def _fallback():
+        for spec in export_graph_signature.output_specs:
+            old = spec.arg.name
+            base = (old or spec.target or "")
+            prefix = output_prefixes.get(spec.kind, "o_")
+            sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
+            candidate = f"{prefix}{sanitized}"
+            _rename_without_collisions(
+                name_map,
+                old,
+                candidate)
+        return name_map
+
+    output_prefixes: Dict[OutputKind, str] = _build_output_prefixes()
+
+    # Early return: no useful spec → fallback
+    if out_spec is None or len(getattr(out_spec, "children_specs", [])) != 1:
+        return _fallback()
+
+    ctx = out_spec.children_specs[0].context
+
+    # Try to extract field names
+    # NamedTuple
+    if hasattr(ctx, "_fields"):
+        all_fields = list(ctx._fields)
+    # Dataclass (registered)
+    elif isinstance(ctx, (list, tuple)) and ctx and isinstance(ctx[0], (list, tuple)):
+        all_fields = list(ctx[0])
+    else:
+        all_fields = []
+
+    # Early return: no field names → fallback
+    if not all_fields:
+        return _fallback()
+
+    # We found names
+    for spec, field_name in zip(export_graph_signature.output_specs, all_fields):
+        old = spec.arg.name
+        base1 = (field_name or old or spec.target or "")
+        prefix = output_prefixes.get(spec.kind, "o_")
+        sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base1).lower()
+        candidate = f"{prefix}{sanitized}"
+        _rename_without_collisions(name_map, old, candidate)
+
+    return name_map
 
 def outputs_naming_pass(
     gm: torch.fx.GraphModule,
@@ -1082,48 +1190,11 @@ def outputs_naming_pass(
     If outputs are named using Dataclass, then context
     list/tuple is used.
     """
-    name_map: dict[str, str] = {}
-    out_spec = getattr(mod, "_out_spec", None)
+    out_spec = _root_out_spec_from_call_graph(export_graph_signature)
+    if out_spec is None:
+        out_spec = getattr(mod, "_out_spec", None)
 
-    # Build name_map by picking the i-th field name for spec i.
-    # This way we can handling NamedTuple and Dataclass with multiple names.
-    if out_spec is not None and len(out_spec.children_specs) == 1:
-        ctx = out_spec.children_specs[0].context
-        # NamedTuple case
-        if hasattr(ctx, "_fields"):
-            all_fields = list(ctx._fields)
-        # Dataclass case: context is a list/tuple with first element is a field name
-        elif isinstance(ctx, (list, tuple)) and ctx and isinstance(ctx[0], (list, tuple)):
-            all_fields = list(ctx[0])
-        else:
-            all_fields = []
-
-        if all_fields:
-            for spec, field_name in zip(export_graph_signature.output_specs, all_fields):
-                old = spec.arg.name
-                base: str = (field_name or old or spec.target or "")
-                prefix = placeholder_prefixes.get(spec.kind, "o_")
-                sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
-                candidate = f"{prefix}{sanitized}"
-                _rename_without_collisions(name_map, old, candidate, is_placeholder=True)
-        else:
-            # fallback to one‐to‐one if we couldn't extract any field names
-            for spec in export_graph_signature.output_specs:
-                old = spec.arg.name
-                base: str = (old or spec.target or "")
-                prefix = placeholder_prefixes.get(spec.kind, "o_")
-                sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
-                candidate = f"{prefix}{sanitized}"
-                _rename_without_collisions(name_map, old, candidate, is_placeholder=True)
-    else:
-        # fallback: one output_spec per leaf → simple one‐to‐one
-        for spec in export_graph_signature.output_specs:
-            old = spec.arg.name
-            base: str = (old or spec.target or "")
-            prefix = placeholder_prefixes.get(spec.kind, "o_")
-            sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
-            candidate = f"{prefix}{sanitized}"
-            _rename_without_collisions(name_map, old, candidate, is_placeholder=True)
+    name_map = _compute_output_name_map(export_graph_signature, out_spec)
 
     # Apply renames to all matching nodes
     for node in gm.graph.nodes:
