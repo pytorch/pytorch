@@ -1,14 +1,20 @@
 #pragma once
 
 #include <torch/csrc/stable/stableivalue_conversions.h>
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <optional>
 #include <string>
 #include <vector>
 
-#include <c10/util/Exception.h>
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/csrc/stable/parallel_utils.h>
 #include <torch/headeronly/core/ScalarType.h>
@@ -247,6 +253,66 @@ struct Trampoline {
   }
 };
 
+namespace internal {
+// We expect this to be the stable version of the OpenMP variant of the
+// invoke_parallel op with identical semantics to the existing parallel_for op.
+// This is copy pasted from aten/src/ATen/ParallelOpenMP.h except that we
+// replace ThreadIdGuard with the shim-ed version.
+// Requiring the extension to link against the OpenMP library to use
+// invoke_parallel matches the existing semantic.
+#ifdef _OPENMP
+
+// Copied from aten/src/ATen/Parallel.h
+inline int64_t divup(int64_t x, int64_t y) {
+  return (x + y - 1) / y;
+}
+
+template <typename F>
+inline void invoke_parallel(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    const F& f) {
+  std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
+  std::exception_ptr eptr;
+
+#pragma omp parallel
+  {
+    // choose number of tasks based on grain size and number of threads
+    // can't use num_threads clause due to bugs in GOMP's thread pool (See
+    // #32008)
+    int64_t num_threads = omp_get_num_threads();
+    if (grain_size > 0) {
+      num_threads = std::min(num_threads, divup((end - begin), grain_size));
+    }
+
+    int64_t tid = omp_get_thread_num();
+    int64_t chunk_size = divup((end - begin), num_threads);
+    int64_t begin_tid = begin + tid * chunk_size;
+    if (begin_tid < end) {
+      try {
+        ThreadIdGuard tid_guard(tid);
+        f(begin_tid, std::min(end, chunk_size + begin_tid));
+      } catch (...) {
+        if (!err_flag.test_and_set()) {
+          eptr = std::current_exception();
+        }
+      }
+    }
+  }
+  if (eptr) {
+    std::rethrow_exception(eptr);
+  }
+}
+#endif
+} // namespace internal
+
+#ifdef _OPENMP
+#define EXTENSION_HAS_OPENMP 1
+#else
+#define EXTENSION_HAS_OPENMP 0
+#endif
+
 // We expect this to be the ABI stable version of parallel_for with identical
 // semantics to at::parallel_for
 template <class F>
@@ -260,7 +326,8 @@ inline void parallel_for(
     return;
   }
 
-  if (aoti_torch_get_intra_op_parallel_enabled()) {
+  if (aoti_torch_get_intra_op_parallel_enabled() &&
+      ((!aoti_torch_get_parallel_openmp_enabled()) || EXTENSION_HAS_OPENMP)) {
     aoti_torch_lazy_init_num_threads();
     const auto numiter = end - begin;
     const bool use_parallel =
@@ -273,13 +340,27 @@ inline void parallel_for(
       return;
     }
 
-    TORCH_ERROR_CODE_CHECK(aoti_torch_invoke_parallel(
-        begin,
-        end,
-        grain_size,
-        &Trampoline<F>::invoke,
-        const_cast<void*>(static_cast<const void*>(&f))));
+    if (aoti_torch_get_parallel_openmp_enabled()) {
+      // For parallel openmp path (default), we call internal::invoke_parallel
+      // defined in this header so inlining of f still happens
+      internal::invoke_parallel(
+          begin, end, grain_size, [&](int64_t begin, int64_t end) {
+            ParallelGuard guard(true);
+            f(begin, end);
+          });
+    } else {
+      // For parallel native path, we shim invoke_parallel
+      // invoke_parallel takes in std::function (not templated F) so there's no
+      // inlining anyway.
+      TORCH_ERROR_CODE_CHECK(aoti_torch_invoke_parallel(
+          begin,
+          end,
+          grain_size,
+          &Trampoline<F>::invoke,
+          const_cast<void*>(static_cast<const void*>(&f))));
+    }
   } else {
+    STD_TORCH_CHECK(false, "shouldn't be here");
     ThreadIdGuard tid_guard(0);
     ParallelGuard guard(true);
     f(begin, end);

@@ -203,21 +203,6 @@ uint64_t aoti_torch_abi_version() {
 }
 #endif // C10_MOBILE
 
-// Check if PyTorch was compiled with intra-op parallelism support.
-// This function works because shim_common.cpp includes ATen/Parallel.h, which
-// in turn includes:
-// - ATen/ParallelNative.h (if AT_PARALLEL_NATIVE=1) -> defines
-// INTRA_OP_PARALLEL
-// - ATen/ParallelOpenMP.h (if AT_PARALLEL_OPENMP=1 and _OPENMP is available) ->
-// defines INTRA_OP_PARALLEL
-bool aoti_torch_get_intra_op_parallel_enabled() {
-#ifdef INTRA_OP_PARALLEL
-  return true;
-#else
-  return false;
-#endif
-}
-
 bool aoti_torch_grad_mode_is_enabled() {
   return c10::GradMode::is_enabled();
 }
@@ -1423,75 +1408,6 @@ AOTITorchError aoti_torch_zero_(AtenTensorHandle tensor) {
   });
 }
 
-// ABI stable parallel utilities implementations
-void aoti_torch_lazy_init_num_threads() {
-  at::internal::lazy_init_num_threads();
-}
-
-bool aoti_torch_in_parallel_region() {
-  return at::in_parallel_region();
-}
-
-int32_t aoti_torch_get_num_threads() {
-  return static_cast<int32_t>(at::get_num_threads());
-}
-
-AOTITorchError aoti_torch_create_thread_id_guard(
-    int32_t thread_id,
-    ThreadIdGuardHandle* ret_guard) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    at::internal::ThreadIdGuard* guard =
-        new at::internal::ThreadIdGuard(thread_id);
-    *ret_guard = reinterpret_cast<ThreadIdGuardHandle>(guard);
-  });
-}
-
-AOTITorchError aoti_torch_delete_thread_id_guard(ThreadIdGuardHandle guard) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    at::internal::ThreadIdGuard* tid_guard =
-        reinterpret_cast<at::internal::ThreadIdGuard*>(guard);
-    delete tid_guard;
-  });
-}
-
-AOTITorchError aoti_torch_create_parallel_guard(
-    bool state,
-    ParallelGuardHandle* ret_guard) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::ParallelGuard* guard = new c10::ParallelGuard(state);
-    *ret_guard = reinterpret_cast<ParallelGuardHandle>(guard);
-  });
-}
-
-AOTITorchError aoti_torch_delete_parallel_guard(ParallelGuardHandle guard) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    c10::ParallelGuard* parallel_guard =
-        reinterpret_cast<c10::ParallelGuard*>(guard);
-    delete parallel_guard;
-  });
-}
-
-bool aoti_torch_parallel_guard_is_enabled() {
-  return c10::ParallelGuard::is_enabled();
-}
-
-AOTITorchError aoti_torch_invoke_parallel(
-    int64_t begin,
-    int64_t end,
-    int64_t grain_size,
-    AOTIParallelLambda lambda,
-    void* ctx) {
-  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    // Wrap the lambda+ctx pair into a callable object for invoke_parallel
-    auto wrapper = [lambda, ctx](int64_t chunk_begin, int64_t chunk_end) {
-      lambda(chunk_begin, chunk_end, ctx);
-    };
-
-    // Call PyTorch internal invoke_parallel with the wrapper
-    at::internal::invoke_parallel(begin, end, grain_size, wrapper);
-  });
-}
-
 static StableIValue from_ivalue(
     const c10::TypePtr& type,
     const c10::IValue& ivalue) {
@@ -1813,4 +1729,92 @@ AOTITorchError aoti_torch_get_current_stream(
 AOTITorchError aoti_torch_get_current_device_index(int32_t* ret_device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *ret_device_index = at::accelerator::getDeviceIndex(); });
+}
+
+// Check if INTRA_OP_PARALLEL is defined
+// shim_common.cpp includes ATen/Parallel.h, which in turn includes:
+// - ATen/ParallelOpenMP.h (if AT_PARALLEL_OPENMP=1 and _OPENMP is available) ->
+// defines INTRA_OP_PARALLEL
+// - ATen/ParallelNative.h (if AT_PARALLEL_OPENMP=0 and AT_PARALLEL_NATIVE=1) ->
+// defines INTRA_OP_PARALLEL
+bool aoti_torch_get_intra_op_parallel_enabled() {
+#ifdef INTRA_OP_PARALLEL
+  return true;
+#else
+  return false;
+#endif
+}
+
+// Build time flag generated in ATen/Config.h
+bool aoti_torch_get_parallel_openmp_enabled() {
+  return AT_PARALLEL_OPENMP;
+}
+
+// ABI stable parallel utilities implementations
+void aoti_torch_lazy_init_num_threads() {
+  at::internal::lazy_init_num_threads();
+}
+
+bool aoti_torch_in_parallel_region() {
+  return at::in_parallel_region();
+}
+
+int32_t aoti_torch_get_num_threads() {
+  return static_cast<int32_t>(at::get_num_threads());
+}
+
+AOTITorchError aoti_torch_create_thread_id_guard(
+    int32_t thread_id,
+    ThreadIdGuardHandle* ret_guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::internal::ThreadIdGuard* guard =
+        new at::internal::ThreadIdGuard(thread_id);
+    *ret_guard = reinterpret_cast<ThreadIdGuardHandle>(guard);
+  });
+}
+
+AOTITorchError aoti_torch_delete_thread_id_guard(ThreadIdGuardHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::internal::ThreadIdGuard* tid_guard =
+        reinterpret_cast<at::internal::ThreadIdGuard*>(guard);
+    delete tid_guard;
+  });
+}
+
+AOTITorchError aoti_torch_create_parallel_guard(
+    bool state,
+    ParallelGuardHandle* ret_guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::ParallelGuard* guard = new c10::ParallelGuard(state);
+    *ret_guard = reinterpret_cast<ParallelGuardHandle>(guard);
+  });
+}
+
+AOTITorchError aoti_torch_delete_parallel_guard(ParallelGuardHandle guard) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::ParallelGuard* parallel_guard =
+        reinterpret_cast<c10::ParallelGuard*>(guard);
+    delete parallel_guard;
+  });
+}
+
+bool aoti_torch_parallel_guard_is_enabled() {
+  return c10::ParallelGuard::is_enabled();
+}
+
+AOTITorchError aoti_torch_invoke_parallel(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    AOTIParallelLambda lambda,
+    void* ctx) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    // Wrap the lambda+ctx pair into a callable object for invoke_parallel
+    auto wrapper = [lambda, ctx](int64_t chunk_begin, int64_t chunk_end) {
+      lambda(chunk_begin, chunk_end, ctx);
+    };
+
+    // Call PyTorch internal invoke_parallel with the wrapper
+    at::internal::invoke_parallel(begin, end, grain_size, wrapper);
+  });
 }

@@ -378,18 +378,22 @@ if not IS_WINDOWS:
         def test_parallel_for(self, device):
             import libtorch_agnostic
 
-            # FIXME: remove, checking if this is always True in CI
             self.assertTrue(torch.backends.openmp.is_available())
 
-            size = 120
+            num_threads = torch.get_num_threads()
+            size = 100
             grain_size = 10
+            expected_num_threads_used = min(
+                (size + grain_size - 1) // grain_size, num_threads
+            )
+
             result = libtorch_agnostic.ops.test_parallel_for(size, grain_size)
             result_thread_ids = torch.unique(torch.bitwise_right_shift(result, 32))
             result_values = torch.bitwise_and(result, 0xFFFFFFFF)
             expected = torch.arange(size, dtype=torch.int64)
 
             self.assertEqual(result_values, expected)
-            self.assertEqual(result_thread_ids, torch.arange(size // grain_size))
+            self.assertEqual(result_thread_ids, torch.arange(expected_num_threads_used))
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

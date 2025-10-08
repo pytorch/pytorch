@@ -172,8 +172,11 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex128(
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
 
-// Check if PyTorch was compiled with intra-op parallelism support
+// Check if INTRA_OP_PARALLEL is defined
 AOTI_TORCH_EXPORT bool aoti_torch_get_intra_op_parallel_enabled();
+
+// Value of AT_PARALLEL_OPENMP
+AOTI_TORCH_EXPORT bool aoti_torch_get_parallel_openmp_enabled();
 
 // Free the tensor object
 AOTI_TORCH_EXPORT AOTITorchError

@@ -37,7 +37,8 @@ def get_extension():
     }
     extra_link_args = []
 
-    # Enable OpenMP support
+    # Technically the extension needs to link against OPENMP
+    # In CI OpenMP is available so we can just add this flag
     extra_compile_args["cxx"].extend(["-fopenmp", "-D_OPENMP"])
     extra_link_args.append("-fopenmp")
 
