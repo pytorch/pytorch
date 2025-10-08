@@ -6,7 +6,7 @@ on:
       - main
       - release/*
     tags:
-      - ciflow/rocm/*
+      - ciflow/rocm-gfx1100/*
   workflow_dispatch:
   schedule:
     # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
