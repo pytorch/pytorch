@@ -192,7 +192,7 @@ class Trainer:
         self.hybrid_module = HybridModel(
             self.remote_em_rref,
             self.remote_net_rref,
-            self.trainer_group if ddp_mode in (DdpMode.INSIDE,) else None,
+            self.trainer_group if ddp_mode == DdpMode.INSIDE else None,
         )
         self.ddp_params, self.non_ddp_params = (
             self.hybrid_module.ddp_params,
