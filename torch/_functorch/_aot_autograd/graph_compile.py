@@ -1663,42 +1663,14 @@ def aot_stage2a_partition(
     )
 
 
-def aot_stage2_autograd(
-    aot_state: AOTState,
-    aot_graph_capture: AOTGraphCapture,
-) -> DispatchReturn:
-    """
-    Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
-    and returns a wrapped torch.autograd.Function with a forward and backward.
-    """
-
-    fx_g = aot_graph_capture.graph_module
-    maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
-    fw_metadata = aot_state.fw_metadata
-    aot_config = aot_state.aot_config
-
-    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="autograd")
-    joint_graph_str = log_joint_graph(fx_g, aot_config)
-
-    (
-        fw_module,
-        bw_module,
-        num_fw_outs_saved_for_bw,
-        num_symints_saved_for_bw,
-        _indices_of_inps_to_detach,
-        adjusted_flat_args,
-    ) = aot_stage2a_partition(
-        fx_g,
-        aot_graph_capture.updated_flat_args,
-        maybe_subclass_meta,
-        fw_metadata,
-        aot_config,
-    )
-
-    fw_module_str, bw_module_str = log_graphs(
-        fw_module, bw_module, maybe_subclass_meta, fw_metadata, aot_config
-    )
-
+def aot_stage2b_compile_fwd(
+    fw_module: torch.fx.GraphModule,
+    adjusted_flat_args: list[Any],
+    maybe_subclass_meta: Any,
+    fw_metadata: ViewAndMutationMeta,
+    num_fw_outs_saved_for_bw: int,
+    aot_config: AOTConfig,
+):
     inner_meta = (
         fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
     )
@@ -1768,6 +1740,62 @@ def aot_stage2_autograd(
                 runtime_metadata=fw_metadata,
             )
 
+            return fwd_output_strides, compiled_fw_func
+
+
+def aot_stage2_autograd(
+    aot_state: AOTState,
+    aot_graph_capture: AOTGraphCapture,
+) -> DispatchReturn:
+    """
+    Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
+    and returns a wrapped torch.autograd.Function with a forward and backward.
+    """
+
+    fx_g = aot_graph_capture.graph_module
+    maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
+    fw_metadata = aot_state.fw_metadata
+    aot_config = aot_state.aot_config
+
+    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="autograd")
+    joint_graph_str = log_joint_graph(fx_g, aot_config)
+
+    (
+        fw_module,
+        bw_module,
+        num_fw_outs_saved_for_bw,
+        num_symints_saved_for_bw,
+        _indices_of_inps_to_detach,
+        adjusted_flat_args,
+    ) = aot_stage2a_partition(
+        fx_g,
+        aot_graph_capture.updated_flat_args,
+        maybe_subclass_meta,
+        fw_metadata,
+        aot_config,
+    )
+
+    fw_module_str, bw_module_str = log_graphs(
+        fw_module, bw_module, maybe_subclass_meta, fw_metadata, aot_config
+    )
+
+    inner_meta = (
+        fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
+    )
+
+    (
+        fwd_output_strides,
+        compiled_fw_func,
+    ) = aot_stage2b_compile_fwd(
+        fw_module,
+        adjusted_flat_args,
+        maybe_subclass_meta,
+        fw_metadata,
+        num_fw_outs_saved_for_bw,
+        aot_config,
+    )
+
+    with torch.no_grad():
         # NB: It's important to compile backwards ahead of time, as this may
         # add extra guards which we need to apply to the Dynamo cache at
         # forwards
