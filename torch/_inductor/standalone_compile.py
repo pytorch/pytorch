@@ -58,6 +58,8 @@ class CompiledArtifact:
     ):
         self._compiled_fn = compiled_fn
         self._artifacts = artifacts
+        # Needed by
+        self.__name__ = "CompiledArtifact"
 
     def __call__(self, *args: Any) -> Any:
         return self._compiled_fn(*args)

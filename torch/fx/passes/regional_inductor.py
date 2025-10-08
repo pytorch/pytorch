@@ -3,7 +3,6 @@
 import torch
 
 # from torch._dynamo.backends.common import aot_autograd as auto_autograd_backend
-from torch._guards import detect_fake_mode, TracingContext
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
@@ -37,22 +36,11 @@ def compile_submod(gm, prefix):
                         f"Partition is bad because non fake tensor value is seen {inp_node}"
                     )
 
-            fake_mode = detect_fake_mode()
-            assert fake_mode is not None
-
             submod = getattr(gm, node.target)
 
-            with fake_mode:
-                # Ensure that it runs in eager
-                submod(*fake_inputs)
-
-            from torch._inductor.compile_fx import compile_fx
-
-            # [inductor-stateless-issue] - Calling compile_fx_inner is changing
-            # the reported output strides.
-            with fake_mode:
-                with TracingContext.report_output_strides():
-                    compiled_submod = compile_fx(submod, fake_inputs)
+            compiled_submod = torch._inductor.standalone_compile(
+                submod, fake_inputs, dynamic_shapes="from_tracing_context"
+            )
 
             with gm.graph.inserting_after(node):
                 new_node = gm.graph.call_function(
