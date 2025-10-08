@@ -1412,9 +1412,9 @@ class TestFP8Matmul(TestCase):
         expected_b_size = BLOCK_SIZE_MN * ceil_div(N, BLOCK_SIZE_MN) * padded_num_k_blocks
 
         block = (
-            ScalingType.BlockWise_1x16
+            ScalingType.BlockWise1x16
             if recipe == "nvfp4"
-            else ScalingType.BlockWise_1x32
+            else ScalingType.BlockWise1x32
         )
         swizzle = SwizzleType.Swizzle_32_4_4
 
