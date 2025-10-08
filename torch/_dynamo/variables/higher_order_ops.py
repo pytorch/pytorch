@@ -453,9 +453,7 @@ def _call_while_loop(
         cond_r_meta = _extract_tensor_metadata(
             cond_r.proxy.node.meta["example_value"], include_contiguity=False
         )
-        if not cond_r_meta.dtype == torch.bool or not cond_r_meta.shape == torch.Size(
-            []
-        ):
+        if cond_r_meta.dtype != torch.bool or cond_r_meta.shape != torch.Size([]):
             unimplemented(
                 f"Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}"
             )
@@ -2583,7 +2581,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             elif isinstance(
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
-                context_fn = ctx.as_python_constant()
+                context_fn = ctx.guard_as_python_constant()
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"
@@ -3669,7 +3667,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         expected_num_outputs = len(out_placements.value) - output_none_placements
         assert len(body_gmod.graph.find_nodes(op="output")) == 1
         actual_num_outputs = len(body_gmod.graph.find_nodes(op="output")[0].args[0])
-        gm_str = body_gmod.print_readable(print_output=False)
+
         template = (
             "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
             ", but found {actual}. If the count matches for eager, "
@@ -3677,18 +3675,25 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             "tensors used via closures. "
             "Please adjust the input placements to match what the traced graph sees: \n{gm_str}."
         )
-        assert expected_num_inputs == actual_num_inputs, template.format(
-            expected=expected_num_inputs,
-            inputs_or_outputs="inputs",
-            actual=actual_num_inputs,
-            gm_str=gm_str,
-        )
-        assert expected_num_outputs == actual_num_outputs, template.format(
-            expected=expected_num_outputs,
-            inputs_or_outputs="outputs",
-            actual=actual_num_outputs,
-            gm_str=gm_str,
-        )
+
+        def make_error_msg(*args):
+            expected_num, actual_num, inputs_or_outputs = args
+            gm_str = body_gmod.print_readable(print_output=False)
+            return template.format(
+                expected=expected_num,
+                inputs_or_outputs=inputs_or_outputs,
+                actual=actual_num,
+                gm_str=gm_str,
+            )
+
+        if expected_num_inputs != actual_num_inputs:
+            raise AssertionError(
+                make_error_msg(expected_num_inputs, actual_num_inputs, "inputs")
+            )
+        if expected_num_outputs != actual_num_outputs:
+            raise AssertionError(
+                make_error_msg(expected_num_outputs, actual_num_outputs, "outputs")
+            )
 
         assert len(p_kwargs) == 0
 
