@@ -350,6 +350,35 @@ class DeviceMeshTest(DTensorTestBase):
         # Fake pg only have BackendType as BackendType::CUSTOM.
         self.assertEqual(mesh.get_group(1)._get_backend_name(), "custom")
 
+    @with_comms
+    def test_get_root_mesh_multiple_independent_meshes(self):
+        # regression test for issue #163330
+        # when creating multiple independent device meshes and slicing them,
+        # get_root_mesh should return the correct parent mesh for each submesh
+        mesh1 = init_device_mesh(
+            self.device_type,
+            (2, 2),
+            mesh_dim_names=("dp", "tp"),
+        )
+        mesh1_dp = mesh1["dp"]
+        mesh1_tp = mesh1["tp"]
+
+        mesh2 = init_device_mesh(
+            self.device_type,
+            (2, 2),
+            mesh_dim_names=("dim1", "dim2"),
+        )
+        mesh2_dim1 = mesh2["dim1"]
+        mesh2_dim2 = mesh2["dim2"]
+
+        self.assertEqual(_mesh_resources.get_root_mesh(mesh1_dp), mesh1)
+        self.assertEqual(_mesh_resources.get_root_mesh(mesh1_tp), mesh1)
+        self.assertEqual(_mesh_resources.get_root_mesh(mesh2_dim1), mesh2)
+        self.assertEqual(_mesh_resources.get_root_mesh(mesh2_dim2), mesh2)
+
+        self.assertNotEqual(_mesh_resources.get_root_mesh(mesh1_dp), mesh2)
+        self.assertNotEqual(_mesh_resources.get_root_mesh(mesh1_tp), mesh2)
+
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
