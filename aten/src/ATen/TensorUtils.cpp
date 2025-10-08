@@ -273,11 +273,11 @@ void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout)
 }
 
 void * maybe_data_ptr(const Tensor& tensor) {
-  return tensor.defined() ? (void *)tensor.data_ptr() : nullptr;
+  return tensor.defined() ? tensor.data_ptr() : nullptr;
 }
 
 void * maybe_data_ptr(const TensorArg& tensor) {
-  return tensor->defined() ? (void *)tensor->data_ptr() : nullptr;
+  return tensor->defined() ? tensor->data_ptr() : nullptr;
 }
 
 void check_dim_size(

@@ -969,6 +969,7 @@ class TestScheduleLowering(TestCase):
             stages,
             num_microbatches,
             loss_fn=loss_fn,
+            scale_grads=False,
         )
         schedule._prepare_schedule_with_comms(
             {

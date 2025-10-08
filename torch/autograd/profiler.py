@@ -731,6 +731,7 @@ class profile:
         return all_function_events
 
 
+# pyrefly: ignore  # invalid-inheritance
 class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a code block/function when running autograd profiler.
     Label will only appear if CPU activity tracing is enabled.
@@ -778,7 +779,9 @@ class record_function(_ContextDecorator):
         # TODO: TorchScript ignores standard type annotation here
         # self.record: Optional["torch.classes.profiler._RecordFunction"] = None
         self.record = torch.jit.annotate(
-            Optional["torch.classes.profiler._RecordFunction"], None
+            # pyrefly: ignore  # not-a-type
+            Optional["torch.classes.profiler._RecordFunction"],
+            None,
         )
 
     def __enter__(self):

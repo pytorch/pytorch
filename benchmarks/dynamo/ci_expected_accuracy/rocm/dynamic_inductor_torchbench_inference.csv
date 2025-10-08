@@ -162,7 +162,15 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,8
+hf_Longformer,pass,4
+
+
+
+hf_Reformer,pass,5
+
+
+
+hf_Roberta_base,pass,0
 
 
 
@@ -174,7 +182,7 @@ hf_T5_base,eager_fail_to_run,0
 
 
 
-hf_T5_generate,pass,11
+hf_T5_generate,pass,7
 
 
 
@@ -211,6 +219,10 @@ maml,pass_due_to_skip,0
 
 
 maml_omniglot,pass,0
+
+
+
+microbench_unbacked_tolist_sum,pass,2
 
 
 
@@ -306,6 +318,10 @@ sam,pass,0
 
 
 
+sam_fast,model_fail_to_load,0
+
+
+
 shufflenet_v2_x1_0,pass,0
 
 
@@ -330,7 +346,15 @@ stable_diffusion_unet,pass_due_to_skip,0
 
 
 
+timm_efficientdet,pass,2
+
+
+
 timm_efficientnet,pass,0
+
+
+
+timm_nfnet,pass,0
 
 
 

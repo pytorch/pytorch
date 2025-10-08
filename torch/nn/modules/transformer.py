@@ -382,7 +382,7 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = (
                 f"{enc_layer}.activation_relu_or_gelu was not True"
             )
-        elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps):
+        elif encoder_layer.norm1.eps != encoder_layer.norm2.eps:
             why_not_sparsity_fast_path = (
                 f"{enc_layer}.norm1.eps was not equal to {enc_layer}.norm2.eps"
             )
@@ -458,7 +458,7 @@ class TransformerEncoder(Module):
             )
         elif first_layer.training:
             why_not_sparsity_fast_path = f"{str_first_layer} was in training mode"
-        elif not src.dim() == 3:
+        elif src.dim() != 3:
             why_not_sparsity_fast_path = (
                 f"input not batched; expected src.dim() of 3 but got {src.dim()}"
             )
@@ -832,7 +832,7 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = (
                 "torch.backends.mha.get_fastpath_enabled() was not True"
             )
-        elif not src.dim() == 3:
+        elif src.dim() != 3:
             why_not_sparsity_fast_path = (
                 f"input not batched; expected src.dim() of 3 but got {src.dim()}"
             )
@@ -846,7 +846,7 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "self_attn._qkv_same_embed_dim was not True"
         elif not self.activation_relu_or_gelu:
             why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
-        elif not (self.norm1.eps == self.norm2.eps):
+        elif self.norm1.eps != self.norm2.eps:
             why_not_sparsity_fast_path = "norm1.eps is not equal to norm2.eps"
         elif src.is_nested and (
             src_key_padding_mask is not None or src_mask is not None

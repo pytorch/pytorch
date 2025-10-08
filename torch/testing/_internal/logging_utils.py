@@ -7,7 +7,7 @@ import contextlib
 import torch._logging
 import torch._logging._internal
 from contextlib import AbstractContextManager
-from typing import Callable
+from collections.abc import Callable
 from torch._dynamo.utils import LazyString
 from torch._inductor import config as inductor_config
 import logging

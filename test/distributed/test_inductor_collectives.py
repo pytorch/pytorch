@@ -53,10 +53,8 @@ from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-def _tolist_with_constrain_as_size(tensor):
+def _tolist(tensor):
     lst = tensor.tolist()
-    for elem in lst:
-        torch._check_is_size(elem)
     return lst
 
 
@@ -537,10 +535,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             ranks,
             group_size,
         ):
-            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
-            output_split_sizes = _tolist_with_constrain_as_size(
-                output_split_sizes_tensor
-            )
+            input_split_sizes = _tolist(input_split_sizes_tensor)
+            output_split_sizes = _tolist(output_split_sizes_tensor)
             a2a = torch.ops.c10d_functional.all_to_all_single(
                 inp,
                 output_split_sizes,
@@ -700,10 +696,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             ranks,
             group_size,
         ):
-            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
-            output_split_sizes = _tolist_with_constrain_as_size(
-                output_split_sizes_tensor
-            )
+            input_split_sizes = _tolist(input_split_sizes_tensor)
+            output_split_sizes = _tolist(output_split_sizes_tensor)
             a2a = torch.ops.custom_ns.alltoall_autograd.default(
                 inp,
                 output_split_sizes,

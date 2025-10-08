@@ -28,8 +28,12 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   PyCodeObject* co = F_CODE(frame);
   _framelocals.resize(co->co_nlocalsplus, nullptr);
 
-#if IS_PYTHON_3_14_PLUS
-  TORCH_CHECK(false, "Python 3.14+ not supported");
+#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
+  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
+#elif IS_PYTHON_3_14_PLUS
+  if (!frame->stackpointer) {
+    return;
+  }
 #else
   if (!frame->stacktop) {
     return;
@@ -59,8 +63,12 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
   };
 
   auto offset = co->co_nlocalsplus - co->co_nfreevars;
-#if IS_PYTHON_3_14_PLUS
-  TORCH_CHECK(false, "Python 3.14+ not supported");
+#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
+  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
+#elif IS_PYTHON_3_14_PLUS
+  for (int i = 0; i < offset; i++) {
+    update_framelocals(i, PyStackRef_AsPyObjectBorrow(frame->localsplus[i]));
+  }
 #else
   for (int i = 0; i < offset; i++) {
     update_framelocals(i, frame->localsplus[i]);
@@ -68,11 +76,11 @@ FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
 #endif
 
   // Get references to closure variables
-#if IS_PYTHON_3_14_PLUS
+#if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
   PyObject* closure;
-  TORCH_CHECK(false, "Python 3.14+ not supported");
+  TORCH_CHECK(false, "Python 3.15+ / 3.14 on Windows not supported");
 #else
-  PyObject* closure = ((PyFunctionObject*)FUNC(frame))->func_closure;
+  PyObject* closure = FUNC(frame)->func_closure;
 #endif
   for (int i = 0; i < co->co_nfreevars; i++) {
     update_framelocals(offset + i, PyTuple_GET_ITEM(closure, i));
@@ -151,9 +159,16 @@ void FrameLocalsMapping::_realize_dict() {
   auto update_mapping = [&](int i) {
     DEBUG_CHECK(0 <= i && i < _framelocals.size());
     PyObject* value = _framelocals[i].ptr();
-    if (value == nullptr) {
-      _dict.attr("pop")(framelocals_names[i], py::none());
-    } else {
+    // NOTE: CPython's PyFrame_FastToLocalsWithError/map_to_dict
+    // removes the local name from the locals dict if the value is NULL.
+    // This is likely so that if a local variable is deleted in the fastlocals,
+    // PyFrame_FastToLocalsWithError will also remove it from frame->f_locals.
+    // Since we create the locals dict from scratch every time (and only
+    // before a frame is run), we probably don't need to account for this
+    // codepath, saving us from unnecessarily calling _dict.pop().
+    // It is unexpected that multiple fastlocal values corresponding to
+    // the same variable name have both a null and non-null value.
+    if (value != nullptr) {
       _dict[framelocals_names[i]] = value;
     }
   };

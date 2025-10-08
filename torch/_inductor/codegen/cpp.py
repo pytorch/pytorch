@@ -4197,8 +4197,6 @@ class CppKernelProxy(CppKernel):
                                     to_type_node, lambda n: n is not to_type_node
                                 )
                                 metrics.cpp_to_dtype_count += 1
-                else:
-                    pass
 
             def eliminate_to_dtype(sub_graph: torch.fx.Graph):
                 def _eliminate_duplicate_to_node(sub_graph: torch.fx.Graph):

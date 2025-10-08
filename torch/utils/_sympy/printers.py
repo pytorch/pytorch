@@ -66,6 +66,7 @@ class ExprPrinter(StrPrinter):
     # NB: this pow by natural, you should never have used builtin sympy.pow
     # for FloatPow, and a symbolic exponent should be PowByNatural.  These
     # means exp is guaranteed to be integer.
+    # pyrefly: ignore  # bad-override
     def _print_Pow(self, expr: sympy.Expr) -> str:
         base, exp = expr.args
         assert exp == int(exp), exp

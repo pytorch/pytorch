@@ -9,10 +9,10 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, Callable, ClassVar, Optional, TypeVar, Union
+from typing import Any, ClassVar, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     TEST_MPS,
     TEST_WITH_ASAN,
     TEST_WITH_MIOPEN_SUGGEST_NHWC,
+    TEST_WITH_MTIA,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHINDUCTOR,
     TEST_WITH_TSAN,
@@ -702,8 +703,13 @@ def get_device_type_test_bases():
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
-            # Skip if sanitizer is enabled
-            if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
+            # Skip if sanitizer is enabled or we're on MTIA machines
+            if (
+                not TEST_WITH_ASAN
+                and not TEST_WITH_TSAN
+                and not TEST_WITH_UBSAN
+                and not TEST_WITH_MTIA
+            ):
                 test_bases.append(CUDATestBase)
         else:
             test_bases.append(CPUTestBase)

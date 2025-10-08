@@ -2191,6 +2191,40 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(f(x_ref, y_ref), out)
 
+    def test_red_dtype_mismatch(self):
+        for per in (True, False):
+            torch._dynamo.reset()
+            if not per:
+                torch._inductor.config.triton.persistent_reductions = False
+
+            def f(arg0_1, arg1_1):
+                embedding = torch.ops.aten.embedding.default(arg1_1, arg0_1)
+                view = torch.ops.aten.view.default(embedding, [64, 3072])
+                unsqueeze = torch.ops.aten.unsqueeze.default(view, 0)
+                expand = torch.ops.aten.expand.default(unsqueeze, [576, -1, -1])
+                view_1 = torch.ops.aten.view.default(expand, [2, 8, 36, 64, 3072])
+                permute = torch.ops.aten.permute.default(view_1, [0, 1, 3, 2, 4])
+                clone = torch.ops.aten.clone.default(
+                    permute, memory_format=torch.contiguous_format
+                )
+                view_2 = torch.ops.aten.view.default(clone, [2, 18432, 3072])
+                iota = torch.ops.prims.iota.default(
+                    36,
+                    start=0,
+                    step=1,
+                    dtype=torch.int64,
+                    device="cuda",
+                    requires_grad=False,
+                )
+                view_3 = torch.ops.aten.view.default(iota, [1, 36])
+                max_1 = torch.ops.aten.max.default(view_3)
+                return (max_1,)
+
+            x = torch.ones(1, 64, device="cuda", dtype=torch.int64)
+            y = torch.randn(64, 3072, device="cuda", dtype=torch.bfloat16)
+            out = f(x, y)
+            self.assertEqual(torch.compile(f)(x, y), out)
+
     @unittest.skipIf(
         not config.is_fbcode(),
         "bfloat16 atomic add is only supported in fbcode today #97016",

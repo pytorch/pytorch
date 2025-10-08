@@ -1041,10 +1041,10 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
     return ms
 
 
+@dataclasses.dataclass(slots=True)
 class WhyNoFuse:
-    # TODO when we drop support for Python < 3.10, we can use
-    # @dataclass(slots=True) instead of manually specifying __slots__.
-    __slots__ = ["name1", "name2", "reason", "args"]
+    name1: str
+    name2: str
     reason: str
     args: tuple[Any, ...]
 
@@ -2359,7 +2359,10 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
-        if config.reorder_for_compute_comm_overlap:
+
+        # reorder_for_compute_comm_overlap may do benchmarking to estimate
+        # op runtime. Disable it for now in deterministic mode.
+        if not config.deterministic and config.reorder_for_compute_comm_overlap:
             if not config.reorder_for_peak_memory:
                 from .memory import assign_memory_planning_info_for_scheduler_buffers
 
@@ -2680,6 +2683,10 @@ class Scheduler:
                                 WeakDep(other_name, mutating_buf=buf.get_name())
                             )
                             add_user(other_name, node, is_weak=True)
+
+            for add_dep in V.graph.additional_buffer_deps[node.get_name()]:
+                add_user(add_dep, node, is_weak=True)
+                node.add_fake_dep(WeakDep(add_dep, node.get_name()))
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
@@ -4973,7 +4980,7 @@ class Scheduler:
                 if name in name_to_node
             }
             input_deallocation = {
-                name: True if name in buffer_names_to_free else False
+                name: name in buffer_names_to_free
                 for name in partition_input_names
                 if name in name_to_node
             }

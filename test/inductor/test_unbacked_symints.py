@@ -636,6 +636,28 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    @inductor_config.patch({"benchmark_kernel": True})
+    def test_triton_kernel_with_unbacked_symint_fallback(self, device):
+        # The benchmark_kernel=True config exercises the codegen_kernel_benchmark code path
+        # Test isinstance(arg_sig, SizeArg) == True in the fallback path
+        def fn(x):
+            # Create unbacked SymInt
+            nz = torch.nonzero(x)
+            u0 = nz.size(0)
+            # Create indices for index_select operation
+            indices = torch.tensor([1, u0 - 5], device=device)
+            # Create SizeArg object
+            x = torch.index_select(x, 0, indices)
+            return x
+
+        example_inputs = (torch.randn(32, device=device, dtype=torch.float16),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 

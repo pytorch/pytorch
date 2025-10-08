@@ -1,6 +1,6 @@
 #pragma once
 #ifdef _WIN32
-#include <Windows.h>
+#include <windows.h>
 #include <functional> // std::function
 #ifdef USE_MMAP_SELF
 #include <errno.h>

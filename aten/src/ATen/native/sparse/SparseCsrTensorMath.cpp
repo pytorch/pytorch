@@ -1330,18 +1330,18 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_
 
 template <typename scalar_t>
 struct ReductionAddOp {
-  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+  scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
     return a + b;
   }
-  inline scalar_t identity() const { return 0; }
+  scalar_t identity() const { return 0; }
 };
 
 template <typename scalar_t>
 struct ReductionMulOp {
-  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+  scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
     return a * b;
   }
-  inline scalar_t identity() const { return 1; }
+  scalar_t identity() const { return 1; }
 };
 
 }  // namespace

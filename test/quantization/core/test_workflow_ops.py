@@ -724,7 +724,7 @@ class TestFakeQuantizeOps(TestCase):
                 X.cpu(), scale.cpu(), zero_point.cpu(), axis, quant_min, quant_max)
             Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
-            torch.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
+            torch.testing.assert_close(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
             self.assertTrue(Y.dtype == float_type)
 
     def test_forward_per_channel_cachemask_cpu(self):
@@ -1065,15 +1065,17 @@ class TestFakeQuantizeOps(TestCase):
 
 class TestFusedObsFakeQuant(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           sampled_dtype=st.sampled_from(['bf16', 'fp16', 'fp32']),
            symmetric_quant=st.booleans(), use_bool=st.booleans())
     @settings(deadline=None)
-    def test_fused_obs_fake_quant_moving_avg(self, device, symmetric_quant, use_bool) -> None:
+    def test_fused_obs_fake_quant_moving_avg(self, device, sampled_dtype, symmetric_quant, use_bool) -> None:
         """
         Tests the case where we call the fused_obs_fake_quant op multiple times
         and update the running_min and max of the activation tensors.
         """
-        sampled_dtype = st.sampled_from(["bf16", "fp32"]) if device == "cuda" else "fp32"
-        dtype = torch.bfloat16 if sampled_dtype == "bf16" else torch.float32
+        if device == "cpu":
+            sampled_dtype = "fp32"
+        dtype = {'bf16' : torch.bfloat16, 'fp16' : torch.half, 'fp32' : torch.float32}[sampled_dtype]
 
         in_running_min_ref = out_running_min_ref = torch.tensor(float("inf"), dtype=dtype)
         in_running_min_op = torch.tensor(float("inf"), dtype=dtype, device=device)

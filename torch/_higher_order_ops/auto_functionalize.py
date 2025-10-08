@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, get_args, Optional, Union
+from typing import Any, get_args, Optional, Union
 
 import torch
 import torch._library.utils as library_utils
@@ -609,6 +609,7 @@ def do_auto_functionalize_v2(
     normalized_kwargs = {}
 
     schema = op._schema
+    # pyrefly: ignore  # bad-assignment
     op = op._op if isinstance(op, HopInstance) else op
     assert isinstance(op, get_args(_MutableOpType))
 

@@ -84,6 +84,7 @@ class _NSGraphMatchableSubgraphsIterator:
                 if is_match:
                     # navigate to the base node
                     for rev_fusion_idx in range(len(_reverse_fusion_ops) - 1):
+                        # pyrefly: ignore  # bad-argument-type
                         self.seen_nodes.add(cur_start_node)
                         # for now, assume that there are no other nodes
                         # which need to be added to the stack
@@ -94,8 +95,10 @@ class _NSGraphMatchableSubgraphsIterator:
                             cur_base_op_node = cur_start_node
                     break
 
+            # pyrefly: ignore  # bad-argument-type
             self.seen_nodes.add(cur_start_node)
             # add args of previous nodes to stack
+            # pyrefly: ignore  # missing-attribute
             for arg in cur_start_node.all_input_nodes:
                 self._recursively_add_node_arg_to_stack(arg)
 
@@ -103,6 +106,7 @@ class _NSGraphMatchableSubgraphsIterator:
             # note: this check is done on the start_node, i.e.
             # if we are matching linear-relu in reverse, this would do the matchable
             # check on the linear
+            # pyrefly: ignore  # bad-argument-type
             if not self._is_matchable(cur_base_op_node):
                 continue
 
@@ -116,8 +120,10 @@ class _NSGraphMatchableSubgraphsIterator:
                     continue
 
             return NSSubgraph(
+                # pyrefly: ignore  # bad-argument-type
                 start_node=cur_start_node,
                 end_node=cur_end_node,
+                # pyrefly: ignore  # bad-argument-type
                 base_op_node=cur_base_op_node,
             )
 

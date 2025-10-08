@@ -67,6 +67,7 @@ class TestCase(InductorTestCase):
     )
     # @config.patch("triton.codegen_upcast_to_fp32", False) # TODO enable
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @disable_cache_limit()
     def test_op_dtype_propagation(self, op, dtype):
@@ -257,6 +258,7 @@ class TestCase(InductorTestCase):
 
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
     @config.patch("triton.codegen_upcast_to_fp32", False)
     def test_downcast_div_mod(self):
         def fn(x, y):
@@ -271,6 +273,7 @@ class TestCase(InductorTestCase):
 
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
     def test_constant(self):
         def fn():
             return (torch.full((2, 3), 3.1416, device=GPU_TYPE, dtype=torch.float16),)
@@ -280,6 +283,7 @@ class TestCase(InductorTestCase):
         self.assertEqual(fn(), out)
 
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("triton.persistent_reductions", False)
     def test_any(self):
@@ -291,6 +295,7 @@ class TestCase(InductorTestCase):
         self.assertEqual(fn(x), out)
 
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     def test_assoc_scan(self):
         from torch._higher_order_ops.associative_scan import associative_scan

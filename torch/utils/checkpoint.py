@@ -132,7 +132,7 @@ def _infer_device_type(*args):
 
     def add_device_types(arg):
         nonlocal device_types
-        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu":
+        if isinstance(arg, torch.Tensor) and arg.device.type != "cpu":
             device_types.append(arg.device.type)
     tree_map(add_device_types, args)
 
@@ -222,6 +222,7 @@ def _get_autocast_kwargs(device_type="cuda"):
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, run_function, preserve_rng_state, *args):
         check_backward_validity(args)
         ctx.run_function = run_function
@@ -784,6 +785,7 @@ class _Holder:
 
 class _NoopSaveInputs(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(*args):
         return torch.empty((0,))
 
@@ -1006,6 +1008,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
             def logging_mode():
                 with LoggingTensorMode(), \
                      capture_logs(True, python_tb=True, script_tb=True, cpp_tb=cpp_tb) as logs_and_tb:
+                    # pyrefly: ignore  # bad-assignment
                     self.logs, self.tbs = logs_and_tb
                     yield logs_and_tb
             return logging_mode()

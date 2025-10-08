@@ -7,8 +7,8 @@
 import contextlib
 import copy
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterable, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from collections.abc import Callable, Generator, Iterable, Sequence
+from typing import Any, cast, Optional, Union
 
 import torch.nn as nn
 

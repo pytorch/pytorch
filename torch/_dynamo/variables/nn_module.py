@@ -962,10 +962,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 self.value_type = mod.cls_to_become
             initialize_lazy_module(tx, mod, args, kwargs)
 
-        if (
-            not isinstance(mod, torch.fx.GraphModule)
-            and mod.__call__.__func__ is not unpatched_nn_module_call
-        ):
+        if not isinstance(mod, torch.fx.GraphModule):
             name = "__call__"
             fn = getattr(self.value_type, name)
         else:

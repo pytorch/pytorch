@@ -4,8 +4,9 @@ import inspect
 import logging
 import sys
 from collections import defaultdict
+from collections.abc import Callable
 from enum import auto, Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.utils._pytree import (

@@ -168,6 +168,8 @@ class BlockDescriptorTestBase(InductorTestCase):
         self.assertEqual(len(code), expected_num_programs)
         count_code("@triton.jit", expected_num_triton_kernels)
         count_code(self.block_descriptor_constructor_str, expected_num_block_pointers)
+        # Verify that 1D shapes aren't being transposed for the TMA store.
+        count_code("tl.trans", 0)
 
         return result, code
 

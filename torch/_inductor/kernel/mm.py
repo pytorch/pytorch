@@ -25,7 +25,7 @@ from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, ChoiceCaller, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
-from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
+from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -1251,9 +1251,6 @@ def tuned_sparse_semi_structured_mm(
     return autotune_select_algorithm(
         "sparse_semi_structured_mm", choices, (mat1, mat1_meta, mat2), layout
     )
-
-
-add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]

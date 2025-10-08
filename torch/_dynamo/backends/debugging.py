@@ -74,13 +74,13 @@ def make_eager_backend_with_torch_function_modes(
     def fn(
         gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor], **kwargs: Any
     ) -> Callable[..., Any]:
-        stack = ExitStack()
-        for mode in modes:
-            stack.enter_context(mode)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            with ExitStack() as stack:
+                for mode in modes:
+                    stack.enter_context(mode)
+                return gm.forward(*args, **kwargs)
 
-        result = gm.forward
-        stack.close()
-        return result
+        return wrapper
 
     return fn
 

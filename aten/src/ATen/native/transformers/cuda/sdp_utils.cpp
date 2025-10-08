@@ -316,6 +316,12 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   return false;
 #endif
 #else
+  if (!at::cuda::is_available()) {
+    if (debug) {
+      TORCH_WARN("flash attention requires a CUDA device, which is not available.");
+    }
+    return false;
+  }
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm80, sm121>(dprops)) {
     if (debug) {
@@ -367,6 +373,12 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   return false;
 #endif
 #else
+  if (!at::cuda::is_available()) {
+    if (debug) {
+      TORCH_WARN("Mem Efficient attention requires a CUDA device, which is not available.");
+    }
+    return false;
+  }
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm50, sm121>(dprops)) {
     if (debug) {
@@ -597,6 +609,12 @@ bool check_cudnn_layout(sdp_params const& params, bool debug) {
 bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
   using sm80 = SMVersion<8, 0>;
   using sm121 = SMVersion<12, 1>;
+  if (!at::cuda::is_available()) {
+    if (debug) {
+      TORCH_WARN("cuDNN SDPA requires a CUDA device, which is not available.");
+    }
+    return false;
+  }
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm80, sm121>(dprops)) {
     if (debug) {

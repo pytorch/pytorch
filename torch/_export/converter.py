@@ -4,9 +4,9 @@ import logging
 import operator
 import typing
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.export._trace
@@ -1109,6 +1109,7 @@ class TS2FXGraphConverter:
                     fx_block_args[i] = self.name_to_node[output_name]
 
             # Update the value of global variables, whose values are modified inplace.
+
             for i, name in enumerate(
                 subgraph_converter.name_update_from_subblock_to_parent
             ):

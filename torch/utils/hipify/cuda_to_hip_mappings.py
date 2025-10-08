@@ -48,6 +48,7 @@ MATH_TRANSPILATIONS = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore  # no-matching-overload
 CUDA_TYPE_NAME_MAP = collections.OrderedDict(
     [
         ("CUresult", ("hipError_t", CONV_TYPE, API_DRIVER)),
@@ -675,6 +676,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore  # no-matching-overload
 CUDA_IDENTIFIER_MAP = collections.OrderedDict(
     [
         ("__CUDACC__", ("__HIPCC__", CONV_DEF, API_RUNTIME)),

@@ -1201,9 +1201,119 @@ def permute(x, dims):
 
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
+    """
+    Lowers a slice call, creating ExternKernels for the output size & storage offset symbols,
+    if the indices are unbacked and appropriate semantics aren't known.
+    If they are known (indices are static/backed/unbacked with info), a SliceView is created.
+    """
+
+    from torch.fx.experimental.symbolic_shapes import (
+        CallMethodKey,
+        resolve_unbacked_bindings,
+    )
+
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
+    size = x.get_size()[dim]
+    step = sympy.expand(step)
+    assert isinstance(step, sympy.Expr) or step > 0, step
+
+    # maybe apply slice optimization
+    try:
+        if (
+            start == 0
+            and V.graph.sizevars.statically_known_leq(size, end)
+            and step == 1
+        ):
+            return x
+    except TypeError:
+        pass
+
+    # try to avoid dynamic (unbacked) slice
+    def compute_slice_index(index, size, default=None):
+        if index is None:
+            return default
+
+        fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
+        index = sympy.expand(index)
+        size = sympy.expand(size)
+        if fn(sympy.Ge(index, 0)) and fn(sympy.Le(index, size)):
+            return index
+        elif fn(sympy.Lt(index, 0)) and fn(sympy.Ge(index, -size)):
+            return index + size
+        elif fn(sympy.Gt(index, size)):
+            return size
+        elif fn(sympy.Lt(index, -size)):
+            return 0
+        return None
+
+    start_index, end_index = None, None
+    ambiguous_slice = clamp
+    if ambiguous_slice:
+        start_index = compute_slice_index(start, size, 0)
+        end_index = compute_slice_index(end, size, size)
+        if start_index is not None and end_index is not None:
+            start, end = start_index, end_index
+            ambiguous_slice = False
+
+    # ambiguous_slice=False means we know what semantics this slice call follows,
+    # and don't need to generate an extern kernel to represent the output size.
+    # This is assumed True for clamp=False
+    # (meant to follow standard indexing semantics: 0 <= index < size)
+    if not ambiguous_slice:
+        return TensorBox(
+            ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
+        )  # go to SliceView/ReinterpretView
+
+    # unbacked territory: create DynamicSlice ExternKernel
+    # clamp is True, unbacked start / end
+    assert clamp
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
+    assert unbacked_bindings is not None
+    assert len(unbacked_bindings) <= 2, unbacked_bindings
+    sym_size, sym_storage = None, None
+    for sym, keypath in unbacked_bindings.items():
+        if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
+            sym_size = sym
+        elif keypath == (CallMethodKey("storage_offset"),):
+            sym_storage = sym
+
+    assert start_index is None or end_index is None
+    b_size = ir.DynamicSliceSize(
+        sym_size,
+        start,
+        end,
+        step,
+        x.get_size()[dim],
+    )
+    b_size.name = V.graph.register_buffer(b_size)
+    V.graph.register_operation(b_size)
+    new_size = sym_size
+
+    if start_index is not None:
+        # we shouldn't have allocated storage offset symbol if start index was determinable
+        assert sym_storage is None
+        new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
+    else:
+        b_storage = ir.DynamicSelectStorageOffset(
+            sym_storage,
+            start,
+            x.get_layout().offset,
+            x.get_stride()[dim],
+            x.get_size()[dim],
+            clamp=True,
+        )
+        b_storage.name = V.graph.register_buffer(b_storage)
+        V.graph.register_operation(b_storage)
+        new_storage_offset = sym_storage
+
+    new_sizes = list(x.get_size())
+    new_strides = list(x.get_stride())
+    new_sizes[dim] = new_size
+    new_strides[dim] *= step
+    return as_strided(x, new_sizes, new_strides, new_storage_offset)
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
@@ -1844,7 +1954,8 @@ def select(x, dim, idx):
             del new_stride[dim]
             return as_strided(x, new_size, new_stride, new_storage_offset)
         else:
-            slice_result = slice_(x, dim, actual_index, actual_index + 1)
+            # no need to clamp, this function handles negative indexing itself
+            slice_result = slice_(x, dim, actual_index, actual_index + 1, clamp=False)
             return squeeze(slice_result, dim)
 
     # Unbacked Semantics:
@@ -1867,6 +1978,7 @@ def select(x, dim, idx):
         x.get_layout().offset,
         new_stride[dim],
         x.get_size()[dim],
+        clamp=False,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -1923,7 +2035,7 @@ def unfold(x, dimension, size, step):
     dim = canonicalize_dim(ndim, dimension)
 
     if ndim == 0:
-        return slice_(unsqueeze(x, 0), end=size)
+        return slice_(unsqueeze(x, 0), end=size, clamp=False)
 
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
@@ -1976,8 +2088,9 @@ def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
     # TODO: don't guard on static shape here
     new_len = V.graph.sizevars.guard_int(x.get_size()[dim]) // 2
-    a = slice_(x, dim, 0, new_len)
-    b = slice_(x, dim, new_len, new_len * 2)
+    # no need to clamp, index is int based on input size
+    a = slice_(x, dim, 0, new_len, clamp=False)
+    b = slice_(x, dim, new_len, new_len * 2, clamp=False)
     return mul(a, sigmoid(b))
 
 
@@ -2955,6 +3068,8 @@ make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
 @register_lowering(aten.copy, type_promotion_kind=None)
 def copy(self, src, non_blocking=False):
+    if not isinstance(src, ir.IRNode):
+        src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
     x = src
     if self.get_device() != src.get_device():
         x = to_device(x, self.get_device())
@@ -3585,7 +3700,7 @@ def index_output_size_and_inner_fn(
     # Then, a[:,x,:,x,:] will have shape 2,3,5,7 as due to x,:,x then 2 will
     # be pulled to the front.
     non_consecutive_tensors = False
-    for previous, current in zip(tensor_indices, tensor_indices[1:]):
+    for previous, current in itertools.pairwise(tensor_indices):
         if current - previous != 1:
             non_consecutive_tensors = True
 
@@ -4336,7 +4451,7 @@ def inplace_constant_pad_nd(
         layout.offset,
     )
 
-    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad)
+    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad, clamp=False)
     fill_(sliced_x, fill_value)
 
     counters["inductor"]["inplace_padding"] += 1
@@ -7111,6 +7226,67 @@ register_lowering(
 def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     result = ir.InvokeSubgraph.create(subgraph_fn, *operands)
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
+
+
+# Import the control_deps_op HOP for lowering
+from torch._inductor.fx_passes.control_dependencies import control_deps
+
+
+@register_lowering(control_deps, type_promotion_kind=None)
+def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
+    """
+    Lower control_deps_op by ensuring dependencies are realized and tracking them.
+
+    The control_deps_op HOP makes dependencies explicit in the graph. During lowering:
+    1. Realize all additional dependencies to ensure they're computed
+    2. Execute the target operation normally
+    3. Track the dependencies for the scheduler
+    """
+    # Realize all additional dependencies
+    dep_names = []
+    for dep in additional_deps:
+        if not isinstance(dep, IRNode):
+            continue
+
+        dep.realize()
+        dep_names.append(dep.get_name())
+
+    original_args = V.graph.current_node.args
+    arg_offset = 2  # first two args (additional_deps, subgraph)
+    assert len(args) + arg_offset == len(original_args)
+
+    output = None
+
+    operation_len = len(V.graph.operations)
+    assert len(subgraph_fn.graph_module.graph.find_nodes(op="placeholder")) == len(args)
+    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
+        if node.op == "placeholder":
+            assert node not in V.graph.env
+            V.graph.env[node] = args[i]
+            continue
+        elif node.op == "output":
+            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
+        else:
+            assert node not in V.graph.env
+            V.graph.env[node] = V.graph.run_node(node)
+
+    assert output is not None and additional_deps
+
+    # some operators, like wait_tensor, just return their input,
+    # so its more robust to add dep to the operation itself,
+    # otherwise you can have a cycle of
+    # a = coll
+    # b = control_deps(a, mm, ...)
+    # c = control_deps(b, wait, ...)
+    # if c == a, then you have a cycle.
+    for op in V.graph.operations[operation_len:]:
+        for dep_name in dep_names:
+            op_name = op.operation_name
+            assert op_name is not None
+            V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    return output
 
 
 @register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)

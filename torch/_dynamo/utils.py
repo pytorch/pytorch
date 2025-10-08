@@ -1025,6 +1025,8 @@ def istype(obj: object, allowed_types: Any) -> bool:
 if sys.version_info >= (3, 12):
     # Some typing classes moved to C in 3.12,
     # which no longer have the _Final mixin.
+    # Check for consistency e.g. here:
+    # https://github.com/python/cpython/blob/f2b82b3b3b1f8c7a81e84df35ee921e44517cf32/Lib/typing.py#L32
     _builtin_final_typing_classes = (
         typing.ParamSpecArgs,
         typing.ParamSpecKwargs,
@@ -1039,14 +1041,18 @@ def is_typing(value: Any) -> bool:
     # _Final catches most of typing classes:
     #   - Any
     #   - Callable
-    #   - Union
+    #   - Union (Python < 3.14)
     #   ...
     #
     # NB: we intentionally ignore classes that inherit from Generic, since they
     # can be used as both TypingVariable as well as UserDefinedClassVariable.
     if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
         return True
-    return isinstance(value, typing._Final) or value is typing.Generic  # type: ignore[attr-defined]
+    return (
+        isinstance(value, typing._Final)  # type: ignore[attr-defined]
+        or value is typing.Generic
+        or value is typing.Union
+    )
 
 
 def is_numpy_int_type(value: Any) -> bool:

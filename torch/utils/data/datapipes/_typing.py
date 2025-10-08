@@ -265,6 +265,7 @@ class _DataPipeType:
 
 # Default type for DataPipe without annotation
 _T_co = TypeVar("_T_co", covariant=True)
+# pyrefly: ignore  # invalid-annotation
 _DEFAULT_TYPE = _DataPipeType(Generic[_T_co])
 
 
@@ -283,6 +284,7 @@ class _DataPipeMeta(GenericMeta):
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
         # TODO: the statements below are not reachable by design as there is a bug and typing is low priority for now.
+        # pyrefly: ignore  # no-access
         cls.__origin__ = None
         if "type" in namespace:
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]

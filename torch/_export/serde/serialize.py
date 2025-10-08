@@ -14,11 +14,11 @@ import operator
 import traceback
 import typing
 from collections import namedtuple, OrderedDict
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Annotated, Any, Callable, cast, final, Optional, Union
+from typing import Annotated, Any, cast, final, Optional, Union
 
 import sympy
 
@@ -383,6 +383,7 @@ def _reconstruct_fake_tensor(
     fake_tensor = _CURRENT_DESERIALIZER.deserialize_tensor_meta(tensor_meta)
     if is_parameter:
         fake_tensor = torch.nn.Parameter(fake_tensor)  # type: ignore[assignment]
+    # pyrefly: ignore  # bad-return
     return fake_tensor
 
 
@@ -2182,6 +2183,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     simplify=True,
                 )
             ):
+                # pyrefly: ignore  # unbound-name
                 node.meta["unbacked_bindings"] = unbacked_bindings
 
         assert len(self.unbacked_symbols) == 0
@@ -2499,9 +2501,9 @@ class GraphModuleDeserializer(metaclass=Final):
             # TODO(pianpwk): if we can clean up unused symbols in range_constraints,
             # then this logic can just be handled with self.unbacked_symbols alone
             for _ in range(count_unbacked_symfloat + 1):
-                next(self.shape_env.unbacked_symfloat_counter)
+                self.shape_env.unbacked_symfloat_counter += 1
             for _ in range(count_unbacked_symint + 1):
-                next(self.shape_env.unbacked_symint_counter)
+                self.shape_env.unbacked_symint_counter += 1
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)
@@ -2740,6 +2742,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     serialized_node.metadata
                 )
                 assert arg is not None
+                # pyrefly: ignore  # bad-argument-type
                 self.generate_getitem(meta_val, fx_node, arg, 0, deserialized_metadata)
                 fx_node.meta["val"] = tuple(meta_val)
                 self.serialized_name_to_node[fx_node.name] = fx_node
@@ -3165,6 +3168,7 @@ def _dict_to_dataclass(cls, data):
         _value = next(iter(data.values()))
         assert isinstance(_type, str)
         field_type = cls.__annotations__[_type]
+        # pyrefly: ignore  # missing-attribute
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
         fields = {}
@@ -3471,18 +3475,23 @@ def _canonicalize_graph(
         n.metadata.clear()
 
     # Stage 4: Aggregate values.
+    # pyrefly: ignore  # no-matching-overload
     sorted_tensor_values = dict(
         sorted(graph.tensor_values.items(), key=operator.itemgetter(0))
     )
+    # pyrefly: ignore  # no-matching-overload
     sorted_sym_int_values = dict(
         sorted(graph.sym_int_values.items(), key=operator.itemgetter(0))
     )
+    # pyrefly: ignore  # no-matching-overload
     sorted_sym_float_values = dict(
         sorted(graph.sym_float_values.items(), key=operator.itemgetter(0))
     )
+    # pyrefly: ignore  # no-matching-overload
     sorted_sym_bool_values = dict(
         sorted(graph.sym_bool_values.items(), key=operator.itemgetter(0))
     )
+    # pyrefly: ignore  # no-matching-overload
     sorted_custom_obj_values = dict(
         sorted(graph.custom_obj_values.items(), key=operator.itemgetter(0))
     )
@@ -3539,6 +3548,7 @@ def canonicalize(
         ExportedProgram: The canonicalized exported program.
     """
     ep = copy.deepcopy(ep)
+    # pyrefly: ignore  # annotation-mismatch
     constants: set[str] = constants or set()
 
     opset_version = dict(sorted(ep.opset_version.items(), key=operator.itemgetter(0)))

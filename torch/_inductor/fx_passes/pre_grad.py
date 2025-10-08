@@ -339,8 +339,9 @@ def pre_grad_passes(
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.pre_grad_custom_pass is not None:
-        with GraphTransformObserver(gm, "pre_grad_custom_pass"):
-            config.pre_grad_custom_pass(gm.graph)
+        GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(
+            config.pre_grad_custom_pass
+        )
     stable_topological_sort(gm.graph)
 
     from .quantization import quant_lift_up
@@ -614,7 +615,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
 class NormalizedLinearNode:
     def __init__(self, node: torch.fx.Node) -> None:
         assert node.op == "call_function"
-        assert node.target in [torch.nn.functional.linear]
+        assert node.target is torch.nn.functional.linear
         self.node: torch.fx.Node = node
 
     def get_input(self) -> torch.fx.Node:

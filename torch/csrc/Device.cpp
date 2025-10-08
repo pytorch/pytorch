@@ -18,7 +18,7 @@
 static PyObject* THPUpperModuleOfDevice = nullptr;
 
 PyObject* THPDevice_New(const at::Device& device) {
-  auto type = (PyTypeObject*)&THPDeviceType;
+  auto type = &THPDeviceType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();

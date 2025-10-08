@@ -220,6 +220,12 @@ class TestCppExtensionJIT(common.TestCase):
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/163721
+        lib = torch.mps.compile_shader("void kernel noop(device float *x) {}")
+        lib.noop(mps_output)
+        module.mps_add_one_new_context(mps_output)
+        self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
+
     def _run_jit_cuda_archflags(self, flags, expected):
         # Compile an extension with given `flags`
         def _check_cuobjdump_output(expected_values, is_ptx=False):

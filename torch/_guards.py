@@ -14,16 +14,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Generic,
-    NamedTuple,
-    Optional,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
 from torch.utils import _pytree as pytree
@@ -36,7 +27,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator
+    from collections.abc import Callable, Generator, Iterator
     from types import CodeType
 
     import sympy
@@ -72,8 +63,7 @@ CA_COMPILE_ID_PATTERN = re.compile(
 # 3. Compact: The string form is directly displayed by some tools. Special symbols are okay.
 
 
-# TODO: mark as kw_only=True once we drop support for <Python 3.10
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True, slots=True)
 class CompileId:
     frame_id: Optional[int]
     # This id is per-frame, and counts how many times we've compiled this

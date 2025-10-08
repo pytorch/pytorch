@@ -1647,14 +1647,20 @@ class SIMDScheduling(BaseScheduling):
                                 )
                             kernel.cse.invalidate(OrderedSet())
 
-        if not isinstance(partial_code, str):
-            # This is used to calculate flops in TritonTemplateKernels
-            with ir.IRNode.current_origins(template_node.node.origins):
-                partial_code.finalize_hook("<DEF_KERNEL>")
-            partial_code.finalize_hook("<ARGDEFS>", strict=False)
-        # finalize must be called after adding epilogue above
+        # Template hooks must be finalised after kernel.remove_kernel_local_buffers
+        # is called (this is called when the kernel context is exited above), and when
+        # the kernel handler is set (as below). This is because the hooks may add
+        # DeferredLine type lines, which preclude lines involving buffers that have
+        # been removed
 
+        # finalize must be called after adding epilogue above
         with V.set_kernel_handler(kernel):
+            if not isinstance(partial_code, str):
+                # This is used to calculate flops in TritonTemplateKernels
+                with ir.IRNode.current_origins(template_node.node.origins):
+                    partial_code.finalize_hook("<DEF_KERNEL>")
+                partial_code.finalize_hook("<ARGDEFS>", strict=False)
+
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
 
             for input_name in kernel.named_input_nodes.keys():
@@ -1696,7 +1702,11 @@ class SIMDScheduling(BaseScheduling):
         from ..ir import IRNode
 
         def get_size(arg):
-            if not isinstance(arg, IRNode) or (size := arg.maybe_get_size()) is None:
+            if not isinstance(arg, IRNode):
+                return None
+            if isinstance(arg, ir.BaseView):  # triton templates want the base tensor.
+                arg = arg.unwrap_view()
+            if (size := arg.maybe_get_size()) is None:
                 return None
             return tuple(s for s in size)
 

@@ -706,8 +706,7 @@ class ScheduleTest(MultiProcContinuousTest):
         "schedule_class",
         [ScheduleZBVZeroBubble, ScheduleDualPipeV],
     )
-    @parametrize("use_new_runtime", [False, True])
-    def test_v_shape_schedules(self, schedule_class, use_new_runtime):
+    def test_v_shape_schedules(self, schedule_class):
         n_stages = 8
         rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -727,13 +726,6 @@ class ScheduleTest(MultiProcContinuousTest):
         schedule = schedule_class(
             stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
         )
-
-        if schedule_class != ScheduleDualPipeV and use_new_runtime:
-            old_schedule = schedule
-            schedule = _PipelineScheduleRuntime(
-                stages, num_microbatches, loss_fn=loss_fn
-            )
-            schedule._prepare_schedule_with_comms(old_schedule.pipeline_order)
 
         # Run pipeline - special case where first and last stage are on rank 0
         out = None

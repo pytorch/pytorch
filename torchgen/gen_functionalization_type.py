@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from torchgen.api import cpp, dispatcher, functionalization
 from torchgen.api.translate import translate
@@ -51,6 +51,8 @@ from torchgen.utils import concatMap, dataclass_repr, FileManager
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torchgen.selective_build.selector import SelectiveBuilder
 
 
@@ -651,28 +653,6 @@ def emit_inplace_functionalization_body(
         e.expr
         for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)
     ]
-
-    if f.func.is_out_fn():
-        mutable_input_post_processing = "\n".join(
-            [
-                f"""
-      at::functionalization::impl::replace_(
-        {a.name}, {"std::get<" + str(i) + ">(tmp_output)" if len(f.func.returns) > 1 else "tmp_output"});
-      at::functionalization::impl::commit_update({a.name});"""
-                for (i, a) in enumerate(f.func.arguments.out)
-                if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
-            ]
-        )
-    else:
-        mutable_input_post_processing = "\n".join(  # noqa: F841
-            [
-                f"""
-      at::functionalization::impl::replace_({a.name}, tmp_output);
-      at::functionalization::impl::commit_update({a.name});"""
-                for a in f.func.arguments.flat_all
-                if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
-            ]
-        )
 
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
     # We don't want to run the inplace meta func for ops like .set_(), because:
