@@ -4258,7 +4258,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         @torch.compile(fullgraph=True)
         def f(x):
             y = x.item()
-            torch._check_is_size(y)
+            torch._check(y >= 0)
             if y >= 0:
                 return x * 2
             else:
