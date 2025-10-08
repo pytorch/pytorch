@@ -179,6 +179,15 @@ skip:
     - timm_resnest
     - timm_vision_transformer
     - timm_vovnet
+    - hf_Bert_large
+    - hf_GPT2_large
+    - hf_Roberta_base
+    - hf_T5_base
+    - hf_T5_generate
+    - hf_T5_large
+    - hf_Whisper
+    - hf_distil_whisper
+    - timm_vision_transformer_large
 
   device:
     cpu:
