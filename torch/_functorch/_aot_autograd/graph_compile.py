@@ -1334,27 +1334,7 @@ def maybe_inline_graph_saved_tensors_hooks(
     bw_module.recompile()
 
 
-def aot_stage2_autograd(
-    aot_state: AOTState,
-    aot_graph_capture: AOTGraphCapture,
-) -> DispatchReturn:
-    """
-    Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
-    and returns a wrapped torch.autograd.Function with a forward and backward.
-    """
-
-    wrappers = aot_graph_capture.wrappers
-    fx_g = aot_graph_capture.graph_module
-    flat_args = aot_state.flat_args
-    joint_inputs = aot_graph_capture.updated_flat_args
-    maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
-    aot_config = aot_state.aot_config
-    fw_metadata = aot_state.fw_metadata
-
-    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="autograd")
-
-    # Copied from aot_dispatch_autograd_graph.
-    disable_amp = torch._C._is_any_autocast_enabled()
+def log_joint_graph(fx_g, aot_config):
     joint_graph_str = None
     if aot_config.enable_log:
         aot_joint_log.info(
@@ -1378,13 +1358,90 @@ def aot_stage2_autograd(
             "aot_joint_graph",
             payload_fn=lambda: joint_graph_str,
         )
+    return joint_graph_str
+
+
+def log_graphs(fw_module, bw_module, maybe_subclass_meta, fw_metadata, aot_config):
+    fw_module_str = None
+    bw_module_str = None
+    if aot_config.enable_log:
+        aot_graphs_log.info(
+            "%s",
+            lazy_format_graph_code(
+                "Forward graph",
+                fw_module,
+                aot_config.aot_id,
+                include_stride=True,
+                include_device=True,
+                colored=True,
+            ),
+        )
+        aot_graphs_log.info(
+            "%s",
+            lazy_format_graph_code(
+                "Backward graph",
+                bw_module,
+                aot_config.aot_id,
+                include_stride=True,
+                include_device=True,
+                colored=True,
+            ),
+        )
+        fw_module_str = fw_module.print_readable(
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            expanded_def=True,
+        )
+        bw_module_str = bw_module.print_readable(
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            expanded_def=True,
+        )
+
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "aot_forward_graph_fw_metadata",
+                "encoding": "string",
+            },
+            payload_fn=lambda: dataclass_repr(fw_metadata),
+        )
+        if maybe_subclass_meta is not None:
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "aot_forward_graph_fw_subclass_metadata",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dataclass_repr(maybe_subclass_meta),
+            )
+
+        trace_structured(
+            "aot_forward_graph",
+            payload_fn=lambda: fw_module_str,
+        )
+        trace_structured(
+            "aot_backward_graph",
+            payload_fn=lambda: bw_module_str,
+        )
+    return fw_module_str, bw_module_str
+
+
+def aot_stage2a_partition(
+    fx_g: torch.fx.GraphModule,
+    joint_inputs: Union[list[Any], tuple[list[Any], list[Any]]],
+    maybe_subclass_meta: Any,
+    fw_metadata: ViewAndMutationMeta,
+    aot_config: AOTConfig,
+):
+    disable_amp = torch._C._is_any_autocast_enabled()
+    inner_meta = (
+        fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
+    )
 
     with torch.no_grad():
-        inner_meta = (
-            fw_metadata
-            if maybe_subclass_meta is None
-            else maybe_subclass_meta.fw_metadata
-        )
         context = torch._C._DisableAutocast if disable_amp else nullcontext
         with context(), track_graph_compiling(aot_config, "joint"):
             # See Note: [Partitioner handling for Subclasses, Part 1]
@@ -1473,9 +1530,9 @@ def aot_stage2_autograd(
                     if dynamic_dims:
                         fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
 
-            fw_metadata.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
-            inner_meta.num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+            fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
+            inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
                     fw_module,
@@ -1596,78 +1653,62 @@ def aot_stage2_autograd(
                 if bw_out is None and not metadata_mutation_in_graph and is_non_leaf:
                     _indices_of_inps_to_detach.append(i)
 
-        fw_module_str = None
-        bw_module_str = None
-        if aot_config.enable_log:
-            aot_graphs_log.info(
-                "%s",
-                lazy_format_graph_code(
-                    "Forward graph",
-                    fw_module,
-                    aot_config.aot_id,
-                    include_stride=True,
-                    include_device=True,
-                    colored=True,
-                ),
-            )
-            aot_graphs_log.info(
-                "%s",
-                lazy_format_graph_code(
-                    "Backward graph",
-                    bw_module,
-                    aot_config.aot_id,
-                    include_stride=True,
-                    include_device=True,
-                    colored=True,
-                ),
-            )
-            fw_module_str = fw_module.print_readable(
-                print_output=False,
-                include_stride=True,
-                include_device=True,
-                expanded_def=True,
-            )
-            bw_module_str = bw_module.print_readable(
-                print_output=False,
-                include_stride=True,
-                include_device=True,
-                expanded_def=True,
-            )
+    return (
+        fw_module,
+        bw_module,
+        num_fw_outs_saved_for_bw,
+        num_symints_saved_for_bw,
+        _indices_of_inps_to_detach,
+        joint_inputs[0],
+    )
 
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "aot_forward_graph_fw_metadata",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: dataclass_repr(fw_metadata),
-            )
-            if maybe_subclass_meta is not None:
-                trace_structured(
-                    "artifact",
-                    metadata_fn=lambda: {
-                        "name": "aot_forward_graph_fw_subclass_metadata",
-                        "encoding": "string",
-                    },
-                    payload_fn=lambda: dataclass_repr(maybe_subclass_meta),
-                )
 
-            trace_structured(
-                "aot_forward_graph",
-                payload_fn=lambda: fw_module_str,
-            )
-            trace_structured(
-                "aot_backward_graph",
-                payload_fn=lambda: bw_module_str,
-            )
+def aot_stage2_autograd(
+    aot_state: AOTState,
+    aot_graph_capture: AOTGraphCapture,
+) -> DispatchReturn:
+    """
+    Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
+    and returns a wrapped torch.autograd.Function with a forward and backward.
+    """
 
+    fx_g = aot_graph_capture.graph_module
+    maybe_subclass_meta = aot_graph_capture.maybe_subclass_meta
+    fw_metadata = aot_state.fw_metadata
+    aot_config = aot_state.aot_config
+
+    CompileEventLogger.try_add_pt2_compile("backend_compile", dispatch_mode="autograd")
+    joint_graph_str = log_joint_graph(fx_g, aot_config)
+
+    (
+        fw_module,
+        bw_module,
+        num_fw_outs_saved_for_bw,
+        num_symints_saved_for_bw,
+        _indices_of_inps_to_detach,
+        adjusted_flat_args,
+    ) = aot_stage2a_partition(
+        fx_g,
+        aot_graph_capture.updated_flat_args,
+        maybe_subclass_meta,
+        fw_metadata,
+        aot_config,
+    )
+
+    fw_module_str, bw_module_str = log_graphs(
+        fw_module, bw_module, maybe_subclass_meta, fw_metadata, aot_config
+    )
+
+    inner_meta = (
+        fw_metadata if maybe_subclass_meta is None else maybe_subclass_meta.fw_metadata
+    )
+
+    with torch.no_grad():
         # AMP is already traced out in joint graph. we do not wish to reapply it accidentally
         # in the compiler.
         with track_graph_compiling(aot_config, "forward"), torch._C._DisableAutocast():
             # flat_args at this point might still be subclasses-
             # make sure to pass the unwrapped fake tensors into the compiler!
-            adjusted_flat_args = joint_inputs[0]
-
             fakified_out_wrapper = FakifiedOutWrapper()
             fakified_out_wrapper.pre_compile(
                 fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
@@ -1677,7 +1718,7 @@ def aot_stage2_autograd(
                 return_new_outs=False
             )
 
-            if rng_states:
+            if fw_metadata.num_graphsafe_rng_states > 0:
                 index = fw_metadata.graphsafe_rng_state_index
                 assert index is not None
                 rng_states = [
@@ -1839,6 +1880,7 @@ def aot_stage2_autograd(
     saved_context = TracingContext.try_get()
     saved_compile_context = CompileContext.try_get()
 
+    flat_args = aot_state.flat_args
     backward_state_indices = [
         idx for idx, x in enumerate(flat_args) if isinstance(x, BackwardState)
     ]
@@ -1856,6 +1898,7 @@ def aot_stage2_autograd(
     try_save_cache_entry: Optional[Callable] = None
     entry: Optional[GenericAOTAutogradCacheEntry] = None
 
+    wrappers = aot_graph_capture.wrappers
     if aot_config.cache_info is not None:
         forward_time_taken_ns = time.time_ns() - aot_config.cache_info.start_time_ns
 
@@ -1924,6 +1967,7 @@ def aot_stage2_autograd(
             )
             try_save_cache_entry = None
 
+    disable_amp = torch._C._is_any_autocast_enabled()
     compiled_fn = AOTDispatchAutograd.post_compile(
         compiled_fw_func,
         compiled_bw_func,
