@@ -3574,6 +3574,24 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             *user_args,
         ) = args
 
+        # None placements are used to pass non-Tensors into the local_map function.
+        # Containers passed this way can not hold tensors. Thus, Dynamo would have inlined
+        # into them, and we handle None placements by assuming they will be desugared away.
+        # This will need to be adjusted for dynamic shapes support.
+        def check_none_last(placements):
+            seen_none = 0
+            for p in placements:
+                if p is None:
+                    seen_none += 1
+                else:
+                    assert seen_none == 0, (
+                        "Tracing local_map is only currently supported with None placements last."
+                    )
+            return seen_none
+
+        inputs_none_placements = check_none_last(in_placements.value)
+        output_none_placements = check_none_last(out_placements.value)
+
         local_map_kwargs = {
             "out_placements": out_placements.value,
             "in_placements": in_placements.value,
@@ -3644,9 +3662,9 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         )
 
         # Step 4: Validate traced graph signature still matches placement information
-        expected_num_inputs = len(in_placements.value)
+        expected_num_inputs = len(in_placements.value) - inputs_none_placements
         actual_num_inputs = len(body_gmod.graph.find_nodes(op="placeholder"))
-        expected_num_outputs = len(out_placements.value)
+        expected_num_outputs = len(out_placements.value) - output_none_placements
         assert len(body_gmod.graph.find_nodes(op="output")) == 1
         actual_num_outputs = len(body_gmod.graph.find_nodes(op="output")[0].args[0])
 
@@ -3676,16 +3694,6 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             raise AssertionError(
                 make_error_msg(expected_num_outputs, actual_num_outputs, "outputs")
             )
-
-        # Treat as const, so we don't have to deal with Placement types in fx IR
-        # Guarded with EQUALS_MATCH on local_map call's arguments
-        body_gmod.meta["local_map_kwargs"] = {
-            "out_placements": out_placements.value,
-            "in_placements": in_placements.value,
-            "redistribute_inputs": redistribute_inputs.value,
-            "in_grad_placements": in_grad_placements.value,
-            "device_mesh": device_mesh.value,
-        }
 
         assert len(p_kwargs) == 0
 
@@ -3730,7 +3738,13 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
 
         # Treat as const, so we don't have to deal with Placement types in fx IR
         # Guarded with EQUALS_MATCH on local_map call's arguments
-        body_gmod.meta["local_map_kwargs"] = local_map_kwargs
+        body_gmod.meta["local_map_kwargs"] = {
+            "out_placements": out_placements.value[:expected_num_outputs],
+            "in_placements": in_placements.value[:expected_num_inputs],
+            "redistribute_inputs": redistribute_inputs.value,
+            "in_grad_placements": in_grad_placements.value,
+            "device_mesh": device_mesh.value,
+        }
 
         return out
 

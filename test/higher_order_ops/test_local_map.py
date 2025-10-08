@@ -506,26 +506,24 @@ class GraphModule(torch.nn.Module):
     def test_local_map_dynamo_mismatch_placements(self):
         @local_map(
             out_placements=((Shard(0), Shard(1), Shard(2)),),
-            in_placements=(
-                (Shard(0), Shard(1), Shard(2)),
-                None,
-            ),
+            in_placements=((Shard(0), Shard(1), Shard(2)),),
             redistribute_inputs=True,
             in_grad_placements=None,
             device_mesh=self.mesh,
         )
-        def mismatch_input(x, scalar):
-            return x + scalar, scalar
+        def mismatch_input(x, y):
+            return x + y
 
         x = torch.randn(64, 64, 64, requires_grad=True)
+        y = torch.randn(64, 64, 64, requires_grad=True)
         with (
             LocalMapWrappedHigherOrderVariable.enable(),
             self.assertRaisesRegex(
                 AssertionError,
-                "Expecting 2 inputs to local_map function based on placements, but found 1.",
+                "Expecting 1 inputs to local_map function based on placements, but found 2.",
             ),
         ):
-            torch.compile(mismatch_input, backend="eager", fullgraph=True)(x, 10)
+            torch.compile(mismatch_input, backend="eager", fullgraph=True)(x, y)
 
         @local_map(
             out_placements=(
@@ -647,6 +645,42 @@ class GraphModule(torch.nn.Module):
                 ),
             )
         ap_style_initial_capture(model, inputs)
+
+    @unittest.skipIf(*get_skip_reasons())
+    def test_none_placements(self):
+        class ScalarHolder(torch.nn.Module):
+            def __init__(self, scalar):
+                super().__init__()
+                self.scalar = scalar
+
+            def forward(self, x):
+                return x + self.scalar
+
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                None,
+                None,
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def fn_with_non_tensors(x, scalar, module):
+            return x + 10 + scalar + module.scalar
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module = ScalarHolder(10)
+
+            def forward(self, x):
+                return fn_with_non_tensors(x, 10, self.module)
+
+        x = torch.randn(10, 10, requires_grad=True)
+        model = MyModule()
+        ap_style_initial_capture(model, (x,))
 
 
 if __name__ == "__main__":
