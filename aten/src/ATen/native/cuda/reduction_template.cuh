@@ -470,7 +470,9 @@ struct ReduceJitOp {
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = reducer::warp_shfl_down(value[i], offset);
-        value[i] = reducer::combine(value[i], other);
+        if (threadIdx.x + offset < dim_x) {
+          value[i] = ops.combine(value[i], other);
+        }
       }
     }
     return value;
