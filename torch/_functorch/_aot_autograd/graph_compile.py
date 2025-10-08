@@ -1394,8 +1394,8 @@ def aot_stage2_autograd(
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
 
             # apply joint_gm callback here
-            if callable(torch._functorch.config.joint_gm_compiler):
-                fx_g = torch._functorch.config.joint_gm_compiler(fx_g, joint_inputs)
+            if callable(torch._functorch.config.joint_custom_pass):
+                fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
             static_lifetime_input_indices = fw_metadata.static_input_indices
             fw_module, bw_module = aot_config.partition_fn(

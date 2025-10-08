@@ -21,7 +21,7 @@ from torch.utils._config_module import Config, install_config_module
 # [@compile_ignored: debug]
 _save_config_ignore = [
     # callable not serializeable
-    "joint_gm_compiler",
+    "joint_custom_pass",
 ]
 
 
@@ -369,7 +369,7 @@ saved_tensors_hooks_filtering_mode = "donated"
 
 
 # This callback is invoked on the joint graph before partitioning
-joint_gm_compiler: Callable = None  # type: ignore[assignment]
+joint_custom_pass: Callable = None  # type: ignore[assignment]
 
 
 if TYPE_CHECKING:

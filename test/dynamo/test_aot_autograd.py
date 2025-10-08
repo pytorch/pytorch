@@ -715,10 +715,10 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         out = compiled_fn(x, y)
         out.sum().backward()
 
-    def test_joint_gm_compiler(self):
+    def test_joint_custom_pass(self):
         is_called = False
 
-        def joint_gm_compiler(joint_gm: torch.fx.GraphModule, joint_inputs):
+        def joint_custom_pass(joint_gm: torch.fx.GraphModule, joint_inputs):
             nonlocal is_called
             is_called = True
 
@@ -739,13 +739,13 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         x = torch.randn(10, requires_grad=False)
         compiled_fn = torch.compile(M(), backend="aot_eager")
 
-        with torch._functorch.config.patch("joint_gm_compiler", joint_gm_compiler):
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
             _ = compiled_fn(x)
         # x doesn't require grad, shouldn't trigger joint graph compiler
         self.assertFalse(is_called)
 
         y = torch.randn(10, requires_grad=True)
-        with torch._functorch.config.patch("joint_gm_compiler", joint_gm_compiler):
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
             out = compiled_fn(y)
         # y requires grad, should trigger joint graph compiler
         self.assertTrue(is_called)
