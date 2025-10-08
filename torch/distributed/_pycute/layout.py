@@ -36,8 +36,8 @@ of lexicographic instead of co-lexicographic as implemented in the original layo
 """
 
 from itertools import chain
-from typing import Optional, Union
-from typing_extensions import TypeAlias, TypeIs
+from typing import Optional, TypeAlias, Union
+from typing_extensions import TypeIs
 
 from .int_tuple import (
     crd2idx,
