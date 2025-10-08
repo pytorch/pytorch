@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import logging
-import tempfile
 from dataclasses import dataclass
 
 from model_registry import ModelWithKwargs, MultiMLP, MultiMLPKwargs, MultiMLPWithDw
