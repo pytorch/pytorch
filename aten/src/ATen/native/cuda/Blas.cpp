@@ -1704,9 +1704,9 @@ enum class ScaledGemmImplementation {
  * Convert passed int (enum) from python back into a
  * strictly-typed enum
  */
-template <class EnumType>
-std::vector<EnumType> convert_int_to_enum(ArrayRef<long>& v) {
-  std::vector<EnumType> converted{};
+template <class EnumType, class ArrayType>
+std::vector<EnumType> convert_int_to_enum(ArrayType& v) {
+  std::vector<EnumType> converted;
   converted.reserve(v.size());
 
   for (auto vi : v) {
