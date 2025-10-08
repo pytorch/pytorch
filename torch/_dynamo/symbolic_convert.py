@@ -485,7 +485,8 @@ def get_assert_bytecode_sequence(with_msg: bool) -> list[str]:
 
     insts = [inst.opname for inst in dis.get_instructions(fn)]
 
-    begin_idx = insts.index("POP_JUMP_IF_TRUE")
+    # expect to find POP_JUMP_[FORWARD_]IF_TRUE
+    begin_idx = next(i for i, inst in enumerate(insts) if inst.startswith("POP_JUMP"))
     end_idx = insts.index("RAISE_VARARGS")
 
     return insts[begin_idx + 1 : end_idx + 1]
@@ -4228,9 +4229,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
             # _origin marks this as coming from an internal dynamo known function that is safe to
             # trace through.
-            if hasattr(getattr(func, "fn", None), "_origin") and func.fn._origin in [
-                produce_trampoline_autograd_apply,
-            ]:
+            if (
+                hasattr(getattr(func, "fn", None), "_origin")
+                and func.fn._origin is produce_trampoline_autograd_apply
+            ):
                 # Known sound
                 return trace_rules.SkipResult(
                     False, "allowlist in dynamo known function"
