@@ -75,12 +75,15 @@ def is_builtin(op: OpOverload) -> bool:
     return op.namespace in {"aten", "prim", "prims"}
 
 
-def is_functional_schema(schema: Any, *, view_ok: bool = False) -> bool:
+def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool:
     """Check if the schema is functional.
 
     An operator is functional if:
     - it does not mutate any of its inputs
-    - it does not return a view on any of its inputs
+    - If no view are allowed
+        - it does not return a view on any of its inputs
+    - If valid views are allowed
+        - it is not a view or a view with a single input Tensor and single output Tensor
     - it has at least one return
     """
 
@@ -114,7 +117,9 @@ def is_functional_schema(schema: Any, *, view_ok: bool = False) -> bool:
                     num_tensor_outputs += 1
 
         if is_non_mutating_view:
-            return view_ok and (num_tensor_inputs == 1 and num_tensor_outputs == 1)
+            return allow_valid_view and (
+                num_tensor_inputs == 1 and num_tensor_outputs == 1
+            )
         if not schema.returns:
             return False
         return True

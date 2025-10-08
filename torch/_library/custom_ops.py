@@ -589,7 +589,7 @@ class CustomOpDef:
 
         """
         schema = self._opoverload._schema
-        if not utils.is_functional_schema(schema, view_ok=True):
+        if not utils.is_functional_schema(schema, allow_valid_view=True):
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
                 f"{self} with schema {schema}. Please create "
