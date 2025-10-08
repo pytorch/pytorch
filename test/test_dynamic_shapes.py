@@ -4202,6 +4202,38 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         eager_result = func(x, torch.tensor([5]))
         self.assertEqual(cnt.frame_count, 2)
 
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_item_set_item(self):
+        def my_arithmetic(a, b):
+            wrk = torch.zeros(a.size(0))
+            for i in range(a.size(0)):
+                idx = b[i].item()
+                wrk[idx] += 1
+
+            return wrk
+
+        compiled = torch.compile(my_arithmetic, fullgraph=True, disable=False)
+        a = torch.randn([9])
+        b = torch.ones(9, dtype=torch.int32)
+        compiled(a, b)
+        self.assertEqual(compiled(a, b), my_arithmetic(a, b))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_item_set_item2(self):
+        def accumulate(X0, start):
+            start = start.item()
+            N = 3
+            result = X0[start].clone()
+            for i in range(0, N):
+                result += X0[start + 1 + i]
+            return result
+
+        compiled = torch.compile(accumulate, fullgraph=True)
+        X0 = torch.randn(10, 10)
+        self.assertEqual(
+            accumulate(X0, torch.tensor([1])), compiled(X0, torch.tensor([1]))
+        )
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
