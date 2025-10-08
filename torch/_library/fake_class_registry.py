@@ -31,6 +31,32 @@ class FakeScriptObject:
             )
             self.real_obj = x
 
+    def __getattribute__(self, name):
+        try:
+            return super().__getattribute__(name)
+        except AttributeError as e:
+            raise AttributeError(
+                f"Tried to call __getattr__ with attr '{name}' on a FakeScriptObject, "
+                "implying that you are calling this inside of a fake kernel."
+                "The fake kernel should not depend on the contents of the "
+                "OpaqueObject at all, so we're erroring out. If you need this"
+                "functionality, consider creating a custom TorchBind Object instead"
+                "(but note that this is more difficult)."
+            ) from e
+
+    def __setattr__(self, name, value):
+        if name in ("wrapped_obj", "script_class_name", "real_obj"):
+            super().__setattr__(name, value)
+        else:
+            raise AttributeError(
+                f"Tried to call __setattr__ with attr '{name}' on a FakeScriptObject, "
+                "implying that you are calling this inside of a fake kernel."
+                "The fake kernel should not depend on the contents of the "
+                "OpaqueObject at all, so we're erroring out. If you need this"
+                "functionality, consider creating a custom TorchBind Object instead"
+                "(but note that this is more difficult)."
+            )
+
 
 class FakeScriptMethod:
     def __init__(

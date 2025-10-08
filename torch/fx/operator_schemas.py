@@ -79,6 +79,7 @@ _type_eval_globals = {
     "NoneType": type(None),
     "Storage": torch.UntypedStorage,
     "t": typing.TypeVar("t"),
+    "PyObject": Any,
 }
 for k in dir(typing):
     _type_eval_globals[k] = getattr(typing, k)
