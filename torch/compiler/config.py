@@ -25,7 +25,6 @@ __all__ = [
     "automatic_dynamic_shapes",
     "recompile_limit",
     "accumulated_recompile_limit",
-    "cache_size_limit",
     "verbose",
     "capture_scalar_outputs",
     "capture_dynamic_output_shape_ops",
@@ -184,14 +183,6 @@ accumulated_recompile_limit: int = Config(
 Global limit on total recompilations across all compiled functions to prevent
 runaway recompilation scenarios. This safeguard protects against compilation
 performance issues that could affect the entire program.
-"""
-
-cache_size_limit: int = Config(alias="torch._dynamo.config.cache_size_limit")
-"""
-Maximum number of compiled variants cached for each function. This cross-cutting
-cache limit affects the entire compilation pipeline's memory usage and recompilation
-behavior. When the limit is reached, older cache entries are evicted to make room
-for new ones. This is an alias for recompile_limit.
 """
 
 verbose: bool = Config(alias="torch._dynamo.config.verbose")
