@@ -810,7 +810,8 @@ void addmm_out_sparse_csr(
   if (mat1.layout() == kSparseBsr) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided)
-        return block_sparse_mm(input, mat1, mat2, beta, alpha, result);
+         { block_sparse_mm(input, mat1, mat2, beta, alpha, result); return;
+}
     }
   }
 
@@ -819,13 +820,13 @@ void addmm_out_sparse_csr(
       if (result.layout() == kStrided) {
         auto result_t = result.transpose(-2, -1);
         auto input_t = (result.is_same(input) ? result_t : input.transpose(-2, -1));
-        return block_sparse_mm(
+        block_sparse_mm(
             input_t,
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result_t);
+            result_t); return;
       }
     }
   }
@@ -840,41 +841,41 @@ void addmm_out_sparse_csr(
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kStrided) {
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spmm(
+        spmm(
             mat2.transpose(0, 1).to_sparse_csr(),
             mat1.transpose(0, 1),
             beta,
             alpha,
-            result.transpose(0, 1));
+            result.transpose(0, 1)); return;
       }
     }
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kStrided) {
-        return spmm(
+        spmm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result.transpose(-2, -1));
+            result.transpose(-2, -1)); return;
       }
     }
   }
   if (mat1.layout() == kSparseCsr) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
-        return spmm(mat1, mat2, beta, alpha, result);
+        spmm(mat1, mat2, beta, alpha, result); return;
       }
     }
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr) {
-        return spgemm(mat1, mat2, beta, alpha, result);
+        spgemm(mat1, mat2, beta, alpha, result); return;
       }
     }
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
         // TODO: Add native CSC support via cuSPARSE if supported.
         // CSR @ CSC kernel would be very fast due to format alignment
-        return spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result);
+        spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result); return;
       }
     }
   }
@@ -882,27 +883,28 @@ void addmm_out_sparse_csr(
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+        spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result); return;
       }
     }
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr)
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+         { spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result); return;
+}
     }
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spgemm(
-            mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
+        spgemm(
+            mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result); return;
       }
       if (result.layout() == kSparseCsc) {
-        return spgemm(
+        spgemm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result.transpose(-2, -1));
+            result.transpose(-2, -1)); return;
       }
     }
   }
@@ -933,7 +935,7 @@ void addmv_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result) {
   if (mat.layout() == kSparseBsr) {
-    return block_sparse_mv(mat, vec, beta, alpha, result);
+    block_sparse_mv(mat, vec, beta, alpha, result); return;
   }
   cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
@@ -1213,9 +1215,9 @@ void triangular_solve_out_sparse_csr(
   }
   if (A.layout() == kSparseBsr) {
     if (B.size(-1) == 1) {
-      return block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular);
+      block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular); return;
     } else {
-      return block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular);
+      block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular); return;
     }
   }
 #ifdef USE_ROCM
