@@ -466,7 +466,7 @@ struct ReduceJitOp {
 
     __syncthreads();
 
-    for (int offset = 1; offset < dim_x; offset <<= 1) {
+    for (size_t offset = warpSize / 2; offset > 0; offset >>= 1) {
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = reducer::warp_shfl_down(value[i], offset);
