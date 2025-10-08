@@ -3650,7 +3650,12 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             vt.as_proxy().node.meta["example_value"] = local_tensor
             vt.synchronize_attributes(tx)
 
-        # Step 3: Trace local_map subgraph with local tensors
+        # Step 3: Trace local_map subgraph with local tensors and install subgraph
+        subgraph_name = "subgraph"
+        # Best effort to get the name of the user function
+        if isinstance(user_func, variables.functions.BaseUserFunctionVariable):
+            subgraph_name = user_func.get_name()
+
         (
             p_args,
             p_kwargs,
@@ -3660,7 +3665,12 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_gmod,
             body_name,
         ) = self.create_wrapped_node(
-            tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
+            tx,
+            user_func,
+            user_args,
+            kwargs,
+            self.value._name,
+            subgraph_name=subgraph_name,
         )
 
         # Step 4: Validate traced graph signature still matches placement information
@@ -3698,7 +3708,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_r.as_proxy(),
         )
 
-        # Step 5: Install local_map subgraph
+        # Step 5: Proxy call to the installed subgraph
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         out = _call_function_and_unflatten_output(
             tx, self.value, p_args, p_kwargs, flat_example_value, treespec
@@ -3740,6 +3750,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             "in_grad_placements": in_grad_placements.value,
             "device_mesh": device_mesh.value,
         }
+        body_gmod.meta["subgraph_name"] = subgraph_name
 
         return out
 
