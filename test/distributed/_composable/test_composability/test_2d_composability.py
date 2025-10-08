@@ -65,6 +65,7 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+curr_backend = dist.get_default_backend_for_device(device_type)
 
 
 class SimpleModel(nn.Module):
@@ -422,7 +423,7 @@ class TestFullyShard2DStateDict(DTensorTestBase):
     @property
     def backend(self):
         # need to specify gloo backend for testing cpu offload
-        return "cpu:gloo,xpu:xccl" if TEST_XPU else "cpu:gloo,cuda:nccl"
+        return f"cpu:gloo,{device_type}:{curr_backend}"
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -666,7 +667,7 @@ class TestNew2dParallelStateDict(DTensorTestBase):
     @property
     def backend(self):
         # need to specify gloo backend for testing cpu offload
-        return "cpu:gloo,xpu:xccl" if TEST_XPU else "cpu:gloo,cuda:nccl"
+        return f"cpu:gloo,{device_type}:{curr_backend}"
 
     @with_comms
     @skip_if_lt_x_gpu(4)
