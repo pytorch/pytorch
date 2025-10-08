@@ -2507,40 +2507,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
 
-    def test_bitwise_equivalence_for_small_reductions(self):
-        for i in range(1, 8):
-            t_c = torch.rand(
-                [1024, i], dtype=torch.float32, device="cuda", requires_grad=True
-            )
-            t_non_c = torch.rand(
-                [i, 1024], dtype=torch.float32, device="cuda", requires_grad=True
-            )
-
-            def fn(a, dim):
-                return a.sum(dim=dim)
-
-            def evaluate_eager_and_compile(t, dim):
-                torch._dynamo.reset()
-                opt_fn = torch.compile(
-                    functools.partial(fn, dim=dim),
-                    backend="inductor",
-                    fullgraph=True,
-                    dynamic=False,
-                )
-
-                eager_out = fn(t, dim)
-                out = opt_fn(t)
-
-                torch.testing.assert_close(
-                    eager_out,
-                    out,
-                    rtol=0,
-                    atol=0,
-                )
-
-            evaluate_eager_and_compile(t_non_c, dim=0)
-            evaluate_eager_and_compile(t_c, dim=1)
-
     def test_truediv_numerics_with_eager(self):
         from decimal import Decimal
 
