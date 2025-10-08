@@ -290,7 +290,7 @@ def aot_stage2_inference(
                 "name": "torch._functorch.config",
                 "encoding": "string",
             },
-            payload_fn=lambda: torch._functorch.config.get_config_copy(),
+            payload_fn=lambda: torch._functorch.config.get_serializable_config_copy(),
         )
 
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -1393,6 +1393,10 @@ def aot_stage2_autograd(
             if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
 
+            # apply joint_gm callback here
+            if joint_gm_compiler := torch._functorch.config.joint_gm_compiler:
+                fx_g = joint_gm_compiler(fx_g, joint_inputs)
+
             static_lifetime_input_indices = fw_metadata.static_input_indices
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g,
@@ -1474,7 +1478,7 @@ def aot_stage2_autograd(
                     "name": "torch._functorch.config",
                     "encoding": "string",
                 },
-                payload_fn=lambda: torch._functorch.config.get_config_copy(),
+                payload_fn=lambda: torch._functorch.config.get_serializable_config_copy(),
             )
             aot_graphs_log.info(
                 "aot_config id: %s, fw_metadata=%s, inner_meta=%s",
