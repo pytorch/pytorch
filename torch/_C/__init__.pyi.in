@@ -1919,6 +1919,7 @@ class TensorBase(metaclass=_TensorMeta):
     names: list[str]
     device: _device
     dtype: _dtype
+    grad_dtype: _dtype | None
     layout: _layout
     real: Tensor
     imag: Tensor
