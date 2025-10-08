@@ -956,7 +956,7 @@ class SummaryWriter:
         )
         self._projector_config.embeddings.extend([embedding_info])
 
-        # pyrefly: ignore  # import-error
+
         from google.protobuf import text_format
 
         config_pbtxt = text_format.MessageToString(self._projector_config)
