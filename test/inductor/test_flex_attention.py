@@ -6402,7 +6402,7 @@ class TestLearnableBiases(InductorTestCase):
         bias = torch.randn(
             2 * window_size + 1,
             device=device,
-            dtype=params.dtype,
+            dtype=torch.float32,
             requires_grad=True,
         )
 
