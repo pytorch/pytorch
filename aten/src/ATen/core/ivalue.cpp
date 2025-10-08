@@ -1053,7 +1053,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
       }
       err << ". Please define serialization methods via def_pickle() for "
             "this class.";
-     TORCH_FAIL(err.str());
+      TORCH_FAIL(err.str());
     }
     object->setSlot(i, slots_[i].deepcopy(memo, device));
   }
