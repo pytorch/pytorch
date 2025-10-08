@@ -27,8 +27,7 @@ T = TypeVar("T")
 def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
     from torch._inductor import config
 
-    distort_method = config.test_configs.distort_benchmarking_result
-    if distort_method == "":
+    if config.test_configs.distort_benchmarking_result == "":
         return fn
 
     def distort(
@@ -37,6 +36,7 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
         if isinstance(ms, (list, tuple)):
             return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
 
+        distort_method = config.test_configs.distort_benchmarking_result
         assert isinstance(ms, float)
         if distort_method == "inverse":
             return 1.0 / ms if ms else 0.0
