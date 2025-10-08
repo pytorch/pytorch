@@ -7706,10 +7706,10 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         def forward(x: torch.Tensor) -> torch.Tensor:
             x_sparse = x.to_sparse()
             return x_sparse * 2
-        
+
         test_tensor = torch.randn(10, 10)
         self.assertEqual(forward(test_tensor), torch.compile(forward)(test_tensor))
-        
+
     def test_nested_sequential_try_with(self):
         def fn(x):
             with torch.set_grad_enabled(True):

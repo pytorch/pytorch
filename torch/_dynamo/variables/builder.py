@@ -2881,7 +2881,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     import torch._utils
 
     if isinstance(example_value, torch.Tensor):
-        # Check if the result is a sparse tensor - 
+        # Check if the result is a sparse tensor -
         # Inductor cannot handle sparse tensors, so we need to graph break
         if is_sparse_any(example_value) and (
             not tx.export or not config.capture_sparse_compute
