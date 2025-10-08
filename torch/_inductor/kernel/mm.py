@@ -51,7 +51,13 @@ from ..utils import (
     use_triton_template,
     use_triton_tma_template,
 )
-from .mm_common import _is_static_problem, mm_args, mm_grid, persistent_mm_grid
+from .mm_common import (
+    _is_static_problem,
+    mm_args,
+    mm_grid,
+    persistent_mm_grid,
+    use_native_matmul,
+)
 
 
 try:
@@ -907,24 +913,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     # these into `ops.dot` (pointwise) and `ops.reduction("dot")`. These IR nodes
     # are semantically equivalent to the `ops.mul` + `ops.reduction("sum")`
     # combination, but are lowered to `tl.dot` during the code generation phase.
-    m, k, n = mat1.get_size()[-2], mat1.get_size()[-1], mat2.get_size()[-1]
-    if (
-        inductor_config.triton.native_matmul
-        and V.graph.sizevars.statically_known_gt(m, 1)
-        and V.graph.sizevars.statically_known_gt(k, 1)
-        and V.graph.sizevars.statically_known_gt(n, 1)
-    ):
-        # If tma matmul is on, don't do native matmul
-        if (
-            inductor_config.triton.enable_persistent_tma_matmul
-            and torch.utils._triton.has_triton_tma_device()
-        ):
-            raise AssertionError("native matmul doesn't support tma codegen yet")
-
-        # Currently only enable native matmul for default indexing
-        if inductor_config.triton.use_block_ptr:
-            raise AssertionError("native matmul doesn't support block_ptr codegen yet")
-
+    if use_native_matmul(mat1, mat2):
         mat1 = lowerings[aten.unsqueeze](mat1, -1)
         mat2 = lowerings[aten.unsqueeze](mat2, 0)
         args, kwargs = transform_args(
@@ -1167,13 +1156,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    m, k, n = mat1.get_size()[-2], mat1.get_size()[-1], mat2.get_size()[-1]
-    if (
-        inductor_config.triton.native_matmul
-        and V.graph.sizevars.statically_known_gt(m, 1)
-        and V.graph.sizevars.statically_known_gt(k, 1)
-        and V.graph.sizevars.statically_known_gt(n, 1)
-    ):
+    if use_native_matmul(mat1, mat2):
         return lowerings[aten.add](
             lowerings[aten.mul](beta, inp),
             lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2)),

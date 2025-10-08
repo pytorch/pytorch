@@ -1526,6 +1526,9 @@ def is_valid_addmm_fusion(match):
     if inp_dtype != mat1.meta["val"].dtype or inp_dtype != mat2.meta["val"].dtype:
         return False
 
+    if torch._inductor.config.triton.native_matmul:
+        return False
+
     return not should_prefer_unfused_addmm(match)
 
 

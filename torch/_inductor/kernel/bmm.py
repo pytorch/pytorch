@@ -24,7 +24,12 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import ops, V
-from .mm_common import _is_static_problem, is_batch_stride_largest_or_zero, mm_args
+from .mm_common import (
+    _is_static_problem,
+    is_batch_stride_largest_or_zero,
+    mm_args,
+    use_native_matmul,
+)
 
 
 if TYPE_CHECKING:
@@ -168,24 +173,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             meta_mat2 = V.graph.current_node.args[1]
             mat2 = may_require_contiguous(mat2, meta_mat2)
 
-    m, k, n = mat1.get_size()[-2], mat1.get_size()[-1], mat2.get_size()[-1]
-    if (
-        inductor_config.triton.native_matmul
-        and V.graph.sizevars.statically_known_gt(m, 1)
-        and V.graph.sizevars.statically_known_gt(k, 1)
-        and V.graph.sizevars.statically_known_gt(n, 1)
-    ):
-        # If tma matmul is on, don't do native matmul
-        if (
-            inductor_config.triton.enable_persistent_tma_matmul
-            and torch.utils._triton.has_triton_tma_device()
-        ):
-            raise AssertionError("native matmul doesn't support tma codegen yet")
-
-        # Currently only enable native matmul for default indexing
-        if inductor_config.triton.use_block_ptr:
-            raise AssertionError("native matmul doesn't support block_ptr codegen yet")
-
+    if use_native_matmul(mat1, mat2):
         mat1 = lowerings[aten.unsqueeze](mat1, -1)
         mat2 = lowerings[aten.unsqueeze](mat2, 1)
         args, kwargs = transform_args(
@@ -299,13 +287,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
-    m, k, n = mat1.get_size()[-2], mat1.get_size()[-1], mat2.get_size()[-1]
-    if (
-        inductor_config.triton.native_matmul
-        and V.graph.sizevars.statically_known_gt(m, 1)
-        and V.graph.sizevars.statically_known_gt(k, 1)
-        and V.graph.sizevars.statically_known_gt(n, 1)
-    ):
+    if use_native_matmul(mat1, mat2):
         return lowerings[aten.add](
             lowerings[aten.mul](beta, inp),
             lowerings[aten.mul](alpha, lowerings[aten.bmm](mat1, mat2)),
