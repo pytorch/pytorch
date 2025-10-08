@@ -255,15 +255,15 @@ inline int64_t divup(int64_t x, int64_t y) {
 // invoke_parallel op with identical semantics to the existing invoke_parallel.
 // This is copy pasted from aten/src/ATen/ParallelOpenMP.h except that we
 // replace ThreadIdGuard with the shim-ed version.
-// Requiring the extension to link against the OpenMP library to use
-// invoke_parallel matches the existing semantic.
+// Requiring the extension to have _OPENMP defined to use invoke_parallel
+// matches the existing semantic.
+#ifdef _OPENMP
 template <typename F>
 inline void invoke_parallel(
     int64_t begin,
     int64_t end,
     int64_t grain_size,
     const F& f) {
-#ifdef _OPENMP
   std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
   std::exception_ptr eptr;
 
@@ -294,13 +294,20 @@ inline void invoke_parallel(
   if (eptr) {
     std::rethrow_exception(eptr);
   }
+}
 #else
+template <typename F>
+inline void invoke_parallel(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    const F& f) {
   STD_TORCH_CHECK(
       false,
       "Attempting to call torch::stable::invoke_parallel "
-      "without OPENMP. Internal error, should not have gotten here");
-#endif
+      "without _OPENMP. Internal error, should not have gotten here");
 }
+#endif // _OPENMP
 
 // For the ParallelNative path, this helps with converting C++ lambdas
 // etc. to a C-style function pointer expected by the C-shim
@@ -334,6 +341,11 @@ inline void parallel_for(
     return;
   }
 
+  // INTRA_OP_PARALLEL = 1 --> either AT_PARALLEL_OPENMP or AT_PARALLEL_NATIVE
+  // For the first case, we additionally need to make sure EXTENSION_HAS_OPENMP
+  // in order to use the parallel path (otherwise the extension doesn't know
+  // how to compile invoke_parallel). This is consistent with the existing
+  // semantic.
   if (aoti_torch_get_intra_op_parallel_enabled() &&
       ((!aoti_torch_get_parallel_openmp_enabled()) || EXTENSION_HAS_OPENMP)) {
     aoti_torch_lazy_init_num_threads();
