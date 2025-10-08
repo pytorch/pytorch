@@ -255,10 +255,7 @@ class TestCutlassBackend(TestCase):
 
         self.assertTrue(try_import_cutlass())
 
-        if config.is_fbcode():
-            import cutlass_cppgen  # noqa: F401
-        else:
-            import cutlass_cppgen as python_cutlass  # noqa: F401
+        import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):
