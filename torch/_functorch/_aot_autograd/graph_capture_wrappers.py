@@ -65,6 +65,7 @@ from .functional_utils import (
     has_data_mutation,
     has_metadata_mutation,
     is_fun,
+    sync_functional_tensor,
     to_fun,
     was_inductor_storage_resized,
 )
@@ -159,6 +160,7 @@ def fn_prepped_for_autograd(
     fn: TraceFn,
     args_descs: list[AOTInput],
     meta: ViewAndMutationMeta,
+    aot_config: AOTConfig,
 ) -> PreppedForAutogradTraceFn:
     @simple_wraps(fn)
     def inner_fn(*args):
@@ -239,10 +241,11 @@ def fn_prepped_for_autograd(
         # This is annoying: our joint function needs to be aware of functionalization
         # (syncing mutated inputs before calling autograd.grad())
         # In theory, we could make the autograd engine do this automatically, although that probably isn't any cleaner.
-        for arg in args_maybe_cloned:
-            if not isinstance(arg, Tensor):
-                continue
-            # sync_functional_tensor(arg)
+        if not aot_config.disable_functionalization:
+            for arg in args_maybe_cloned:
+                if not isinstance(arg, Tensor):
+                    continue
+                sync_functional_tensor(arg)
 
         return (fw_outs_to_return, out_grad_mask), (
             fw_outs_to_return_descs,
@@ -429,12 +432,10 @@ def create_joint(
             with torch.autograd.detect_anomaly(check_nan=False):
                 return inner_fn(primals, tangents)
 
-    # inner_fn_with_anomaly.handle = joint_fn_handle  # type: ignore[attr-defined]
-
-    # TODO: only need to skip this when turning off functionalization
-    # inner_fn_with_anomaly.handle = joint_fn_handle  # type: ignore[attr-defined]
     def joint_helper(primals, tangents):
         return inner_fn_with_anomaly(primals, tangents)
+
+    joint_helper.handle = joint_fn_handle  # type: ignore[attr-defined]
 
     return joint_helper
 
