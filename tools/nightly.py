@@ -254,9 +254,18 @@ class Venv:
         *,
         base_executable: Path | str | None = None,
     ) -> None:
+        base_executable = Path(base_executable or sys.executable)
+        if not base_executable.is_absolute():
+            base_exec = shutil.which(str(base_executable))
+            if base_exec is None:
+                raise RuntimeError(
+                    f"Could not find Python executable {base_executable}",
+                )
+            base_executable = Path(base_exec)
+
         self.prefix = Path(prefix).absolute()
         self.pip_source = pip_source
-        self.base_executable = Path(base_executable or sys.executable).absolute()
+        self.base_executable = base_executable.absolute()
         self._executable: Path | None = None
         self._bindir: Path | None = None
         self._env = {
@@ -329,7 +338,12 @@ class Venv:
         return f"source {shlex.quote(str(self.activate_script))}"
 
     @timed("Creating virtual environment")
-    def create(self, *, remove_if_exists: bool = False) -> Path:
+    def create(
+        self,
+        *,
+        remove_if_exists: bool = False,
+        assume_yes: bool = False,
+    ) -> Path:
         """Create a virtual environment."""
         if self.prefix.exists():
             if remove_if_exists:
@@ -339,43 +353,56 @@ class Venv:
                         f"The path {self.prefix} already exists and is not a virtual environment. "
                         "Please remove it manually or choose a different prefix."
                     )
-                if self.prefix in [
-                    Path(p).absolute()
+                if any(
+                    Path(p).absolute().samefile(self.prefix)
                     for p in [
                         sys.prefix,
                         sys.exec_prefix,
                         sys.base_prefix,
                         sys.base_exec_prefix,
                     ]
-                ]:
+                ):
                     raise RuntimeError(
                         f"The path {self.prefix} trying to remove is the same as the interpreter "
                         "to run this script. Please choose a different prefix or deactivate the "
                         "current virtual environment."
                     )
-                if self.prefix in [
+                if any(
                     Path(
                         self.base_python(
                             "-c",
                             f"import os, sys; print(os.path.abspath({p}))",
                             capture_output=True,
                         ).stdout.strip()
-                    ).absolute()
+                    )
+                    .absolute()
+                    .samefile(self.prefix)
                     for p in [
                         "sys.prefix",
                         "sys.exec_prefix",
                         "sys.base_prefix",
                         "sys.base_exec_prefix",
                     ]
-                ]:
+                ):
                     raise RuntimeError(
                         f"The Python executable {self.base_executable} trying to remove is the "
                         "same as the interpreter to create the virtual environment. Please choose "
                         "a different prefix or a different Python interpreter."
                     )
+                if not assume_yes:
+                    answer = input(
+                        f"The virtual environment {self.prefix} already exists. "
+                        "Do you want to remove it and recreate it? [y/N] "
+                    )
+                    if answer.lower() not in ("y", "yes"):
+                        if answer.lower() not in ("n", "no", ""):
+                            print(f"Invalid answer: {answer!r}")
+                        else:
+                            print(f"Aborting due to existing prefix: {self.prefix}")
+                        sys.exit(1)
+
                 print(f"Removing existing venv: {self.prefix}")
                 _remove_existing(self.prefix)
-
             else:
                 raise RuntimeError(f"Path {self.prefix} already exists.")
 
@@ -427,6 +454,15 @@ class Venv:
         """Ensure the virtual environment exists."""
         if not self.is_venv():
             return self.create(remove_if_exists=True)
+        if (
+            self.python_version().split(".")[:2]
+            != self.base_python_version().split(".")[:2]
+        ):
+            raise RuntimeError(
+                f"Python version mismatch: venv has Python {self.python_version()} "
+                f"but base Python is {self.base_python_version()}. "
+                "Please recreate the virtual environment with the correct Python version."
+            )
 
         self.pip_install(*self.AGGRESSIVE_UPDATE_PACKAGES, upgrade=True)
         return self.prefix
@@ -461,7 +497,10 @@ class Venv:
         return self.python(*args, python=self.base_executable, **popen_kwargs)
 
     def python_version(self, *, python: Path | str | None = None) -> str:
-        """Get the Python version for the virtual environment."""
+        """Get the Python version for the virtual environment.
+
+        Return a string like "3.13.7", "3.13.7t", "3.13.7d", "3.13.7td", etc.
+        """
         return self.python(
             "-c",
             (
@@ -473,7 +512,10 @@ class Venv:
         ).stdout.strip()
 
     def base_python_version(self) -> str:
-        """Get the Python version for the base environment."""
+        """Get the Python version for the base environment.
+
+        Return a string like "3.13.7", "3.13.7t", "3.13.7d", "3.13.7td", etc.
+        """
         return self.python_version(python=self.base_executable)
 
     def uv(
@@ -980,13 +1022,15 @@ def install(
     packages: Iterable[str],
     subcommand: str = "checkout",
     branch: str | None = None,
+    fresh_venv: bool = False,
+    assume_yes: bool = False,
 ) -> None:
     """Development install of PyTorch"""
-    use_existing = subcommand == "checkout"
-    if use_existing:
+    if not fresh_venv:
+        print(f"Using existing venv: {venv.prefix}")
         venv.ensure()
     else:
-        venv.create(remove_if_exists=True)
+        venv.create(remove_if_exists=True, assume_yes=assume_yes)
 
     packages = [p for p in packages if p != "torch"]
 
@@ -1061,8 +1105,8 @@ def make_parser() -> argparse.ArgumentParser:
             metavar="PYTHON",
         )
         subparser.add_argument(
-            "-p",
             "--prefix",
+            "-p",
             type=lambda p: Path(p).absolute(),
             help='Path to virtual environment directory (e.g. "./venv")',
             dest="prefix",
@@ -1070,8 +1114,26 @@ def make_parser() -> argparse.ArgumentParser:
             metavar="PATH",
         )
         subparser.add_argument(
-            "-v",
+            "--fresh",
+            help="Remove existing virtual environment if it exists",
+            dest="fresh",
+            default=False,
+            action="store_true",
+        )
+        subparser.add_argument(
+            "--yes",
+            "-y",
+            help=(
+                "Automatic yes to prompts; assume 'yes' as answer to all prompts "
+                "(e.g., removing existing venv)"
+            ),
+            dest="yes",
+            default=False,
+            action="store_true",
+        )
+        subparser.add_argument(
             "--verbose",
+            "-v",
             help="Provide debugging info",
             dest="verbose",
             default=False,
@@ -1161,6 +1223,8 @@ def main() -> None:
             packages=PACKAGES_TO_INSTALL,
             subcommand=args.subcmd,
             branch=args.branch,
+            fresh_venv=args.fresh,
+            assume_yes=args.yes,
         )
 
 
