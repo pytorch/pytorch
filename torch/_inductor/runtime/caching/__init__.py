@@ -1,4 +1,8 @@
-from . import config, interfaces as intfs
+from functools import cache
+from threading import Lock
+from typing import Optional
+
+from . import config, interfaces as intfs, locks
 from .context import IsolationSchema, SelectedCompileContext, SelectedRuntimeContext
 from .exceptions import (
     CacheError,
@@ -21,7 +25,17 @@ from .exceptions import (
 
 fcache: intfs._CacheIntf = intfs._FastCacheIntf()
 dcache: intfs._CacheIntf = intfs._DeterministicCacheIntf()
-icache: intfs._CacheIntf = dcache if config.DETERMINISTIC_CACHING else fcache
+
+_ICACHE: Optional[intfs._CacheIntf] = None
+_ICACHE_LOCK: Lock = Lock()
+
+@cache
+def get_icache() -> intfs._CacheIntf:
+    global _ICACHE
+    with locks._acquire_lock_with_timeout(_ICACHE_LOCK):
+        if _ICACHE is None:
+            _ICACHE = dcache if config.IS_DETERMINISTIC_CACHING_ENABLED() else fcache
+    return _ICACHE
 
 __all__ = [
     "SelectedCompileContext",
@@ -44,5 +58,5 @@ __all__ = [
     "DeterministicCachingRequiresStrongConsistency",
     "fcache",
     "dcache",
-    "icache",
+    "get_icache",
 ]

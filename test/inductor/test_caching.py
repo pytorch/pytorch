@@ -16,6 +16,15 @@ from unittest.mock import patch
 
 from filelock import FileLock
 
+
+# pretty much all of the testing relies on or expects that the caching module
+# is enabled, so there's no reason we should simply enable it for everything at once
+os.environ["TORCHINDUCTOR_ENABLE_CACHING_MODULE"] = "1"
+# and the same logic goes for deterministic caching, although the set of tests
+# that expect this to be toggle is much smaller
+os.environ["TORCHINDUCTOR_ENABLE_DETERMINISTIC_CACHING"] = "1"
+
+
 import torch
 from torch._inductor.runtime.caching import (
     config,
@@ -72,6 +81,7 @@ class ConfigTest(TestCase):
     )
 
     def assert_versioned_config(self, expected_enabled: bool) -> None:
+        config._versioned_config.cache_clear()
         actual_enabled: bool = config._versioned_config(
             self.FOO_JK_NAME,
             self.FOO_THIS_VERSION,

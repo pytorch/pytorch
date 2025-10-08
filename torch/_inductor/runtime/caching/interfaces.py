@@ -22,7 +22,7 @@ from functools import partial, wraps
 from threading import Lock
 from typing import Any, Callable, Generator, Optional, override, Self
 
-from . import context, exceptions, locks
+from . import config, context, exceptions, locks
 from . import implementations as impls
 from .utils import P, R
 
@@ -108,6 +108,12 @@ class _CacheIntf(ABC):
             A wrapped version of the function with caching behavior
         """
         pass
+    
+    def _make_dummy_record_wrapper(intf: Self, fn: _Fn) -> _Fn:
+        @wraps(fn)
+        def dummy_wrapper(*args: Any, **kwargs: Any) -> _Result:
+            return fn(*args, **kwargs)
+        return dummy_wrapper
     
     @property
     def lock(self: Self) -> Callable[[int], Generator[None, None, None]]:
@@ -209,6 +215,8 @@ class _CacheIntf(ABC):
             def expensive_computation(x, y):
                 return x * y + complex_operation()
         """
+        if not config.IS_CACHING_MODULE_ENABLED():
+            return self._make_dummy_record_wrapper
         if custom_result_encoder and not custom_result_decoder:
             raise exceptions.CustomResultDecoderRequiredError(
                 "Custom result encoder provided without custom result decoder."
