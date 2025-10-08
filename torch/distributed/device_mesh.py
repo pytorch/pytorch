@@ -84,6 +84,10 @@ else:
             # A root mesh is not created through slicing.
             # We considers the root mesh of a root mesh is itself.
             # We keep this function for backward compatibility.
+            warnings.warn(
+                "This _get_all_submeshes API will be deprecated soon."
+                "Please use `_get_all_submeshes` inside DeviceMesh instead."
+            )
             return device_mesh._get_root_mesh()
 
         @staticmethod
@@ -97,10 +101,14 @@ else:
             return get_world_size() // _MeshEnv.num_devices_per_host(device_type)
 
         # TODO: to remove it once we move all use cases into new API.
-        # We keep this API for backward compatibility for Meta internal use cases.
+        # We keep this API for backward compatibility.
         def _get_all_submeshes(
             self, device_mesh: "DeviceMesh", mesh_dim_name: str
         ) -> list["DeviceMesh"]:
+            warnings.warn(
+                "This _get_all_submeshes API will be deprecated soon."
+                "Please use `_get_all_submeshes` inside DeviceMesh instead."
+            )
             return device_mesh._get_all_submeshes(mesh_dim_name)
 
     _mesh_resources: _MeshEnv = _MeshEnv()
@@ -625,9 +633,9 @@ else:
                 submesh_dim_names,
                 _init_backend=False,
                 _layout=layout,
+                _root_mesh=root_mesh,
             )
             res_submesh._dim_group_names = slice_dim_group_name
-            res_submesh._root_mesh = root_mesh
             return res_submesh
 
         def _create_flatten_mesh(
@@ -682,8 +690,8 @@ else:
                 (mesh_dim_name,),
                 (backend_override,),
                 _layout=self._layout.coalesce(),
+                _root_mesh=root_mesh,
             )
-            res_flattened_mesh._root_mesh = root_mesh
             root_mesh._flatten_mapping[mesh_dim_name] = res_flattened_mesh
 
             return res_flattened_mesh
@@ -835,6 +843,7 @@ else:
             backend_override: Optional[tuple[BackendConfig, ...]] = None,
             _init_backend: bool = True,
             _layout: Optional[_MeshLayout] = None,
+            _root_mesh: Optional["DeviceMesh"] = None,
         ) -> "DeviceMesh":
             """
             Helper method to create a DeviceMesh from tensor `pg_ranks_by_dim`. This is due to
@@ -875,6 +884,8 @@ else:
                     f"Current rank {cur_rank} not found in any mesh, "
                     f"input {pg_ranks_by_dim} does not contain all ranks in the world"
                 )
+            if _root_mesh is not None:
+                res_mesh._root_mesh = _root_mesh
             return res_mesh
 
         @staticmethod
