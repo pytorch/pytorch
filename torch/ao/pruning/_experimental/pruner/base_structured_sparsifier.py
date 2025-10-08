@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
+from collections.abc import Callable
 from itertools import chain
 from operator import getitem
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -259,6 +260,7 @@ class BaseStructuredSparsifier(BaseSparsifier):
                     module.register_parameter(
                         "_bias", nn.Parameter(module.bias.detach())
                     )
+                    # pyrefly: ignore  # bad-assignment
                     module.bias = None
                     module.prune_bias = prune_bias
 
