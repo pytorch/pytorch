@@ -3,7 +3,8 @@ import functools
 import math
 import operator
 import sys
-from typing import Callable, Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeVarTuple, Unpack
 
 import sympy
@@ -18,6 +19,8 @@ from sympy.core.sorting import ordered
 from sympy.core.traversal import walk
 from sympy.printing.precedence import PRECEDENCE
 from sympy.utilities.iterables import sift
+
+from torch.torch_version import TorchVersion
 
 from .numbers import int_oo
 
@@ -102,6 +105,7 @@ def _keep_float(
 ) -> Callable[[Unpack[_Ts]], Union[_T, sympy.Float]]:
     @functools.wraps(f)
     def inner(*args: Unpack[_Ts]) -> Union[_T, sympy.Float]:
+        # pyrefly: ignore  # bad-argument-type
         r: Union[_T, sympy.Float] = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
@@ -109,6 +113,7 @@ def _keep_float(
             r = sympy.Float(float(r))
         return r
 
+    # pyrefly: ignore  # bad-return
     return inner
 
 
@@ -195,10 +200,12 @@ class FloorDiv(sympy.Function):
 
     @property
     def base(self) -> sympy.Basic:
+        # pyrefly: ignore  # missing-attribute
         return self.args[0]
 
     @property
     def divisor(self) -> sympy.Basic:
+        # pyrefly: ignore  # missing-attribute
         return self.args[1]
 
     def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
@@ -267,7 +274,20 @@ class FloorDiv(sympy.Function):
             for term in sympy.Add.make_args(base):
                 quotient = term / divisor
 
-                if quotient.is_integer:
+                # This is a sympy bug fixed in https://github.com/sympy/sympy/pull/28442
+                # sympy can generate a quotient with (1/22)*.... such that quotient.is_integer is True
+                # FloorDiv should not allow that as output. see
+                quotient_is_integer = None
+                if isinstance(quotient, sympy.Mul) and TorchVersion(
+                    sympy.__version__
+                ) < TorchVersion("1.15.0"):
+                    rationals = quotient.atoms(sympy.Rational)
+                    all_rationals_ints = all(r.q == 1 for r in rationals)
+                    quotient_is_integer = quotient.is_integer and all_rationals_ints
+                else:
+                    quotient_is_integer = quotient.is_integer
+
+                if quotient_is_integer:
                     terms.append(term)
                     quotients += quotient
 
@@ -291,11 +311,6 @@ class FloorDiv(sympy.Function):
 
         return None
 
-    def _ccode(self, printer):
-        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
-        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
-        return f"floor({base}/{divisor})"
-
 
 class ModularIndexing(sympy.Function):
     """
@@ -312,7 +327,6 @@ class ModularIndexing(sympy.Function):
     ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
             return sympy.S.Zero
-
         if (
             isinstance(base, sympy.Integer)
             and isinstance(divisor, sympy.Integer)
@@ -360,6 +374,7 @@ class ModularIndexing(sympy.Function):
         return None
 
     def _eval_is_nonnegative(self) -> Optional[bool]:
+        # pyrefly: ignore  # missing-attribute
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
 
@@ -440,6 +455,7 @@ class PythonMod(sympy.Function):
         #   - floor(p / q) = 0
         #   - p % q = p - floor(p / q) * q = p
         less = p < q
+        # pyrefly: ignore  # missing-attribute
         if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
@@ -456,8 +472,11 @@ class PythonMod(sympy.Function):
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
 
     def _ccode(self, printer):
+        # pyrefly: ignore  # missing-attribute
         p = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        # pyrefly: ignore  # missing-attribute
         q = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        # pyrefly: ignore  # missing-attribute
         abs_q = str(q) if self.args[1].is_positive else f"abs({q})"
         return f"({p} % {q}) < 0 ? {p} % {q} + {abs_q} : {p} % {q}"
 
@@ -538,6 +557,7 @@ class CeilToInt(sympy.Function):
             return sympy.Integer(math.ceil(float(number)))
 
     def _ccode(self, printer):
+        # pyrefly: ignore  # missing-attribute
         number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
         return f"ceil({number})"
 
@@ -808,6 +828,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             if not cond:
                 return ai.func(*[do(i, a) for i in ai.args], evaluate=False)
             if isinstance(ai, cls):
+                # pyrefly: ignore  # missing-attribute
                 return ai.func(*[do(i, a) for i in ai.args if i != a], evaluate=False)
             return a
 
@@ -985,6 +1006,7 @@ class Max(MinMaxBase, Application):  # type: ignore[misc]
         return fuzzy_or(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
     def _eval_is_negative(self):  # type:ignore[override]
+        # pyrefly: ignore  # missing-attribute
         return fuzzy_and(a.is_negative for a in self.args)
 
 
@@ -1003,6 +1025,7 @@ class Min(MinMaxBase, Application):  # type: ignore[misc]
         return fuzzy_and(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
     def _eval_is_negative(self):  # type:ignore[override]
+        # pyrefly: ignore  # missing-attribute
         return fuzzy_or(a.is_negative for a in self.args)
 
 
@@ -1140,7 +1163,9 @@ class IntTrueDiv(sympy.Function):
             return sympy.Float(int(base) / int(divisor))
 
     def _ccode(self, printer):
+        # pyrefly: ignore  # missing-attribute
         base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        # pyrefly: ignore  # missing-attribute
         divisor = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
         return f"((int){base}/(int){divisor})"
 
@@ -1300,9 +1325,11 @@ class Identity(sympy.Function):
     precedence = 10
 
     def __repr__(self):  # type: ignore[override]
+        # pyrefly: ignore  # missing-attribute
         return f"Identity({self.args[0]})"
 
     def _eval_is_real(self):
+        # pyrefly: ignore  # missing-attribute
         return self.args[0].is_real
 
     def _eval_is_integer(self):
@@ -1310,12 +1337,15 @@ class Identity(sympy.Function):
 
     def _eval_expand_identity(self, **hints):
         # Removes the identity op.
+        # pyrefly: ignore  # missing-attribute
         return self.args[0]
 
     def __int__(self) -> int:
+        # pyrefly: ignore  # missing-attribute
         return int(self.args[0])
 
     def __float__(self) -> float:
+        # pyrefly: ignore  # missing-attribute
         return float(self.args[0])
 
 
@@ -1411,7 +1441,10 @@ def make_opaque_bitwise_fn(name, real_op_name):
                 return sympy.Integer(getattr(operator, real_op_name)(int(a), int(b)))
             return None
 
-    BitwiseFn.__name__ = "BitwiseFn_" + name
+    nm = "BitwiseFn_" + name
+    BitwiseFn.__name__ = nm
+    BitwiseFn.__qualname__ = nm
+
     return BitwiseFn
 
 
