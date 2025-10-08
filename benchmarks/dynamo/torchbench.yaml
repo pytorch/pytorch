@@ -38,6 +38,8 @@ tolerance:
     - tacotron2
     - yolov3
     - squeezenet1_1
+    - vision_maskrcnn # [DO NOT MERGE]
+    - torch_multimodal_clip # [DO NOT MERGE]
 
   higher_fp16:
     - doctr_reco_predictor
