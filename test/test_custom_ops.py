@@ -18,7 +18,6 @@ from typing import *  # noqa: F403
 import numpy as np
 import yaml
 
-import functorch
 import torch._custom_ops as custom_ops
 import torch.testing._internal.optests as optests
 import torch.utils._pytree as pytree
@@ -36,6 +35,7 @@ from torch._library.fake_profile import (
 )
 from torch._library.infer_schema import tuple_to_list
 from torch._utils_internal import get_file_path_2  # @manual
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -1671,7 +1671,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         x = torch.randn(2, 3, device="cpu")
         op = self.get_op(f"{self.test_ns}::foo")
-        functorch.make_fx(op, tracing_mode="symbolic")(x)
+        make_fx(op, tracing_mode="symbolic")(x)
 
     def test_meta_for_data_dependent_shape_operation(self):
         x = torch.randn(10, device="meta")
@@ -1691,7 +1691,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         x = torch.randn(3)
         op = self.get_op(f"{self.test_ns}::foo")
-        gm = functorch.make_fx(op, tracing_mode="symbolic")(x)
+        gm = make_fx(op, tracing_mode="symbolic")(x)
         self.assertTrue(f"{TestCustomOp.test_ns}.foo" in gm.code)
 
     def test_not_implemented_error(self):
@@ -1718,21 +1718,21 @@ class TestCustomOp(CustomOpTestCaseBase):
 
     def test_data_dependent_basic(self):
         x = torch.randn(5, 5)
-        gm = functorch.make_fx(numpy_nonzero, tracing_mode="symbolic")(x)
+        gm = make_fx(numpy_nonzero, tracing_mode="symbolic")(x)
         self.assertTrue("nonzero" in gm.code)
 
     def test_data_dependent_fake_tracing(self):
         x = torch.randn(5, 5)
         # We've updated to attempt to use unbacked symints even for fake
         # tracing
-        functorch.make_fx(numpy_nonzero, tracing_mode="fake")(x)
+        make_fx(numpy_nonzero, tracing_mode="fake")(x)
 
     def test_symints(self):
         def f(x):
             return torch.ops._torch_testing.numpy_view_copy(x, x.shape)
 
         x = torch.randn(2, 3, 4)
-        gm = functorch.make_fx(f, tracing_mode="symbolic")(x)
+        gm = make_fx(f, tracing_mode="symbolic")(x)
         result = gm(x)
         self.assertEqual(result, f(x))
         self.assertExpectedInline(
