@@ -32,6 +32,12 @@ __all__ = [
     "suppress_errors",
     "verify_correctness",
     "log_file_name",
+    "fail_on_recompile_limit_hit",
+    "allow_unspec_int_on_nn_module",
+    "skip_tensor_guards_with_matching_dict_tags",
+    "enable_cpp_symbolic_shape_guards",
+    "wrap_top_frame",
+    "reorderable_logging_functions",
 ]
 
 
@@ -237,6 +243,61 @@ log_file_name: Optional[str] = Config(alias="torch._dynamo.config.log_file_name"
 Specifies a file path for TorchDynamo-specific logging output. When set, internal
 TorchDynamo debug information is written to this file rather than stdout. This is
 useful for debugging TorchDynamo's internal tracing behavior.
+"""
+
+fail_on_recompile_limit_hit: bool = Config(
+    alias="torch._dynamo.config.fail_on_recompile_limit_hit"
+)
+"""
+Raises a hard error when recompile limits are exceeded instead of falling back
+to eager execution. This is useful for detecting excessive recompilation in
+performance-critical deployments where you want to ensure compilation overhead
+is kept under control.
+"""
+
+allow_unspec_int_on_nn_module: bool = Config(
+    alias="torch._dynamo.config.allow_unspec_int_on_nn_module"
+)
+"""
+Allows integer attributes of nn.Module instances to be unspecialized through
+the dynamic shape mechanism. By default, TorchDynamo specializes on all integer
+module attributes, but this can cause excessive recompilation when integers
+like step counters change frequently.
+"""
+
+skip_tensor_guards_with_matching_dict_tags: bool = Config(
+    alias="torch._dynamo.config.skip_tensor_guards_with_matching_dict_tags"
+)
+"""
+Optimizes guard generation by treating tensors as immutable when they are
+dictionary values with consistent dictionary tags across invocations. This
+reduces guard overhead for tensors stored in persistent data structures.
+"""
+
+enable_cpp_symbolic_shape_guards: bool = Config(
+    alias="torch._dynamo.config.enable_cpp_symbolic_shape_guards"
+)
+"""
+Uses C++ implementation for symbolic shape guard evaluation to improve performance.
+The C++ guard manager can significantly speed up guard checking for symbolic shapes
+in shape-polymorphic compilations.
+"""
+
+wrap_top_frame: bool = Config(alias="torch._dynamo.config.wrap_top_frame")
+"""
+Wraps the top-level decorated function/module in a frame wrapper to ensure
+nn.Module hooks are compiled within the same frame as the main function. This
+improves compilation coverage for models that rely on hooks.
+"""
+
+reorderable_logging_functions: set = Config(
+    alias="torch._dynamo.config.reorderable_logging_functions"
+)
+"""
+A set of logging functions that can be reordered to execute after the compiled
+portion of the graph, allowing larger graphs to be captured. Functions in this
+set will have their execution deferred to avoid graph breaks, though this may
+affect the timing of log output.
 """
 
 
