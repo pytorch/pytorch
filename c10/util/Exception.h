@@ -545,7 +545,7 @@ namespace c10::detail {
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    throw std::runtime_error(TORCH_CHECK_MSG( \
+    C10_THROW_ERROR(Error, TORCH_CHECK_MSG( \
         cond,                                 \
         "",                                   \
         __func__,                             \
@@ -559,7 +559,7 @@ namespace c10::detail {
 #else
 #define TORCH_CHECK(cond, ...)                \
   if (C10_UNLIKELY_OR_CONST(!(cond))) {       \
-    throw std::runtime_error(TORCH_CHECK_MSG( \
+    C10_THROW_ERROR(Error, TORCH_CHECK_MSG( \
         cond,                                 \
         "",                                   \
         __func__,                             \
