@@ -22,14 +22,16 @@ project-excludes = [
   # ==== to test Pyrefly on a specific directory, simply comment it out ====
   "torch/_inductor/**",
   "torch/distributed/**",
-  "torch/nn/**",
-  "torch/_dynamo/**",
   # formatting issues
   "torch/linalg/__init__.py",
   "torch/package/importer.py",
   "torch/package/_package_pickler.py",
   "torch/jit/annotations.py",
   "torch/utils/data/datapipes/_typing.py",
+  "torch/nn/functional.py",
+  "torch/_export/utils.py",
+  "torch/fx/experimental/unification/multipledispatch/__init__.py",
+  "torch/nn/modules/__init__.py",
   # ====
   "benchmarks/instruction_counts/main.py",
   "benchmarks/instruction_counts/definitions/setup.py",
