@@ -4,7 +4,6 @@
 
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/OpMathType.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
