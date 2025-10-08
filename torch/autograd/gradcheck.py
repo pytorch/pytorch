@@ -1108,7 +1108,7 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
             ) from ex
 
         for input_idx, (res, exp) in enumerate(zip(result, expected)):
-            if torch.allclose(res, exp):
+            if torch.allclose(res, exp, equal_nan=True):
                 continue
             raise GradcheckError(
                 _get_failed_batched_grad_test_msg(
@@ -1165,7 +1165,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
             ) from ex
 
     for input_idx, (res, exp) in enumerate(zip(result, expected)):
-        if torch.allclose(res, exp):
+        if torch.allclose(res, exp, equal_nan=True):
             continue
         raise GradcheckError(
             _get_failed_batched_grad_test_msg(output_idx, input_idx, res, exp)
@@ -1279,7 +1279,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 _val2, res2 = fwAD.unpack_dual(d_o2)
 
                 if not (res1 is None or res2 is None):
-                    if not torch.allclose(res1, res2):
+                    if not torch.allclose(res1, res2, equal_nan=True):
                         raise GradcheckError(
                             "Mismatch in tangent values for output with index: ",
                             index_o,
@@ -1649,7 +1649,7 @@ def _allclose_with_type_promotion(a, b, rtol, atol):
     promoted_type = torch.promote_types(a.dtype, b.dtype)
     a = a.to(dtype=promoted_type)
     b = b.to(dtype=promoted_type)
-    return torch.allclose(a, b, rtol, atol)
+    return torch.allclose(a, b, rtol, atol, equal_nan=True)
 
 
 def _to_real_dtype(dtype):
@@ -1773,7 +1773,7 @@ def _run_slow_mode_and_get_error(
     # Assume jacobians are non-empty and have the same shape
     slow_max_diff = (slow_numerical - slow_analytical).abs().max()
 
-    slow_allclose = torch.allclose(slow_analytical, slow_numerical, rtol, atol)
+    slow_allclose = torch.allclose(slow_analytical, slow_numerical, rtol, atol, equal_nan=True)
     msg = (
         "\nThe above quantities relating the numerical and analytical jacobians are computed \n"
         "in fast mode. See: https://github.com/pytorch/pytorch/issues/53876 for more background \n"
