@@ -66,6 +66,7 @@
 #include <ATen/ops/unique_dim.h>
 #include <ATen/ops/values_native.h>
 #include <ATen/ops/view_as_real.h>
+#include <ATen/ops/view_as_real_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/ones.h>
 #endif

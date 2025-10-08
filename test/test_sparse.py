@@ -5695,7 +5695,7 @@ class TestSparseAny(TestCase):
     @dtypes(torch.complex32, torch.complex64, torch.complex128)
     def test_view_as_real(self, device, dtype):
         x = torch.tensor(2 + 3j, dtype=dtype, device=device)
-        indices = torch.tensor([[0], [0]])
+        indices = torch.tensor([[0], [0]], device=device)
         size = torch.Size([3, 3])
         xs = torch.sparse_coo_tensor(indices, x, size, dtype=dtype)
         res = torch.view_as_real(xs).coalesce()
