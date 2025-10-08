@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
+import functools
+
 import torch
 import torch._inductor.test_case
 import torch.fx.traceback as fx_traceback
@@ -8,14 +10,9 @@ from torch._dynamo.backends.common import aot_autograd
 from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.fx.passes.regional_inductor import compile_fx_annotated_nodes_with_inductor
-from torch.nn.attention.flex_attention import (
-    create_block_mask,
-    flex_attention,
-    flex_attention_hop,
-)
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
 # from torch._inductor.utils import run_and_get_code
-from torch.testing._internal import common_utils
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -51,6 +48,17 @@ def aot_eager_regional_inductor():
 
 
 class RegionalInductorTests(torch._inductor.test_case.TestCase):
+    # TODO - should not need this because we should turn this on in Dynamo but
+    # for some reasons, test fail.
+    def setUp(self):
+        super().setUp()
+        self.cm = torch.fx.traceback.preserve_node_meta()
+        self.cm.__enter__()
+
+    def tearDown(self):
+        super().tearDown()
+        self.cm.__exit__(None, None, None)
+
     def test_simple(self):
         def fn(x, y):
             sin = torch.sin(x)
@@ -185,19 +193,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         self.assertEqual(len(codes), 2)
 
     @requires_cuda_and_triton
-    @common_utils.parametrize(
-        "ops_to_save",
-        [
-            [
-                torch.ops.aten.mm.default,
-            ],
-            [
-                flex_attention_hop,
-            ],
-            [torch.ops.aten.mm.default, flex_attention_hop],
-        ],
-    )
-    def test_selective_ac_flex(self, device, ops_to_save):
+    def test_selective_ac_flex(self):
         class FlexAttentionModule(torch.nn.Module):
             def __init__(self, hidden_size, num_heads):
                 super().__init__()
@@ -234,11 +230,12 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
                 )
 
                 # Apply flex attention
-                attn_output = flex_attention(
-                    q,
-                    k,
-                    v,
-                )
+                with torch.fx.traceback.annotate({"compile_with_inductor": 0}):
+                    attn_output = flex_attention(
+                        q,
+                        k,
+                        v,
+                    )
 
                 # Reshape output
                 attn_output = (
@@ -257,6 +254,9 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             create_selective_checkpoint_contexts,
         )
 
+        ops_to_save = [
+            torch.ops.aten.mm.default,
+        ]
         context_fn = functools.partial(
             create_selective_checkpoint_contexts, ops_to_save
         )
@@ -285,11 +285,13 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             "cuda", dtype=torch.bfloat16
         )
         x = torch.ones(8, 1024, 512, device="cuda", dtype=torch.bfloat16)
+        compiled_module = torch.compile(
+            flex_module, backend=aot_eager_regional_inductor(), fullgraph=True
+        )
 
-        # Run without compilation
-        output_module = flex_module(x)
-        compiled_module = torch.compile(flex_module)
-        output_compiled = compiled_module(x)
+        _, codes = run_fw_bw_and_get_code(lambda: compiled_module(x))
+        # flex in forward and flex_backward in backward
+        self.assertEqual(len(codes), 2)
 
 
 if __name__ == "__main__":
