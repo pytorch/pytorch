@@ -412,10 +412,9 @@ else:
             >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
         """
 
-        # TODO: to make existing public fields private and add some methods/properties for bc.
-        device_type: str
-        mesh: torch.Tensor
-        mesh_dim_names: Optional[tuple[str, ...]]
+        _device_type: str
+        _mesh: torch.Tensor
+        _mesh_dim_names: Optional[tuple[str, ...]]
         _layout: _MeshLayout
 
         def __init__(
@@ -429,15 +428,15 @@ else:
             _rank: Optional[int] = None,
             _layout: Optional[_MeshLayout] = None,
         ) -> None:
-            self.device_type = device_type
+            self._device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
                 raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
-            self.mesh = (
+            self._mesh = (
                 mesh.detach().to(dtype=torch.int).contiguous()
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
-            self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
+            self._mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
             if backend_override is None:
                 backend_override = ((None, None),) * self.mesh.ndim
             elif len(backend_override) != self.mesh.ndim:
@@ -487,6 +486,21 @@ else:
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
+        @property
+        def device_type(self) -> str:
+            """Returns the device type of the mesh."""
+            return self._device_type
+
+        @property
+        def mesh(self) -> torch.Tensor:
+            """Returns the tensor representing the layout of devices."""
+            return self._mesh
+
+        @property
+        def mesh_dim_names(self) -> Optional[tuple[str, ...]]:
+            """Returns the names of mesh dimensions."""
+            return self._mesh_dim_names
+
         def _setup_world_group_and_device(self):
             default_initialized = is_initialized()
             # TODO: think about how to allow pg options to be passed to world group
@@ -502,7 +516,7 @@ else:
 
             # ONLY set the device if the current device is not initialized, if user already
             # set the device before DeviceMesh init, we respect the user's choice.
-            device_handle = _get_device_handle(self.device_type)
+            device_handle = _get_device_handle(self._device_type)
             if device_handle and not device_handle.is_initialized():
                 # auto set the cuda/cuda-like device only if user has not set it, if there's LOCAL_RANK
                 # env variable from launchers, we use it to set the device.
@@ -531,7 +545,7 @@ else:
                     ):
                         raise RuntimeError(
                             f"DeviceMesh only support homogeneous hardware, but found "
-                            f"{world_size} ranks and {num_devices_per_host} {self.device_type} devices!"
+                            f"{world_size} ranks and {num_devices_per_host} {self._device_type} devices!"
                         )
                     device_handle.set_device(get_rank() % num_devices_per_host)
 
@@ -552,7 +566,7 @@ else:
                 and self.mesh.numel() == get_world_size()
                 and backend_override[0] == (None, None)
             ):
-                # Append the default pg to the first dim groups only if the default pg is compatible with `self.device_type`.
+                # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
                 # Otherwise, create new pg.
                 ranks = list(range(get_world_size()))
                 dim_group = (
@@ -581,8 +595,8 @@ else:
                     # If the mesh doesn't not have a mesh_dim_names, then the group description of the
                     # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
                     group_desc = (
-                        f"mesh_{self.mesh_dim_names[dim]}"
-                        if self.mesh_dim_names
+                        f"mesh_{self._mesh_dim_names[dim]}"
+                        if self._mesh_dim_names
                         else f"mesh_dim_{dim}"
                     )
 
@@ -658,14 +672,14 @@ else:
 
         def __repr__(self) -> str:
             device_mesh_repr = (
-                f"({', '.join(f'{k}={v}' for k, v in zip(self.mesh_dim_names, self.mesh.shape))})"
-                if self.mesh_dim_names
-                else f"{tuple(self.mesh.shape)}"
+                f"({', '.join(f'{k}={v}' for k, v in zip(self._mesh_dim_names, self._mesh.shape))})"
+                if self._mesh_dim_names
+                else f"{tuple(self._mesh.shape)}"
             )
-            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, device: '{self.device_type}', stride: {self.mesh.stride()}"
+            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, device: '{self._device_type}', stride: {self._mesh.stride()}"
             # We only print the mesh tensor if the debug mode is turned on.
             if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
-                device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
+                device_mesh_repr += f", Mesh: {self._mesh.tolist()}"
             return f"{device_mesh_repr})"
 
         def __hash__(self):
@@ -675,9 +689,9 @@ else:
                 self._hash = hash(
                     (
                         self._flatten_mesh_list,
-                        self.mesh.shape,
-                        self.device_type,
-                        self.mesh_dim_names,
+                        self._mesh.shape,
+                        self._device_type,
+                        self._mesh_dim_names,
                         self._thread_id,
                     )
                 )
@@ -690,9 +704,9 @@ else:
                 return False
             return (
                 self._flatten_mesh_list == other._flatten_mesh_list
-                and self.mesh.shape == other.mesh.shape
-                and self.device_type == other.device_type
-                and self.mesh_dim_names == other.mesh_dim_names
+                and self._mesh.shape == other._mesh.shape
+                and self._device_type == other._device_type
+                and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
             )
 
@@ -742,14 +756,14 @@ else:
                 >>> dp_cp_mesh = mesh_3d["dp", "cp"]
                 >>> cp_dp_mesh = mesh_3d["cp", "dp"]
             """
-            if not self.mesh_dim_names:
+            if not self._mesh_dim_names:
                 raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names!")
 
             mesh_dim_names = (
                 (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
             )
 
-            if mesh_dim_names == self.mesh_dim_names:
+            if mesh_dim_names == self._mesh_dim_names:
                 return self
             else:
                 sliced_mesh_layout = _mesh_resources._get_slice_mesh_layout(
@@ -1056,7 +1070,7 @@ else:
             After the flattened dimension is created, to access the flattened dimension in mesh_3d, one can use the
             existing slicing method to obtain the flattened mesh through calling mesh_3d["dp_cp"].
             """
-            if not self.mesh_dim_names:
+            if not self._mesh_dim_names:
                 raise RuntimeError(
                     "Cannot flatten a DeviceMesh without mesh_dim_names!"
                 )
