@@ -20,6 +20,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 import os
 import torch
 import torch.distributed as dist
+from torch.distributed.tensor.debug import CommDebugMode
 
 def main():
     dist.init_process_group(backend="nccl")
@@ -29,12 +30,36 @@ def main():
     mesh_shape = (2, )
     mesh = init_device_mesh("cuda", mesh_shape)
     batch_size, seq_len, dim = 2, 4, 2
-    global_inps = torch.arange(batch_size * seq_len * dim, device="cuda").float().view(batch_size, seq_len, dim)
-    inps = distribute_tensor(global_inps, mesh, (Shard(1), ))
-    global_weight = torch.eye(dim, device="cuda")
-    weight = distribute_tensor(global_weight, mesh, (Shard(0), ))
-    out = F.linear(inps, weight)
+
+    # view
+    # global_inps = torch.arange(batch_size * seq_len * dim, device="cuda").float().view(batch_size, seq_len, dim)
+    # inps = distribute_tensor(global_inps, mesh, (Shard(1), ))
+    # out = inps.view(batch_size * seq_len, dim)
+
+    # transpose
+    # global_weight = torch.eye(dim, device="cuda")
+    # weight = distribute_tensor(global_weight, mesh, (Shard(0), ))
+    # out = torch.t(weight)
+    # print(f"rank: {torch.distributed.get_rank()} transpose out: {out}", flush=True)
+
+    # mm
+    global_inps = torch.arange(8, device="cuda").float().view(2, 4)
+    inps = distribute_tensor(global_inps, mesh, (Shard(0), ))
+    global_weight = torch.eye(4, device="cuda")
+    weight = distribute_tensor(global_weight, mesh, (Replicate(), ))
+    comm_mode = CommDebugMode()
+    with comm_mode:
+        out = torch.mm(inps, weight)
     print(f"rank: {torch.distributed.get_rank()} out: {out}")
+
+
+    # F.linear
+    # global_inps = torch.arange(batch_size * seq_len * dim, device="cuda").float().view(batch_size, seq_len, dim)
+    # inps = distribute_tensor(global_inps, mesh, (Shard(1), ))
+    # global_weight = torch.eye(dim, device="cuda")
+    # weight = distribute_tensor(global_weight, mesh, (Shard(0), ))
+    # out = F.linear(inps, weight)
+    # print(f"rank: {torch.distributed.get_rank()} out: {out}")
 
 if __name__ == "__main__":
     main()
