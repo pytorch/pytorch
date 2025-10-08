@@ -9,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <ATen/ceil_div.h>
 // Use torch's cub wrapper instead of CUDA's <cub/cub.cuh>, see #55292
 #include <ATen/cuda/cub.cuh>
 
@@ -863,6 +864,128 @@ void all_to_all_vdev_2d_offset(
       0,
       stream);
 }
+
+/* Tiled Communication */
+
+using Shape2D = nvshmemx::shape<int64_t, int64_t>;
+using Stride2D = nvshmemx::stride<int64_t, int64_t>;
+
+template <typename T>
+__global__ void tile_reduce_kernel(
+    T* src_ptr, T* dst_ptr, Shape2D shape, Stride2D strides, int64_t root, nvshmem_team_t* teams) {
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  int bid = blockIdx.x;
+  auto team = teams[bid];
+  CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID && " invalid team\n");
+
+  // Global tile shape
+  auto [rows, cols] = shape;
+  auto [stride0, stride1] = strides;
+
+  // Divide rows among CUDA blocks
+  auto rows_per_block = at::ceil_div(rows, (int64_t)gridDim.x);
+  auto block_start_row = rows_per_block * bid;
+  auto block_shape = nvshmemx::make_shape(std::min(rows_per_block, rows - block_start_row), cols);
+  auto block_layout = nvshmemx::make_layout(block_shape, strides);
+
+  // Start pointer of each block's sub-tile
+  auto block_src_ptr = src_ptr + stride0 * block_start_row;
+  auto block_dst_ptr = dst_ptr + stride0 * block_start_row;
+  auto block_src_tensor = nvshmemx::Tensor(block_src_ptr, block_layout);
+  auto block_dst_tensor = nvshmemx::Tensor(block_dst_ptr, block_layout);
+
+  // Making these empty to avoid nvshmemx::tile_sum_reduce_block() from doing
+  // additional range checks
+  auto start_coord = nvshmemx::make_shape();
+  auto boundary = nvshmemx::make_shape();
+
+  // Use one-shot pull to reduce the tile
+  uint64_t flag = 0;
+  constexpr auto algo = nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI;
+  nvshmemx::tile_sum_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
+      team, block_src_tensor, block_dst_tensor, start_coord, boundary, root, flag /* unused */);
+
+  // Wait for the operation to complete
+  nvshmemx::tile_collective_wait<algo>(team, flag /* unused */);
+#endif
+}
+
+#define AT_DISPATCH_CASE_CONVERT(enum_type, scalar_type, ...)               \
+  case enum_type: {                                                         \
+    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                            \
+    using scalar_t = scalar_type;                                           \
+    return __VA_ARGS__();                                                   \
+  }
+
+#define AT_DISPATCH_NVSHMEM_FLOATS(scalar_type, name, ...)                  \
+  AT_DISPATCH_SWITCH(                                                       \
+      scalar_type, name,                                                    \
+      AT_DISPATCH_CASE_CONVERT(at::kBFloat16, __nv_bfloat16, __VA_ARGS__);  \
+      AT_DISPATCH_CASE_CONVERT(at::kHalf, __half, __VA_ARGS__);             \
+      AT_DISPATCH_CASE(at::kFloat, __VA_ARGS__));
+
+void tile_reduce(
+    at::Tensor& in_tile,
+    at::Tensor& out_tile,
+    int64_t root,
+    std::string group_name,
+    std::string reduce_op) {
+  /* Perform a tile reduce operation on the input tensor, with the root rank
+   * receiving the reduced tensor. */
+  TORCH_CHECK(reduce_op == "sum", "tile_reduce: only sum is supported for now");
+  TORCH_CHECK(in_tile.dim() == 2 && out_tile.dim() == 2, "Only 2D tensors are supported");
+  TORCH_CHECK_EQ(in_tile.dtype(), out_tile.dtype());
+  TORCH_CHECK_EQ(in_tile.sizes(), out_tile.sizes());
+  TORCH_CHECK_EQ(in_tile.strides(), out_tile.strides());
+  TORCH_CHECK_EQ(in_tile.device(), out_tile.device());
+
+  auto device = in_tile.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto hdl = c10d::symmetric_memory::rendezvous(in_tile, group_name);
+  c10d::symmetric_memory::rendezvous(out_tile, group_name);
+
+  // Ideally 16 bytes per thread
+  int nblocks = at::ceil_div(
+      in_tile.numel() * in_tile.element_size(),
+      (int64_t)THREADS_PER_BLOCK * 16);
+  nblocks = std::min(nblocks, 24);
+
+  // Need one team per block
+  auto& team_manager = TeamManager::get(device);
+  auto [teams, teams_dev] = team_manager.get_n_teams(
+      group_name, hdl->get_rank_to_global_rank(), nblocks);
+  TORCH_CHECK(
+      root < nvshmem_team_n_pes(teams[0]),
+      "root must be smaller than group size");
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // Prepare launch parameters
+  auto shape = nvshmemx::make_shape(in_tile.sizes()[0], in_tile.sizes()[1]);
+  auto stride = nvshmemx::make_stride(in_tile.strides()[0], in_tile.strides()[1]);
+  auto src_ptr = in_tile.const_data_ptr();
+  auto dst_ptr = out_tile.mutable_data_ptr();
+  void* args[] = {
+      &src_ptr,
+      &dst_ptr,
+      &shape,
+      &stride,
+      &root,
+      &teams_dev};
+
+  AT_DISPATCH_NVSHMEM_FLOATS(in_tile.scalar_type(), "tile_reduce", [&]() {
+    nvshmemx_collective_launch(
+        (const void*)tile_reduce_kernel<scalar_t>,
+        dim3(nblocks),
+        dim3(THREADS_PER_BLOCK),
+        args,
+        0,
+        stream);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  });
+}
+
 } // namespace c10d::nvshmem_extension
 
 
@@ -876,4 +999,5 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("all_to_all_vdev", c10d::nvshmem_extension::all_to_all_vdev);
   m.impl("all_to_all_vdev_2d", c10d::nvshmem_extension::all_to_all_vdev_2d);
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
+  m.impl("tile_reduce", c10d::nvshmem_extension::tile_reduce);
 }
