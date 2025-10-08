@@ -740,19 +740,16 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         compiled_fn = torch.compile(M(), backend="aot_eager")
 
         with torch._functorch.config.patch("joint_gm_compiler", joint_gm_compiler):
-            out = compiled_fn(x)
+            _ = compiled_fn(x)
         # x doesn't require grad, shouldn't trigger joint graph compiler
         self.assertFalse(is_called)
-
 
         y = torch.randn(10, requires_grad=True)
         with torch._functorch.config.patch("joint_gm_compiler", joint_gm_compiler):
             out = compiled_fn(y)
         # y requires grad, should trigger joint graph compiler
         self.assertTrue(is_called)
-
-
-
+        out.sum().backward()
 
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
