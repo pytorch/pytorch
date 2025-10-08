@@ -4205,7 +4205,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_item(self):
         def func():
-            _x_ms = torch.tensor([True, False], device="cuda", dtype=torch.int64)
+            _x_ms = torch.tensor([True, False], dtype=torch.int64)
             _mask_ms = torch.zeros_like(_x_ms, dtype=torch.bool)
             _mask_ms[:1] = True
             var_node_2 = torch.masked_select(_x_ms, _mask_ms)
