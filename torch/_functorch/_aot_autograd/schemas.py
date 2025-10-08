@@ -196,6 +196,7 @@ class MemoryFormatMeta:
 
         if use_memory_format:
             return MemoryFormatMeta(
+                # pyrefly: ignore  # unbound-name
                 memory_format=torch._prims_common.suggest_memory_format(t),
             )
 
@@ -892,12 +893,15 @@ class GraphSignature:
         parameters_to_mutate = {}
         for output_name, mutation_name in outputs_to_mutations.items():
             if mutation_name in user_inputs:
+                # pyrefly: ignore  # unsupported-operation
                 user_inputs_to_mutate[output_name] = mutation_name
             else:
                 assert mutation_name in buffers or mutation_name in parameters
                 if mutation_name in buffers:
+                    # pyrefly: ignore  # unsupported-operation
                     buffers_to_mutate[output_name] = mutation_name
                 else:
+                    # pyrefly: ignore  # unsupported-operation
                     parameters_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
