@@ -1236,12 +1236,15 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             )
         for model, inputs in models_to_test:
             # Select deterministic context based on device
+            if "cuda" not in device:
+                torch.use_deterministic_algorithms(True)
+
             det_ctx = (
                 torch.backends.cudnn.flags(
                     enabled=True, deterministic=True, benchmark=False
                 )
                 if "cuda" in device
-                else torch.use_deterministic_algorithms(True)
+                else nullcontext()
             )
             with det_ctx:
                 device_ids = [rank] if requires_ddp_rank(device) else None
