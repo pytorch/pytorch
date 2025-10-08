@@ -273,7 +273,11 @@ def annotate(annotation_dict: dict):
     global current_meta
 
     has_custom = "custom" in current_meta
-    old_custom = copy.copy(current_meta.get("custom", {}))
+    old_custom = {}
+    # cannot use `old_custom = copy.copy(current_meta.get("custom", {}))` here,
+    # as dynamo doesn't support copy.copy()
+    for k, v in current_meta.get("custom", {}).items():
+        old_custom[k] = v  # noqa: PERF403
 
     try:
         if not has_custom:
