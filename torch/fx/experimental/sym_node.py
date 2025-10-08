@@ -477,12 +477,18 @@ class SymNode:
         # Inner impl
         from torch.fx.experimental.proxy_tensor import (
             handle_sym_dispatch,
-            no_sym_dispatch,
+            is_sym_tracing,
         )
 
-        # sym_sum() takes a tuple itself
-        if (result := handle_sym_dispatch(torch.sym_sum, args)) is not no_sym_dispatch:
-            return to_node(self, result)
+        if is_sym_tracing():
+            return to_node(
+                self,
+                handle_sym_dispatch(
+                    torch.sym_sum,
+                    (tuple(wrap_node(a) for a in args),),
+                    {},
+                ),
+            )
         exprs = [a.expr for a in args]
         out = sympy.Add(*exprs)
 
@@ -1364,7 +1370,7 @@ def _make_node_magic(method, func):
     def binary_magic_impl(self, other):
         from torch.fx.experimental.proxy_tensor import (
             handle_sym_dispatch,
-            no_sym_dispatch,
+            is_sym_tracing,
         )
 
         op = method_to_operator(method)
@@ -1373,8 +1379,10 @@ def _make_node_magic(method, func):
         if self.hint is not None and other.hint is not None:
             out_hint = op(self.hint, other.hint)
 
-        if (result := handle_sym_dispatch(op, self, other)) is not no_sym_dispatch:
-            return to_node(self, result)
+        if is_sym_tracing():
+            return to_node(
+                self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
+            )
         assert isinstance(other, SymNode)
         optimized_summation = False
         try:
@@ -1453,12 +1461,12 @@ def _make_node_magic(method, func):
     def unary_magic_impl(self):
         from torch.fx.experimental.proxy_tensor import (
             handle_sym_dispatch,
-            no_sym_dispatch,
+            is_sym_tracing,
         )
 
         op = method_to_operator(method)
-        if (result := handle_sym_dispatch(op, self)) is not no_sym_dispatch:
-            return to_node(self, result)
+        if is_sym_tracing():
+            return to_node(self, handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.expr
         if method == "floor" or method == "ceiling":
@@ -1493,14 +1501,23 @@ def _make_node_magic(method, func):
         def sym_ite_impl(pred_node, then_node, else_node):
             from torch.fx.experimental.proxy_tensor import (
                 handle_sym_dispatch,
-                no_sym_dispatch,
+                is_sym_tracing,
             )
 
             out_hint = then_node.hint if pred_node.hint else else_node.hint
-            if (
-                result := handle_sym_dispatch(sym_ite, pred_node, then_node, else_node)
-            ) is not no_sym_dispatch:
-                return to_node(pred_node, result)
+            if is_sym_tracing():
+                return to_node(
+                    pred_node,
+                    handle_sym_dispatch(
+                        sym_ite,
+                        (
+                            wrap_node(pred_node),
+                            wrap_node(then_node),
+                            wrap_node(else_node),
+                        ),
+                        {},
+                    ),
+                )
 
             try:
                 out = func(pred_node.expr, then_node.expr, else_node.expr)
@@ -1527,14 +1544,14 @@ def _make_node_magic(method, func):
         def round_impl(self, ndigits=None):
             from torch.fx.experimental.proxy_tensor import (
                 handle_sym_dispatch,
-                no_sym_dispatch,
+                is_sym_tracing,
             )
 
             op = builtins.round
-            if (
-                result := handle_sym_dispatch(op, self, ndigits)
-            ) is not no_sym_dispatch:
-                return to_node(self, result)
+            if is_sym_tracing():
+                return to_node(
+                    self, handle_sym_dispatch(op, (wrap_node(self), ndigits), {})
+                )
 
             expr = self.expr
             try:
@@ -1576,12 +1593,19 @@ def _make_node_sizes_strides(method, func):
     def sizes_strides_impl(self, sizes, strides):
         from torch.fx.experimental.proxy_tensor import (
             handle_sym_dispatch,
-            no_sym_dispatch,
+            is_sym_tracing,
         )
 
         op = getattr(sys.modules[__name__], method)
-        if (result := handle_sym_dispatch(op, sizes, strides)) is not no_sym_dispatch:
-            return to_node(self, result)
+        if is_sym_tracing():
+            return to_node(
+                self,
+                handle_sym_dispatch(
+                    op,
+                    ([wrap_node(s) for s in sizes], [wrap_node(s) for s in strides]),
+                    {},
+                ),
+            )
         size_exprs = [s.expr for s in sizes]
         stride_exprs = [s.expr for s in strides]
         try:
