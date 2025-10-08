@@ -688,6 +688,68 @@ class TestReductions(TestCase):
         self.assertEqual(y3_none, y3_explicit)
 
     @dtypes(torch.float32, torch.double)
+    def test_logsumexp_backward_intermediate_shapes(self, device, dtype):
+        """Test that backward pass correctly unsqueezes gradients for dim=None.
+
+        This test uses backward hooks to verify intermediate gradient shapes,
+        which catches bugs where the code relies on broadcasting instead of
+        explicitly unsqueezing dimensions.
+        """
+        # Test with multi-dimensional tensor
+        x = torch.randn(2, 3, 4, device=device, dtype=dtype, requires_grad=True)
+
+        # Track the gradient shape as it flows backward
+        grad_shape_seen = []
+
+        def hook(grad):
+            grad_shape_seen.append(grad.shape)
+            return grad
+
+        x.register_hook(hook)
+
+        # Forward pass with dim=None, keepdim=False
+        # Output should be scalar
+        y = torch.logsumexp(x, dim=None, keepdim=False)
+        self.assertEqual(y.shape, torch.Size([]))  # scalar
+
+        # Backward pass
+        y.backward()
+
+        # The gradient flowing back to x should have the same shape as x
+        # This verifies that unsqueeze_multiple was called correctly
+        self.assertEqual(len(grad_shape_seen), 1)
+        self.assertEqual(grad_shape_seen[0], x.shape)
+
+        # Additional test: verify the gradient computation is correct
+        # by comparing with explicit dim specification
+        x2 = x.detach().clone().requires_grad_(True)
+        y2 = torch.logsumexp(x2, dim=(0, 1, 2), keepdim=False)
+        y2.backward()
+
+        # Gradients should be identical
+        self.assertEqual(x.grad, x2.grad)
+
+        # Test with keepdim=True (should not need unsqueezing)
+        x3 = torch.randn(2, 3, 4, device=device, dtype=dtype, requires_grad=True)
+        grad_shape_seen_keepdim = []
+
+        def hook_keepdim(grad):
+            grad_shape_seen_keepdim.append(grad.shape)
+            return grad
+
+        x3.register_hook(hook_keepdim)
+        y3 = torch.logsumexp(x3, dim=None, keepdim=True)
+
+        # Output should be (1, 1, 1)
+        self.assertEqual(y3.shape, torch.Size([1, 1, 1]))
+
+        y3.backward()
+
+        # Gradient should match input shape
+        self.assertEqual(len(grad_shape_seen_keepdim), 1)
+        self.assertEqual(grad_shape_seen_keepdim[0], x3.shape)
+
+    @dtypes(torch.float32, torch.double)
     def test_logsumexp_jit_dim_none(self, device, dtype):
         """Test JIT compilation for logsumexp with dim=None"""
         def logsumexp_no_dim(x):

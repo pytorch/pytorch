@@ -1551,24 +1551,6 @@ TORCH_IMPL_FUNC(logsumexp_out)
   }
 }
 
-Tensor& logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
-  // Complex type implies floating point type
-  TORCH_CHECK(at::isFloatingType(result.scalar_type()) || at::isComplexType(result.scalar_type()),
-              "logsumexp(): Expected floating point type for result tensor, but got: ",
-              result.scalar_type());
-  {
-    NoNamesGuard guard;
-    if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
-      // for integral inputs, promote input to default floating type.
-      auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
-      logsumexp_out_impl(result, self.to(default_dtype), dims, keepdim);
-    } else {
-      logsumexp_out_impl(result, self, dims, keepdim);
-    }
-  }
-  namedinference::propagate_names_for_reduction(result, self, dims, keepdim);
-  return result;
-}
 
 // Manual dispatcher for logsumexp with IntArrayRef (called by codegen)
 Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
@@ -1613,6 +1595,28 @@ Tensor special_logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
 }
 Tensor& special_logsumexp_out(const Tensor& self, IntArrayRef dims, bool keepdim, Tensor& result) {
   return at::logsumexp_out(result, self, dims, keepdim);
+}
+
+// Default composite implementation for logsumexp - works on all backends
+Tensor& logsumexp_out_default(const Tensor& self, OptionalIntArrayRef opt_dim, bool keepdim, Tensor& result) {
+  TORCH_CHECK(at::isFloatingType(result.scalar_type()) || at::isComplexType(result.scalar_type()),
+              "logsumexp(): Expected floating point type for result tensor, but got: ",
+              result.scalar_type());
+
+  // Convert OptionalIntArrayRef to IntArrayRef
+  DimVector dims_vec = at::native::make_dim_vector(opt_dim, self.dim());
+  IntArrayRef dims(dims_vec);
+
+  // Handle integer promotion
+  Tensor self_promoted = self;
+  if (at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    auto default_dtype = at::typeMetaToScalarType(c10::get_default_dtype());
+    self_promoted = self.to(default_dtype);
+  }
+
+  // Call the implementation
+  logsumexp_out_impl(result, self_promoted, dims, keepdim);
+  return result;
 }
 
 static void impl_func_norm(

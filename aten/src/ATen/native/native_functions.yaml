@@ -3804,7 +3804,6 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: logsumexp
-  autogen: logsumexp.out
 
 - func: logsumexp.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False) -> Tensor
   structured_delegate: logsumexp.IntList_out
@@ -3819,6 +3818,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logsumexp_out
+    CompositeExplicitAutograd: logsumexp_out_default
   tags: reduction
 
 - func: logsumexp.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
