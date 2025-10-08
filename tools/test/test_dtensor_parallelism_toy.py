@@ -9,7 +9,8 @@ if LOG_INTERNAL:
     os.environ["NCCL_DEBUG"] = "INFO"
     os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
     os.environ["TORCH_LOGS"] = "+torch.distributed.tensor"
-LOG_DEBUG = False
+LOG_DEBUG = True
+LOG_RANK = [0]
 
 import torch
 import torch.distributed as dist
@@ -41,21 +42,35 @@ def init_distributed():
     return rank, world_size, local_rank, device
 
 class TinyNet(nn.Module):
-    def __init__(self, d_in=8, d_hidden=16, d_out=1):
+    def __init__(self, d_in=8, d_hidden=16, d_out=1, mesh=None):
         super().__init__()
         self.fc1 = nn.Linear(d_in, d_hidden, bias=False) #8x16
         self.fc2 = nn.Linear(d_hidden, d_out, bias=False) #16x1
+        self.mesh = mesh
+        if self.mesh:
+            print(f"[Rank {dist.get_rank()}]: ==== DTensor Mixed Local Ops Testing ====")
+        else:
+            print(f"[Rank {dist.get_rank()}]: ==== DTensor Testing ====")
 
     def forward(self, x):
         #x = 16x8 [8x8], [8x8]
         #w1 = 8x16 [8x8 @ 8x16 = 8x16 act]
         #w2 = 16x1 [8x16 @ 16x1 = 8x1 act]
-        x = self.fc1(x)
-        x = F.relu(x)
-        x = self.fc2(x)
-        return x
+        if not self.mesh:
+            x = self.fc1(x)
+            x = F.relu(x)
+            x = self.fc2(x)
+            return x
 
-def main():
+        w1_local = self.fc1.weight.to_local()
+        x_local = x.to_local()
+        x_local = F.linear(x_local, w1_local)
+        x_local = F.relu(x_local)
+        x2 = DTensor.from_local(x_local, device_mesh=self.mesh, placements=[Shard(0)])
+        x2 = self.fc2(x2)
+        return x2
+
+def data_parallel_dtensor(local_ops=False):
     rank, world_size, local_rank, device = init_distributed()
 
     # 1) Data-parallel mesh across all ranks
@@ -65,7 +80,7 @@ def main():
 
     # 2) Build model and distribute (replicate params for DP)
     torch.manual_seed(0)
-    base_model = TinyNet().to(device)
+    base_model = TinyNet(mesh=(mesh if local_ops else None)).to(device)
     
     # 3) Global batch -> shard along batch dim across dp mesh
     global_batch_size = 16
@@ -79,14 +94,14 @@ def main():
         x = distribute_tensor(x_global, mesh, placements=[Shard(0)])
         y = distribute_tensor(y_global, mesh, placements=[Shard(0)])
 
-    if LOG_DEBUG:
+    if LOG_DEBUG and rank in LOG_RANK:
         print(f"[Rank {dist.get_rank()}]: === DebugMode: Models/Input/Labels Sharding === \n {debug_mode.debug_string()}")
 
     # 4) Forward
     with DebugMode(record_torchfunction=True) as debug_mode:
         pred = model(x)  # DTensor with Shard(0)
 
-    if LOG_DEBUG:
+    if LOG_DEBUG and rank in LOG_RANK:
         print(f"[Rank {dist.get_rank()}]: === DebugMode: Forward === \n {debug_mode.debug_string()}")
 
     # 5) MSE loss (pred - y)^2 .mean() yields a DTensor with a Partial state
@@ -96,23 +111,26 @@ def main():
         # full_tensor() triggers a collective call
         print(f"[Rank {dist.get_rank()}] Loss: {loss=} {loss.full_tensor()=} {loss.full_tensor().mean()=}")
 
-    with DebugMode(record_torchfunction=True) as debug_mode:
-        loss.backward()
-
-    if LOG_DEBUG:
-        print(f"[Rank {dist.get_rank()}]: === DebugMode: Loss backward === \n {debug_mode.debug_string()}")
-    
     # 6) Backward + step — gradients on replicated params are auto all-reduced by DTensor autograd
     opt = torch.optim.SGD(model.parameters(), lr=0.1)
     opt.zero_grad(set_to_none=True)
+
+    with DebugMode(record_torchfunction=True) as debug_mode:
+        loss.backward()
+
+    if LOG_DEBUG and rank in LOG_RANK:
+        print(f"[Rank {dist.get_rank()}]: === DebugMode: Loss backward === \n {debug_mode.debug_string()}")
+    
     dist.barrier()
 
     with DebugMode(record_torchfunction=True) as debug_mode:
         opt.step()
-    if LOG_DEBUG:
+
+    if LOG_DEBUG and rank in LOG_RANK:
         print(f"[Rank {dist.get_rank()}]: === DebugMode: Optimizer step === \n {debug_mode.debug_string()}")
 
     dist.destroy_process_group()
 
 if __name__ == "__main__":
-    main()
+    data_parallel_dtensor()
+    data_parallel_dtensor(local_ops=True)
