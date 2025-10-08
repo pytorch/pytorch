@@ -69,7 +69,7 @@ class Shard(Placement):
             return True
 
     @staticmethod
-    def split_tensor(
+    def _make_split_tensor(
         dim: int,
         tensor: torch.Tensor,
         num_chunks: int,
@@ -119,7 +119,7 @@ class Shard(Placement):
         with_padding: bool = True,
         contiguous: bool = True,
     ) -> tuple[list[torch.Tensor], list[int]]:
-        return Shard.split_tensor(
+        return Shard._make_split_tensor(
             self.dim,
             tensor,
             num_chunks,
@@ -171,7 +171,7 @@ class Shard(Placement):
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
-    def shard_tensor(
+    def _make_shard_tensor(
         dim: int,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
@@ -194,13 +194,13 @@ class Shard(Placement):
         if src_data_rank is None:
             # src_data_rank specified as None explicitly means to skip the
             # communications, simply split
-            scatter_list, _ = Shard.split_tensor(
+            scatter_list, _ = Shard._make_split_tensor(
                 dim, tensor, num_chunks, with_padding=False, contiguous=True
             )
 
             return scatter_list[mesh_dim_local_rank]
 
-        scatter_list, pad_sizes = Shard.split_tensor(
+        scatter_list, pad_sizes = Shard._make_split_tensor(
             dim, tensor, num_chunks, with_padding=True, contiguous=True
         )
         output = torch.empty_like(scatter_list[mesh_dim_local_rank])
@@ -224,7 +224,7 @@ class Shard(Placement):
         mesh_dim: int,
         src_data_rank: Optional[int] = 0,
     ) -> torch.Tensor:
-        return Shard.shard_tensor(self.dim, tensor, mesh, mesh_dim, src_data_rank)
+        return Shard._make_shard_tensor(self.dim, tensor, mesh, mesh_dim, src_data_rank)
 
     def _reduce_shard_tensor(
         self,
@@ -246,7 +246,7 @@ class Shard(Placement):
 
         is_padded = tensor.size(self.dim) % num_chunks != 0
         if is_padded:
-            scattered_list, pad_sizes = Shard.split_tensor(
+            scattered_list, pad_sizes = Shard._make_split_tensor(
                 self.dim, tensor, num_chunks, with_padding=True, contiguous=True
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
@@ -641,7 +641,7 @@ class Replicate(Placement):
         return "R"
 
     @staticmethod
-    def replicate_tensor(
+    def _make_replicate_tensor(
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
@@ -670,7 +670,7 @@ class Replicate(Placement):
         mesh_dim: int,
         src_data_rank: Optional[int] = 0,
     ) -> torch.Tensor:
-        return Replicate.replicate_tensor(tensor, mesh, mesh_dim, src_data_rank)
+        return Replicate._make_replicate_tensor(tensor, mesh, mesh_dim, src_data_rank)
 
     def is_replicate(self) -> bool:
         return True
