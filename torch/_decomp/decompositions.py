@@ -4079,6 +4079,7 @@ def _nll_loss_forward(
         return result, total_weight
 
     if weight is not None:
+        # pyrefly: ignore  # unbound-name
         w = w.expand(self.shape)
         wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
         wsum = torch.where(target != ignore_index, wsum, 0)

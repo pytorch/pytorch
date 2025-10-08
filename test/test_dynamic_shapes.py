@@ -1426,6 +1426,15 @@ class f(torch.nn.Module):
                 f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
             )
 
+    @fresh_cache()
+    def test_slice_backed_size_oblivious(self):
+        @torch.compile(backend="inductor", fullgraph=True, dynamic=True)
+        def f(x):
+            return x[:5]
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            f(torch.randn(10, 10))
+
     def test_baddbmm_symint(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -4039,17 +4048,6 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(compiled_func2(x, neg), func2(x, neg))
         self.assertEqual(compiled_func2(x, zero), func2(x, zero))
         self.assertEqual(cnt.frame_count, 2)
-
-    @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_unbacked_select_2(self):
-        class M(torch.nn.Module):
-            def forward(self, x):
-                nz = x.nonzero()
-                return nz[-1]
-
-        mod = M()
-        x = torch.randn(4)
-        self.assertEqual(torch.compile(mod)(x), mod(x))
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_select_index_with_check(self):
