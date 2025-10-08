@@ -903,7 +903,6 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
                 inst.arg = abs(
                     int(target.offset - inst.offset - instruction_size(inst))
                 )
-                # pyrefly: ignore  # unsupported-operation
                 inst.arg //= 2
             inst.argval = target.offset
             inst.argrepr = f"to {target.offset}"
@@ -1355,7 +1354,6 @@ def update_offsets(instructions: Sequence[Instruction]) -> None:
     offset = 0
     for inst in instructions:
         inst.offset = offset
-        # pyrefly: ignore  # unsupported-operation
         offset += instruction_size(inst)
 
 

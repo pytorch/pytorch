@@ -127,7 +127,7 @@ struct Event final {
   }
 
   void synchronize() const {
-    impl_.synchronize();
+    return impl_.synchronize();
   }
 
  private:

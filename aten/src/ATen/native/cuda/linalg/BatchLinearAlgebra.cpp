@@ -1107,14 +1107,10 @@ void ldl_factor_kernel(
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
-       { ldl_factor_cusolver(
+      return ldl_factor_cusolver(
           LD, pivots, info, upper, hermitian);
-        return;
-}
     case at::LinalgBackend::Magma:
-       { ldl_factor_magma(LD, pivots, info, upper, hermitian);
-        return;
-}
+      return ldl_factor_magma(LD, pivots, info, upper, hermitian);
     default:
     // By default use cusolver if available and magma otherwise.
     // If cusolver and magma 2.5.4+ are both available and hermitian=true,
@@ -1126,10 +1122,8 @@ void ldl_factor_kernel(
             LD, pivots, info, upper, hermitian);
       }
 #endif
-    { ldl_factor_cusolver(
-      LD, pivots, info, upper, hermitian);
-      return;
-    }
+      return ldl_factor_cusolver(
+          LD, pivots, info, upper, hermitian);
 #else
       return ldl_factor_magma(LD, pivots, info, upper, hermitian);
 #endif
@@ -1845,14 +1839,11 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
       // For the benchmarks see
       // https://github.com/pytorch/pytorch/pull/56253#discussion_r622851107
       if (input.size(-2) <= 256 && batchCount(input) >= std::max<int64_t>(2, input.size(-2) / 16)) {
-        geqrf_batched_cublas(input, tau);
-        return;
+        return geqrf_batched_cublas(input, tau);
       } else {
-        geqrf_cusolver(input, tau);
-        return;
+        return geqrf_cusolver(input, tau);
       }
-      geqrf_batched_cublas(input, tau);
-      return;
+      return geqrf_batched_cublas(input, tau);
   };
 
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
@@ -1865,14 +1856,10 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
   // - ?geqrf_gpu allows fast computation of Q via ?orgqr_gpu, but doesn't give R properly.
   // - ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orgqr_gpu
     case at::LinalgBackend::Magma:
-      { geqrf_magma(input, tau);
-        return;
-      }
+      return geqrf_magma(input, tau);
     case at::LinalgBackend::Cusolver:
     default:
-      { geqrf_cusolver_backend(input, tau);
-        return;
-      }
+      return geqrf_cusolver_backend(input, tau);
   }
 #else
   return geqrf_magma(input, tau);
@@ -2716,17 +2703,13 @@ void gels_looped(const Tensor& a, Tensor& b, Tensor& infos) {
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
     case at::LinalgBackend::Magma:
-      { gels_magma(a, b, infos);
-        return;
-      }
+      return gels_magma(a, b, infos);
     case at::LinalgBackend::Cusolver:
     default:
       // linalg_lstsq_gels is a generic function that is implemented using
       // geqrf_stub, ormqr_stub, and triangular_solve_stub
       // It dispatches to cuSOLVER for CUDA inputs if USE_LINALG_SOLVER is defined
-      { linalg_lstsq_gels(a, b, infos);
-        return;
-      }
+      return linalg_lstsq_gels(a, b, infos);
   }
 #else
   return gels_magma(a, b, infos);

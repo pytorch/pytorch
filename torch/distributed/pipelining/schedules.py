@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from enum import Enum
 from functools import lru_cache
-from typing import Any, cast, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -1884,14 +1884,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         send_ops: list[list[dist.Work]] = []
 
         # we track which stages are 'active' when used with FSDP, and wait on unshard ops before computing on stages
-        unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
+        unshard_ops: dict[int, UnshardHandle] = {}
         unsharded_stages = set()
 
         def _assert_unsharded(stage_idx: int):
             """If an unshard is active for `stage_idx`, wait() it and mark `stage_idx` unshared."""
             if stage_idx in unshard_ops:
-                for op in unshard_ops[stage_idx]:
-                    op.wait()
+                unshard_ops[stage_idx].wait()
                 del unshard_ops[stage_idx]
                 unsharded_stages.add(stage_idx)
             assert stage_idx in unsharded_stages, (
@@ -1956,13 +1955,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             stage_idx not in unsharded_stages
                             and stage_idx not in unshard_ops
                         ), f"Unsharding the same {stage_idx=} twice"
-                        for submodule in stage.submod.modules():
-                            if not isinstance(submodule, FSDPModule):
-                                continue
-                            handle = cast(
-                                UnshardHandle, submodule.unshard(async_op=True)
-                            )
-                            unshard_ops[stage_idx].append(handle)
+                        unshard_ops[stage_idx] = stage.submod.unshard(async_op=True)  # type: ignore[operator]
                 elif comp_type == RESHARD:
                     if stage_uses_fsdp:
                         assert stage_idx in unsharded_stages, (
@@ -1971,10 +1964,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         assert stage_idx not in unshard_ops, (
                             f"Resharding {stage_idx=} before finishing unshard"
                         )
-                        for submodule in stage.submod.modules():
-                            if not isinstance(submodule, FSDPModule):
-                                continue
-                            submodule.reshard()
+                        stage.submod.reshard()  # type: ignore[operator]
                 elif comp_type == FORWARD:
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
@@ -2067,14 +2057,11 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
                     backward_counter[stage_idx] += 1
-                    last_backward = backward_counter[stage_idx] == self._n_microbatches
-                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                     stage.backward_weight_one_chunk(
                         mb_index,
-                        last_backward=last_backward,
+                        last_backward=backward_counter[stage_idx]
+                        == self._n_microbatches,
                     )
-                    if last_backward:
-                        stage.scale_grads(grad_scale_factor)
                 else:
                     raise ValueError(f"{action=} is unknown or unsupported")
 
@@ -2115,7 +2102,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self._update_losses(self._stages, losses)
 
 
-class ScheduleLoopedBFS(_PipelineScheduleRuntime):
+class ScheduleLoopedBFS(PipelineScheduleMulti):
     """
     Breadth-First Pipeline Parallelism.
     See https://arxiv.org/abs/2211.05953 for details.
@@ -2149,9 +2136,6 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
-
-        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
-        self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank):
         n_local_stages = len(self._stages)
@@ -2319,7 +2303,7 @@ def _get_1f1b_rank_ops(
     return rank_ops
 
 
-class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
+class ScheduleInterleaved1F1B(PipelineScheduleMulti):
     """
     The Interleaved 1F1B schedule.
     See https://arxiv.org/pdf/2104.04473 for details.
@@ -2374,9 +2358,6 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
-
-        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
-        self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[Optional[_Action]]:
         def get_rank_warmup_ops(rank):
@@ -2438,7 +2419,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         )
 
 
-class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
+class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
     """
     The Interleaved Zero Bubble schedule.
     See https://arxiv.org/pdf/2401.10241 for details.
@@ -2502,9 +2483,6 @@ stage modules that have used torch.compile"
         self.pipeline_order = self._add_bubbles_to_actions(
             self.n_local_stages * self.pp_group_size,
         )
-
-        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
-        self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[Optional[_Action]]:
         def get_rank_warmup_ops(rank):
@@ -2637,7 +2615,7 @@ stage modules that have used torch.compile"
         return result
 
 
-class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
+class ScheduleZBVZeroBubble(PipelineScheduleMulti):
     """
     The Zero Bubble schedule (ZBV variant).
     See https://arxiv.org/pdf/2401.10241 Section 6 for details.
@@ -2696,9 +2674,6 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
-
-        # Initialize the pipeline order with communication necessary to run with _PipelineScheduleRuntime
-        self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[Optional[_Action]]:
         # max(2 * self.pp_group_size - 1, ...) ensure the number of microbatches is at least

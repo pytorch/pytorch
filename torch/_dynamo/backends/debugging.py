@@ -153,17 +153,8 @@ def torchscript(
 def boxed_nop(
     fx_g: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
 ) -> Callable[..., Any]:
-    from torch.fx.graph import _BoxedCodeGen
-
-    # Set the graph to use boxed codegen
-    fx_g.graph.set_codegen(_BoxedCodeGen())
-    fx_g.recompile()
-
-    # Wrap the forward method in a function so we can set _boxed_call attribute
-    forward_fn = fx_g.forward
-
     def run(args: Any) -> Any:
-        return forward_fn(args)
+        return torch.fx.Interpreter(fx_g).boxed_run(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
     return run
@@ -175,18 +166,9 @@ def boxed_nop_with_mode(
     *,
     mode: torch.overrides.TorchFunctionMode,
 ) -> Callable[..., Any]:
-    from torch.fx.graph import _BoxedCodeGen
-
-    # Set the graph to use boxed codegen
-    fx_g.graph.set_codegen(_BoxedCodeGen())
-    fx_g.recompile()
-
-    # Create a wrapper that runs with the mode
-    forward_fn = fx_g.forward
-
     def run(args: Any) -> Any:
         with mode:
-            return forward_fn(args)
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
     return run
@@ -197,18 +179,9 @@ def fake_crossref_boxed_nop(
     example_inputs: list[torch.Tensor],
     ignore_op_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None,
 ) -> Callable[..., Any]:
-    from torch.fx.graph import _BoxedCodeGen
-
-    # Set the graph to use boxed codegen
-    fx_g.graph.set_codegen(_BoxedCodeGen())
-    fx_g.recompile()
-
-    # Create a wrapper that runs with the mode
-    forward_fn = fx_g.forward
-
     def run(args: Any) -> Any:
         with torch._subclasses.CrossRefFakeMode(ignore_op_fn):
-            return forward_fn(args)
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
 
     run._boxed_call = True  # type: ignore[attr-defined]
     return run

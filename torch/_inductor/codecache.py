@@ -657,8 +657,7 @@ class FxGraphCachePickler(pickle.Pickler):
             if isinstance(obj, torch.Tensor):
                 return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
-                val = obj.decode("utf-8", errors="replace")
-                return val if len(val) <= 1024 else val[:1024] + "..."
+                return "<bytes>"
             elif type(obj) in self.dispatch_table:
                 # Run the reducer on the object
                 return str(self.dispatch_table[type(obj)](obj)[1])
