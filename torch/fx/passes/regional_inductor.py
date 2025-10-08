@@ -1,11 +1,24 @@
 # mypy: allow-untyped-defs
 
+import functools
+
 import torch
 
 # from torch._dynamo.backends.common import aot_autograd as auto_autograd_backend
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
+
+
+# standalone_inductor returns a callable class object - this does not sit well
+# with Fx graph node op call_function which expects a function. So this is just
+# a wrapper function to make Fx graph codegen happy.
+def dummy_wrapper(fn):
+    @functools.wraps(fn)
+    def inner(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return inner
 
 
 def partition_by_supported_nodes(gm, supported_ops, prefix):
@@ -38,8 +51,11 @@ def compile_submod(gm, prefix):
 
             submod = getattr(gm, node.target)
 
-            compiled_submod = torch._inductor.standalone_compile(
-                submod, fake_inputs, dynamic_shapes="from_tracing_context"
+            # dummy_wrapper is to make call_function happy
+            compiled_submod = dummy_wrapper(
+                torch._inductor.standalone_compile(
+                    submod, fake_inputs, dynamic_shapes="from_tracing_context"
+                )
             )
 
             with gm.graph.inserting_after(node):
