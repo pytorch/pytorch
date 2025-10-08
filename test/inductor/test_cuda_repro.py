@@ -39,11 +39,11 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
     IS_FBCODE,
+    MI350_ARCH,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
-    skipIfRocmArch,
-    MI350_ARCH,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
