@@ -6,9 +6,9 @@
 # NOTE: this file may be removed once we move to a dynamo frontend
 
 import functools
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, Sequence, TypeAlias
+from typing import Any, Optional, Sequence, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -20,7 +20,8 @@ from torch._higher_order_ops.utils import (
     saved_tensors_and_symints,
 )
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
@@ -51,6 +52,9 @@ def _new_tensor(
     new_stride: Optional[Sequence[int]] = None,
 ) -> Any:
     if isinstance(t, torch.Tensor):
+        assert type(t) in (FunctionalTensor, FakeTensor, torch.Tensor), (
+            f"No subclasses support for now, found {type(t)}"
+        )
         return torch.empty_strided(
             t.size() if new_shape is None else new_shape,
             t.stride() if new_stride is None else new_stride,
@@ -70,7 +74,6 @@ def _redistribute(
 ) -> GraphArg:
     from torch._dispatch.python import suspend_functionalization
     from torch._guards import detect_fake_mode
-    from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
@@ -261,9 +264,7 @@ def create_hop_fw_bw(
                         "Dynamo traced submodule should return tuple"
                     )
                     return fw_out, [
-                        True
-                        if isinstance(ret, torch.Tensor) and ret.requires_grad
-                        else False
+                        bool(isinstance(ret, torch.Tensor) and ret.requires_grad)
                         for ret in fw_out
                     ]
 
@@ -360,6 +361,7 @@ def create_hop_fw_bw(
 
 class LocalMapAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx: Any,
         fw_gm: GraphModule,
@@ -406,6 +408,7 @@ class LocalMapAutogradOp(torch.autograd.Function):
             )
 
             for i, meta in ctx.expected_tangent_metadata.items():
+                # pyrefly: ignore  # bad-argument-type
                 grads[i] = coerce_to_expected_memory_format(grads[i], meta)
 
             grad_ins = local_map_hop(ctx.bw_gm, *saved_activations, *grads)

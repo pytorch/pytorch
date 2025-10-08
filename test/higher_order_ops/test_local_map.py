@@ -14,10 +14,7 @@ import torch._inductor.decomposition
 import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.variables.higher_order_ops import LocalMapWrappedHigherOrderVariable
-from torch._functorch.aot_autograd import (
-    aot_export_joint_with_descriptors,
-    boxed_nop_preserve_node_meta,
-)
+from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.utils.checkpoint import create_selective_checkpoint_contexts
@@ -94,8 +91,6 @@ def ap_style_initial_capture(model, inputs):
             ep.module(),
             inputs,
             decompositions=torch._inductor.decomposition.select_decomp_table(),
-            fw_compiler=boxed_nop_preserve_node_meta,
-            bw_compiler=boxed_nop_preserve_node_meta,
         )
         unused.close()
     return joint_with_descriptors.graph_module

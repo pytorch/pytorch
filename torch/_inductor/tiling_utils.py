@@ -132,7 +132,7 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
 
     out = _solve_simple_expr(eq_1_expr_simplified)
     # since we approximated FloorDiv/ModularIndexing, double check here
-    if not out or not (sympy_subs(eq_1_expr, {free_symbol: out})) == 1:
+    if not out or sympy_subs(eq_1_expr, {free_symbol: out}) != 1:
         return None
 
     required_values.append(out)
