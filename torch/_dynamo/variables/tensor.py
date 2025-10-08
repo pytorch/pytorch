@@ -1536,7 +1536,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
-        elif name in ["__version__"]:
+        elif name == "__version__":
             unimplemented_v2(
                 gb_type="Unsupported ndarray.__version__ access",
                 context=f"var_getattr {self} {name}",

@@ -6,9 +6,10 @@ Contains various utils for AOTAutograd, including those for handling collections
 import dataclasses
 import operator
 import warnings
+from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -327,6 +328,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                         and out.args[1] == 0
                         and out.args[0] in with_effect_nodes
                     ):
+                        # pyrefly: ignore  # missing-attribute
                         output_token_nodes.append(out)
                     else:
                         other_output_nodes.append(out)
@@ -420,14 +422,18 @@ def copy_fwd_metadata_to_bw_nodes(fx_g):
         # the descendants of graph inputs corresponding to fwd inputs, didn't
         # seem obvious at first glance on how to partition graph inputs into
         # fwd vs bwd without relying on string names.
-        return "nn_module_stack" in node.meta and "seq_nr" in node.meta
+        return (
+            node.meta.get("partitioner_tag") != "is_backward" and "seq_nr" in node.meta
+        )
 
     def _is_backward_node_with_seq_nr(node):
         # For now, assume that if nn_module_stack_metadata is not populated,
         # this node is from the backward. Ignore nodes without `seq_nr`.
         # TODO(future): there is likely a less brittle way to do this, same
         # as with the forward.
-        return ("nn_module_stack" not in node.meta) and "seq_nr" in node.meta
+        return (
+            node.meta.get("partitioner_tag") == "is_backward" and "seq_nr" in node.meta
+        )
 
     fwd_seq_nr_to_node = {}
     for node in fx_g.graph.nodes:
@@ -447,8 +453,10 @@ def copy_fwd_metadata_to_bw_nodes(fx_g):
         # fwd_node should always exist, but handle non-existence just in case
         fwd_node = fwd_seq_nr_to_node.get(node.meta["seq_nr"])
         if fwd_node is not None:
-            node.meta["fwd_nn_module_stack"] = fwd_node.meta["nn_module_stack"]
+            node.meta["fwd_nn_module_stack"] = fwd_node.meta.get("nn_module_stack")
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
+            # TODO: better to change to a specific field of custom?
+            node.meta["custom"] = fwd_node.meta.get("custom")
 
 
 def register_buffer_assignment_hook(mod, assigned_buffers):
@@ -528,8 +536,10 @@ def without_output_descs(f: Callable[_P, tuple[_T, _S]]) -> Callable[_P, _T]:
     @wraps(f)
     @simple_wraps(f)
     def inner(*args, **kwargs):
+        # pyrefly: ignore  # invalid-param-spec
         return f(*args, **kwargs)[0]
 
+    # pyrefly: ignore  # bad-return
     return inner
 
 
