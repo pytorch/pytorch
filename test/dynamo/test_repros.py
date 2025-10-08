@@ -4258,7 +4258,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         @torch.compile(fullgraph=True)
         def f(x):
             y = x.item()
-            torch._check_is_size(y)
+            torch._check(y >= 0)
             if y >= 0:
                 return x * 2
             else:
@@ -7925,6 +7925,37 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
             unsafe_grad(y)  # should not warn
             self.assertEqual(len(w), 1)
+
+    @torch._dynamo.config.patch(install_free_tensors=True)
+    def test_partial_export(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def parallelize(self):
+                fn = self._call_impl
+
+                def wrapped_fn(fn, *args, **kwargs):
+                    new_args_0 = args[0].to(torch.bfloat16)
+                    new_args_1 = args[1].to(torch.bfloat16)
+                    return fn(new_args_0, new_args_1)
+
+                fn = functools.partial(wrapped_fn, fn)
+                self._call_impl = fn
+
+            def forward(self, a, b):
+                return a + b
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        foo = Foo()
+        foo.parallelize()
+        x = torch.randn(4, 4, dtype=torch.float32)
+        y = torch.randn(4, 4, dtype=torch.float32)
+        ref = foo(x, y)
+        gm = _dynamo_graph_capture_for_export(foo)(x, y)
+        res = gm(x, y)
+        self.assertEqual(res, ref)
 
 
 instantiate_parametrized_tests(ReproTests)

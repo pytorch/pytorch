@@ -4,7 +4,7 @@ import functools
 import itertools
 import random
 import unittest
-from typing import Union
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -15,6 +15,7 @@ from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
     _CausalBehavior,
+    _context_parallel_buffers,
     _cp_options,
     _DispatchMode,
     _is_causal_behavior,
@@ -22,6 +23,11 @@ from torch.distributed.tensor.experimental._attention import (
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
+)
+from torch.distributed.tensor.experimental._load_balancer import (
+    _HeadTailLoadBalancer,
+    _LoadBalancer,
+    _PerDocumentHeadTailLoadBalancer,
 )
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
@@ -282,7 +288,7 @@ def causal_mask(b, h, q_idx, kv_idx):
 
 
 # copied from https://github.com/meta-pytorch/attention-gym/blob/main/attn_gym/masks/document_mask.py
-def generate_random_lengths(total_length, num_documents):
+def generate_random_lengths(total_length, num_documents) -> list[int]:
     # Initialize all lengths to 1 to ensure each document has at least one token
     lengths = [1] * num_documents
     remaining_length = total_length - num_documents
@@ -293,6 +299,26 @@ def generate_random_lengths(total_length, num_documents):
         lengths[index] += 1
 
     return lengths
+
+
+def generate_random_lengths_in_chunks(
+    total_length, num_documents, chunk_size
+) -> list[int]:
+    # Generate a list of random document lengths so that each document contains
+    # some number of chunks of size `chunk_size`. This means each document's length
+    # must be a multiple of `chunk_size`. Besides, the lengths of all the documents
+    # sum up to `total_length`.
+    num_chunks = total_length // chunk_size
+    assert total_length % chunk_size == 0 and num_chunks >= num_documents
+
+    num_chunks_per_document = [1] * num_documents
+    remaining_chunks = num_chunks - num_documents
+    # Randomly distribute the remaining chunks
+    for _ in range(remaining_chunks):
+        index = random.randint(0, num_documents - 1)  # document_id
+        num_chunks_per_document[index] += 1
+
+    return [num_chunks * chunk_size for num_chunks in num_chunks_per_document]
 
 
 def length_to_offsets(
@@ -360,45 +386,43 @@ class CPFlexAttentionTest(DTensorTestBase):
         return 2
 
     def _test_cp_flex_attention(
-        self, qkv_size, B=1, mask_func=causal_mask, atol=1e-6, rtol=1e-2
+        self,
+        *,
+        qkv_size: int,
+        B: int = 1,
+        mask_func: _mask_mod_signature = causal_mask,
+        lb: Optional[_LoadBalancer] = None,
+        atol: float = 1e-4,
+        rtol: float = 1,
     ) -> None:
-        torch.cuda.manual_seed(10)
+        torch.cuda.manual_seed(1234)
+
         dtype = torch.float32
         bs = B if B > 1 else 8
-        query_tokens = context_tokens = qkv_size
         dim = 32
         nheads = 8
 
-        q = torch.rand(
-            (bs, nheads, query_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        k = torch.rand(
-            (bs, nheads, context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        v = torch.rand(
-            (bs, nheads, context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
+        qkv = [
+            torch.rand(
+                (bs, nheads, qkv_size, dim),
+                device=self.device_type,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        ]
 
         block_mask = compiled_create_block_mask(
             mask_func,
             B=B,
             H=1,
-            Q_LEN=query_tokens,
-            KV_LEN=context_tokens,
+            Q_LEN=qkv_size,
+            KV_LEN=qkv_size,
             device=self.device_type,
         )
 
         expect_out, expect_aux = compiled_flex_attention(
-            q, k, v, block_mask=block_mask, return_aux=AuxRequest(lse=True)
+            *qkv, block_mask=block_mask, return_aux=AuxRequest(lse=True)
         )
         expect_out.sum().backward()
 
@@ -409,83 +433,78 @@ class CPFlexAttentionTest(DTensorTestBase):
             mesh_dim_names=("cp",),
         )
 
-        # NOTE: we do not test load balance here
-        _cp_options.enable_load_balance = False
-
-        # set CP context dispatch mode to use TORCH_FUNCTION for flex_attention
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.TORCH_FUNCTION
-        )
-
-        # prepare input buffer
-        cp_q = q.detach().clone()
-        cp_k = k.detach().clone()
-        cp_v = v.detach().clone()
-
         # create block_mask for CP
         from torch.distributed.tensor.experimental._attention import (
             create_cp_block_mask,
         )
 
+        if not lb and _cp_options.enable_load_balance:
+            # NOTE: when parallelizing `flex_attention`, we require not-None
+            # `load_balancer` object be explicitly passed APIs `_context_parallel_shard`
+            # and `context_parallel_unshard` if load-balancing is needed.
+            lb = _HeadTailLoadBalancer(qkv_size, self.world_size, self.device_type)
+
+        # if load-balance is enabled, reorder input tensor and produce the index tensor
         # NOTE: call create_block_mask() within TorchFunctionMode would cause error in create_fw_bw_graph
         cp_block_mask = create_cp_block_mask(
             mask_func,
             B=B,
             H=1,
-            Q_LEN=query_tokens,
-            KV_LEN=context_tokens,
+            Q_LEN=qkv_size,
+            KV_LEN=qkv_size,
             device_mesh=device_mesh,
+            load_balancer=lb,
         )
 
         # shard qkv on seq_dim
         shard_dim = 2
 
-        with context_parallel(
+        cp_qkv = _context_parallel_buffers(
             device_mesh,
-            buffers=[cp_q, cp_k, cp_v],
+            buffers=[t.detach().clone() for t in qkv],
             buffer_seq_dims=[shard_dim] * 3,
-        ):
-            cp_q.requires_grad = True
-            cp_k.requires_grad = True
-            cp_v.requires_grad = True
+            load_balancer=lb,
+        )
+        for t in cp_qkv:
+            t.requires_grad = True
 
+        # TODO: remove this once https://github.com/pytorch/pytorch/pull/164500 is merged
+        torch.distributed.tensor.experimental._attention._dispatch_mode = (
+            _DispatchMode.TORCH_FUNCTION
+        )
+        with context_parallel(
+            device_mesh, buffers=[torch.empty(self.world_size * 2)], buffer_seq_dims=[0]
+        ):
             cp_out, cp_aux = compiled_flex_attention(
-                cp_q,
-                cp_k,
-                cp_v,
+                *cp_qkv,
                 block_mask=cp_block_mask,
                 return_aux=AuxRequest(lse=True),
-            )
-
-            # check block_mask rewrite doesn't escape to the outside
-            assert cp_block_mask.seq_lengths == (
-                cp_q.size(dim=shard_dim),
-                cp_k.size(dim=shard_dim),
             )
 
             # backward run
             cp_out.sum().backward()
 
-            cp_q.requires_grad = False
-            cp_k.requires_grad = False
-            cp_v.requires_grad = False
-
         # unshard the output
         cp_out, cp_lse = context_parallel_unshard(
-            device_mesh, [cp_out, cp_aux.lse], [2, 2]
+            device_mesh,
+            buffers=[cp_out, cp_aux.lse],
+            seq_dims=[2, 2],
+            load_balancer=lb,
         )
         torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
 
         # unshard the gradient
-        cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
+        cp_qkv_grad = context_parallel_unshard(
             device_mesh,
-            [cp_q.grad, cp_k.grad, cp_v.grad],
-            [2, 2, 2],
+            buffers=[t.grad for t in cp_qkv],
+            seq_dims=[2, 2, 2],
+            load_balancer=lb,
         )
-        torch.testing.assert_close(cp_q_grad, q.grad, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_k_grad, k.grad, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_v_grad, v.grad, atol=atol, rtol=rtol)
+
+        qkv_grad = [t.grad for t in qkv]
+        for grad, cp_grad in zip(qkv_grad, cp_qkv_grad):
+            torch.testing.assert_close(grad, cp_grad, atol=atol, rtol=rtol)
 
         # reset CP context dispatch mode to default
         torch.distributed.tensor.experimental._attention._dispatch_mode = (
@@ -497,18 +516,33 @@ class CPFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    def test_cp_flex_attention(self) -> None:
-        self.run_subtests(
-            {"qkv_size": [128 * self.world_size, 2048]},
-            self._test_cp_flex_attention,
-        )
+    def test_cp_flex_attention_causal_mask(self) -> None:
+        restore_enable_load_balance = _cp_options.enable_load_balance
 
-        # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
-        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
+        for enable_load_balance in [
+            False,  # test w/o load-balancing
+            True,  # test w/ the default load-balancing
+        ]:
+            _cp_options.enable_load_balance = enable_load_balance
+
             self.run_subtests(
-                {"qkv_size": [64 * self.world_size]},
+                {
+                    "qkv_size": [
+                        (256 if enable_load_balance else 128) * self.world_size,
+                        2048,
+                    ],
+                },
                 self._test_cp_flex_attention,
             )
+
+            # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
+            with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
+                self.run_subtests(
+                    {"qkv_size": [64 * self.world_size]},
+                    self._test_cp_flex_attention,
+                )
+
+        _cp_options.enable_load_balance = restore_enable_load_balance
 
     # TODO: merge with the above test
     @skip_if_lt_x_gpu(2)
@@ -517,17 +551,13 @@ class CPFlexAttentionTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
     def test_cp_flex_attention_document_mask(self) -> None:
+        restore_enable_load_balance = _cp_options.enable_load_balance
+
         random.seed(10)
 
-        # NOTE: Each (batch_size, seq_len) tuple introduces 2 create_block_mask
-        # compilations: 1 for single-rank flex_attention and 1 for CP flex_attention.
-        # In order to avoid the "exceeds_recompile_limit" error, we need to increase
-        # the cache_size_limit to 12 which is the total number of compilations in our
-        # test case.
-        torch._dynamo.config.cache_size_limit = 12
-
-        # initialize document mask
+        # parameters for testing
         doc_count = 28
+        enable_load_balance_list = [True, False]
         batch_size_list = [2, 4, 8]
         max_seq_len_list = [
             256 * self.world_size,
@@ -535,30 +565,63 @@ class CPFlexAttentionTest(DTensorTestBase):
             # 128 * self.world_size  # NOTE: Mismatched elements: 8 / 131072 (0.0%),
         ]
 
+        # NOTE: Each (enable_load_balance, batch_size, seq_len) tuple introduces 2
+        # create_block_mask compilations: 1 for single-rank flex_attention and 1 for
+        # CP flex_attention. In order to avoid the "exceeds_recompile_limit" error,
+        # we need to increase the cache_size_limit to 12 which is the total number
+        # of compilations in our test case.
+        torch._dynamo.config.cache_size_limit = (
+            2
+            * len(enable_load_balance_list)
+            * len(batch_size_list)
+            * len(max_seq_len_list)
+        )
+
         # TODO: change this for-loop to run_subtests
         # Use a for-loop instead of run_subtests because we need to intialize the mask
         # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
-        for batch_size, max_seq_len in itertools.product(
-            batch_size_list, max_seq_len_list
+        for enable_load_balance, batch_size, max_seq_len in itertools.product(
+            enable_load_balance_list, batch_size_list, max_seq_len_list
         ):
+            _cp_options.enable_load_balance = enable_load_balance
+
+            # initialize document mask
             lengths = [
-                generate_random_lengths(max_seq_len, doc_count)
+                (
+                    generate_random_lengths_in_chunks(
+                        max_seq_len, doc_count, chunk_size=2 * self.world_size
+                    )
+                    if enable_load_balance
+                    else generate_random_lengths(max_seq_len, doc_count)
+                )
                 for _ in range(batch_size)
             ]
             offsets = length_to_offsets(lengths, self.device_type)
             document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
+
+            # generate load balancer
+            load_balancer = (
+                _PerDocumentHeadTailLoadBalancer(
+                    lengths, self.world_size, torch.device(self.device_type)
+                )
+                if enable_load_balance
+                else None
+            )
 
             # construct testing function
             test_func = functools.partial(
                 self._test_cp_flex_attention,
                 qkv_size=max_seq_len,
                 B=batch_size,
+                lb=load_balancer,
                 mask_func=document_causal_mask,
                 atol=1e-6,
             )
 
             test_func()
+
+        _cp_options.enable_load_balance = restore_enable_load_balance
 
 
 if __name__ == "__main__":
