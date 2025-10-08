@@ -724,7 +724,7 @@ else:
                 )
             return not_none(self.mesh_dim_names.index(mesh_dim_name))
 
-        def _get_slice_mesh_layout(self, mesh_dim_names) -> _MeshLayout:
+        def _get_slice_mesh_layout(self, mesh_dim_names: tuple[str, ...]) -> _MeshLayout:
             """
             Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
             If valid, return dim indexes of the slice mesh in the device mesh.
@@ -769,6 +769,10 @@ else:
                         self._layout[not_none(self.mesh_dim_names).index(name)]
                     )
                 elif name in flatten_name_to_root_layout:
+                    warnings.warn(
+                        "Slicing a flattened dim from root mesh will be deprecated in PT 2.11. "
+                        "Users need to bookkeep the flattened mesh directly. "
+                    )
                     layout_sliced.append(flatten_name_to_root_layout[name])
 
             sliced_sizes = tuple(l.sizes for l in layout_sliced)
