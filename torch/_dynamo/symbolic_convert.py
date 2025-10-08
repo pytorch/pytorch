@@ -2524,7 +2524,9 @@ class InstructionTranslatorBase(
             if inst.opname == "RETURN_VALUE"
             else create_instruction("RETURN_CONST", argval=inst.argval)
         )
-        insts.extend([create_instruction("POP_TOP"), create_instruction("POP_TOP"), return_inst])
+        insts.extend(
+            [create_instruction("POP_TOP"), create_instruction("POP_TOP"), return_inst]
+        )
         return insts
 
     def create_call_resume_at(
