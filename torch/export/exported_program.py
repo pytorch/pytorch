@@ -55,8 +55,8 @@ from torch._export.utils import (
     _register_constants_as_buffers,
     _rename_without_collisions,
     _special_op_to_preserve_cia,
+    outputs_naming_pass,
     placeholder_naming_pass,
-    outputs_naming_pass
 )
 from torch._export.verifier import Verifier
 from torch._guards import detect_fake_mode
@@ -529,11 +529,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                     constants,
                 )
 
-                outputs_naming_pass(
-                    gm,
-                    new_graph_signature,
-                    patched_mod
-                )
+                outputs_naming_pass(gm, new_graph_signature, patched_mod)
 
         _verify_nn_module_stack(gm)
         _verify_stack_trace(gm)

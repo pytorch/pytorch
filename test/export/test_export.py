@@ -17,7 +17,7 @@ import weakref
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from re import escape
-from typing import Dict, List, Union, NamedTuple
+from typing import Dict, List, NamedTuple, Union
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -90,6 +90,7 @@ from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._pytree import (
+    _register_namedtuple,
     LeafSpec,
     register_constant,
     tree_flatten,
@@ -98,8 +99,8 @@ from torch.utils._pytree import (
     TreeSpec,
     treespec_dumps,
     treespec_loads,
-    _register_namedtuple,
 )
+
 
 if HAS_GPU:
     import triton
@@ -16774,7 +16775,6 @@ def forward(self, q, k, v):
         self.assertEqual(returned[1].name, "o_diff")
 
     def test_dataclass_output_names(self):
-
         @dataclass
         class ThreeDataOutputs:
             first: torch.Tensor
@@ -16810,6 +16810,7 @@ def forward(self, q, k, v):
         self.assertEqual(returned[0].name, "o_first")
         self.assertEqual(returned[1].name, "o_second")
         self.assertEqual(returned[2].name, "o_third")
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):

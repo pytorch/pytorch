@@ -48,8 +48,8 @@ from torch._export.utils import (
     _populate_param_buffer_metadata_to_new_gm,
     _update_gm_meta_if_possible,
     apply_runtime_assertion_pass,
-    placeholder_naming_pass,
     outputs_naming_pass,
+    placeholder_naming_pass,
     placeholder_prefixes,
 )
 from torch._export.verifier import SpecViolationError
@@ -626,11 +626,7 @@ def _produce_aten_artifact(
             fake_params_buffers,
             constants,
         )
-        outputs_naming_pass(
-            gm,
-            export_graph_signature,
-            mod
-        )
+        outputs_naming_pass(gm, export_graph_signature, mod)
 
     _preserve_requires_grad_pass(
         gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args

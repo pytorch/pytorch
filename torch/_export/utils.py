@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union, cast
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._guards import detect_fake_mode
@@ -1166,10 +1166,12 @@ def _root_out_spec_from_call_graph(sig) -> Optional[Any]:
     if root is None:
         return None
 
-    for holder in (root,
-                   getattr(root, "call_spec", None),
-                   getattr(root, "schema", None),
-                   getattr(root, "context", None)):
+    for holder in (
+        root,
+        getattr(root, "call_spec", None),
+        getattr(root, "schema", None),
+        getattr(root, "context", None),
+        ):
         if holder is None:
             continue
         ospec = getattr(holder, "out_spec", None)
@@ -1219,7 +1221,7 @@ def _compute_output_name_map(export_graph_signature, out_spec):
 
     def _fallback():
         for spec in export_graph_signature.output_specs:
-            base = (spec.arg.name or spec.target or "")
+            base = spec.arg.name or spec.target or ""
             _assign(spec.arg.name, base, spec.kind)
         return name_map
 
@@ -1234,7 +1236,7 @@ def _compute_output_name_map(export_graph_signature, out_spec):
     if hasattr(ctx, "_fields"):
         all_fields = list(ctx._fields)
     elif isinstance(ctx, (list, tuple)) and ctx and isinstance(ctx[0], (list, tuple)):
-    # dataclass (registered)
+        # dataclass (registered)
         all_fields = list(ctx[0])
     else:
         all_fields = []
@@ -1245,7 +1247,7 @@ def _compute_output_name_map(export_graph_signature, out_spec):
 
     # We found names
     for spec, field_name in zip(export_graph_signature.output_specs, all_fields):
-        base = (field_name or spec.arg.name or spec.target or "")
+        base = field_name or spec.arg.name or spec.target or ""
         _assign(spec.arg.name, base, spec.kind)
 
     return name_map
