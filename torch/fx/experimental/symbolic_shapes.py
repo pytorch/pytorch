@@ -880,13 +880,36 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
     Raises:
         AssertionError: If the value is of an unsupported type.
     """
-    if isinstance(val, SymNode):
+    # This is almost close enough to implement in terms of _iterate_nodes()
+    # except that it needs to handle `list[sympy.Basic]` which _iterate_nodes()
+    # can't handle.
+    if isinstance(val, SymTypes):
+        # This allow applies to the jagged layout NestedTensor case as
+        # nested ints are not symbolic
+        if is_symbolic(val):
+            yield val.node.expr
+    elif isinstance(val, SymNode):
         yield val.expr
     elif isinstance(val, sympy.Basic):
         yield val
+    elif isinstance(val, (int, float, bool)):
+        pass
+    elif isinstance(val, (tuple, list)):
+        for s in val:
+            yield from _iterate_exprs(s)
+    elif is_sparse_any(val):
+        yield from _iterate_exprs(val.size())
+    elif isinstance(val, torch.Tensor):
+        yield from _iterate_exprs(val.size())
+        yield from _iterate_exprs(val.stride())
+        yield from _iterate_exprs(val.storage_offset())
+    elif val is None:
+        pass
+    # see Note: [Generator arguments in AOTDispatcher]
+    elif isinstance(val, torch.Generator):
+        pass
     else:
-        for node in _iterate_nodes(val):
-            yield from _iterate_exprs(node)
+        raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")
 
 
 def _iterate_nodes(val: Any) -> Iterator[SymNode]:
@@ -894,6 +917,7 @@ def _iterate_nodes(val: Any) -> Iterator[SymNode]:
     Recursively iterate through a value and yield all SymNodes contained
     within it.
     """
+    #print(f"{indent}_iterate_nodes {type(val)}")
     if isinstance(val, SymNode):
         yield val
     elif isinstance(val, py_sym_types):
@@ -901,8 +925,9 @@ def _iterate_nodes(val: Any) -> Iterator[SymNode]:
         # nested ints are not symbolic
         if is_symbolic(val):
             yield val.node
-    elif isinstance(val, (tuple, list)):
+    elif isinstance(val, (tuple, list, torch.Size)):
         for s in val:
+            #print(f"{indent} s={s}")
             yield from _iterate_nodes(s)
     elif isinstance(val, torch.Tensor):
         yield from _iterate_nodes(val.size())
