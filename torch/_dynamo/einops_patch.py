@@ -1,10 +1,11 @@
-import sys
 import importlib
 import importlib.abc
 import importlib.machinery
+import sys
+from collections.abc import Sequence
 from importlib._bootstrap import ModuleSpec
 from types import ModuleType
-from collections.abc import Sequence
+
 
 _EINOPS_NEEDS_PATCH = True
 _TARGET_VERSIONS = {"0.6.1", "0.6.2rc0", "0.7.0rc1"}
