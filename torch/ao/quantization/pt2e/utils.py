@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
 import types
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.ao.quantization.pt2e._affine_quantization  # noqa: F401
@@ -89,6 +90,7 @@ def _find_q_dq_node_for_user(
         and arg.op == "call_function"
         and arg.target in _QUANTIZE_OPS
     ):
+        # pyrefly: ignore  # unbound-name
         q_node = arg
     return (q_node, dq_node)
 
