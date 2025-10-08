@@ -1362,7 +1362,7 @@ class InstructionTranslatorBase(
 
         # Store the latest 20 bytecode execution for the process
         self.latest_bytecode_queue.append(
-            f"TRACE {inst.opname} {inst.argval} {self.stack}"
+            f"TRACE {inst.opname} {str(inst.argval)} {self.stack}"
         )
 
         self.update_block_stack(inst)

@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import logging
-import re
 import unittest
 
 import torch

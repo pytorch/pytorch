@@ -1092,7 +1092,7 @@ User code traceback:
         self.assertIsNotNone(e)
         msg = "".join(traceback.format_exception(type(e), e, e.__traceback__))
         self.assertExpectedInline(
-            munge_exc(msg, suppress_suffix=True, skip=0),
+            munge_exc(msg, skip=0),
             """Traceback (most recent call last):
   File "test_error_messages.py", line N, in test_latest_bytecode_to_graph_break_fullgraph
     torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
