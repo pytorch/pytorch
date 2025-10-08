@@ -824,7 +824,7 @@ class SplitCatSimplifier:
         return split_ranges
 
     def has_non_overlapping_ranges(self, ranges: list[_Range]) -> bool:
-        for range_, next_range in zip(ranges, ranges[1:]):
+        for range_, next_range in itertools.pairwise(ranges):
             if range_[1] > next_range[0]:
                 return False
         return True
@@ -1477,7 +1477,7 @@ def is_sorted_and_consecutive(arr: list[int]) -> bool:
     # check if the array is sorted
     if arr == sorted(arr):
         # check if the differences between adjacent elements are all 1
-        return all(x[1] - x[0] == 1 for x in zip(arr, arr[1:]))
+        return all(x[1] - x[0] == 1 for x in itertools.pairwise(arr))
     else:
         return False
 

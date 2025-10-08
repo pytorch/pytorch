@@ -381,12 +381,6 @@ use_recursive_dict_tags_for_guards = True
 # useful for regional compilation.
 max_saved_pointers_for_recursive_dict_tags_check = 256
 
-# Controls whether to construct the partial framelocals to dict for lambda
-# guards. This is a temporary flag to allow quick fallback behavior in case of
-# unexpected issues. Default is True, i.e., we will construct only partial
-# dict, a faster version for guards. Set to False to fallback to old behavior.
-construct_partial_framelocals_dict = True
-
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -680,6 +674,11 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
+
+# Does not graph break on torch.autograd._profiler_enabled if set to True. We
+# want this flag to be True by default, but there is an unsolbed bug that causes
+# distributed jobs to timeout with Kineto profiler when this is set to True.
+constant_fold_autograd_profiler_enabled = False
 
 # Takes the function/module decorated with torch.compile and passes it through a
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
