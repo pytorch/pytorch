@@ -26,6 +26,8 @@ class AugmentedGraphHelper:
 
         # Extra dependencies: node depends on dep (dep must come before node)
         self.extra_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        # Note: only reflect original ancestors, not maintained through additional deps
+        # or merge sets
         self.node_ancestors = node_ancestors
 
     def add_extra_dep(self, *, n: fx.Node, dep: fx.Node) -> None:
@@ -96,7 +98,6 @@ class AugmentedGraphHelper:
         while queue:
             current = queue.pop()
 
-            # Get all dependencies
             for dep in self.get_merged_deps(current):
                 # Check if we reached source or its equivalent
                 if dep in self.merge_sets[source]:
