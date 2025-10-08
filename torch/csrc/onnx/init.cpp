@@ -28,11 +28,6 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/utils/pybind.h>
-
-TORCH_MAKE_PYBIND_ENUM_FASTER(ONNX_NAMESPACE::TensorProto_DataType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(torch::onnx::OperatorExportTypes)
-TORCH_MAKE_PYBIND_ENUM_FASTER(torch::onnx::TrainingMode)
 
 namespace torch::onnx {
 
