@@ -55,7 +55,6 @@
 #include <ATen/ops/is_pinned_native.h>
 #include <ATen/ops/resize_as_sparse.h>
 #include <ATen/ops/resize_as_sparse_native.h>
-#include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/sparse_coo_tensor_native.h>
 #include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/sparse_mask_native.h>

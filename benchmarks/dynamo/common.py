@@ -123,8 +123,6 @@ CI_SKIP_OPTIMIZER = {
     # HF
     "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
-    "MobileBertForQuestionAnswering",  # Stack issue in fx
-    "PegasusForConditionalGeneration",  # OOM
 }
 
 try:
@@ -192,17 +190,11 @@ BENCHMARK_USE_SGD = {
     # HF
     "AlbertForMaskedLM",
     "BartForCausalLM",
-    "BartForConditionalGeneration",
-    "BlenderbotSmallForCausalLM",
-    "BlenderbotSmallForConditionalGeneration",
-    "DebertaV2ForQuestionAnswering",  # eager OOM
     "ElectraForCausalLM",
     "M2M100ForConditionalGeneration",
     "MBartForCausalLM",
-    "MBartForConditionalGeneration",
     "OPTForCausalLM",
     "PLBartForCausalLM",
-    "PLBartForConditionalGeneration",
     "PegasusForCausalLM",
     "TrOCRForCausalLM",
     "XGLMForCausalLM",
@@ -2282,7 +2274,9 @@ class BenchmarkRunner:
                 del model_copy
                 empty_gpu_cache(current_device)
 
-            # Two eager runs should have exactly same result
+            # Two eager runs should have exactly same result, within tolerance.
+            # TODO If we want the above to be true, then deterministic should be set.
+            # For example, MIOpen convolutions could be implemented with non-deterministic algos.
             is_same = True
             try:
                 if (
@@ -2292,7 +2286,7 @@ class BenchmarkRunner:
                         correct_rerun_result,
                         fp64_ref=None,
                         cos_similarity=False,
-                        tol=0,
+                        tol=tolerance if torch.version.hip else 0,
                         equal_nan=self.equal_nan,
                         use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
                             name
@@ -3580,18 +3574,10 @@ def process_caching_precompile():
     )
     from torch._dynamo.precompile_context import PrecompileContext
 
-    # Serialize all callables, clear PrecompileContext
-    # TODO: put this under torch.compiler API once ready
-    serialized = PrecompileContext.serialize()
-    PrecompileContext.clear()
-    if serialized is not None:
-        artifacts, info = serialized
-        print(
-            f"Saving {len(info.precompile_dynamo_artifacts)} Precompile Artifact(s)..."
-        )
-        results = PrecompileContext.deserialize(artifacts)
-        assert results is not None
-        PrecompileContext.populate_caches(results)
+    debug_info = PrecompileContext.save_to_dynamo_cache()
+    print(
+        f"Saved {len(debug_info['dynamo'])} precompile artifacts with {len(debug_info['backends'])} backends"
+    )
 
 
 def process_entry(rank, runner, original_dir, args):
@@ -3795,7 +3781,6 @@ def run(runner, args, original_dir=None):
             torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         if args.only is not None and args.only in {
-            "DebertaForQuestionAnswering",
             "nvidia_deeprecommender",
             "crossvit_9_240",
         }:
