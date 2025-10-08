@@ -3574,6 +3574,63 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             *user_args,
         ) = args
 
+        local_map_kwargs = {
+            "out_placements": out_placements.value,
+            "in_placements": in_placements.value,
+            "redistribute_inputs": redistribute_inputs.value,
+            "in_grad_placements": in_grad_placements.value,
+            "device_mesh": device_mesh.value,
+        }
+        assert local_map_kwargs["device_mesh"] is not None, (
+            "Not yet implemented, please manually provide a device_mesh to local_map."
+        )
+        mesh = local_map_kwargs["device_mesh"]
+
+        # For Autoparallel, the initial trace is done with global shapes, then we decide model weights sharding,
+        # and reuse the graph. Since the sharding decision is after the initial trace, we can't trace with local shapes.
+        # For local_map however, since we specify all placements, we can trace with local shapes.
+
+        # Step 1: Validate the annotated function matches the input_placements (i.e. that it can run in eager)
+        template = (
+            "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
+            ", but found {actual}. Please ensure the count matches for eager. "
+        )
+        assert len(in_placements.value) == len(user_args), template.format(
+            expected=len(in_placements.value),
+            inputs_or_outputs="inputs",
+            actual=len(user_args),
+        )
+
+        from torch._higher_order_ops.local_map import (
+            redistribute_fw_inputs,
+            redistribute_fw_outputs,
+        )
+
+        # Step 2: Convert inputs to local shapes
+        priors = {}
+        for placements, vt in zip(in_placements.value, user_args):
+            if isinstance(vt, variables.lazy.LazyVariableTracker):
+                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
+
+            if not isinstance(vt, variables.TensorVariable):
+                assert placements is None
+                continue
+
+            global_tensor = vt.as_proxy().node.meta["example_value"]
+            # NOTE: We don't support local_map region relying on exact grad_fn information
+            # This is okay since accessing grad_fn is a graph break.
+            local_tensor = redistribute_fw_inputs(
+                (global_tensor,),
+                (placements,),
+                mesh,
+            )
+            local_tensor = local_tensor[0]
+
+            priors[vt] = global_tensor
+            vt.as_proxy().node.meta["example_value"] = local_tensor
+            vt.synchronize_attributes(tx)
+
+        # Step 3: Trace local_map subgraph with local tensors
         (
             p_args,
             p_kwargs,
@@ -3586,7 +3643,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
         )
 
-        # Validate
+        # Step 4: Validate traced graph signature still matches placement information
         expected_num_inputs = len(in_placements.value)
         actual_num_inputs = len(body_gmod.graph.find_nodes(op="placeholder"))
         expected_num_outputs = len(out_placements.value)
@@ -3638,10 +3695,42 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_r.as_proxy(),
         )
 
+        # Step 5: Install local_map subgraph
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         out = _call_function_and_unflatten_output(
             tx, self.value, p_args, p_kwargs, flat_example_value, treespec
         )
+
+        # Step 6: Restore inputs and outputs to global shapes
+        for vt, global_tensor in priors.items():
+            vt.as_proxy().node.meta["example_value"] = global_tensor
+            vt.synchronize_attributes(tx)
+
+        outs = out.items if isinstance(out, TupleVariable) else [out]
+        assert len(outs) == len(out_placements.value)
+        for placements, vt in zip(out_placements.value, outs):
+            if not isinstance(vt, variables.TensorVariable):
+                assert placements is None
+                continue
+
+            local_tensor = vt.as_proxy().node.meta["example_value"]
+
+            # NOTE: We don't support code after the local_map region relying on exact grad_fn information
+            # This is okay since accessing grad_fn is a graph break.
+            global_tensor = redistribute_fw_outputs(
+                (local_tensor,),
+                (placements,),
+                mesh,
+                num_activations=0,  # this is not the joint
+            )
+            global_tensor = global_tensor[0]
+
+            vt.as_proxy().node.meta["example_value"] = global_tensor
+            vt.synchronize_attributes(tx)
+
+        # Treat as const, so we don't have to deal with Placement types in fx IR
+        # Guarded with EQUALS_MATCH on local_map call's arguments
+        body_gmod.meta["local_map_kwargs"] = local_map_kwargs
 
         return out
 
