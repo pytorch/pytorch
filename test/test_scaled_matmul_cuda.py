@@ -211,6 +211,7 @@ def scaled_mm_wrap(
             swizzle_b=swizzle_b,
             bias=bias,
             output_dtype=out_dtype,
+            use_fast_accum=use_fast_accum,
         )
         return out
 
@@ -784,9 +785,9 @@ class TestFP8Matmul(TestCase):
         y = torch.full(size, .5, device=device, dtype=y_type).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)
-        out_fp8 = scaled_mm_wrap(x, y, scale_a, scale_b, use_fast_accum=True)
+        out_fp8 = scaled_mm_wrap(x, y, scale_a, scale_b, out_dtype=torch.float8_e4m3fn, use_fast_accum=True)
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
-        out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
+        out_fp8_s = scaled_mm_wrap(x, y, scale_a=scale_a, scale_b=scale_b, out_dtype=torch.float8_e4m3fn, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
 
     @onlyCUDA
