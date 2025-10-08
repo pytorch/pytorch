@@ -728,7 +728,13 @@ def autograd_would_have_decomposed(
                 torch._C._dispatch_key_for_device(a.device.type)
             )
             assert backend_key is not None
-            has_backend_registration = func.has_kernel_for_dispatch_key(backend_key)
+            # TODO: use func.has_kernel_for_dispatch_key(backend_key)
+            # but this one checks py_impl and CompositeImplicitAutograd
+            # incorrectly shows up as has backend reg here
+            has_backend_registration = torch._C._dispatch_has_kernel_for_dispatch_key(
+                func.name(), backend_key
+            )
+
             # in theory we should take all backend keys and take the highest priority one
             # to properly mimic the dispatcher,
             # this just grabs the first tensor and takes its device key

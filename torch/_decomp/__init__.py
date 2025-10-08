@@ -475,6 +475,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.silu,
             aten.silu_,
             aten.silu_backward.grad_input,
+            aten.silu_backward,
             aten.sinc,
             aten.sinc_,
             aten.slice_backward,
