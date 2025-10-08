@@ -2190,7 +2190,7 @@ class GuardBuilder(GuardBuilderBase):
 
         import torch.utils._pytree as pytree
 
-        assert istype(val, ok_types) or pytree.is_constant_class(type(val)), (
+        assert isinstance(val, ok_types) or pytree.is_constant_class(type(val)), (
             f"Unexpected type {type(val)}"
         )
 
