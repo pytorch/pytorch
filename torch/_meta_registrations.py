@@ -841,7 +841,7 @@ def sym_constrain_range_for_size(size, min=None, max=None):
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
     if min is None and max is None:
-        torch._check_is_size(size)
+        torch._check(size >= 0)
         return
 
     if isinstance(size, (SymFloat, SymBool)):
@@ -4351,6 +4351,8 @@ def meta_index_put_(self, indices, values, accumulate=False):
 
 
 def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype=None):
+    from torch.fx.experimental.symbolic_shapes import sym_and, sym_eq
+
     torch._check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
 
@@ -4364,7 +4366,7 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
     output_size = (bs, res_rows, res_cols)
 
     torch._check(
-        batch2_sizes[0] == bs and batch2_sizes[1] == contraction_size,
+        sym_and(sym_eq(batch2_sizes[0], bs), sym_eq(batch2_sizes[1], contraction_size)),
         lambda: f"Expected size for first two dimensions of batch2 tensor to be: [{bs}"
         f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
     )
@@ -4384,7 +4386,7 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
     if not is_bmm and self_baddbmm is not None:
         torch._check(self_baddbmm.dim() == 3, lambda: "self must be a 3D tensor")
         torch._check(
-            self_baddbmm.size() == output_size,
+            sym_eq(self_baddbmm.size(), output_size),
             lambda: f"Expected an input tensor shape with shape {output_size} but got shape: {self_baddbmm.size()}",
         )
 
@@ -6833,7 +6835,7 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
     sliceSize = 1 if self.dim() == 0 else self.size(dim)
-    torch._check_is_size(k)
+    torch._check(k >= 0)
     torch._check(k <= sliceSize, lambda: "k not in range for dimension")
 
     topKSize = list(self.shape)
