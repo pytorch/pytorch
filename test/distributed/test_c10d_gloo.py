@@ -1791,6 +1791,136 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.recv([recv_tensor], 0, 0).wait()
             self.assertEqual(send_tensor, recv_tensor)
 
+    @requires_gloo()
+    def test_alltoall_checks(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        t1 = torch.zeros([1], dtype=torch.float32)
+        t2 = torch.zeros([1], dtype=torch.float64)
+        t3 = torch.zeros([2], dtype=torch.float32)
+
+        # Check input tensor list size does not match world size
+        with self.assertRaisesRegex(
+            RuntimeError, "input tensor list size.*does not match world size"
+        ):
+            pg.alltoall([t1] * self.world_size, [t1] * (self.world_size - 1))
+
+        # Check output tensor list size does not match world size
+        with self.assertRaisesRegex(
+            RuntimeError, "output tensor list size.*does not match world size"
+        ):
+            pg.alltoall([t1] * (self.world_size - 1), [t1] * self.world_size)
+
+        # Check invalid tensor type in inputs
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type"):
+            pg.alltoall([t1] * self.world_size, [t1, t2] + [t1] * (self.world_size - 2))
+
+        # Check invalid tensor size in inputs
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
+            pg.alltoall([t1] * self.world_size, [t1, t3] + [t1] * (self.world_size - 2))
+
+        # Check invalid tensor type in outputs
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor type"):
+            pg.alltoall([t1, t2] + [t1] * (self.world_size - 2), [t1] * self.world_size)
+
+        # Check invalid tensor size in outputs
+        with self.assertRaisesRegex(RuntimeError, "invalid tensor size"):
+            pg.alltoall([t1, t3] + [t1] * (self.world_size - 2), [t1] * self.world_size)
+
+        # Check input and output tensors must have the same type
+        with self.assertRaisesRegex(
+            RuntimeError, "input and output tensors must have the same type"
+        ):
+            pg.alltoall([t2] * self.world_size, [t1] * self.world_size)
+
+        # Check input and output tensors must have the same size
+        with self.assertRaisesRegex(
+            RuntimeError, "input and output tensors must have the same size"
+        ):
+            pg.alltoall([t3] * self.world_size, [t1] * self.world_size)
+
+    def _test_alltoall_basics(self, fn):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        # Preallocate tensors for input/output
+        # Each rank sends tensor with value equal to rank to each other rank
+        input_tensors = [fn(torch.tensor([self.rank])) for _ in range(self.world_size)]
+        output_tensors = [fn(torch.tensor([-1])) for _ in range(self.world_size)]
+
+        # Perform all-to-all
+        fut = pg.alltoall(output_tensors, input_tensors).get_future()
+        fut.wait()
+        result = fut.value()
+
+        # After alltoall, rank i should have received tensor with value j from rank j
+        # in output_tensors[j]
+        for i in range(self.world_size):
+            self.assertEqual(torch.tensor([i]), output_tensors[i])
+
+    @requires_gloo()
+    def test_alltoall_basics(self):
+        self._test_alltoall_basics(lambda t: t.clone())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_alltoall_basics_cuda(self):
+        self._test_alltoall_basics(lambda t: t.clone().cuda())
+
+    def _test_alltoall_stress(self, inputs, fn):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts(threads=8)
+        )
+
+        outputs = [
+            [fn(torch.tensor([-1])) for _ in range(self.world_size)]
+            for _ in range(len(inputs))
+        ]
+
+        future_handles = []
+        for i in range(len(inputs)):
+            input_tensors = [fn(inputs[i][j]) for j in range(self.world_size)]
+            fut = pg.alltoall(outputs[i], input_tensors).get_future()
+            future_handles.append(fut)
+
+        for i, future_handle in enumerate(future_handles):
+            future_handle.wait()
+            result = future_handle.value()
+
+            # Verify correctness: output_tensors[j] should contain the value
+            # that was in input_tensors[rank] from rank j
+            for j in range(self.world_size):
+                expected_value = torch.tensor([i + j])
+                self.assertEqual(
+                    expected_value,
+                    outputs[i][j],
+                    msg=(f"Mismatch in iteration {i:d} for rank {j:d}"),
+                )
+
+    @requires_gloo()
+    def test_alltoall_stress(self):
+        inputs = [
+            [torch.tensor([i + rank]) for rank in range(self.world_size)]
+            for i in range(1000)
+        ]
+        self._test_alltoall_stress(inputs, lambda t: t.clone())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    @skipIfRocm
+    def test_alltoall_stress_cuda(self):
+        inputs = [
+            [torch.tensor([i + rank]) for rank in range(self.world_size)]
+            for i in range(1000)
+        ]
+        self._test_alltoall_stress(inputs, lambda t: t.clone().cuda())
+
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase

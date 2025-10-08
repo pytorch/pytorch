@@ -401,6 +401,11 @@ class TORCH_API ProcessGroupGloo : public Backend {
       std::vector<int64_t>& inputCounts,
       const AllToAllOptions& opts = AllToAllOptions()) override;
 
+  c10::intrusive_ptr<Work> alltoall(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
+
   c10::intrusive_ptr<Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
