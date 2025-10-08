@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
+import os
 import re
+import tempfile
 import unittest
 from functools import partial
 from typing import Any, Optional, Union
@@ -9,7 +11,10 @@ import torch
 import torch.nn as nn
 from torch._inductor import config as inductor_config
 from torch._inductor.choices import InductorChoices
+
+# from torch._inductor.ir import ChoiceCaller  # Using MockChoiceCaller instead
 from torch._inductor.kernel_inputs import MMKernelInputs
+from torch._inductor.lookup_table import recorder
 from torch._inductor.lookup_table.choices import LookupTableChoices
 from torch._inductor.select_algorithm import (
     add_preprocessing_fn,
@@ -17,6 +22,7 @@ from torch._inductor.select_algorithm import (
     ExternKernelCaller,
     TritonTemplateCaller,
 )
+from torch._inductor.template_heuristics.params import DictKernelTemplateParams
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache, get_num_sms, TMA_DESCRIPTOR_SIZE
 from torch._inductor.virtualized import V
@@ -565,6 +571,7 @@ class TestLookupTable(BaseLookupTableTest):
                     if device.type != "cuda":
                         return None
                     return "device_1"
+
         else:
 
             class TestChoices(LookupTableChoices):
@@ -1052,6 +1059,351 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         # Ensure hash checking is enabled
         with patch.object(inductor_config.lookup_table, "check_src_hash", True):
             self.run_model("mm", tensors)
+
+
+# Recorder-specific test classes
+class MockTemplate:
+    """Mock template for recorder testing"""
+
+    def __init__(self, uid="mock_template", src_hash="mock_hash_12345"):
+        self.uid = uid
+        self.src_hash = src_hash
+
+
+class MockKernelTemplateChoice:
+    """Mock KernelTemplateChoice for recorder testing"""
+
+    def __init__(self, template_id="mock_template", **kwargs):
+        self.template = MockTemplate(template_id)
+        # Create params dictionary from kwargs
+        params_dict = {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 64, **kwargs}
+        self.params = DictKernelTemplateParams(params_dict)
+        # Add mock inputs
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        tensors = [
+            torch.randn(128, 128, device=device),
+            torch.randn(128, 128, device=device),
+        ]
+        self.inputs = MockMMKernelInputs(tensors)
+
+
+class MockChoiceCaller:
+    """Mock ChoiceCaller for recorder testing"""
+
+    def __init__(self, name):
+        self.name = name
+        self.annotations = {}
+        # Add any other attributes that might be accessed
+        self.input_nodes = []
+        self.layout = None
+        self.description = ""
+
+
+@unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
+@instantiate_parametrized_tests
+class TestLookupTableRecorder(BaseLookupTableTest):
+    """Tests for lookup table recorder functionality"""
+
+    def setUp(self):
+        super().setUp()
+        # Save original recorder config values
+        self.original_recording_active = inductor_config.lookup_table.recording_active
+        self.original_recorder_emit = inductor_config.lookup_table.recorder_emit
+        self.original_recorder_record_dir = (
+            inductor_config.lookup_table.recorder_record_dir
+        )
+        self.original_recorder_topk = inductor_config.lookup_table.recorder_topk
+        self.original_record_template_hash = (
+            inductor_config.lookup_table.record_template_hash
+        )
+        self.original_record_with_device_key = (
+            inductor_config.lookup_table.record_with_device_key
+        )
+        # Clear any existing recorder state
+        recorder.clear()
+
+    def tearDown(self):
+        # Restore original config values
+        inductor_config.lookup_table.recording_active = self.original_recording_active
+        inductor_config.lookup_table.recorder_emit = self.original_recorder_emit
+        inductor_config.lookup_table.recorder_record_dir = (
+            self.original_recorder_record_dir
+        )
+        inductor_config.lookup_table.recorder_topk = self.original_recorder_topk
+        inductor_config.lookup_table.record_template_hash = (
+            self.original_record_template_hash
+        )
+        inductor_config.lookup_table.record_with_device_key = (
+            self.original_record_with_device_key
+        )
+        # Clear recorder state
+        recorder.clear()
+        super().tearDown()
+
+    def test_recorder_respects_device_key_config(self):
+        """Test that recorder respects the record_with_device_key configuration"""
+        # Setup
+        inductor_config.lookup_table.recording_active = True
+        inductor_config.lookup_table.record_with_device_key = False  # No device key
+
+        # Create mock choice and timing
+        mock_choice = MockChoiceCaller("mock_choice")
+        mock_choice.annotations = {"ktc": MockKernelTemplateChoice()}
+        timings = {mock_choice: 1.0}
+        choices = [mock_choice]
+
+        # Record entry
+        recorder.record_topk_choices(timings, "test_op", [], choices, dict)
+
+        # Verify entry was recorded without device key
+        rec = recorder.get_lookup_table_recorder()
+        self.assertEqual(len(rec.data), 1)
+        key = next(iter(rec.data.keys()))
+        # Key should not contain device info when record_with_device_key=False
+        self.assertNotIn("device_", key)
+
+    def test_recorder_topk_config(self):
+        """Test that recorder respects topk configuration"""
+        inductor_config.lookup_table.recording_active = True
+        inductor_config.lookup_table.recorder_topk = 2
+
+        # Create 3 mock choices with different timings
+        choices = []
+        timings = {}
+        for i, timing in enumerate([1.0, 2.0, 3.0]):
+            choice = MockChoiceCaller(f"mock_choice_{i}")
+            choice.annotations = {"ktc": MockKernelTemplateChoice(BLOCK_M=64 + i * 32)}
+            choices.append(choice)
+            timings[choice] = timing
+
+        # Record entries
+        recorder.record_topk_choices(timings, "test_op", [], choices, dict)
+
+        # Should only have top 2 entries
+        rec = recorder.get_lookup_table_recorder()
+        self.assertEqual(len(rec.data), 1)  # One key
+        entries = next(iter(rec.data.values()))
+        self.assertEqual(len(entries), 2)  # Top 2 entries
+        # Verify they're the fastest ones (1.0 and 2.0)
+        runtimes = [entry.runtime for entry in entries]
+        self.assertEqual(sorted(runtimes), [1.0, 2.0])
+
+    def test_recorder_backend_registration(self):
+        """Test that recorder backends are properly registered"""
+        inductor_config.lookup_table.recording_active = True
+        inductor_config.lookup_table.recorder_emit = True
+
+        # Get recorder (triggers backend registration)
+        rec = recorder.get_lookup_table_recorder()
+
+        # Should have at least the LogEmitBackend registered
+        self.assertGreater(len(rec.emit_backends), 0)
+        self.assertIsInstance(rec.emit_backends[0], recorder.LogEmitBackend)
+
+    def test_recorder_topk_logic_detailed(self):
+        """Test detailed topk logic in the feedback function"""
+        inductor_config.lookup_table.recording_active = True
+        inductor_config.lookup_table.recorder_topk = 3
+
+        # Create choices with some invalid ones
+        choices = []
+        timings = {}
+
+        # Valid choices
+        for i in range(5):
+            choice = MockChoiceCaller(f"valid_choice_{i}")
+            choice.annotations = {"ktc": MockKernelTemplateChoice(BLOCK_M=64 + i * 16)}
+            choices.append(choice)
+            timings[choice] = float(i + 1)  # 1.0, 2.0, 3.0, 4.0, 5.0
+
+        # Invalid choice (no timing)
+        invalid_choice1 = MockChoiceCaller("invalid_no_timing")
+        invalid_choice1.annotations = {"ktc": MockKernelTemplateChoice()}
+        choices.append(invalid_choice1)
+        # Don't add to timings
+
+        # Invalid choice (no ktc annotation)
+        invalid_choice2 = MockChoiceCaller("invalid_no_ktc")
+        invalid_choice2.annotations = {}
+        choices.append(invalid_choice2)
+        timings[invalid_choice2] = 0.5
+
+        # Invalid choice (infinite timing)
+        invalid_choice3 = MockChoiceCaller("invalid_inf_timing")
+        invalid_choice3.annotations = {"ktc": MockKernelTemplateChoice()}
+        choices.append(invalid_choice3)
+        timings[invalid_choice3] = float("inf")
+
+        # Record entries
+        recorder.record_topk_choices(timings, "test_op", [], choices, dict)
+
+        # Should have recorded top 3 of the 5 valid choices
+        rec = recorder.get_lookup_table_recorder()
+        self.assertEqual(len(rec.data), 1)
+        entries = next(iter(rec.data.values()))
+        self.assertEqual(len(entries), 3)  # Top 3 entries
+        # Verify they're the fastest valid ones (1.0, 2.0, 3.0)
+        runtimes = sorted([entry.runtime for entry in entries])
+        self.assertEqual(runtimes, [1.0, 2.0, 3.0])
+
+    def test_recorder_backend_functionality(self):
+        """Test that recorder backends work correctly"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            inductor_config.lookup_table.recording_active = True
+            inductor_config.lookup_table.recorder_record_dir = temp_dir
+
+            # Create and record entry
+            choice = MockChoiceCaller("test_choice")
+            choice.annotations = {"ktc": MockKernelTemplateChoice()}
+            timings = {choice: 1.5}
+
+            recorder.record_topk_choices(timings, "test_op", [], [choice], dict)
+
+            # Verify file was created
+            files = os.listdir(temp_dir)
+            self.assertEqual(len(files), 1)
+            self.assertTrue(files[0].startswith("inductor_lut_"))
+            self.assertTrue(files[0].endswith(".json"))
+
+            # Verify file content
+            import json
+
+            with open(os.path.join(temp_dir, files[0])) as f:
+                data = json.load(f)
+
+            self.assertEqual(len(data), 1)
+            key = next(iter(data.keys()))
+            entries = data[key]
+            self.assertEqual(len(entries), 1)
+            self.assertIn("template_id", entries[0])
+            self.assertEqual(entries[0]["template_id"], "mock_template")
+
+    def test_recorder_emit_and_record(self):
+        """Test recorder emit and record functionality using real templates"""
+        inductor_config.lookup_table.recording_active = True
+        inductor_config.lookup_table.recorder_emit = True
+
+        # Create choice with KTC
+        choice = MockChoiceCaller("test_choice")
+        choice.annotations = {"ktc": MockKernelTemplateChoice(BLOCK_M=256, BLOCK_N=128)}
+        timings = {choice: 0.75}
+
+        # Record entry
+        recorder.record_topk_choices(timings, "mm", [], [choice], dict)
+
+        # Verify recording worked
+        rec = recorder.get_lookup_table_recorder()
+        self.assertEqual(len(rec.data), 1)
+
+        entries = next(iter(rec.data.values()))
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+
+        # Check entry fields
+        self.assertEqual(entry.runtime, 0.75)
+        self.assertIn("BLOCK_M", entry.value)
+        self.assertEqual(entry.value["BLOCK_M"], 256)
+        self.assertEqual(entry.value["BLOCK_N"], 128)
+
+    def test_recorder_topk_per_key_behavior(self):
+        """Test that topk=2 maintains only 2 fastest entries per key"""
+        inductor_config.lookup_table.recording_active = True
+        inductor_config.lookup_table.recorder_topk = 2
+
+        # Create multiple choices for the same operation (same key)
+        choices = []
+        timings = {}
+
+        for i, timing in enumerate([3.0, 1.0, 4.0, 2.0, 5.0]):
+            choice = MockChoiceCaller(f"choice_{i}")
+            choice.annotations = {"ktc": MockKernelTemplateChoice(BLOCK_M=64 + i * 16)}
+            choices.append(choice)
+            timings[choice] = timing
+
+        # Record all entries (should trigger topk limiting)
+        recorder.record_topk_choices(timings, "mm", [], choices, dict)
+
+        # Should only keep top 2 fastest (1.0, 2.0)
+        rec = recorder.get_lookup_table_recorder()
+        self.assertEqual(len(rec.data), 1)
+        entries = next(iter(rec.data.values()))
+        self.assertEqual(len(entries), 2)
+
+        runtimes = sorted([entry.runtime for entry in entries])
+        self.assertEqual(runtimes, [1.0, 2.0])
+
+    def test_fast_bail_when_recording_disabled(self):
+        """Test that function returns quickly when recording is disabled"""
+        # Disable recording
+        inductor_config.lookup_table.recording_active = False
+
+        # Create choice (shouldn't matter since we bail early)
+        choice = MockChoiceCaller("test_choice")
+        choice.annotations = {"ktc": MockKernelTemplateChoice()}
+        timings = {choice: 1.0}
+
+        # Call should return quickly without error
+        recorder.record_topk_choices(timings, "mm", [], [choice], dict)
+
+        # No entries should be recorded
+        rec = recorder.get_lookup_table_recorder()
+        self.assertEqual(len(rec.data), 0)
+
+    def test_fast_bail_when_topk_zero(self):
+        """Test that function returns quickly when topk is 0"""
+        inductor_config.lookup_table.recording_active = True
+        inductor_config.lookup_table.recorder_topk = 0  # Don't record anything
+
+        # Create choice
+        choice = MockChoiceCaller("test_choice")
+        choice.annotations = {"ktc": MockKernelTemplateChoice()}
+        timings = {choice: 1.0}
+
+        # Call should return quickly without error
+        recorder.record_topk_choices(timings, "mm", [], [choice], dict)
+
+        # No entries should be recorded
+        rec = recorder.get_lookup_table_recorder()
+        self.assertEqual(len(rec.data), 0)
+
+    def test_recorder_template_hash_recording(self):
+        """Test that template hashes are recorded when enabled"""
+        inductor_config.lookup_table.recording_active = True
+        inductor_config.lookup_table.record_template_hash = True
+
+        # Create choice with template that has hash
+        choice = MockChoiceCaller("test_choice")
+        choice.annotations = {"ktc": MockKernelTemplateChoice()}
+        timings = {choice: 1.0}
+
+        # Record entry
+        recorder.record_topk_choices(timings, "mm", [], [choice], dict)
+
+        # Verify hash was recorded
+        rec = recorder.get_lookup_table_recorder()
+        entries = next(iter(rec.data.values()))
+        entry = entries[0]
+        self.assertIn("template_hash", entry.value)
+        self.assertEqual(entry.value["template_hash"], "mock_hash_12345")
+
+    def test_recorder_no_template_hash_when_disabled(self):
+        """Test that template hashes are not recorded when disabled"""
+        inductor_config.lookup_table.recording_active = True
+        inductor_config.lookup_table.record_template_hash = False
+
+        # Create choice with template that has hash
+        choice = MockChoiceCaller("test_choice")
+        choice.annotations = {"ktc": MockKernelTemplateChoice()}
+        timings = {choice: 1.0}
+
+        # Record entry
+        recorder.record_topk_choices(timings, "mm", [], [choice], dict)
+
+        # Verify hash was not recorded
+        rec = recorder.get_lookup_table_recorder()
+        entries = next(iter(rec.data.values()))
+        entry = entries[0]
+        self.assertNotIn("template_hash", entry.value)
 
 
 if __name__ == "__main__":
