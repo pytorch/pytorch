@@ -759,9 +759,6 @@ def is_valid_mm_plus_mm(match: Match):
     if m1 != m2 or n1 != n2:
         return False
 
-    if config.triton.native_matmul:
-        return False
-
     return True
 
 
@@ -1524,9 +1521,6 @@ def is_valid_addmm_fusion(match):
 
     # aten cublas integration assumes equal dtypes
     if inp_dtype != mat1.meta["val"].dtype or inp_dtype != mat2.meta["val"].dtype:
-        return False
-
-    if torch._inductor.config.triton.native_matmul:
         return False
 
     return not should_prefer_unfused_addmm(match)
