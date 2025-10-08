@@ -1,5 +1,5 @@
 # Build System requirements (see also: pyproject.toml)
-setuptools>=77.0.0,<80.0  # setuptools develop deprecated on 80.0
+setuptools>=77.0.0
 cmake>=3.27
 ninja
 numpy
