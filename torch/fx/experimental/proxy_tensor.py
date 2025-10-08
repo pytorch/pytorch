@@ -2542,6 +2542,7 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     #
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
+
     fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
