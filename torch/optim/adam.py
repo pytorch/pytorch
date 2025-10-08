@@ -698,7 +698,6 @@ def _multi_tensor_adam(
             device_exp_avgs, device_grads, cast(float, 1 - device_beta1)
         )
 
-        # pyrefly: ignore  # no-matching-overload
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
 
         # Due to the strictness of the _foreach_addcmul API, we can't have a single

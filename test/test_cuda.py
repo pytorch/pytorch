@@ -4522,6 +4522,21 @@ class TestCudaMallocAsync(TestCase):
         reg_mem = torch.cuda.memory_stats()[key_allocated]
         self.assertEqual(reg_mem - start_mem, nbytes)
 
+        # Test division==1 case.
+        torch.cuda.memory.empty_cache()
+        div1_start_mem = torch.cuda.memory_stats()[key_allocated]
+        div1_start_requested = torch.cuda.memory_stats()[key_requested]
+        torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:1")
+        torch.rand(nelems, device="cuda")
+        div1_end_mem = torch.cuda.memory_stats()[key_allocated]
+        div1_end_requested = torch.cuda.memory_stats()[key_requested]
+
+        self.assertEqual(div1_start_mem - start_mem, nbytes)
+        if not TEST_CUDAMALLOCASYNC:
+            # not supported with the cudaMallocAsync backend
+            self.assertEqual(div1_end_mem - div1_start_mem, power2_div(nbytes, 1))
+            self.assertEqual(div1_end_requested - div1_start_requested, nbytes)
+
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
 
