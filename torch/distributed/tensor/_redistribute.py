@@ -419,3 +419,7 @@ class Redistribute(torch.autograd.Function):
             None,
             None,
         )
+    
+    @classmethod 
+    def apply(cls, *args, **kwargs):
+        return super().apply(*args, **kwargs)

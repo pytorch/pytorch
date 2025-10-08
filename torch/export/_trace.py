@@ -1,3 +1,4 @@
+
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import dataclasses
@@ -1739,6 +1740,7 @@ def _export_to_aten_ir_make_fx(
                     record_module_stack=True,
                     pre_dispatch=True,
                 )(*flat_args)
+                print(gm.graph)
 
             if non_strict_root is not None:
                 input_names = _graph_input_names(gm)

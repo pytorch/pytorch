@@ -216,6 +216,8 @@ class TracerBase:
                     node.stack_trace = "".join(user_stack_summary.format()).strip()
 
         log.debug("create_node %s", node)
+        if node.name == "_tensor_constant0":
+            breakpoint()
         return node
 
     def _filter_traceback_frames(

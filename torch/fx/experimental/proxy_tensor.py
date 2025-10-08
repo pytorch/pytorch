@@ -1479,7 +1479,7 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             torch._functorch.predispatch._vmap_increment_nesting,
             torch._functorch.predispatch._vmap_decrement_nesting,
             torch._functorch.vmap.lazy_load_decompositions,
-        ]:
+        ] or "TensorVariable" in str(func):
             _, proxies, _ = _fetch_proxies_and_all_constant_flag(args, self.tracer)
             out_proxy = self.tracer.create_proxy(
                 "call_function",
@@ -1487,9 +1487,11 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
                 proxies,
                 {},
             )
-            res = func(*args, **kwargs)
+            with disable_proxy_modes_tracing():
+                res = func(*args, **kwargs)
             track_tensor_tree(res, out_proxy, constant=None, tracer=self.tracer)
             return res
+        print("FUNNCC", func)
         return func(*args, **kwargs)
 
 

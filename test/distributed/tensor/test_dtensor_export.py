@@ -18,6 +18,8 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor.placement_types import Shard, Replicate
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -73,11 +75,17 @@ def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
     ):
         with torch._export.utils._disable_aten_to_metadata_assertions():
             ep = torch.export.export(model, (inputs,), strict=True)
+    
+    from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+    print(_dynamo_graph_capture_for_export(model)(inputs))
+    
 
     # joint_gm produced here is missing the backward region, due to incompatiblility
     # between ep.module() and aot_export_joint_with_descriptors.
     # Keeping this here to show the issue.
-    return aot_export_joint_with_descriptors_alone(ep.module(), inputs)
+    ff = aot_export_joint_with_descriptors_alone(ep.module(), inputs)
+    print(ff)
+    return ff 
 
 
 def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
@@ -286,9 +294,6 @@ class DTensorExportTest(TestCase):
     ):
         self._run_test(export_fn)
 
-    # aot_export_joint_with_descriptors on strict-exported exported_program.module()
-    # is producing a joint graph with backward region missing
-    @unittest.expectedFailure
     def test_strict_export_parallelize_module_with_dtensor_input(self):
         self._run_test(strict_export_and_aot_export_joint_with_descriptors)
 
