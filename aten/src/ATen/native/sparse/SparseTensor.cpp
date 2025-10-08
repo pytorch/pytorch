@@ -900,8 +900,7 @@ Tensor _pin_memory_sparse_coo(const Tensor& self, std::optional<Device> device) 
 }
 
 Tensor view_as_real_sparse(const Tensor& self) {
-  TORCH_CHECK(self.is_sparse(), "view_as_real_sparse is only supported for sparse tensors");
-  TORCH_CHECK(self.is_complex(), "view_as_real_sparse is only supported for complex sparse tensors");
+  TORCH_CHECK(self.is_sparse() && self.is_complex(), "view_as_real_sparse is only supported for complex sparse tensors");
   TORCH_CHECK(!self.is_conj(), "view_as_real_sparse doesn't work on unresolved conjugated tensors.  To resolve the conjugate tensor so you can view it as real, use self.resolve_conj(); however, be warned that the resulting tensor will NOT alias the original.");
 
   auto new_sizes = self.sizes().vec();
