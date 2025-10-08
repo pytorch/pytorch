@@ -345,7 +345,7 @@ def redistribute_cost(
             continue
         
         if target.is_partial_view_shard():
-            assert target.orig_placement == current
+            assert target.input_src_placement == current
             continue
 
         num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[i]

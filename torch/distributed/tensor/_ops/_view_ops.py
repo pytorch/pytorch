@@ -680,8 +680,6 @@ def propagate_shape_and_sharding(
             it's certain that ``placements`` won't change except the
             inner ``dim`` attribute of ``Shard`` or ``_StridedShard``.
         """
-        import fbvscode
-        fbvscode.set_trace()
         if isinstance(p, _StridedShard):
             return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
         elif isinstance(p, PartialViewShard):

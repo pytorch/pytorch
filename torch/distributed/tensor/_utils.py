@@ -187,13 +187,11 @@ def _compute_local_shape_and_global_offset(
                 global_offset[shard_dim] + not_none(shard_offset),
             )
         elif isinstance(placement, PartialViewShard):
-            import fbvscode
-            fbvscode.set_trace()
-            shard_dim = placement.orig_placement.dim
+            shard_dim = placement.output_placement.dim
             assert shard_dim < len(local_shape), (
                 f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
             )
-            shard_size, shard_offset = placement.orig_placement._local_shard_size_and_offset(
+            shard_size, shard_offset = placement.output_placement._local_shard_size_and_offset(
                 local_shape[shard_dim],
                 mesh_dim_size,
                 my_coordinate[mesh_dim],
