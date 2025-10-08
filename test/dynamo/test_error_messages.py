@@ -909,7 +909,7 @@ from user code:
         )
 
         for line in all_lines:
-            self.assertIn("type", line)
+            self.assertIn("realized", line)
             self.assertIn("class", line)
 
     @make_logging_test(graph_breaks=True)
