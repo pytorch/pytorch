@@ -290,6 +290,10 @@ else
 
       WERROR=1 python setup.py clean
 
+      export SCCACHE_LOG_LEVEL=debug
+      export SCCACHE_ERROR_LOG=/tmp/sccache_errors.log
+      export SCCACHE_LOG=debug
+
       WERROR=1 python -m build --wheel --no-isolation
     else
       python setup.py clean
@@ -425,3 +429,6 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi
+
+
+mv /tmp/sccache_errors.log dist/sccache_errors.log

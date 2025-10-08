@@ -1,16 +1,16 @@
 name: pull
 
 on:
-  pull_request:
-    branches-ignore:
-      - nightly
-  push:
-    branches:
-      - main
-      - release/*
-      - landchecks/*
-    tags:
-      - ciflow/pull/*
+  # pull_request:
+  #   branches-ignore:
+  #     - nightly
+  # push:
+  #   branches:
+  #     - main
+  #     - release/*
+  #     - landchecks/*
+  #   tags:
+  #     - ciflow/pull/*
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
