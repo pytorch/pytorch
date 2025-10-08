@@ -1214,6 +1214,15 @@ class TensorVariable(VariableTracker):
         kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
         def redistribute_fn_with_prim_types(x):
+            from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export    
+            mode = _maybe_find_pre_dispatch_tf_mode_for_export()                                                                                                                                                                     
+            if mode:                  
+                print("VALLL REDIS", args_as_value, kwargs_as_value)                                                                                                                                                                                                 
+                return torch.overrides.handle_torch_function(                                                                                                                                                                         
+                    redistribute_fn_with_prim_types,                                                                                                                                                                                  
+                    (x,),                                                                                                                                                                                                             
+                    x,                                                                                                                                                                                                        
+                ) 
             return x.redistribute(*args_as_value, **kwargs_as_value)
 
         # attach the same function name for better debugging
@@ -1240,6 +1249,16 @@ class TensorVariable(VariableTracker):
         kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
         def to_local_fn_with_prim_types(x):
+            from torch._export.utils import _maybe_find_pre_dispatch_tf_mode_for_export 
+            mode = _maybe_find_pre_dispatch_tf_mode_for_export()                                                                                                                                                                      
+            if mode:         
+                print("VALLL", args_as_value, kwargs_as_value)                                                                                                                                                                                                         
+                return torch.overrides.handle_torch_function(                                                                                                                                                                         
+                    to_local_fn_with_prim_types,                                                                                                                                                                                  
+                    (x,),                                                                                                                                                                                                             
+                    x,                                                                                                                                                                                                               
+                )   
+
             return x.to_local(*args_as_value, **kwargs_as_value)
 
         # attach the same function name for better debugging
