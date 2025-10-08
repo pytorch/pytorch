@@ -27,7 +27,7 @@ def _async_compile_initializer(orig_ppid: int) -> None:
 
     def run() -> None:
         while True:
-            sleep(1)
+            sleep(60)
             if orig_ppid != os.getppid():
                 os.kill(os.getpid(), signal.SIGKILL)
 

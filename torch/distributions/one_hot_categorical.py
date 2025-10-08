@@ -42,6 +42,7 @@ class OneHotCategorical(Distribution):
         logits (Tensor): event log probabilities (unnormalized)
     """
 
+    # pyrefly: ignore  # bad-override
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = constraints.one_hot
     has_enumerate_support = True
