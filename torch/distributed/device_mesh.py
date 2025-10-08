@@ -582,7 +582,7 @@ else:
                 return not_none(_resolve_process_group(dim_group_name))
             else:
                 mesh_dim = (
-                    self.get_mesh_dim_by_name(mesh_dim)
+                    self._get_mesh_dim_by_name(mesh_dim)
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
@@ -696,7 +696,7 @@ else:
 
             return res_flattened_mesh
 
-        def get_root_mesh_dim(self) -> Optional[int]:
+        def _get_root_mesh_dim(self) -> Optional[int]:
             """
             Returns the index of the mesh dim in the root mesh.
             The device_mesh passed in needs to be sliced out from the root mesh
@@ -709,10 +709,10 @@ else:
                     "The submesh can only be a 1D mesh."
                 )
                 child_mesh_dim_name = child_mesh_dim_names[0]
-                return root_mesh.get_mesh_dim_by_name(child_mesh_dim_name)
+                return root_mesh._get_mesh_dim_by_name(child_mesh_dim_name)
             return None
 
-        def get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
+        def _get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
             if self.mesh_dim_names is None or len(self.mesh_dim_names) == 0:
                 raise KeyError(
                     "No `mesh_dim_names` found.",
@@ -724,7 +724,9 @@ else:
                 )
             return not_none(self.mesh_dim_names.index(mesh_dim_name))
 
-        def _get_slice_mesh_layout(self, mesh_dim_names: tuple[str, ...]) -> _MeshLayout:
+        def _get_slice_mesh_layout(
+            self, mesh_dim_names: tuple[str, ...]
+        ) -> _MeshLayout:
             """
             Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
             If valid, return dim indexes of the slice mesh in the device mesh.
@@ -815,7 +817,7 @@ else:
             """
             Return all the submeshes of a given mesh dimension of the device mesh.
             """
-            mesh_dim = self.get_mesh_dim_by_name(mesh_dim_name)
+            mesh_dim = self._get_mesh_dim_by_name(mesh_dim_name)
             layout = self._layout[mesh_dim]
             pg_ranks_by_dim = layout.remap_to_tensor(
                 self.mesh,

@@ -1032,15 +1032,15 @@ class TestMeshEnv(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(mesh_2d["DP"].get_root_mesh_dim(), 0)
-        self.assertEqual(mesh_2d["TP"].get_root_mesh_dim(), 1)
+        self.assertEqual(mesh_2d["DP"]._get_root_mesh_dim(), 0)
+        self.assertEqual(mesh_2d["TP"]._get_root_mesh_dim(), 1)
 
     @with_comms
     def test_get_root_mesh_dim_not_exist(self):
         mesh_shape = (self.world_size,)
         mesh = init_device_mesh(self.device_type, mesh_shape)
 
-        self.assertEqual(mesh.get_root_mesh_dim(), None)
+        self.assertEqual(mesh._get_root_mesh_dim(), None)
 
     @with_comms
     def test_get_mesh_dim_by_name(self):
@@ -1050,8 +1050,8 @@ class TestMeshEnv(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(mesh_2d.get_mesh_dim_by_name("DP"), 0)
-        self.assertEqual(mesh_2d.get_mesh_dim_by_name("TP"), 1)
+        self.assertEqual(mesh_2d._get_mesh_dim_by_name("DP"), 0)
+        self.assertEqual(mesh_2d._get_mesh_dim_by_name("TP"), 1)
 
     @with_comms
     def test_get_all_submeshes(self):
