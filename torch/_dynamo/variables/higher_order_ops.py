@@ -3586,6 +3586,40 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
         )
 
+        # Validate
+        expected_num_inputs = len(in_placements.value)
+        actual_num_inputs = len(body_gmod.graph.find_nodes(op="placeholder"))
+        expected_num_outputs = len(out_placements.value)
+        assert len(body_gmod.graph.find_nodes(op="output")) == 1
+        actual_num_outputs = len(body_gmod.graph.find_nodes(op="output")[0].args[0])
+
+        template = (
+            "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
+            ", but found {actual}. If the count matches for eager, "
+            "Dynamo may have flattened {inputs_or_outputs} to the function or found additional "
+            "tensors used via closures. "
+            "Please adjust the input placements to match what the traced graph sees: \n{gm_str}."
+        )
+
+        def make_error_msg(*args):
+            expected_num, actual_num, inputs_or_outputs = args
+            gm_str = body_gmod.print_readable(print_output=False)
+            return template.format(
+                expected=expected_num,
+                inputs_or_outputs=inputs_or_outputs,
+                actual=actual_num,
+                gm_str=gm_str,
+            )
+
+        if expected_num_inputs != actual_num_inputs:
+            raise AssertionError(
+                make_error_msg(expected_num_inputs, actual_num_inputs, "inputs")
+            )
+        if expected_num_outputs != actual_num_outputs:
+            raise AssertionError(
+                make_error_msg(expected_num_outputs, actual_num_outputs, "outputs")
+            )
+
         # Treat as const, so we don't have to deal with Placement types in fx IR
         # Guarded with EQUALS_MATCH on local_map call's arguments
         body_gmod.meta["local_map_kwargs"] = {
