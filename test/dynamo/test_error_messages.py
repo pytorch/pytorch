@@ -772,13 +772,15 @@ from user code:
             torch._dynamo.graph_break()
             return f
 
-        torch.compile(fn, backend="eager")()
-
         def post_munge(s):
             return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
 
+        torch.compile(fn, backend="eager")()
+
         self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            post_munge(
+                munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0)
+            ),
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Call to `torch._dynamo.graph_break()`
@@ -1013,7 +1015,7 @@ Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especiall
             "<Internal traceback>\n",
             msg,
         )
-        msg = re.sub(r"TRACE.*\n", "", msg, flags=re.MULTILINE)
+
         self.assertExpectedInline(
             msg,
             """\
@@ -1169,6 +1171,7 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker()]""",
         matches = re.findall(pattern, s)
         self.assertEqual((len(matches) > 10), True)
         self.assertEqual((len(matches) <= 20), True)
+        self.assertIn("Most recent bytecode instructions traced (max 20):", s)
 
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)
