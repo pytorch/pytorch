@@ -202,7 +202,7 @@ bool TensorCheck::check(
     c10::DispatchKey::Python,
     c10::DispatchKey::PythonTLSSnapshot,
   });
-  auto stored_keys = c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_) - mode_key_mask;
+  auto stored_keys = c10::DispatchKeySet::from_raw_repr(dispatch_key_) - mode_key_mask;
   auto current_keys = state.apply(dispatch_key_set) - mode_key_mask;
 
   if (stored_keys.raw_repr() != current_keys.raw_repr() ||
