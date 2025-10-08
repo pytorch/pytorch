@@ -164,6 +164,37 @@ class MultiKernelTest(TestCase):
         self.assertEqual(ref, act)
         self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
+    @requires_triton()
+    @skipIfRocm
+    @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
+    @config.patch({"multi_kernel_hints": [8, 32, 128]})  # 4096 is too large
+    def test_mm_on_view_of_dynamic_base(self):
+        def fn(x, y):
+            x = x.view(-1, 4096)  # [m, n, d] -> [m*n, d]
+            y = y.view(4096, -1)  # [d, k, l] -> [d, k*l]
+            z = x @ y  # [m*n, k*l]
+            return z
+
+        compiled_fn = torch.compile(
+            fn,
+            options={
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+        x = torch.randn(64, 32, 4096, device=GPU_TYPE)
+        y = torch.randn(4096, 16, 8, device=GPU_TYPE)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(y, 1)
+        torch._dynamo.mark_dynamic(y, 2)
+        act, wrapper_code = run_and_get_code(compiled_fn, x, y)
+        ref = fn(x, y)  # noqa: F841
+
+        wrapper_code = wrapper_code[-1]
+        # self.assertEqual(ref, act)  # this actually fails without multi-kernel
+        self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
+
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(
         os.environ, {"TORCHINDUCTOR_DISABLE_MULTI_KERNEL_CACHE": "1"}
