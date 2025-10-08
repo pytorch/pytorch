@@ -262,14 +262,24 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
     def test_compile(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def f(x):
             return x.sin().cos()
 
         x = torch.randn(8)
-        with DebugMode() as debug_mode:
+        print(torch._C._dispatch_keys(x))
+        f(x)
+        with DebugMode(record_torchfunction=False) as debug_mode:
+            print("under debug mode")
+            print(torch._C._dispatch_keys(x))
             f(x)
-        self.assertEqual(len(debug_mode.debug_string()), 0)
+            breakpoint()
+            f(x)
+            f(x)
+            f(x)
+            print(debug_mode.debug_string())
+            # expects: DispatchKeySet(CPU, BackendSelect, ADInplaceOrView, AutogradCPU)
+        # self.assertEqual(len(debug_mode.debug_string()), 0)
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)

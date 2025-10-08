@@ -20,9 +20,11 @@ struct LocalState {
   bool grad_mode_enabled;
 
   at::DispatchKeySet apply(at::DispatchKeySet ks) const {
+    std::cout << "LocalState::apply; override is empty: " << override_dispatch_key_set.empty() << std::endl;
     if (override_dispatch_key_set.empty()) {
       return (ks | dispatch_modifier.included_) - dispatch_modifier.excluded_;
     } else {
+      std::cout << "nonempty override contains backend select: " << override_dispatch_key_set.has(c10::DispatchKey::BackendSelect) << std::endl;
       return override_dispatch_key_set;
     }
   }

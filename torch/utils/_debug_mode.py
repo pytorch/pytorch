@@ -159,6 +159,7 @@ class DebugMode(TorchDispatchMode):
 
     @contextlib.contextmanager
     def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
+        breakpoint()
         try:
             self.operators.append(
                 (

@@ -187,35 +187,124 @@ bool TensorCheck::check(const LocalState& state, const at::Tensor& v) {
       v.requires_grad());
 }
 
+// bool TensorCheck::check(
+//     const LocalState& state,
+//     const c10::DispatchKeySet& dispatch_key_set,
+//     const at::ScalarType& dtype,
+//     const c10::Device& device,
+//     const c10::SymIntArrayRef& sym_sizes,
+//     const c10::SymIntArrayRef& sym_strides,
+//     const bool& requires_grad) {
+//   std::cout << "TensorCheck dispatch key; expected: " << dispatch_key_ << "; saw: " << state.apply(dispatch_key_set).raw_repr() << std::endl;
+//   std::cout << "dispatch_key_set has backend select" << dispatch_key_set.has(c10::DispatchKey::BackendSelect) << std::endl;
+//   if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
+//       dtype_ != dtype || device_index_ != device.index() ||
+//       requires_grad_ != requires_grad) {
+//     std::cout << "TensorCheck dispatch key; expected: " << dispatch_key_ << "; saw: " << state.apply(dispatch_key_set).raw_repr() << std::endl;
+//     std::cout << "predispatch: " << dispatch_key_set.has(c10::DispatchKey::PreDispatch) << std::endl;
+//     std::cout << "python dispatcher: " << dispatch_key_set.has(c10::DispatchKey::PythonDispatcher) << std::endl;
+//     std::cout << "python: " << dispatch_key_set.has(c10::DispatchKey::Python) << std::endl;
+//     std::cout << "backend select: " << dispatch_key_set.has(c10::DispatchKey::BackendSelect) << std::endl;
+//     std::cout << "CPU: " << dispatch_key_set.has(c10::DispatchKey::CPU) << std::endl;
+//     std::cout << "ADInplaceOrView: " << dispatch_key_set.has(c10::DispatchKey::ADInplaceOrView) << std::endl;
+//     std::cout << "AutogradCPU: " << dispatch_key_set.has(c10::DispatchKey::AutogradCPU) << std::endl;
+//     return false;
+//   }
+
+//   auto ndim = sym_sizes.size();
+//   if (ndim != static_cast<size_t>(dim_)) {
+//     return false;
+//   }
+
+//   const auto& sizes = sym_sizes;
+//   const auto& strides = sym_strides;
+//   for (auto i : c10::irange(ndim)) {
+//     auto known_size = sizes_[i];
+//     auto known_stride = strides_[i];
+//     if (known_size.has_value()) {
+//       if (known_size.value() != sizes[i]) {
+//         return false;
+//       }
+//     }
 bool TensorCheck::check(
-    const LocalState& state,
-    const c10::DispatchKeySet& dispatch_key_set,
-    const at::ScalarType& dtype,
-    const c10::Device& device,
-    const c10::SymIntArrayRef& sym_sizes,
-    const c10::SymIntArrayRef& sym_strides,
-    const bool& requires_grad) {
-  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
-      dtype_ != dtype || device_index_ != device.index() ||
-      requires_grad_ != requires_grad) {
-    return false;
-  }
 
-  auto ndim = sym_sizes.size();
-  if (ndim != static_cast<size_t>(dim_)) {
-    return false;
-  }
+      const LocalState& state,
 
-  const auto& sizes = sym_sizes;
-  const auto& strides = sym_strides;
-  for (auto i : c10::irange(ndim)) {
-    auto known_size = sizes_[i];
-    auto known_stride = strides_[i];
-    if (known_size.has_value()) {
-      if (known_size.value() != sizes[i]) {
-        return false;
-      }
+      const c10::DispatchKeySet& dispatch_key_set,
+
+      const at::ScalarType& dtype,
+
+      const c10::Device& device,
+
+      const c10::SymIntArrayRef& sym_sizes,
+
+      const c10::SymIntArrayRef& sym_strides,
+
+      const bool& requires_grad) {
+
+    // Mask to exclude mode-specific keys that can change due to context managers
+
+    // but don't affect the actual tensor computation
+
+    std::cout << "dispatch set contains python key: " << dispatch_key_set.has(c10::DispatchKey::Python) << std::endl;
+    constexpr auto mode_key_mask = c10::DispatchKeySet({
+
+        c10::DispatchKey::Python,
+
+        c10::DispatchKey::PythonTLSSnapshot,
+
+    });
+
+
+    auto stored_keys = c10::DispatchKeySet(c10::DispatchKeySet::RAW, dispatch_key_) - mode_key_mask;
+
+    auto current_keys = state.apply(dispatch_key_set) - mode_key_mask;
+
+
+    if (stored_keys.raw_repr() != current_keys.raw_repr() ||
+
+        dtype_ != dtype || device_index_ != device.index() ||
+
+        requires_grad_ != requires_grad) {
+
+      return false;
+
     }
+    // if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
+    //   dtype_ != dtype || device_index_ != device.index() ||
+    //   requires_grad_ != requires_grad) {
+    //   return false;
+    // }
+
+
+    auto ndim = sym_sizes.size();
+
+    if (ndim != static_cast<size_t>(dim_)) {
+
+      return false;
+
+    }
+
+
+    const auto& sizes = sym_sizes;
+
+    const auto& strides = sym_strides;
+
+    for (auto i : c10::irange(ndim)) {
+
+      auto known_size = sizes_[i];
+
+      auto known_stride = strides_[i];
+
+      if (known_size.has_value()) {
+
+        if (known_size.value() != sizes[i]) {
+
+          return false;
+
+        }
+
+      }
     if (known_stride.has_value()) {
       if (known_stride.value() != strides[i]) {
         return false;
@@ -4388,6 +4477,7 @@ class TENSOR_MATCH : public LeafGuard {
     if (Py_TYPE(value) != _tensor_check->pytype) {
       return false;
     }
+    std::cout << "TENSOR_MATCH check for " << _tensor_name << std::endl;
     return _tensor_check->check(
         _root_guard_manager->_local_state, THPVariable_Unpack(value));
   }

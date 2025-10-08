@@ -677,10 +677,12 @@ class GuardManagerWrapper:
             return body.getvalue()
 
     def check(self, x: Any) -> bool:
+        breakpoint()
         # Only needed for debugging purposes.
         return self.root.check(x)
 
     def check_verbose(self, x: Any) -> GuardDebugInfo:
+        breakpoint()
         # Only needed for debugging purposes.
         return self.root.check_verbose(x)
 
@@ -839,6 +841,7 @@ def get_tensor_guard_code_part(
     pytype: type,
     dispatch_keys: DispatchKeySet,
 ) -> str:
+    breakpoint()
     dispatch_key = (
         dispatch_keys | torch._C._dispatch_tls_local_include_set()
     ) - torch._C._dispatch_tls_local_exclude_set()
@@ -2721,6 +2724,7 @@ class GuardBuilder(GuardBuilderBase):
 
             value = value if value is not None else self.get(guard.name)
 
+            breakpoint()
             pytype = type(value)
             dispatch_keys = torch._C._dispatch_keys(value)
             if isinstance(value, torch._subclasses.FakeTensor):
@@ -2822,6 +2826,8 @@ class GuardBuilder(GuardBuilderBase):
                     ),
                     guard,
                 )
+                print(dispatch_keys)
+                breakpoint()
                 guard_manager.add_tensor_match_guard(
                     value,
                     size,  # type: ignore[arg-type]
