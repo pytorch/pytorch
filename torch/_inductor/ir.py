@@ -535,19 +535,6 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
     return list(sym_vars)
 
 
-def next_power_of_2(n: int) -> int:
-    """Return the smallest power of 2 greater than or equal to n"""
-    n -= 1
-    n |= n >> 1
-    n |= n >> 2
-    n |= n >> 4
-    n |= n >> 8
-    n |= n >> 16
-    n |= n >> 32
-    n += 1
-    return n
-
-
 class IRNode:
     """Base class for all intermediate representation (IR) nodes in TorchInductor.
 
@@ -1519,10 +1506,8 @@ class Reduction(Loops):
                 return functools.reduce(combine_fn, accs)
             else:
                 # Reduction tree simulating warp shuffle
-                # Find next power-of-2 >= rnumel, then divide by 2 to start reduction
-                # to match the C++ logic in block_x_reduce in Reduce.cuh
-                offset = next_power_of_2(rnumel) // 2
-                # Initialize thread values: each thread starts with its own element
+                offset = (config.unroll_reductions_threshold + 1) // 2
+
                 thread_values = {}
                 for i in range(rnumel):
                     thread_values[i] = value_fn(index, (i,))
