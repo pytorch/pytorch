@@ -428,10 +428,11 @@ void fp16_gemv_trans(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0);
 #if !defined(__aarch64__) || defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
   if (at::globalContext().allowFP16ReductionCPU()) {
-    return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
+    fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
+    return;
   }
 #endif
-  return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
+  fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
 }
 
 float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec2, int64_t len) {
@@ -465,7 +466,7 @@ void bf16_gemv_trans(
   at::BFloat16* y,
   const int incy) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
-  return bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
+  bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
 }
 
 float fp16_dot(
