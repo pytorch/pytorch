@@ -1104,6 +1104,7 @@ ErrorType ProcessGroupNCCL::getError() {
   return error_;
 }
 
+using c10::cuda::CUDACachingAllocator::SegmentInfo;
 void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
   const auto key = std::to_string(pool->device());
   LOG(INFO) << logPrefix()
@@ -1125,6 +1126,10 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
+  std::sort(snapshot.segments.begin(), snapshot.segments.end(), [](const SegmentInfo &a, const SegmentInfo &b)
+  {
+      return a.address < b.address;
+  });
   for (const auto& segmentInfo : snapshot.segments) {
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
