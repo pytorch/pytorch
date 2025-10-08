@@ -203,19 +203,19 @@ class DeviceMeshTest(DTensorTestBase):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
         with self.assertRaisesRegex(KeyError, "No `mesh_dim_names` found"):
-            mesh_2d.get_mesh_dim_by_name("")
+            mesh_2d._get_mesh_dim_by_name("")
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
         )
-        self.assertEqual(mesh_2d.get_mesh_dim_by_name("dp"), 0)
-        self.assertEqual(mesh_2d.get_mesh_dim_by_name("tp"), 1)
+        self.assertEqual(mesh_2d._get_mesh_dim_by_name("dp"), 0)
+        self.assertEqual(mesh_2d._get_mesh_dim_by_name("tp"), 1)
         tp_mesh = mesh_2d["tp"]
-        self.assertEqual(tp_mesh.get_mesh_dim_by_name("tp"), 0)
+        self.assertEqual(tp_mesh._get_mesh_dim_by_name("tp"), 0)
         non_exist_mesh_name = "dp"
         with self.assertRaisesRegex(
             KeyError, f"Mesh dimension '{non_exist_mesh_name}' does not exist."
         ):
-            tp_mesh.get_mesh_dim_by_name(non_exist_mesh_name)
+            tp_mesh._get_mesh_dim_by_name(non_exist_mesh_name)
 
     @with_comms
     def test_get_local_rank_raises_exception(self):
@@ -1081,8 +1081,8 @@ class TestMeshEnv(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(mesh_2d.get_mesh_dim_by_name("DP"), 0)
-        self.assertEqual(mesh_2d.get_mesh_dim_by_name("TP"), 1)
+        self.assertEqual(mesh_2d._get_mesh_dim_by_name("DP"), 0)
+        self.assertEqual(mesh_2d._get_mesh_dim_by_name("TP"), 1)
 
     @with_comms
     def test_get_all_submeshes(self):
