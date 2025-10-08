@@ -313,9 +313,9 @@ def create_hop_fw_bw(
         new_fw_gm.meta["local_map_kwargs"] = local_map_kwargs
         new_bw_gm.meta["local_map_kwargs"] = {**local_map_kwargs}
         # Okay because Autoparallel assumes same sharding between param and grads
-        new_bw_gm.meta["local_map_kwargs"]["in_placements"] = local_map_kwargs[
-            "out_placements"
-        ]
+        new_bw_gm.meta["local_map_kwargs"]["in_placements"] = tuple(
+            [local_map_kwargs["out_placements"][i] for i in filtered_grads_idx]
+        )
         new_bw_gm.meta["local_map_kwargs"]["out_placements"] = local_map_kwargs[
             "in_placements"
         ]
@@ -344,6 +344,8 @@ def create_hop_fw_bw(
             len(new_bw_gm.graph.find_nodes(op="placeholder")) - num_activations
         )
         assert actual_bw_inputs > 0
+        assert expected_fw_inputs + expected_bw_inputs == len(primals_and_tangents)
+        assert actual_fw_inputs + actual_bw_inputs == len(primals_and_tangents)
         assert len(new_bw_gm.graph.find_nodes(op="output")) == 1
         actual_bw_outputs = len(new_bw_gm.graph.find_nodes(op="output")[0].args[0])
         assert expected_bw_inputs == actual_bw_inputs

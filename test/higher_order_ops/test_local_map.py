@@ -682,6 +682,39 @@ class GraphModule(torch.nn.Module):
         model = MyModule()
         ap_style_initial_capture(model, (x,))
 
+    @unittest.skipIf(*get_skip_reasons())
+    def test_filtered_gradients(self):
+        @local_map(
+            out_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def returns_non_param(w, x):
+            # x does not requires_grad, and it is an output, so its corresponding tangent is filtered out
+            return torch.matmul(x, w.t()), x + 20
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                a, b = returns_non_param(self.w.weight, x)
+                return a.sum() + b.sum()
+
+        model = MyModule()
+        with FakeTensorMode():
+            inputs = (torch.randn(80, 80),)
+        ap_style_initial_capture(model, inputs)
+
 
 if __name__ == "__main__":
     run_tests()
