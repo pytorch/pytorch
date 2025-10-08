@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import torch
-from torch.fx import Node, Proxy
-from torch.utils._ordered_set import OrderedSet
+from torch.fx import Proxy
 
 from .. import graph_break_hints
+from ..bytecode_transformation import create_call_function
 from ..device_interface import get_interface_for_device
 from ..exc import TYPE_CHECKING, unimplemented_v2
 from .base import VariableTracker
@@ -27,28 +27,36 @@ TensorVariable = Any
 Tensor = torch.Tensor
 
 
-@custom_op("streams::fork", mutates_args={"args"})
-def fork_stream_(
-    index: int, device: torch.device, device_index: int, args: list[Tensor]
+@custom_op("streams::fork", mutates_args=())
+def fork_stream(
+    from_index: int,
+    from_device: torch.device,
+    from_device_index: int,
+    to_index: int,
+    to_device: torch.device,
+    to_device_index: int,
 ) -> None:
     pass
 
 
-@fork_stream_.register_fake
-def _(index: int, device: torch.device, device_index: int, args: list[Tensor]) -> None:
-    pass
-
-
-@custom_op("streams::join", mutates_args={"args"})
-def join_stream_(
-    index: int, device: torch.device, device_index: int, args: list[Tensor]
+@custom_op("streams::join", mutates_args=())
+def join_stream(
+    from_index: int,
+    from_device: torch.device,
+    from_device_index: int,
+    to_index: int,
+    to_device: torch.device,
+    to_device_index: int,
 ) -> None:
     pass
 
 
-@join_stream_.register_fake
-def _(index: int, device: torch.device, device_index: int, args: list[Tensor]) -> None:
-    pass
+_keep_alive = []
+
+
+def add_dynamo_owned_stream(s):
+    global _keep_alive
+    _keep_alive.append(s)
 
 
 # Stream state consists of the fork stream node
@@ -56,13 +64,7 @@ def _(index: int, device: torch.device, device_index: int, args: list[Tensor]) -
 # stream
 @dataclass
 class StreamState:
-    # the fork node that initiated the creation of this stream state
-    # we will finalize it once the stream state is popped
-    fork_node: Node
-    # Nodes not created within the stream
-    external_nodes: OrderedSet[Node]
-    # Nodes created within the stream
-    internal_nodes: OrderedSet[Node]
+    prev_stream_info: tuple[Proxy, Proxy, Proxy]
 
 
 class StreamStateManager:
@@ -88,38 +90,16 @@ class StreamStateManager:
     def in_stream_context(self) -> bool:
         return bool(self.state_stack)
 
-    def track_internal_node(self, node: Node) -> None:
-        # if we are in a stream context, all created nodes are internal
-        if self.in_stream_context():
-            val = node.meta.get("example_value")
-            if isinstance(val, torch.Tensor):
-                # Only add tensor nodes
-                # if we have seen the node before, it is an internal
-                self._cur_state().internal_nodes.add(node)
-
-    def track_node(self, node: Node) -> None:
-        # If we are in a stream context, args of ops may be external
-        if self.in_stream_context():
-            val = node.meta.get("example_value")
-            if isinstance(val, torch.Tensor) and node not in self._internal_nodes():
-                self._external_nodes().add(node)
-
-    def push_stream_state(self, node: Node) -> None:
-        self.state_stack.append(StreamState(node, OrderedSet(), OrderedSet()))
+    def push_stream_state(
+        self, index_proxy: Proxy, device_proxy: Proxy, device_index_proxy: Proxy
+    ) -> None:
+        self.state_stack.append(
+            StreamState((index_proxy, device_proxy, device_index_proxy))
+        )
 
     def pop_stream_state(self) -> StreamState:
         assert self.state_stack, "No stream state to pop"
         return self.state_stack.pop()
-
-    def _cur_state(self) -> StreamState:
-        assert self.state_stack, "No stream state to pop"
-        return self.state_stack[-1]
-
-    def _internal_nodes(self) -> OrderedSet[Node]:
-        return self._cur_state().internal_nodes
-
-    def _external_nodes(self) -> OrderedSet[Node]:
-        return self._cur_state().external_nodes
 
 
 stream_state_mgr = StreamStateManager()
@@ -244,6 +224,7 @@ class StreamVariable(StreamContextVariable):
         device: torch.device,
         **kwargs: Any,
     ) -> None:
+        user_ind = kwargs.pop("user_obj_index", None)
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         assert value.device.type == device.type, (
@@ -253,6 +234,7 @@ class StreamVariable(StreamContextVariable):
         self.proxy = proxy
         self.value = value
         self.device = device
+        self.user_ind = user_ind
 
     def python_type(self) -> type:
         return torch.Stream
@@ -332,15 +314,20 @@ class StreamVariable(StreamContextVariable):
         # If we got here, this stream is fully subsumed by the graph - this means it is
         # not an input or global
         assert not self.source
-        # Since we just proved that - for other such structures, like lists and dicts, reconstruction
-        # is fine and sound according to dynamo principles of treating collectives. However,
-        # streams are special in that we want to preserve the identity of the stream as the same as in the graph
-        # Normally, we would do this via codegen for the proxy mapping to an output - we cannot do this yet, as we do not
-        # yet have a plan for how we want to handle the case where the stream is used as an input or an output. Pending
-        # design, to unblock current work, we lift the stream into a global and then codegen bytecode to load it from there.
-        prefix = f"_stream_{self.device}"
-        name = codegen.tx.output.install_global_by_id(prefix, self.value)
-        codegen.append_output(codegen.create_load_global(name, add=True))
+        if self.user_ind is not None:
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.graph_bytecode_inputs.__name__,
+                    "get_user_object_by_index",
+                )
+            )
+            codegen.append_output(codegen.create_load_const(self.user_ind))
+            codegen.extend_output(create_call_function(1, False))
+        else:
+            # TODO mlazos: evaluate if we still need this
+            prefix = f"_stream_{self.device}"
+            name = codegen.tx.output.install_global_by_id(prefix, self.value)
+            codegen.append_output(codegen.create_load_global(name, add=True))
 
     def _get_target_values(self) -> list["StreamVariable"]:
         return [self]
