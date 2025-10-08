@@ -6531,7 +6531,7 @@ def scaled_mm(
     swizzle_b: SwizzleType | list[SwizzleType] | None = None,
     bias: Optional[Tensor] = None,
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
-    contraction_dim: Optional[list[int]] = None,
+    contraction_dim: list[int] | tuple[int] = (),
     use_fast_accum: bool = False,
     **kwargs: _Any,
 ) -> Tensor:
@@ -6571,8 +6571,6 @@ def scaled_mm(
     scale_recipe_b = expand_single_value(scale_recipe_b)
     swizzle_a = expand_single_value(swizzle_a)
     swizzle_b = expand_single_value(swizzle_b)
-
-    contraction_dim = [] if not contraction_dim else contraction_dim
 
     # native_functions has restrictions on what can be defined
     # & passed through - std::optional<ArrayRef<Tensor>> for instance
