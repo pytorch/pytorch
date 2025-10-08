@@ -138,10 +138,10 @@ class TestDTensorDebugMode(TestCase):
         aten::clone(t$17: f32[8, 1]) -> t$25: f32[8, 1]
       aten::_to_copy(t$25: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu) -> t$26: f32[8, 1]
       redistribute_input(t$16: f32[8, 8], [R] -> [S(0)])
-        aten::split.Tensor(t$16: f32[8, 8], 1) -> ['t$27: f32[1, 8]', 't$28: f32[1, 8]', 't$29: f32[1, 8]', 't$30: f32[1, 8]', 't$31: f32[1, 8]', 't$32: f32[1, 8]', 't$33: f32[1, 8]', 't$34: f32[1, 8]']
-        aten::new_empty_strided(t$26: f32[8, 1], [8, 1], [1, 1], dtype=torch.float32, layout=torch.strided, device=cpu) -> t$35: f32[8, 1]
-        aten::copy_(t$35: f32[8, 1], t$26: f32[8, 1]) -> t$35: f32[8, 1]
-        aten::clone(t$27: f32[1, 8]) -> t$36: f32[1, 8]
+        aten::split.Tensor(t$16: f32[8, 8], 1) -> ['t$28: f32[1, 8]', 't$29: f32[1, 8]', 't$30: f32[1, 8]', 't$31: f32[1, 8]', 't$32: f32[1, 8]', 't$33: f32[1, 8]', 't$34: f32[1, 8]', 't$35: f32[1, 8]']
+        aten::new_empty_strided(t$26: f32[8, 1], [8, 1], [1, 1], dtype=torch.float32, layout=torch.strided, device=cpu) -> t$27: f32[8, 1]
+        aten::copy_(t$27: f32[8, 1], t$26: f32[8, 1]) -> t$27: f32[8, 1]
+        aten::clone(t$28: f32[1, 8]) -> t$36: f32[1, 8]
       aten::_to_copy(t$36: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu) -> t$37: f32[1, 8]
       aten::new_empty_strided(t$37: f32[1, 8], [1, 8], [8, 1], dtype=torch.float32, layout=torch.strided, device=cpu) -> t$38: f32[1, 8]
       aten::copy_(t$38: f32[1, 8], t$37: f32[1, 8]) -> t$38: f32[1, 8]"""
