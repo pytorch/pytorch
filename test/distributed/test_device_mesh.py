@@ -217,28 +217,6 @@ class DeviceMeshTest(DTensorTestBase):
         ):
             tp_mesh.get_mesh_dim_by_name(non_exist_mesh_name)
 
-    @with_comms()
-    @skip_if_lt_x_gpu(4)
-    def test_get_rank_from_coordinate(self):
-        mesh_shape = (2, self.world_size // 2)
-        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
-        self.assertEqual(mesh_2d.get_rank([0, 0]), 0)
-        self.assertEqual(mesh_2d.get_rank([0, 1]), 1)
-        self.assertEqual(mesh_2d.get_rank([1, 1]), 3)
-        self.assertEqual(mesh_2d.get_rank(), torch.distributed.get_rank())
-        coordinate_3d = [0, 0, 0]
-        with self.assertRaisesRegex(
-            ValueError,
-            f"Coordinate length {len(coordinate_3d)} must match mesh dimensions",
-        ):
-            mesh_2d.get_rank(coordinate_3d)
-        coordinate_out_range = [0, 2]
-        with self.assertRaisesRegex(
-            ValueError,
-            f"Coordinate {coordinate_out_range} at dimension 1 is out of bounds",
-        ):
-            mesh_2d.get_rank(coordinate_out_range)
-
     @with_comms
     def test_get_local_rank_raises_exception(self):
         mesh_shape = (2, self.world_size // 2)
@@ -1103,8 +1081,8 @@ class TestMeshEnv(DTensorTestBase):
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
 
-        self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "DP"), 0)
-        self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "TP"), 1)
+        self.assertEqual(mesh_2d.get_mesh_dim_by_name("DP"), 0)
+        self.assertEqual(mesh_2d.get_mesh_dim_by_name("TP"), 1)
 
     @with_comms
     def test_get_all_submeshes(self):
