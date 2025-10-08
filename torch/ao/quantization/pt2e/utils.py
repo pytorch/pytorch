@@ -72,6 +72,7 @@ def _find_q_dq_node_for_user(
                 dq_node = n
                 break
     if dq_node is None:
+        # pyrefly: ignore  # bad-assignment
         for n in user.kwargs:
             if (
                 isinstance(n, torch.fx.Node)

@@ -47,6 +47,7 @@ def _patch_dynamo_unsupported_functions():
 
     # Replace torch.jit.isinstance with isinstance
     jit_isinstance = torch.jit.isinstance
+    # pyrefly: ignore  # bad-assignment
     torch.jit.isinstance = isinstance
     logger.info("Replaced torch.jit.isinstance with isinstance to allow dynamo tracing")
     try:

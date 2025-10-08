@@ -219,6 +219,7 @@ def index_put(
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
             if symbolic_helper._is_bool(indices_list[idx_]):
+                # pyrefly: ignore  # unsupported-operation
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
@@ -819,6 +820,7 @@ def arange(g: jit_utils.GraphContext, *args):
             "Constant",
             value_t=torch.tensor(1, dtype=type_.dtype()),
         )
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Range", start_default, end, delta_default)
     elif len(args) == 4 or len(args) == 7:
         if len(args) == 4:
@@ -830,6 +832,7 @@ def arange(g: jit_utils.GraphContext, *args):
         _, end, start, step = symbolic_helper._arange_cast_helper(
             g, start=args[0], end=args[1], step=args[2], dtype=dtype
         )
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Range", start, end, step)
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
@@ -841,6 +844,7 @@ def arange(g: jit_utils.GraphContext, *args):
             "Constant",
             value_t=torch.tensor(1, dtype=type_.dtype()),
         )
+        # pyrefly: ignore  # bad-argument-type
         return g.op("Range", start, end, delta_default)
     else:
         return symbolic_helper._unimplemented(
