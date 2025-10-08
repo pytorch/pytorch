@@ -3,14 +3,19 @@
 
 import os
 import pickle
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError, wait
+from contextlib import contextmanager
 from itertools import combinations
+from pathlib import Path
 from random import Random
-from typing import Sequence
+from threading import Lock
+from typing import Generator, Sequence, Union
+from typing_extensions import Self, TypeVar
 from unittest.mock import patch
 
 from filelock import FileLock
 
-from torch._inductor.runtime.caching import config, context, exceptions, utils
+from torch._inductor.runtime.caching import config, context, exceptions, locks, utils
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -337,6 +342,171 @@ class ExceptionsTest(TestCase):
         self.assertTrue(
             issubclass(exceptions.ValueUnPicklingError, exceptions.ValueDecodingError)
         )
+
+
+@instantiate_parametrized_tests
+class LocksTest(TestMixin, TestCase):
+    T = TypeVar("T")
+
+    @contextmanager
+    def executor(self: Self) -> Generator[ThreadPoolExecutor, None, None]:
+        executor: ThreadPoolExecutor = ThreadPoolExecutor()
+        try:
+            yield executor
+        finally:
+            executor.shutdown()
+
+    def is_lock(self: Self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+        return hasattr(lock_or_flock, "locked")
+
+    def is_flock(self: Self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+        return hasattr(lock_or_flock, "is_locked")
+
+    def lock_or_flock_locked(self: Self, lock_or_flock: Union[Lock, FileLock]) -> bool:
+        if self.is_lock(lock_or_flock):
+            return lock_or_flock.locked()
+        elif self.is_flock(lock_or_flock):
+            return lock_or_flock.is_locked
+        else:
+            raise NotImplementedError
+
+    def test_BLOCKING(self: Self) -> None:
+        self.assertEqual(locks._BLOCKING, -1.0)
+
+    def test_NON_BLOCKING(self: Self) -> None:
+        self.assertEqual(locks._NON_BLOCKING, 0.0)
+
+    def test_BLOCKING_WITH_TIMEOUT(self: Self) -> None:
+        self.assertGreater(locks._BLOCKING_WITH_TIMEOUT, 0.0)
+
+    @patch.object(locks, "_BLOCKING_WITH_TIMEOUT", 1.0)
+    @patch.object(locks, "_DEFAULT_TIMEOUT", 1.0)
+    @parametrize("lock_typename", ["Lock", "FileLock"])
+    @parametrize("lock_timeout", ["BLOCKING", "NON_BLOCKING", "BLOCKING_WITH_TIMEOUT"])
+    @parametrize("acquisition_mode", ["safe", "unsafe"])
+    @parametrize("release", ["unlocked", "never", "before_timeout", "after_timeout"])
+    def test_acquire_with_timeout(
+        self: Self,
+        lock_typename: str,
+        lock_timeout: str,
+        acquisition_mode: str,
+        release: str,
+    ) -> None:
+        """Test lock acquisition behavior with various timeout configurations and release scenarios.
+
+        This comprehensive test verifies the lock acquisition functionality for both threading.Lock
+        and FileLock objects across different timeout modes, acquisition patterns, and release timings.
+        The test validates proper exception handling, timeout behavior, and correct lock state management.
+
+        Test parameters:
+        - lock_typename: Tests both "Lock" (threading.Lock) and "FileLock" (filelock.FileLock) types
+        - lock_timeout: Tests "BLOCKING", "NON_BLOCKING", and "BLOCKING_WITH_TIMEOUT" modes
+        - acquisition_mode: Tests both "safe" (context manager) and "unsafe" (manual) acquisition
+        - release: Tests "unlocked", "never", "before_timeout", and "after_timeout" scenarios
+
+        The test ensures that:
+        - Safe acquisition properly manages lock lifecycle through context managers
+        - Unsafe acquisition requires manual release and behaves correctly
+        - Timeout exceptions are raised appropriately for different timeout configurations
+        - Lock states are correctly maintained throughout acquisition and release cycles
+        - Different lock types (Lock vs FileLock) behave consistently with their respective APIs
+        """
+
+        def inner(lock_or_flock: Union[Lock, FileLock], timeout: int) -> None:
+            if self.is_lock(lock_or_flock):
+                lock: Lock = lock_or_flock
+                if acquisition_mode == "safe":
+                    with locks._acquire_lock_with_timeout(lock, timeout=timeout):
+                        self.assertTrue(self.lock_or_flock_locked(lock))
+                elif acquisition_mode == "unsafe":
+                    locks._unsafe_acquire_lock_with_timeout(lock, timeout=timeout)
+                    self.assertTrue(self.lock_or_flock_locked(lock))
+                    lock.release()
+                else:
+                    raise NotImplementedError
+            elif self.is_flock(lock_or_flock):
+                flock: FileLock = lock_or_flock
+                if acquisition_mode == "safe":
+                    with locks._acquire_flock_with_timeout(flock, timeout=timeout):
+                        self.assertTrue(self.lock_or_flock_locked(flock))
+                elif acquisition_mode == "unsafe":
+                    locks._unsafe_acquire_flock_with_timeout(flock, timeout=timeout)
+                    self.assertTrue(self.lock_or_flock_locked(flock))
+                    flock.release()
+                else:
+                    raise NotImplementedError
+            else:
+                raise NotImplementedError
+            self.assertFalse(self.lock_or_flock_locked(lock_or_flock))
+
+        assert lock_typename in ["Lock", "FileLock"]
+        flock_fpath: Path = Path("/tmp/LocksTest") / self.random_string
+        lock_or_flock: Union[Lock, FileLock] = (
+            Lock() if lock_typename == "Lock" else FileLock(str(flock_fpath))
+        )
+        lock_exception_type: type = (
+            exceptions.LockTimeoutError
+            if lock_typename == "Lock"
+            else exceptions.FileLockTimeoutError
+        )
+
+        if release == "unlocked":
+            self.assertFalse(self.lock_or_flock_locked(lock_or_flock))
+        elif release in ["never", "before_timeout", "after_timeout"]:
+            self.assertTrue(lock_or_flock.acquire(timeout=locks._NON_BLOCKING))
+            self.assertTrue(self.lock_or_flock_locked(lock_or_flock))
+        else:
+            raise NotImplementedError
+
+        with self.executor() as executor:
+            assert lock_timeout in ["BLOCKING", "NON_BLOCKING", "BLOCKING_WITH_TIMEOUT"]
+            lock_or_flock_future: Future[None] = executor.submit(
+                inner,
+                lock_or_flock,
+                timeout={
+                    "BLOCKING": locks._BLOCKING,
+                    "NON_BLOCKING": locks._NON_BLOCKING,
+                    "BLOCKING_WITH_TIMEOUT": locks._BLOCKING_WITH_TIMEOUT,
+                }[lock_timeout],
+            )
+
+            if release == "unlocked":
+                self.assertIsNone(lock_or_flock_future.result())
+            elif release == "never":
+                wait([lock_or_flock_future], timeout=(locks._BLOCKING_WITH_TIMEOUT * 2))
+                if lock_timeout == "BLOCKING":
+                    with self.assertRaises(TimeoutError):
+                        lock_or_flock_future.result(
+                            timeout=locks._BLOCKING_WITH_TIMEOUT
+                        )
+                elif lock_timeout in ["NON_BLOCKING", "BLOCKING_WITH_TIMEOUT"]:
+                    with self.assertRaises(lock_exception_type):
+                        lock_or_flock_future.result()
+                else:
+                    raise NotImplementedError
+                lock_or_flock.release()
+            elif release == "before_timeout":
+                wait([lock_or_flock_future], timeout=(locks._BLOCKING_WITH_TIMEOUT / 2))
+                lock_or_flock.release()
+                if lock_timeout in ["BLOCKING", "BLOCKING_WITH_TIMEOUT"]:
+                    self.assertIsNone(lock_or_flock_future.result())
+                elif lock_timeout == "NON_BLOCKING":
+                    with self.assertRaises(lock_exception_type):
+                        lock_or_flock_future.result()
+                else:
+                    raise NotImplementedError
+            elif release == "after_timeout":
+                wait([lock_or_flock_future], timeout=(locks._BLOCKING_WITH_TIMEOUT * 2))
+                lock_or_flock.release()
+                if lock_timeout == "BLOCKING":
+                    self.assertIsNone(lock_or_flock_future.result())
+                elif lock_timeout in ["NON_BLOCKING", "BLOCKING_WITH_TIMEOUT"]:
+                    with self.assertRaises(lock_exception_type):
+                        lock_or_flock_future.result()
+                else:
+                    raise NotImplementedError
+
+        flock_fpath.unlink(missing_ok=True)
 
 
 @instantiate_parametrized_tests
