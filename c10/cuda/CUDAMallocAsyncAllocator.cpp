@@ -14,7 +14,6 @@ namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync {
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
-#if CUDA_VERSION >= 11040 || defined(USE_ROCM)
 // CUDA device allocator that uses cudaMallocAsync to implement
 // the same interface as CUDACachingAllocator.cpp.
 
@@ -447,7 +446,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return !devs_initialized_flags.empty();
   }
 
-  static inline void assertValidDevice(c10::DeviceIndex device) {
+  static void assertValidDevice(c10::DeviceIndex device) {
     TORCH_CHECK(
         0 <= device && device < device_count, "Invalid device argument.");
   }
@@ -494,6 +493,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // demand, but opportunistically trims reserved memory back to threshold
     // when the memory in use is < threshold. I don't like this because it
     // introduces performance nondeterminism.
+  }
+
+  std::vector<StreamSegmentSize> getExpandableSegmentSizes(
+      c10::DeviceIndex device) override {
+    TORCH_CHECK(
+        false,
+        "CUDAMallocAsyncAllocator does not yet support getExpandableSegmentSizes.");
   }
 
   void emptyCache(/*unused*/ MempoolId_t mempool_id) override {
@@ -925,14 +931,5 @@ void local_raw_delete(void* ptr) {
 CUDAAllocator* allocator() {
   return &device_allocator;
 }
-
-#else
-// NOLINTNEXTLINE(misc-use-internal-linkage)
-CUDAAllocator* allocator() {
-  TORCH_CHECK(false, "Cannot use CudaMallocAsyncAllocator with cuda < 11.4.");
-  return nullptr;
-}
-
-#endif
 
 } // namespace c10::cuda::CUDACachingAllocator::CudaMallocAsync
