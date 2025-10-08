@@ -97,7 +97,7 @@ class TestObserver(QuantizationTestCase):
                                                     reduce_range=reduce_range)]
 
         def _get_ref_params(reduce_range, qscheme, dtype, input_scale, min_val, max_val):
-            assert dtype in _INT_DTYPES, "Not supported dtype: {dtype}, supported dtypes are {_INT_DTYPES}"
+            assert dtype in _INT_DTYPES, f"Not supported dtype: {dtype}, supported dtypes are {_INT_DTYPES}"
             eps = torch.tensor([tolerance])
             if dtype in [torch.qint8, torch.int8]:
                 if reduce_range:
@@ -908,11 +908,13 @@ class TestFakeQuantize(TestCase):
         self.assertEqual(fq_module.activation_post_process.quant_min, 0)
         self.assertEqual(fq_module.activation_post_process.quant_max, 127)
 
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
-    def test_fused_moving_avg_obs_fake_quant(self, device):
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           sampled_dtype=st.sampled_from(['bf16', 'fp16', 'fp32']))
+    def test_fused_moving_avg_obs_fake_quant(self, device, sampled_dtype):
         try:
-            sampled_dtype = st.sampled_from(["bf16", "fp32"]) if device == "cuda" else "fp32"
-            dtype = torch.bfloat16 if sampled_dtype == "bf16" else torch.float32
+            if device == 'cpu':
+                sampled_dtype = 'fp32'
+            dtype = {'bf16' : torch.bfloat16, 'fp16' : torch.half, 'fp32' : torch.float32}[sampled_dtype]
             torch.set_default_dtype(dtype)
 
             with torch.device(device):

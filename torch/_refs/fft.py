@@ -106,6 +106,7 @@ def _resize_fft_input(
         if x_sizes[dims[i]] < sizes[i]:
             must_copy = True
             pad_idx = len(pad_amount) - 2 * dims[i] - 1
+
             pad_amount[pad_idx] = sizes[i] - x_sizes[dims[i]]
 
         if x_sizes[dims[i]] > sizes[i]:

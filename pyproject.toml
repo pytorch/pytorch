@@ -4,7 +4,7 @@
 requires = [
     # 70.1.0: min version for integrated bdist_wheel command from wheel package
     # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=70.1.0,<80.0",
+    "setuptools>=70.1.0",
     "cmake>=3.27",
     "ninja",
     "numpy",
@@ -53,7 +53,7 @@ dev = [
 name = "torch"
 description = "Tensors and Dynamic neural networks in Python with strong GPU acceleration"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 # TODO: change to `license = "BSD-3-Clause"` and enable PEP 639 after pinning setuptools>=77
 # FIXME: As of 2025.06.20, it is hard to ensure the minimum version of setuptools in our CI environment.
 # TOML-table-based license deprecated in setuptools>=77, and the deprecation warning will be changed
@@ -74,7 +74,6 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: C++",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -185,6 +184,9 @@ ignore = [
     "UP007", # keep-runtime-typing
     "UP045", # keep-runtime-typing
     "TC006",
+    # TODO: Remove Python-3.10 specific suppressions
+    "B905",
+    "UP035",
 ]
 select = [
     "B",
@@ -240,6 +242,7 @@ select = [
     "Q003",  # avoidable escaped quote
     "Q004",  # unnecessary escaped quote
     "RSE",
+    "RUF007", # pairwise over zip
     "RUF008", # mutable dataclass default
     "RUF013", # ban implicit optional
     "RUF015", # access first ele in constant time
