@@ -219,7 +219,6 @@ def index_put(
     if len(indices_list) > 1:
         for idx_ in range(len(indices_list)):
             if symbolic_helper._is_bool(indices_list[idx_]):
-                # pyrefly: ignore  # unsupported-operation
                 indices_list[idx_] = g.op("NonZero", indices_list[idx_])
         index = indices_list[0]
 
