@@ -1538,7 +1538,7 @@ class CudaReproTests(TestCase):
                 t2 = a0.view(379, 165, 2).mean(dim=2)
                 t7 = ((((a1) - a2) - a3) - a2) - a4
                 t8 = t7.view(379, 165)
-                t11 = torch.nn.functional.gelu(a5).mean(dim=0)
+                t11 = torch.nn.functional.relu(a5).mean(dim=0)
                 t12 = t2 - t11
                 t13 = (((t2) / t8) / t11) / t12
                 return t13
