@@ -31,6 +31,7 @@ def pass_result_wrapper(fn: Callable) -> Callable:
         wrapped_fn (Callable[Module, PassResult])
     """
     if fn is None:
+        # pyrefly: ignore  # bad-return
         return None
 
     @wraps(fn)
@@ -273,6 +274,7 @@ class PassManager:
                 logger.debug("Running pass '%s'", fn_name)
 
                 try:
+                    # pyrefly: ignore  # not-callable
                     res = fn(module)
 
                     if not isinstance(res, PassResult) and not hasattr(

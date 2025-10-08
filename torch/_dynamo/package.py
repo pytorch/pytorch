@@ -26,7 +26,7 @@ import sys
 import types
 from collections.abc import Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, Callable, NewType, Optional
+from typing import Any, Callable, NewType, Optional, TYPE_CHECKING
 from typing_extensions import Never
 
 import torch
@@ -38,6 +38,10 @@ from .utils import dynamo_timed, increment_frame
 
 
 logger = logging.getLogger(__name__)
+
+
+if TYPE_CHECKING:
+    from .guards import GuardManagerWrapper, GuardsState
 
 
 @dataclasses.dataclass(frozen=True)
@@ -107,6 +111,22 @@ def load_guards_state(guards_state: bytes) -> Any:
         ctx = nullcontext()  # type: ignore[assignment]
     with ctx:
         return pickle.loads(guards_state)
+
+
+def load_guard_manager(
+    guards_state: "GuardsState",
+    target_code: types.CodeType,
+    runtime_global_scope: Any,
+) -> "GuardManagerWrapper":
+    from .output_graph import OutputGraphCommon
+
+    return torch._dynamo.guards.CheckFunctionManager(
+        target_code,
+        OutputGraphCommon(guards_state.output_graph),
+        shape_code_parts=guards_state.shape_code_parts,
+        runtime_global_scope=runtime_global_scope,
+        source_get_cache=guards_state.source_get_cache,
+    ).guard_manager
 
 
 _BackendId = NewType("_BackendId", str)  # __compiled_fn
@@ -739,7 +759,7 @@ class CompilePackage:
         """
         from torch._C._dynamo.eval_frame import _load_precompile_entry
 
-        from .output_graph import get_builtins_dict, OutputGraphCommon
+        from .output_graph import get_builtins_dict
 
         self.uninstall()
         for code, entry in self._codes.items():
@@ -806,16 +826,12 @@ class CompilePackage:
                             runtime_global_scope[builtin_dict_name] = builtins_dict
                     assert isinstance(guards_state, torch._dynamo.guards.GuardsState)
                     with dynamo_timed("precompile_build_guards"):
-                        check_fn_manager = torch._dynamo.guards.CheckFunctionManager(
-                            target_code,
-                            OutputGraphCommon(guards_state.output_graph),
-                            shape_code_parts=guards_state.shape_code_parts,
-                            runtime_global_scope=runtime_global_scope,
-                            source_get_cache=guards_state.source_get_cache,
+                        guard_manager = load_guard_manager(
+                            guards_state, target_code, runtime_global_scope
                         )
                     _load_precompile_entry(
                         target_code,
-                        check_fn_manager.guard_manager,
+                        guard_manager,
                         SerializedCode.to_code_object(guarded_code.dynamo_code),
                     )
 

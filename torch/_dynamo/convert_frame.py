@@ -750,6 +750,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 
 
 @preserve_global_state
+@torch.fx.traceback.preserve_node_meta()
 def trace_frame(
     code: types.CodeType,
     globals: dict[str, object],
