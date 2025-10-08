@@ -47,3 +47,32 @@ def _call_custom_autograd_function_in_pre_dispatch(function_cls_name, *args, **k
     function_cls = getattr(module, class_name)
     assert hasattr(function_cls, "apply")
     return function_cls.apply(*args, **kwargs)
+
+def make_redistribute_closure(device_mesh, placements, async_op=False, forward_dtype=None, backward_dtype=None):
+    """
+    Create a closure function for DTensor.redistribute() that captures all arguments.
+    This mimics dynamo's closure-based approach in variables/tensor.py:method_redistribute.
+    The returned closure only takes the dtensor as input.
+    """
+    def redistribute_closure(dtensor):
+        # All arguments are captured in the closure
+        return dtensor.redistribute(
+            device_mesh=device_mesh,
+            placements=placements,
+            async_op=async_op,
+            forward_dtype=forward_dtype,
+            backward_dtype=backward_dtype,
+        )
+
+    redistribute_closure.__name__ = f"redistribute_closure_{id(redistribute_closure)}"
+    return redistribute_closure
+
+def make_to_local_closure(grad_placements=None):
+    """
+    Create a closure function for DTensor.to_local() that captures grad_placements.
+    """
+    def to_local_closure(dtensor):
+        return dtensor.to_local(grad_placements=grad_placements)
+
+    to_local_closure.__name__ = f"to_local_closure_{id(to_local_closure)}"
+    return to_local_closure

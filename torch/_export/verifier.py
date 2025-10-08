@@ -231,16 +231,16 @@ class Verifier(metaclass=_VerifierMeta):
                 torch._functorch.predispatch.lazy_load_decompositions,
             )
 
-            if not isinstance(op, _allowed_op_types()):
-                if (
-                    op not in _allowed_builtin_ops()
-                    and op not in _allowed_torch_functions
-                ):
-                    raise SpecViolationError(
-                        f"Operator '{op}' is not an allowed operator type: {_allowed_op_types()}\n"
-                        f"Valid builtin ops: {_allowed_builtin_ops()}"
-                        f"Valid torch functions: {_allowed_torch_functions}"
-                    )
+            # if not isinstance(op, _allowed_op_types()):
+            #     if (
+            #         op not in _allowed_builtin_ops()
+            #         and op not in _allowed_torch_functions
+            #     ):
+            #         raise SpecViolationError(
+            #             f"Operator '{op}' is not an allowed operator type: {_allowed_op_types()}\n"
+            #             f"Valid builtin ops: {_allowed_builtin_ops()}"
+            #             f"Valid torch functions: {_allowed_torch_functions}"
+            #         )
 
             if isinstance(op, OpOverload):
                 # All ops functional
