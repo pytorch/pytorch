@@ -1325,17 +1325,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if name == "__defaults__":
             d = getattr(self, "defaults", None)
             return d.as_python_constant() if d else None
-        if name == "__kwdefaults__":
-            kd = getattr(self, "kwdefaults", None)
-            return kd.as_python_constant() if kd else None
-        if name == "__annotations__":
-            ann = getattr(self, "annotations", None)
-            val = ann.as_python_constant() if ann else None
-            if isinstance(val, tuple):
-                val = dict(itertools.pairwise(val))
-            return val
-        if name == "__globals__":
-            return self.get_globals()
         return super().const_getattr(tx, name)
 
     def has_self(self):
