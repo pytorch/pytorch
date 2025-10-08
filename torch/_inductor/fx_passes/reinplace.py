@@ -24,7 +24,10 @@ from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
 from torch._inductor.virtualized import V
-from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+from torch.fx.experimental.symbolic_shapes import (
+    compute_unbacked_bindings,
+    GuardOnDataDependentSymNode,
+)
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
@@ -60,7 +63,14 @@ def graph_call_function(graph: torch.fx.Graph, fn, *args, **kwargs):
         fake_result = fn(*fake_args, **fake_kwargs)
 
     node = graph.call_function(fn, args, kwargs)
+
     node.meta["val"] = fake_result
+    # we need to set unbacked bindings that could have been created during the generation of the new val.
+    if (V.fake_mode.shape_env) and (
+        symbol_to_path := compute_unbacked_bindings(V.fake_mode.shape_env, fake_result)
+    ):
+        node.meta["unbacked_bindings"] = symbol_to_path
+
     return node
 
 
