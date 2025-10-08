@@ -25,7 +25,7 @@ from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, ChoiceCaller, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
-from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
+from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -930,16 +930,22 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         and is_nonzero
         and use_triton_template(layout, check_max_autotune=True)
     ):
-        templates_to_use.append(mm_template)
-
-        if use_triton_tma_template(mat1, mat2, output_layout=layout):
-            templates_to_use.append(persistent_tma_mm_template)
-
-        if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-
         if use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
+        # Triton Templates typically perform very poorly for large K.
+        # Its highly unlikely that if we want to use decompose_k, then
+        # Triton will ever win.
+        #
+        # To be conservative we increase this threshold for N/M by 2.
+        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "exhaustive"
+        if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
+            templates_to_use.append(mm_template)
+
+            if use_triton_tma_template(mat1, mat2, output_layout=layout):
+                templates_to_use.append(persistent_tma_mm_template)
+
+            if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
+                templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
@@ -1245,9 +1251,6 @@ def tuned_sparse_semi_structured_mm(
     return autotune_select_algorithm(
         "sparse_semi_structured_mm", choices, (mat1, mat1_meta, mat2), layout
     )
-
-
-add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
