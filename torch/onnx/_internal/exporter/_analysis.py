@@ -128,6 +128,7 @@ def _format_model_info(model_info: ModelInfo) -> str:
         target_to_messages = {}
         for node, message in model_info.dispatch_failures:
             if str(node.target) not in target_to_messages:
+                # pyrefly: ignore  # unsupported-operation
                 target_to_messages[str(node.target)] = message
 
         for target, nodes in sorted(
