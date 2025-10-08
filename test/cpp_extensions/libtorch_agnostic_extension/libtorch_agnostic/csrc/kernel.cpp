@@ -10,9 +10,6 @@
 #include <cuda_runtime.h>
 #endif
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 #include <optional>
 
 void inline sgd_math(
