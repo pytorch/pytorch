@@ -360,7 +360,6 @@ def trace_flex_attention(
         "call_function", flex_attention, proxy_args, {}
     )
     return track_tensor_tree(
-        # pyrefly: ignore  # bad-argument-type
         example_out,
         out_proxy,
         constant=None,
@@ -1080,7 +1079,6 @@ def trace_flex_attention_backward(
         name="flex_attention_backward",
     )
     return track_tensor_tree(
-        # pyrefly: ignore  # bad-argument-type
         example_out,
         out_proxy,
         constant=None,
