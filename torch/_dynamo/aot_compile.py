@@ -89,6 +89,7 @@ class AOTCompiledFunction:
             **import_sources,
             self._artifacts.backend_id: self._artifacts.compiled_fn,
         }
+        # pyrefly: ignore  # read-only
         self.fn = types.FunctionType(
             self._artifacts.bytecode, f_globals, closure=self._artifacts.closure
         )

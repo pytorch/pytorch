@@ -3700,7 +3700,7 @@ def index_output_size_and_inner_fn(
     # Then, a[:,x,:,x,:] will have shape 2,3,5,7 as due to x,:,x then 2 will
     # be pulled to the front.
     non_consecutive_tensors = False
-    for previous, current in zip(tensor_indices, tensor_indices[1:]):
+    for previous, current in itertools.pairwise(tensor_indices):
         if current - previous != 1:
             non_consecutive_tensors = True
 
