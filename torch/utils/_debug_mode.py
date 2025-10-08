@@ -152,6 +152,7 @@ class DebugMode(TorchDispatchMode):
         super().__enter__()
         return self
 
+    # pyrefly: ignore  # bad-override
     def __exit__(self, *args):
         super().__exit__(*args)
         if self.record_torchfunction:

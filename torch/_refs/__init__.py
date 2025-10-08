@@ -6682,7 +6682,7 @@ def _infer_scalar_type(obj):
         # double.
         if length == 0:
             return torch.get_default_dtype()
-        # pyrefly: ignore  # bad-assignment
+
         for i in range(length):
             cur_item = obj[i]
             # TODO: test this
