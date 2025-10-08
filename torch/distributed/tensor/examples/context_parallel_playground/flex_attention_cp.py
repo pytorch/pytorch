@@ -15,7 +15,7 @@ import torch.distributed.tensor.experimental._attention as cp_attn
 from torch import Tensor
 from torch.autograd.grad_mode import no_grad
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor.examples.flex_perf import (
+from torch.distributed.tensor.examples.context_parallel_playground.flex_perf import (
     add_metrics_to_result,
     benchmark_torch_function_in_microseconds,
     Experiment,
