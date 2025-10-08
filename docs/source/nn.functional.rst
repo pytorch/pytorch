@@ -225,4 +225,6 @@ Low-Precision functions
     :toctree: generated
     :nosignatures:
 
+    ScalingType
+    SwizzleType
     scaled_mm

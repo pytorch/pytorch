@@ -8,7 +8,12 @@ from typing import Any as _Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
-from torch._C import _add_docstr, _infer_size, _ScalingType, _SwizzleType
+from torch._C import (
+    _add_docstr,
+    _infer_size,
+    _ScalingType as ScalingType,
+    _SwizzleType as SwizzleType,
+)
 from torch._jit_internal import (
     _overload,
     boolean_dispatch,
@@ -26,6 +31,10 @@ from torch.overrides import (
     has_torch_function_variadic,
 )
 
+
+# Set visibility of the bound enums to this module
+ScalingType.__module__ = "torch.nn.functional"
+SwizzleType.__module__ = "torch.nn.functional"
 
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
@@ -6515,11 +6524,11 @@ def scaled_mm(
     mat_a: Tensor,
     mat_b: Tensor,
     scale_a: Tensor | list[Tensor],
-    scale_recipe_a: _ScalingType | list[_ScalingType],
+    scale_recipe_a: ScalingType | list[ScalingType],
     scale_b: Tensor | list[Tensor],
-    scale_recipe_b: _ScalingType | list[_ScalingType],
-    swizzle_a: _SwizzleType | list[_SwizzleType] | None = None,
-    swizzle_b: _SwizzleType | list[_SwizzleType] | None = None,
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
     bias: Optional[Tensor] = None,
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
     contraction_dim: Optional[list[int]] = None,
