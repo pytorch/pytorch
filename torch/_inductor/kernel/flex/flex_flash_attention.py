@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 """Call into flash-attention 4 for flexattention"""
 
+import functools
+import importlib
 from typing import Any
 
 import sympy
@@ -16,13 +18,15 @@ from .common import infer_dense_strides, load_template, SubgraphResults
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-try:
-    from flash_attn.cute import flash_attn_func  # type: ignore[import-not-found]
 
-    CUTE_AVAILABLE = True
-except ImportError:
-    flash_attn_func = None
-    CUTE_AVAILABLE = False
+@functools.lru_cache(maxsize=1)
+def ensure_flash_available() -> bool:
+    """Check if flash-attn is importable; cache the result for reuse.
+
+    Call ensure_flash_available.cache_clear() after installing flash-attn
+    in the same interpreter to retry the import.
+    """
+    return importlib.util.find_spec("flash_attn.cute") is not None
 
 
 from ...codegen.cutedsl.cutedsl_template import CuteDSLTemplate
@@ -72,7 +76,7 @@ def _can_use_flex_flash_attention(
     Returns:
         tuple: (can_use, reason) where reason explains why it can't be used if can_use is False
     """
-    if not CUTE_AVAILABLE:
+    if not ensure_flash_available():
         return False, "CUTE flash attention library is not available"
 
     if input_buffers_require_grads(subgraph.graph_module):
@@ -132,7 +136,7 @@ def create_flex_flash_attention_kernel(
     mask_mod_other_buffers: list[TensorBox],
 ) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox | ShapeAsConstantBuffer]:
     """Create a flex flash attention kernel using CuteDSL template."""
-    if not CUTE_AVAILABLE:
+    if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
 
     # Get dimensions
