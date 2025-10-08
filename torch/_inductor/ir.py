@@ -2987,6 +2987,18 @@ class PermuteView(BaseView):
         return reindex
 
 
+def is_size_one(size: Union[int, sympy.Expr]) -> bool:
+    if isinstance(size, sympy.Expr):
+        # Lazy load and check this
+        from torch._inductor.virtualized import V
+
+        # Edge case related to squeeze for symbolic that is known to
+        # be 1 - needed for #164814
+        return V.graph.sizevars.statically_known_equals(size, 1)
+    else:
+        return size == 1
+
+
 @ir_dataclass
 class SqueezeView(BaseView):
     @classmethod
@@ -2999,17 +3011,10 @@ class SqueezeView(BaseView):
                 assert isinstance(dim, int), type(dim)
                 assert 0 <= dim and dim < len(old_layout.size)
 
-            # Fix for #164814: Handle symbolic expressions that are equal to 1
-            from torch._inductor.virtualized import V
-              
             for i, (size, stride) in enumerate(zip(old_layout.size, old_layout.stride)):
                 if dim is None:
-                    # Skip dimensions that are 1 (literal or symbolic)
-                    is_one = size == 1 or (
-                        isinstance(size, sympy.Expr)
-                        and V.graph.sizevars.statically_known_equals(size, 1)
-                    )
-                    if not is_one:
+                    # Only append if dim is not squeezed out
+                    if not is_size_one(size):
                         new_size.append(size)
                         new_stride.append(stride)
                 else:
@@ -3030,20 +3035,7 @@ class SqueezeView(BaseView):
             return ReinterpretView(data=storage, layout=new_layout)
 
         if dim is None:
-            # redirect to a generic view
-            # Fix for #164814: Filter out dimensions that are symbolically equal to 1.
-            # When dynamic shape operations produce tensors with symbolic shapes like (u0,)
-            # where u0 is guarded to equal 1, we need to filter them out properly.
-            from torch._inductor.virtualized import V
-            new_size = []
-            for s in x.get_size():
-                # Keep dimension if it's not literally 1 and not symbolically equal to 1
-                if s != 1 and not (
-                    isinstance(s, sympy.Expr)
-                    and V.graph.sizevars.statically_known_equals(s, 1)
-                ):
-                    new_size.append(s)
-            return View.create(x, new_size)
+            return View.create(x, [s for s in x.get_size() if not is_size_one(s)])
         else:
             assert x.get_size()[dim] == 1
             return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])

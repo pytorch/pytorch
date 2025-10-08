@@ -1764,7 +1764,7 @@ def aot_stage2_autograd(
                     # (2408448, 1, 21504, 192). The solution mentioned will
                     # decide a stride of (802816, 1, 7168, 64) for this
                     # tensor which is wrong.
-                    
+
                     ph_size = ph_arg.size()
                     if len(ph_size) == 0 and len(real_stride) > 0:
                         # Fix for 0-dimensional tensors: When a tensor becomes 0-d
@@ -1773,7 +1773,7 @@ def aot_stage2_autograd(
                         # tensors that are later squeezed to 0-d. The stride metadata
                         # may get preserved causing a dimension mismatch (#164814)
                         real_stride = ()
-                    
+
                     # pyrefly: ignore  # bad-argument-type
                     placeholder_list[i] = ph_arg.as_strided(ph_size, real_stride)
             compiled_bw_func = None
