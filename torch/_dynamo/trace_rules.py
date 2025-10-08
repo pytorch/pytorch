@@ -3005,6 +3005,7 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                 obj = torch_dir + k[len("torch/") :]
             if obj is not None:
                 if is_annotate_wrapped_function(obj):
+                    # pyrefly: ignore  # missing-attribute
                     obj = obj.__wrapped__
                 if is_lru_cache_wrapped_function(obj):
                     obj = obj.__wrapped__

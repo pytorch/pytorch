@@ -23,7 +23,6 @@ project-excludes = [
   "torch/_inductor/**",
   "torch/distributed/**",
   "torch/nn/**",
-  "torch/_dynamo/**",
   # formatting issues
   "torch/linalg/__init__.py",
   "torch/package/importer.py",
