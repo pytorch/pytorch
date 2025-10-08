@@ -6436,7 +6436,7 @@ class TestLearnableBiases(InductorTestCase):
         bias = torch.randn(
             params.seq_length,
             device=device,
-            dtype=params.dtype,
+            dtype=torch.float32,
             requires_grad=True,
         )
 
@@ -6619,12 +6619,12 @@ class TestLearnableBiases(InductorTestCase):
         gate_score = torch.randn(
             params.num_heads,
             device=device,
-            dtype=params.dtype,
+            dtype=torch.float32,
             requires_grad=True,
         )
 
         def bias_func(score, b, h, q_idx, kv_idx):
-            return score * torch.sigmoid(gate_score[h].to(torch.float32))
+            return score * torch.sigmoid(gate_score[h])
 
         flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
@@ -6659,7 +6659,7 @@ class TestLearnableBiases(InductorTestCase):
         bias2 = torch.randn(
             params.seq_length,
             device=device,
-            dtype=params.dtype,
+            dtype=torch.float32,
             requires_grad=True,
         )
 
