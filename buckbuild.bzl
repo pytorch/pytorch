@@ -156,7 +156,7 @@ ROOT = "//" if IS_OSS else "//xplat/caffe2"
 # for targets in subfolders
 ROOT_PATH = "//" if IS_OSS else "//xplat/caffe2/"
 
-C10 = "//c10:c10" if IS_OSS else ("//xplat/caffe2/c10:c10_ovrsource" if is_arvr_mode() else "//xplat/caffe2/c10:c10")
+C10 = "//c10:c10" if IS_OSS else "//xplat/caffe2/c10:c10"
 
 # a dictionary maps third party library name to fbsource and oss target
 THIRD_PARTY_LIBS = {
@@ -391,6 +391,8 @@ def get_aten_generated_files(enabled_backends):
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
         "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
+        "ViewMetaClasses.h",
+        "ViewMetaClasses.cpp",
         "VmapGeneratedPlumbing.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
@@ -948,7 +950,6 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
-                ("", "torch/csrc/**/*.hpp"),
                 ("", "torch/nativert/**/*.h"),
                 ("", "torch/headeronly/**/*.h"),
                 ("", "torch/script.h"),
@@ -1037,7 +1038,8 @@ def define_buck_targets(
         name = "generated-version-header",
         header_namespace = "torch",
         exported_headers = {
-            "version.h": ":generate-version-header[version.h]",
+            "headeronly/version.h": ":generate-version-header[version.h]",
+            "version.h": "torch/csrc/api/include/torch/version.h"
         },
         labels = labels,
     )
@@ -1046,19 +1048,27 @@ def define_buck_targets(
     fb_native.genrule(
         name = "generate-version-header",
         srcs = [
-            "torch/csrc/api/include/torch/version.h.in",
+            "torch/headeronly/version.h.in",
             "version.txt",
         ],
-        cmd = "$(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
+        cmd = "mkdir -p $OUT/torch/headeronly && $(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
             "--template-path",
-            "torch/csrc/api/include/torch/version.h.in",
+            "torch/headeronly/version.h.in",
             "--version-path",
             "version.txt",
             "--output-path",
-            "$OUT/version.h",
+            "$OUT/torch/headeronly/version.h",
+        ]),
+        cmd_exe = "md $OUT\\torch\\headeronly 2>nul & $(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
+            "--template-path",
+            "torch/headeronly/version.h.in",
+            "--version-path",
+            "version.txt",
+            "--output-path",
+            "$OUT\\torch\\headeronly\\version.h",
         ]),
         outs = {
-            "version.h": ["version.h"],
+            "version.h": ["torch/headeronly/version.h"],
         },
         default_outs = ["."],
     )
@@ -1193,6 +1203,7 @@ def define_buck_targets(
             "NativeMetaFunctions.h": ":gen_aten[NativeMetaFunctions.h]",
             "Operators.h": ":gen_aten[Operators.h]",
             "RedispatchFunctions.h": ":gen_aten[RedispatchFunctions.h]",
+            "ViewMetaClasses.h": ":gen_aten[ViewMetaClasses.h]",
             "core/TensorBody.h": ":gen_aten[core/TensorBody.h]",
             "core/aten_interned_strings.h": ":gen_aten[core/aten_interned_strings.h]",
             "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
@@ -2048,7 +2059,6 @@ def define_buck_targets(
                 ("", "caffe2/utils/*.h"),
                 ("", "caffe2/core/*.h"),
                 ("", "torch/csrc/*.h"),
-                ("", "torch/csrc/*.hpp"),
                 ("", "torch/csrc/api/include/torch/*.h"),
                 ("", "torch/csrc/autograd/*.h"),
                 ("", "torch/csrc/autograd/*/*.h"),
