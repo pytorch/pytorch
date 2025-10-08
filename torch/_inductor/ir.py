@@ -1449,39 +1449,17 @@ class Reduction(Loops):
         reduction_ranges = V.graph.sizevars.guard_int_seq(reduction_ranges)
 
         combine_fn = get_reduction_combine_fn(reduction_type, src_dtype)
-        
-        # Number of default accumulators for thread_reduce for eager
-        # to emulate reduction order
-        def fn(index: Sequence[_IntLike]) -> Any:
-            # Currently only support eager emulation for 1 reduction range
-            if len(reduction_ranges) > 1:
-                return functools.reduce(
-                    combine_fn,
-                    (
-                        value_fn(index, rindex)
-                        for rindex in itertools.product(
-                            *[range(x) for x in reduction_ranges]
-                        )
-                    ),
-                )
 
-            # num_accs based on vt0 in aten/native/cuda/Reduce.cuh
-            num_accs = 4
-            rnumel = reduction_ranges[0]
-            accs = []
-            for acc_num in range(min(num_accs, rnumel)):
-                accs.append(
-                    functools.reduce(
-                        combine_fn,
-                        (
-                            value_fn(index, rindex)
-                            for rindex in itertools.product(
-                                *[range(acc_num, x, num_accs) for x in reduction_ranges]
-                            )
-                        ),
+        def fn(index: Sequence[_IntLike]) -> Any:
+            return functools.reduce(
+                combine_fn,
+                (
+                    value_fn(index, rindex)
+                    for rindex in itertools.product(
+                        *[range(x) for x in reduction_ranges]
                     )
-                )
-            return functools.reduce(combine_fn, accs)
+                ),
+            )
 
         value_fn: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Any]
         if reduction_type in ("argmin", "argmax"):
