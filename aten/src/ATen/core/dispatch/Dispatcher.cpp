@@ -17,6 +17,7 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 #endif
 
 bool show_dispatch_trace() {
+  return false;
   const char* rank_env = std::getenv("RANK");
   if (rank_env == nullptr) {
     rank_env = std::getenv("LOCAL_RANK");

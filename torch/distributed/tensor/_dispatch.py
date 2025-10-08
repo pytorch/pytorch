@@ -229,7 +229,11 @@ class OpDispatcher:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
-                local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                try:
+                    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                except:
+                    import fbvscode
+                    fbvscode.set_trace()
 
         else:
             # For a non-participating device (happens on rank that does not belong to
@@ -336,7 +340,6 @@ class OpDispatcher:
         use_val_from_redistribute_schema: bool,
     ) -> None:
         debug_mode = get_active_debug_mode()
-
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
         if op_info.args_tree_spec is not None:
             flatten_args_schema_to_reshard = tuple(

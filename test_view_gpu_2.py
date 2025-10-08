@@ -27,11 +27,12 @@ def main():
     torch.cuda.set_device(device)
     mesh_shape = (2, )
     mesh = init_device_mesh("cuda", mesh_shape)
-    input_dim, batch_size, seq_len = 4, 8, 8
-    global_input = torch.randn([batch_size, seq_len, input_dim])
+    input_dim, batch_size, seq_len = 2, 4, 2
+    global_input = torch.arange(input_dim * batch_size * seq_len).float().view(input_dim, batch_size, seq_len)
     input_sharding = (Shard(1), )
     distributed_input = distribute_tensor(global_input, mesh, input_sharding)
-    distributed_input.view(batch_size * seq_len, input_dim)
+    shard = distributed_input.view(batch_size * seq_len, input_dim)
+    print(f"rank: {torch.distributed.get_rank()} shard: {shard}\n", flush=True)
 
 
 if __name__ == "__main__":

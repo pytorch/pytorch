@@ -280,10 +280,10 @@ def generate_redistribute_costs(
 
     Each value in the row is the cost of redistributing from a particular src_strategy to dst_spec.
     """
-    redistribute_costs: list[float] = [
-        redistribute_cost(strat.output_spec, dst_spec)
-        for strat in src_strategy.strategies
-    ]
+    redistribute_costs: list[float] = []
+    for strat in src_strategy.strategies:
+        cost = redistribute_cost(strat.output_spec, dst_spec)
+        redistribute_costs.append(cost)
 
     return redistribute_costs
 
