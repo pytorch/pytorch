@@ -688,7 +688,7 @@ def get_alias_info(func) -> SchemaInfo:
 
 
 def autograd_would_have_decomposed(
-    func: torch.ops.OpOverload, flat_args: Sequence[Union[torch.Tensor, object]]
+    func: torch._ops.OpOverload, flat_args: Sequence[Union[torch.Tensor, object]]
 ) -> bool:
     """
     Suppose that an operator has CompositeImplicitAutograd decomp registered.
@@ -724,7 +724,10 @@ def autograd_would_have_decomposed(
     has_backend_registration = False
     for a in flat_args:
         if isinstance(a, torch.Tensor):
-            backend_key = torch._C._dispatch_key_for_device(a.device.type)
+            backend_key = torch._C._parse_dispatch_key(
+                torch._C._dispatch_key_for_device(a.device.type)
+            )
+            assert backend_key is not None
             has_backend_registration = func.has_kernel_for_dispatch_key(backend_key)
             # in theory we should take all backend keys and take the highest priority one
             # to properly mimic the dispatcher,

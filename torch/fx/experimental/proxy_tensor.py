@@ -11,7 +11,6 @@ import functools
 import inspect
 import logging
 import operator
-import sys
 import threading
 import typing
 import typing_extensions
