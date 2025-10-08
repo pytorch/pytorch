@@ -428,13 +428,12 @@ aoti_torch_cpu__wrapped_quantized_linear_prepacked(
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_zero_(AtenTensorHandle self);
 
-// ABI stable parallel utilities
+// parallel utilities
 AOTI_TORCH_EXPORT void aoti_torch_lazy_init_num_threads();
 AOTI_TORCH_EXPORT bool aoti_torch_in_parallel_region();
 AOTI_TORCH_EXPORT int32_t aoti_torch_get_num_threads();
 AOTI_TORCH_EXPORT int32_t aoti_torch_get_thread_num();
 
-// ABI stable ThreadIdGuard handle - opaque pointer to avoid exposing C++ class
 struct ThreadIdGuardOpaque;
 using ThreadIdGuardHandle = ThreadIdGuardOpaque*;
 
@@ -445,7 +444,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_thread_id_guard(
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_thread_id_guard(ThreadIdGuardHandle guard);
 
-// ABI stable ParallelGuard handle - opaque pointer to avoid exposing C++ class
 struct ParallelGuardOpaque;
 using ParallelGuardHandle = ParallelGuardOpaque*;
 
@@ -457,7 +455,7 @@ aoti_torch_delete_parallel_guard(ParallelGuardHandle guard);
 
 AOTI_TORCH_EXPORT bool aoti_torch_parallel_guard_is_enabled();
 
-// ABI stable invoke_parallel function, only intended for use for the
+// invoke_parallel function, only intended for use for the
 // AT_PARALLEL_NATIVE path, where the function is not inlined.
 typedef void (*AOTIParallelLambda)(int64_t begin, int64_t end, void* ctx);
 

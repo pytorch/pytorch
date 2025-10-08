@@ -322,7 +322,7 @@ struct Trampoline {
 #endif
 
 // We expect this to be the ABI stable version of parallel_for with identical
-// semantics to at::paralålel_for
+// semantics to at::parallel_for
 template <class F>
 inline void parallel_for(
     const int64_t begin,
