@@ -2508,27 +2508,39 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(actual, correct)
 
     def test_bitwise_equivalence_for_small_reductions(self):
-        for i in range(8):
-            torch._dynamo.reset()
-            arg5 = torch.rand(
-                [i, 379, 165], dtype=torch.float32, device="cuda", requires_grad=True
+        for i in range(1, 8):
+            t_c = torch.rand(
+                [1024, i], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+            t_non_c = torch.rand(
+                [i, 1024], dtype=torch.float32, device="cuda", requires_grad=True
             )
 
-            def fn(a5):
-                t11 = torch.nn.functional.gelu(a5).sum(dim=0)
-                return t11
+            def fn(a, dim):
+                return a.sum(dim=dim)
 
-            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=False)
+            def evaluate_eager_and_compile(t, dim):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(
+                    functools.partial(fn, dim=dim),
+                    backend="inductor",
+                    fullgraph=True,
+                    dynamic=False,
+                )
 
-            eager_out = fn(arg5)
-            compiled_out = opt_fn(arg5)
+                eager_out = fn(t, dim)
+                out = opt_fn(t)
 
-            torch.testing.assert_close(
-                eager_out,
-                compiled_out,
-                rtol=0,
-                atol=0,
-            )
+                torch.testing.assert_close(
+                    eager_out,
+                    out,
+                    rtol=0,
+                    atol=0,
+                )
+
+            evaluate_eager_and_compile(t_non_c, dim=0)
+            evaluate_eager_and_compile(t_c, dim=1)
+
     def test_truediv_numerics_with_eager(self):
         from decimal import Decimal
 
