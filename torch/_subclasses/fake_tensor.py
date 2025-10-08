@@ -1374,6 +1374,7 @@ class FakeTensorMode(TorchDispatchMode):
         return self._stack
 
     @count
+    # pyrefly: ignore  # bad-override
     def __torch_dispatch__(
         self,
         func: OpOverload,
@@ -2624,6 +2625,7 @@ class FakeTensorMode(TorchDispatchMode):
                         and s.rhs == 1
                     ):
                         assert self.shape_env is not None
+                        # pyrefly: ignore  # unbound-name
                         self.shape_env.set_unbacked_var_to_val(s, int(real_t))
 
             if real_out is not nil:
@@ -3012,7 +3014,7 @@ class FakeTensorMode(TorchDispatchMode):
             t.numel() <= CONSTANT_NUMEL_LIMIT
             and not is_sparse_any(t)
             and not self.is_our_fake(t)
-            and not t.device.type == "meta"
+            and t.device.type != "meta"
         )
 
     def invalidate_written_to_constants(
