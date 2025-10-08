@@ -1506,24 +1506,20 @@ class Reduction(Loops):
                         (value_fn(index, (i,)) for i in range(acc_num, rnumel, num_accs))
                     )
                     accs.append(acc_value)
-                # Combine all accumulators
+
                 return functools.reduce(combine_fn, accs)
             else:
                 # Reduction tree simulating warp shuffle
-                # Find next power-of-2 >= rnumel, then divide by 2 to start reduction
-                # to match the C++ logic in block_x_reduce in Reduce.cuh
                 offset = next_power_of_2(rnumel) // 2
                 # Initialize thread values: each thread starts with its own element
                 thread_values = {}
                 for i in range(rnumel):
                     thread_values[i] = value_fn(index, (i,))
 
-                # Simulate warp shuffle reduction with boundary checks
                 # This matches the C++ warp shuffle logic where threads combine
                 # with elements at (threadIdx.x + offset) if that's within bounds
                 while offset > 0:
                     for i in range(rnumel):
-                        # Only combine if source thread (i + offset) is within bounds
                         if i + offset < rnumel:
                             thread_values[i] = combine_fn(thread_values[i], thread_values[i + offset])
                     offset = offset // 2
