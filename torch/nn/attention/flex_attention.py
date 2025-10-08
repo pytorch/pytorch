@@ -249,8 +249,8 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     except Exception:
         num_positional_args = sum(
             1
-            for p in inspect.signature(fn).parameters.values()
-            if p.default == inspect._empty
+            for param in inspect.signature(fn).parameters.values()
+            if param.default == inspect.Parameter.empty
         )
     assert num_positional_args == 5 or num_positional_args == 4
     if num_positional_args == 5:
