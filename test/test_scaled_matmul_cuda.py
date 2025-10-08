@@ -139,7 +139,7 @@ def infer_scale_swizzle(mat, scale):
         if scale.shape[0] == math.ceil(mat.shape[0] // 128) and scale.shape[
             1
         ] == math.ceil(mat.shape[1] // 128):
-            return ScalingType.Blockwise128x128, SwizzleType.NO_SWIZZLE
+            return ScalingType.BlockWise128x128, SwizzleType.NO_SWIZZLE
 
     # NVFP4
     if (
@@ -150,7 +150,7 @@ def infer_scale_swizzle(mat, scale):
         and mat.dtype == torch.float4_e2m1fn_x2
         and scale.dtype == torch.float8_e4m3fn
     ):
-        return ScalingType.Blockwise1x16, SwizzleType.SWIZZLE_32_4_4
+        return ScalingType.BlockWise1x16, SwizzleType.SWIZZLE_32_4_4
 
     # MX
     if (
@@ -160,7 +160,7 @@ def infer_scale_swizzle(mat, scale):
         == round_up(mat.shape[1], 128) * round_up(math.ceil(mat.shape[0] // 32), 4)
         and scale.dtype == torch.float8_e8m0fnu
     ):
-        return ScalingType.Blockwise1x32, SwizzleType.SWIZZLE_32_4_4
+        return ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_4_4
 
     return None, None
 
