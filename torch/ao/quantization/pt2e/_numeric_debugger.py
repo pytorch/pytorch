@@ -1,8 +1,8 @@
 import copy
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Optional
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
