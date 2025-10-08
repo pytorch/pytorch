@@ -1258,7 +1258,13 @@ class SIMDScheduling(BaseScheduling):
                     rnumel2,
                 )
 
-            if reduction_can_fuse and node1.is_native_matmul():
+            if reduction_can_fuse and (
+                node1.is_native_matmul() or node2.is_native_matmul()
+            ):
+                # Ensure node1 is always the native matmul side
+                if not node1.is_native_matmul():
+                    node1, node2 = node2, node1
+
                 # 1. A native matmul node keeps its original loop order.
                 #    For example: C[z,y,x] = torch.bmm(A[z,y,r], B[z,r,x]) keeps (z,y,x) order.
                 #    (see simplify_and_reorder in ir.py)
