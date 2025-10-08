@@ -25,13 +25,13 @@ import types
 import unittest
 from collections.abc import Sequence
 from typing import Any, Callable, Optional, overload, TypeVar, Union
-from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
 from torch import fx
 from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
+from typing_extensions import ParamSpec
 
 from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (
@@ -507,9 +507,9 @@ def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
 
 
 def skipIfOnlyNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
-    if sys.version_info < (3, 12) or sys.version_info >= (3, 13):
-        return unittest.skip("Requires Python 3.12")
-    return fn
+    if sys.version_info >= (3, 13) or sys.version_info < (3, 12):
+        return fn
+    return unittest.skip("Requires Python 3.12")(fn)
 
 
 def xfailIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
