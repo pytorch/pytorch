@@ -596,9 +596,15 @@ class TestTryMerge(TestCase):
         # Check that app can revert
         self.assertIsNotNone(validate_revert(repo, pr, comment_id=app_comment_id))
         # But impostor can not
-        self.assertRaises(PostCommentError, lambda: validate_revert(repo, pr, comment_id=impostor_comment_id))
+        self.assertRaises(
+            PostCommentError,
+            lambda: validate_revert(repo, pr, comment_id=impostor_comment_id),
+        )
         # Despite it's name being the name of the bot
-        self.assertEqual(pr.get_comment_by_id(impostor_comment_id).author_login, "pytorch-auto-revert")
+        self.assertEqual(
+            pr.get_comment_by_id(impostor_comment_id).author_login,
+            "pytorch-auto-revert",
+        )
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
