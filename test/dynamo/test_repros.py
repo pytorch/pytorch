@@ -5091,6 +5091,25 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         compiled_foo = torch.compile(model.foo, backend="eager", fullgraph=True)
         self.assertEqual(compiled_foo(), x)
 
+    def test_weakref_proxy_dynamo_convert(self):
+        class Dummy:
+            pass
+
+        def target_fn(x: torch.Tensor) -> torch.Tensor:
+            torch._dynamo.graph_break()
+            return x + 1
+        
+        dummy = Dummy()
+        proxy = weakref.proxy(dummy)
+        context = torch._dynamo.symbolic_convert.code_context.get_context(target_fn.__code__)
+        try:
+            context["orig_graphmodule"] = (lambda: proxy)
+            f_compiled = torch.compile(target_fn)
+            y = f_compiled(torch.tensor(1))
+            torch.testing.assert_close(y, torch.tensor(2))
+        finally:
+            context.clear()
+
     def test_weakref_reconstruct(self):
         def fn(x_weak, weight, y):
             y = torch.sin(y)

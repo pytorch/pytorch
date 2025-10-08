@@ -2751,7 +2751,7 @@ class InstructionTranslatorBase(
             orig_graphmodule_maybe = code_context.get_context(cur_tx.f_code).get(
                 "orig_graphmodule", lambda: None
             )()
-            if orig_graphmodule_maybe is not None:
+            if orig_graphmodule_maybe and not isinstance(orig_graphmodule_maybe, weakref.ProxyTypes):
                 code_context.get_context(new_code)["orig_graphmodule"] = weakref.ref(
                     orig_graphmodule_maybe
                 )
