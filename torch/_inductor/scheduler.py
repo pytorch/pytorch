@@ -1041,10 +1041,10 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
     return ms
 
 
+@dataclasses.dataclass(slots=True)
 class WhyNoFuse:
-    # TODO when we drop support for Python < 3.10, we can use
-    # @dataclass(slots=True) instead of manually specifying __slots__.
-    __slots__ = ["name1", "name2", "reason", "args"]
+    name1: str
+    name2: str
     reason: str
     args: tuple[Any, ...]
 
@@ -1112,7 +1112,11 @@ def _prune_redundant_deps(
     def should_prune(dep: Dep) -> bool:
         if isinstance(dep, WeakDep):
             op_name = name_to_buf[dep.name].defining_op_name()
-            is_redundant = name_to_dep_count[name_to_fused_node[op_name].get_name()] > 0
+            is_redundant = name_to_dep_count[
+                name_to_fused_node[op_name].get_name()
+            ] > 0 and node.scheduler.fusable_weak_dep(
+                dep, name_to_fused_node[op_name], node
+            )
             # These can occur because fused nodes always gather deps from their snodes
             # If B has a weakdep on A
             # B gets fused with C, then any time BC is fused, the weakdep will reappear
@@ -2355,7 +2359,10 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
-        if config.reorder_for_compute_comm_overlap:
+
+        # reorder_for_compute_comm_overlap may do benchmarking to estimate
+        # op runtime. Disable it for now in deterministic mode.
+        if not config.deterministic and config.reorder_for_compute_comm_overlap:
             if not config.reorder_for_peak_memory:
                 from .memory import assign_memory_planning_info_for_scheduler_buffers
 
@@ -2676,6 +2683,10 @@ class Scheduler:
                                 WeakDep(other_name, mutating_buf=buf.get_name())
                             )
                             add_user(other_name, node, is_weak=True)
+
+            for add_dep in V.graph.additional_buffer_deps[node.get_name()]:
+                add_user(add_dep, node, is_weak=True)
+                node.add_fake_dep(WeakDep(add_dep, node.get_name()))
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
@@ -3535,6 +3546,7 @@ class Scheduler:
             - self.can_fuse(): checks if a fusion is legal
             - self.score_fusion(): assigns priority to a given fusion
         """
+        self.prune_redundant_deps(nodes)
         fused_nodes = OrderedSet(nodes)
         if fusion_log.isEnabledFor(logging.DEBUG):
             fusion_log.debug("fuse_nodes_once, candidates:")
@@ -3628,7 +3640,6 @@ class Scheduler:
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
-        self.prune_redundant_deps(nodes)
         return nodes
 
     def create_combo_kernel_nodes(self, num_ck_nodes: Optional[int] = None) -> None:
@@ -4408,22 +4419,36 @@ class Scheduler:
         if len(mutating_writes) != 1:
             return False
         write = mutating_writes[0]
+        if isinstance(write, StarDep):
+            return False
         assert isinstance(write, MemoryDep)
 
         if free_symbol_is_type(write.index, SymT.TMP):
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
-        relevant_reads = [
-            read for read in node1.read_writes.reads if read.name == real_name
-        ]
-        return all(
-            isinstance(read, MemoryDep)
-            and not free_symbol_is_type(read.index, SymT.TMP)
-            and read.index == write.index
-            and read.size == write.size
-            for read in relevant_reads
-        )
+        relevant_reading_nodes = [node1]
+        if isinstance(node1, ForeachKernelSchedulerNode):
+            relevant_reading_nodes = node1.snodes
+        num_concurrent_reads = 0
+        for reading_node in relevant_reading_nodes:
+            relevant_reads = [
+                read
+                for read in reading_node.read_writes.reads
+                if read.name == real_name
+            ]
+            if not relevant_reads:
+                continue
+            num_concurrent_reads += 1
+            if not all(
+                isinstance(read, MemoryDep)
+                and not free_symbol_is_type(read.index, SymT.TMP)
+                and read.index == write.index
+                and read.size == write.size
+                for read in relevant_reads
+            ):
+                return False
+        return num_concurrent_reads <= 1
 
     # StarDep doesn't match MemoryDep, different indices don't match
     # However, broadcasting sometimes strips dimensions, and if that's the case
@@ -4955,7 +4980,7 @@ class Scheduler:
                 if name in name_to_node
             }
             input_deallocation = {
-                name: True if name in buffer_names_to_free else False
+                name: name in buffer_names_to_free
                 for name in partition_input_names
                 if name in name_to_node
             }
@@ -5245,9 +5270,10 @@ class Scheduler:
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()
 
+            graph_name = V.graph.name
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
-        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)
+        V.graph.wrapper_code.define_subgraph_launcher_fn(graph_name, partition_code)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
         V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
@@ -5587,7 +5613,7 @@ class Scheduler:
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)
 
 
-class BaseScheduling:
+class BaseScheduling:  # noqa: docstring_linter
     def __init__(self, scheduler: Optional[Scheduler]):
         super().__init__()
         self.scheduler = scheduler
@@ -5730,3 +5756,19 @@ class BaseScheduling:
         and memory copy time in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError
+
+    def codegen_comment(
+        self,
+        node_schedule: Sequence[BaseSchedulerNode],
+        kernel_name: Optional[str] = None,
+    ) -> None:
+        if kernel_name:
+            from torch._inductor.debug import set_kernel_post_grad_provenance_tracing
+
+            debug_handle = set_kernel_post_grad_provenance_tracing(
+                node_schedule,  # type: ignore[arg-type]
+                kernel_name,
+            )
+            V.graph.wrapper_code.write_provenance_debug_handle(
+                kernel_name, debug_handle
+            )

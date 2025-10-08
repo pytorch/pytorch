@@ -163,8 +163,8 @@ struct CollectiveFingerPrint {
     backend->allgather(output_tensors, tensors_to_verify)->wait();
     // Verify equivalence
     for (const auto i : c10::irange(output_tensors.size())) {
-      const std::vector<at::Tensor> gathered_tensors = output_tensors[i];
-      const at::Tensor reference_tensor = tensors_to_verify[i];
+      const std::vector<at::Tensor>& gathered_tensors = output_tensors[i];
+      const at::Tensor& reference_tensor = tensors_to_verify[i];
       for (const auto rank : c10::irange(gathered_tensors.size())) {
         const auto& rank_tensor = gathered_tensors[rank];
         if (!rank_tensor.equal(reference_tensor)) {

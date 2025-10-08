@@ -4,6 +4,7 @@ import tempfile
 from unittest.mock import MagicMock, patch
 
 import torch
+from torch.distributed.checkpoint._hf_utils import _HFStorageInfo
 from torch.distributed.checkpoint.metadata import MetadataIndex
 from torch.distributed.checkpoint.planner import LoadItemType, ReadItem
 from torch.distributed.checkpoint.quantized_hf_storage import (
@@ -57,6 +58,12 @@ class TestQuantizedHfStorage(TestCase):
             scale2_fqn: file2_name,  # Scale in file 2 (different file scenario)
         }
 
+        # Populate the tensor shapes cache that would normally be built by read_metadata()
+        reader._tensor_full_shapes = {
+            weight1_fqn: torch.Size([4, 4]),
+            weight2_fqn: torch.Size([4, 4]),
+        }
+
         # Mock the main safetensors file (file1)
         mock_file1 = MagicMock()
 
@@ -64,9 +71,9 @@ class TestQuantizedHfStorage(TestCase):
         def mock_get_slice(tensor_name):
             mock_tensor = MagicMock()
             if tensor_name == weight1_fqn:
-                mock_tensor.__getitem__ = lambda _, __: quantized_tensor1
+                mock_tensor.__getitem__ = lambda _, _slice: quantized_tensor1
             elif tensor_name == weight2_fqn:
-                mock_tensor.__getitem__ = lambda _, __: quantized_tensor2
+                mock_tensor.__getitem__ = lambda _, _slice: quantized_tensor2
             return mock_tensor
 
         mock_file1.get_slice = mock_get_slice
@@ -161,6 +168,110 @@ class TestQuantizedHfStorage(TestCase):
         args2, _ = mock_planner2.commit_tensor.call_args
         committed_tensor2 = args2[1]
         torch.testing.assert_close(committed_tensor2, expected_result2)
+
+    def test_dtensor_slice_dequantization_block_alignment(self):
+        """Test DTensor slice dequantization with proper block alignment logic."""
+        reader = QuantizedHuggingFaceStorageReader(
+            self.path,
+            thread_count=1,
+            block_size=4,  # Small block size for easier testing
+        )
+
+        # Create a larger tensor to test multiple blocks
+        # Full tensor is 8x8, block size is 4x4, so we have 2x2 = 4 blocks
+        full_tensor_shape = torch.Size([8, 8])
+
+        # Create quantized tensor data for a slice (rows 2:6, cols 1:5)
+        # This slice spans across multiple blocks
+        slice_tensor = torch.ones(4, 4, dtype=torch.float32) * 2.0
+
+        # Create scale inverse tensor with different values for each block
+        # Scale tensor shape: (2, 2) for 2x2 blocks
+        scale_inv = torch.tensor(
+            [
+                [1.0, 2.0],  # Block (0,0)=1.0, Block (0,1)=2.0
+                [3.0, 4.0],  # Block (1,0)=3.0, Block (1,1)=4.0
+            ],
+            dtype=torch.float32,
+        )
+
+        # Define tensor names
+        weight_fqn = "model.layers.0.attn.q_proj.weight"
+        scale_fqn = "model.layers.0.attn.q_proj.weight_scale_inv"
+        file_name = "model-00001-of-00001.safetensors"
+
+        # Setup mappings
+        reader._weight_scale_mapping = {weight_fqn: scale_fqn}
+        reader._weight_map = {weight_fqn: file_name, scale_fqn: file_name}
+
+        # Mock storage_data to provide tensor shape information
+        reader.storage_data = {
+            MetadataIndex(fqn=weight_fqn, offset=[0, 0]): _HFStorageInfo(
+                relative_path=file_name, shape=full_tensor_shape, dtype=torch.float32
+            )
+        }
+
+        # Populate the tensor shapes cache that would normally be built by read_metadata()
+        reader._tensor_full_shapes = {
+            weight_fqn: full_tensor_shape,
+        }
+
+        # Create ReadItem for a slice that spans multiple blocks
+        # Request slice [2:6, 1:5] from the full 8x8 tensor
+        read_item = ReadItem(
+            type=LoadItemType.TENSOR,
+            storage_index=MetadataIndex(
+                fqn=weight_fqn,
+                offset=torch.Size([0, 0]),
+            ),
+            dest_index=MetadataIndex(
+                fqn=weight_fqn,
+                offset=torch.Size([0, 0]),
+            ),
+            storage_offsets=[2, 1],  # Start at row 2, col 1
+            dest_offsets=[0, 0],
+            lengths=[4, 4],  # 4x4 slice
+        )
+
+        # Mock safetensors file
+        mock_file = MagicMock()
+
+        # Mock get_slice to return the slice tensor
+        mock_tensor_slice = MagicMock()
+        mock_tensor_slice.__getitem__ = lambda _, _slice: slice_tensor
+        mock_file.get_slice.return_value = mock_tensor_slice
+
+        # Mock get_tensor for scale
+        mock_file.get_tensor.return_value = scale_inv
+
+        # Create target tensor
+        target_tensor = torch.zeros(4, 4, dtype=torch.float32)
+        mock_planner = MagicMock()
+        mock_planner.resolve_tensor.return_value = target_tensor
+
+        # Process the request
+        reader._process_read_request(mock_file, read_item, mock_planner)
+
+        # Verify the result
+        mock_planner.commit_tensor.assert_called_once()
+        args, _ = mock_planner.commit_tensor.call_args
+        committed_tensor = args[1]
+
+        # Expected result calculation:
+        # The slice [2:6, 1:5] intersects with blocks as follows:
+        # - Block (0,0): covers [0:4, 0:4] -> intersection [2:4, 1:4] -> local [0:2, 0:3] with scale 1.0
+        # - Block (0,1): covers [0:4, 4:8] -> intersection [2:4, 4:5] -> local [0:2, 3:4] with scale 2.0
+        # - Block (1,0): covers [4:8, 0:4] -> intersection [4:6, 1:4] -> local [2:4, 0:3] with scale 3.0
+        # - Block (1,1): covers [4:8, 4:8] -> intersection [4:6, 4:5] -> local [2:4, 3:4] with scale 4.0
+
+        expected_result = torch.zeros(4, 4, dtype=torch.float32)
+        # Fill expected values based on block intersections
+        expected_result[0:2, 0:3] = 2.0 * 1.0  # Block (0,0) intersection
+        expected_result[0:2, 3:4] = 2.0 * 2.0  # Block (0,1) intersection
+        expected_result[2:4, 0:3] = 2.0 * 3.0  # Block (1,0) intersection
+        expected_result[2:4, 3:4] = 2.0 * 4.0  # Block (1,1) intersection
+
+        torch.testing.assert_close(committed_tensor, expected_result)
 
 
 if __name__ == "__main__":

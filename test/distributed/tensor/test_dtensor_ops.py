@@ -20,8 +20,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorOpTestBase,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._debug_mode import DebugMode
 from torch.utils._pytree import tree_map
-from torch.utils.debug_mode import DebugMode
 
 
 # rewrite common size variables to sth can be sharded evenly
@@ -670,7 +670,7 @@ class TestDTensorOps(DTensorOpTestBase):
             .to(DEVICE_TYPE)
         )
 
-        for is_evenly_shardable in [True]:
+        for is_evenly_shardable in [True, False]:
             if is_evenly_shardable:
                 placement = [Shard(1)]
                 reduce_dim = 1
@@ -686,9 +686,9 @@ class TestDTensorOps(DTensorOpTestBase):
             self.assertEqual(full_tensor, tensor.mean(dim=reduce_dim))
 
             if is_evenly_shardable:
-                self.assertFalse("redistribute_input" in debug_mode.debug_string())
+                self.assertTrue("[P] -> [R]" in debug_mode.debug_string())
             else:
-                self.assertTrue("redistribute_input" in debug_mode.debug_string())
+                self.assertTrue("[S(0)] -> [R])" in debug_mode.debug_string())
 
 
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)
