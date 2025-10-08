@@ -149,6 +149,7 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
             f"{self.promote_args_positions}, {self.promote_kwargs_names}, {self.promotion_kind})"
         )
 
+    # pyrefly: ignore  # bad-override
     def __eq__(self, other: object, /) -> bool:
         if not isinstance(other, ElementwiseTypePromotionRule):
             return False
@@ -265,6 +266,7 @@ class ReductionTypePromotionRule(TypePromotionRule):
     def __repr__(self):
         return f"ReductionTypePromotionRule('{self.namespace}', '{self.op_name}', {self.promotion_kind})"
 
+    # pyrefly: ignore  # bad-override
     def __eq__(self, other: object, /) -> bool:
         if not isinstance(other, ElementwiseTypePromotionRule):
             return False
