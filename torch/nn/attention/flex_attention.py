@@ -233,6 +233,14 @@ class _ModificationType(Enum):
     UNKNOWN = 3
 
 
+def _get_num_positional_args_with_inspect(fn: Callable) -> int:
+    return sum(
+        1
+        for param in inspect.signature(fn).parameters.values()
+        if param.default == inspect.Parameter.empty
+    )
+
+
 def _get_mod_type(fn: Callable) -> _ModificationType:
     """Get the type of modification function.
     This function inspects the number of positional arguments of the function to determine
@@ -241,17 +249,18 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     considered as a mask function.
     """
     try:
-        code = fn.__code__
-        num_positional_total = code.co_argcount
-        defaults = fn.__defaults__ or ()
-        num_defaults = len(defaults)
-        num_positional_args = num_positional_total - num_defaults
+        if hasattr(fn, "__code__"):
+            code = fn.__code__
+            num_positional_total = code.co_argcount
+            defaults = ()
+            if hasattr(fn, "__defaults__"):
+                defaults = fn.__defaults__ or ()
+            num_defaults = len(defaults)
+            num_positional_args = num_positional_total - num_defaults
+        else:
+            num_positional_args = _get_num_positional_args_with_inspect(fn)
     except Exception:
-        num_positional_args = sum(
-            1
-            for param in inspect.signature(fn).parameters.values()
-            if param.default == inspect.Parameter.empty
-        )
+        num_positional_args = _get_num_positional_args_with_inspect(fn)
     assert num_positional_args == 5 or num_positional_args == 4
     if num_positional_args == 5:
         return _ModificationType.SCORE_MOD

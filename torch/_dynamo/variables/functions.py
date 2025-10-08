@@ -1327,6 +1327,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             return d.as_python_constant() if d else None
         return super().const_getattr(tx, name)
 
+    def call_obj_hasattr(self, tx: "InstructionTranslator", name):
+        if name == "__code__":
+            return variables.ConstantVariable.create(hasattr(self, "code"))
+        if name == "__defaults__":
+            return variables.ConstantVariable.create(hasattr(self, "defaults"))
+        return super().call_obj_hasattr(tx, name)
+
     def has_self(self):
         return False
 
