@@ -134,13 +134,15 @@ class DebugMode(TorchDispatchMode):
             self._next_tensor_id += 1
 
     def _track_tensor_ids(self, obj):
-        """Recursively assign IDs to all tensors in a pytree."""
-        tree_map_only(torch.Tensor, self._assign_tensor_id, obj)
+        """Recursively assign IDs to all tensors in a pytree"""
+        with torch._C.DisableTorchFunction():
+            tree_map_only(torch.Tensor, self._assign_tensor_id, obj)
 
     def _track_op_output(self, op_index, result):
-        """Assign IDs to output tensors and store in output_info."""
-        self._track_tensor_ids(result)
-        self._output_info[op_index] = result
+        """Assign IDs to output tensors and store in output_info"""
+        with torch._C.DisableTorchFunction():
+            self._track_tensor_ids(result)
+            self._output_info[op_index] = result
 
     # Without this override, running torch.compile under DebugMode
     # will force torch.compile to always use the "eager" backend
