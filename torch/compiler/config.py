@@ -216,7 +216,7 @@ better integration for modules with hooks.
 
 # Debugging and Logging Configuration
 
-reorderable_logging_functions: set = Config(default_factory=set)
+reorderable_logging_functions: set = Config(default=set())
 """
 A set of logging functions which will be reordered to the end of graph breaks,
 allowing dynamo to construct larger graphs. Note that there are some limitations
