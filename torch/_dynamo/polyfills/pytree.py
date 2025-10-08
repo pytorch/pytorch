@@ -171,7 +171,6 @@ if python_pytree._cxx_pytree_dynamo_traceable:
                     or optree.is_namedtuple_class(treespec.type)
                     or optree.is_structseq_class(treespec.type)
                 ):
-                    # pyrefly: ignore  # bad-return
                     return treespec._unflatten_func(
                         treespec._metadata,
                         children_representations,

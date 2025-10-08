@@ -663,7 +663,6 @@ def is_caffe2_gpu_file(rel_filepath):
         return True
     filename = os.path.basename(rel_filepath)
     _, ext = os.path.splitext(filename)
-    # pyrefly: ignore  # unsupported-operation
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 class TrieNode:
@@ -1138,7 +1137,6 @@ def hipify(
                                         out_of_place_only=out_of_place_only,
                                         is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
-    # pyrefly: ignore  # bad-assignment
     for f in extra_files:
         if not os.path.isabs(f):
             f = os.path.join(output_directory, f)

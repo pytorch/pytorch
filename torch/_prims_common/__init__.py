@@ -113,6 +113,7 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     if len(a) != len(b):
         return False
 
+    # pyrefly: ignore  # bad-assignment
     for x, y in zip(a, b):
         if allow_rhs_unbacked:
             if isinstance(y, torch.SymInt):
@@ -728,7 +729,7 @@ def validate_dim_length(length: int):
     """
 
     if isinstance(length, (int, torch.SymInt)):
-        torch._check(length >= 0)
+        torch._check_is_size(length)
     else:
         # sometimes called with sympy expression by inductor
         assert length >= 0
@@ -1083,7 +1084,13 @@ def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
         # PyTorch, which prints sequences in square brackets.
         shape = list(shape)
         shape[dim] = numel // newsize
-        torch._check(shape[dim] >= 0)
+        # NB: This is pretty important when you have unbacked SymInts.
+        # Suppose you have (i0, 12) resizing into (2, -1, 12).  The old
+        # range for i0 is typically [2, inf], which means if you divide
+        # by two the new range should be [1, inf].  But this is bad news
+        # if you have an unbacked SymInt: we need to reapply the unsound
+        # assumption that the size is >= 2.
+        torch._check_is_size(shape[dim])
     return tuple(shape)
 
 

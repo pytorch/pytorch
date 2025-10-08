@@ -153,9 +153,7 @@ class CPythonTestCase(TestCase):
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
     assertDictEqual = polyfills.assert_dict_equal
-    # pyrefly: ignore  # bad-override
     assertRaises = unittest.TestCase.assertRaises
-    # pyrefly: ignore  # bad-override
     assertRaisesRegex = unittest.TestCase.assertRaisesRegex
     assertWarns = unittest.TestCase.assertWarns
     assertWarnsRegex = unittest.TestCase.assertWarnsRegex
@@ -171,10 +169,8 @@ class CPythonTestCase(TestCase):
     ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
         # from unittest
-
         method = getattr(self, self._testMethodName)
         method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
-
         setattr(self, self._testMethodName, method)
         return fn
 

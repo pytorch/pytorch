@@ -9,7 +9,6 @@ from sympy.core.parameters import global_parameters
 from sympy.core.singleton import S, Singleton
 
 
-# pyrefly: ignore  # invalid-inheritance
 class IntInfinity(Number, metaclass=Singleton):
     r"""Positive integer infinite quantity.
 
@@ -204,7 +203,6 @@ class IntInfinity(Number, metaclass=Singleton):
 int_oo = S.IntInfinity
 
 
-# pyrefly: ignore  # invalid-inheritance
 class NegativeIntInfinity(Number, metaclass=Singleton):
     """Negative integer infinite quantity.
 

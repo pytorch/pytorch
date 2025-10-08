@@ -175,7 +175,6 @@ class ReferenceAnalysis:
 
     @staticmethod
     def pow(a, b):
-        # pyrefly: ignore  # bad-argument-type
         return _keep_float(FloatPow)(a, b)
 
     @staticmethod

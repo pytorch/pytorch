@@ -93,7 +93,6 @@ class OutputProp:
                 )
 
             if isinstance(result, torch.Tensor):  # type: ignore[possibly-undefined]
-                # pyrefly: ignore  # unbound-name
                 node.traced_result = result
 
             # pyrefly: ignore  # unsupported-operation

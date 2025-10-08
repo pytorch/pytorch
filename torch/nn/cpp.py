@@ -78,7 +78,6 @@ class ModuleWrapper(nn.Module):
 
     # nn.Module defines training as a boolean
     @property  # type: ignore[override]
-    # pyrefly: ignore  # bad-override
     def training(self):
         return self.cpp_module.training
 

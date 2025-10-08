@@ -196,7 +196,6 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
 
 
 @overload
-# pyrefly: ignore  # inconsistent-overload
 def zip_longest(
     iter1: Iterable[_T1],
     /,
@@ -206,7 +205,6 @@ def zip_longest(
 
 
 @overload
-# pyrefly: ignore  # inconsistent-overload
 def zip_longest(
     iter1: Iterable[_T1],
     iter2: Iterable[_T2],
@@ -215,7 +213,6 @@ def zip_longest(
 
 
 @overload
-# pyrefly: ignore  # inconsistent-overload
 def zip_longest(
     iter1: Iterable[_T1],
     iter2: Iterable[_T2],
@@ -226,7 +223,6 @@ def zip_longest(
 
 
 @overload
-# pyrefly: ignore  # inconsistent-overload
 def zip_longest(
     iter1: Iterable[_T],
     iter2: Iterable[_T],
@@ -237,7 +233,6 @@ def zip_longest(
 
 
 @overload
-# pyrefly: ignore  # inconsistent-overload
 def zip_longest(
     iter1: Iterable[_T],
     iter2: Iterable[_T],

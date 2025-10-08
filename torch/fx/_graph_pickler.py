@@ -332,9 +332,7 @@ class _TorchNumpyPickleData:
         if not (name := getattr(np, "__name__", None)):
             return None
 
-        # pyrefly: ignore  # unbound-name
         assert np == getattr(importlib.import_module(mod), name)
-        # pyrefly: ignore  # unbound-name
         return cls(mod, name)
 
 
