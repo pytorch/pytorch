@@ -548,7 +548,7 @@ def propagate_shape_and_sharding(
                                 f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
                                 "It cannot be performed without redistribution, which is disallowed by the current operator.",
                             )
-                elif (shard_mesh_dim is not None):
+                elif shard_mesh_dim is not None:
                     assert shard_placement is not None
                     tensor_dim_size = global_input_shape[shard_placement.dim]
                     mesh_dim_size = mesh_sizes[shard_mesh_dim]
