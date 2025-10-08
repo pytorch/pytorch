@@ -1,3 +1,4 @@
+import itertools
 from dataclasses import dataclass
 from typing import Any, cast, NamedTuple, Optional
 
@@ -233,7 +234,7 @@ class DTensorSpec:
         for tensor_dim_and_mesh_dims in shard_order:
             tensor_dim, *mesh_dims = tensor_dim_and_mesh_dims
             is_increasing = all(
-                prev < nxt for prev, nxt in zip(mesh_dims, mesh_dims[1:])
+                prev < nxt for prev, nxt in itertools.pairwise(mesh_dims)
             )
             if not is_increasing:
                 return False
