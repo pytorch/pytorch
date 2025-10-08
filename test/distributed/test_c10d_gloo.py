@@ -1052,7 +1052,8 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         ]
         self._test_scatter_stress(inputs, lambda t: t.clone())
 
-    @skip_but_pass_in_sandcastle(
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_WITH_ROCM,
         "Test is flaky, see https://github.com/pytorch/pytorch/issues/15963"
     )
     @skip_if_lt_x_gpu(2)
