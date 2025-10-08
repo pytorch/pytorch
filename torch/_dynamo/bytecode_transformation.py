@@ -533,6 +533,8 @@ def create_binary_slice(
 def create_copy(i: int) -> list[Instruction]:
     if sys.version_info >= (3, 11):
         return [create_instruction("COPY", arg=i)]
+    if i == 1:
+        return [create_instruction("DUP_TOP")]
     # COPY 4
     # 0 1 2 3
     # 3 1 2 0

@@ -536,6 +536,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 5)
         # 4 additions from f5+f4, 2 x 4 additions from f2+f1 (i == 5, i != 5)
         self.assertEqual(cnts.op_count, 12)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 6)
 
     def test_nested_graph_break_in_try_block(self):
         # NOTE: this also tests nested step_graph_break
@@ -576,13 +577,40 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         x = torch.zeros(3)
         res = f5(x)
         ref = opt_fn(x)
-        print(ref, res)
         self.assertEqual(ref, res)
         # skip frame due to graph break in try block
         # 2 frames from f5+f4+(first part of f3), 2 frames from f2+f1
         self.assertEqual(cnts.frame_count, 4)
         # 5 additions from f5+f4+(first part of f3), 4 additions from f2+f1
         self.assertEqual(cnts.op_count, 9)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 4)
+
+    def test_nested_step_unsupported(self):
+        global f1, f2, f3
+
+        def f1(x):
+            return x + 1
+
+        def f2(x):
+            x = x + 2
+            torch._dynamo.step_unsupported()
+            return f1(x) + 4
+
+        def f3(x):
+            x = x + 8
+            return f2(x) + 16
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f3)
+        x = torch.zeros(3)
+        res = f3(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        # 1 frame from start of f3 + start of f2, 1 frame from f1, 1 frame from the end of f3
+        self.assertEqual(cnts.frame_count, 3)
+        # all ops except + 4
+        self.assertEqual(cnts.op_count, 4)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
 
 
 if __name__ == "__main__":
