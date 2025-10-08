@@ -404,6 +404,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.max_unpool3d,
             aten.mish,
             aten.mish_,
+            aten.mish_backward,
             aten.mse_loss,
             aten.mse_loss_backward,
             aten.multi_margin_loss,
