@@ -36,6 +36,7 @@ from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
 )
+from torch._guards import tracing, TracingContext
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -213,9 +214,7 @@ class inner_f(torch.nn.Module):
         where: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le, 0.0, add_4);  le = add_4 = None
         view_of: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(where)
         view_of_1: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of);  view_of = None
-        view_of_2: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of_1);  view_of_1 = None
-        view_of_3: "f32[2, 3, 4, 4]" = torch.ops.prims.view_of.default(view_of_2);  view_of_2 = None
-        le_1: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(view_of_3, 0.0);  view_of_3 = None
+        le_1: "b8[2, 3, 4, 4]" = torch.ops.prims.le.default(view_of_1, 0.0);  view_of_1 = None
         where_1: "f32[2, 3, 4, 4]" = torch.ops.prims.where.default(le_1, 0.0, tangents_1);  le_1 = tangents_1 = None
         broadcast_in_dim_10: "f32[1, 3]" = torch.ops.prims.broadcast_in_dim.default(squeeze_2, [1, 3], [1]);  squeeze_2 = None
         broadcast_in_dim_11: "f32[1, 3, 1]" = torch.ops.prims.broadcast_in_dim.default(broadcast_in_dim_10, [1, 3, 1], [0, 1]);  broadcast_in_dim_10 = None
@@ -780,18 +779,23 @@ class inner_f(torch.nn.Module):
 
         for with_export in [False]:  # TODO: make dynamo work for annotation
             with ExitStack() as stack:
-                model = None
-                with fx_traceback.preserve_node_meta():
-                    if with_export:
-                        with torch._dynamo.config.patch(install_free_tensors=True):
-                            # TODO: switch to use the official graph_capture API once it is ready
-                            model = _dynamo_graph_capture_for_export(model)(*inputs)
-                    else:
-                        model = SimpleLinear()
+                model = SimpleLinear()
+                fake_mode = None
 
-                    joint_with_descriptors = aot_export_joint_with_descriptors(
-                        stack, model, inputs, decompositions={}
+                stack.enter_context(fx_traceback.preserve_node_meta())
+
+                if with_export:
+                    stack.enter_context(
+                        torch._dynamo.config.patch(install_free_tensors=True)
                     )
+                    # TODO: switch to use the official graph_capture API once it is ready
+                    model = _dynamo_graph_capture_for_export(model)(*inputs)
+                    fake_mode = model.meta.get("fake_mode", None)
+
+                stack.enter_context(tracing(TracingContext(fake_mode)))
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack, model, inputs, decompositions={}
+                )
 
                 for node in joint_with_descriptors.graph_module.graph.nodes:
                     if node.op in ("placeholder", "output"):
