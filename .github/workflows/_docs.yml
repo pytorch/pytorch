@@ -67,7 +67,7 @@ jobs:
             # an OOM issue when running the job, so this upgrades the runner from 4xlarge
             # to the next available tier of 12xlarge. So much memory just to generate cpp
             # doc
-            runner: ${{ inputs.runner_prefix }}linux.12xlarge
+            runner: ${{ inputs.runner_prefix }}linux.12xlarge.memory
             # TODO: Nightly cpp docs take longer and longer to finish (more than 3h now)
             # Let's try to figure out how this can be improved
             timeout-minutes: 360
