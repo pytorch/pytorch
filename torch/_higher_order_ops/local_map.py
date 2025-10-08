@@ -6,9 +6,9 @@
 # NOTE: this file may be removed once we move to a dynamo frontend
 
 import functools
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -140,9 +140,7 @@ def create_hop_fw_bw(
                         "Dynamo traced submodule should return tuple"
                     )
                     return fw_out, [
-                        True
-                        if isinstance(ret, torch.Tensor) and ret.requires_grad
-                        else False
+                        bool(isinstance(ret, torch.Tensor) and ret.requires_grad)
                         for ret in fw_out
                     ]
 
@@ -237,6 +235,7 @@ def create_hop_fw_bw(
 
 class LocalMapAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx: Any,
         fw_gm: GraphModule,
@@ -283,6 +282,7 @@ class LocalMapAutogradOp(torch.autograd.Function):
             )
 
             for i, meta in ctx.expected_tangent_metadata.items():
+                # pyrefly: ignore  # bad-argument-type
                 grads[i] = coerce_to_expected_memory_format(grads[i], meta)
 
             grad_ins = local_map_hop(ctx.bw_gm, *saved_activations, *grads)

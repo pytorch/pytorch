@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.ao.quantization.utils import Pattern
 
 
