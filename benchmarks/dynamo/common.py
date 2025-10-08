@@ -117,11 +117,7 @@ class CI(NamedTuple):
 
 
 CI_SKIP_OPTIMIZER = {
-    # TIMM
-    "convmixer_768_32",  # accuracy
-    "hrnet_w18",  # Stack issue in fx
     # HF
-    "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
 }
 
@@ -200,25 +196,8 @@ BENCHMARK_USE_SGD = {
     "XGLMForCausalLM",
     # TIMM
     "adv_inception_v3",
-    "botnet26t_256",
-    "cait_m36_384",  # OOM
-    "coat_lite_mini",
-    "convit_base",
-    "dpn107",
-    "fbnetv3_b",
-    "gernet_l",
-    "lcnet_050",
-    "mixnet_l",
-    "res2net101_26w_4s",
-    "res2net50_14w_8s",
-    "res2next50",
-    "resnest101e",
-    "sebotnet33ts_256",
-    "swsl_resnext101_32x16d",
     "tf_efficientnet_b0",
     "ghostnet_100",
-    "gmixer_24_224",
-    "tinynet_a",
 }
 
 # These models OOM in CI
@@ -243,25 +222,17 @@ CI_USE_SGD = {
     "mobilenet_v2_quantized_qat",
     "phi_1_5 resnet50_quantized_qat",
     "BlenderbotForCausalLM",
-    "cait_m36_384",
     "DALLE2_pytorch",
     "moco",
     "timm_efficientdet",
     "ghostnet_100",
-    "regnety_002",
-    "poolformer_m36",
     "inception_v3",
-    "tinynet_a",
-    "selecsls42b",
     "mobilevit_s",
     "pytorch_CycleGAN_and_pix2pix",
     "vision_maskrcnn",
-    "resmlp_12_224",
     "dlrm",
     "resnet50",
     "dm_nfnet_f0",
-    "pit_b_224",
-    "tf_mixnet_l",
 }
 
 
@@ -3782,7 +3753,6 @@ def run(runner, args, original_dir=None):
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         if args.only is not None and args.only in {
             "nvidia_deeprecommender",
-            "crossvit_9_240",
         }:
             # These seem unhappy with numerics of larger cuBLASLt workspace
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
@@ -3810,7 +3780,6 @@ def run(runner, args, original_dir=None):
             runner.skip_models.update(
                 {
                     # xfail: https://github.com/pytorch/pytorch/issues/145773
-                    "convit_base",
                     "llama",
                     "cm3leon_generate",
                 }
