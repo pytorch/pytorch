@@ -2507,6 +2507,29 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
 
+    def test_bitwise_equivalence_for_small_reductions(self):
+        for i in range(8):
+            torch._dynamo.reset()
+            arg5 = torch.rand(
+                [i, 379, 165], dtype=torch.float32, device="cuda", requires_grad=True
+            )
+
+            def fn(a5):
+                t11 = torch.nn.functional.gelu(a5).sum(dim=0)
+                return t11
+
+            opt_fn = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=False)
+
+            eager_out = fn(arg5)
+            compiled_out = opt_fn(arg5)
+
+            torch.testing.assert_close(
+                eager_out,
+                compiled_out,
+                rtol=0,
+                atol=0,
+            )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
