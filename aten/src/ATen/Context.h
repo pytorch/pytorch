@@ -25,6 +25,7 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
+#include <c10/util/hash.h>
 #include <c10/util/irange.h>
 
 #include <cstdint>
@@ -37,6 +38,12 @@ namespace at {
 class Tensor;
 
 enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
+
+enum class CuBLASReductionOption : uint8_t {
+  AllowReducedPrecisionWithSplitK = 0,
+  DisallowReducedPrecisionAllowSplitK = 1,
+  DisallowReducedPrecisionDisallowSplitK = 2,
+};
 enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
 enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
@@ -319,13 +326,7 @@ class TORCH_API Context {
   //
   // * Throw an error when `Context::deterministicAlgorithms()` is true. Most
   //   of the time, this should be accomplished by calling
-  //   `at::globalContext().alertNotDeterminstic()`.  However, if the
-  //   nondeterministic behavior is caused by the CuBLAS workspace
-  //   configuration in CUDA >= 10.2,
-  //   `at::globalContext().alertCuBLASConfigNotDeterministic()` should be
-  //   called instead (in this case, a comment explaining why the operation is
-  //   nondeterministic is not necessary). See below for details on these
-  //   methods.
+  //   `at::globalContext().alertNotDeterminstic().
   //
   // * Have an entry in the list of nondeterministic PyTorch operations in the
   //   docstring of `use_deterministic_algorithms()` in torch/__init__.py
@@ -349,12 +350,6 @@ class TORCH_API Context {
   // Throws an error if `Context::deterministicAlgorithms()` is true
   static void alertNotDeterministic(std::string_view const& caller);
 
-  // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
-  // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
-  // ":4096:8". For more details:
-  // https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
-  void alertCuBLASConfigNotDeterministic() const;
-
   void setFloat32MatmulPrecision(const std::string& s);
   void setFloat32Precision(
       Float32Backend backend,
@@ -368,10 +363,14 @@ class TORCH_API Context {
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
   Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
-  bool allowFP16ReductionCuBLAS() const;
-  void setAllowFP16ReductionCuBLAS(bool);
-  bool allowBF16ReductionCuBLAS() const;
-  void setAllowBF16ReductionCuBLAS(bool);
+  CuBLASReductionOption allowFP16ReductionCuBLAS() const;
+  void setAllowFP16ReductionCuBLAS(
+      bool allow_reduced_precision,
+      bool allow_splitk = true);
+  CuBLASReductionOption allowBF16ReductionCuBLAS() const;
+  void setAllowBF16ReductionCuBLAS(
+      bool allow_reduced_precision,
+      bool allow_splitk = true);
   bool allowFP16AccumulationCuBLAS() const;
   void setAllowFP16AccumulationCuBLAS(bool);
 
@@ -436,7 +435,6 @@ class TORCH_API Context {
   }
 
  private:
-  static bool checkCuBLASConfigDeterministic();
   std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
@@ -464,8 +462,10 @@ class TORCH_API Context {
       : at::Float32MatmulPrecision::HIGHEST;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
-  bool allow_fp16_reduction_cublas = true;
-  bool allow_bf16_reduction_cublas = true;
+  CuBLASReductionOption allow_fp16_reduction_cublas =
+      CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  CuBLASReductionOption allow_bf16_reduction_cublas =
+      CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
   bool allow_fp16_accumulation_cublas = false;
   std::optional<int32_t> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;
@@ -495,32 +495,21 @@ class TORCH_API Context {
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 
-  struct BackendOpHash {
-    size_t operator()(const std::pair<Float32Backend, Float32Op>& key) const {
-      size_t k1{static_cast<size_t>(key.first)};
-      size_t k2{static_cast<size_t>(key.second)};
-      return std::hash<size_t>{}((k1 << 32) | k2);
-    }
+  using Key = std::pair<Float32Backend, Float32Op>;
+  std::unordered_map<Key, Float32Precision, c10::hash<Key>> fp32_precision = {
+      {{Float32Backend::GENERIC, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::CONV}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
+      {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::MATMUL},
+       float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+           ? Float32Precision::NONE
+           : Float32Precision::TF32},
   };
-
-  std::unordered_map<
-      std::pair<Float32Backend, Float32Op>,
-      Float32Precision,
-      BackendOpHash>
-      fp32_precision = {
-          {{Float32Backend::GENERIC, Float32Op::ALL}, Float32Precision::NONE},
-          {{Float32Backend::MKLDNN, Float32Op::ALL}, Float32Precision::NONE},
-          {{Float32Backend::MKLDNN, Float32Op::CONV}, Float32Precision::NONE},
-          {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
-          {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
-          {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
-          {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::TF32},
-          {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::TF32},
-          {{Float32Backend::CUDA, Float32Op::MATMUL},
-           float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
-               ? Float32Precision::NONE
-               : Float32Precision::TF32},
-      };
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
@@ -701,5 +690,4 @@ struct TORCH_API ROCmBackwardPassGuard {
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
 };
-
 } // namespace at
