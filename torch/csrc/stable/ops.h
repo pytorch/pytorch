@@ -295,8 +295,10 @@ inline void invoke_parallel(
     std::rethrow_exception(eptr);
   }
 #else
-  STD_TORCH_CHECK(false, "Attempting to call torch::stable::invoke_parallel "
-    "without OPENMP. Internal error, should not have gotten here");
+  STD_TORCH_CHECK(
+      false,
+      "Attempting to call torch::stable::invoke_parallel "
+      "without OPENMP. Internal error, should not have gotten here");
 #endif
 }
 
@@ -356,9 +358,9 @@ inline void parallel_for(
             f(begin, end);
           });
     } else {
-      // For parallel native path, we shim invoke_parallel
-      // invoke_parallel takes in std::function (not templated F) so there's no
-      // inlining anyway.
+      // For parallel native path, we call the shim-ed invoke_parallel, the
+      // native invoke_parallel takes in std::function (not templated F) so
+      // there's no inlining anyway.
       TORCH_ERROR_CODE_CHECK(aoti_torch_invoke_parallel(
           begin,
           end,

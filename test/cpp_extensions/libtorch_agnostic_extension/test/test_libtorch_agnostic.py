@@ -378,8 +378,6 @@ if not IS_WINDOWS:
         def test_parallel_for(self, device):
             import libtorch_agnostic
 
-            self.assertTrue(torch.backends.openmp.is_available())
-
             num_threads = torch.get_num_threads()
             size = 100
             grain_size = 10

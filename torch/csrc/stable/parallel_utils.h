@@ -21,7 +21,6 @@ inline void delete_parallel_guard(void* ptr) {
 }
 } // namespace
 
-
 class ThreadIdGuard {
  public:
   explicit ThreadIdGuard() = delete;
@@ -35,7 +34,6 @@ class ThreadIdGuard {
  private:
   std::unique_ptr<ThreadIdGuardOpaque, DeleterFnPtr> guard_;
 };
-
 
 class ParallelGuard {
  public:

@@ -603,12 +603,8 @@ Tensor test_parallel_for(int64_t size, int64_t grain_size) {
   torch::stable::parallel_for(
       0, size, grain_size, [data_ptr](int64_t begin, int64_t end) {
         for (int64_t i = begin; i < end; i++) {
-          #ifdef _OPENMP
-            int thread_id = omp_get_thread_num();
-            data_ptr[i] = i | (static_cast<int64_t>(thread_id) << 32);
-          #else
-            data_ptr[i] = i;
-          #endif
+          int thread_id = aoti_torch_get_thread_num();
+          data_ptr[i] = i | (static_cast<int64_t>(thread_id) << 32);
         }
       });
 

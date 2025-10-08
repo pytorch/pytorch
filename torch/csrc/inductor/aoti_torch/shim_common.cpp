@@ -1763,6 +1763,10 @@ int32_t aoti_torch_get_num_threads() {
   return static_cast<int32_t>(at::get_num_threads());
 }
 
+int32_t aoti_torch_get_thread_num() {
+  return static_cast<int32_t>(at::get_thread_num());
+}
+
 AOTITorchError aoti_torch_create_thread_id_guard(
     int32_t thread_id,
     ThreadIdGuardHandle* ret_guard) {
@@ -1809,6 +1813,9 @@ AOTITorchError aoti_torch_invoke_parallel(
     AOTIParallelLambda lambda,
     void* ctx) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    TORCH_CHECK(
+        AT_PARALLEL_NATIVE,
+        "Only use aoti_torch_invoke_parallel if libtorch built with AT_PARALLEL_NATIVE=1");
     auto wrapper = [lambda, ctx](int64_t chunk_begin, int64_t chunk_end) {
       lambda(chunk_begin, chunk_end, ctx);
     };

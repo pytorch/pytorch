@@ -432,6 +432,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_zero_(AtenTensorHandle self);
 AOTI_TORCH_EXPORT void aoti_torch_lazy_init_num_threads();
 AOTI_TORCH_EXPORT bool aoti_torch_in_parallel_region();
 AOTI_TORCH_EXPORT int32_t aoti_torch_get_num_threads();
+AOTI_TORCH_EXPORT int32_t aoti_torch_get_thread_num();
 
 // ABI stable ThreadIdGuard handle - opaque pointer to avoid exposing C++ class
 struct ThreadIdGuardOpaque;

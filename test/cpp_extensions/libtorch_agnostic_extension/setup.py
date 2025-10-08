@@ -37,10 +37,12 @@ def get_extension():
     }
     extra_link_args = []
 
-    # Technically the extension needs to link against OPENMP
-    # In CI OpenMP is available so we can just add this flag
-    extra_compile_args["cxx"].extend(["-fopenmp", "-D_OPENMP"])
-    extra_link_args.append("-fopenmp")
+    # Note that adding this flag does not mean extension's parallel_for will
+    # always use OPENMP path, OpenMP path will only be used if (1) AND (2)
+    # (1) libtorch was built with OpenMP
+    # (2) extension links against OpenMP
+    # extra_compile_args["cxx"].extend(["-fopenmp", "-D_OPENMP"])
+    # extra_link_args.append("-fopenmp")
 
     extension = CppExtension
     # allow including <cuda_runtime.h>
