@@ -3068,6 +3068,8 @@ make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
 @register_lowering(aten.copy, type_promotion_kind=None)
 def copy(self, src, non_blocking=False):
+    if not isinstance(src, ir.IRNode):
+        src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
     x = src
     if self.get_device() != src.get_device():
         x = to_device(x, self.get_device())
@@ -3698,7 +3700,7 @@ def index_output_size_and_inner_fn(
     # Then, a[:,x,:,x,:] will have shape 2,3,5,7 as due to x,:,x then 2 will
     # be pulled to the front.
     non_consecutive_tensors = False
-    for previous, current in zip(tensor_indices, tensor_indices[1:]):
+    for previous, current in itertools.pairwise(tensor_indices):
         if current - previous != 1:
             non_consecutive_tensors = True
 
