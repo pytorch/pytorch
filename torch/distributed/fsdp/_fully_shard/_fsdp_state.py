@@ -290,7 +290,9 @@ class FSDPState(_State):
                 FSDPParamGroup._prefetch_unshard(target_param_group, "backward")
         return grad
 
-    def _root_post_backward_final_callback(self) -> None:
+    def _root_post_backward_final_callback(
+        self, reduce_scatter_events: list[Any]
+    ) -> None:
         if not compiled_autograd_enabled():
             logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
@@ -311,7 +313,10 @@ class FSDPState(_State):
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
                 if self._comm_ctx.reduce_scatter_state is not None:
-                    self._device_handle.current_stream().wait_event(
+                    # self._device_handle.current_stream().wait_event(
+                    #     self._comm_ctx.reduce_scatter_state.event
+                    # )
+                    reduce_scatter_events.append(
                         self._comm_ctx.reduce_scatter_state.event
                     )
                     self._comm_ctx.reduce_scatter_state = None

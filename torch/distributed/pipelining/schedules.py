@@ -1558,6 +1558,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for stage in self._stages:
             if stage.is_last:
                 return self._merge_outputs(stage.output_chunks)
+
+        # TODO: hack, now wait for reduce scatter events to finish
+        for stage in self._stages:
+            for event in stage.reduce_scatter_events:
+                torch.cuda.current_stream().wait_event(event)
+
         # Does not contain the last stage
         return None
 
