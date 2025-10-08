@@ -456,7 +456,8 @@ aoti_torch_delete_parallel_guard(ParallelGuardHandle guard);
 
 AOTI_TORCH_EXPORT bool aoti_torch_parallel_guard_is_enabled();
 
-// ABI stable invoke_parallel function
+// ABI stable invoke_parallel function, only intended for use for the
+// AT_PARALLEL_NATIVE path, where the function is not inlined.
 typedef void (*AOTIParallelLambda)(int64_t begin, int64_t end, void* ctx);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_invoke_parallel(

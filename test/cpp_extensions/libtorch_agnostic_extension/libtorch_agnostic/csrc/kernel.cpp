@@ -580,7 +580,6 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
 
 
 Tensor test_parallel_for(int64_t size, int64_t grain_size) {
-  // Create a tensor to work on
   AtenTensorHandle tensor_handle;
   int64_t sizes[] = {size};
   int64_t strides[] = {1};
@@ -597,12 +596,10 @@ Tensor test_parallel_for(int64_t size, int64_t grain_size) {
   Tensor tensor(tensor_handle);
   int64_t* data_ptr = reinterpret_cast<int64_t*>(tensor.data_ptr());
 
-  // Initialize all elements to 0
-  for (int64_t i = 0; i < size; i++) {
-    data_ptr[i] = 0;
-  }
+  torch::stable::zero_(tensor);
 
   // Use parallel_for to fill each element with its index
+  // If using a parallel path, the thread id is encoded in the upper 32 bits
   torch::stable::parallel_for(
       0, size, grain_size, [data_ptr](int64_t begin, int64_t end) {
         for (int64_t i = begin; i < end; i++) {

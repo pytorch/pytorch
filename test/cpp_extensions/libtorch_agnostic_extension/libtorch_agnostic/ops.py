@@ -344,5 +344,6 @@ def test_parallel_for(size, grain_size) -> Tensor:
         grain_size: int - grain size for parallel_for
 
     Returns: Tensor - a 1D int64 tensor where each element contains its index
+        (if multiple threads are used the threadid will be encoded in the upper 32 bits)
     """
     return torch.ops.libtorch_agnostic.test_parallel_for.default(size, grain_size)
