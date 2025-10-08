@@ -37,7 +37,7 @@ pytorch_main_components
 :maxdepth: 2
 :hidden:
 
-torch.compiler_get_started
+../torch.compiler_get_started
 ```
 
 ```{toctree}
