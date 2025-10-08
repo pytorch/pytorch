@@ -121,7 +121,7 @@ _name_regex = re.compile(r"^([a-zA-Z_][0-9a-zA-Z_]*?)(?:_(\d+))?$")
 
 # starts with torch but does not start with torch._dynamo. or torch._inductor.
 _torch_but_not_dynamo = re.compile(
-    r"^torch(?:\.(?!_dynamo\.|_inductor\.)[^.]+)*$"
+    r"^torch(?:\.(?!_dynamo\.|_inductor\.|_functorch\.)[^.]+)*$"
 ).fullmatch
 
 
