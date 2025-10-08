@@ -28,6 +28,7 @@ project-excludes = [
   "torch/package/_package_pickler.py",
   "torch/jit/annotations.py",
   "torch/utils/data/datapipes/_typing.py",
+  "torch/nn/functional.py",
   # ====
   "benchmarks/instruction_counts/main.py",
   "benchmarks/instruction_counts/definitions/setup.py",

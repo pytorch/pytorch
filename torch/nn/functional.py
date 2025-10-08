@@ -9,7 +9,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import _add_docstr, _infer_size
-from torch._jit_internal import (  # pyrefly: ignore  # missing-module-attribute
+from torch._jit_internal import (
     _overload,
     boolean_dispatch,
     BroadcastingList1,
