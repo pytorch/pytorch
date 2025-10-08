@@ -51,6 +51,7 @@ from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import (
     getfile,
     hashable,
+    is_annotate_wrapped_function,
     is_lru_cache_wrapped_function,
     NP_SUPPORTED_MODULES,
     unwrap_if_wrapper,
@@ -154,6 +155,7 @@ manual_torch_name_rule_map: dict[
         type[UserFunctionVariable],
     ],
 ] = {
+    "torch.fx.traceback.annotate": UserFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -177,7 +179,6 @@ manual_torch_name_rule_map: dict[
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
-    "torch.autograd._profiler_enabled": SkipFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
     # We graph break on RNG state setters or getters like
@@ -1415,14 +1416,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C.unify_type_list",
         "torch._C.vitals_enabled",
         "torch._C.wait",
-        "torch._cast_Byte",
-        "torch._cast_Char",
-        "torch._cast_Double",
-        "torch._cast_Float",
-        "torch._cast_Half",
-        "torch._cast_Int",
-        "torch._cast_Long",
-        "torch._cast_Short",
         "torch._choose_qparams_per_tensor",
         "torch._chunk_cat",
         "torch._coalesce",
@@ -2443,6 +2436,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.atleast_3d",
         "torch.autograd._calculate_shape",
         "torch.autograd._is_checkpoint_valid",
+        "torch.autograd._profiler_enabled",
         "torch.autograd._make_grads",
         "torch.autograd._register_py_tensor_class_for_device",
         "torch.autograd._tensor_or_tensors_to_tuple",
@@ -3002,6 +2996,9 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                     continue
                 obj = torch_dir + k[len("torch/") :]
             if obj is not None:
+                if is_annotate_wrapped_function(obj):
+                    # pyrefly: ignore  # missing-attribute
+                    obj = obj.__wrapped__
                 if is_lru_cache_wrapped_function(obj):
                     obj = obj.__wrapped__
                 if obj in d and d[obj] != v:
@@ -3406,6 +3403,7 @@ MOD_INLINELIST = [
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
     "torch._dynamo.test_case",
+    "torch._export.non_strict_utils",
     "torch._functorch._aot_autograd.subclass_parametrization",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
@@ -3426,6 +3424,7 @@ MOD_INLINELIST = [
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.export._tree_utils",
+    "torch.export._unlift",
     "torch.export._wrapper_utils",
     "torch.fx._pytree",
     "torch.fx._symbolic_trace",
