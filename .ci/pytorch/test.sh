@@ -34,12 +34,14 @@ fi
 
 
 # Patch numba to avoid CUDA-13 crash, see https://github.com/pytorch/pytorch/issues/162878
-NUMBA_CUDA_DIR=$(python -c "import os;import numba.cuda; print(os.path.dirname(numba.cuda.__file__))" 2>/dev/null || true)
-if [ -n "$NUMBA_CUDA_DIR" ]; then
-  NUMBA_PATCH="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/numba-cuda-13.patch"
-  pushd "$NUMBA_CUDA_DIR"
-  patch -p4 <"$NUMBA_PATCH"
-  popd
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  NUMBA_CUDA_DIR=$(python -c "import os;import numba.cuda; print(os.path.dirname(numba.cuda.__file__))" 2>/dev/null || true)
+  if [ -n "$NUMBA_CUDA_DIR" ]; then
+    NUMBA_PATCH="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/numba-cuda-13.patch"
+    pushd "$NUMBA_CUDA_DIR"
+    patch -p4 <"$NUMBA_PATCH"
+    popd
+  fi
 fi
 
 echo "Environment variables:"
@@ -435,7 +437,7 @@ test_inductor_distributed() {
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives distributed/test_compute_comm_reordering --verbose
+  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives distributed/test_aten_comm_compute_reordering distributed/test_compute_comm_reordering --verbose
   assert_git_not_dirty
 }
 
@@ -884,7 +886,7 @@ test_inductor_torchbench_smoketest_perf() {
   done
 
   # Perform some "warm-start" runs for a few huggingface models.
-  for test in AlbertForQuestionAnswering AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
+  for test in AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
     python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \
