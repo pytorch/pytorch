@@ -1154,6 +1154,11 @@ class ExceptionStack:
     __repr__ = __str__
 
 
+_debug_force_graph_break_on_leaf_return_disable_codes: weakref.WeakSet[
+    types.CodeType
+] = weakref.WeakSet()
+
+
 class InstructionTranslatorBase(
     metaclass=BytecodeDispatchTableMeta,
 ):
@@ -2912,7 +2917,11 @@ class InstructionTranslatorBase(
         )
         all_stack_locals_metadata[0].num_stack = current_num_stack
 
-        if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+        if not (
+            config.debug_force_graph_break_on_leaf_return
+            and self.current_instruction.opname == "NOP"
+            and self.current_instruction.argval == "GRAPH_BREAK_IF_LEAF"
+        ) and inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
             return self.codegen_return_with_pops(
                 inst, all_stack_locals_metadata[0].num_stack
             )
@@ -2942,6 +2951,13 @@ class InstructionTranslatorBase(
 
             cur_tx = cur_tx.parent
             idx += 1
+
+        if (
+            config.debug_force_graph_break_on_leaf_return
+            and self.current_instruction.opname == "NOP"
+            and self.current_instruction.argval == "GRAPH_BREAK_IF_LEAF"
+        ):
+            _debug_force_graph_break_on_leaf_return_disable_codes.add(resume_codes[0])
 
         self.codegen_call_resume(resume_codes, resume_names, cg)
         return cg.get_instructions() + [create_instruction("RETURN_VALUE")]
@@ -3077,7 +3093,10 @@ class InstructionTranslatorBase(
         return (
             all(b.can_restore() for b in self.block_stack)
             and not self.one_graph
-            and not self.error_on_graph_break
+            and (
+                not self.error_on_graph_break
+                or config.debug_force_graph_break_on_leaf_return
+            )
             and not self.is_tracing_resume_prologue
             and not self.active_generic_context_managers
         )
@@ -3316,7 +3335,10 @@ class InstructionTranslatorBase(
 
     def NOP(self, inst: Instruction) -> None:
         # Dynamo-specific testing behavior
-        if inst.argval == "GRAPH_BREAK_IF_LEAF":
+        if (
+            self.f_code not in _debug_force_graph_break_on_leaf_return_disable_codes
+            and inst.argval == "GRAPH_BREAK_IF_LEAF"
+        ):
             self.graph_break_on_leaf_function(inst)
 
     def POP_TOP(self, inst: Instruction) -> None:
