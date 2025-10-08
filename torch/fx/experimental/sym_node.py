@@ -476,11 +476,11 @@ class SymNode:
 
         # Inner impl
         from torch.fx.experimental.proxy_tensor import (
-            get_proxy_mode,
             handle_sym_dispatch,
+            is_sym_tracing,
         )
 
-        if get_proxy_mode():
+        if is_sym_tracing():
             return to_node(
                 self,
                 handle_sym_dispatch(
@@ -1369,8 +1369,8 @@ def _make_node_magic(method, func):
     @capture_provenance
     def binary_magic_impl(self, other):
         from torch.fx.experimental.proxy_tensor import (
-            get_proxy_mode,
             handle_sym_dispatch,
+            is_sym_tracing,
         )
 
         op = method_to_operator(method)
@@ -1379,7 +1379,7 @@ def _make_node_magic(method, func):
         if self.hint is not None and other.hint is not None:
             out_hint = op(self.hint, other.hint)
 
-        if get_proxy_mode():
+        if is_sym_tracing():
             return to_node(
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             )
@@ -1460,12 +1460,12 @@ def _make_node_magic(method, func):
     @capture_provenance
     def unary_magic_impl(self):
         from torch.fx.experimental.proxy_tensor import (
-            get_proxy_mode,
             handle_sym_dispatch,
+            is_sym_tracing,
         )
 
         op = method_to_operator(method)
-        if get_proxy_mode():
+        if is_sym_tracing():
             return to_node(self, handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.expr
@@ -1500,12 +1500,12 @@ def _make_node_magic(method, func):
 
         def sym_ite_impl(pred_node, then_node, else_node):
             from torch.fx.experimental.proxy_tensor import (
-                get_proxy_mode,
                 handle_sym_dispatch,
+                is_sym_tracing,
             )
 
             out_hint = then_node.hint if pred_node.hint else else_node.hint
-            if get_proxy_mode():
+            if is_sym_tracing():
                 return to_node(
                     pred_node,
                     handle_sym_dispatch(
@@ -1543,12 +1543,12 @@ def _make_node_magic(method, func):
 
         def round_impl(self, ndigits=None):
             from torch.fx.experimental.proxy_tensor import (
-                get_proxy_mode,
                 handle_sym_dispatch,
+                is_sym_tracing,
             )
 
             op = builtins.round
-            if get_proxy_mode():
+            if is_sym_tracing():
                 return to_node(
                     self, handle_sym_dispatch(op, (wrap_node(self), ndigits), {})
                 )
@@ -1592,12 +1592,12 @@ def _make_node_sizes_strides(method, func):
 
     def sizes_strides_impl(self, sizes, strides):
         from torch.fx.experimental.proxy_tensor import (
-            get_proxy_mode,
             handle_sym_dispatch,
+            is_sym_tracing,
         )
 
         op = getattr(sys.modules[__name__], method)
-        if get_proxy_mode():
+        if is_sym_tracing():
             return to_node(
                 self,
                 handle_sym_dispatch(
