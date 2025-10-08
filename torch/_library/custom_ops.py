@@ -348,13 +348,15 @@ class CustomOpDef:
                             fn = self._backend_fns[device_type]
                             return inspect.getmodule(fn)
 
-                        utils._c_check_aliasing_constraint(
-                            self._name,
-                            args,
-                            kwargs,
-                            result,
-                            get_module,
-                        )
+                        schema = self._opoverload._schema
+                        if not schema._is_view_op():
+                            utils._c_check_aliasing_constraint(
+                                self._name,
+                                args,
+                                kwargs,
+                                result,
+                                get_module,
+                            )
                         return result
 
                     if device_type is None:

@@ -2552,13 +2552,57 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(x, expected)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_subclass_accessor_view_error(self):
+        @torch.library.custom_op(
+            "_torch_testing::_failing_two_tensor_accessor",
+            mutates_args=(),
+            schema="(Tensor(a) tx, SymInt idx) -> Tensor(a)",
+        )
+        def _failing_two_tensor_accessor(tx, idx):
+            return tx.view_as(tx)
+
+        def noop(*args):
+            pass
+
+        _failing_two_tensor_accessor.register_autograd(noop, setup_context=noop)
+
+        t = torch.rand(2)
+        with self.assertRaisesRegex(
+            RuntimeError, "Custom ops that are views do not support SymInt."
+        ):
+            torch.ops._torch_testing._failing_two_tensor_accessor(t, 2)
+
+        @torch.library.custom_op(
+            "_torch_testing::_failing_two_tensor_accessor_list",
+            mutates_args=(),
+            schema="(Tensor(a) tx, SymInt[] idx) -> Tensor(a)",
+        )
+        def _failing_two_tensor_accessor_list(tx, idx):
+            return tx.view_as(tx)
+
+        def noop(*args):
+            pass
+
+        _failing_two_tensor_accessor_list.register_autograd(noop, setup_context=noop)
+
+        t = torch.rand(2)
+        with self.assertRaisesRegex(
+            RuntimeError, "Custom ops that are views do not support SymInt."
+        ):
+            torch.ops._torch_testing._failing_two_tensor_accessor_list(t, (2,))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_subclass_accessor_view(self):
         class MyTwoTensor(TwoTensor):
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs):
                 if func is torch.ops._torch_testing._two_tensor_accessor.default:
                     self.assertIsInstance(args[0], MyTwoTensor)
-                    res = args[0].a
+                    self.assertIn(args[1], (0, 1))
+                    if args[1] == 0:
+                        res = args[0].a
+                    else:
+                        res = args[0].b
                     # Always return a fresh Tensor!
                     return res.view_as(res)
                 return super().__torch_dispatch__(func, types, args, kwargs)
@@ -2566,33 +2610,44 @@ class TestCustomOpAPI(TestCase):
         @torch.library.custom_op(
             "_torch_testing::_two_tensor_accessor",
             mutates_args=(),
-            schema="(Tensor(a) tx) -> Tensor(a)",
+            schema="(Tensor(a) tx, int idx) -> Tensor(a)",
         )
-        def _two_tensor_accessor(tx):
+        def _two_tensor_accessor(tx, idx):
             raise RuntimeError("Should never be called")
 
         def backward(ctx, gO):
             gI = gO.clone()
-            return MyTwoTensor(gI, torch.zeros_like(gO))
+            if ctx.idx == 0:
+                return MyTwoTensor(gI, torch.zeros_like(gO)), None
+            else:
+                return MyTwoTensor(torch.zeros_like(gO), gI), None
 
         def setup_ctx(ctx, inputs, output):
             ctx._is_pure_view = True
+            ctx.idx = inputs[1]
 
         _two_tensor_accessor.register_autograd(backward, setup_context=setup_ctx)
 
         x = torch.rand(3)
         y = torch.rand(3)
         z = MyTwoTensor(x, y, requires_grad=True)
-        res = torch.ops._torch_testing._two_tensor_accessor(z)
+        res = torch.ops._torch_testing._two_tensor_accessor(z, 0)
         res.sum().backward()
         self.assertEqual(res, x)
         self.assertTrue(res._is_view())
         self.assertTrue(res._base is z)
         self.assertEqual(z.grad, torch.ones_like(z.grad))
 
+        res = torch.ops._torch_testing._two_tensor_accessor(z, 1)
+        res.sum().backward()
+        self.assertEqual(res, y)
+        self.assertTrue(res._is_view())
+        self.assertTrue(res._base is z)
+        self.assertEqual(z.grad, TwoTensor(torch.ones(3), torch.ones(3)))
+
         leaf = MyTwoTensor(torch.rand(3), torch.rand(3), requires_grad=True)
         non_leaf = leaf.clone()
-        view_a = torch.ops._torch_testing._two_tensor_accessor(non_leaf)
+        view_a = torch.ops._torch_testing._two_tensor_accessor(non_leaf, 0)
         self.assertTrue(view_a._is_view())
         self.assertTrue(view_a._base is non_leaf)
         view_a *= 2
