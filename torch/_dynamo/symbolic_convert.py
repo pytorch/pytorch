@@ -1353,7 +1353,8 @@ class InstructionTranslatorBase(
                         vartracker.append(VariableInfo)
 
                     else:
-                        vartracker.append(var)
+                        vartracker.append(str(var))
+
                 trace_bytecode_log.debug(
                     "TRACE %s %s %s", inst.opname, inst.argval, vartracker
                 )
