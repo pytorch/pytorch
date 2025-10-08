@@ -368,6 +368,9 @@ inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
   return p;
 }
 
+void C10_API
+registerDeviceGuard(DeviceType type, const DeviceGuardImplInterface* impl);
+
 inline bool hasDeviceGuardImpl(DeviceType type) {
   return device_guard_impl_registry[static_cast<size_t>(type)].load();
 }

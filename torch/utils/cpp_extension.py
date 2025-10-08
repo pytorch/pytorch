@@ -26,6 +26,7 @@ from typing import Optional, Union
 from typing_extensions import deprecated
 from torch.torch_version import TorchVersion, Version
 
+
 from setuptools.command.build_ext import build_ext
 
 IS_WINDOWS = sys.platform == 'win32'
@@ -227,7 +228,7 @@ CUDA_NOT_FOUND_MESSAGE = (
 )
 ROCM_HOME = _find_rocm_home() if (torch.cuda._is_compiled() and torch.version.hip) else None
 HIP_HOME = _join_rocm_home('hip') if ROCM_HOME else None
-IS_HIP_EXTENSION = True if ((ROCM_HOME is not None) and (torch.version.hip is not None)) else False
+IS_HIP_EXTENSION = bool(ROCM_HOME is not None and torch.version.hip is not None)
 ROCM_VERSION = None
 if torch.version.hip is not None:
     ROCM_VERSION = tuple(int(v) for v in torch.version.hip.split('.')[:2])
@@ -235,6 +236,7 @@ if torch.version.hip is not None:
 CUDA_HOME = _find_cuda_home() if (torch.cuda._is_compiled() and torch.version.cuda) else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 SYCL_HOME = _find_sycl_home() if torch.xpu._is_compiled() else None
+WINDOWS_CUDA_HOME = os.environ.get('WINDOWS_CUDA_HOME')  # used for AOTI cross-compilation
 
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
@@ -345,7 +347,7 @@ PLAT_TO_VCVARS = {
     'win-amd64' : 'x86_amd64',
 }
 
-min_supported_cpython = "0x03090000"  # Python 3.9 hexcode
+min_supported_cpython = "0x030A0000"  # Python 3.10 hexcode
 
 def get_cxx_compiler():
     if IS_WINDOWS:
@@ -785,6 +787,7 @@ class BuildExtension(build_ext):
 
             # Use absolute path for output_dir so that the object file paths
             # (`objects`) get generated with absolute paths.
+            # pyrefly: ignore  # no-matching-overload
             output_dir = os.path.abspath(output_dir)
 
             # See Note [Absolute include_dirs]
@@ -975,6 +978,7 @@ class BuildExtension(build_ext):
                                    is_standalone=False):
             if not self.compiler.initialized:
                 self.compiler.initialize()
+            # pyrefly: ignore  # no-matching-overload
             output_dir = os.path.abspath(output_dir)
 
             # Note [Absolute include_dirs]
@@ -1526,6 +1530,7 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         # Support CUDA_INC_PATH env variable supported by CMake files
         if (cuda_inc_path := os.environ.get("CUDA_INC_PATH", None)) and \
                 cuda_inc_path != '/usr/include':
+            # pyrefly: ignore  # unbound-name
             paths.append(cuda_inc_path)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
@@ -1535,7 +1540,7 @@ def include_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
     return paths
 
 
-def library_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str]:
+def library_paths(device_type: str = "cpu", torch_include_dirs: bool = True, cross_target_platform: Optional[str] = None) -> list[str]:
     """
     Get the library paths required to build a C++ or CUDA extension.
 
@@ -1558,20 +1563,26 @@ def library_paths(device_type: str = "cpu", torch_include_dirs=True) -> list[str
         if HIP_HOME is not None:
             paths.append(os.path.join(HIP_HOME, 'lib'))
     elif device_type == "cuda":
-        if IS_WINDOWS:
+        if cross_target_platform == "windows":
             lib_dir = os.path.join('lib', 'x64')
+            if WINDOWS_CUDA_HOME is None:
+                raise RuntimeError("Need to set WINDOWS_CUDA_HOME for windows cross-compilation")
+            paths.append(os.path.join(WINDOWS_CUDA_HOME, lib_dir))
         else:
-            lib_dir = 'lib64'
-            if (not os.path.exists(_join_cuda_home(lib_dir)) and
-                    os.path.exists(_join_cuda_home('lib'))):
-                # 64-bit CUDA may be installed in 'lib' (see e.g. gh-16955)
-                # Note that it's also possible both don't exist (see
-                # _find_cuda_home) - in that case we stay with 'lib64'.
-                lib_dir = 'lib'
+            if IS_WINDOWS:
+                lib_dir = os.path.join('lib', 'x64')
+            else:
+                lib_dir = 'lib64'
+                if (not os.path.exists(_join_cuda_home(lib_dir)) and
+                        os.path.exists(_join_cuda_home('lib'))):
+                    # 64-bit CUDA may be installed in 'lib' (see e.g. gh-16955)
+                    # Note that it's also possible both don't exist (see
+                    # _find_cuda_home) - in that case we stay with 'lib64'.
+                    lib_dir = 'lib'
 
-        paths.append(_join_cuda_home(lib_dir))
-        if CUDNN_HOME is not None:
-            paths.append(os.path.join(CUDNN_HOME, lib_dir))
+            paths.append(_join_cuda_home(lib_dir))
+            if CUDNN_HOME is not None:
+                paths.append(os.path.join(CUDNN_HOME, lib_dir))
     elif device_type == "xpu":
         if IS_WINDOWS:
             lib_dir = os.path.join('lib', 'x64')
@@ -2561,6 +2572,7 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
         from setuptools import distutils  # type: ignore[attr-defined]
+        # pyrefly: ignore  # missing-attribute
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
         try:

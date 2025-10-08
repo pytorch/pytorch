@@ -496,6 +496,7 @@ def make_test_cls_with_patches(
 def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 11):
         return fn
+    # pyrefly: ignore  # bad-return, bad-argument-type
     return unittest.skip(fn)
 
 
@@ -515,13 +516,6 @@ def skipIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return unittest.skip("Not supported in Python 3.12+")(fn)
     return fn
-
-
-def requiresPy310(fn: Callable[_P, _T]) -> Callable[_P, _T]:
-    if sys.version_info >= (3, 10):
-        return fn
-    else:
-        return unittest.skip("Requires Python 3.10+")(fn)
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
