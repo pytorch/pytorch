@@ -9,17 +9,20 @@ from itertools import combinations
 from random import Random
 from shutil import rmtree
 from threading import Lock
+from time import sleep, time
 from typing import Any, Generator, Sequence, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 from unittest.mock import patch
 
 from filelock import FileLock
 
+import torch
 from torch._inductor.runtime.caching import (
     config,
     context,
     exceptions,
     implementations as impls,
+    interfaces as intfs,
     locks,
     utils,
 )
@@ -35,6 +38,24 @@ if TYPE_CHECKING:
 
 
 class TestMixin:
+    impl_typenames: list[str] = [
+        "_InMemoryCacheImpl",
+        "_OnDiskCacheImpl",
+    ]
+    cls_id: int = Random().randint(0, 2**32)
+    
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-impls-instance-{cls.cls_id}"
+    
+    def impl_from_typename(self: Self, impl_typename: str) -> impls._CacheImpl:
+        if impl_typename == "_OnDiskCacheImpl":
+            return impls._OnDiskCacheImpl(
+                sub_dir=f"{self.sub_dir()}/rng-{self.random_string[4:]}",
+            )
+        else:
+            return getattr(impls, impl_typename)()
+    
     @property
     def random_string(self) -> str:
         return f"s-{Random().randint(0, 2**32)}"
@@ -313,6 +334,10 @@ class ExceptionsTest(TestCase):
         "ValuePicklingError",
         "ValueDecodingError",
         "ValueUnPicklingError",
+        "CustomParamsEncoderRequiredError",
+        "CustomResultEncoderRequiredError",
+        "CustomResultDecoderRequiredError",
+        "DeterministicCachingRequiresStrongConsistency",
     ]
 
     @parametrize("exception_typename", exception_typenames)
@@ -353,20 +378,14 @@ class ExceptionsTest(TestCase):
         self.assertTrue(
             issubclass(exceptions.ValueUnPicklingError, exceptions.ValueDecodingError)
         )
+        self.assertTrue(issubclass(exceptions.CustomParamsEncoderRequiredError, exceptions.UserError))
+        self.assertTrue(issubclass(exceptions.CustomResultEncoderRequiredError, exceptions.UserError))
+        self.assertTrue(issubclass(exceptions.CustomResultDecoderRequiredError, exceptions.UserError))
+        self.assertTrue(issubclass(exceptions.DeterministicCachingRequiresStrongConsistency, exceptions.UserError))
 
 
 @instantiate_parametrized_tests
 class ImplementationsTest(TestMixin, TestCase):
-    impl_typenames: list[str] = [
-        "_InMemoryCacheImpl",
-        "_OnDiskCacheImpl",
-    ]
-    cls_id: int = Random().randint(0, 2**32)
-
-    @classmethod
-    def sub_dir(cls) -> str:
-        return f"testing-impls-instance-{cls.cls_id}"
-
     @classmethod
     def setUpClass(cls) -> None:
         rmtree(
@@ -378,14 +397,6 @@ class ImplementationsTest(TestMixin, TestCase):
         rmtree(
             impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir, ignore_errors=True
         )
-
-    def impl_from_typename(self, impl_typename: str) -> impls._CacheImpl:
-        if impl_typename == "_OnDiskCacheImpl":
-            return impls._OnDiskCacheImpl(
-                sub_dir=f"{self.sub_dir()}/rng-{self.random_string[4:]}",
-            )
-        else:
-            return getattr(impls, impl_typename)()
 
     def assert_key_in(self, key: Any, impl: impls._CacheImpl) -> None:
         self.assertTrue(impl.get(key) is not None)
@@ -408,7 +419,7 @@ class ImplementationsTest(TestMixin, TestCase):
     ) -> None:
         self.assertTrue(((get := impl.get(key)) is not None) and (get.value == value))
 
-    @parametrize("impl_typename", impl_typenames)
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_get(self, impl_typename: str) -> None:
         """Test cache get operation returns cache miss for non-existent keys.
 
@@ -424,7 +435,7 @@ class ImplementationsTest(TestMixin, TestCase):
         with impl.lock():
             self.assert_key_not_in(self.random_string, impl)
 
-    @parametrize("impl_typename", impl_typenames)
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_insert(self, impl_typename: str) -> None:
         """Test cache insert operation successfully stores and retrieves key-value pairs.
 
@@ -445,7 +456,7 @@ class ImplementationsTest(TestMixin, TestCase):
             self.assert_key_value_inserted_in(key, value, impl)
             self.assert_key_has_value_in(key, value, impl)
 
-    @parametrize("impl_typename", impl_typenames)
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_insert_will_not_overwrite(self, impl_typename: str) -> None:
         """Test cache insert operation does not overwrite existing keys.
 
@@ -469,7 +480,7 @@ class ImplementationsTest(TestMixin, TestCase):
             self.assert_key_value_not_inserted_in(key, self.random_string, impl)
             self.assert_key_has_value_in(key, value, impl)
 
-    @parametrize("impl_typename", impl_typenames)
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_key_encoding(self, impl_typename: str) -> None:
         """Test that cache implementations properly handle non-serializable keys.
 
@@ -486,7 +497,7 @@ class ImplementationsTest(TestMixin, TestCase):
             with self.assertRaises(exceptions.KeyPicklingError):
                 impl.insert(lambda: None, None)
 
-    @parametrize("impl_typename", impl_typenames)
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_value_encoding(self, impl_typename: str) -> None:
         """Test that on-disk cache implementations properly handle non-serializable values.
 
@@ -504,7 +515,7 @@ class ImplementationsTest(TestMixin, TestCase):
                 with self.assertRaises(exceptions.ValuePicklingError):
                     impl.insert(None, lambda: None)
 
-    @parametrize("impl_typename", impl_typenames)
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_value_decoding(self, impl_typename: str) -> None:
         """Test that on-disk cache implementations properly handle corrupted cached values.
 
@@ -529,7 +540,7 @@ class ImplementationsTest(TestMixin, TestCase):
                 with self.assertRaises(exceptions.ValueUnPicklingError):
                     impl.get(key)
 
-    @parametrize("impl_typename", impl_typenames)
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_version_mismatch(self, impl_typename: str) -> None:
         """Test that on-disk cache implementations properly handle version mismatches.
 
@@ -567,6 +578,268 @@ class ImplementationsTest(TestMixin, TestCase):
 
 
 @instantiate_parametrized_tests
+class InterfacesTest(TestMixin, TestCase):
+    intf_typenames: list[str] = [
+        "_FastCacheIntf",
+        "_DeterministicCacheIntf",
+    ]
+    cls_id: int = Random().randint(0, 2**32)
+
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-intfs-instance-{cls.cls_id}"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        rmtree(impls._OnDiskCacheImpl()._base_dir / cls.sub_dir(), ignore_errors=True)
+    
+    @classmethod
+    def tearDownClass(cls) -> None:
+        rmtree(impls._OnDiskCacheImpl()._base_dir / cls.sub_dir(), ignore_errors=True)
+
+    def intf_from_typename(self: Self, intf_typename: str) -> intfs._CacheIntf:
+        if intf_typename == "_DeterministicCacheIntf":
+            with patch.object(impls, "_RemoteCacheImpl", impls._InMemoryCacheImpl):
+                impls._InMemoryCacheImpl.has_strong_consistency = True
+                intf: intfs._CacheIntf = intfs._DeterministicCacheIntf()
+        else:
+            intf: intfs._CacheIntf = getattr(intfs, intf_typename)()
+        if intf_typename == "_FastCacheIntf":
+            intf: intfs._FastCacheIntf = intfs._FastCacheIntf()
+            old_get_odc_from_callee = intf._get_odc_from_callee
+            new_get_odc_from_callee = lambda callee: old_get_odc_from_callee(f"{self.sub_dir()}/{callee}")
+            intf._get_odc_from_callee = new_get_odc_from_callee
+        return intf
+    
+    @parametrize("intf_typename", intf_typenames)
+    def test_defaults(self: Self, intf_typename: str) -> None:
+        """Test cache interface decorator with default configuration parameters.
+        
+        Verifies that the cache interface's record decorator works correctly when using
+        default isolation schema and no custom encoders/decoders. This test validates
+        the fundamental caching behavior by:
+        
+        1. Decorating a function with default cache settings (@intf.record())
+        2. Calling the function once (should execute normally and cache result)
+        3. Calling the function again with identical parameters (should hit cache)
+        4. Verifying the cached call executes significantly faster than the original
+        
+        The test uses a function with a deliberate sleep delay to ensure that cache
+        hits are distinguishable from cache misses through execution time measurement.
+        This validates that the caching mechanism is functioning properly with default
+        settings across different cache interface implementations.
+        
+        Args:
+            intf_typename: The cache interface type to test (e.g., "_FastCacheIntf")
+        """
+        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
+        sleep_t: int = 5
+
+        @intf.record()
+        def foo(*args, **kwargs) -> None:
+            sleep(sleep_t)
+            return (args, kwargs)
+        
+        self.assertEqual(foo(1, 2, 3, bar="bar"), ((1, 2, 3,), {"bar": "bar"}))
+        start_t: float = time()
+        self.assertEqual(foo(1, 2, 3, bar="bar"), ((1, 2, 3,), {"bar": "bar"}))
+        self.assertTrue((time() - start_t) < sleep_t)
+    
+    @parametrize("intf_typename", intf_typenames)
+    def test_custom_params_encoder(self: Self, intf_typename: str) -> None:
+        """Test cache interface with custom parameter encoder for non-serializable parameters.
+        
+        Verifies that the cache interface's record decorator works correctly when using
+        custom parameter encoders to handle non-serializable function arguments like
+        lambda functions. This test validates that:
+        
+        1. Functions with non-serializable parameters can be cached using custom encoders
+        2. The custom encoder properly transforms parameters before cache key generation
+        3. Cache hits work correctly when the same transformed parameters are used
+        4. Performance benefits are realized through caching despite complex parameters
+        
+        The test uses a lambda function (which normally can't be pickled) but provides
+        a custom encoder that returns a fixed string, allowing the caching to work.
+        
+        Args:
+            intf_typename: The cache interface type to test (e.g., "_FastCacheIntf")
+        """
+        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
+        sleep_t: int = 5
+
+        @intf.record(custom_params_encoder=lambda params: "bar")
+        def foo(_lambda) -> None:
+            sleep(sleep_t)
+            return hash(_lambda)
+        
+        _lambda = lambda: None
+        self.assertEqual(foo(_lambda), hash(_lambda))
+        start_t: float = time()
+        self.assertEqual(foo(_lambda), hash(_lambda))
+        self.assertTrue((time() - start_t) < sleep_t)
+    
+    @parametrize("intf_typename", intf_typenames)
+    def test_custom_result_encoder_and_decoder(self: Self, intf_typename: str) -> None:
+        """Test cache interface with custom result encoder and decoder for non-serializable results.
+        
+        Verifies that the cache interface's record decorator works correctly when using
+        both custom result encoders and decoders to handle non-serializable function
+        return values. This test validates that:
+        
+        1. Functions that return non-serializable values can be cached using custom encoders
+        2. The custom encoder properly transforms results before storage
+        3. The custom decoder transforms stored values back when retrieving from cache
+        4. Cache hits work correctly with the encoder/decoder transformation pipeline
+        5. Performance benefits are realized through caching despite complex return values
+        
+        The test uses a function that returns "foo" but the encoder/decoder pipeline
+        transforms this to "bar", demonstrating the transformation process works correctly.
+        
+        Args:
+            intf_typename: The cache interface type to test (e.g., "_FastCacheIntf")
+        """
+        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
+        sleep_t: int = 5
+
+        @intf.record(
+            custom_result_encoder=lambda value: "bar",
+            custom_result_decoder=lambda encoded_value: "bar",
+        )
+        def foo() -> None:
+            sleep(sleep_t)
+            return "foo"
+        
+        self.assertEqual(foo(), "bar")
+        start_t: float = time()
+        self.assertEqual(foo(), "bar")
+        self.assertTrue((time() - start_t) < sleep_t)
+    
+    @parametrize("intf_typename", intf_typenames)
+    def test_custom_ischema(self: Self, intf_typename: str) -> None:
+        """Test cache interface with custom isolation schema for context-aware caching.
+        
+        Verifies that the cache interface's record decorator works correctly when using
+        custom isolation schemas to control when cache hits occur based on runtime context.
+        This test validates that:
+        
+        1. Cache hits occur when isolation context conditions are met (same configuration state)
+        2. Cache misses occur when isolation context conditions change (different configuration state)
+        3. Custom isolation schemas properly differentiate between different runtime contexts
+        4. Performance benefits are realized only when context conditions match
+        
+        The test uses torch._inductor.config.max_autotune setting changes to demonstrate
+        context-aware caching - when max_autotune changes, the cache should miss because
+        the isolation context has changed, requiring recomputation.
+        
+        Args:
+            intf_typename: The cache interface type to test (e.g., "_FastCacheIntf")
+        """
+        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
+        sleep_t: int = 5
+
+        @intf.record(
+            ischema=context.IsolationSchema(
+                runtime_context=context.SelectedRuntimeContext(
+                    inductor_configs=True,
+                    torch_determinism_configs=False,
+                    cuda_matmul_precision_configs=False,
+                ),
+                compile_context=False,
+            ),
+        )
+        def foo(*args, **kwargs) -> None:
+            sleep(sleep_t)
+            return (args, kwargs)
+        
+        with patch.object(torch._inductor.config, "max_autotune", True):
+            self.assertEqual(foo("foo"), (("foo",), {},))
+            start_t: float = time()
+            self.assertEqual(foo("foo"), (("foo",), {},))
+            self.assertTrue((time() - start_t) < sleep_t)
+        
+        with patch.object(torch._inductor.config, "max_autotune", False):
+            start_t: float = time()
+            self.assertEqual(foo("foo"), (("foo",), {},))            
+            self.assertTrue((time() - start_t) >= sleep_t)
+    
+    @parametrize("intf_typename", intf_typenames)
+    def test_params_encoder_required(self: Self, intf_typename: str) -> None:
+        """Test that CustomParamsEncoderRequiredError is raised for non-serializable parameters.
+        
+        Verifies that when a cached function is called with parameters that cannot be serialized
+        (such as lambda functions) without providing a custom parameter encoder, the cache
+        interface correctly raises CustomParamsEncoderRequiredError. This ensures proper error
+        handling and user guidance when dealing with complex parameter types that need custom
+        encoding logic.
+        
+        Args:
+            intf_typename: The cache interface type to test (e.g., "_FastCacheIntf")
+        """
+        intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
+
+        @intf.record()
+        def foo(*args, **kwargs) -> None:
+            return (args, kwargs)
+        
+        with self.assertRaises(exceptions.CustomParamsEncoderRequiredError):
+            foo(lambda: None)
+    
+    @parametrize("intf_typename", intf_typenames)
+    def test_result_encoder_required(self: Self, intf_typename: str) -> None:
+        """Test that CustomResultEncoderRequiredError is raised for non-serializable results.
+        
+        Verifies that when a cached function returns values that cannot be serialized
+        (such as lambda functions) without providing a custom result encoder, the cache
+        interface correctly raises CustomResultEncoderRequiredError. This ensures proper
+        error handling and user guidance when dealing with complex return values that need
+        custom encoding logic.
+        
+        Args:
+            intf_typename: The cache interface type to test (e.g., "_FastCacheIntf")
+        """
+        if intf_typename != "_DeterministicCacheIntf":
+            intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
+
+            @intf.record()
+            def foo(*args, **kwargs) -> None:
+                return lambda: None
+            
+            with self.assertRaises(exceptions.CustomResultEncoderRequiredError):
+                foo(0)
+    
+    @parametrize("intf_typename", intf_typenames)
+    def test_result_encoder_and_decoder_required(self: Self, intf_typename: str) -> None:
+        """Test that encoder/decoder pairing requirements are properly enforced.
+        
+        Verifies that when using custom result encoders or decoders, both must be provided
+        together or the cache interface correctly raises the appropriate error. This test
+        ensures that:
+        
+        1. CustomResultEncoderRequiredError is raised when decoder is provided without encoder
+        2. CustomResultDecoderRequiredError is raised when encoder is provided without decoder
+        3. The cache interface prevents inconsistent encoder/decoder configurations
+        
+        This enforcement ensures data integrity by preventing scenarios where data could
+        be encoded but not decoded (or vice versa), which would lead to runtime errors.
+        
+        Args:
+            intf_typename: The cache interface type to test (e.g., "_FastCacheIntf")
+        """
+        if intf_typename != "_DeterministicCacheIntf":
+            intf: intfs._CacheIntf = self.intf_from_typename(intf_typename)
+            
+            with self.assertRaises(exceptions.CustomResultEncoderRequiredError):
+                @intf.record(custom_result_decoder=lambda: None)
+                def foo() -> None:
+                    return None
+            
+            with self.assertRaises(exceptions.CustomResultDecoderRequiredError):
+                @intf.record(custom_result_encoder=lambda: None)
+                def foo() -> None:
+                    return None
+
+
+@instantiate_parametrized_tests
 class LocksTest(TestMixin, TestCase):
     T = TypeVar("T")
 
@@ -593,12 +866,32 @@ class LocksTest(TestMixin, TestCase):
             raise NotImplementedError
 
     def test_BLOCKING(self) -> None:
+        """Test that the BLOCKING constant has the expected value.
+        
+        Verifies that the _BLOCKING constant is set to -1, which is used to indicate
+        that lock acquisition should block indefinitely until the lock is available.
+        This constant is used throughout the locking system to specify blocking behavior.
+        """
         self.assertEqual(locks._BLOCKING, -1.0)
 
     def test_NON_BLOCKING(self) -> None:
+        """Test that the NON_BLOCKING constant has the expected value.
+        
+        Verifies that the _NON_BLOCKING constant is set to 0, which is used to indicate
+        that lock acquisition should not block and should return immediately whether
+        the lock is available or not. This constant is used throughout the locking system
+        to specify non-blocking behavior.
+        """
         self.assertEqual(locks._NON_BLOCKING, 0.0)
 
     def test_BLOCKING_WITH_TIMEOUT(self) -> None:
+        """Test that the BLOCKING_WITH_TIMEOUT constant has the expected value.
+        
+        Verifies that the _BLOCKING_WITH_TIMEOUT constant is set to a positive value,
+        which represents the timeout duration in seconds for blocking lock acquisition
+        attempts. This constant is used throughout the locking system to specify how
+        long to wait before timing out on lock acquisition.
+        """
         self.assertGreater(locks._BLOCKING_WITH_TIMEOUT, 0.0)
 
     @patch.object(locks, "_BLOCKING_WITH_TIMEOUT", 1.0)
@@ -732,6 +1025,54 @@ class LocksTest(TestMixin, TestCase):
                     raise NotImplementedError
 
         flock_fpath.unlink(missing_ok=True)
+
+    @patch.object(locks, "_BLOCKING_WITH_TIMEOUT", 1)
+    @patch.object(locks, "_DEFAULT_TIMEOUT", 1)
+    @parametrize(
+        "impl_typename_combos",
+        list(combinations(TestMixin.impl_typenames, 1))
+        + list(combinations(TestMixin.impl_typenames, 2))
+    )
+    def test_acquire_many_impl_locks_with_timeout(
+        self: Self,
+        impl_typename_combos: tuple[str, ...],
+    ) -> None:
+        """Test that multiple cache implementation locks are acquired and released correctly.
+        
+        Verifies that the _acquire_many_impl_locks_with_timeout context manager properly
+        handles lock acquisition and release for multiple cache implementations simultaneously.
+        This test ensures that:
+        1. All locks are successfully acquired when entering the context manager
+        2. Lock states are correctly maintained while inside the context
+        3. All locks are properly released when exiting the context manager
+        4. The function works correctly with different combinations of cache implementations
+        
+        The test covers both single implementation scenarios and multiple implementation
+        combinations (in-memory and on-disk cache implementations), ensuring that the
+        multi-lock acquisition mechanism works reliably across different cache types
+        and their respective locking mechanisms (threading.Lock vs FileLock).
+        
+        Args:
+            impl_typename_combos: Tuple of cache implementation type names to test,
+                                generated from combinations of available implementation types
+        """
+        impls: list[impls._CacheImpl] = []
+        for impl_typename in impl_typename_combos:
+            impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
+            impls.append(impl)
+
+        with locks._acquire_many_impl_locks_with_timeout(*impls):
+            for impl in impls:
+                if hasattr(impl, '_lock'):
+                    self.assertTrue(impl._lock.locked())
+                elif hasattr(impl, '_flock'):
+                    self.assertTrue(impl._flock.is_locked)
+        
+        for impl in impls:
+            if hasattr(impl, '_lock'):
+                self.assertFalse(impl._lock.locked())
+            elif hasattr(impl, '_flock'):
+                self.assertFalse(impl._flock.is_locked)
 
 
 @instantiate_parametrized_tests

@@ -9,13 +9,13 @@ The module offers both context manager and manual acquisition patterns:
 - Unsafe acquisition: Manual acquisition that requires explicit release by the caller
 """
 
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from threading import Lock
 from typing import Generator, Optional
 
 from filelock import FileLock, Timeout
 
-from . import exceptions
+from . import exceptions, implementations as impls
 
 
 # Infinite timeout - blocks indefinitely until lock is acquired.
@@ -179,3 +179,33 @@ def _unsafe_acquire_flock_with_timeout(
         _ = flock.acquire(timeout=_timeout)
     except Timeout as err:
         raise exceptions.FileLockTimeoutError(flock, _timeout) from err
+
+@contextmanager
+def _acquire_many_impl_locks_with_timeout(
+    *impls: impls._CacheImpl,
+    timeout: int = _DEFAULT_TIMEOUT,
+) -> Generator[None, None, None]:
+    """Context manager for acquiring multiple cache implementation locks atomically.
+    
+    This function uses ExitStack to ensure all locks are acquired and released
+    properly, even if some acquisitions fail. It provides a coordinated way to
+    acquire multiple cache implementation locks with timeout support.
+    
+    Args:
+        *impls: Variable number of cache implementation instances whose locks
+               should be acquired.
+        timeout: Timeout mode or seconds for each lock acquisition. Use _BLOCKING
+                for indefinite wait, _NON_BLOCKING for immediate failure, or a
+                positive integer for timeout in seconds.
+    
+    Yields:
+        None: Control is yielded while all locks are held.
+        
+    Raises:
+        LockTimeout: If any threading lock cannot be acquired within the timeout.
+        FileLockTimeout: If any file lock cannot be acquired within the timeout.
+    """
+    with ExitStack() as stack:
+        for impl in impls:
+            stack.enter_context(impl.lock(timeout=timeout))
+        yield
