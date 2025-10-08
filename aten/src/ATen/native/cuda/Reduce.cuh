@@ -658,12 +658,7 @@ struct ReduceOp {
     // Warp-level reduction for remaining threads
     // For non-power-of-2 sizes, we start from the next power-of-2 divided by 2
     // and use a boundary check to avoid out-of-bounds access
-    size_t offset = 1;
-    while (offset < dim_x) {
-      offset <<= 1;
-    }
-    offset >>= 1;
-    for (; offset > 0; offset >>= 1) {
+    for (size_t offset = warpSize / 2; offset > 0; offset >>= 1) {
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = ops.warp_shfl_down(value[i], offset);
