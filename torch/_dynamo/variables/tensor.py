@@ -246,7 +246,7 @@ class TensorVariable(VariableTracker):
 
         if is_sparse_any(value) and not has_free_symbols(value):
             props["_size"] = tuple(
-                [int(s) if is_symbolic(s) else s for s in value.size()]
+                int(s) if is_symbolic(s) else s for s in value.size()
             )
         elif not has_free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
@@ -258,7 +258,8 @@ class TensorVariable(VariableTracker):
             props["_size"] = tuple(
                 # the non is_symbolic case applies to the jagged layout
                 # NestedTensor case as singleton ints are not symbolic
-                [int(s) if is_symbolic(s) else s for s in value.size()]
+                int(s) if is_symbolic(s) else s
+                for s in value.size()
             )
             props["stride"] = tuple(value.stride())
             if torch._C._functorch.is_batchedtensor(value):
@@ -267,11 +268,9 @@ class TensorVariable(VariableTracker):
                 props["is_contiguous"] = None
             else:
                 props["is_contiguous"] = tuple(
-                    [
-                        x
-                        for x in torch._prims_common._memory_formats
-                        if value.is_contiguous(memory_format=x)
-                    ]
+                    x
+                    for x in torch._prims_common._memory_formats
+                    if value.is_contiguous(memory_format=x)
                 )
         return props
 
@@ -1544,7 +1543,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
-        elif name in ["__version__"]:
+        elif name == "__version__":
             unimplemented_v2(
                 gb_type="Unsupported ndarray.__version__ access",
                 context=f"var_getattr {self} {name}",

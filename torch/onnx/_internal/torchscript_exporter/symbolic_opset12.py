@@ -363,7 +363,10 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
         concat = loop_context.op("Concat", *unsqueeze_list, axis_i=0)
 
         cond_out = loop_context.op(
-            "Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL
+            "Cast",
+            loop_condition,
+            # pyrefly: ignore  # bad-argument-type
+            _C_onnx.TensorProtoDataType.BOOL,
         )
         utils._add_output_to_block(loop_block, cond_out)
         utils._add_output_to_block(loop_block, concat)
