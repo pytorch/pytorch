@@ -8042,6 +8042,56 @@ def sample_inputs_dropout_backward(op_info, device, dtype, requires_grad, **kwar
     for case, scale in product(cases, scale_vals):
         yield SampleInput(make_arg(case), make_mask(case), scale)
 
+def sample_inputs_convolution_backward(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def get_in_dim(out_dim, pad, dialation, kernel, stride):
+        return (stride * (out_dim - 1)) + 1 + (dialation * (kernel - 1)) - (2 * pad)
+
+    def get_random_conv_bwd_inputs(num_cases):
+        pad = dialation = stride = kernel = 2
+        for (is_transposed, input_bias, groups, tensor_sizes) in zip(
+                [True, False],
+                [True, False],
+                [1, 4],
+                [[M, M, M, L, L], [M, M, S, L, L]]
+        ):
+            [N, C_in, C_out, H_out, W_out] = tensor_sizes
+            C_in = (C_in // groups) * groups
+            C_out = (C_out // groups) * groups
+
+            H_in = get_in_dim(H_out, pad, dialation, kernel, stride)
+            W_in = get_in_dim(W_out, pad, dialation, kernel, stride)
+
+            if is_transposed:
+                grad_output = make_arg([N, C_in, H_in, W_in]),
+                args = (
+                    make_arg([N, C_out, H_out, W_out]),
+                    make_arg([C_out, C_in // groups, kernel, kernel]),
+                )
+                bias_size = [C_in * groups] if input_bias else None
+            else:
+                grad_output = make_arg([N, C_out, H_out, W_out]),
+                args = (
+                    make_arg([N, C_in, H_in, W_in]),
+                    make_arg([C_out, C_in // groups, kernel, kernel]),
+                )
+                bias_size = [C_out] if input_bias else None
+            kwargs = {
+                "bias_sizes": bias_size,
+                "stride": [stride, stride],
+                "padding": [pad, pad],
+                "dilation": [dialation, dialation],
+                "transposed": is_transposed,
+                "output_padding": [0],
+                "groups": groups,
+                "output_mask": [True, True, True],
+            }
+            yield (grad_output, args, kwargs)
+
+    for grad_output, args, kwargs in get_random_conv_bwd_inputs(5):
+        yield SampleInput(grad_output[0], args=args, kwargs=kwargs)
+
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
         return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -20992,6 +21042,15 @@ op_db: list[OpInfo] = [
                 active_if=TEST_WITH_ASAN
             ),
         ),
+    ),
+    OpInfo(
+        "convolution_backward",
+        op=torch.ops.aten.convolution_backward.default,
+        aten_name="convolution_backward",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        sample_inputs_func=sample_inputs_convolution_backward
     ),
     OpInfo(
         "nn.functional.dropout2d",

@@ -3537,9 +3537,9 @@ def meta_convolution_backward(
             backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
         else:
             if transposed:
-               backend_grad_bias = grad_output_.new_empty(weight_.size(1)*groups)
+                backend_grad_bias = grad_output_.new_empty(weight_.size(1) * groups)
             else:
-               backend_grad_bias = grad_output_.new_empty(weight_.size(0))
+                backend_grad_bias = grad_output_.new_empty(weight_.size(0))
     return (backend_grad_input, backend_grad_weight, backend_grad_bias)
 
 
