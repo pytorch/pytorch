@@ -319,6 +319,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
+    # pyrefly: ignore  # missing-attribute
     return toplevel.__qualname__, code_source.strip(".")
 
 
@@ -593,9 +594,11 @@ class CompilePackage:
                             f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
                         )
 
+                # pyrefly: ignore  # bad-assignment
                 self._source_info = dynamo.source_info
 
             main, *codes = dynamo.codes
+            # pyrefly: ignore  # bad-assignment
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
@@ -603,6 +606,7 @@ class CompilePackage:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
             )
+        # pyrefly: ignore  # bad-assignment
         self._initialized = True
 
     def _add_function(
@@ -746,6 +750,7 @@ class CompilePackage:
             for name in names:
                 module.__dict__.pop(name)
 
+        # pyrefly: ignore  # bad-assignment
         self._installed_globals = {}
 
         _reset_precompile_entries(self._innermost_fn.__code__)
