@@ -150,3 +150,33 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
             f"Tried to get the payload from a non-OpaqueObject of type `{type_}`"
         )
     torch._C._set_opaque_object_payload(opaque_object, payload)
+
+
+_OPAQUE_TYPES: dict[Any, str] = {}
+
+
+def register_opaque_type(type_: Any, fqn: str) -> None:
+    """
+    Registers the given type as an opaque type which allows this to be consumed
+    by a custom operator.
+
+    Args:
+        type_ (type): The type to register as an opaque type.
+        fqn (str): A unique qualified name of the type.
+    """
+    if "." in fqn:
+        # The schema_type_parser will break up types with periods
+        raise ValueError(
+            f"Unable to accept fqn, {fqn}, for this opaque type as it contains a '.'"
+        )
+    _OPAQUE_TYPES[type_] = fqn
+    torch._C._register_opaque_type(fqn)
+
+
+def is_opaque_type(type_: Any) -> bool:
+    """
+    Checks if the given type is an opaque type.
+    """
+    if type_ not in _OPAQUE_TYPES:
+        return False
+    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[type_])
