@@ -902,6 +902,7 @@ def prepare_aot_module_simplified(
     flatten: bool,
     *,
     force_non_lazy_backward_lowering: bool = False,
+    disable_functionalization: bool = False,
 ):
     if not flatten:
         assert kwargs is None
@@ -992,6 +993,7 @@ def prepare_aot_module_simplified(
         ignore_shape_env=ignore_shape_env,
         precompile_backend_id=getattr(mod, "_backend_id", None),
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
+        disable_functionalization=disable_functionalization,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
@@ -1066,6 +1068,7 @@ def aot_module_simplified(
             ignore_shape_env,
             flatten=False,
             force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
+            disable_functionalization=config._test_disable_functionalization,
         )
 
         compiled_fn = None
@@ -1168,6 +1171,7 @@ def aot_export_joint_with_descriptors(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     ignore_shape_env=False,
+    disable_functionalization=False,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1257,6 +1261,7 @@ def aot_export_joint_with_descriptors(
         # Metric(s) {'is_forward'} have already been set in the current
         # context.
         force_non_lazy_backward_lowering=True,
+        disable_functionalization=disable_functionalization,
     )
 
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would
