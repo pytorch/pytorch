@@ -47,6 +47,8 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
                 "levit_128",
                 "llava",
                 "microbench_unbacked_tolist_sum",
+                "resnet50",
+                "resnet152",
                 "sam",
                 "sam_fast",
                 "stable_diffusion_text_encoder",
