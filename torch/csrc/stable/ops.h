@@ -10,6 +10,8 @@
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/headeronly/core/ScalarType.h>
 
+using torch::headeronly::ScalarType;
+
 namespace torch::stable {
 
 // We expect this to be the stable version of the empty_like op that takes in
