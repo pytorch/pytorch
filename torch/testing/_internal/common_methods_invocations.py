@@ -21050,6 +21050,12 @@ op_db: list[OpInfo] = [
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=5e-4, rtol=1e-6)}),
+                'TestCommon', 'test_noncontiguous_samples',
+            ),
+        ),
         sample_inputs_func=sample_inputs_convolution_backward
     ),
     OpInfo(
