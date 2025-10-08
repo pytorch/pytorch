@@ -10,6 +10,8 @@ from torch._inductor.test_case import run_tests
 # from torch._inductor.utils import run_and_get_code
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.fx.passes.regional_inductor import compile_fx_annotated_nodes_with_inductor
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 # Some issues raised in the HOP meeting
@@ -26,6 +28,7 @@ from torch.fx.passes.regional_inductor import compile_fx_annotated_nodes_with_in
 #   c) nn.MOdule info to organize MoE runtime
 #   d) PP stages
 #   e) rename graph nodes for more debugging.
+#   f) No nested regional compile
 
 
 def checkpoint_wrapper(fn):
@@ -132,6 +135,46 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
             fn, backend=aot_eager_regional_inductor(), fullgraph=True
         )
         x = torch.randn(10, requires_grad=True)
+
+        _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
+        # the invoke_subgraph is called twice - but the inside code is compiled
+        # once - so in total 2 (1 fwd + 1 bwd)
+        self.assertEqual(len(codes), 2)
+
+    @requires_cuda_and_triton
+    def test_flex_attention(self):
+        def _squared(score, b, h, m, n):
+            return score * score
+
+        def mask_mod(b, h, q, k):
+            return q >= 0
+
+        a = 12
+        b = 64
+        block_mask = create_block_mask(mask_mod, None, None, a * b, a * b)
+
+        def fn(x):
+            x = torch.sin(x)
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                x = flex_attention(x, x, x, block_mask=block_mask, score_mod=_squared)
+            return torch.cos(x)
+
+        x = torch.randn(
+            1,
+            1,
+            a * b,
+            b,
+            dtype=torch.bfloat16,
+            device="cuda",
+            requires_grad=True,
+        )
+
+        opt_fn = torch.compile(
+            fn,
+            backend=aot_eager_regional_inductor(),
+            fullgraph=True,
+            # fn, backend="inductor", fullgraph=True
+        )
 
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x))
         # the invoke_subgraph is called twice - but the inside code is compiled

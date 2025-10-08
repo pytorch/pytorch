@@ -1,22 +1,12 @@
 # mypy: allow-untyped-defs
-import functools
 
 import torch
 
 # from torch._dynamo.backends.common import aot_autograd as auto_autograd_backend
-from torch._guards import TracingContext
+from torch._guards import detect_fake_mode, TracingContext
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
-
-
-def listify_inputs(fn):
-    # Handles boxed arguments expectation from compile_fx_inner
-    @functools.wraps(fn)
-    def inner(*args):
-        return fn(list(args))
-
-    return inner
 
 
 def partition_by_supported_nodes(gm, supported_ops, prefix):
@@ -42,17 +32,27 @@ def compile_submod(gm, prefix):
             for inp_node in node.all_input_nodes:
                 if hasattr(inp_node, "meta") and "val" in inp_node.meta:
                     fake_inputs.append(inp_node.meta["val"])
+                else:
+                    raise RuntimeError(
+                        f"Partition is bad because non fake tensor value is seen {inp_node}"
+                    )
+
+            fake_mode = detect_fake_mode()
+            assert fake_mode is not None
 
             submod = getattr(gm, node.target)
-            # Ensure that it runs in eager
-            submod(*fake_inputs)
 
-            from torch._inductor.compile_fx import compile_fx_inner
+            with fake_mode:
+                # Ensure that it runs in eager
+                submod(*fake_inputs)
+
+            from torch._inductor.compile_fx import compile_fx
 
             # [inductor-stateless-issue] - Calling compile_fx_inner is changing
             # the reported output strides.
-            with TracingContext.report_output_strides():
-                compiled_submod = listify_inputs(compile_fx_inner(submod, fake_inputs))
+            with fake_mode:
+                with TracingContext.report_output_strides():
+                    compiled_submod = compile_fx(submod, fake_inputs)
 
             with gm.graph.inserting_after(node):
                 new_node = gm.graph.call_function(
@@ -99,6 +99,11 @@ def _compile_fx_annotated_nodes_with_inductor(gm):
 
 def recursive_compile_fx_annotated_nodes_with_inductor(gm):
     for node in gm.graph.find_nodes(op="get_attr"):
+        if has_marked_node_custom_metadata(node):
+            # If the get_attr itself is marked for compile, the outer graph will
+            # take care of it. If we dont do that, we end up with nested
+            # regional inductor compiles that do not work well.
+            continue
         submod = getattr(gm, node.target)
         if isinstance(submod, torch.fx.GraphModule):
             recursive_compile_fx_annotated_nodes_with_inductor(submod)
