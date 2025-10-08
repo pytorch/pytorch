@@ -210,7 +210,7 @@ else:
                     "The submesh can only be a 1D mesh."
                 )
                 child_mesh_dim_name = child_mesh_dim_names[0]
-                return self.get_mesh_dim_by_name(root_mesh, child_mesh_dim_name)
+                return root_mesh.get_mesh_dim_by_name(child_mesh_dim_name)
             return None
 
         @staticmethod
@@ -222,23 +222,6 @@ else:
             # ProcessGroup can't tell us this info so we have to infer it, assume
             # homogeneous hardware for now
             return get_world_size() // _MeshEnv.num_devices_per_host(device_type)
-
-        def get_mesh_dim_by_name(
-            self, device_mesh: "DeviceMesh", mesh_dim_name: str
-        ) -> int:
-            if (
-                device_mesh.mesh_dim_names is None
-                or len(device_mesh.mesh_dim_names) == 0
-            ):
-                raise KeyError(
-                    "No `mesh_dim_names` found.",
-                )
-            if mesh_dim_name not in device_mesh.mesh_dim_names:
-                raise KeyError(
-                    f"Mesh dimension '{mesh_dim_name}' does not exist.",
-                    f"Available mesh dimensions are: mesh_dim_names={device_mesh.mesh_dim_names}",
-                )
-            return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
 
         def _set_mesh_dim_group_options(
             self,
@@ -339,7 +322,7 @@ else:
             """
             Return all the submeshes of a given mesh dimension of the device mesh.
             """
-            mesh_dim = self.get_mesh_dim_by_name(device_mesh, mesh_dim_name)
+            mesh_dim = device_mesh.get_mesh_dim_by_name(mesh_dim_name)
             layout = device_mesh._layout[mesh_dim]
             pg_ranks_by_dim = layout.remap_to_tensor(
                 device_mesh.mesh,
@@ -828,7 +811,7 @@ else:
                 return not_none(_resolve_process_group(dim_group_name))
             else:
                 mesh_dim = (
-                    _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
+                    self.get_mesh_dim_by_name(mesh_dim)
                     if isinstance(mesh_dim, str)
                     else mesh_dim
                 )
@@ -1001,33 +984,11 @@ else:
         def shape(self) -> tuple[int, ...]:
             return tuple(self.mesh.shape)
 
-        def get_rank(self, coordinate: Optional[list[int]] = None) -> int:
+        def get_rank(self) -> int:
             """
-            Returns the rank at the specified ``coordinate``.
-            If no coordinate is provided, returns the current global rank.
-
-            Args:
-                coordinate (list[int], optional): The coordinate in the mesh to query the rank for.
-                    If not provided, returns the current global rank.
-
-            Returns:
-                The rank at the specified coordinate, or the current global rank if coordinate is None.
+            Returns the current global rank.
             """
-            if coordinate is None:
-                return get_rank()
-
-            # Assert that coordinate doesn't exceed mesh dimensions
-            if len(coordinate) != self.mesh.ndim:
-                raise ValueError(
-                    f"Coordinate length {len(coordinate)} must match mesh dimensions {self.mesh.ndim}"
-                )
-
-            for i, coord in enumerate(coordinate):
-                if coord < 0 or coord >= self.mesh.size(i):
-                    raise ValueError(
-                        f"Coordinate {coord} at dimension {i} is out of bounds [0, {self.mesh.size(i)})"
-                    )
-            return int(self.mesh[tuple(coordinate)].item())
+            return get_rank()
 
         def get_local_rank(self, mesh_dim: Optional[Union[int, str]] = None) -> int:
             """
