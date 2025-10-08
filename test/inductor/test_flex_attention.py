@@ -464,7 +464,9 @@ class TestFlexAttention(InductorTestCase):
             self.fail("Output/Grad with NaN")
         name = tensor_name if tensor_name is not None else ""
         msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
-        torch.testing.assert_close(compiled_error, ref_error, rtol=fudge_factor, atol=1e-7, msg=msg)
+        torch.testing.assert_close(
+            compiled_error, ref_error, rtol=fudge_factor, atol=1e-7, msg=msg
+        )
 
     def _check_out(
         self,
