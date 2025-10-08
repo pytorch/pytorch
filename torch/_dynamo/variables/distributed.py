@@ -232,7 +232,7 @@ class PlacementVariable(DistributedVariable):
     def reconstruct(self, codegen):
         # Reconstruct the Placement object by calling its constructor
         # e.g., Shard(0), Replicate(), Partial()
-        from torch.distributed.tensor.placement_types import Shard
+        from torch.distributed.tensor.placement_types import Partial, Replicate, Shard
 
         placement_type = type(self.value)
 
@@ -248,8 +248,10 @@ class PlacementVariable(DistributedVariable):
             codegen(ConstantVariable.create(self.value.dim))
             codegen.extend_output(create_call_function(1, False))
         # Replicate and Partial have no required args
-        else:
+        elif istype(self.value, (Replicate, Partial)):
             codegen.extend_output(create_call_function(0, False))
+        else:
+            super().reconstruct(codegen)
 
 
 class DeviceMeshVariable(DistributedVariable):
