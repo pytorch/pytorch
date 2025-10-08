@@ -4,12 +4,12 @@ import math
 import os
 import socket
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -1421,7 +1421,7 @@ def _maybe_convert_scalar_types_to_dtypes(
         if scalar_type is None:
             dtypes.append(scalar_type)
         elif scalar_type not in _SCALAR_TYPE_TO_DTYPE:
-            raise ValueError("Unrecognized scalar type {scalar_type}")
+            raise ValueError(f"Unrecognized scalar type {scalar_type}")
         else:
             dtypes.append(_SCALAR_TYPE_TO_DTYPE[scalar_type])
     return dtypes
