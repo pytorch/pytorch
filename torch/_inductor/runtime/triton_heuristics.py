@@ -2512,13 +2512,23 @@ def pointwise(
     if len(size_hints) == 1:
 
         use_looped_pointwise = True
-        if use_looped_pointwise:
+        has_r0_block = any(
+            arg == "R0_BLOCK" 
+            for arg in triton_meta.get("signature", {}).keys()
+        )
+        if has_r0_block:
             configs = [
                 Config({"XBLOCK": 512, "R0_BLOCK": 256}, num_warps=4, num_stages=1),
                 Config({"XBLOCK": 1024, "R0_BLOCK": 512}, num_warps=4, num_stages=1),
                 Config({"XBLOCK": 2048, "R0_BLOCK": 1024}, num_warps=8, num_stages=1),
                 Config({"XBLOCK": 4096, "R0_BLOCK": 2048}, num_warps=8, num_stages=1),
             ]
+            #configs = [
+            #    triton_config_with_settings(size_hints, 512),
+            #    triton_config_with_settings(size_hints, 1024),
+            #    triton_config_with_settings(size_hints, 2048),
+            #    triton_config_with_settings(size_hints, 4096),
+            #]
 
         elif disable_pointwise_autotuning(inductor_meta) and not (
             inductor_meta.get("max_autotune")
@@ -2535,7 +2545,11 @@ def pointwise(
             ]
     if len(size_hints) == 2:
         use_looped_pointwise = True
-        if use_looped_pointwise:
+        has_r0_block = any(
+            arg == "R0_BLOCK" 
+            for arg in triton_meta.get("signature", {}).keys()
+        )
+        if has_r0_block:
             # Find which dimension is larger
             dim_sizes = [(name, size) for name, size in size_hints.items()]
             larger_dim, larger_size = max(dim_sizes, key=lambda x: x[1])
@@ -2551,6 +2565,14 @@ def pointwise(
                 Config({larger_block: 512, "R0_BLOCK": 256, smaller_block: 64}, num_warps=4, num_stages=1),
                 Config({larger_block: 1024, "R0_BLOCK": 512, smaller_block: 64}, num_warps=8, num_stages=1),
             ]
+            #configs = [
+            #    triton_config_with_settings(size_hints, 32, 32),
+            #    triton_config_with_settings(size_hints, 64, 64),
+            #    triton_config_with_settings(size_hints, 256, 16),
+            #    triton_config_with_settings(size_hints, 16, 256),
+            #]
+
+
         elif (
             disable_pointwise_autotuning(inductor_meta) or tile_hint == TileHint.SQUARE
         ) and not (

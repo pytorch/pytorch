@@ -3895,6 +3895,25 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.fixed_config or self.cooperative_reduction or self.persistent_reduction:
             return False
         
+        # Check for operations incompatible with inner loop
+        code_str = ""
+        if hasattr(self, 'indexing_code') and self.indexing_code:
+            code_str += str(self.indexing_code)
+        if hasattr(self, 'loads') and self.loads:
+            code_str += str(self.loads)
+        if hasattr(self, 'compute') and self.compute:
+            code_str += str(self.compute)
+        if hasattr(self, 'stores') and self.stores:
+            code_str += str(self.stores)
+        
+        # Skip if using block pointers - they have complex shape calculations
+        if "tl.make_block_ptr" in code_str:
+            return False
+        
+        # Skip if using tensor descriptors (TMA)
+        if "tl.make_tensor_descriptor" in code_str:
+            return False
+        
         # Separate trees by type
         valid_prefixes = {'x', 'y', 'z'}
         valid_trees = []
@@ -3904,26 +3923,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if tree.prefix in valid_prefixes:
                 valid_trees.append(tree)
             elif tree.prefix.startswith('r') and (len(tree.prefix) == 1 or tree.prefix[1:].replace('_', '').isdigit()):
-                # This catches r, r0, r1, r0_, r1_, etc.
                 reduction_trees.append(tree)
         
-        # Check if all reduction trees are trivial (numel=1 or very small)
-        # This happens with certain BatchNorm fusions
+        # Check if all reduction trees are trivial (numel=1)
         for tree in reduction_trees:
             try:
                 size_hint = V.graph.sizevars.size_hint(tree.numel, fallback=999999)
-                # If any reduction dimension is > 1, this is not a pointwise kernel
                 if size_hint > 1:
                     return False
             except:
-                # If we can't determine size, conservatively assume it's non-trivial
                 return False
         
-        # Need at least one valid dimension, max 2 for now
+        # Need at least one valid dimension
         if len(valid_trees) == 0 or len(valid_trees) > 2:
             return False
         
-        # Check that we have at least one dimension large enough to benefit
+        # Check dimension sizes
         dimension_sizes = []
         for tree in valid_trees:
             try:
@@ -3935,17 +3950,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             except:
                 return False
         
-        if dimension_sizes:
-            largest_size = max(size for _, size in dimension_sizes)
-            # Need sufficient work to hide memory latency
-            if largest_size < 512:
-                return False
-        else:
-            return False
-        
-        # Additional check
-        if hasattr(self, 'no_x_dim') and self.no_x_dim:
-            return False
+        #if dimension_sizes:
+        #    largest_size = max(size for _, size in dimension_sizes)
+        #    # Need sufficient work to hide memory latency
+        #    if largest_size < 512:
+        #        return False
+        #else:
+        #    return False
         
         return True
 
@@ -3986,15 +3997,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return largest_tree
 
     def _codegen_pointwise_with_inner_loop(self):
-        """Generate pointwise kernel body with inner R0_BLOCK loop for better memory performance."""
+        """Generate pointwise kernel body with inner R0_BLOCK loop."""
         
+        # Save the current generated code
+        saved_indexing = self.indexing_code.getvalue()
+        saved_loads = self.loads.getvalue()
+        saved_compute = self.compute.getvalue()
+        saved_stores = self.stores.getvalue()
+        
+        # Clear buffers for our custom generation
         self.indexing_code.clear()
         self.body.clear()
+        self.loads.clear()
+        self.compute.clear()
+        self.stores.clear()
         
-        # Determine which dimension to split (largest numel) - only consider non-reduction dims
-        non_reduction_trees = [t for t in self.range_trees if not t.prefix.startswith('r')]
+        # Determine which dimension to split
+        non_reduction_trees = [t for t in self.range_trees if t.prefix in {'x', 'y', 'z'}]
         if not non_reduction_trees:
-            # Fallback to regular codegen if no non-reduction dims
+            # Restore and fallback
+            self.indexing_code.writelines(saved_indexing.split('\n'))
+            self.loads.writelines(saved_loads.split('\n'))
+            self.compute.writelines(saved_compute.split('\n'))
+            self.stores.writelines(saved_stores.split('\n'))
             return
         
         split_tree = max(
@@ -4008,14 +4033,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # Add static assertion
         self.body.writeline(f"tl.static_assert({split_prefix.upper()}BLOCK % R0_BLOCK == 0)")
         
-        # Map prefix to program_id (only x, y, z)
+        # Map prefix to program_id
         prefix_to_pid = {
             'x': "tl.program_id(0)",
             'y': "(tl.program_id(1) + tl.program_id(2) * tl.num_programs(1))",
             'z': "tl.program_id(2)"
         }
         
-        # Build prefix list for broadcast calculations (only non-reduction dims)
+        # Build prefix list for broadcast calculations
         all_prefixes = [t.prefix for t in non_reduction_trees]
         
         # Generate offset+index+mask for NON-SPLIT dimensions
@@ -4024,7 +4049,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 prefix = tree.prefix
                 pid = prefix_to_pid[prefix]
                 
-                # Calculate broadcast suffix
                 idx = all_prefixes.index(prefix)
                 if len(all_prefixes) == 1:
                     broadcast = ""
@@ -4071,7 +4095,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
             self.body.writeline(f"{split_prefix}mask = {split_prefix}index < {split_prefix}numel")
             
-            # Override the range tree
+            # Override the range tree name temporarily
             split_tree.name = f"{split_prefix}index"
             
             # Generate derived indices
@@ -4080,13 +4104,46 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     line = f"{entry.name} = {self.kexpr(self.rename_indexing(entry.expr))}"
                     self.body.writeline(line)
             
-            # Splice operations
-            self.body.splice(self.indexing_code)
-            self.body.splice(self.loads)
-            self.body.splice(self.compute)
-            self.body.splice(self.stores)
+            # Fix shapes in the saved code
+            block_name = f"{split_prefix.upper()}BLOCK"
+            
+            # Replace in all buffers
+            import re
+            
+            def fix_shapes(code):
+                if not code:
+                    return code
+                
+                # Replace [XBLOCK] with [R0_BLOCK]
+                code = code.replace(f"[{block_name}]", "[R0_BLOCK]")
+                
+                # Replace tl.full([XBLOCK], ...) with tl.full([R0_BLOCK], ...)
+                code = re.sub(
+                    rf'tl\.full\(\[{block_name}\]',
+                    'tl.full([R0_BLOCK]',
+                    code
+                )
+                
+                # Replace broadcast_to(expr, [XBLOCK]) with broadcast_to(expr, [R0_BLOCK])
+                code = re.sub(
+                    rf'broadcast_to\((.*?),\s*\[{block_name}\]\)',
+                    r'broadcast_to(\1, [R0_BLOCK])',
+                    code
+                )
+                
+                return code
+            
+            # Apply fixes and write the code
+            if saved_indexing:
+                self.body.splice(fix_shapes(saved_indexing))
+            if saved_loads:
+                self.body.splice(fix_shapes(saved_loads))
+            if saved_compute:
+                self.body.splice(fix_shapes(saved_compute))
+            if saved_stores:
+                self.body.splice(fix_shapes(saved_stores))
         
-        # Restore
+        # Restore original name
         split_tree.name = original_name
 
     def codegen_body(self):

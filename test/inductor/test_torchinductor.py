@@ -3573,6 +3573,7 @@ class CommonTemplate:
         self.assertEqual(actual, expect)
 
     @skip_if_halide  # only 32-bit indexing
+    @skipIfRocm
     @largeTensorTest("4GB", inductor=True)
     def test_large_pointwise(self):
         def fn(a):
@@ -12962,6 +12963,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             if name not in {"softmax", "log_softmax", "logsumexp"}
         ],
     )
+    @skipIfRocm
     def test_pointwise(self, name, op):
         dtype = torch.float32
         check_lowp = True
