@@ -152,7 +152,8 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
     ENDMACRO()
 
     # Check for SVE256 vector length
-    CHECK_COMPILES(CXX "SVE256" "-march=armv8.2-a+sve -msve-vector-bits=256" "${SVE_CODE}")
+    # CHECK_COMPILES(CXX "SVE256" "-march=armv8.2-a+sve -msve-vector-bits=256" "${SVE_CODE}")
+    set(CXX_SVE256_FOUND FALSE CACHE BOOL "CXX SVE256 support")
     CHECK_COMPILES(CXX "ARM_BF16" "-march=armv8.2-a+sve+bf16 -msve-vector-bits=256" "${ARM_BF16_CODE}")
 
     # If SVE256 support is not found, set CXX_SVE_FOUND to FALSE and notify the user
@@ -163,6 +164,8 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       # If SVE256 support is found, set CXX_SVE_FOUND to TRUE and notify the user
       set(CXX_SVE_FOUND TRUE CACHE BOOL "SVE available on host")
       message(STATUS "SVE support detected.")
+
+      message(FATAL_ERROR "CXX_SVE256_FOUND is on")
     endif()
 
     # Mark the SVE support variable as advanced
