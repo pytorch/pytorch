@@ -21,7 +21,7 @@ __all__ = [
 @lru_cache(maxsize=8)
 def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
-    return False
+    return True
 
 
 @torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
@@ -34,7 +34,8 @@ def _varlen_attn(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    attn_bias: torch.Tensor = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention using Flash Attention.
     This is the internal implementation that calls into the Flash Attention kernels.
@@ -42,7 +43,6 @@ def _varlen_attn(
     """
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
-
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
         result = torch.ops.aten._cudnn_attention_forward(
@@ -60,7 +60,7 @@ def _varlen_attn(
             False,  # return_debug_mask
         )
         # cuDNN returns: (output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, philox_seed, philox_offset, debug_attn_mask)
-        output, softmax_lse, rng_state = result[0], result[1], result[6]
+        output, softmax_lse, rng_state, philox_offset = result[0], result[1], result[6], result[7]
     else:
         log.info("Using Flash Attention backend for varlen_attn")
         output, softmax_lse, rng_state, _, _ = torch.ops.aten._flash_attention_forward(
@@ -75,7 +75,8 @@ def _varlen_attn(
             is_causal,
             return_debug_mask=False,
         )
-    return output, softmax_lse, rng_state
+        philox_offset = torch.empty(0, device=query.device)
+    return output, softmax_lse, rng_state, philox_offset
 
 
 # @_varlen_attn.register_fake
@@ -135,7 +136,7 @@ def varlen_attn(
     Returns:
         Tensor: Output tensor from attention computation
     """
-    out, lse, _ = torch.ops.torch_nn_attention._varlen_attn(
+    out, lse, _, _ = torch.ops.torch_nn_attention._varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
 
@@ -145,8 +146,8 @@ def varlen_attn(
 
 
 def setup_context(ctx, inputs, output):
-    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
-    out, lse, rng_state = output
+    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, attn_bias = inputs
+    out, lse, rng_state, philox_offset = output
     ctx.query = query
     ctx.key = key
     ctx.value = value
@@ -155,12 +156,14 @@ def setup_context(ctx, inputs, output):
     ctx.max_q = max_q
     ctx.max_k = max_k
     ctx.is_causal = is_causal
+    ctx.attn_bias = attn_bias
     ctx.output = out
     ctx.lse = lse
     ctx.rng_state = rng_state
+    ctx.philox_offset = philox_offset
 
 
-def backward(ctx, grad_out, grad_lse, grad_rng):
+def backward(ctx, grad_out, grad_lse, grad_rng, grad_philox_offset):
     query = ctx.query
     key = ctx.key
     value = ctx.value
@@ -169,9 +172,11 @@ def backward(ctx, grad_out, grad_lse, grad_rng):
     max_q = ctx.max_q
     max_k = ctx.max_k
     is_causal = ctx.is_causal
+    attn_bias = ctx.attn_bias
     out = ctx.output
     lse = ctx.lse
     rng_state = getattr(ctx, "rng_state", torch.empty(0, device=query.device))
+    philox_offset = getattr(ctx, "philox_offset", torch.empty(0, device=query.device))
     unused = torch.empty(0, device=query.device)
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
@@ -184,14 +189,15 @@ def backward(ctx, grad_out, grad_lse, grad_rng):
             value,
             out,
             lse,
+            rng_state,
+            philox_offset,
+            attn_bias,
             cu_seq_q,
             cu_seq_k,
             max_q,
             max_k,
             0.0,
             is_causal,
-            rng_state,
-            unused,
         )
     else:
         log.info("Using Flash Attention backend for varlen_attn")
