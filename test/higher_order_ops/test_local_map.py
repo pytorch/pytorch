@@ -614,6 +614,40 @@ class GraphModule(torch.nn.Module):
         assert len(bw_outputs) == 1
         self.assertEqual(bw_outputs[0].shape, (80, 80))
 
+    @unittest.skipIf(*get_skip_reasons())
+    def test_none_gradients(self):
+        @local_map(
+            out_placements=((Replicate(), Replicate(), Replicate()),),
+            in_placements=(
+                (Replicate(), Replicate(), Replicate()),
+                (Replicate(), Replicate(), Replicate()),
+            ),
+            redistribute_inputs=True,
+            in_grad_placements=None,
+            device_mesh=self.mesh,
+        )
+        def replicate_linear(w, x):
+            # x does not requires_grad, so it will have None gradients
+            return torch.matmul(x, w.t())
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Linear(80, 80)
+
+            def forward(self, x):
+                return replicate_linear(self.w.weight, x)
+
+        model = MyModule()
+        with FakeTensorMode():
+            inputs = (
+                torch.randn(
+                    80,
+                    80,
+                ),
+            )
+        ap_style_initial_capture(model, inputs)
+
 
 if __name__ == "__main__":
     run_tests()

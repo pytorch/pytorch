@@ -8,7 +8,7 @@
 import functools
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, TypeAlias
 
 import torch
 import torch.utils._pytree as pytree
@@ -30,6 +30,8 @@ from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispat
 # Proxy the HOP instead of inlining into it
 # And trace it with local shapes for AP
 _DEFER_INLINING = False
+
+GraphArg: TypeAlias = tuple[torch.Tensor, int, torch.SymInt, None]
 
 
 @contextmanager
@@ -69,7 +71,7 @@ def _redistribute(
     all_placements: tuple[Any],
     mesh: Any,
     shape_stride_fn: Callable[[torch.Tensor, Any, Any], tuple[list[int], list[int]]],
-) -> tuple[torch.Tensor, int, torch.SymInt]:
+) -> GraphArg:
     from torch._dispatch.python import suspend_functionalization
     from torch._guards import detect_fake_mode
     from torch._subclasses.functional_tensor import disable_functional_mode
@@ -88,6 +90,10 @@ def _redistribute(
         with fake_mode:
             new_args = list(pytree.tree_map(_new_tensor, args))
             for i, (tensor, placements) in enumerate(zip(new_args, all_placements)):
+                if tensor is None:
+                    # Sometimes gradients can be None
+                    continue
+
                 new_shape, new_stride = shape_stride_fn(
                     tensor,
                     mesh,
@@ -99,7 +105,8 @@ def _redistribute(
 
             new_args = tuple(new_args)
             assert all(
-                isinstance(t, (FakeTensor, int, torch.SymInt)) for t in new_args
+                isinstance(t, (FakeTensor, int, torch.SymInt, type(None)))
+                for t in new_args
             ), f"Unexpected element in {args=}"
 
     return new_args
@@ -107,7 +114,7 @@ def _redistribute(
 
 def redistribute_fw_inputs(
     global_args: Any, all_placements: Any, mesh: Any, _: Optional[int] = None
-) -> tuple[torch.Tensor, int, torch.SymInt]:
+) -> GraphArg:
     assert len(global_args) == len(all_placements)
     return _redistribute(
         global_args,
@@ -119,7 +126,7 @@ def redistribute_fw_inputs(
 
 def redistribute_fw_outputs(
     local_outs: Any, all_placements: Any, mesh: Any, num_activations: int
-) -> tuple[torch.Tensor, int, torch.SymInt]:
+) -> GraphArg:
     assert len(local_outs) == len(all_placements) + num_activations
     num_fw_outs = len(local_outs) - num_activations
     assert num_fw_outs > 0
@@ -137,7 +144,7 @@ def redistribute_fw_outputs(
 
 def redistribute_bw_inputs(
     global_args: Any, all_placements: Any, mesh: Any, num_activations: int
-) -> tuple[torch.Tensor, int, torch.SymInt]:
+) -> GraphArg:
     assert len(global_args) == len(all_placements) + num_activations
     activations, inputs = global_args[:num_activations], global_args[num_activations:]
     assert len(inputs) > 0
@@ -155,7 +162,7 @@ def redistribute_bw_inputs(
 
 def redistribute_bw_outputs(
     local_outs: Any, all_placements: Any, mesh: Any, _: Optional[int] = None
-) -> tuple[torch.Tensor, int, torch.SymInt]:
+) -> GraphArg:
     assert len(local_outs) == len(all_placements)
     return _redistribute(
         local_outs,
@@ -445,7 +452,7 @@ def fake_mode_key(
     gm: GraphModule,
     *args: Any,
     **kwargs: Any,
-) -> tuple[torch.Tensor, int, torch.SymInt]:
+) -> GraphArg:
     with mode:
         if not _DEFER_INLINING:
             return gm(*args, **kwargs)
