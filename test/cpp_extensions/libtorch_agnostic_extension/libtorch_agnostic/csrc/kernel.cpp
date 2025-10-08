@@ -611,7 +611,7 @@ Tensor test_parallel_for(int64_t size, int64_t grain_size) {
             data_ptr[i] = i | (static_cast<int64_t>(thread_id) << 32);
           #else
             data_ptr[i] = i;
-          #endif        
+          #endif
         }
       });
 

@@ -2,7 +2,6 @@
 
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/include/torch/headeronly/util/shim_utils.h>
 
 #include <memory>
 
