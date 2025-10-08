@@ -1432,12 +1432,12 @@ void ProcessGroupNCCL::dumpExtraDebuggingInfo() {
   bool dumpExtraOnExec_ = getCvarBool(TORCH_NCCL_EXTRA_DUMP_ON_EXEC, false);
   if (dumpExtraOnExec_) {
     bool should_dump_local = false;
-    bool succeded = shouldDump_.compare_exchange_strong(
+    bool succeeded = shouldDump_.compare_exchange_strong(
         should_dump_local,
         true,
         std::memory_order_release,
         std::memory_order_acquire);
-    if (succeded) {
+    if (succeeded) {
       LOG(INFO) << logPrefix() << "Sending extra dumping signal";
       broadcastDumpSignal();
       // When this routine is called, exception is captured so

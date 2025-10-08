@@ -265,7 +265,6 @@ static std::vector<std::string> TORCH_INCLUDE_STACK_TRACE = {
 static std::vector<std::string> TORCH_INCLUDE_ONLY_ACTIVE = {
     "TORCH_INCLUDE_ONLY_ACTIVE"};
 
-
 // Dumps the fr traces and additional information about the Process
 // Group.
 TORCH_API std::string dump_fr_trace(
