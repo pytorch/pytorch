@@ -94,6 +94,7 @@ function pip_build_and_install() {
   # Build the wheel if it doesn't exist
   if [ "${found_whl}" == "0" ]; then
     python3 -m pip wheel \
+      --vvv \
       --no-build-isolation \
       --no-deps \
       --no-use-pep517 \
@@ -286,7 +287,9 @@ EOF
     rm -rf fbgemm
   else
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
+    sccache --show-stats
     pip_build_and_install "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#subdirectory=fbgemm_gpu" dist/fbgemm_gpu
+    sccache --show-stats
   fi
 }
 
