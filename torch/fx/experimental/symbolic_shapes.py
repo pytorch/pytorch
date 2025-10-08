@@ -82,7 +82,6 @@ from torch.utils._sympy.functions import (
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Max,
-    Min,
     Mod,
     PythonMod,
     TruncToInt,
@@ -3743,8 +3742,8 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: dict[int, sympy.Symbol] = {}
-        self.unbacked_symfloat_counter = itertools.count()
-        self.unbacked_symint_counter = itertools.count()
+        self.unbacked_symfloat_counter = 0
+        self.unbacked_symint_counter = 0
         # Similar to guards, but these MUST evaluate to true and can
         # only be evaluated at runtime midway through (i.e., they always
         # involve unbacked symints)
@@ -3994,14 +3993,7 @@ class ShapeEnv:
         # and the stack when it was added to the set of guards. In order to compare
         # it, we throw away the stack information.
         def map_value(key: str, value: Any) -> Any:
-            if key in ("unbacked_symfloat_counter", "unbacked_symint_counter"):
-                from copy import copy
-
-                # For itertools.count(), we compare the next integer returned
-                # by the count iterators. Not that we need to copy the iterator
-                # first. Otherwise we are mutating the object.
-                return next(copy(value))
-            elif key == "guards":
+            if key == "guards":
                 # Transform the list of ShapeGuard into a list of expressions.
                 return [g.expr for g in value]
             elif key == "deferred_runtime_asserts":
@@ -4822,8 +4814,9 @@ class ShapeEnv:
     def create_unbacked_symfloat(self) -> SymFloat:
         """Create a symbolic float without a hint value"""
         symbol: sympy.Symbol = make_symbol(
-            SymT.UNBACKED_FLOAT, next(self.unbacked_symfloat_counter)
+            SymT.UNBACKED_FLOAT, self.unbacked_symfloat_counter
         )
+        self.unbacked_symfloat_counter += 1
         self.counter["create_unbacked_symbol"] += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
@@ -4847,8 +4840,9 @@ class ShapeEnv:
     def create_unbacked_symint(self, source: Optional[Source] = None) -> SymInt:
         """Create a symbolic integer without a hint value"""
         symbol: sympy.Symbol = make_symbol(
-            SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True
+            SymT.UNBACKED_INT, self.unbacked_symint_counter, integer=True
         )
+        self.unbacked_symint_counter += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
@@ -4875,8 +4869,9 @@ class ShapeEnv:
     def create_unbacked_symbool(self) -> SymBool:
         """Create a symbolic boolean without a hint value"""
         symbol: sympy.Symbol = make_symbol(
-            SymT.UNBACKED_INT, next(self.unbacked_symint_counter), integer=True
+            SymT.UNBACKED_INT, self.unbacked_symint_counter, integer=True
         )
+        self.unbacked_symint_counter += 1
         if not self._ignore_fresh_unbacked_symbols_tls():
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
@@ -5077,7 +5072,7 @@ class ShapeEnv:
                         self._get_sloc(
                             "user code shown is first use of this value--the guard itself is not "
                             "due user code but due to 0/1 specialization in the framework; to "
-                            "avoid specialization try torch._dynamo.mark_unbacked(tensor, dim)"
+                            "avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim)"
                             if self.specialize_zero_one
                             else None
                         ),
@@ -6391,23 +6386,6 @@ class ShapeEnv:
             if min_max_replacements:
                 expr = expr.xreplace(min_max_replacements)
 
-        if size_oblivious and (expr.has(Max) or expr.has(Min)):  # type: ignore[has-type]
-            min_max_replacements = {}
-            for atom in (*expr.atoms(Max), *expr.atoms(Min)):  # type: ignore[has-type]
-                if len(atom.args) > 2:
-                    continue
-                a, b = atom.args
-                if b == 1 or b == 0:
-                    a, b = b, a
-                if a == 1 or a == 0:
-                    vr = self.bound_sympy(b, size_oblivious=True)
-                    if vr.lower >= a:
-                        min_max_replacements[atom] = b if atom.func is Max else a
-                    elif vr.upper <= a:
-                        min_max_replacements[atom] = a if atom.func is Max else b
-            if min_max_replacements:
-                expr = expr.xreplace(min_max_replacements)
-
         if expr.has(TruncToInt):
             trunc_replacements = {}
             for atom in expr.atoms(TruncToInt):
@@ -7060,7 +7038,7 @@ class ShapeEnv:
                 expr,
                 concrete_val,
                 # only print stack trace when debug mode is on (e.g. TORCH_LOGS="dynamic")
-                stack_info=True if log.getEffectiveLevel() < logging.WARNING else False,
+                stack_info=log.getEffectiveLevel() < logging.WARNING,
             )
 
     def _get_user_frame(self) -> Optional[types.FrameType]:
@@ -7943,17 +7921,6 @@ class _PythonMsgPrinter(PythonPrinter):
         return self.src_map[sym.name][0]
 
 
-def _is_non_negative_check(cond: sympy.Basic) -> Optional[str]:
-    """
-    Check if a condition (SymPy expression) is checking for non-negative values (>= 0).
-    Returns the variable name if it's a non-negative check (>= 0), None otherwise.
-    """
-    if isinstance(cond, sympy.Rel):
-        if cond.rel_op == ">=" and cond.rhs == 0:
-            return str(cond.lhs)
-    return None
-
-
 def _suggest_torch_checks(
     e: GuardOnDataDependentSymNode, src_map: defaultdict[str, list[str]]
 ) -> None:
@@ -7982,26 +7949,13 @@ def _suggest_torch_checks(
     msg += "\nTo fix the error, insert one of the following checks before this call:"
 
     not_cond_str = printer.doprint(sympy.Not(cond))
-    var_name = _is_non_negative_check(cond)
 
     # suggested fixes to resolve `cond` are to tell the compiler to assume
     # either `cond` or its negation (the user will need to select which)
-    suggested_fixes = []
-
-    if var_name:
-        suggested_fixes = [
-            f"You can add either: torch._check_is_size({var_name}) or torch._check({var_name}>=0)"
-            f" Note: torch._check_is_size({var_name}) could prevent data dependent errors that"
-            + " happen in a guard_size_oblivious(..) context by opting into guard_size_oblivious reasoning."
-            + " See documentation on guard_size_oblivious for more details:"
-            + " https://pytorch.org/docs/stable/generated/torch.fx.experimental.symbolic_shapes.guard_size_oblivious.html",
-            f"torch._check({not_cond_str})",
-        ]
-    else:
-        suggested_fixes = [
-            f"torch._check({printer.doprint(cond)})",
-            f"torch._check({not_cond_str})",
-        ]
+    suggested_fixes = [
+        f"torch._check({printer.doprint(cond)})",
+        f"torch._check({not_cond_str})",
+    ]
 
     for i, fix in enumerate(suggested_fixes):
         msg += f"\n  {i + 1}. {fix}"

@@ -1,6 +1,7 @@
 import collections
 
 import torch
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -14,22 +15,42 @@ def _end_ptr(tensor: torch.Tensor) -> int:
 
 class TensorProperties:
     def __init__(self, tensor: torch.Tensor):
-        # info about underlying storage
-        self.storage_ptr = tensor.untyped_storage().data_ptr()
-        self.storage_size = tensor.untyped_storage().nbytes()
+        self.is_fake = isinstance(tensor, FakeTensor)
+        self.is_contiguous = tensor.is_contiguous()
+        self.storage_ptr = None
+        self.storage_size = None
+        self.start = None
+        self.end = None
+
+        if not self.is_fake:
+            # only get the storage pointer for real tensors
+            self.storage_ptr = tensor.untyped_storage().data_ptr()
+            if self.is_contiguous:
+                # only get storage size and start/end pointers for contiguous tensors
+                self.storage_size = tensor.untyped_storage().nbytes()
+                self.start = tensor.data_ptr()
+                self.end = _end_ptr(tensor)
 
         # info to recover tensor
         self.shape = tensor.shape
         self.stride = tensor.stride()
         self.offset = tensor.storage_offset()
 
-        self.start = tensor.data_ptr()
-        self.end = _end_ptr(tensor)
-
     def is_complete(self) -> bool:
         """
         Whether the tensor completely overlaps with its underlying storage
         """
+        if self.is_fake:
+            # Theoretically, fake tensors should not appear in weights
+            # But we handle this corner case to make it always complete
+            return True
+        if not self.is_contiguous:
+            return False
+
+        assert self.storage_ptr is not None
+        assert self.storage_size is not None
+        assert self.start is not None
+        assert self.end is not None
         return (
             self.start == self.storage_ptr
             and self.end == self.storage_ptr + self.storage_size
@@ -79,6 +100,10 @@ def get_complete(
         tensor_property = get_tensor_properties(name_tuple)
         if tensor_property.is_complete():
             return name_tuple
+
+    if len(group) == 1:
+        # When there is only one tensor in the group, we return it.
+        return name_tuple
 
     raise RuntimeError("No complete tensor found in the group!")
 
