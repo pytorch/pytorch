@@ -19,7 +19,6 @@
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
-#include <cstdint>
 
 #include <torch/csrc/dynamo/debug_macros.h>
 
@@ -196,7 +195,17 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_sizes,
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
-  if (dispatch_key_ != state.apply(dispatch_key_set).raw_repr() ||
+
+  // Mask to exclude Python keys, that can be artifically off during compilation,
+  // due to ignore_compile_internals being set on custom TorchDispatchModes.
+  constexpr auto mode_key_mask = c10::DispatchKeySet({
+    c10::DispatchKey::Python,
+    c10::DispatchKey::PythonTLSSnapshot,
+  });
+  auto stored_keys = c10::DispatchKeySet::from_raw_repr(dispatch_key_) - mode_key_mask;
+  auto current_keys = state.apply(dispatch_key_set) - mode_key_mask;
+
+  if (stored_keys.raw_repr() != current_keys.raw_repr() ||
       dtype_ != dtype || device_index_ != device.index() ||
       requires_grad_ != requires_grad) {
     return false;
@@ -704,10 +713,8 @@ struct GlobalStateGuard {
     json_j["deterministic_algorithms_warn_only"] =
         json_t._deterministic_algorithms_warn_only;
     json_j["allow_tf32"] = json_t._allow_tf32;
-    json_j["allow_fp16_reduce"] =
-        static_cast<int64_t>(json_t._allow_fp16_reduce);
-    json_j["allow_bf16_reduce"] =
-        static_cast<int64_t>(json_t._allow_bf16_reduce);
+    json_j["allow_fp16_reduce"] = json_t._allow_fp16_reduce;
+    json_j["allow_bf16_reduce"] = json_t._allow_bf16_reduce;
     json_j["num_threads"] = json_t._num_threads;
     json_j["default_dtype"] = json_t._default_dtype.toScalarType();
   }
@@ -723,10 +730,8 @@ struct GlobalStateGuard {
     json_t._deterministic_algorithms_warn_only =
         json_j.at("deterministic_algorithms_warn_only");
     json_t._allow_tf32 = json_j.at("allow_tf32");
-    json_t._allow_fp16_reduce = static_cast<at::CuBLASReductionOption>(
-        static_cast<int64_t>(json_j.at("allow_fp16_reduce")));
-    json_t._allow_bf16_reduce = static_cast<at::CuBLASReductionOption>(
-        static_cast<int64_t>(json_j.at("allow_bf16_reduce")));
+    json_t._allow_fp16_reduce = json_j.at("allow_fp16_reduce");
+    json_t._allow_bf16_reduce = json_j.at("allow_bf16_reduce");
     json_t._num_threads = json_j.at("num_threads");
     json_t._default_dtype =
         caffe2::TypeMeta::fromScalarType(json_j.at("default_dtype"));
@@ -739,8 +744,8 @@ struct GlobalStateGuard {
   bool _deterministic_algorithms;
   bool _deterministic_algorithms_warn_only;
   bool _allow_tf32;
-  at::CuBLASReductionOption _allow_fp16_reduce;
-  at::CuBLASReductionOption _allow_bf16_reduce;
+  bool _allow_fp16_reduce;
+  bool _allow_bf16_reduce;
   int _num_threads;
   caffe2::TypeMeta _default_dtype;
   // TODO(jansel): we should guard on more state as inductor starts using it
