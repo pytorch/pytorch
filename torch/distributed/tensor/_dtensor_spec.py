@@ -86,13 +86,11 @@ class DTensorSpec:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
         if self.shard_order is None:
-            self.shard_order = DTensorSpec.compute_default_sparse_shard_order(
-                self.placements
-            )
+            self.shard_order = DTensorSpec.compute_default_shard_order(self.placements)
         self._hash: int | None = None
 
     @staticmethod
-    def compute_default_sparse_shard_order(
+    def compute_default_shard_order(
         placements: tuple[Placement, ...],
     ) -> ShardOrder:
         """
@@ -119,12 +117,12 @@ class DTensorSpec:
                 tensor_dim_to_mesh_dims[shard_dim].append(mesh_dim)
 
         # Convert dict into ShardOrderEntry tuples
-        default_sparse_shard_order = tuple(
+        default_shard_order = tuple(
             ShardOrderEntry(tensor_dim=key, mesh_dims=tuple(value))
             for key, value in sorted(tensor_dim_to_mesh_dims.items())
             if value
         )
-        return default_sparse_shard_order
+        return default_shard_order
 
     def _verify_shard_order(self, shard_order: ShardOrder) -> None:
         """Verify that the shard_order is valid and matches the placements."""
