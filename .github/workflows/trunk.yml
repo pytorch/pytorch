@@ -56,7 +56,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       build-generates-artifacts: false
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: "linux.4xlarge"
+      runner: "linux.c7i.4xlarge"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
