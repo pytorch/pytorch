@@ -3218,7 +3218,6 @@ class TestGuardsExpressions(TestCase):
         f(torch.rand(10, 2), torch.rand(10, 4, 9))
 
         # Should only compile once despite different input shapes
-        # The size comparison should be symbolic and not force recompilation
         self.assertEqual(
             cnt.frame_count,
             1,
