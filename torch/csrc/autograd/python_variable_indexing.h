@@ -60,6 +60,10 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
     start_sym = py::handle(r->start).cast<c10::SymInt>();
   } else if (r->start == Py_None) {
     start_sym = c10::SymInt(step_sym < 0 ? PY_SSIZE_T_MAX : 0);
+  } else if (THPVariable_Check(r->start)) {
+    // Handle Tensor objects directly (e.g., when used in slicing)
+    const auto& tensor = THPVariable_Unpack(r->start);
+    start_sym = tensor.item().toSymInt();
   } else {
     Py_ssize_t start = 0;
     if (!_PyEval_SliceIndex(r->start, &start)) {
@@ -74,6 +78,10 @@ inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
   } else if (r->stop == Py_None) {
     stop_sym = c10::SymInt(
         step_sym < 0 ? c10::SymInt::min_representable_int() : PY_SSIZE_T_MAX);
+  } else if (THPVariable_Check(r->stop)) {
+    // Handle Tensor objects directly (e.g., when used in slicing)
+    const auto& tensor = THPVariable_Unpack(r->stop);
+    stop_sym = tensor.item().toSymInt();
   } else {
     Py_ssize_t stop = 0;
     if (!_PyEval_SliceIndex(r->stop, &stop)) {

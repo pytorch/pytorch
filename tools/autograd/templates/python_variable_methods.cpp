@@ -322,7 +322,8 @@ template<typename T>
 static T dispatch_to(const Tensor & self) {
   pybind11::gil_scoped_release no_gil;
   OptionalDeviceGuard device_guard(device_of(self));
-  TORCH_CHECK_VALUE(self.sym_numel() == 1, "only one element tensors can be converted to Python scalars");
+  auto cond = sym_eq(self.sym_numel(), 1);
+  TORCH_SYM_CHECK(cond, "only one element tensors can be converted to Python scalars");
   return self.template item<T>();
 }
 
