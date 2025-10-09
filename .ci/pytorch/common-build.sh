@@ -2,6 +2,8 @@
 # Required environment variables:
 #   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
+set -e -x -o pipefail
+
 if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
     # Save the absolute path in case later we chdir (as occurs in the gpu perf test)
     script_dir="$( cd "$(dirname "${BASH_SOURCE[0]}")" || exit ; pwd -P )"
@@ -45,14 +47,14 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
             # explicitly
             echo "Skipping sccache server initialization, setting environment variables"
             export SCCACHE_IDLE_TIMEOUT=0
-            export SCCACHE_ERROR_LOG=~/sccache_error.log
-            export RUST_LOG=sccache::server=error
+            export SCCACHE_ERROR_LOG=/tmp/sccache_error.log
+            export RUST_LOG=sccache::server=debug
         elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
-            SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
+            SCCACHE_ERROR_LOG=/tmp/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 sccache --start-server
         else
             # increasing SCCACHE_IDLE_TIMEOUT so that extension_backend_test.cpp can build after this PR:
             # https://github.com/pytorch/pytorch/pull/16645
-            SCCACHE_ERROR_LOG=~/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 RUST_LOG=sccache::server=error sccache --start-server
+            SCCACHE_ERROR_LOG=/tmp/sccache_error.log SCCACHE_IDLE_TIMEOUT=0 RUST_LOG=sccache::server=error sccache --start-server
         fi
 
         # Report sccache stats for easier debugging. It's ok if this commands

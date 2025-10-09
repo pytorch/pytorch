@@ -289,14 +289,15 @@ else
       python -mpip install numpy==2.0.2
 
       WERROR=1 python setup.py clean
-
+      sccache --stop-server
       export SCCACHE_LOG_LEVEL=debug
-      export SCCACHE_ERROR_LOG=sccache_errors.log
+      export SCCACHE_ERROR_LOG=/tmp/sccache_errors.log
       export SCCACHE_LOG=debug
-      export RUST_LOG=sccache=trace
+      export RUST_LOG=sccache::server=debug
+      sccache --start-server
 
       WERROR=1 python -m build --wheel --no-isolation
-      mv sccache_errors.log dist/
+      mv /tmp/sccache_errors.log dist/
     else
       python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
