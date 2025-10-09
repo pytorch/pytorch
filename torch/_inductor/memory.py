@@ -914,7 +914,7 @@ def reorder_for_peak_memory(
         validate_graph_acyclic(nodes)
         validate_unique_buffer_names(nodes, name_to_buf, name_to_freeable_input_buf)
     except RuntimeError:
-        torch_log.execution("Memory planning validation failed")
+        torch_log.exception("Memory planning validation failed")
         if not is_fbcode():  # TODO: remove after ensuring OSS side is safe
             raise
 
