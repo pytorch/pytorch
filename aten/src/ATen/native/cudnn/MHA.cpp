@@ -371,8 +371,7 @@ struct MHAGraphCache {
   }
 
   void update(const KeyType& key, T& results) {
-    engine_cache.erase(key);
-    engine_cache.emplace(key, std::move(results));
+    engine_cache.insert_or_assign(key, std::move(results));
   }
 };
 

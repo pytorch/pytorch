@@ -411,10 +411,6 @@ def _should_pad_bench(
     op: torch._ops.OpOverloadPacket,
     input: Optional[Tensor] = None,
 ) -> bool:
-    if torch._inductor.config.deterministic:
-        # In deterministic mode, don't benchmark for pad-mm and assumes
-        # no padding.
-        return False
     do_bench = get_do_bench()
 
     m_padded_length = 0
@@ -455,6 +451,14 @@ def _should_pad_bench(
 
         if torch._inductor.config.force_shape_pad:
             return True
+
+        if torch._inductor.config.deterministic:
+            # In deterministic mode, don't benchmark for pad-mm and assumes
+            # no padding.
+            #
+            # Check the deterministic mode after 'force_shape_pad'
+            # so unit test relying on force_shape_pad should still pass
+            return False
 
         if (
             "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
