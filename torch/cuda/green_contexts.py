@@ -4,8 +4,8 @@ import torch
 _GreenContext = object
 SUPPORTED = False
 
-if hasattr(torch._C, "GreenContext"):
-    _GreenContext = torch._C.GreenContext  # type: ignore[misc]
+if hasattr(torch._C, "_CUDAGreenContext"):
+    _GreenContext = torch._C._CUDAGreenContext  # type: ignore[misc]
     SUPPORTED = True
 
 

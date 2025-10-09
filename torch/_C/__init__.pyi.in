@@ -2784,7 +2784,7 @@ class _StaticCudaLauncher:
         stream: _int,
     ) -> None: ...
 
-# Defined in torch/csrc/cuda/green_context.h
+# Defined in torch/csrc/cuda/GreenContext.cpp
 class GreenContext:
     @staticmethod
     def create(

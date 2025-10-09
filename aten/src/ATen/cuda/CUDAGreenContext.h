@@ -11,7 +11,7 @@
 namespace at {
 namespace cuda {
 
-class GreenContext {
+class TORCH_CUDA_CPP_API GreenContext {
  public:
   GreenContext(int device_id, unsigned int num_sms); 
 
