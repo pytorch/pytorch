@@ -115,10 +115,7 @@ class DebugMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        if not (
-            type(func).__name__ == "method-wrapper"
-            and func.__name__ == "__get__"
-        ):
+        if not (type(func).__name__ == "method-wrapper" and func.__name__ == "__get__"):
             # filter out known noise
             self.log_operator(func, args, kwargs, self.call_depth)
 
@@ -171,7 +168,7 @@ class DebugMode(TorchDispatchMode):
                 ]
 
             self._guard_filter_fn = guard_filter_fn
-            _register_global_guard_filter_fn(guard_filter_fn)  
+            _register_global_guard_filter_fn(guard_filter_fn)
 
         super().__enter__()
         return self

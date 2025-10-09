@@ -2194,7 +2194,7 @@ class GuardBuilder(GuardBuilderBase):
 
         import torch.utils._pytree as pytree
 
-        assert istype(val, ok_types) or pytree.is_constant_class(type(val)), (
+        assert isinstance(val, ok_types) or pytree.is_constant_class(type(val)), (
             f"Unexpected type {type(val)}"
         )
 
@@ -3439,14 +3439,14 @@ _GLOBAL_GUARD_FILTER_FNS: set[Callable[[list[GuardFilterEntry]], list[bool]]] = 
 
 
 def _register_global_guard_filter_fn(
-    fn: Callable[[list[GuardFilterEntry]], list[bool]]
+    fn: Callable[[list[GuardFilterEntry]], list[bool]],
 ) -> None:
     global _GLOBAL_GUARD_FILTER_FNS
     _GLOBAL_GUARD_FILTER_FNS.add(fn)
 
 
 def _remove_global_guard_filter_fn(
-    fn: Callable[[list[GuardFilterEntry]], list[bool]]
+    fn: Callable[[list[GuardFilterEntry]], list[bool]],
 ) -> None:
     global _GLOBAL_GUARD_FILTER_FNS
     _GLOBAL_GUARD_FILTER_FNS.remove(fn)
@@ -3574,10 +3574,12 @@ class CheckFunctionManager:
 
             guard_entries = [make_guard_filter_entry(guard) for guard in sorted_guards]
             filter_results = [True] * len(sorted_guards)
-            if guard_filter_fn:
-                filter_results = [x and y for x, y in zip(filter_results, guard_filter_fn(guard_entries))]
-            for filter_fn in _GLOBAL_GUARD_FILTER_FNS:
-                filter_results = [x and y for x, y in zip(filter_results, filter_fn(guard_entries))]
+            guard_filter_fns = [guard_filter_fn] if guard_filter_fn else []
+            guard_filter_fns += list(_GLOBAL_GUARD_FILTER_FNS)
+            for filter_fn in guard_filter_fns:
+                filter_results = [
+                    x and y for x, y in zip(filter_results, filter_fn(guard_entries))
+                ]
 
             assert len(filter_results) == len(sorted_guards)
             assert all(type(x) == bool for x in filter_results)

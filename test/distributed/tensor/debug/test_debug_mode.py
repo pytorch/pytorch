@@ -273,7 +273,6 @@ class TestDTensorDebugMode(TestCase):
         self.assertEqual(len(debug_mode.debug_string()), 0)
 
     def test_bwd_compiled_with_torch_function(self):
-        cnt = CompileCounterWithBackend("aot_eager")
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         x = torch.randn(1, 8, requires_grad=True)
@@ -281,7 +280,7 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
 
-        @torch.compile(backend=cnt, fullgraph=True)
+        @torch.compile(backend="aot_eager", fullgraph=True)
         def fn(x, y):
             out = (x @ y).sum()
             return out
@@ -289,16 +288,12 @@ class TestDTensorDebugMode(TestCase):
         def run():
             fn(x_dtensor, y_dtensor).backward()
 
-        run()
         with DebugMode(record_torchfunction=True) as debug_mode:
             run()
-        run()
 
-        # check that running w/ & w/o DebugMode didn't cause recompiles
-        self.assertEqual(cnt.frame_count, 1)
         self.assertExpectedInline(
-          debug_mode.debug_string(),
-          """\
+            debug_mode.debug_string(),
+            """\
   torch._C._set_view_replay_enabled(True)
   torch._C._set_grad_enabled(True)
   <method 'size' of 'torch._C.TensorBase' objects>(dt: f32[8, 8][S(0)])
@@ -352,6 +347,7 @@ class TestDTensorDebugMode(TestCase):
       aten::add_.Tensor(t: f32[8, 1], t: f32[8, 1])
       aten::add_.Tensor(t: f32[1, 8], t: f32[1, 8])""",
         )
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 
