@@ -2555,7 +2555,6 @@ class CUDAGraphTreeManager:
         live_storages_weak_refs: list[int] = [t() for t in live_storages_wrappers]  # type: ignore[misc]
         ptrs_to_deallocate = self.current_node.data_ptrs_dead_since_invocation()
         torch._C._cuda_setCheckpointPoolState(
-            # pyrefly: ignore  # bad-argument-type
             device,
             # pyrefly: ignore  # bad-argument-type
             state,

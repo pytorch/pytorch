@@ -3441,7 +3441,6 @@ class Scheduler:
                     # pyrefly: ignore  # missing-attribute
                     with multi_node.swap_as_triton_caller(choice):
                         ms_fused, path = self.benchmark_codegened_module(
-                            # pyrefly: ignore  # bad-argument-type
                             mod_fused,
                             # pyrefly: ignore  # bad-argument-type
                             device,
@@ -3494,7 +3493,6 @@ class Scheduler:
                             fut.result()
 
                     ms1, path1 = self.benchmark_codegened_module(
-                        # pyrefly: ignore  # bad-argument-type
                         future_and_mod_l1[1],
                         # pyrefly: ignore  # bad-argument-type
                         device,
@@ -3504,7 +3502,6 @@ class Scheduler:
                         return False
 
                     ms2, path2 = self.benchmark_codegened_module(
-                        # pyrefly: ignore  # bad-argument-type
                         future_and_mod_l2[1],
                         # pyrefly: ignore  # bad-argument-type
                         device,
@@ -3514,7 +3511,6 @@ class Scheduler:
                         return False
 
                     ms_fused, path_fused = self.benchmark_codegened_module(
-                        # pyrefly: ignore  # bad-argument-type
                         future_and_mod_l1_fused[1],
                         # pyrefly: ignore  # bad-argument-type
                         device,

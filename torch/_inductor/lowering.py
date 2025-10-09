@@ -27,7 +27,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (  # pyrefly: ignore  # deprecated
+from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -560,7 +560,6 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         return inputs
     if all(isinstance(x, (int, float, sympy.Basic)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
-            # pyrefly: ignore  # bad-argument-type
             *inputs,
             # pyrefly: ignore  # bad-argument-type
             type_promotion_kind=type_promotion_kind,

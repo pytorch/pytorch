@@ -1610,7 +1610,6 @@ class _InProcessFxCompile(FxCompile):
                     # pyrefly: ignore  # unbound-name
                     if V.aot_compilation:
                         assert isinstance(
-                            # pyrefly: ignore  # unbound-name
                             compiled_fn,
                             # pyrefly: ignore  # unbound-name
                             (str, list, torch.fx.GraphModule),

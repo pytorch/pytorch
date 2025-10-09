@@ -728,7 +728,6 @@ def register_lowering_pattern(
     Register an aten to inductor IR replacement pattern
     """
     return pattern_matcher.register_lowering_pattern(
-        # pyrefly: ignore  # bad-argument-type
         pattern,
         extra_check,
         pass_dict=pass_patterns[pass_number],
@@ -1573,7 +1572,6 @@ def register_partial_reduction_pattern():
         full_reduc = CallFunction([red_op, equiv_red[red_op]], inp)
 
         @register_graph_pattern(
-            # pyrefly: ignore  # bad-argument-type
             MultiOutputPattern([partial_reduc, full_reduc]),
             pass_dict=pass_patterns[2],
         )
