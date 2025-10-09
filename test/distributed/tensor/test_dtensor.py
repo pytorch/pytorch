@@ -881,7 +881,6 @@ class DTensorMeshTest(DTensorTestBase):
         local_expected = expected.to_local()
         self.assertEqual(local_result, local_expected)
 
-    @unittest.expectedFailure
     @with_comms
     def test_inplace_on_local_tensor_view(self):
         mesh = self.build_device_mesh()
@@ -892,7 +891,31 @@ class DTensorMeshTest(DTensorTestBase):
         dtensor_vocab_parallel_logits = dtensor_leaf * 2  # make this non-leaf
         vocab_parallel_logits = dtensor_vocab_parallel_logits.to_local()
         logits_max = torch.randn(seq, device=self.device_type)
-        vocab_parallel_logits -= logits_max.unsqueeze(dim=1)
+        # Use multiplication here to ensure non-trivial gradient
+        vocab_parallel_logits *= logits_max.unsqueeze(dim=1)
+
+        dtensor_vocab_parallel_logits.sum().backward()
+
+        self.assertEqual(leaf.grad, logits_max.unsqueeze(1).expand_as(leaf) * 2)
+
+    @with_comms
+    def test_inplace_on_local_tensor_view_with_placement(self):
+        mesh = self.build_device_mesh()
+        leaf = torch.randn((7, 7), device=self.device_type, requires_grad=True)
+        dt = distribute_tensor(leaf, mesh, [Replicate()])
+
+        # Default expects Replicated gradients even when it is NOT True
+        local = dt.to_local()
+        grad = torch.randn_like(local)
+        local.backward(grad)
+        self.assertEqual(dt.grad.to_local(), grad)
+        leaf.grad = None
+
+        # Partial for each rank should trigger a collective
+        local = dt.to_local(grad_placements=[Partial()])
+        # Clone the grad as distributed WRONGFULLY modifies the given input inplace?!
+        local.backward(grad.clone())
+        self.assertEqual(dt.grad.to_local(), grad)
 
     @with_comms
     def test_auto_implicit_replication(self):
