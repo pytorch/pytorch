@@ -1624,7 +1624,6 @@ static at::Tensor _quantized_convolution_onednn(
     dilation.size() == (decltype(dilation.size()))kSpatialDim,
     func_name, ": dilation should contain ", kSpatialDim, " elements for ",
     kSpatialDim, "D convolution.");
-  bool is_fp8 = weight.scalar_type() == c10::ScalarType::Float8_e4m3fn;
   if (is_fp8) {
     TORCH_CHECK(act_dtype == c10::ScalarType::Float8_e4m3fn,
       func_name, ": expect input tensor to have fp8 data type, but got ", act_dtype);
