@@ -202,7 +202,7 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             if self.device == "mps":
-                FileCheck().check("aoti_torch_mps_get_kernel_function(").run(code)
+                FileCheck().check("getKernelFunction(").run(code)
             elif self.device == GPU_TYPE:
                 FileCheck().check("launchKernel(").run(code)
                 if config.aot_inductor.embed_kernel_binary:
@@ -2893,7 +2893,7 @@ class AOTInductorTestsTemplate:
 
         if self.device == "mps":
             self.code_check_count(
-                model, example_inputs, "aoti_torch_mps_get_kernel_function(", 1
+                model, example_inputs, '.getKernelFunction("generated_kernel")', 1
             )
         elif self.device == GPU_TYPE:
             self.code_check_count(

@@ -1,9 +1,11 @@
+#include <ATen/native/mps/MetalShaderLibrary.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_mps.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/mps/MPSProfiler.h>
+
 
 using namespace torch::aot_inductor;
 
@@ -31,6 +33,7 @@ AOTITorchError aoti_torch_mps_free(
   });
 }
 
+
 AOTITorchError
 aoti_torch_mps_memcpy(void* buffer, size_t constant_offset, size_t bytes_read, size_t data_size, uint8_t* constants_start) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
@@ -43,6 +46,7 @@ aoti_torch_mps_memcpy(void* buffer, size_t constant_offset, size_t bytes_read, s
 AOTITorchError
 aoti_torch_mps_copy_buffer(void* src_buffer, void* dst_buffer, size_t data_size, size_t src_offset, size_t dst_offset) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+
     auto src_mtl_buffer = (id<MTLBuffer>)src_buffer;
     auto dst_mtl_buffer = (id<MTLBuffer>)dst_buffer;
 
