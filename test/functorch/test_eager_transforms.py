@@ -5221,6 +5221,24 @@ class TestCompileTransforms(TestCase):
         expected = torch.compile(wrapper_fn, backend="eager", fullgraph=True)(x, y)
         self.assertEqual(actual, expected)
 
+class TestGradTrackingTensorToList(TestCase):
+    """Tests for tolist() method with GradTrackingTensor (functorch tensors)."""
+    def test_tolist_with_grad(self):
+        """Test to see if tolist works inside grad transformation"""
+        def f(x):
+            # inside grad, x is a GradTrackingTensor
+            result = x.tolist()
+            # tolist shoudl return a python list and not fail
+            self.assertIsInstance(result, list)
+            self.assertEqual(result, [1., 2., 3.])
+            return (x ** 2).sum()
+        
+        x = torch.tensor([1., 2., 3.], requires_grad=True)
+        grad_f = grad(f)
+        result = grad_f(x)
+        # gradients should still be computed correctly
+        self.assertEqual(result, [2., 4., 6.])
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(
