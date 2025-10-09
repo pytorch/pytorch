@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -57,29 +57,100 @@ def _arg_to_str(arg) -> str:
     return str(arg)
 
 
-def _op_to_str(op, *args, **kwargs) -> str:
-    if op == REDISTRIBUTE_FUNC:
-        assert len(args) == 3
-        _args = [_arg_to_str(arg) for arg in args]
-        args_str = f"{_args[0]}, {_args[1]} -> {_args[2]}"
-    else:
-        args_str = ", ".join(_arg_to_str(arg) for arg in args)
+class _OperatorCall:
+    """Base class for tracking operator calls in DebugMode"""
+    def __init__(self, call_depth: int):
+        self.call_depth = call_depth
 
-    if kwargs:
-        kwargs_str = ", " + ", ".join(
-            f"{k}={_arg_to_str(v)}" for k, v in kwargs.items()
-        )
-    else:
-        kwargs_str = ""
+    def __str__(self) -> str:
+        raise NotImplementedError("Subclasses must implement __str__")
 
-    if isinstance(op, torch._ops.OpOverload):
-        op_name = op.__qualname__
-    elif hasattr(op, "__module__") and hasattr(op, "__name__"):
-        op_name = f"{op.__module__}.{op.__name__}"
-    else:
-        op_name = str(op)
+    __repr__ = __str__
 
-    return f"{op_name}({args_str}{kwargs_str})"
+
+class _OpCall(_OperatorCall):
+    """Normal operator call"""
+    def __init__(self, op, args: tuple, kwargs: dict, call_depth: int):
+        super().__init__(call_depth)
+        self.op = op
+        self.args = args
+        self.kwargs = kwargs
+
+    def __str__(self) -> str:
+        args_str = ", ".join(_arg_to_str(arg) for arg in self.args)
+
+        if self.kwargs:
+            kwargs_str = ", " + ", ".join(
+                f"{k}={_arg_to_str(v)}" for k, v in self.kwargs.items()
+            )
+        else:
+            kwargs_str = ""
+
+        if isinstance(self.op, torch._ops.OpOverload):
+            op_name = self.op.__qualname__
+        elif hasattr(self.op, "__module__") and hasattr(self.op, "__name__"):
+            op_name = f"{self.op.__module__}.{self.op.__name__}"
+        else:
+            op_name = str(self.op)
+        return f"{op_name}({args_str}{kwargs_str})"
+
+
+class _RedistributeCall(_OperatorCall):
+    """Redistribute call from DTensor dispatch"""
+    def __init__(self, arg, src_placement, dst_placement, call_depth):
+        super().__init__(call_depth)
+        self.arg = arg
+        self.src_placement = src_placement
+        self.dst_placement = dst_placement
+
+    def __str__(self) -> str:
+        arg_str = f"{_arg_to_str(self.arg)}"
+        src_placement_str = _arg_to_str(self.src_placement)
+        dst_placement_str = _arg_to_str(self.dst_placement)
+        return f"{REDISTRIBUTE_FUNC}({arg_str}, {src_placement_str} -> {dst_placement_str})"
+
+
+class _InductorGraphCall(_OperatorCall):
+    """Inductor compiled graph call (at runtime)"""
+    def __init__(self, post_grad_graph: str, cache_key: str, inputs: tuple, fx_kwargs: dict, call_depth: int):
+        super().__init__(call_depth)
+        self.post_grad_graph = post_grad_graph
+        self.cache_key = cache_key
+        self.inputs = inputs
+        self.fx_kwargs = fx_kwargs
+
+    def __str__(self) -> str:
+        # Base indentation for this call
+        base_indent = "  " + "  " * self.call_depth
+        inner_indent = base_indent + "  "
+
+        # Runtime args
+        args_str = ", ".join(_arg_to_str(arg) for arg in self.inputs)
+
+        # Add call_depth indentation to graph module str
+        graph_lines = self.post_grad_graph.strip().split('\n')
+        indented_graph = '\n'.join(inner_indent + "  " +  line for line in graph_lines)
+
+        # Format fx_kwargs
+        if self.fx_kwargs:
+            kwargs_items = [
+                f"{k}={v}"
+                for k, v in self.fx_kwargs.items()
+            ]
+            fx_kwargs_str = ", ".join(kwargs_items)
+        else:
+            fx_kwargs_str = ""
+
+        # Build the full string
+        result = f"inductor_graph_call(\n"
+        result += f"{inner_indent}inputs: ({args_str})\n"
+        result += f"{inner_indent}cache_key: {self.cache_key}\n"
+        if fx_kwargs_str:
+            result += f"{inner_indent}fx_kwargs: {{{fx_kwargs_str}}}\n"
+        result += f"{inner_indent}post_grad_graph:\n"
+        result += indented_graph + "\n"
+        result += f"{base_indent})"
+        return result
 
 
 class DebugMode(TorchDispatchMode):
@@ -112,7 +183,7 @@ class DebugMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
-        self.operators.append((func, args, kwargs, self.call_depth))
+        self.operators.append(_OpCall(func, args, kwargs, self.call_depth))
 
         try:
             self.call_depth += 1
@@ -126,17 +197,17 @@ class DebugMode(TorchDispatchMode):
 
         # Record the operation with its call depth
         if torch.distributed.tensor.DTensor in types:
-            self.operators.append((func, args, kwargs, self.call_depth))
+            self.operators.append(_OpCall(func, args, kwargs, self.call_depth))
             return NotImplemented
         elif FakeTensor in types or isinstance(
             _get_current_dispatch_mode(), FakeTensorMode
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    self.operators.append((func, args, kwargs, self.call_depth + 1))
+                    self.operators.append(_OpCall(func, args, kwargs, self.call_depth + 1))
         elif len(types) == 0:
             if self.record_realtensor:
-                self.operators.append((func, args, kwargs, self.call_depth + 1))
+                self.operators.append(_OpCall(func, args, kwargs, self.call_depth + 1))
 
         result = func(*args, **kwargs)
 
@@ -159,14 +230,11 @@ class DebugMode(TorchDispatchMode):
             torch._C._pop_torch_function_stack()
 
     @contextlib.contextmanager
-    def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
+    def record_redistribute_calls(self, arg, src_placement, dst_placement):
         try:
             self.operators.append(
-                (
-                    REDISTRIBUTE_FUNC,
-                    [arg_idx, src_placement, dst_placement],
-                    {},
-                    self.call_depth + 1,
+                _RedistributeCall(
+                    arg, src_placement, dst_placement, self.call_depth + 1
                 )
             )
             self.call_depth += 1
@@ -174,12 +242,19 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
+    def record_inductor_graph_call(self, post_grad_graph: str, cache_key: str, inputs: tuple[Any], fx_kwargs: dict[str, Any]):
+        self.operators.append(
+            _InductorGraphCall(
+                post_grad_graph, cache_key, inputs, fx_kwargs, self.call_depth + 1
+            )
+        )
+
     def debug_string(self) -> str:
         with torch._C.DisableTorchFunction():
             result = ""
             result += "\n".join(
-                "  " + "  " * depth + _op_to_str(op, *args, **kwargs)
-                for op, args, kwargs, depth in self.operators
+                "  " + "  " * call.call_depth + str(call)
+                for call in self.operators
             )
         return result
 

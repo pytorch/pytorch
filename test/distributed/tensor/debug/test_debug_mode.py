@@ -107,8 +107,8 @@ class TestDTensorDebugMode(TestCase):
         aten::clone(t: f32[8, 1])
       aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
       redistribute_input(t: f32[8, 8], [R] -> [S(0)])
-        aten::detach(t: f32[8, 1])
         aten::split.Tensor(t: f32[8, 8], 1)
+        aten::detach(t: f32[8, 1])
         aten::clone(t: f32[1, 8])
       aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
       aten::detach(t: f32[1, 8])""",
@@ -262,14 +262,100 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
     def test_compile(self):
-        @torch.compile
+        @torch.compile(backend="inductor")
         def f(x):
             return x.sin().cos()
 
         x = torch.randn(8)
         with DebugMode() as debug_mode:
             f(x)
-        self.assertEqual(len(debug_mode.debug_string()), 0)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    inductor_graph_call(
+      inputs: (t: f32[8])
+      cache_key: fzybyavonwnejlvtozbolxyf7uy4dfrl7ocjwlxnykgkvyb7wwzl
+      fx_kwargs: {static_input_idxs=[], cudagraphs=BoxedBool(value=False), graph_id=0, is_inference=True, boxed_forward_device_index=BoxedDeviceIndex(value=None), is_backward=False, cpp_wrapper=False, fx_wrapper=False, layout_opt=None, extern_node_serializer=None}
+      post_grad_graph:
+        class <lambda>(torch.nn.Module):
+            def forward(self, arg0_1: "f32[8][1]cpu"):
+                 # File: /data/users/pianpwk/ptclone/pytorch/test/distributed/tensor/debug/test_debug_mode.py:267 in f, code: return x.sin().cos()
+                sin: "f32[8][1]cpu" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+                cos: "f32[8][1]cpu" = torch.ops.aten.cos.default(sin);  sin = None
+                return (cos,)
+    )""",
+        )
+        
+    def test_inductor_calls_for_mm(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        x = torch.randn(1, 8, requires_grad=False)
+        y = torch.randn(1, 32, requires_grad=True)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(x, y):
+            return torch.mm(x, y)
+
+        with DebugMode(record_torchfunction=False) as debug_mode:
+            out = fn(x_dtensor, y_dtensor)
+            out.sum().backward()
+            
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    inductor_graph_call(
+      inputs: (t: f32[1, 8], t: f32[1, 32])
+      cache_key: f3ckshcwfrbbfxcrcc2psb62hbl3mmp5wbqbb3uymncnixzbqyp2
+      fx_kwargs: {static_input_idxs=[], cudagraphs=BoxedBool(value=False), graph_id=0, is_inference=False, boxed_forward_device_index=BoxedDeviceIndex(value=None), is_backward=False, cpp_wrapper=False, fx_wrapper=False, layout_opt=None, extern_node_serializer=None}
+      post_grad_graph:
+        class GraphModule(torch.nn.Module):
+            def forward(self, primals_1: "f32[1, 8][8, 1]cuda:0", primals_2: "f32[1, 32][32, 1]cuda:0"):
+                 # File: /data/users/pianpwk/ptclone/pytorch/test/distributed/tensor/debug/test_debug_mode.py:300 in fn, code: return torch.mm(x, y)
+                all_gather_into_tensor: "f32[8, 32][32, 1]cuda:0" = torch.ops._c10d_functional.all_gather_into_tensor.default(primals_2, 8, '0');  primals_2 = None
+                wait_tensor: "f32[8, 32][32, 1]cuda:0" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+                mm: "f32[1, 32][32, 1]cuda:0" = torch.ops.aten.mm.default(primals_1, wait_tensor);  wait_tensor = None
+                permute: "f32[8, 1][1, 8]cuda:0" = torch.ops.aten.permute.default(primals_1, [1, 0]);  primals_1 = None
+                return (mm, permute)
+    )
+      _c10d_functional::all_gather_into_tensor(t: f32[1, 32], 8, 0)
+      _c10d_functional::wait_tensor(t: f32[8, 32])
+      aten::mm.out(t: f32[1, 8], t: f32[8, 32], out=t: f32[1, 32])
+  aten::sum(dt: f32[8, 32][S(0)])
+    aten::sum(t: f32[1, 32])
+  aten::ones_like(dt: f32[][P], pin_memory=False, memory_format=torch.preserve_format)
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)
+  aten::expand(dt: f32[][R], [8, 32])
+    aten::expand(t: f32[], [8, 32])
+    redistribute_input(t: f32[8, 32], [R] -> [S(0)])
+      aten::split.Tensor(t: f32[8, 32], 1)
+      aten::clone(t: f32[1, 32])
+  aten::clone(dt: f32[8, 32][S(0)], memory_format=torch.contiguous_format)
+    aten::clone(t: f32[1, 32], memory_format=torch.contiguous_format)
+    profiler::_record_function_enter_new(backward._backward_impl (dynamo_timed))
+    profiler::_record_function_enter_new(compile_fx.<locals>.bw_compiler (dynamo_timed))
+    profiler::_record_function_exit._RecordFunction(ScriptObject <__torch__.torch.classes.profiler._RecordFunction>)
+    profiler::_record_function_exit._RecordFunction(ScriptObject <__torch__.torch.classes.profiler._RecordFunction>)
+    inductor_graph_call(
+      inputs: (t: f32[8, 1], t: f32[1, 32])
+      cache_key: fsnyocggi2loaax6imaueniogtvgd2ta4wlrcfydcp4qzv7rmhqi
+      fx_kwargs: {static_input_idxs=[0], cudagraphs=BoxedBool(value=False), is_backward=True, graph_id=0, boxed_forward_device_index=BoxedDeviceIndex(value=None), cpp_wrapper=False, fx_wrapper=False, is_inference=False, layout_opt=None, extern_node_serializer=None}
+      post_grad_graph:
+        class GraphModule(torch.nn.Module):
+            def forward(self, permute: "f32[8, 1][1, 8]cuda:0", tangents_1: "f32[1, 32][32, 1]cuda:0"):
+                 # File: /data/users/pianpwk/ptclone/pytorch/test/distributed/tensor/debug/test_debug_mode.py:300 in fn, code: return torch.mm(x, y)
+                mm_1: "f32[8, 32][32, 1]cuda:0" = torch.ops.aten.mm.default(permute, tangents_1);  permute = tangents_1 = None
+                return (None, mm_1)
+    )
+      aten::mm.out(t: f32[8, 1], t: f32[1, 32], out=t: f32[8, 32])
+    redistribute_input(t: f32[8, 32], [P] -> [S(0)])
+      _c10d_functional::reduce_scatter_tensor(t: f32[8, 32], sum, 8, 0)
+      _c10d_functional::wait_tensor(t: f32[1, 32])
+    aten::_to_copy(t: f32[1, 32], dtype=torch.float32, layout=torch.strided, device=cpu)
+    aten::detach(t: f32[1, 32])""",
+        )
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
