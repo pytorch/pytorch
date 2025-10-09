@@ -13,7 +13,7 @@ namespace cuda {
 
 class TORCH_CUDA_CPP_API GreenContext {
  public:
-  GreenContext(int device_id, unsigned int num_sms); 
+  GreenContext(int device_id, unsigned int num_sms);
 
   static std::unique_ptr<GreenContext> create(unsigned int num_sms, std::optional<unsigned int> device_id);
 
@@ -22,7 +22,7 @@ class TORCH_CUDA_CPP_API GreenContext {
   GreenContext& operator=(const GreenContext&) = delete;
 
   // Implement move operations
-  GreenContext(GreenContext&& other) noexcept; 
+  GreenContext(GreenContext&& other) noexcept;
   GreenContext& operator=(GreenContext&& other) noexcept;
   ~GreenContext() noexcept;
 
