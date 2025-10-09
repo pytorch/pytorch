@@ -706,6 +706,10 @@ conv_1x1_as_mm = False
 # enabling both of these will implicitly disable split_reductions
 split_reductions = True
 
+# A deterministic mode that skips any on device benchmarking in Inductor
+# if we know they affect numerics.  WARNING: Expect perf hit in this mode.
+deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
+
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
 # It's a much bigger problem when we compile a dynamic shape kernel with
@@ -1741,11 +1745,6 @@ class cuda:
         "TORCHINDUCTOR_CUTLASS_INSTANTIATION_LEVEL", "0"
     )
 
-    # Experimental. Only for H100 for now. Flag to control whether to use presets.
-    # Format looks like: "0,1,3" for using presets 0, 1, and 3. Presets can be
-    # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
-    cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
-
     # use compile command to create kernel .cu and .so name
     cutlass_hash_with_compile_cmd: bool = (
         os.environ.get("TORCHINDUCTOR_CUTLASS_HASH_WITH_COMPILE_CMD", "0") == "1"
@@ -2030,6 +2029,9 @@ class test_configs:
     # to be migrated when ready for use
     aten_fx_overlap_scheduling = False
 
+    # insert ordering deps for overlap
+    aten_fx_overlap_insert_overlap_deps = True
+
     # to be migrated when ready for use
     aten_fx_overlap_preserving_bucketing = False
 
@@ -2040,6 +2042,11 @@ class test_configs:
     estimate_aten_runtime: Union[
         Literal["default"], Callable[[torch.fx.Node], Optional[float]]
     ] = "default"
+
+    # A test config to ease the test for perf of reduction config filtering
+    force_filter_reduction_configs = (
+        os.getenv("TORCHINDUCTOR_FORCE_FILTER_REDUCTION_CONFIGS") == "1"
+    )
 
 
 if TYPE_CHECKING:

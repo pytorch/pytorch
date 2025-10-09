@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch._prims_common as utils
@@ -56,6 +57,7 @@ def _interleave(a, b, dim=0):
 
     stacked = torch.stack([a, b], dim=dim + 1)
     interleaved = torch.flatten(stacked, start_dim=dim, end_dim=dim + 1)
+    # pyrefly: ignore  # unbound-name
     if b_trunc:
         # TODO: find torch alternative for slice_along dim for torch.jit.script to work
         interleaved = aten.slice(interleaved, dim, 0, b.shape[dim] + a.shape[dim] - 1)
@@ -95,6 +97,7 @@ class AssociativeScanOp(HigherOrderOperator):
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, xs, additional_inputs)
 
+    # pyrefly: ignore  # bad-override
     def gen_schema(self, combine_fn, xs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -647,6 +650,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx,
         combine_fn,

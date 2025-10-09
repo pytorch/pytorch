@@ -73,7 +73,6 @@ static void check_shape_except_dim(const Tensor& first, const Tensor& second, in
 // too large to use MPSGraph.
 // NOTE: `output` is expected to already have the correct size.
 static void cat_out_large_tensor_mps(const ITensorListRef& inputs, int64_t dimension, const Tensor& output) {
-  std::vector<CatLargeInputParams<>> input_params_list(inputs.size());
   CatLargeSharedParams shared_params;
 
   shared_params.ndim = output.dim();
@@ -86,10 +85,9 @@ static void cat_out_large_tensor_mps(const ITensorListRef& inputs, int64_t dimen
 
   int64_t cat_dim_offset = 0;
   size_t input_idx = 0;
-
   MPSStream* stream = getCurrentMPSStream();
 
-  // Launch a separate kernel for each input. This will produce some overhead,
+  // Launch a separate kernels for each input. This will produce some overhead,
   // but that should be relatively minimal since at least one of the inputs is
   // very large. In order to launch only one kernel to process all inputs, we
   // would have to copy all the input tensor data into a packed buffer, which
@@ -99,37 +97,38 @@ static void cat_out_large_tensor_mps(const ITensorListRef& inputs, int64_t dimen
       continue;
     }
 
-    auto& input_params = input_params_list[input_idx];
-
-    input_params.cat_dim_offset = cat_dim_offset;
-    cat_dim_offset += input.size(dimension);
-
     // Metal can only launch up to MAX_INT threads at one time. If the input has
-    // more than that number of elements, each thread has to handle more than
-    // one element.
+    // more than that number of elements, launch multiple kernels with different
+    // offsets into the data.
     const int64_t max_num_threads = static_cast<int64_t>(std::numeric_limits<int32_t>::max());
-    input_params.elements_per_thread = (input.numel() - 1) / max_num_threads + 1;
-    auto num_threads = (input.numel() - 1) / input_params.elements_per_thread + 1;
-    input_params.input_numel = input.numel();
 
-    for (const auto dim : c10::irange(input.dim())) {
-      input_params.input_strides[dim] = input.stride(dim);
-      input_params.input_sizes[dim] = input.size(dim);
+    for (int64_t numel_remaining = input.numel(); numel_remaining > 0; numel_remaining -= max_num_threads) {
+      auto num_threads = std::min(max_num_threads, numel_remaining);
+      CatLargeInputParams input_params;
+
+      input_params.cat_dim_offset = cat_dim_offset;
+      input_params.input_element_offset = input.numel() - numel_remaining;
+
+      for (const auto dim : c10::irange(input.dim())) {
+        input_params.input_strides[dim] = input.stride(dim);
+        input_params.input_sizes[dim] = input.size(dim);
+      }
+
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
+          auto pipeline_state = lib.getPipelineStateForFunc(
+              fmt::format("cat_large_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output)));
+          getMPSProfiler().beginProfileKernel(pipeline_state, "cat", {input});
+          [computeEncoder setComputePipelineState:pipeline_state];
+          mtl_setArgs(computeEncoder, input, output, shared_params, input_params);
+          mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
+          getMPSProfiler().endProfileKernel(pipeline_state);
+        }
+      });
     }
 
-    dispatch_sync_with_rethrow(stream->queue(), ^() {
-      @autoreleasepool {
-        id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
-        auto pipeline_state = lib.getPipelineStateForFunc(
-            fmt::format("cat_large_{}_{}", scalarToMetalTypeString(input), scalarToMetalTypeString(output)));
-        getMPSProfiler().beginProfileKernel(pipeline_state, "cat", {input});
-        [computeEncoder setComputePipelineState:pipeline_state];
-        mtl_setArgs(computeEncoder, input, output, shared_params, input_params);
-        mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
-        getMPSProfiler().endProfileKernel(pipeline_state);
-      }
-    });
-
+    cat_dim_offset += input.size(dimension);
     input_idx++;
   }
 }

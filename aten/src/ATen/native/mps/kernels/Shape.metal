@@ -19,37 +19,27 @@ kernel void cat_large(
   constant auto& output_sizes = shared_params.output_sizes;
 
   auto cat_dim_offset = input_params.cat_dim_offset;
-  auto elements_per_thread = input_params.elements_per_thread;
-  auto input_numel = input_params.input_numel;
+  auto input_element_offset = input_params.input_element_offset;
   constant auto& input_strides = input_params.input_strides;
   constant auto& input_sizes = input_params.input_sizes;
 
-  for (auto thread_element_idx = 0; thread_element_idx < elements_per_thread;
-       thread_element_idx++) {
-    auto input_element_idx =
-        static_cast<int64_t>(tid) * elements_per_thread + thread_element_idx;
+  auto input_element_idx = static_cast<int64_t>(tid) + input_element_offset;
+  int64_t input_offset = 0;
+  int64_t output_offset = 0;
 
-    if (input_element_idx > input_numel) {
-      return;
-    }
+  for (auto dim = ndim - 1; dim >= 0; dim--) {
+    auto dim_size = input_sizes[dim];
+    auto input_dim_idx = input_element_idx % dim_size;
+    auto output_dim_idx =
+        input_dim_idx + ((dim == cat_dim) ? cat_dim_offset : 0);
 
-    int64_t input_offset = 0;
-    int64_t output_offset = 0;
+    input_offset += input_strides[dim] * input_dim_idx;
+    output_offset += output_strides[dim] * output_dim_idx;
 
-    for (auto dim = ndim - 1; dim >= 0; dim--) {
-      auto dim_size = input_sizes[dim];
-      auto input_dim_idx = input_element_idx % dim_size;
-      auto output_dim_idx =
-          input_dim_idx + ((dim == cat_dim) ? cat_dim_offset : 0);
-
-      input_offset += input_strides[dim] * input_dim_idx;
-      output_offset += output_strides[dim] * output_dim_idx;
-
-      input_element_idx = input_element_idx / dim_size;
-    }
-
-    output[output_offset] = static_cast<T_out>(input[input_offset]);
+    input_element_idx = input_element_idx / dim_size;
   }
+
+  output[output_offset] = static_cast<T_out>(input[input_offset]);
 }
 
 #define REGISTER_CAT_LARGE_OP(T_in, T_out)                           \
@@ -66,8 +56,11 @@ kernel void cat_large(
   REGISTER_CAT_LARGE_OP(half, T_out);                \
   REGISTER_CAT_LARGE_OP(bfloat, T_out);              \
   REGISTER_CAT_LARGE_OP(int, T_out);                 \
+  REGISTER_CAT_LARGE_OP(uint, T_out);                \
   REGISTER_CAT_LARGE_OP(long, T_out);                \
+  REGISTER_CAT_LARGE_OP(ulong, T_out);               \
   REGISTER_CAT_LARGE_OP(short, T_out);               \
+  REGISTER_CAT_LARGE_OP(ushort, T_out);              \
   REGISTER_CAT_LARGE_OP(char, T_out);                \
   REGISTER_CAT_LARGE_OP(uchar, T_out);               \
   REGISTER_CAT_LARGE_OP(bool, T_out);
@@ -76,10 +69,14 @@ REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(float);
 REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(half);
 REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(bfloat);
 REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(int);
+REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(uint);
 REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(long);
+REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(ulong);
 REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(short);
+REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(ushort);
 REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(char);
 REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(uchar);
 REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(bool);
 
 REGISTER_CAT_LARGE_OP(float2, float2);
+REGISTER_CAT_LARGE_OP(half2, half2);
