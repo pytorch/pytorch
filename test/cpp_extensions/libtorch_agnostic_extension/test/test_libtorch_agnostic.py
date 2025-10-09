@@ -377,7 +377,9 @@ if not IS_WINDOWS:
         # 2 argument(s) but received 3 argument(s).
         # Declaration: libtorch_agnostic::test_parallel_for(int size, int grain_size) -> Tensor')
         @xfailIfTorchDynamo
-        @skipIf(IS_MACOS, "Default Apple clang++/g++ on macos doesn't have -fopenmp flag")
+        @skipIf(
+            IS_MACOS, "Default Apple clang/g++ on macos doesn't have -fopenmp flag"
+        )
         def test_parallel_for(self, device):
             import libtorch_agnostic
 
