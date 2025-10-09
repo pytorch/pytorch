@@ -453,9 +453,7 @@ def _call_while_loop(
         cond_r_meta = _extract_tensor_metadata(
             cond_r.proxy.node.meta["example_value"], include_contiguity=False
         )
-        if not cond_r_meta.dtype == torch.bool or not cond_r_meta.shape == torch.Size(
-            []
-        ):
+        if cond_r_meta.dtype != torch.bool or cond_r_meta.shape != torch.Size([]):
             unimplemented(
                 f"Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}"
             )
@@ -2077,9 +2075,14 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
             unimplemented(
                 "executorch_call_delegate: kwargs arguments were not enabled."
             )
-        lowered_module = tx.output.get_submodule(args[0].module_key)
-
-        lowered_node = make_attr(tx, args[0].module_key)
+        if isinstance(args[0], variables.NNModuleVariable):
+            lowered_module = args[0].module
+            lowered_module = tx.output.get_submodule(args[0].module_key)
+            lowered_node = make_attr(tx, args[0].module_key)
+        elif isinstance(args[0], variables.UnspecializedNNModuleVariable):
+            lowered_module = args[0].value
+            mod_name = tx.output.install_subgraph("delegate", lowered_module)
+            lowered_node = make_attr(tx, mod_name)
 
         p_args = tuple(arg.as_proxy() for arg in args[1:])
         real_sub_args = pytree.tree_map_only(
@@ -2583,7 +2586,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             elif isinstance(
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
-                context_fn = ctx.as_python_constant()
+                context_fn = ctx.guard_as_python_constant()
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"
