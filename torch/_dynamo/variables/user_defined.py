@@ -58,7 +58,7 @@ from ..exc import (
     raise_observed_exception,
     unimplemented_v2,
 )
-from ..graph_bytecode_inputs import get_user_object_by_index, register_user_object
+from ..graph_bytecode_inputs import get_external_object_by_index
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -67,7 +67,6 @@ from ..source import (
     DictGetItemSource,
     GetItemSource,
     RandomValueSource,
-    TorchSource,
     TypeDictSource,
     TypeMROSource,
     TypeSource,
@@ -795,20 +794,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 args = [stacked]
 
             if issubclass(self.value, torch.Stream):
-                torch_stream_src = CallFunctionNoArgsSource(
-                    AttrSource(TorchSource(), "Stream")
-                )
                 # Register newly created stream for reconstruction
                 stream = self.value()
-                from .streams import add_dynamo_owned_stream
+                from ..graph_bytecode_inputs import register_graph_created_object
+                from .streams import StreamVariable
 
-                add_dynamo_owned_stream(stream)
-                ind = register_user_object(stream, torch_stream_src)
-                breakpoint()
+                ind = register_graph_created_object(
+                    stream, StreamVariable._construct_in_graph_stream
+                )
                 tensor_variable = wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
-                        "call_function", get_user_object_by_index, (ind,), {}
+                        "call_function", get_external_object_by_index, (ind,), {}
                     ),
                     user_obj_index=ind,
                 )

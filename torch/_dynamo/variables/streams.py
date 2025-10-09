@@ -1,5 +1,3 @@
-from collections import deque
-from dataclasses import dataclass
 from typing import Any, Optional
 
 import torch
@@ -9,6 +7,7 @@ from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
 from ..device_interface import get_interface_for_device
 from ..exc import TYPE_CHECKING, unimplemented_v2
+from ..source import AttrSource, CallFunctionNoArgsSource, TorchSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
@@ -17,13 +16,12 @@ from .misc import GetAttrVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
     from ..codegen import PyCodegen
 
 from torch._library.custom_ops import custom_op
 
 
-# Avoid circular dependency for the dataclass
-TensorVariable = Any
 Tensor = torch.Tensor
 
 
@@ -65,60 +63,6 @@ def _(
     to_device: torch.device,
 ) -> None:
     pass
-
-
-_keep_alive: list[torch.Stream] = []
-
-
-def add_dynamo_owned_stream(s: torch.Stream) -> None:
-    global _keep_alive
-    _keep_alive.append(s)
-
-
-# Stream state consists of the fork stream node
-# and the external to the stream that are accessed from within the
-# stream
-@dataclass
-class StreamState:
-    prev_stream_info: tuple[Proxy, Proxy, Proxy]
-
-
-class StreamStateManager:
-    """
-    Class used to track the current stream context we are in and identify
-    any used tensors as external (created outside the stream context) or
-    internal (created within the stream context). We use this information to
-    ensure the fork op is dependent on any external tensors, so that it will not
-    be reordered before them or after ops which use the externally created tensors.
-    Analagously, we use the internal tensors to ensure that the join op is not
-    reordered before any internally created tensors or after ops which use the
-    internally created tensors.
-
-    To actually implement this, we have a stack of stream states which track any external tensors that
-    have not yet been seen within the stream context and any tensors created within the stream context.
-    Once we exit the stream context we populate the args of fork with all external tensors which have been used,
-    and join with any internal tensors that were created.
-    """
-
-    def __init__(self) -> None:
-        self.state_stack: deque[StreamState] = deque()
-
-    def in_stream_context(self) -> bool:
-        return bool(self.state_stack)
-
-    def push_stream_state(
-        self, index_proxy: Proxy, device_proxy: Proxy, device_index_proxy: Proxy
-    ) -> None:
-        self.state_stack.append(
-            StreamState((index_proxy, device_proxy, device_index_proxy))
-        )
-
-    def pop_stream_state(self) -> StreamState:
-        assert self.state_stack, "No stream state to pop"
-        return self.state_stack.pop()
-
-
-stream_state_mgr = StreamStateManager()
 
 
 class StreamContextVariable(ContextWrappingVariable):
@@ -327,7 +271,7 @@ class StreamVariable(StreamContextVariable):
             codegen.add_push_null(
                 lambda: codegen.load_import_from(
                     torch._dynamo.graph_bytecode_inputs.__name__,
-                    "get_user_object_by_index",
+                    "get_external_object_by_index",
                 )
             )
             codegen.append_output(codegen.create_load_const(self.user_object_index))
@@ -337,6 +281,13 @@ class StreamVariable(StreamContextVariable):
             prefix = f"_stream_{self.device}"
             name = codegen.tx.output.install_global_by_id(prefix, self.value)
             codegen.append_output(codegen.create_load_global(name, add=True))
+
+    @staticmethod
+    def construct_in_graph_stream(index: int, codegen: "PyCodegen") -> None:
+        # Use source to create the right bytecode, this
+        # isn't an actual input
+        source = CallFunctionNoArgsSource(AttrSource(TorchSource(), "Stream"))
+        codegen(source)
 
     def _get_target_values(self) -> list["StreamVariable"]:
         return [self]
