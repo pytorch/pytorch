@@ -357,9 +357,9 @@ class ShardingPropagator:
             strategy_schema = self._wrap_with_op_strategy(op_schema)
 
             # run sharding strategy propagation/generation
-            if op_schema.op == aten.mm.default:
-                import fbvscode
-                fbvscode.set_trace()
+            # if op_schema.op == aten.mm.default:
+            #     import fbvscode
+            #     fbvscode.set_trace()
             op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)
 
             if isinstance(op_strategy, OpStrategy):
@@ -390,10 +390,20 @@ class ShardingPropagator:
                         )
                     )
                     if input_spec.placements != desired_spec.placements:
-                        if all(x.is_partial_view_shard() for x in desired_spec.placements) and (x.orig_placement == y for x, y in zip(desired_spec.placements, input_spec.placements)):
+                        if all(
+                            x.is_partial_view_shard() for x in desired_spec.placements
+                        ) and (
+                            x.orig_placement == y
+                            for x, y in zip(
+                                desired_spec.placements, input_spec.placements
+                            )
+                        ):
                             pass
                         else:
-                            assert not any(x.is_partial_view_shard() for x in desired_spec.placements)
+                            assert not any(
+                                x.is_partial_view_shard()
+                                for x in desired_spec.placements
+                            )
                             needs_redistribute = True
 
                 suggestion_schema = None
@@ -409,7 +419,10 @@ class ShardingPropagator:
                     assert isinstance(output_strategy.output_spec, DTensorSpec)
                     # It happens when the output has the same shape as the input
                     # and the input placements are not all Replicate().
-                    if output_strategy.output_spec.is_sharded() or output_strategy.output_spec.is_partial_view_sharded():
+                    if (
+                        output_strategy.output_spec.is_sharded()
+                        or output_strategy.output_spec.is_partial_view_sharded()
+                    ):
                         schema = suggestion_schema or op_schema
                         assert isinstance(out_tensor_meta, TensorMeta)
                         suggestion_schema = self._adjust_shape_and_stride_args(
