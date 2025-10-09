@@ -231,6 +231,8 @@ struct FlightRecorder {
       std::optional<size_t> id,
       bool compute_duration = true);
 
+  TORCH_API void reset_all();
+
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,
       bool onlyActive);

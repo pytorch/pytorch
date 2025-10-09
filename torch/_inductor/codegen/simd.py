@@ -1895,6 +1895,8 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel_code_list = []
         for node_group in partitions:
+            if len(node_group) == 0:
+                continue
             fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ComboKernel(
                 enable_autotune=enable_autotune,
