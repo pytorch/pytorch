@@ -329,6 +329,8 @@ class TestVarlenAttention(NNTestCase):
             end_idx = start_idx + seq_len
             varlen_grad_seq = varlen_grad[start_idx:end_idx]
             sdpa_grad_seq = sdpa_grad[i, :seq_len]
+            print(f"varlen_grad_seq: {varlen_grad_seq}")
+            print(f"sdpa_grad_seq: {sdpa_grad_seq}")
             torch.testing.assert_close(varlen_grad_seq, sdpa_grad_seq, **tolerances)
             start_idx = end_idx
 
