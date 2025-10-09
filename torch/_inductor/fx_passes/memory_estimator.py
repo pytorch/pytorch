@@ -303,13 +303,15 @@ def get_fwd_bwd_interactions(
     return bwd_baseline_memory, do_not_delete
 
 
+def _is_releasable(n: fx.Node) -> bool:
+    # Storages of primals cannot be released during fwd or bwd pass.
+    return not n.name.startswith("primals")
+
+
 def get_peak_memory(
     fwd_graph: fx.Graph,
     bwd_graph: fx.Graph,
 ) -> int:
-    def _is_releasable(n: fx.Node) -> bool:
-        # Storages of primals cannot be released during fwd or bwd pass.
-        return not n.name.startswith("primals")
 
     fwd_peak_memory = max(build_memory_profile(fwd_graph, _is_releasable))
 
@@ -330,3 +332,135 @@ def get_peak_memory(
         fwd_peak_memory,
         bwd_peak_memory,
     )
+
+
+class MemoryTracker:
+    """
+    Tracks memory usage for alternative scheduling orders of an FX graph.
+
+    This class enables tracking memory usage as nodes are scheduled in a different
+    order than the original graph.
+    """
+
+    def __init__(
+        self,
+        graph: fx.Graph,
+        is_releasable: Optional[Callable[[fx.Node], bool]] = None,
+        device_filter: Optional[Callable[[torch.device], bool]] = None,
+    ):
+        """
+        Initialize memory tracker for alternative scheduling of the given graph.
+
+        Args:
+            graph: FX graph to track memory for under alternative scheduling
+            device_filter: Function to determine which devices to track (default: non-CPU)
+        """
+
+        self.graph = graph
+        self.nodes = list(graph.nodes)
+        self.device_filter = device_filter or (lambda device: device.type != "cpu")
+        self.scheduled: OrderedSet[fx.Node] = OrderedSet()
+
+        # Memory tracking using GraphAliasTracker
+        self.alias_tracker = GraphAliasTracker(self.nodes)
+        self.current_live_storages: OrderedSet[StorageKey] = OrderedSet()
+        self.current_memory_bytes = 0
+        self.is_releasable = _is_releasable if is_releasable is None else is_releasable
+
+        # Initialize live storages with placeholders and get_attr nodes
+        for node in self.nodes:
+            if node.op in ("placeholder", "get_attr"):
+                fresh_allocations = self.alias_tracker.get_fresh_allocations(node)
+                for storage_key in fresh_allocations:
+                    if self.device_filter(storage_key.device):
+                        self.current_live_storages.add(storage_key)
+                        self.current_memory_bytes += self._get_storage_size(storage_key)
+
+        self.peak_memory = self.current_memory_bytes
+
+        log.debug(
+            f"Memory tracker initialized with "
+            f"initial memory: {self.current_memory_bytes // (1024 * 1024)} MB"
+        )
+
+    def schedule_node(self, node: fx.Node) -> None:
+        """
+        Schedule a node and update memory tracking for the new scheduling order.
+
+        Args:
+            node: The node being scheduled (potentially out of original order)
+        """
+        assert node not in self.scheduled, "should not schedule node twice"
+        self.scheduled.add(node)
+        self._update_memory_for_node(node)
+
+    def get_current_memory_bytes(self) -> int:
+        """Get current live memory in bytes under the current scheduling."""
+        return self.current_memory_bytes
+
+    def _get_storage_size(self, storage_key: StorageKey) -> int:
+        """Get the size of a storage in bytes, handling symbolic shapes."""
+        size_bytes = storage_key.storage.nbytes()
+        return hint_int(
+            size_bytes, fallback=torch._inductor.config.unbacked_symint_fallback
+        )
+
+    def _get_storages_freed_by_node(self, node: fx.Node) -> OrderedSet[StorageKey]:
+        """Get storages that would be freed if we schedule this node."""
+        freed_storages: OrderedSet[StorageKey] = OrderedSet()
+
+        input_storages = self.alias_tracker.get_storage_uses(node)
+        for storage_key in input_storages:
+            # Invariant: if a node uses a storage, it must be live
+            assert storage_key in self.current_live_storages, (
+                "all input storages should be currently allocated"
+            )
+
+            if not self.is_releasable(self.alias_tracker.storage_to_allocator[storage_key]):
+                continue
+
+            all_uses = self.alias_tracker.storage_to_uses[storage_key]
+
+            # If no more unscheduled uses remain, the storage can be freed
+            if all(u in self.scheduled for u in all_uses):
+                freed_storages.add(storage_key)
+
+        return freed_storages
+
+    def _update_memory_for_node(self, node: fx.Node) -> None:
+        """Update memory tracking when a node is scheduled."""
+        if node.op in ("placeholder", "get_attr", "output"):
+            return
+
+        # Add fresh allocations
+        fresh_allocations = self.alias_tracker.get_fresh_allocations(node)
+        alloc_bytes = 0
+        for storage_key in fresh_allocations:
+            if (
+                self.device_filter(storage_key.device)
+                and storage_key not in self.current_live_storages
+            ):
+                size = self._get_storage_size(storage_key)
+                self.current_live_storages.add(storage_key)
+                self.current_memory_bytes += size
+                alloc_bytes += size
+
+        self.peak_memory = max(self.current_memory_bytes, self.peak_memory)
+
+        # Remove storages that are no longer used
+        storages_to_free = self._get_storages_freed_by_node(node)
+        freed_bytes = 0
+        for storage_key in storages_to_free:
+            if storage_key in self.current_live_storages:
+                size = self._get_storage_size(storage_key)
+                self.current_live_storages.remove(storage_key)
+                self.current_memory_bytes -= size
+                freed_bytes += size
+
+        log.debug(
+            "Scheduled %s: memory change %d allocs, %d frees, current memory: %d MB",
+            node.name,
+            len(fresh_allocations),
+            len(storages_to_free),
+            self.current_memory_bytes // (1024 * 1024),
+        )
