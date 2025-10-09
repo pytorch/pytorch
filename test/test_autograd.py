@@ -13634,22 +13634,21 @@ class TestAutogradStreamSynchronization(TestCase):
         populate_events()
         check_ordering()
 
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     def test_warn_on_accumulate_grad_stream_mismatch_flag(self):
         def do_test(suppress_warn, keep_grad_acc):
             def _test():
                 with warnings.catch_warnings(record=True) as warns:
                     warnings.simplefilter("always")
 
-                    s1, s2 = torch.cuda.Stream(), torch.cuda.Stream()
-
-                    with torch.cuda.stream(s1):
+                    with torch.Stream(0) as s0:
                         a = torch.ones(8, 8, device="cuda", requires_grad=True)
-                        # create grad_acc under s1 and keep alive with b
                         if keep_grad_acc:
+                            # create grad_acc under s1 and keep alive with b
                             b = a.clone()
 
-                    with torch.cuda.stream(s2):
-                        s2.wait_stream(s1)
+                    with torch.Stream(0) as s1:
+                        s1.wait_stream(s0)
                         c = a.sum()
 
                     c.backward()
