@@ -870,7 +870,6 @@ from user code:
         )
 
     # Test that the bytecode source attribution is correct with VariableTracker
-    # @make_logging_test(dynamo=logging.DEBUG, trace_bytecode=True)
     @make_logging_test(trace_bytecode=True)
     def test_variable_tracker_source_attribution(self, records):
         def inner(x):
