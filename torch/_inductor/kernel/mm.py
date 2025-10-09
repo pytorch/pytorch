@@ -1157,10 +1157,17 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
     """
     if use_native_matmul(mat1, mat2):
-        return lowerings[aten.add](
-            lowerings[aten.mul](beta, inp),
-            lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2)),
-        )
+        if beta == 0:
+            arg1 = 0
+        else:
+            arg1 = lowerings[aten.mul](beta, inp)
+
+        if alpha == 0:
+            arg2 = 0
+        else:
+            arg2 = lowerings[aten.mul](alpha, lowerings[aten.mm](mat1, mat2))
+
+        return lowerings[aten.add](arg1, arg2)
 
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
