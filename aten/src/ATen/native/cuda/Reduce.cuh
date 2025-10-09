@@ -655,12 +655,17 @@ struct ReduceOp {
     }
 
     __syncthreads();
-
-    for (int offset = 1; offset < dim_x; offset <<= 1) {
+    // Warp-level reduction for remaining threads
+    // For non-power-of-2 sizes, we start from the next power-of-2 divided by 2
+    // and use a boundary check to avoid out-of-bounds access
+    for (size_t offset = warpSize / 2; offset > 0; offset >>= 1) {
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = ops.warp_shfl_down(value[i], offset);
-        value[i] = ops.combine(value[i], other);
+        // Only combine if the source thread (threadIdx.x + offset) is within bounds
+        if (threadIdx.x + offset < dim_x) {
+          value[i] = ops.combine(value[i], other);
+        }
       }
     }
     return value;

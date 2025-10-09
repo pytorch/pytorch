@@ -575,7 +575,7 @@ def get_score(addr: sympy.Expr, var_ranges: dict[sympy.Symbol, int]) -> int:
     # TODO - deduplicate with candidate_tilings
     var_sizes = []
     for v in addr.free_symbols:
-        v_size = var_ranges.get(v, None)
+        v_size = var_ranges.get(v)
         # TODO - reason about indirect vars
         if not symbol_is_type(v, SymT.INDIRECT) and v_size is not None:
             var_sizes.append(v_size)

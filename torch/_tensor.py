@@ -2,6 +2,7 @@
 import copyreg
 import enum
 import functools
+import itertools
 import warnings
 from collections import OrderedDict
 from collections.abc import Callable
@@ -1119,6 +1120,7 @@ class Tensor(torch._C.TensorBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C.TensorBase.__idiv__
 
+    # pyrefly: ignore  # bad-override
     __pow__ = cast(
         Callable[
             ["torch._C.TensorBase", Union["Tensor", int, float, bool, complex]],
@@ -1633,7 +1635,7 @@ class Tensor(torch._C.TensorBase):
             # Check if there are any duplicate strides
             has_duplicate_strides = any(
                 guard_or_false(earlier == later)
-                for earlier, later in zip(strides, strides[1:])
+                for earlier, later in itertools.pairwise(strides)
             )
 
             # Check if there are any singleton dimensions
