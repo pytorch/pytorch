@@ -247,7 +247,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
         element_length += formatter2.width() + 1
 
     elements_per_line = max(
-        1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
+        1, math.floor((PRINT_OPTS.linewidth - indent) / (element_length))
     )
 
     def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
@@ -657,8 +657,10 @@ def _str_intern(inp, *, tensor_contents=None):
         grad_fn_name = "Invalid"
 
     if grad_fn_name is None and grad_fn is not None:  # type: ignore[possibly-undefined]
+        # pyrefly: ignore  # unbound-name
         grad_fn_name = type(grad_fn).__name__
         if grad_fn_name == "CppFunction":
+            # pyrefly: ignore  # unbound-name
             grad_fn_name = grad_fn.name().rsplit("::", 1)[-1]
 
     if grad_fn_name is not None:
