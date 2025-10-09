@@ -88,6 +88,10 @@ Some of the most commonly used backends include:
 :maxdepth: 2
 :hidden:
 
+torch.compiler_get_started
+torch.compiler_faq
+torch.compiler_troubleshooting
+
 ```
 ```{toctree}
 :caption: Getting Started for PyTorch Users
