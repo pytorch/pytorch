@@ -7982,8 +7982,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
     @parametrize("backend", ["eager", "inductor"])
     def test_issue_164247(self, backend: str):
-        # https://github.com/pytorch/pytorch/issues/164247
-
         class MixedFakeModeModel(nn.Module):
             def __init__(self, dim=64):
                 super().__init__()
