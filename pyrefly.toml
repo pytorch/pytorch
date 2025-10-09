@@ -21,7 +21,6 @@ project-excludes = [
   # ==== below will be enabled directory by directory ====
   # ==== to test Pyrefly on a specific directory, simply comment it out ====
   "torch/_inductor/**",
-  "torch/distributed/**",
   # formatting issues
   "torch/linalg/__init__.py",
   "torch/package/importer.py",
