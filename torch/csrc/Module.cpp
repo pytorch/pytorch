@@ -1224,14 +1224,30 @@ static PyObject* THPModule_allowTF32CuBLAS(
 
 static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
     PyObject* _unused,
-    PyObject* arg) {
+    PyObject* args) {
   HANDLE_TH_ERRORS
+  PyObject* allow_reduction_obj = nullptr;
+  PyObject* allow_splitk_obj = Py_None;
+  if (!PyArg_ParseTuple(args, "O|O", &allow_reduction_obj, &allow_splitk_obj)) {
+    return nullptr;
+  }
   TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_allow_fp16_reduction_cublas expects a bool, "
+      PyBool_Check(allow_reduction_obj),
+      "set_allow_fp16_reduction_cublas expects a bool for allow_reduced_precision, "
       "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setAllowFP16ReductionCuBLAS(arg == Py_True);
+      THPUtils_typename(allow_reduction_obj));
+  bool allow_reduction = allow_reduction_obj == Py_True;
+  bool allow_splitk = true;
+  if (allow_splitk_obj != Py_None) {
+    TORCH_CHECK(
+        PyBool_Check(allow_splitk_obj),
+        "set_allow_fp16_reduction_cublas expects a bool for allow_splitk, "
+        "but got ",
+        THPUtils_typename(allow_splitk_obj));
+    allow_splitk = allow_splitk_obj == Py_True;
+  }
+  at::globalContext().setAllowFP16ReductionCuBLAS(
+      allow_reduction, allow_splitk);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1239,22 +1255,43 @@ static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
 static PyObject* THPModule_allowFP16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().allowFP16ReductionCuBLAS()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  auto option = at::globalContext().allowFP16ReductionCuBLAS();
+  bool allow_reduced_precision =
+      option == at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  bool allow_splitk = option !=
+      at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK;
+  return PyTuple_Pack(
+      2,
+      allow_reduced_precision ? Py_True : Py_False,
+      allow_splitk ? Py_True : Py_False);
 }
 
 static PyObject* THPModule_setAllowBF16ReductionCuBLAS(
     PyObject* _unused,
-    PyObject* arg) {
+    PyObject* args) {
   HANDLE_TH_ERRORS
+  PyObject* allow_reduction_obj = nullptr;
+  PyObject* allow_splitk_obj = Py_None;
+  if (!PyArg_ParseTuple(args, "O|O", &allow_reduction_obj, &allow_splitk_obj)) {
+    return nullptr;
+  }
   TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_allow_bf16_reduction_cublas expects a bool, "
+      PyBool_Check(allow_reduction_obj),
+      "set_allow_bf16_reduction_cublas expects a bool for allow_reduced_precision, "
       "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setAllowBF16ReductionCuBLAS(arg == Py_True);
+      THPUtils_typename(allow_reduction_obj));
+  bool allow_reduction = allow_reduction_obj == Py_True;
+  bool allow_splitk = true;
+  if (allow_splitk_obj != Py_None) {
+    TORCH_CHECK(
+        PyBool_Check(allow_splitk_obj),
+        "set_allow_bf16_reduction_cublas expects a bool for allow_splitk, "
+        "but got ",
+        THPUtils_typename(allow_splitk_obj));
+    allow_splitk = allow_splitk_obj == Py_True;
+  }
+  at::globalContext().setAllowBF16ReductionCuBLAS(
+      allow_reduction, allow_splitk);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1262,10 +1299,15 @@ static PyObject* THPModule_setAllowBF16ReductionCuBLAS(
 static PyObject* THPModule_allowBF16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().allowBF16ReductionCuBLAS()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  auto option = at::globalContext().allowBF16ReductionCuBLAS();
+  bool allow_reduced_precision =
+      option == at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  bool allow_splitk = option !=
+      at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK;
+  return PyTuple_Pack(
+      2,
+      allow_reduced_precision ? Py_True : Py_False,
+      allow_splitk ? Py_True : Py_False);
 }
 
 static PyObject* THPModule_setAllowFP16AccumulationCuBLAS(
@@ -1736,7 +1778,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_cublas_allow_fp16_reduced_precision_reduction",
      THPModule_setAllowFP16ReductionCuBLAS,
-     METH_O,
+     METH_VARARGS,
      nullptr},
     {"_get_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_allowBF16ReductionCuBLAS,
@@ -1744,7 +1786,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_setAllowBF16ReductionCuBLAS,
-     METH_O,
+     METH_VARARGS,
      nullptr},
     {"_get_cublas_allow_fp16_accumulation",
      THPModule_allowFP16AccumulationCuBLAS,
