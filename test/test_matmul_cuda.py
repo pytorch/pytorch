@@ -857,6 +857,7 @@ class TestMatmulCuda(InductorTestCase):
 
 
     @unittest.skipIf(not _get_torch_cuda_version() >= (12, 8), "Green Context only tested on 12.8+")
+    @unittest.skipIf(not int(torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run).split('.')[0]) >= 570, "driver version too old for green context")
     def test_greencontext_carveout(self):
         a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
         ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
