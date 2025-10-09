@@ -572,21 +572,5 @@ static void sparse_mask_intersection_out_mps_kernel(
       /*coalesce_mask=*/false);
 }
 
-static void sparse_mask_projection_out_mps_kernel(
-    Tensor& result,
-    const Tensor& x,
-    const Tensor& y,
-    const OptTensor& /*x_hash_opt*/,
-    bool accumulate_matches) {
-  sparse_mask_apply_out_mps_kernel(
-      result,
-      /*src_in=*/y,
-      /*mask_in=*/x,
-      /*accumulate_matches=*/accumulate_matches,
-      /*require_same_sizes=*/true,  // projection requires same sizes
-      /*coalesce_mask=*/true);
-}
-
 REGISTER_MPS_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_mps_kernel);
-REGISTER_MPS_DISPATCH(sparse_mask_projection_out_stub, &sparse_mask_projection_out_mps_kernel);
 } // namespace at::native
