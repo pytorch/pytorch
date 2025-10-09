@@ -7,10 +7,12 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyOn,
     skipMeta,
+    #skipXPU,
 )
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_WITH_ROCM
+from torch.nn.attention import SDPBackend
 
 class TestMHADeviceType(TestCase):
     @torch.no_grad()
@@ -101,7 +103,7 @@ class TestMHADeviceType(TestCase):
     @dtypesIfCUDA(torch.float)
     @dtypes(torch.float)
     @skipMeta
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_transform_bias_rescale_qkv_nested(self, device, dtype):
         for use_padding in (False, True):
             with self.subTest(use_padding=use_padding):
@@ -185,9 +187,11 @@ class TestMHADeviceType(TestCase):
             embed_dim=embed_dim, num_heads=num_heads, qkv=native_qkv, proj=native_proj
         ).to(dtype)
 
-        if device == "cuda":
-            pt = pt.cuda()
-            npt = npt.cuda()
+        if device == "cuda" or device == "xpu":
+            #pt = pt.cuda()
+            #npt = npt.cuda()
+            pt = pt.to(device)
+            npt = npt.to(device)
 
         ypt, weight_pt = pt(
             q,
@@ -281,15 +285,24 @@ class TestMHADeviceType(TestCase):
                 self.skipTest("Large numerical errors on ROCM to investigate.")
             if use_padding and not pad_all and fused:
                 self.skipTest("Large numerical errors on ROCM to investigate.")
+        backend = None
+        print(device)
+        if device == "cuda":
+            backend = torch.backends.cuda.sdp_kernel(
+                    enable_flash=False, enable_mem_efficient=False
+                    ) if not fused else torch.backends.cuda.sdp_kernel(
+                            enable_flash=True, enable_mem_efficient=True
+                            )
+        elif "xpu" in device:
+            backend = torch.nn.attention.sdpa_kernel([SDPBackend.MATH]) if not fused else torch.nn.attention.sdpa_kernel([SDPBackend.OVERRIDEABLE])
+        print(backend)
+        print(fused)
         for need_weights in (False, not pad_all):
             with self.subTest(use_padding=use_padding, pad_all=pad_all,
                               use_nt=use_nt, need_weights=need_weights,
                               average_attn_weights=average_attn_weights):
-                with torch.backends.cuda.sdp_kernel(
-                        enable_flash=False, enable_mem_efficient=False
-                ) if not fused else torch.backends.cuda.sdp_kernel(
-                        enable_flash=True, enable_mem_efficient=True
-                ):
+                with backend:
+                    print("it is ok", flush=True)
                     self._test_multihead_attention_impl(
                         device,
                         dtype,
@@ -299,7 +312,7 @@ class TestMHADeviceType(TestCase):
                         pad_all=pad_all,
                         need_weights=need_weights,
                         average_attn_weights=average_attn_weights,
-                    )
+                        )
 
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
@@ -330,7 +343,7 @@ class TestMHADeviceType(TestCase):
         )
 
 
-instantiate_device_type_tests(TestMHADeviceType, globals())
+instantiate_device_type_tests(TestMHADeviceType, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
