@@ -23,8 +23,8 @@ import torch.utils.data.datapipes as dp
 from torch import multiprocessing as mp
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_CI,
     IS_JETSON,
     IS_MACOS,
@@ -42,7 +42,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
     TestCase,
-    xfailIfLinux,
 )
 from torch.utils.data import (
     _utils,
@@ -1410,7 +1409,7 @@ except RuntimeError as e:
     # please don't forget to remove this skip when remove the xfailIfLinux.
     @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
     # https://github.com/pytorch/pytorch/issues/128551
-    #@xfailIfLinux
+    # @xfailIfLinux
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
@@ -1534,11 +1533,10 @@ except RuntimeError as e:
 
         # stateful with multi-process data loading
         with self.assertRaisesRegex(
-            ValueError, "stateful option is only supported with single-process data loading"
+            ValueError,
+            "stateful option is only supported with single-process data loading",
         ):
-            self._get_data_loader(
-                self.dataset, num_workers=1, stateful=True
-            )
+            self._get_data_loader(self.dataset, num_workers=1, stateful=True)
 
         # map-style
         sampler = torch.utils.data.SequentialSampler(self.dataset)
@@ -2369,7 +2367,6 @@ except RuntimeError as e:
         self._test_batch_sampler(num_workers=4)
         self._test_batch_sampler(num_workers=4, multiprocessing_context="spawn")
 
-
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_shuffle_pin_memory(self):
         loader = self._get_data_loader(
@@ -2912,7 +2909,6 @@ except RuntimeError as e:
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
 
-
 class TestDataLoaderDeviceType(TestCase):
     @parametrize(
         "context",
@@ -3158,7 +3154,9 @@ class TestDictDataLoader(TestCase):
     )
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory(self, stateful):
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True, stateful=stateful)
+        loader = DataLoader(
+            self.dataset, batch_size=2, pin_memory=True, stateful=stateful
+        )
         for sample in loader:
             self.assertTrue(sample["a_tensor"].is_pinned())
             self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
@@ -3170,7 +3168,9 @@ class TestDictDataLoader(TestCase):
     @skipIfXpu
     @unittest.skipIf(TEST_CUDA, "Test for when CUDA is not available")
     def test_pin_memory_no_cuda(self, stateful):
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True, stateful=stateful)
+        loader = DataLoader(
+            self.dataset, batch_size=2, pin_memory=True, stateful=stateful
+        )
         for sample in loader:
             self.assertFalse(sample["a_tensor"].is_pinned())
             self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
@@ -3182,7 +3182,11 @@ class TestDictDataLoader(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory_device(self, stateful):
         loader = DataLoader(
-            self.dataset, batch_size=2, pin_memory=True, pin_memory_device="cuda", stateful = stateful
+            self.dataset,
+            batch_size=2,
+            pin_memory=True,
+            pin_memory_device="cuda",
+            stateful=stateful,
         )
         for sample in loader:
             self.assertTrue(sample["a_tensor"].is_pinned())
@@ -3194,7 +3198,9 @@ class TestDictDataLoader(TestCase):
     )
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory_with_only_device(self, stateful):
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory_device="cuda", stateful=stateful)
+        loader = DataLoader(
+            self.dataset, batch_size=2, pin_memory_device="cuda", stateful=stateful
+        )
         for sample in loader:
             self.assertFalse(sample["a_tensor"].is_pinned())
             self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
@@ -3717,9 +3723,11 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertNotEqual(data, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
         self.assertEqual(expected_data, data)
 
+
 # Helper classes for stateful DataLoader tests using stateful=True
 class StatefulIterator:
     """Basic iterator with stateful functionality."""
+
     def __init__(self, samples, shuffle=False):
         self.samples = samples
         self.shuffle = shuffle
@@ -3754,6 +3762,7 @@ class StatefulIterator:
 
 class StatefulIterableDataset(IterableDataset):
     """Iterable dataset with stateful behavior."""
+
     def __init__(self, sizes_for_all_workers, shuffle=False):
         self.sizes_for_all_workers = sizes_for_all_workers
         self.shuffle = shuffle
@@ -3787,9 +3796,7 @@ class TestStatefulDataLoaderBasic(TestCase):
     def _get_dataset(self, shuffle):
         return StatefulIterableDataset([0, 100, 37], shuffle=shuffle)
 
-    @parametrize(
-        "num_workers", [0]
-    )
+    @parametrize("num_workers", [0])
     def test_basic_statefulness(self, num_workers):
         """Test basic state_dict/load_state_dict functionality"""
         dataset = self._get_dataset(shuffle=False)
@@ -3822,8 +3829,10 @@ class TestStatefulDataLoaderBasic(TestCase):
         # Should get the same batch when resuming
         self.assertEqual(batch2, batch2_resumed)
 
+
 class StatefulMapDataset(Dataset):
     """Map dataset with stateful behavior for testing."""
+
     def __init__(self, size, shuffle=False):
         self.size = size
         self.data = [{"id": i, "value": i * 2} for i in range(size)]
@@ -3856,9 +3865,7 @@ class StatefulMapDataset(Dataset):
 class TestStatefulDataLoaderMapDataset(TestCase):
     """Test stateful DataLoader with map-style datasets."""
 
-    @parametrize(
-        "num_workers", [0]
-    )
+    @parametrize("num_workers", [0])
     def test_map_dataset_statefulness(self, num_workers):
         """Test state_dict/load_state_dict functionality with map datasets"""
 
@@ -3904,7 +3911,9 @@ class TestStatefulDataLoaderMapDataset(TestCase):
             remaining_batches_resumed.append(batch)
 
         # Verify that resumed loader continues exactly where original left off
-        self.assertEqual(len(remaining_batches_original), len(remaining_batches_resumed))
+        self.assertEqual(
+            len(remaining_batches_original), len(remaining_batches_resumed)
+        )
         for orig, resumed in zip(remaining_batches_original, remaining_batches_resumed):
             self.assertEqual(len(orig), len(resumed))
             for o, r in zip(orig, resumed):
@@ -3913,6 +3922,7 @@ class TestStatefulDataLoaderMapDataset(TestCase):
 
 class StatefulSampler(torch.utils.data.Sampler):
     """Sampler with stateful behavior for testing."""
+
     def __init__(self, size):
         self.size = size
         self.i = 0
@@ -3932,6 +3942,7 @@ class StatefulSampler(torch.utils.data.Sampler):
 
 class StatefulSamplerIterator:
     """Iterator for stateful sampler."""
+
     def __init__(self, size, start_idx=0):
         self.size = size
         self.i = start_idx
@@ -3961,9 +3972,7 @@ class StatefulSamplerIterator:
 class TestStatefulDataLoaderSampler(TestCase):
     """Test stateful DataLoader with stateful samplers."""
 
-    @parametrize(
-        "num_workers", [0]
-    )
+    @parametrize("num_workers", [0])
     def test_stateful_sampler(self, num_workers):
         """Test state_dict/load_state_dict functionality with stateful samplers"""
         dataset = StatefulMapDataset(20, shuffle=False)
@@ -4013,15 +4022,15 @@ class TestStatefulDataLoaderSampler(TestCase):
             remaining_batches_resumed.append(batch)
 
         # Verify that resumed loader continues exactly where original left off
-        self.assertEqual(len(remaining_batches_original), len(remaining_batches_resumed))
+        self.assertEqual(
+            len(remaining_batches_original), len(remaining_batches_resumed)
+        )
         for orig, resumed in zip(remaining_batches_original, remaining_batches_resumed):
             self.assertEqual(len(orig), len(resumed))
             for o, r in zip(orig, resumed):
                 self.assertEqual(o, r)
 
-    @parametrize(
-        "num_workers", [0]
-    )
+    @parametrize("num_workers", [0])
     def test_sampler_state_preservation(self, num_workers):
         """Test that sampler internal state is properly preserved"""
         dataset = StatefulMapDataset(10, shuffle=False)
@@ -4029,7 +4038,7 @@ class TestStatefulDataLoaderSampler(TestCase):
 
         dl = DataLoader(
             dataset=dataset,
-            num_workers=num_workers,  
+            num_workers=num_workers,
             collate_fn=identity_collate,
             stateful=True,
             batch_size=2,
@@ -4080,7 +4089,6 @@ class TestStatefulDataLoaderSampler(TestCase):
 )
 class TestStatefulDataLoaderRandomState(TestCase):
     """Test stateful DataLoader with random state and shuffle functionality."""
-
 
     def test_shuffle_state_preservation(self):
         """Test that shuffle random state is properly preserved and restored"""
@@ -4212,7 +4220,6 @@ class TestStatefulDataLoaderRandomState(TestCase):
         self.assertEqual(remaining_original, remaining_resumed)
 
 
-
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
@@ -4221,9 +4228,7 @@ class TestStatefulDataLoaderRandomState(TestCase):
 class TestStatefulDataLoaderMultiEpoch(TestCase):
     """Test stateful DataLoader across multiple epochs and at epoch boundaries."""
 
-    @parametrize(
-        "num_workers", [0]
-    )
+    @parametrize("num_workers", [0])
     def test_multi_epoch_continuation(self, num_workers):
         """Test that DataLoader state is preserved across multiple epochs"""
         dataset = StatefulMapDataset(12, shuffle=False)
@@ -4276,12 +4281,10 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
         # Should match exactly
         self.assertEqual(epoch3_items_original, epoch3_items_resumed)
 
-    @parametrize(
-        "num_workers", [0]
-    )
+    @parametrize("num_workers", [0])
     def test_epoch_boundary_state_behavior(self, num_workers):
         """Test state behavior at exact epoch boundaries"""
-        dataset = StatefulMapDataset(8, shuffle=False) 
+        dataset = StatefulMapDataset(8, shuffle=False)
 
         dl = DataLoader(
             dataset=dataset,
@@ -4297,7 +4300,6 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
 
         it = iter(dl)
         for batch in it:  # 4 batches of 2 items each = 8 items total
-
             epoch1_items.extend(batch)
             batches_consumed += 1
 
@@ -4351,9 +4353,7 @@ class TestStatefulDataLoaderMultiEpoch(TestCase):
         self.assertEqual(len(next_epoch_items), 8)
         self.assertEqual(next_epoch_items, epoch1_items)  # Same order since no shuffle
 
-    @parametrize(
-        "num_workers", [0]
-    )
+    @parametrize("num_workers", [0])
     def test_checkpoint_at_different_epoch_positions(self, num_workers):
         """Test checkpointing at batch boundaries within epochs"""
         dataset = StatefulMapDataset(12, shuffle=False)
@@ -4437,7 +4437,7 @@ class TestStatefulDataLoaderSerialization(TestCase):
             num_workers=0,  # Single process for simpler state
             collate_fn=identity_collate,
             stateful=True,
-            batch_size=5,  
+            batch_size=5,
         )
 
         # Consume some data
@@ -4451,6 +4451,7 @@ class TestStatefulDataLoaderSerialization(TestCase):
 
         # Test JSON serialization
         import json
+
         try:
             json_str = json.dumps(state_dict)
             deserialized_state = json.loads(json_str)
@@ -4495,7 +4496,7 @@ class TestStatefulDataLoaderSerialization(TestCase):
 
         # Consume some data
         batches_before = []
-        it = iter(dl) 
+        it = iter(dl)
         for i in range(2):
             batch = next(it)
             batches_before.append(batch)
@@ -4505,6 +4506,7 @@ class TestStatefulDataLoaderSerialization(TestCase):
 
         # Test pickle serialization
         import pickle
+
         try:
             pickled_state = pickle.dumps(state_dict)
             unpickled_state = pickle.loads(pickled_state)
@@ -4577,18 +4579,13 @@ class ErrorDataset_SDL(Dataset):
 ERROR_MSG = "Error in worker_init_fn"
 
 
-
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestStatefulDataLoaderErrors(TestCase):
-
-
-    @parametrize(
-        "num_workers", [0]
-    )
+    @parametrize("num_workers", [0])
     def test_iteration_error(self, num_workers):
         dl = DataLoader(
             dataset=ErrorDataset_SDL(),
@@ -4598,6 +4595,7 @@ class TestStatefulDataLoaderErrors(TestCase):
         it = iter(dl)
         with self.assertRaisesRegex(ValueError, "Iteration error"):
             next(it)
+
 
 class IterationState:
     def __init__(self, start, end):
@@ -4610,6 +4608,7 @@ class IterationState:
 
     def get_state(self):
         return {"curr": self.curr, "end": self.end}
+
 
 class CountIterCalls(torch.utils.data.IterableDataset):
     def __init__(self, length):
@@ -4642,7 +4641,9 @@ class CountIterCallsIter(torch.utils.data.IterableDataset):
             num_workers = torch.utils.data.get_worker_info().num_workers
 
         num_samples = (int)(self.length / num_workers)
-        self.iter_state = IterationState(num_samples * worker_id, num_samples * (worker_id + 1))
+        self.iter_state = IterationState(
+            num_samples * worker_id, num_samples * (worker_id + 1)
+        )
         return self
 
     def __next__(self):
@@ -4661,38 +4662,48 @@ class CountIterCallsIter(torch.utils.data.IterableDataset):
 
 class TestSingleIterCalled(TestCase):
     def _get_iter_calls(self, state):
-        if "dataset_state" in state:
+        if "_dataset_state" in state:
             w_states = [state]
         else:
             w_states = list(state["_snapshot"]["_worker_snapshots"].values())
 
-        if w_states[0]["dataset_state"] is not None:
-            return [x["dataset_state"]["iter_calls"] for x in w_states]
-        return [x["fetcher_state"]["dataset_iter_state"]["iter_calls"] for x in w_states]
+        if w_states[0]["_dataset_state"] is not None:
+            return [x["_dataset_state"]["iter_calls"] for x in w_states]
+        return [
+            x["_fetcher_state"]["_dataset_iter_state"]["iter_calls"] for x in w_states
+        ]
 
     def _run_test(self, num_workers, dataset, expected_iter_calls):
         dl = DataLoader(
             dataset=dataset,
             num_workers=num_workers,
-            multiprocessing_context=("forkserver" if IS_MACOS and num_workers else None),
+            multiprocessing_context=(
+                "forkserver" if IS_MACOS and num_workers else None
+            ),
             stateful=True,
         )
         iter(dl)
         state = dl.state_dict()
         # Ensure iter is called only once per worker
-        self.assertEqual(self._get_iter_calls(state), [expected_iter_calls[0]] * max(1, num_workers))
+        self.assertEqual(
+            self._get_iter_calls(state), [expected_iter_calls[0]] * max(1, num_workers)
+        )
 
         dl2 = DataLoader(
             dataset=dataset,
             num_workers=num_workers,
-            multiprocessing_context=("forkserver" if IS_MACOS and num_workers else None),
+            multiprocessing_context=(
+                "forkserver" if IS_MACOS and num_workers else None
+            ),
             stateful=True,
         )
         dl2.load_state_dict(state)
         iter(dl2)
         state2 = dl2.state_dict()
         # Ensure that iter is called only once per worker even when dataloader resumes from a state
-        self.assertEqual(self._get_iter_calls(state2), [expected_iter_calls[1]] * max(1, num_workers))
+        self.assertEqual(
+            self._get_iter_calls(state2), [expected_iter_calls[1]] * max(1, num_workers)
+        )
 
     def test_inline(self):
         self._run_test(0, CountIterCalls(100), [1, 2])
@@ -4739,10 +4750,7 @@ class DynamicStateIterable(IterableDataset):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestDynamicStateGrowth(TestCase):
-
-    @parametrize(
-        "num_workers", [0]
-    )
+    @parametrize("num_workers", [0])
     def test_state_is_immutable_post_fetch(self, num_workers):
         ds = DynamicStateIterable(list(range(100)))
         dl = DataLoader(ds, num_workers=num_workers, stateful=True)
@@ -4777,7 +4785,9 @@ class TestStateInitializationResumeCompleteness(TestCase):
     def _run(self, num_workers):
         length = 100
         ds = CountIterCallsIter(length)
-        dl = DataLoader(ds, num_workers=num_workers, stateful=True, collate_fn=identity_collate)
+        dl = DataLoader(
+            ds, num_workers=num_workers, stateful=True, collate_fn=identity_collate
+        )
         it = iter(dl)
         data = []
         for _ in range(length - 30):
@@ -4789,7 +4799,9 @@ class TestStateInitializationResumeCompleteness(TestCase):
                 data.append(batch)
         s = dl.state_dict()
 
-        dl2 = DataLoader(ds, num_workers=num_workers, stateful=True, collate_fn=identity_collate)
+        dl2 = DataLoader(
+            ds, num_workers=num_workers, stateful=True, collate_fn=identity_collate
+        )
         dl2.load_state_dict(s)
         it2 = iter(dl2)
         for _ in range(30):
@@ -4813,22 +4825,35 @@ class TestStateInitializationResumeCompleteness(TestCase):
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
 class TestConcurrentLoaderParity(TestCase):
-
-    @parametrize(
-        "num_workers", [0]
-    )
+    @parametrize("num_workers", [0])
     def test_parity_with_standard_loader(self, num_workers):
         dataset = StatefulMapDataset(40, shuffle=False)
-        stateful = DataLoader(dataset=dataset, num_workers=num_workers, stateful=True, collate_fn=identity_collate)
+        stateful = DataLoader(
+            dataset=dataset,
+            num_workers=num_workers,
+            stateful=True,
+            collate_fn=identity_collate,
+        )
         exp = list(stateful)
-        standard = DataLoader(dataset=dataset, num_workers=num_workers, collate_fn=identity_collate)
+        standard = DataLoader(
+            dataset=dataset, num_workers=num_workers, collate_fn=identity_collate
+        )
         got = list(standard)
         self.assertEqual(got, exp)
 
 
-
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
-parametrized_classes = [TestDictDataLoader, TestStringDataLoader, TestStatefulDataLoaderMapDataset, TestStatefulDataLoaderBasic, TestStatefulDataLoaderSampler, TestStatefulDataLoaderMultiEpoch, TestStatefulDataLoaderErrors, TestDynamicStateGrowth, TestConcurrentLoaderParity]
+parametrized_classes = [
+    TestDictDataLoader,
+    TestStringDataLoader,
+    TestStatefulDataLoaderMapDataset,
+    TestStatefulDataLoaderBasic,
+    TestStatefulDataLoaderSampler,
+    TestStatefulDataLoaderMultiEpoch,
+    TestStatefulDataLoaderErrors,
+    TestDynamicStateGrowth,
+    TestConcurrentLoaderParity,
+]
 for parametrize_class in parametrized_classes:
     instantiate_parametrized_tests(parametrize_class)
 

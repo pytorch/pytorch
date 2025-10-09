@@ -86,9 +86,9 @@ class _StateKeys:
     ITERABLEDATASET_LEN_CALLED = "_IterableDataset_len_called"
     SHARED_SEED = "_shared_seed"
     ITERATOR_FINISHED = "_iterator_finished"
-    DATASET_STATE = "dataset_state"
-    FETCHER_STATE = "fetcher_state"
-    DATASET_ITER_STATE = "dataset_iter_state"
+    DATASET_STATE = "_dataset_state"
+    FETCHER_STATE = "_fetcher_state"
+    DATASET_ITER_STATE = "_dataset_iter_state"
 
 
 class _DatasetKind:
@@ -946,8 +946,8 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
             self._NUM_YIELDED: self._num_yielded,
             _StateKeys.ITERABLEDATASET_LEN_CALLED: self._IterableDataset_len_called,
             _StateKeys.SHARED_SEED: self._shared_seed,
-            "fetcher_state": fetcher_state,
-            "dataset_state": dataset_state,
+            _StateKeys.FETCHER_STATE: fetcher_state,
+            _StateKeys.DATASET_STATE: dataset_state,
             _StateKeys.ITERATOR_FINISHED: self._finished,
         }
         return state_dict
@@ -995,8 +995,10 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         #  1. try to restore dataset state
         #  2. generate dataset iterator
         #  3. try to restore iterator state
-        if state_dict[_StateKeys.DATASET_STATE] is not None and isinstance(
-            self._dataset, Stateful
+        if (
+            _StateKeys.DATASET_STATE in state_dict
+            and state_dict[_StateKeys.DATASET_STATE] is not None
+            and isinstance(self._dataset, Stateful)
         ):
             _try_load_state_dict(self._dataset, state_dict[_StateKeys.DATASET_STATE])
 
@@ -1013,7 +1015,10 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
             if isinstance(self._dataset, Stateful) or isinstance(
                 self._dataset_fetcher.dataset_iter, Stateful
             ):
-                if state_dict[_StateKeys.FETCHER_STATE] is not None:
+                if (
+                    _StateKeys.FETCHER_STATE in state_dict
+                    and state_dict[_StateKeys.FETCHER_STATE] is not None
+                ):
                     if (
                         state_dict[_StateKeys.FETCHER_STATE][
                             _StateKeys.DATASET_ITER_STATE
