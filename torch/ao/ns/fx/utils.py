@@ -404,7 +404,7 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
                 for model_name, model_results in model_name_to_results.items():
                     if model_name == model_name_with_fqns:
                         continue
-                    # pyrefly: ignore  # bad-assignment
+
                     for i in range(len(model_results)):
                         fqn = ref_model_results[i]["fqn"]
                         model_results[i]["fqn"] = fqn

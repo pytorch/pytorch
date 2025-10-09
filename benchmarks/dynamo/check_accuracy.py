@@ -10,7 +10,6 @@ import pandas as pd
 
 flaky_models = {
     "yolov3",
-    "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
     "timm_efficientnet",  # see https://github.com/pytorch/pytorch/issues/148699
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
@@ -36,15 +35,11 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             {
                 "Background_Matting",
                 "alexnet",
-                "cait_m36_384",
-                "dla102",
                 "demucs",
                 "densenet121",
                 "detectron2_fcos_r_50_fpn",
                 "doctr_det_predictor",
                 "doctr_reco_predictor",
-                "dpn107",
-                "fbnetv3_b",
                 "hf_BigBird",
                 "hf_Longformer",
                 "hf_Reformer",
@@ -52,7 +47,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "hf_T5",
                 "hf_T5_base",
                 "hf_T5_generate",
-                "levit_128",
                 "llava",
                 "microbench_unbacked_tolist_sum",
                 "mnasnet1_0",
@@ -69,7 +63,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "squeezenet1_1",
                 "stable_diffusion_text_encoder",
                 "stable_diffusion_unet",
-                "swsl_resnext101_32x16d",
                 "timm_efficientdet",
                 "timm_efficientnet",
                 "timm_nfnet",
