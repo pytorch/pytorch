@@ -36,6 +36,7 @@ from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
 )
+from torch._guards import tracing, TracingContext
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -780,18 +781,23 @@ class inner_f(torch.nn.Module):
 
         for with_export in [False]:  # TODO: make dynamo work for annotation
             with ExitStack() as stack:
-                model = None
-                with fx_traceback.preserve_node_meta():
-                    if with_export:
-                        with torch._dynamo.config.patch(install_free_tensors=True):
-                            # TODO: switch to use the official graph_capture API once it is ready
-                            model = _dynamo_graph_capture_for_export(model)(*inputs)
-                    else:
-                        model = SimpleLinear()
+                model = SimpleLinear()
+                fake_mode = None
 
-                    joint_with_descriptors = aot_export_joint_with_descriptors(
-                        stack, model, inputs, decompositions={}
+                stack.enter_context(fx_traceback.preserve_node_meta())
+
+                if with_export:
+                    stack.enter_context(
+                        torch._dynamo.config.patch(install_free_tensors=True)
                     )
+                    # TODO: switch to use the official graph_capture API once it is ready
+                    model = _dynamo_graph_capture_for_export(model)(*inputs)
+                    fake_mode = model.meta.get("fake_mode", None)
+
+                stack.enter_context(tracing(TracingContext(fake_mode)))
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack, model, inputs, decompositions={}
+                )
 
                 for node in joint_with_descriptors.graph_module.graph.nodes:
                     if node.op in ("placeholder", "output"):
