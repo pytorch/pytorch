@@ -76,12 +76,12 @@ register_opaque_type(Placement)
 @torch.library.custom_op(
     "dtensor::_dtensor_local_tensor",
     mutates_args=(),
-    schema="(Tensor(a) input, Placement[]?) -> Tensor(a)",
+    schema="(Tensor(a) input, Placement[]? grad_placements) -> Tensor(a)",
 )
 def _dtensor_local_tensor(tx, idx):
     raise RuntimeError("Should never be called")
 
-def backward(ctx, grad_output):
+def _backward(ctx, grad_output):
     dtensor_spec = ctx.dtensor_spec
     mesh = dtensor_spec.mesh
     grad_placements = ctx.grad_placements
@@ -111,11 +111,12 @@ def backward(ctx, grad_output):
         None,
     )
 
-def setup_ctx(ctx, inputs, output):
+def _setup_ctx(ctx, inputs, output):
     ctx._is_pure_view = True
     ctx.dtensor_spec = inputs[0]._spec
     ctx.grad_placements = inputs[1]
 
+_dtensor_local_tensor.register_autograd(_backward, setup_context=_setup_ctx)
 
 # class _ToTorchTensor(torch.autograd.Function):
 #     @staticmethod

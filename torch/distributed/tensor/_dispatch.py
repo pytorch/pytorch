@@ -148,7 +148,7 @@ class OpDispatcher:
         """
         if op_call is torch.ops.dtensor._dtensor_local_tensor.default:
             # This is the backend implementation of to local
-            if not isinstance(args[0], DTensor):
+            if not isinstance(args[0], dtensor.DTensor):
                 raise TypeError("The first argument to _dtensor_local_tensor should be a DTensor")
             local_tensor = args[0]._local_tensor
             # Always return a different Tensor object
