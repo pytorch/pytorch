@@ -4316,10 +4316,14 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
+
       if (mode_type == avoid_type) {
         skip += 1;
-      } else if (_ref_stack.size() <= idx - skip || mode_type != _ref_stack.at(idx - skip)) {
-        return false;
+      } else {
+        if (_ref_stack.size() <= idx - skip || mode_type != _ref_stack.at(idx - skip)) {
+          return false;
+        }
+        compare_len += 1;
       }
     }
 
