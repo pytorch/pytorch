@@ -1221,7 +1221,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
             except Exception as e:
                 cache_key = None
                 counters["aot_autograd"]["autograd_cache_bypass"] += 1
-                log.info("Bypassing autograd cache due to: %s", e)  # noqa:G200
+                log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
                 cache_state = "bypass"
                 cache_event_time = time.time_ns()
                 cache_info["cache_bypass_reason"] = str(e)
@@ -1368,7 +1368,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradCacheEntry]):
                         ),
                     )
         except Exception as e:
-            log.info("AOTAutograd cache unable to load compiled graph: %s", e)  # noqa:G200
+            log.info("AOTAutograd cache unable to load compiled graph: %s", e)  # noqa: G200
             if config.strict_autograd_cache:
                 raise e
         if entry is not None:

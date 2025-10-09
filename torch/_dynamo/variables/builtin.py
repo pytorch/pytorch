@@ -1041,7 +1041,7 @@ class BuiltinVariable(VariableTracker):
                     except TypeError as e:
                         has_constant_handler = obj.has_constant_handler(args, kwargs)
                         if not has_constant_handler:
-                            log.warning(  # noqa:G200
+                            log.warning(  # noqa: G200
                                 "incorrect arg count %s %s and no constant handler",
                                 self_handler,
                                 e,

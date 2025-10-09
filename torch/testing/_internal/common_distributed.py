@@ -875,7 +875,7 @@ class MultiProcessTestCase(TestCase):
         try:
             getattr(self, test_name)()
         except unittest.SkipTest as se:
-            logger.info(  # noqa:G200
+            logger.info(  # noqa: G200
                 "Process %s skipping test %s for following reason: %s",
                 self.rank,
                 test_name,

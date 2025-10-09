@@ -3210,7 +3210,7 @@ class DimConstraints:
                 else:
                     self._dynamic_results.add(self._dcp.doprint(solution))
             except (NotImplementedError, AssertionError):
-                log.warning("Failed to reduce inequalities: %s", exc_info=True)
+                log.warning("Failed to reduce inequalities", exc_info=True)
                 for expr2 in exprs:
                     self._dynamic_results.add(self._dcp.doprint(expr2))
 
