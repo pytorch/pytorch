@@ -189,7 +189,6 @@ class OpDispatcher:
 
             local_tensor_args = (
                 pytree.tree_unflatten(
-                    # pyrefly: ignore  # bad-argument-type
                     cast(list[object], op_info.local_args),
                     # pyrefly: ignore  # bad-argument-type
                     op_info.args_tree_spec,
@@ -364,7 +363,6 @@ class OpDispatcher:
 
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
-                            # pyrefly: ignore  # bad-argument-type
                             local_tensor,
                             arg_spec,
                             # pyrefly: ignore  # bad-argument-type
@@ -438,7 +436,6 @@ class OpDispatcher:
                     op_call, args_list
                 )
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
-                    # pyrefly: ignore  # bad-argument-type
                     op_call,
                     v,
                     # pyrefly: ignore  # bad-argument-type

@@ -90,7 +90,6 @@ class LocalShardsWrapper(torch.Tensor):
         # TODO: we shall continually extend this function to support more ops if needed
         if func in supported_ops:
             res_shards_list = [
-                # pyrefly: ignore  # index-error
                 func(shard, *args[1:], **kwargs)
                 # pyrefly: ignore  # index-error
                 for shard in args[0].shards
