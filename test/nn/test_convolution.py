@@ -2811,6 +2811,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         torch.float, torch.cfloat
     )  # Double, complex double not supported on MPS
     @expectedFailureMPS  # https://github.com/pytorch/pytorch/issues/107214
+    @skipIfTorchDynamo("Doesn't work for complex128. Similar to conv3d")
     def test_conv_transpose3d_valid_padding_backward(self, device, dtype):
         check_forward_ad = torch.device(device).type != "xla"
 
