@@ -4,6 +4,7 @@ import weakref
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch.testing._internal.common_utils import requires_cuda
 
 
 class TestStreams(torch._dynamo.test_case.TestCase):
@@ -23,22 +24,18 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         e = torch.Event()
         weakref.ref(e)
 
+    @requires_cuda
     def test_run_opcheck(self):
-        from torch._dynamo.variables.streams import fork_stream_, join_stream_
+        from torch._dynamo.variables.streams import fork_stream, join_stream
         from torch.library import opcheck
 
         sample_inputs = [
-            (1, torch.device("cuda:0"), 1, [torch.randn(3), torch.randn(3)]),
-            (
-                2,
-                torch.device("cuda:0"),
-                0,
-                [torch.randn(2, 3, device="cuda"), torch.randn(2, 3, device="cuda")],
-            ),
+            (0, torch.device("cuda:0"), 1, torch.device("cuda:1")),
+            (2, torch.device("cuda:2"), 3, torch.device("cuda:1")),
         ]
         for args in sample_inputs:
-            opcheck(fork_stream_, args)
-            opcheck(join_stream_, args)
+            opcheck(fork_stream, args)
+            opcheck(join_stream, args)
 
 
 if __name__ == "__main__":
