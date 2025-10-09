@@ -896,8 +896,8 @@ class TestFP8Matmul(TestCase):
         else:
             # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
             with self.assertRaisesRegex(
-                RuntimeError,
-                r"Expected b\.dtype\(\) == at::kFloat8_e4m3fnu?z? to be true, but got false\.",
+                ValueError,
+                r"expected mat_b\.dtype\(\) to be at::kFloat8_e4m3fn(uz)?, but got c10::Float8_e5m2(fnuz)?",
             ):
                 e5m2()
 
