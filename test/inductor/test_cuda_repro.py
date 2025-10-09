@@ -2430,7 +2430,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             torch.zeros(1, dtype=torch.int32, device=device),
         )
         # This crashes
-        compile_out, code = run_and_get_code(torch.compile(f),
+        compile_out, code = run_and_get_code(
+            torch.compile(f),
             torch.zeros(1, 32, dtype=torch.int64, device=device),
             torch.zeros(1, dtype=torch.int32, device=device),
         )
