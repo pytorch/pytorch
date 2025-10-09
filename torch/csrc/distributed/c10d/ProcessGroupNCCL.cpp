@@ -393,6 +393,10 @@ static std::
 #endif // (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
 }
 
+void reset_nccl_trace() {
+  FlightRecorderCUDA::get()->reset_all();
+}
+
 std::string dump_nccl_trace(
     bool includeCollectives,
     bool includeStackTraces,
