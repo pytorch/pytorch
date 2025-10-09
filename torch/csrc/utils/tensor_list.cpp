@@ -1,4 +1,5 @@
 #include <torch/csrc/utils/tensor_list.h>
+#include <ATen/functorch/TensorWrapper.h>
 
 #include <c10/util/irange.h>
 #include <pybind11/pybind11.h>
@@ -48,7 +49,11 @@ PyObject* tensor_to_list(const Tensor& tensor) {
         ".tolist() is not supported for tensor subclasses, got ",
         Py_TYPE(pytensor.ptr())->tp_name);
   }
+  // check if it is a grad tracking tensor and unwrap.
   Tensor data = tensor.resolve_conj().resolve_neg();
+  if (auto* wrapper = at::functorch::maybeGetTensorWrapper(tensor)) {
+    data = wrapper->value();
+  }
   if (!data.device().is_cpu()) {
     pybind11::gil_scoped_release no_gil;
     data = data.toBackend(Backend::CPU);
