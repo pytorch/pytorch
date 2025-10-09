@@ -275,7 +275,9 @@ class TestDTensorDebugMode(TestCase):
             self.assertEqual(len(debug_mode.debug_string()), 0)
             f(x)
             f(x)
-        self.assertEqual(cnt.frame_count, 1)  # check DebugMode doesn't trigger additional recompilations
+        self.assertEqual(
+            cnt.frame_count, 1
+        )  # check DebugMode doesn't trigger additional recompilations
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)

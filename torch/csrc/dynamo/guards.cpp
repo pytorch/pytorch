@@ -196,18 +196,19 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
 
-  // Mask to exclude Python keys, that can be artifically off during compilation,
-  // due to ignore_compile_internals being set on custom TorchDispatchModes.
+  // Mask to exclude Python keys, that can be artifically off during
+  // compilation, due to ignore_compile_internals being set on custom
+  // TorchDispatchModes.
   constexpr auto mode_key_mask = c10::DispatchKeySet({
-    c10::DispatchKey::Python,
-    c10::DispatchKey::PythonTLSSnapshot,
+      c10::DispatchKey::Python,
+      c10::DispatchKey::PythonTLSSnapshot,
   });
-  auto stored_keys = c10::DispatchKeySet::from_raw_repr(dispatch_key_) - mode_key_mask;
+  auto stored_keys =
+      c10::DispatchKeySet::from_raw_repr(dispatch_key_) - mode_key_mask;
   auto current_keys = state.apply(dispatch_key_set) - mode_key_mask;
 
-  if (stored_keys.raw_repr() != current_keys.raw_repr() ||
-      dtype_ != dtype || device_index_ != device.index() ||
-      requires_grad_ != requires_grad) {
+  if (stored_keys.raw_repr() != current_keys.raw_repr() || dtype_ != dtype ||
+      device_index_ != device.index() || requires_grad_ != requires_grad) {
     return false;
   }
 
