@@ -2566,7 +2566,7 @@ _mxfp8_mxfp8_bf16_grouped_mm_fbgemm(
     TORCH_CHECK_VALUE(offs.has_value(), "MXFP8 2d-2d and 2d-3d grouped GEMMs requires offsets");
     TORCH_CHECK_VALUE(out.scalar_type() == at::kBFloat16, "Only bf16 out_dtype is supported for MXFP8 grouped gemm");
 
-#if defined(USE_FBGEMM_GENAI)
+#if defined(USE_FBGEMM_GENAI) and !defined(USE_ROCM)
     fbgemm_gpu::mx8mx8bf16_grouped_mm(
         mat_a,
         mat_b,
