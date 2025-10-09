@@ -708,6 +708,7 @@ class structseq(tuple[_T_co, ...]):
     def __new__(
         cls: type[Self],
         sequence: Iterable[_T_co],
+        # pyrefly: ignore  # bad-function-definition
         dict: dict[str, Any] = ...,
     ) -> Self:
         raise NotImplementedError
@@ -754,6 +755,7 @@ def _tuple_flatten_with_keys(
     d: tuple[T, ...],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _tuple_flatten(d)
+    # pyrefly: ignore  # bad-return
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -767,6 +769,7 @@ def _list_flatten(d: list[T]) -> tuple[list[T], Context]:
 
 def _list_flatten_with_keys(d: list[T]) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _list_flatten(d)
+    # pyrefly: ignore  # bad-return
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -782,6 +785,7 @@ def _dict_flatten_with_keys(
     d: dict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _dict_flatten(d)
+    # pyrefly: ignore  # bad-return
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
@@ -797,6 +801,7 @@ def _namedtuple_flatten_with_keys(
     d: NamedTuple,
 ) -> tuple[list[tuple[KeyEntry, Any]], Context]:
     values, context = _namedtuple_flatten(d)
+    # pyrefly: ignore  # bad-return
     return (
         [(GetAttrKey(field), v) for field, v in zip(context._fields, values)],
         context,
@@ -846,6 +851,7 @@ def _ordereddict_flatten_with_keys(
     d: OrderedDict[Any, T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _ordereddict_flatten(d)
+    # pyrefly: ignore  # bad-return
     return [(MappingKey(k), v) for k, v in zip(context, values)], context
 
 
@@ -870,6 +876,7 @@ def _defaultdict_flatten_with_keys(
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _defaultdict_flatten(d)
     _, dict_context = context
+    # pyrefly: ignore  # bad-return
     return [(MappingKey(k), v) for k, v in zip(dict_context, values)], context
 
 
@@ -918,6 +925,7 @@ def _deque_flatten_with_keys(
     d: deque[T],
 ) -> tuple[list[tuple[KeyEntry, T]], Context]:
     values, context = _deque_flatten(d)
+    # pyrefly: ignore  # bad-return
     return [(SequenceKey(i), v) for i, v in enumerate(values)], context
 
 
@@ -1547,6 +1555,7 @@ def tree_map_only(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
+    # pyrefly: ignore  # no-matching-overload
     return tree_map(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -1607,6 +1616,7 @@ def tree_map_only_(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> PyTree:
+    # pyrefly: ignore  # no-matching-overload
     return tree_map_(map_only(type_or_types_or_pred)(func), tree, is_leaf=is_leaf)
 
 
@@ -1819,6 +1829,7 @@ def enum_object_hook(obj: dict[str, Any]) -> Union[Enum, dict[str, Any]]:
         for attr in classname.split("."):
             enum_cls = getattr(enum_cls, attr)
         enum_cls = cast(type[Enum], enum_cls)
+        # pyrefly: ignore  # unsupported-operation
         return enum_cls[obj["name"]]
     return obj
 
