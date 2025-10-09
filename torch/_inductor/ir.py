@@ -2987,18 +2987,6 @@ class PermuteView(BaseView):
         return reindex
 
 
-def is_size_one(size: Union[int, sympy.Expr]) -> bool:
-    if isinstance(size, sympy.Expr):
-        # Lazy load and check this
-        from torch._inductor.virtualized import V
-
-        # Edge case related to squeeze for symbolic that is known to
-        # be 1 - needed for #164814
-        return V.graph.sizevars.statically_known_equals(size, 1)
-    else:
-        return size == 1
-
-
 @ir_dataclass
 class SqueezeView(BaseView):
     @classmethod
@@ -3014,7 +3002,7 @@ class SqueezeView(BaseView):
             for i, (size, stride) in enumerate(zip(old_layout.size, old_layout.stride)):
                 if dim is None:
                     # Only append if dim is not squeezed out
-                    if not is_size_one(size):
+                    if not V.graph.sizevars.is_size_one_or_false(size):
                         new_size.append(size)
                         new_stride.append(stride)
                 else:
@@ -3035,7 +3023,14 @@ class SqueezeView(BaseView):
             return ReinterpretView(data=storage, layout=new_layout)
 
         if dim is None:
-            return View.create(x, [s for s in x.get_size() if not is_size_one(s)])
+            return View.create(
+                x,
+                [
+                    s
+                    for s in x.get_size()
+                    if not V.graph.sizevars.is_size_one_or_false(s)
+                ],
+            )
         else:
             assert x.get_size()[dim] == 1
             return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
