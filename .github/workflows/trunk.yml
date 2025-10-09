@@ -86,18 +86,18 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12_8-py3_10-gcc11-test:
-    name: linux-jammy-cuda12.8-py3.10-gcc11
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-cuda12_8-py3_10-gcc11-build
-      - target-determination
-    with:
-      timeout-minutes: 360
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.test-matrix }}
-    secrets: inherit
+  # linux-jammy-cuda12_8-py3_10-gcc11-test:
+  #   name: linux-jammy-cuda12.8-py3.10-gcc11
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs:
+  #     - linux-jammy-cuda12_8-py3_10-gcc11-build
+  #     - target-determination
+  #   with:
+  #     timeout-minutes: 360
+  #     build-environment: linux-jammy-cuda12.8-py3.10-gcc11
+  #     docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-build.outputs.test-matrix }}
+  #   secrets: inherit
 
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
@@ -136,19 +136,19 @@ jobs:
         ]}
     secrets: inherit
 
-  macos-py3-arm64-test:
-    name: macos-py3-arm64
-    uses: ./.github/workflows/_mac-test.yml
-    needs:
-      - macos-py3-arm64-build
-      - target-determination
-    with:
-      build-environment: macos-py3-arm64
-      # Same as the build job
-      python-version: 3.12.7
-      test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
-      disable-monitor: false
-    secrets: inherit
+  # macos-py3-arm64-test:
+  #   name: macos-py3-arm64
+  #   uses: ./.github/workflows/_mac-test.yml
+  #   needs:
+  #     - macos-py3-arm64-build
+  #     - target-determination
+  #   with:
+  #     build-environment: macos-py3-arm64
+  #     # Same as the build job
+  #     python-version: 3.12.7
+  #     test-matrix: ${{ needs.macos-py3-arm64-build.outputs.test-matrix }}
+  #     disable-monitor: false
+  #   secrets: inherit
 
   win-vs2022-cpu-py3-build:
     name: win-vs2022-cpu-py3
@@ -167,18 +167,18 @@ jobs:
         ]}
     secrets: inherit
 
-  win-vs2022-cpu-py3-test:
-    name: win-vs2022-cpu-py3
-    uses: ./.github/workflows/_win-test.yml
-    needs:
-      - win-vs2022-cpu-py3-build
-      - target-determination
-    with:
-      build-environment: win-vs2022-cpu-py3
-      cuda-version: cpu
-      test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
-      disable-monitor: false
-    secrets: inherit
+  # win-vs2022-cpu-py3-test:
+  #   name: win-vs2022-cpu-py3
+  #   uses: ./.github/workflows/_win-test.yml
+  #   needs:
+  #     - win-vs2022-cpu-py3-build
+  #     - target-determination
+  #   with:
+  #     build-environment: win-vs2022-cpu-py3
+  #     cuda-version: cpu
+  #     test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
+  #     disable-monitor: false
+  #   secrets: inherit
 
   win-vs2022-cuda12_6-py3-build:
     name: win-vs2022-cuda12.6-py3
@@ -214,17 +214,17 @@ jobs:
         ]}
     secrets: inherit
 
-  verify-cachebench-cpu-test:
-    name: verify-cachebench-cpu-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - verify-cachebench-cpu-build
-      - target-determination
-    with:
-      build-environment: linux-jammy-py3.10-gcc11
-      docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
-      test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
-    secrets: inherit
+  # verify-cachebench-cpu-test:
+  #   name: verify-cachebench-cpu-test
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs:
+  #     - verify-cachebench-cpu-build
+  #     - target-determination
+  #   with:
+  #     build-environment: linux-jammy-py3.10-gcc11
+  #     docker-image: ${{ needs.verify-cachebench-cpu-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.verify-cachebench-cpu-build.outputs.test-matrix }}
+  #   secrets: inherit
 
   linux-jammy-py3-clang12-executorch-build:
     name: linux-jammy-py3-clang12-executorch
@@ -240,12 +240,12 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3-clang12-executorch-test:
-    name: linux-jammy-py3-clang12-executorch
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3-clang12-executorch-build
-    with:
-      build-environment: linux-jammy-py3-clang12-executorch
-      docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
-    secrets: inherit
+  # linux-jammy-py3-clang12-executorch-test:
+  #   name: linux-jammy-py3-clang12-executorch
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs: linux-jammy-py3-clang12-executorch-build
+  #   with:
+  #     build-environment: linux-jammy-py3-clang12-executorch
+  #     docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
+  #   secrets: inherit

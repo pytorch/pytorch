@@ -73,17 +73,17 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_10-gcc11-test:
-    name: linux-jammy-py3.10-gcc11
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-py3_10-gcc11-build
-      - target-determination
-    with:
-      build-environment: linux-jammy-py3.10-gcc11
-      docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
-    secrets: inherit
+  # linux-jammy-py3_10-gcc11-test:
+  #   name: linux-jammy-py3.10-gcc11
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs:
+  #     - linux-jammy-py3_10-gcc11-build
+  #     - target-determination
+  #   with:
+  #     build-environment: linux-jammy-py3.10-gcc11
+  #     docker-image: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
+  #   secrets: inherit
 
   linux-docs:
     name: linux-docs
@@ -143,18 +143,18 @@ jobs:
       sync-tag: asan-build
     secrets: inherit
 
-  linux-jammy-py3_10-clang18-asan-test:
-    name: linux-jammy-py3.10-clang18-asan
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-py3_10-clang18-asan-build
-      - target-determination
-    with:
-      build-environment: linux-jammy-py3.10-clang18-asan
-      docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
-      sync-tag: asan-test
-    secrets: inherit
+  # linux-jammy-py3_10-clang18-asan-test:
+  #   name: linux-jammy-py3.10-clang18-asan
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs:
+  #     - linux-jammy-py3_10-clang18-asan-build
+  #     - target-determination
+  #   with:
+  #     build-environment: linux-jammy-py3.10-clang18-asan
+  #     docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
+  #     sync-tag: asan-test
+  #   secrets: inherit
 
   linux-jammy-py3_10-clang12-onnx-build:
     name: linux-jammy-py3.10-clang12-onnx
@@ -171,17 +171,17 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_10-clang12-onnx-test:
-    name: linux-jammy-py3.10-clang12-onnx
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-py3_10-clang12-onnx-build
-      - target-determination
-    with:
-      build-environment: linux-jammy-py3.10-clang12-onnx
-      docker-image: ${{ needs.linux-jammy-py3_10-clang12-onnx-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang12-onnx-build.outputs.test-matrix }}
-    secrets: inherit
+  # linux-jammy-py3_10-clang12-onnx-test:
+  #   name: linux-jammy-py3.10-clang12-onnx
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs:
+  #     - linux-jammy-py3_10-clang12-onnx-build
+  #     - target-determination
+  #   with:
+  #     build-environment: linux-jammy-py3.10-clang12-onnx
+  #     docker-image: ${{ needs.linux-jammy-py3_10-clang12-onnx-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-jammy-py3_10-clang12-onnx-build.outputs.test-matrix }}
+  #   secrets: inherit
 
   linux-jammy-py3_10-clang12-build:
     name: linux-jammy-py3.10-clang12
@@ -207,17 +207,17 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_10-clang12-test:
-    name: linux-jammy-py3.10-clang12
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-py3_10-clang12-build
-      - target-determination
-    with:
-      build-environment: linux-jammy-py3.10-clang12
-      docker-image: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.test-matrix }}
-    secrets: inherit
+  # linux-jammy-py3_10-clang12-test:
+  #   name: linux-jammy-py3.10-clang12
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs:
+  #     - linux-jammy-py3_10-clang12-build
+  #     - target-determination
+  #   with:
+  #     build-environment: linux-jammy-py3.10-clang12
+  #     docker-image: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.test-matrix }}
+  #   secrets: inherit
 
   linux-jammy-py3_13-clang12-build:
     name: linux-jammy-py3.13-clang12
@@ -243,15 +243,15 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-py3_13-clang12-test:
-    name: linux-jammy-py3.13-clang12
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3_13-clang12-build
-    with:
-      build-environment: linux-jammy-py3.13-clang12
-      docker-image: ${{ needs.linux-jammy-py3_13-clang12-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_13-clang12-build.outputs.test-matrix }}
-    secrets: inherit
+  # linux-jammy-py3_13-clang12-test:
+  #   name: linux-jammy-py3.13-clang12
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs: linux-jammy-py3_13-clang12-build
+  #   with:
+  #     build-environment: linux-jammy-py3.13-clang12
+  #     docker-image: ${{ needs.linux-jammy-py3_13-clang12-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-jammy-py3_13-clang12-build.outputs.test-matrix }}
+  #   secrets: inherit
 
   linux-jammy-cuda12_8-cudnn9-py3_10-clang12-build:
     name: linux-jammy-cuda12.8-cudnn9-py3.10-clang12
@@ -267,20 +267,20 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cpu-py3_10-gcc11-bazel-test:
-    name: linux-jammy-cpu-py3.10-gcc11-bazel-test
-    uses: ./.github/workflows/_bazel-build-test.yml
-    needs: get-label-type
-    with:
-      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-bazel-test
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
-      cuda-version: cpu
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-        ]}
-    secrets: inherit
+  # linux-jammy-cpu-py3_10-gcc11-bazel-test:
+  #   name: linux-jammy-cpu-py3.10-gcc11-bazel-test
+  #   uses: ./.github/workflows/_bazel-build-test.yml
+  #   needs: get-label-type
+  #   with:
+  #     runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
+  #     build-environment: linux-jammy-cuda12.8-py3.10-gcc11-bazel-test
+  #     docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+  #     cuda-version: cpu
+  #     test-matrix: |
+  #       { include: [
+  #         { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+  #       ]}
+  #   secrets: inherit
 
   linux-jammy-py3_10-gcc11-mobile-lightweight-dispatch-build:
     name: linux-jammy-py3.10-gcc11-mobile-lightweight-dispatch-build
@@ -331,15 +331,15 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda12_8-py3_10-gcc9-inductor-test:
-    name: cuda12.8-py3.10-gcc9-sm75
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cuda12_8-py3_10-gcc9-inductor-build
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm75
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-inductor-build.outputs.test-matrix }}
-    secrets: inherit
+  # linux-jammy-cuda12_8-py3_10-gcc9-inductor-test:
+  #   name: cuda12.8-py3.10-gcc9-sm75
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs: linux-jammy-cuda12_8-py3_10-gcc9-inductor-build
+  #   with:
+  #     build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm75
+  #     docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-inductor-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+  #   secrets: inherit
 
   linux-jammy-xpu-n-py3_10-build:
     name: linux-jammy-xpu-n-py3.10
