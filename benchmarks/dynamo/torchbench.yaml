@@ -38,6 +38,7 @@ tolerance:
     - tacotron2
     - yolov3
     - squeezenet1_1
+    - vision_maskrcnn
 
   higher_fp16:
     - doctr_reco_predictor
