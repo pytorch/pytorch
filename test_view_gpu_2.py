@@ -31,25 +31,21 @@ def main():
     mesh = init_device_mesh("cuda", mesh_shape)
     batch_size, seq_len, dim = 2, 4, 2
 
-    # view
-    # global_inps = torch.arange(batch_size * seq_len * dim, device="cuda").float().view(batch_size, seq_len, dim)
-    # inps = distribute_tensor(global_inps, mesh, (Shard(1), ))
-    # out = inps.view(batch_size * seq_len, dim)
-
     # transpose
     # global_weight = torch.eye(dim, device="cuda")
     # weight = distribute_tensor(global_weight, mesh, (Shard(0), ))
     # out = torch.t(weight)
     # print(f"rank: {torch.distributed.get_rank()} transpose out: {out}", flush=True)
 
-    # mm
-    global_inps = torch.arange(8, device="cuda").float().view(2, 4)
-    inps = distribute_tensor(global_inps, mesh, (Shard(0), ))
-    global_weight = torch.eye(4, device="cuda")
+    # # view
+    global_inps = torch.arange(batch_size * seq_len * dim, device="cuda").float().view(batch_size, seq_len, dim)
+    inps = distribute_tensor(global_inps, mesh, (Shard(1), ))
+    inps_viewed = inps.view(batch_size * seq_len, dim)
+
+    # # mm
+    global_weight = torch.eye(dim, device="cuda")
     weight = distribute_tensor(global_weight, mesh, (Replicate(), ))
-    comm_mode = CommDebugMode()
-    with comm_mode:
-        out = torch.mm(inps, weight)
+    out = torch.mm(inps_viewed, weight)
     print(f"rank: {torch.distributed.get_rank()} out: {out}")
 
 

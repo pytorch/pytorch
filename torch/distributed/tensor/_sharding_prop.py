@@ -350,14 +350,16 @@ class ShardingPropagator:
         if op_schema.op is aten._local_scalar_dense.default:
             return OutputSharding(None, op_schema)
 
+        # outer shape and stride
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
         if op_schema.op in self.op_strategy_funcs:
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
 
             # run sharding strategy propagation/generation
-            # import fbvscode
-            # fbvscode.set_trace()
+            if op_schema.op == aten.mm.default:
+                import fbvscode
+                fbvscode.set_trace()
             op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)
 
             if isinstance(op_strategy, OpStrategy):
@@ -388,8 +390,6 @@ class ShardingPropagator:
                         )
                     )
                     if input_spec.placements != desired_spec.placements:
-                        # import fbvscode
-                        # fbvscode.set_trace()
                         if all(x.is_partial_view_shard() for x in desired_spec.placements) and (x.orig_placement == y for x, y in zip(desired_spec.placements, input_spec.placements)):
                             pass
                         else:
@@ -409,8 +409,6 @@ class ShardingPropagator:
                     assert isinstance(output_strategy.output_spec, DTensorSpec)
                     # It happens when the output has the same shape as the input
                     # and the input placements are not all Replicate().
-                    # import fbvscode
-                    # fbvscode.set_trace()
                     if output_strategy.output_spec.is_sharded() or output_strategy.output_spec.is_partial_view_sharded():
                         schema = suggestion_schema or op_schema
                         assert isinstance(out_tensor_meta, TensorMeta)

@@ -150,8 +150,6 @@ class OpDispatcher:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
         print(f"rank: {torch.distributed.get_rank()} op: {op_call}", flush=True)
-        # import fbvscode
-        # fbvscode.set_trace()
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
 
