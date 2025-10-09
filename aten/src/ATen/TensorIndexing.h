@@ -417,14 +417,17 @@ inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
 }
 
 inline void copy_to(const Tensor& dst, const Tensor& src) {
-  if (dst.sym_sizes().equals(src.sym_sizes())) {
-    // A shortcut to avoid generating hard-coded constant sizes during tracing.
-    // This is not a perfect solution: when src & dst have different shapes,
-    // constants will still appear. Users can workaround that case by
-    // dst[index..] = src.reshape(..)
-    dst.copy_(src);
-    return;
-  } else if (src.dim() == 0 && src.device().type() == at::kCPU) {
+  // ensure we use runtime guard or false here
+
+  // if (dst.sym_sizes().equals(src.sym_sizes())) {
+  //   // A shortcut to avoid generating hard-coded constant sizes during tracing.
+  //   // This is not a perfect solution: when src & dst have different shapes,
+  //   // constants will still appear. Users can workaround that case by
+  //   // dst[index..] = src.reshape(..)
+  //   dst.copy_(src);
+  //   return;
+  // } 
+  if (src.dim() == 0 && src.device().type() == at::kCPU) {
     dst.fill_(src);
     return;
   }

@@ -99,9 +99,13 @@ inline void check_defined(
 inline c10::MaybeOwned<Tensor> expand_inplace(
     const Tensor& tensor,
     const Tensor& to_expand) {
-  if (tensor.sym_sizes().equals(to_expand.sym_sizes())) {
-    return c10::MaybeOwned<Tensor>::borrowed(to_expand);
-  }
+  // TODO: Re-enable optimization check that doesn't force guards on unbacked SymInts
+  // For now, always expand - expand_symint() is a no-op when sizes match anyway
+  // The check was: if (tensor.sym_sizes().equals(to_expand.sym_sizes()))
+  //   return c10::MaybeOwned<Tensor>::borrowed(to_expand);
+  // But .equals() forces guards on unbacked SymInts, causing errors
+  
+  // expand_symint() will handle validation and is no-op if sizes already match
   return c10::MaybeOwned<Tensor>::owned(
       to_expand.expand_symint(tensor.sym_sizes()));
 }
