@@ -1570,7 +1570,7 @@ static at::Tensor _quantized_convolution_onednn(
       ),
       "For post op sum, accum tensor must be contiguous."
     );
-    if (fp32_output || bfloat16_output) {
+    if (high_prec_output) {
       TORCH_CHECK(accum_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, accum_scale must be 1.0.");
       TORCH_CHECK(accum_zero_point == 0,  " (ONEDNN): fp32 or bf16 output, accum_zero_point must be 0");
       TORCH_CHECK((accum.value().scalar_type() == c10::kFloat) || (accum.value().scalar_type() == c10::kBFloat16), "The accum tensor should be KFloat or KBFloat.");
@@ -1741,7 +1741,7 @@ static at::Tensor _quantized_convolution_onednn(
     at::empty(
       dst_dims,
       at::device(c10::kCPU)
-          .dtype(out_dtype)
+          .dtype(high_prec_output ? output_dtype.value() : act.scalar_type())
           .memory_format(kSpatialDim == 2 ?
               c10::MemoryFormat::ChannelsLast :
               c10::MemoryFormat::ChannelsLast3d)
