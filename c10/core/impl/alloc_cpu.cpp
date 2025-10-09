@@ -108,15 +108,12 @@ void* alloc_cpu(size_t nbytes) {
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
       nbytes,
       " bytes.");
-#elif defined(USE_MIMALLOC)
-  data = mi_malloc_aligned(nbytes, gAlignment);
-  CAFFE_ENFORCE(
-      data,
-      "DefaultCPUAllocator: not enough memory: you tried to allocate ",
-      nbytes,
-      " bytes.");
 #elif defined(_MSC_VER)
+#ifdef USE_MIMALLOC
+  data = mi_malloc_aligned(nbytes, gAlignment);
+#else
   data = _aligned_malloc(nbytes, gAlignment);
+#endif
   CAFFE_ENFORCE(
       data,
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
@@ -163,10 +160,12 @@ void* alloc_cpu(size_t nbytes) {
 }
 
 void free_cpu(void* data) {
+#ifdef _MSC_VER
 #ifdef USE_MIMALLOC
   mi_free(data);
-#elif defined(_MSC_VER)
+#else
   _aligned_free(data);
+#endif
 #else
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(data);

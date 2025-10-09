@@ -225,7 +225,7 @@
 #
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
-#      By default, It is only enabled on Windows and AArch64.
+#      By default, It is only enabled on Windows.
 #
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
