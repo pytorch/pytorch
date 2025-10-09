@@ -125,7 +125,9 @@ def infer_schema(
         # we convert it to the actual type.
         annotation_type, _ = unstringify_type(param.annotation)
 
-        if annotation_type not in SUPPORTED_PARAM_TYPES:
+        if torch._C._is_opaque_type_registered(annotation_type.__name__):
+            schema_type = annotation_type.__name__
+        elif annotation_type not in SUPPORTED_PARAM_TYPES:
             if annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
@@ -149,8 +151,9 @@ def infer_schema(
                     f"Parameter {name} has unsupported type {param.annotation}. "
                     f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
                 )
+        else:
+            schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
 
-        schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
         if type(mutates_args) == str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(

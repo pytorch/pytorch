@@ -150,3 +150,7 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
             f"Tried to get the payload from a non-OpaqueObject of type `{type_}`"
         )
     torch._C._set_opaque_object_payload(opaque_object, payload)
+
+
+def register_opaque_type(type_: Any) -> None:
+    torch._C._register_opaque_type(type_.__name__)
