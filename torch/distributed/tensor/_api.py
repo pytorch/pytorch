@@ -12,6 +12,7 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
+from torch._library.opaque_object import register_opaque_type
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -30,7 +31,6 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-from torch._library.opaque_object import register_opaque_type
 
 
 __all__ = [
@@ -73,6 +73,7 @@ aten = torch.ops.aten
 
 register_opaque_type(Placement)
 
+
 @torch.library.custom_op(
     "dtensor::_dtensor_local_tensor",
     mutates_args=(),
@@ -80,6 +81,7 @@ register_opaque_type(Placement)
 )
 def _dtensor_local_tensor(tx, idx):
     raise RuntimeError("Should never be called")
+
 
 def _backward(ctx, grad_output):
     dtensor_spec = ctx.dtensor_spec
@@ -111,10 +113,12 @@ def _backward(ctx, grad_output):
         None,
     )
 
+
 def _setup_ctx(ctx, inputs, output):
     ctx._is_pure_view = True
     ctx.dtensor_spec = inputs[0]._spec
     ctx.grad_placements = inputs[1]
+
 
 _dtensor_local_tensor.register_autograd(_backward, setup_context=_setup_ctx)
 
@@ -164,6 +168,7 @@ _dtensor_local_tensor.register_autograd(_backward, setup_context=_setup_ctx)
 #             ),
 #             None,
 #         )
+
 
 # TODO: update the Tensor->DTensor similarly to what was done above for DTensor->Tensor
 class _FromTorchTensor(torch.autograd.Function):
@@ -625,7 +630,7 @@ class DTensor(torch.Tensor):
         redist_res = self.redistribute(
             placements=[Replicate()] * self.device_mesh.ndim, async_op=False
         )
-        return _ToTorchTensor.apply(redist_res, grad_placements)
+        return torch.ops.dtensor._dtensor_local_tensor(redist_res, grad_placements)
 
     @property
     def device_mesh(self) -> DeviceMesh:

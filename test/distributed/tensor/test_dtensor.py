@@ -897,7 +897,7 @@ class DTensorMeshTest(DTensorTestBase):
         dtensor_vocab_parallel_logits.sum().backward()
 
         self.assertEqual(leaf.grad, logits_max.unsqueeze(1).expand_as(leaf) * 2)
-        
+
     @with_comms
     def test_inplace_on_local_tensor_view_with_placement(self):
         mesh = self.build_device_mesh()
@@ -916,7 +916,6 @@ class DTensorMeshTest(DTensorTestBase):
         # Clone the grad as distributed WRONGFULLY modifies the given input inplace?!
         local.backward(grad.clone())
         self.assertEqual(dt.grad.to_local(), grad)
-        
 
     @with_comms
     def test_auto_implicit_replication(self):
