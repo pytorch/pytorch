@@ -127,6 +127,7 @@ def _prune_linear_helper(linear: nn.Linear) -> Tensor:
     linear.out_features = linear.weight.shape[0]
     _remove_bias_handles(linear)
 
+    # pyrefly: ignore  # unbound-name
     return mask
 
 
@@ -185,6 +186,7 @@ def _prune_conv2d_helper(conv2d: nn.Conv2d) -> Tensor:
     conv2d.out_channels = conv2d.weight.shape[0]
 
     _remove_bias_handles(conv2d)
+    # pyrefly: ignore  # unbound-name
     return mask
 
 
@@ -205,6 +207,7 @@ def prune_conv2d_padded(conv2d_1: nn.Conv2d) -> None:
             new_bias = torch.zeros(conv2d_1.bias.shape)
             new_bias[mask] = conv2d_1.bias[mask]  # type: ignore[possibly-undefined]
             # adjusted bias that to keep in conv2d_1
+            # pyrefly: ignore  # unbound-name
             new_bias[~mask] = cast(Tensor, conv2d_1._bias)[~mask]
             # pruned biases that are kept instead of propagated
             conv2d_1.bias = nn.Parameter(new_bias)
