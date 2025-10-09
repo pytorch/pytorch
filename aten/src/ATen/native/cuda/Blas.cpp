@@ -2550,7 +2550,7 @@ _scaled_mm_cuda_v2(
 // scaling=MXFP8
 // CUDA-only
 Tensor&
-_mxfp8_mxfp8_bf16_grouped_mm_fbgemm(
+_mx8_mx8_bf16_grouped_mm_fbgemm(
         const Tensor& mat_a,
         const Tensor& mat_b,
         const Tensor& scale_a,
@@ -2748,7 +2748,7 @@ _scaled_grouped_mm_cuda(
 #endif
 
   if (is_mx8mx8bf16) {
-    return _mxfp8_mxfp8_bf16_grouped_mm_fbgemm(
+    return _mx8_mx8_bf16_grouped_mm_fbgemm(
         mat_a,
         mat_b,
         scale_a,
