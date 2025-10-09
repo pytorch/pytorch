@@ -26,7 +26,10 @@ def ensure_flash_available() -> bool:
     Call ensure_flash_available.cache_clear() after installing flash-attn
     in the same interpreter to retry the import.
     """
-    return importlib.util.find_spec("flash_attn.cute") is not None
+    try:
+        return importlib.util.find_spec("flash_attn.cute") is not None
+    except ImportError:
+        return False
 
 
 from ...codegen.cutedsl.cutedsl_template import CuteDSLTemplate
