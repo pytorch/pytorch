@@ -1033,9 +1033,9 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
     from .utils import snode_args_kwargs
 
     args, kwargs = args_kwargs_fn()
-    from triton.testing import do_bench
+    from torch._inductor.runtime.benchmarking import benchmarker
 
-    ms = do_bench(lambda: bench_fn(*args, **kwargs))
+    ms = benchmarker.benchmark(bench_fn, args, kwargs)  # type: ignore[arg-type]
 
     cache.set_value(cache_key, value=ms)
     return ms
