@@ -661,6 +661,7 @@ def propagate_shape_and_sharding(
         elif isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]:
             input_tgt_placements.append(Replicate())
         else:
+            assert not p.is_partial_view_shard()
             input_tgt_placements.append(p)
 
 

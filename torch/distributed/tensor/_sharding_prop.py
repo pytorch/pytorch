@@ -357,7 +357,7 @@ class ShardingPropagator:
             strategy_schema = self._wrap_with_op_strategy(op_schema)
 
             # run sharding strategy propagation/generation
-            # if op_schema.op == aten.mm.default:
+            # if op_schema.op == aten._unsafe_view.default:
             #     import fbvscode
             #     fbvscode.set_trace()
             op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)

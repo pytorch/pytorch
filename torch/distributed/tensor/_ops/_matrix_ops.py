@@ -119,9 +119,6 @@ def _mm_like_strategy(
                 strtg.redistribute_cost = redistribute_cost
                 filtered_strategies.append(strtg)
     mm_strategy.strategies = filtered_strategies
-    import fbvscode
-
-    fbvscode.set_trace()
     return mm_strategy
 
 
