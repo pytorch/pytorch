@@ -103,7 +103,7 @@ class MicrobatchTests(TestCase):
             device=device,
         )
         if device == "cuda":
-            flex_fn = torch.compile(flex_attention, fullgraph=True)
+            flex_fn = torch.compile(flex_attention)
         else:
             # It's unclear why CPU + torch.compile + flex_attention can cause an issue.
             flex_fn = flex_attention
