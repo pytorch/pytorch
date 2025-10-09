@@ -573,6 +573,7 @@ class SizeVarAllocator:
             return expr
         # Substitute all hints into expr, but leave unbacked symints alone
         expr = self.simplify(expr)
+        expr = self.remove_precomputed_replacements(expr)
         if not isinstance(expr, Expr):
             assert isinstance(expr, int)
             return expr
@@ -584,12 +585,20 @@ class SizeVarAllocator:
                 return expr  # inf/nan/I
 
         if hint_override:
-            return hint_override
-
-        expr = self.remove_precomputed_replacements(expr)
-
-        if use_user_provided_hint_override:
-            expr = sympy_subs(expr, self.var_to_hint_override)
+            subs = {}
+            if isinstance(hint_override, int):
+                for sym in free_symbols:
+                    if symbol_is_type(sym, SymT.SIZE):
+                        subs[sym] = hint_override
+            elif isinstance(hint_override, tuple):
+                breakpoint()
+                for sym, val in hint_override:
+                    subs[sym] = val
+                    if sym in self.replacements and isinstance((sr := self.replacements[sym]), sympy.Symbol):
+                        subs[symr] = val
+            else:
+                raise Exception("what format")
+            expr = expr.subs(subs)
 
         return sympy_subs(expr, self.var_to_val)
 
