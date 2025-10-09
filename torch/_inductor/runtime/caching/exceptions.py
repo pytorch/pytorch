@@ -6,7 +6,6 @@ This module defines a hierarchy of exceptions used throughout the caching system
 All custom exceptions inherit from CacheError, with UserError serving as a base
 for user-facing errors that also inherit from TypeError for compatibility.
 """
-
 from threading import Lock
 from typing import Any
 
@@ -151,3 +150,39 @@ class ValueUnPicklingError(ValueDecodingError):
         super().__init__(
             f"Failed to unpickle cache value from pickled value {pickled_value!r}."
         )
+
+
+class CustomParamsEncoderRequiredError(UserError):
+    """Error raised when a custom params encoder is required but not provided.
+    
+    This typically occurs when trying to cache objects with custom parameters
+    that require a custom encoder to be specified during caching.
+    """
+    pass
+
+
+class CustomResultEncoderRequiredError(UserError):
+    """Error raised when a custom result encoder is required but not provided.
+    
+    This typically occurs when trying to cache objects with custom results
+    that require a custom encoder to be specified during caching.
+    """
+    pass
+
+
+class CustomResultDecoderRequiredError(UserError):
+    """Error raised when a custom result decoder is required but not provided.
+    
+    This typically occurs when trying to cache objects with custom results
+    that require a custom decoder to be specified during caching.
+    """
+    pass
+
+
+class DeterministicCachingRequiresStrongConsistency(UserError):
+    """Error raised when deterministic caching requires strong consistency.
+    
+    This typically occurs when trying to cache objects with deterministic caching
+    enabled but the cache implementation does not support strong consistency.
+    """
+    pass
