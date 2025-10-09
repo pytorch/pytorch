@@ -122,7 +122,7 @@ class SchemaCheckMode(TorchDispatchMode):
 
         def parse_metadata(e):
             if isinstance(e, torch.Tensor):
-                if type(e) != torch.Tensor:
+                if type(e) is not torch.Tensor:
                     try:
                         current = e.elem
                         return (

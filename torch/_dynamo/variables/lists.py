@@ -200,7 +200,7 @@ class BaseListVariable(VariableTracker):
             if kwargs or len(args) != 1:
                 raise_args_mismatch(tx, name)
 
-            if type(self) != type(args[0]):
+            if type(self) is not type(args[0]):
                 tp_name = self.python_type_name()
                 other = args[0].python_type_name()
                 msg = ConstantVariable.create(

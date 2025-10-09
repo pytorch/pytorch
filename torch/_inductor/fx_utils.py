@@ -98,7 +98,7 @@ class FakeTensorUpdater:
             return statically_known_true(sym_eq(new, old))
 
         def is_fake_tensor_same(new, old, *, node):
-            if type(new) != type(old):
+            if type(new) is not type(old):
                 return False
             if isinstance(new, (list, tuple)):
                 if len(new) != len(old):
