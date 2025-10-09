@@ -88,6 +88,8 @@ else:
                 "This get_root_mesh API will be deprecated soon."
                 "Please use `get_root_mesh` inside DeviceMesh instead."
             )
+            if not device_mesh:
+                return device_mesh
             return device_mesh._get_root_mesh()
 
         @staticmethod
