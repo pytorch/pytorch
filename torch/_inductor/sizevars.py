@@ -180,6 +180,7 @@ class SizeVarAllocator:
         def statically_known(expr):
             evaluated = self.shape_env._maybe_evaluate_static(
                 expr,
+                # pyrefly: ignore  # bad-argument-type
                 axioms=axioms,
                 var_to_range=var_to_range_tuple,
             )
