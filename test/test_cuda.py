@@ -749,25 +749,67 @@ print(t.is_pinned())
 
     def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
         orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        orig_splitk = (
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction_split_k
+        )
         self.assertEqual(
-            torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), orig
+            torch._C._get_cublas_allow_fp16_reduced_precision_reduction(),
+            (orig, orig_splitk),
         )
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = not orig
         self.assertEqual(
-            torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), not orig
+            torch._C._get_cublas_allow_fp16_reduced_precision_reduction(),
+            (not orig, True),
         )
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+            False,
+            False,
+        )
+        self.assertEqual(
+            torch._C._get_cublas_allow_fp16_reduced_precision_reduction(),
+            (False, False),
+        )
+        with self.assertRaisesRegex(RuntimeError, "allow_splitk=False"):
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                True,
+                False,
+            )
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+            orig,
+            orig_splitk,
+        )
 
     def test_cublas_allow_bf16_reduced_precision_reduction_get_set(self):
         orig = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        orig_splitk = (
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction_split_k
+        )
         self.assertEqual(
-            torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), orig
+            torch._C._get_cublas_allow_bf16_reduced_precision_reduction(),
+            (orig, orig_splitk),
         )
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = not orig
         self.assertEqual(
-            torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), not orig
+            torch._C._get_cublas_allow_bf16_reduced_precision_reduction(),
+            (not orig, True),
         )
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+            False,
+            False,
+        )
+        self.assertEqual(
+            torch._C._get_cublas_allow_bf16_reduced_precision_reduction(),
+            (False, False),
+        )
+        with self.assertRaisesRegex(RuntimeError, "allow_splitk=False"):
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                True,
+                False,
+            )
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+            orig,
+            orig_splitk,
+        )
 
     def test_cublas_allow_fp16_accumulation_get_set(self):
         orig = torch.backends.cuda.matmul.allow_fp16_accumulation
