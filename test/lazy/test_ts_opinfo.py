@@ -225,7 +225,7 @@ class TestLazyOpInfo(TestCase):
         cands = [f"{prefix}::{op.name}{symint_suffix}"]
         # check aliases
         for alias in op.aliases:
-            cands.append(f"{prefix}::{alias.name}{symint_suffix}" in metrics)
+            cands.append(f"{prefix}::{alias.name}{symint_suffix}")
 
         self.assertTrue(
             any(c in metrics for c in cands), f"none of {cands} not found in {metrics}"
