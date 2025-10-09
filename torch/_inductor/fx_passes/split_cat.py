@@ -1422,6 +1422,9 @@ def simplify_split_cat(match: Match, split_sections: list[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
         return
     split_node = next(node for node in match.nodes if node.target == torch.split)
+    if any(isinstance(section, torch.fx.node.Node) for section in split_node.args[1]):
+        log.debug("dynamic shape with Node objects for the split node: %s", split_node)
+        return
     SplitCatSimplifier().simplify(match.graph, split_node, split_sections)
 
 
@@ -1507,6 +1510,10 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
         return
     graph = match.graph
     split_node = next(node for node in match.nodes if node.target == torch.split)
+    # Check if split_node.args[1] contains dynamic shapes or Node objects
+    if any(isinstance(section, torch.fx.node.Node) for section in split_node.args[1]):
+        log.debug("dynamic shape with Node objects for the split node: %s", split_node)
+        return
     split_input, _split_size, split_dim = _get_split_args_default(split_node)
     # if the cat and split have different dims, return
     # Find the next users (i.e. users after the getitem)
@@ -1614,6 +1621,10 @@ def mutate_cat_node(match: Match, split_sections: list[int], dim: int):
         return
     graph = match.graph
     split_node = next(node for node in match.nodes if node.target == torch.split)
+    # Check if split_node.args[1] contains dynamic shapes or Node objects
+    if any(isinstance(section, torch.fx.node.Node) for section in split_node.args[1]):
+        log.debug("dynamic shape with Node objects for the split node in mutate_cat_node: %s", split_node)
+        return
     _split_input, _split_size, split_dim = _get_split_args_default(split_node)
     # if the cat and split have different dims, return
     # Find the next users (i.e. users after the getitem)
