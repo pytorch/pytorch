@@ -2075,14 +2075,9 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
             unimplemented(
                 "executorch_call_delegate: kwargs arguments were not enabled."
             )
-        if isinstance(args[0], variables.NNModuleVariable):
-            lowered_module = args[0].module
-            lowered_module = tx.output.get_submodule(args[0].module_key)
-            lowered_node = make_attr(tx, args[0].module_key)
-        elif isinstance(args[0], variables.UnspecializedNNModuleVariable):
-            lowered_module = args[0].value
-            mod_name = tx.output.install_subgraph("delegate", lowered_module)
-            lowered_node = make_attr(tx, mod_name)
+        lowered_module = tx.output.get_submodule(args[0].module_key)
+
+        lowered_node = make_attr(tx, args[0].module_key)
 
         p_args = tuple(arg.as_proxy() for arg in args[1:])
         real_sub_args = pytree.tree_map_only(
