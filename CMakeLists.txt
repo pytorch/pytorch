@@ -420,6 +420,14 @@ if(USE_CCACHE)
   endif()
 endif()
 
+# Optionally disable -MD / -MMD if COMPILE_NO_MD is set in the environment
+if(DEFINED ENV{COMPILE_NO_MD})
+  message(STATUS "COMPILE_NO_MD is set — disabling compiler dependency file flags (-MD/-MMD)")
+  foreach(lang C CXX CUDA HIP ASM)
+    set(CMAKE_DEPFILE_FLAGS_${lang} "")
+  endforeach()
+endif()
+
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
