@@ -13634,6 +13634,48 @@ class TestAutogradStreamSynchronization(TestCase):
         populate_events()
         check_ordering()
 
+    def test_warn_on_accumulate_grad_stream_mismatch_flag(self):
+        def do_test(suppress_warn, keep_grad_acc):
+            def _test():
+                with warnings.catch_warnings(record=True) as warns:
+                    warnings.simplefilter("always")
+
+                    s1, s2 = torch.cuda.Stream(), torch.cuda.Stream()
+
+                    with torch.cuda.stream(s1):
+                        a = torch.ones(8, 8, device="cuda", requires_grad=True)
+                        # create grad_acc under s1 and keep alive with b
+                        if keep_grad_acc:
+                            b = a.clone()
+
+                    with torch.cuda.stream(s2):
+                        s2.wait_stream(s1)
+                        c = a.sum()
+
+                    c.backward()
+
+                filter_str = "_set_warn_on_accumulate_grad_stream_mismatch"
+                return sum([filter_str in str(w.message) for w in warns]) > 0
+
+            if suppress_warn:
+                try:
+                    torch._C._set_warn_on_accumulate_grad_stream_mismatch(False)
+                    actual_warn = _test()
+                finally:
+                    torch._C._set_warn_on_accumulate_grad_stream_mismatch(True)
+            else:
+                actual_warn = _test()
+
+            expect_warn = not suppress_warn and keep_grad_acc
+            self.assertEqual(actual_warn, expect_warn)
+
+        # Warn by default
+        self.assertTrue(torch._C._warn_on_accumulate_grad_stream_mismatch())
+
+        for suppress_warn in (True, False):
+            for keep_grad_acc in (True, False):
+                do_test(suppress_warn=suppress_warn, keep_grad_acc=keep_grad_acc)
+
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(
