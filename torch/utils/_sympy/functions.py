@@ -1298,6 +1298,10 @@ class Identity(sympy.Function):
     def __repr__(self):  # type: ignore[override]
         return f"Identity({self.args[0]})"
 
+    def _sympystr(self, printer):
+        """Controls how sympy's StrPrinter prints this"""
+        return f"({printer.doprint(self.args[0])})"
+
     def _eval_is_real(self):
         return self.args[0].is_real
 
