@@ -606,10 +606,10 @@ else:
             root_mesh = self._get_root_mesh()
             slice_dim_group_name = []
             for name in submesh_dim_names:
-                if name in not_none(self.mesh_dim_names):
+                if name in not_none(self._mesh_dim_names):
                     slice_dim_group_name.append(
                         self._dim_group_names[  # type: ignore[has-type]
-                            not_none(self.mesh_dim_names).index(name)
+                            not_none(self._mesh_dim_names).index(name)
                         ]
                     )
                 else:
@@ -619,7 +619,7 @@ else:
                     flatten_mesh = self._flatten_mapping[name]
                     slice_dim_group_name.append(
                         flatten_mesh._dim_group_names[  # type: ignore[has-type]
-                            not_none(flatten_mesh.mesh_dim_names).index(name)
+                            not_none(flatten_mesh._mesh_dim_names).index(name)
                         ]
                     )
             cur_rank = self.get_rank()
@@ -627,7 +627,7 @@ else:
                 root_mesh.mesh,
             )
             res_submesh = DeviceMesh._create_mesh_from_ranks(
-                self.device_type,
+                self._device_type,
                 pg_ranks_by_dim,
                 cur_rank,
                 submesh_dim_names,
@@ -646,14 +646,14 @@ else:
             root_mesh = self._get_root_mesh()
 
             if not mesh_dim_name:
-                mesh_dim_name = "_".join(not_none(self.mesh_dim_names))
+                mesh_dim_name = "_".join(not_none(self._mesh_dim_names))
 
             # Flatten a 1D device mesh into its original mesh_dim_name will return itself.
-            if self.ndim == 1 and mesh_dim_name in not_none(self.mesh_dim_names):
+            if self.ndim == 1 and mesh_dim_name in not_none(self._mesh_dim_names):
                 return self
 
             # Check whether the mesh_dim_name for flattened mesh is valid.
-            invalid_dim_names = not_none(root_mesh.mesh_dim_names)
+            invalid_dim_names = not_none(root_mesh._mesh_dim_names)
             if mesh_dim_name in invalid_dim_names:
                 raise ValueError(
                     f"{mesh_dim_name} already exists for submesh of the {root_mesh}. ",
@@ -682,7 +682,7 @@ else:
                 root_mesh.mesh,
             )
             res_flattened_mesh = DeviceMesh._create_mesh_from_ranks(
-                root_mesh.device_type,
+                root_mesh._device_type,
                 pg_ranks_by_dim.flatten(
                     start_dim=1
                 ),  # this is needed for flatten non-contiguous mesh dims.
@@ -703,7 +703,7 @@ else:
             or submesh of the root mesh.
             """
             root_mesh = self._get_root_mesh()
-            child_mesh_dim_names = self.mesh_dim_names
+            child_mesh_dim_names = self._mesh_dim_names
             if root_mesh and child_mesh_dim_names:
                 assert len(child_mesh_dim_names) == 1, (
                     "The submesh can only be a 1D mesh."
@@ -713,16 +713,16 @@ else:
             return None
 
         def _get_mesh_dim_by_name(self, mesh_dim_name: str) -> int:
-            if self.mesh_dim_names is None or len(self.mesh_dim_names) == 0:
+            if self._mesh_dim_names is None or len(self._mesh_dim_names) == 0:
                 raise KeyError(
                     "No `mesh_dim_names` found.",
                 )
-            if mesh_dim_name not in self.mesh_dim_names:
+            if mesh_dim_name not in self._mesh_dim_names:
                 raise KeyError(
                     f"Mesh dimension '{mesh_dim_name}' does not exist.",
-                    f"Available mesh dimensions are: mesh_dim_names={self.mesh_dim_names}",
+                    f"Available mesh dimensions are: mesh_dim_names={self._mesh_dim_names}",
                 )
-            return not_none(self.mesh_dim_names.index(mesh_dim_name))
+            return not_none(self._mesh_dim_names.index(mesh_dim_name))
 
         def _get_slice_mesh_layout(
             self, mesh_dim_names: tuple[str, ...]
@@ -751,7 +751,7 @@ else:
                 else {}
             )
             valid_mesh_dim_names = [
-                *not_none(self.mesh_dim_names),
+                *not_none(self._mesh_dim_names),
                 *flatten_name_to_root_layout,
             ]
 
@@ -766,9 +766,9 @@ else:
 
             layout_sliced = []
             for name in mesh_dim_names:
-                if name in not_none(self.mesh_dim_names):
+                if name in not_none(self._mesh_dim_names):
                     layout_sliced.append(
-                        self._layout[not_none(self.mesh_dim_names).index(name)]
+                        self._layout[not_none(self._mesh_dim_names).index(name)]
                     )
                 elif name in flatten_name_to_root_layout:
                     warnings.warn(
@@ -826,7 +826,7 @@ else:
             res_submeshes = []
             for mesh_1d in pg_ranks_by_dim:
                 submesh = DeviceMesh(
-                    self.device_type,
+                    self._device_type,
                     mesh_1d,
                     mesh_dim_names=(mesh_dim_name,),
                     _init_backend=False,
