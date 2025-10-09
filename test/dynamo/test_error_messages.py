@@ -1140,17 +1140,17 @@ User code traceback:
 NOTE: the most recent `torch.compile` tracing attempt might not be where you applied `torch.compile`! This is due to how graph breaks are implemented - the optimized code object returned by Dynamo will call another Dynamo-generated resume function and tracing is re-enabled by calling the resume function as a normal Python function, which Dynamo intercepts as a top-level frame.
 Most recent bytecode instructions traced (max 20):
 TRACE RESUME 0 []
-TRACE LOAD_FAST x []
+TRACE LOAD_FAST 'x' []
 TRACE LOAD_CONST 1 [LazyVariableTracker()]
 TRACE BINARY_OP 0 [LazyVariableTracker(), ConstantVariable(int: 1)]
-TRACE STORE_FAST y [TensorVariable()]
-TRACE LOAD_FAST x []
-TRACE LOAD_FAST y [TensorVariable()]
+TRACE STORE_FAST 'y' [TensorVariable()]
+TRACE LOAD_FAST 'x' []
+TRACE LOAD_FAST 'y' [TensorVariable()]
 TRACE BINARY_OP 0 [TensorVariable(), TensorVariable()]
-TRACE STORE_FAST z [TensorVariable()]
-TRACE LOAD_GLOBAL torch []
-TRACE LOAD_ATTR _dynamo [LazyVariableTracker()]
-TRACE LOAD_ATTR graph_break [LazyVariableTracker()]
+TRACE STORE_FAST 'z' [TensorVariable()]
+TRACE LOAD_GLOBAL 'torch' []
+TRACE LOAD_ATTR '_dynamo' [LazyVariableTracker()]
+TRACE LOAD_ATTR 'graph_break' [LazyVariableTracker()]
 TRACE CALL 0 [NullVariable, LazyVariableTracker()]""",
         )
 
