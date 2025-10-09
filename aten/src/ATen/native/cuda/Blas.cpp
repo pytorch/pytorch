@@ -2584,7 +2584,7 @@ _mxfp8_mxfp8_bf16_grouped_mm_fbgemm(
 // scaling=rowwise
 // CUDA-only
 Tensor&
-_f8_f8_bf16_grouped_mm_cuda(
+_f8_f8_bf16_rowwise_grouped_mm_cuda(
           const Tensor& mat_a,
           const Tensor& mat_b,
           const Tensor& scale_a,
@@ -2650,7 +2650,7 @@ _f8_f8_bf16_rowwise_grouped_mm(
       bool use_fast_accum,
       Tensor& out) {
 #ifndef USE_ROCM
-  return _f8_f8_bf16_grouped_mm_cuda(
+  return _f8_f8_bf16_rowwise_grouped_mm_cuda(
       mat_a,
       mat_b,
       scale_a,
