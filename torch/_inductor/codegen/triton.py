@@ -2759,8 +2759,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     line, indexing.block_shape, indexing.final_shape, True
                 )
                 shape = indexing.final_shape
-            elif isinstance(original_index, sympy.Integer):
-                line = f"tl.load({var} + ({original_index}))"
+            elif isinstance(original_index, sympy.Integer) or (
+                isinstance(original_index, sympy.Expr)
+                and len(original_index.free_symbols) == 0
+            ):
+                line = f"tl.load({var} + ({original_index.expand(identity=True)}))"
                 append_broadcast = indexing.expand_str
                 shape = ()
             else:
