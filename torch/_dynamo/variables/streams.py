@@ -24,10 +24,18 @@ Tensor = torch.Tensor
 def fork_stream(
     from_index: int,
     from_device: torch.device,
-    from_device_index: int,
     to_index: int,
     to_device: torch.device,
-    to_device_index: int,
+) -> None:
+    pass
+
+
+@fork_stream.register_fake
+def _(
+    from_index: int,
+    from_device: torch.device,
+    to_index: int,
+    to_device: torch.device,
 ) -> None:
     pass
 
@@ -36,10 +44,18 @@ def fork_stream(
 def join_stream(
     from_index: int,
     from_device: torch.device,
-    from_device_index: int,
     to_index: int,
     to_device: torch.device,
-    to_device_index: int,
+) -> None:
+    pass
+
+
+@join_stream.register_fake
+def _(
+    from_index: int,
+    from_device: torch.device,
+    to_index: int,
+    to_device: torch.device,
 ) -> None:
     pass
 
