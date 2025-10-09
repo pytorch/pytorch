@@ -7,7 +7,7 @@ that calls into the optimized Flash Attention kernels.
 
 import logging
 from functools import lru_cache
-from typing import Union
+from typing import Union, NamedTuple, Optional
 
 import torch
 
@@ -20,6 +20,8 @@ def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
     return False
 
+class AuxRequest(NamedTuple):
+    lse: bool = False
 
 # import failures when I try to register as custom op
 # @torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
@@ -118,7 +120,7 @@ def varlen_attn(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
-    return_lse: bool = False,
+    return_aux: Optional[AuxRequest] = None,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
     """
     Compute variable-length attention using Flash Attention.
@@ -127,21 +129,55 @@ def varlen_attn(
     variable-length sequences using cumulative sequence position tensors.
 
     Args:
-        query (Tensor): Query tensor
-        key (Tensor): Key tensor
-        value (Tensor): Value tensor
-        cu_seq_q (Tensor): Cumulative sequence positions for queries
-        cu_seq_k (Tensor): Cumulative sequence positions for keys/values
-        max_q (int): Maximum query sequence length
-        max_k (int): Maximum key/value sequence length
-        is_causal (bool): Whether to apply causal masking (default: False)
+        query (Tensor): Query tensor; shape :math:`(T_q, H, D)`
+        key (Tensor): Key tensor; shape :math:`(T_k, H, D)`
+        value (Tensor): Value tensor; shape :math:`(T_k, H, D)`
+        cu_seq_q (Tensor): Cumulative sequence positions for queries; shape :math:`(N+1,)`
+        cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
+        max_q (int): Maximum query sequence length in the batch.
+        max_k (int): Maximum key/value sequence length in the batch.
+        is_causal (bool, optional): If set to True, applies causal masking (default: False).
+        return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
+
+    Shape legend:
+        - :math:`N`: Batch size
+        - :math:`T_q`: Total number of query tokens in the batch (sum of all query sequence lengths)
+        - :math:`T_k`: Total number of key/value tokens in the batch (sum of all key/value sequence lengths)
+        - :math:`H`: Number of attention heads
+        - :math:`D`: Head dimension
 
     Returns:
         Tensor: Output tensor from attention computation
+        If ``return_aux`` is not None and ``return_aux.lse`` is True, returns a tuple of Tensors:
+            (output, lse), where lse is the logsumexp
+
+    Example:
+        >>> batch_size, max_seq_len, embed_dim, num_heads = 2, 512, 1024, 16
+        >>> head_dim = embed_dim // num_heads
+        >>> seq_lengths = []
+        >>> for _ in range(shape.batch_size):
+            >>> length = torch.randint(1, shape.max_seq_len // 64 + 1, (1,)).item() * 64
+            >>> seq_lengths.append(min(length, shape.max_seq_len))
+        >>> seq_lengths = torch.tensor(seq_lengths, device=device)
+        >>> total_tokens = seq_lengths.sum().item()
+
+        >>> # Create packed query, key, value tensors
+        >>> query = torch.randn(total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda")
+        >>> key = torch.randn(total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda")
+        >>> value = torch.randn(total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda")
+
+        >>> # Build cumulative sequence tensor
+        >>> cu_seq = torch.zeros(shape.batch_size + 1, device=device, dtype=torch.int32)
+        >>> cu_seq[1:] = seq_lengths.cumsum(0)
+        >>> max_len = seq_lengths.max().item()
+
+        >>> # Call varlen_attn
+        >>> output = varlen_attn(query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False)
+
     """
     out, lse = _varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal
     )
-    if return_lse:
+    if return_aux is not None and return_aux.lse:
         return out, lse
     return out
