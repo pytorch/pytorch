@@ -19,6 +19,7 @@
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
+#include <cstdint>
 
 #include <torch/csrc/dynamo/debug_macros.h>
 
@@ -195,7 +196,6 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_sizes,
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
-
   // Mask to exclude Python keys, that can be artifically off during compilation,
   // due to ignore_compile_internals being set on custom TorchDispatchModes.
   constexpr auto mode_key_mask = c10::DispatchKeySet({
@@ -713,8 +713,10 @@ struct GlobalStateGuard {
     json_j["deterministic_algorithms_warn_only"] =
         json_t._deterministic_algorithms_warn_only;
     json_j["allow_tf32"] = json_t._allow_tf32;
-    json_j["allow_fp16_reduce"] = json_t._allow_fp16_reduce;
-    json_j["allow_bf16_reduce"] = json_t._allow_bf16_reduce;
+    json_j["allow_fp16_reduce"] =
+        static_cast<int64_t>(json_t._allow_fp16_reduce);
+    json_j["allow_bf16_reduce"] =
+        static_cast<int64_t>(json_t._allow_bf16_reduce);
     json_j["num_threads"] = json_t._num_threads;
     json_j["default_dtype"] = json_t._default_dtype.toScalarType();
   }
@@ -730,8 +732,10 @@ struct GlobalStateGuard {
     json_t._deterministic_algorithms_warn_only =
         json_j.at("deterministic_algorithms_warn_only");
     json_t._allow_tf32 = json_j.at("allow_tf32");
-    json_t._allow_fp16_reduce = json_j.at("allow_fp16_reduce");
-    json_t._allow_bf16_reduce = json_j.at("allow_bf16_reduce");
+    json_t._allow_fp16_reduce = static_cast<at::CuBLASReductionOption>(
+        static_cast<int64_t>(json_j.at("allow_fp16_reduce")));
+    json_t._allow_bf16_reduce = static_cast<at::CuBLASReductionOption>(
+        static_cast<int64_t>(json_j.at("allow_bf16_reduce")));
     json_t._num_threads = json_j.at("num_threads");
     json_t._default_dtype =
         caffe2::TypeMeta::fromScalarType(json_j.at("default_dtype"));
@@ -744,8 +748,8 @@ struct GlobalStateGuard {
   bool _deterministic_algorithms;
   bool _deterministic_algorithms_warn_only;
   bool _allow_tf32;
-  bool _allow_fp16_reduce;
-  bool _allow_bf16_reduce;
+  at::CuBLASReductionOption _allow_fp16_reduce;
+  at::CuBLASReductionOption _allow_bf16_reduce;
   int _num_threads;
   caffe2::TypeMeta _default_dtype;
   // TODO(jansel): we should guard on more state as inductor starts using it
@@ -4283,31 +4287,48 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
       py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
+
+    // Designate custom torch function modes to ignore for guard comparisons
+    py::object avoid_module = py::module_::import("torch.utils._debug_mode");
+    PyTypeObject* avoid_type = (PyTypeObject*)avoid_module.attr("DebugMode").ptr();
     for (Py_ssize_t idx = 0; idx < len; idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
       auto type = Py_TYPE(mode);
-      this->_ref_stack.push_back(type);
+      if (type != avoid_type) {
+        this->_ref_stack.push_back(type);
+      }
     }
   }
 
   template <typename T>
   bool check_nopybind_template(T* value) {
     // Ignore value arg, only used to satisfy the interface
-    const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
+    const size_t real_len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
     const size_t ref_stack_size = this->_ref_stack.size();
 
-    if (len != ref_stack_size) {
-      return false;
-    }
-
-    for (int64_t idx = 0; (size_t)idx < len; idx++) {
+    // Avoid this custom torch function mode for guard comparisons
+    py::object avoid_module = py::module_::import("torch.utils._debug_mode");
+    PyTypeObject* avoid_type = (PyTypeObject*)avoid_module.attr("DebugMode").ptr();
+    size_t compare_len = 0;
+    size_t skip = 0;
+    for (int64_t idx = 0; (size_t)idx < real_len; idx++) {
       std::shared_ptr<c10::SafePyObject> mode =
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
-      if (mode_type != _ref_stack.at(idx)) {
-        return false;
+
+      if (mode_type == avoid_type) {
+        skip += 1;
+      } else {
+        if (_ref_stack.size() <= idx - skip || mode_type != _ref_stack.at(idx - skip)) {
+          return false;
+        }
+        compare_len += 1;
       }
+    }
+
+    if (compare_len != ref_stack_size) {
+      return false;
     }
 
     return true;

@@ -263,20 +263,95 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
     def test_compile(self):
-        cnt = CompileCounterWithBackend("inductor")
-
-        @torch.compile(backend=cnt)
+        @torch.compile
         def f(x):
             return x.sin().cos()
 
         x = torch.randn(8)
         with DebugMode() as debug_mode:
             f(x)
-            self.assertEqual(len(debug_mode.debug_string()), 0)
-            f(x)
-            f(x)
-        self.assertEqual(cnt.frame_count, 1)  # check DebugMode doesn't trigger additional recompilations
+        self.assertEqual(len(debug_mode.debug_string()), 0)
 
+    def test_bwd_compiled_with_torch_function(self):
+        cnt = CompileCounterWithBackend("aot_eager")
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        x = torch.randn(1, 8, requires_grad=True)
+        y = torch.randn(8, 1, requires_grad=True)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y):
+            out = (x @ y).sum()
+            return out
+
+        def run():
+            fn(x_dtensor, y_dtensor).backward()
+
+        run()
+        with DebugMode(record_torchfunction=True) as debug_mode:
+            run()
+        run()
+
+        # check that running w/ & w/o DebugMode didn't cause recompiles
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertExpectedInline(
+          debug_mode.debug_string(),
+          """\
+  torch._C._set_view_replay_enabled(True)
+  torch._C._set_grad_enabled(True)
+  <method 'size' of 'torch._C.TensorBase' objects>(dt: f32[8, 8][S(0)])
+  <method 'stride' of 'torch._C.TensorBase' objects>(dt: f32[8, 8][S(0)])
+  <method 'size' of 'torch._C.TensorBase' objects>(dt: f32[8, 8][S(1)])
+  <method 'stride' of 'torch._C.TensorBase' objects>(dt: f32[8, 8][S(1)])
+  _c10d_functional::all_gather_into_tensor(t: f32[8, 1], 8, 0)
+      _c10d_functional::all_gather_into_tensor(t: f32[8, 1], 8, 0)
+  _c10d_functional::wait_tensor(t: f32[64, 1])
+      _c10d_functional::wait_tensor(t: f32[64, 1])
+  aten::split.Tensor(t: f32[64, 1], 8)
+      aten::split.Tensor(t: f32[64, 1], 8)
+  aten::cat(['t: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]'], 1)
+      aten::cat(['t: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]'], 1)
+  aten::mm(t: f32[1, 8], t: f32[8, 8])
+      aten::mm(t: f32[1, 8], t: f32[8, 8])
+  aten::sum(t: f32[1, 8])
+      aten::sum(t: f32[1, 8])
+  aten::t(t: f32[1, 8])
+      aten::t(t: f32[1, 8])
+  aten::t(t: f32[8, 1])
+      aten::t(t: f32[8, 1])
+  <method '_is_view' of 'torch._C.TensorBase' objects>(t: f32[8, 1])
+  <method 'detach' of 'torch._C.TensorBase' objects>(t: f32[8, 1])
+      aten::detach(t: f32[8, 1])
+  <method '_is_view' of 'torch._C.TensorBase' objects>(t: f32[1, 8])
+  <method 'detach' of 'torch._C.TensorBase' objects>(t: f32[1, 8])
+      aten::detach(t: f32[1, 8])
+  torch._C._set_grad_enabled(True)
+  torch._C._set_view_replay_enabled(False)
+  torch._tensor.backward(dt: f32[][P], gradient=None, retain_graph=None, create_graph=False, inputs=None)
+    aten::ones_like(dt: f32[][P], pin_memory=False, memory_format=torch.preserve_format)
+      aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)
+      aten::expand(t: f32[], [8, 8])
+      aten::split.Tensor(t: f32[8, 8], 1)
+      aten::clone(t: f32[1, 8])
+      aten::mm(t: f32[8, 1], t: f32[1, 8])
+      aten::split.Tensor(t: f32[8, 8], 1, 1)
+      aten::clone(t: f32[8, 1])
+      aten::mm(t: f32[8, 1], t: f32[1, 8])
+      redistribute_input(t: f32[8, 8], [P] -> [S(1)])
+        aten::split.Tensor(t: f32[8, 8], 1, 1)
+        aten::cat(['t: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]', 't: f32[8, 1]'])
+        _c10d_functional::reduce_scatter_tensor(t: f32[64, 1], sum, 8, 0)
+        _c10d_functional::wait_tensor(t: f32[8, 1])
+      aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
+      redistribute_input(t: f32[8, 8], [P] -> [S(0)])
+        _c10d_functional::reduce_scatter_tensor(t: f32[8, 8], sum, 8, 0)
+        _c10d_functional::wait_tensor(t: f32[1, 8])
+      aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
+      aten::add_.Tensor(t: f32[8, 1], t: f32[8, 1])
+      aten::add_.Tensor(t: f32[1, 8], t: f32[1, 8])""",
+        )
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 

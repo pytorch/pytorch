@@ -2194,7 +2194,7 @@ class GuardBuilder(GuardBuilderBase):
 
         import torch.utils._pytree as pytree
 
-        assert isinstance(val, ok_types) or pytree.is_constant_class(type(val)), (
+        assert istype(val, ok_types) or pytree.is_constant_class(type(val)), (
             f"Unexpected type {type(val)}"
         )
 
@@ -3435,6 +3435,23 @@ def pickle_guards_state(state: GuardsState, guard_tree_values: dict[int, Any]) -
     return buf.getvalue()
 
 
+_GLOBAL_GUARD_FILTER_FNS: set[Callable[[list[GuardFilterEntry]], list[bool]]] = set()
+
+
+def _register_global_guard_filter_fn(
+    fn: Callable[[list[GuardFilterEntry]], list[bool]]
+) -> None:
+    global _GLOBAL_GUARD_FILTER_FNS
+    _GLOBAL_GUARD_FILTER_FNS.add(fn)
+
+
+def _remove_global_guard_filter_fn(
+    fn: Callable[[list[GuardFilterEntry]], list[bool]]
+) -> None:
+    global _GLOBAL_GUARD_FILTER_FNS
+    _GLOBAL_GUARD_FILTER_FNS.remove(fn)
+
+
 # NB: Naively, you'd expect this to only be a function that produces
 # the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
@@ -3513,7 +3530,7 @@ class CheckFunctionManager:
 
         sorted_guards = sorted(guards or (), key=Guard.sort_key)
 
-        if guard_filter_fn:
+        if guard_filter_fn or _GLOBAL_GUARD_FILTER_FNS:
             # If we're filtering guards, we need to build it an extra time first
             # because filtering depends on the builder/guard_manager results
             builder, guard_manager = self.build_guards(
@@ -3555,9 +3572,13 @@ class CheckFunctionManager:
                     orig_guard=guard,
                 )
 
-            filter_results = guard_filter_fn(
-                [make_guard_filter_entry(guard) for guard in sorted_guards]
-            )
+            guard_entries = [make_guard_filter_entry(guard) for guard in sorted_guards]
+            filter_results = [True] * len(sorted_guards)
+            if guard_filter_fn:
+                filter_results = [x and y for x, y in zip(filter_results, guard_filter_fn(guard_entries))]
+            for filter_fn in _GLOBAL_GUARD_FILTER_FNS:
+                filter_results = [x and y for x, y in zip(filter_results, filter_fn(guard_entries))]
+
             assert len(filter_results) == len(sorted_guards)
             assert all(type(x) == bool for x in filter_results)
             sorted_guards = [

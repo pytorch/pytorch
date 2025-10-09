@@ -98,8 +98,7 @@ class DebugMode(TorchDispatchMode):
         self.record_faketensor = record_faketensor
         self.record_realtensor = record_realtensor
 
-        self.operators = []
-        self.call_depth = 0
+        self.reset_logs()
 
     # Without this override, running torch.compile under DebugMode
     # will force torch.compile to always use the “eager” backend
@@ -108,11 +107,20 @@ class DebugMode(TorchDispatchMode):
     def ignore_compile_internals(cls):
         return True
 
+    def log_operator(self, op, args, kwargs, depth):
+        if not torch.compiler.is_compiling():
+            self.operators.append((op, args, kwargs, depth))
+
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
 
-        self.operators.append((func, args, kwargs, self.call_depth))
+        if not (
+            type(func).__name__ == "method-wrapper"
+            and func.__name__ == "__get__"
+        ):
+            # filter out known noise
+            self.log_operator(func, args, kwargs, self.call_depth)
 
         try:
             self.call_depth += 1
@@ -126,28 +134,44 @@ class DebugMode(TorchDispatchMode):
 
         # Record the operation with its call depth
         if torch.distributed.tensor.DTensor in types:
-            self.operators.append((func, args, kwargs, self.call_depth))
+            self.log_operator(func, args, kwargs, self.call_depth)
             return NotImplemented
         elif FakeTensor in types or isinstance(
             _get_current_dispatch_mode(), FakeTensorMode
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    self.operators.append((func, args, kwargs, self.call_depth + 1))
+                    self.log_operator(func, args, kwargs, self.call_depth + 1)
         elif len(types) == 0:
             if self.record_realtensor:
-                self.operators.append((func, args, kwargs, self.call_depth + 1))
+                self.log_operator(func, args, kwargs, self.call_depth + 1)
 
         result = func(*args, **kwargs)
 
         return result
 
     def __enter__(self):
-        self.operators = []
-        self.call_depth = 0
+        self.reset_logs()
 
         if self.record_torchfunction:
+            from torch._dynamo.guards import _register_global_guard_filter_fn
+
+            _torch_function_stack_index = torch._C._len_torch_function_stack()
             torch._C._push_on_torch_function_stack(self)
+
+            def guard_filter_fn(guard_entries):
+                kw = f"___get_torch_function_mode_stack_at({_torch_function_stack_index})"
+                return [
+                    (
+                        kw not in entry.name
+                        or (entry.name == kw and entry.guard_type == "TYPE_MATCH")
+                    )
+                    and entry.guard_type != "TENSOR_MATCH"
+                    for entry in guard_entries
+                ]
+
+            self._guard_filter_fn = guard_filter_fn
+            _register_global_guard_filter_fn(guard_filter_fn)  
 
         super().__enter__()
         return self
@@ -156,18 +180,23 @@ class DebugMode(TorchDispatchMode):
     def __exit__(self, *args):
         super().__exit__(*args)
         if self.record_torchfunction:
+            from torch._dynamo.guards import _remove_global_guard_filter_fn
+
             torch._C._pop_torch_function_stack()
+            _remove_global_guard_filter_fn(self._guard_filter_fn)
+
+    def reset_logs(self):
+        self.operators = []
+        self.call_depth = 0
 
     @contextlib.contextmanager
     def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
         try:
-            self.operators.append(
-                (
-                    REDISTRIBUTE_FUNC,
-                    [arg_idx, src_placement, dst_placement],
-                    {},
-                    self.call_depth + 1,
-                )
+            self.log_operator(
+                REDISTRIBUTE_FUNC,
+                [arg_idx, src_placement, dst_placement],
+                {},
+                self.call_depth + 1,
             )
             self.call_depth += 1
             yield
