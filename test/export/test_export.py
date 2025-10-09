@@ -230,6 +230,10 @@ def is_non_strict_test(test_name):
     )
 
 
+def is_strict_test(test_name):
+    return test_name.endswith(STRICT_SUFFIX)
+
+
 def is_strict_v2_test(test_name):
     return test_name.endswith(STRICT_EXPORT_V2_SUFFIX)
 
@@ -973,7 +977,7 @@ graph():
 
         model = M()
         ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
-        print(ep)
+
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
 
@@ -1917,15 +1921,9 @@ graph():
         # TODO (tmanlaibaatar) this kinda sucks but today there is no good way to get
         # good source name. We should have an util that post processes dynamo source names
         # to be more readable.
-        if is_strict_v2_test(self._testMethodName):
-            with self.assertWarnsRegex(
-                UserWarning,
-                r"(L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
-                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
-                r"|L\['self']\._export_root\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
-            ):
-                ref(torch.randn(4, 4), torch.randn(4, 4))
-        elif is_inline_and_install_strict_test(self._testMethodName):
+        if is_strict_v2_test(self._testMethodName) or is_inline_and_install_strict_test(
+            self._testMethodName
+        ):
             with self.assertWarnsRegex(
                 UserWarning,
                 r"(L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
@@ -2666,7 +2664,7 @@ class GraphModule(torch.nn.Module):
         m = M()
         x = torch.randn(3)
         ep = export(m, (x,))
-        print(ep)
+
         ufm = torch.export.unflatten(ep)
         self.assertExpectedInline(
             str(ufm.graph_module.code).strip(),
@@ -3571,7 +3569,6 @@ graph():
                     sample_input = _tensor(nz=nz)
                     ep = export(mod, (sample_input,), strict=False)
                     self.assertEqual(ep.module()(sample_input), nz)
-                    print(ep)
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
@@ -6742,6 +6739,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 b = x.item()
                 torch._check(b >= 0)
                 torch._check(b < y.shape[0])
+
                 return y[0, b]
 
         if is_non_strict_test(self._testMethodName):
@@ -7913,9 +7911,11 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 buffer.append(get_buffer(ep, node))
         self.assertEqual(num_buffer, 3)
 
-        self.assertEqual(buffer[0].shape, torch.Size([100]))  # running_mean
-        self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
-        self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
+        # The insertion order is not guaranteed to be same for strict vs
+        # non-strict, so commenting this out.
+        # self.assertEqual(buffer[0].shape, torch.Size([100]))  # running_mean
+        # self.assertEqual(buffer[1].shape, torch.Size([100]))  # running_var
+        # self.assertEqual(buffer[2].shape, torch.Size([]))  # num_batches_tracked
 
     def test_export_dynamo_config(self):
         class MyModule(torch.nn.Module):
@@ -8901,7 +8901,6 @@ def forward(self, x):
 
             def forward(self, start_pos: torch.Tensor):
                 pos = start_pos.item()
-                torch._check_is_size(pos)
                 torch._check(pos >= 0)
                 torch._check(pos <= 4)
                 return self.freq[pos] * self.freq[pos]
@@ -8910,16 +8909,10 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
         decompose_ep = ep.run_decompositions()
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_mixed_input(self):
@@ -9419,10 +9412,9 @@ def forward(self, b_a_buffer, x):
             )
 
         else:
-            if is_inline_and_install_strict_test(self._testMethodName):
-                self.assertExpectedInline(
-                    ep.graph_module.code.strip(),
-                    """\
+            self.assertExpectedInline(
+                ep.graph_module.code.strip(),
+                """\
 def forward(self, b_a_buffer, x):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
     gt = sym_size_int_1 > 4;  sym_size_int_1 = None
@@ -9431,20 +9423,7 @@ def forward(self, b_a_buffer, x):
     cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
-                )
-            else:
-                self.assertExpectedInline(
-                    ep.graph_module.code.strip(),
-                    """\
-def forward(self, b_a_buffer, x):
-    sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
-    gt = sym_size_int_1 > 4;  sym_size_int_1 = None
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
-    getitem = cond[0];  cond = None
-    return (getitem,)""",
-                )
+            )
         self.assertTrue(
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
@@ -10024,10 +10003,9 @@ def forward(self, p_lin_weight, p_lin_bias, x):
             decomp_table={torch.ops.aten.linear.default: _decompose_linear_custom}
         )
 
-        if is_inline_and_install_strict_test(self._testMethodName):
-            self.assertExpectedInline(
-                str(ep_decompose_linear.graph_module.code).strip(),
-                """\
+        self.assertExpectedInline(
+            str(ep_decompose_linear.graph_module.code).strip(),
+            """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
@@ -10039,24 +10017,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
     add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add_1,)""",
-            )
-
-        else:
-            self.assertExpectedInline(
-                str(ep_decompose_linear.graph_module.code).strip(),
-                """\
-def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
-    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
-    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
-    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
-    matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
-    mul = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
-    add = torch.ops.aten.add.Tensor(matmul, mul);  matmul = mul = None
-    cos = torch.ops.aten.cos.default(add);  add = None
-    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
-    add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
-    return (add_1,)""",
-            )
+        )
 
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
@@ -14359,7 +14320,6 @@ def forward(self, x, y):
     sin = torch.ops.aten.sin.default(y)
     sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size_default = None
     ge_1 = _local_scalar_dense >= 3
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le_1 = _local_scalar_dense <= 5
@@ -15256,17 +15216,11 @@ graph():
             list(nn_module_stack.values())[-1][0]
             for nn_module_stack in nn_module_stacks
         ]
-        if is_inline_and_install_strict_test(self._testMethodName):
+        if is_strict_test(self._testMethodName) or is_strict_v2_test(
+            self._testMethodName
+        ):
             self.assertEqual(filtered_nn_module_stack[0], "mod_list_1.2")
             self.assertEqual(filtered_nn_module_stack[1], "mod_list_2.4")
-        # This is fine since both of these will be deprecated soon.
-        elif is_strict_v2_test(self._testMethodName) and IS_FBCODE:
-            self.assertEqual(
-                filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).0"
-            )
-            self.assertEqual(
-                filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
-            )
         else:
             self.assertEqual(
                 filtered_nn_module_stack[0], "mod_list_1.slice(2, 3, None).2"
@@ -15668,11 +15622,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureStrictV2
-    @testing.expectedFailureStrict  # annotation needs to be handled in dynamo
-    @testing.expectedFailureSerDer
     def test_preserve_annotation(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -16780,15 +16729,7 @@ class TestOneOffModelExportResult(TestCase):
 
         with torch.nn.attention.sdpa_kernel([SDPBackend.MATH]):
             ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
-            print(ep.graph)
             ep.run_decompositions()
-            print(ep.graph)
-
-    #         self.assertExpectedInline(ep.graph_module.code.strip(), """\
-    # def forward(self, arg0_1, arg1_1, arg2_1):
-    #     _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(arg0_1, arg1_1, arg2_1, 0.0, True);  arg0_1 = arg1_1 = arg2_1 = None
-    #     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
-    #     return (getitem,)""")
 
     @skipIfCrossRef
     @unittest.skipIf(

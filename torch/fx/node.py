@@ -59,6 +59,7 @@ Argument = Optional[
         BaseArgumentTypes,
     ]
 ]
+# pyrefly: ignore  # invalid-annotation
 ArgumentT = TypeVar("ArgumentT", bound=Argument)
 _P = ParamSpec("_P")
 _R = TypeVar("_R")

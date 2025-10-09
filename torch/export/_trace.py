@@ -377,6 +377,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
 
                 nn_module_stack = {
                     root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
+                    # pyrefly: ignore  # unbound-name
                     **nn_module_stack,
                 }
                 node.meta["nn_module_stack"] = {
@@ -525,6 +526,7 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
                 simplify=True,
             )
         ):
+            # pyrefly: ignore  # unbound-name
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
@@ -662,7 +664,6 @@ def _rename_constants_nodes(
         if spec.kind == InputKind.CONSTANT_TENSOR and not spec.arg.name.startswith(
             const_prefix
         ):
-            # pyrefly: ignore  # bad-argument-type
             if spec.arg.name.startswith(buffer_prefix):  # map from buffer to constants
                 c_name = rename_constant(
                     const_prefix + spec.arg.name[len(buffer_prefix) :]

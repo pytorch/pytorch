@@ -375,7 +375,7 @@ static void bf16_gemv_trans(
   const at::BFloat16 beta,
   at::BFloat16* y,
   const int incy) {
-  return bf16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
+  bf16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 template <>
