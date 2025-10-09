@@ -1210,7 +1210,7 @@ def get_sync_debug_mode() -> int:
 def _get_pynvml_handler(device: "Device" = None):
     if not _HAS_PYNVML:
         raise ModuleNotFoundError(
-            "pynvml does not seem to be installed or it can't be imported."
+            "nvidia-ml-py does not seem to be installed or it can't be imported."
             # pyrefly: ignore  # invalid-inheritance
         ) from _PYNVML_ERR
     # pyrefly: ignore  # import-error

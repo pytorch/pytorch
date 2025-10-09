@@ -769,7 +769,7 @@ def list_gpu_processes(device: "Device" = None) -> str:
         try:
             import pynvml  # type: ignore[import]
         except ModuleNotFoundError:
-            return "pynvml module not found, please install pynvml"
+            return "pynvml module not found, please install nvidia-ml-py"
         # pyrefly: ignore  # import-error
         from pynvml import NVMLError_DriverNotLoaded
 

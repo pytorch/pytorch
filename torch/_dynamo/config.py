@@ -308,7 +308,7 @@ optimize_ddp: Union[
     ],
 ] = True
 
-# By default, Dynamo emits runtime asserts (e.g. torch._check, torch._check_is_size) in the graph.
+# By default, Dynamo emits runtime asserts (e.g. torch._check) in the graph.
 # In some cases those asserts could be performance costly
 # E.g. torch._check(tensor[0].item() > 2) for tensor on cuda will require cuda sync.
 # Setting this to True keeps them hinting to symbolic shapes engine,
