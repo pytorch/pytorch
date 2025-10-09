@@ -2622,7 +2622,7 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
   TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
   TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
 
-#ifdef USE_FBGEMM_GENAI
+#if defined(USE_FBGEMM_GENAI) && defined(USE_ROCM)
   fbgemm_gpu::f8f8bf16_rowwise_grouped_mm(
       mat_a,
       // FBGEMM expects B matrix shape to be (.., N, K)
