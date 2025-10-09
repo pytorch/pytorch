@@ -47,8 +47,8 @@ void setHasPrimaryContext(bool (*func)(DeviceIndex));
 
 namespace at::cuda::detail {
 
-const at::cuda::NVRTC& nvrtc();
-DeviceIndex current_device();
+static const at::cuda::NVRTC& nvrtc();
+static DeviceIndex current_device();
 
 static void (*magma_init_fn)() = nullptr;
 

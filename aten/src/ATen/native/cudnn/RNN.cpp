@@ -122,8 +122,8 @@ namespace {
 // DropoutDescriptor
 
 struct DropoutDescriptorParams {
-  bool train;
-  double dropout;
+  bool train{};
+  double dropout{};
   Tensor dropout_state;
   DropoutDescriptorParams() = default;
   void set(bool train_, double dropout_, Tensor dropout_state_) {
@@ -147,12 +147,12 @@ struct DropoutDescriptorParams {
 
 struct RNNDescriptorParams {
 #ifdef USE_CUDNN_RNN_V8_API
-  int64_t input_size;
-  bool packed;
+  int64_t input_size{};
+  bool packed{};
 #endif
-  int64_t hidden_size;
-  int64_t proj_size;
-  int64_t num_layers;
+  int64_t hidden_size{};
+  int64_t proj_size{};
+  int64_t num_layers{};
   cudnnDirectionMode_t bidirectional;
   cudnnRNNMode_t mode;
   cudnnDataType_t datatype;
@@ -422,15 +422,15 @@ auto rnn_descriptor(
 //
 struct TensorDescriptorListParams {
   IntArrayRef batch_sizes;
-  int64_t seq_length;
-  int64_t mini_batch;
+  int64_t seq_length{};
+  int64_t mini_batch{};
   // NB: this is not input.size(), which is an IntArrayRef; instead, this
   // size of the inner-most dimension.  In NL applications, this is usually
   // the size of the embedding.  You can also think of this as the size
   // of the "channel" dimension (at risk of confusing vision researchers :)
-  int64_t input_size;
+  int64_t input_size{};
   // Only valid when !is_input_packed
-  int64_t batch_sizes_sum; // == sum(batch_sizes)
+  int64_t batch_sizes_sum{}; // == sum(batch_sizes)
 
   [[nodiscard]] bool is_input_packed() const {
     return !batch_sizes.empty();
@@ -555,7 +555,7 @@ int64_t get_num_weights(
     const TensorDescriptor& x_desc,
 #endif
     cudnnDataType_t datatype) {
-  size_t weight_size;
+  size_t weight_size = 0;
 #ifndef USE_CUDNN_RNN_V8_API
   AT_CUDNN_CHECK(cudnnGetRNNParamsSize(
       handle, rnn_desc.desc(), x_desc.desc(), &weight_size, datatype));
@@ -632,7 +632,7 @@ void add_projection_weights(
 #else
   int stride_dim_a[5];
 #endif
-  int nb_dims;
+  int nb_dims = 0;
   constexpr int min_dim = 3;
   int filter_dim_a[min_dim];
 #ifndef USE_CUDNN_RNN_V8_API
@@ -717,7 +717,7 @@ get_parameters(
     size_t layer_params_count = 0;
     for (auto cudnn_method : cudnn_methods) {
       for (const auto linear_id : c10::irange(num_linear_layers)) {
-        void* matrix_pointer;
+        void* matrix_pointer = nullptr;
 #ifndef USE_CUDNN_RNN_V8_API
         FilterDescriptor lin_layer_mat_desc;
         AT_CUDNN_CHECK(cudnn_method(
@@ -766,7 +766,7 @@ get_parameters(
 #else
         int stride_dim_a[5];
 #endif
-        int nb_dims;
+        int nb_dims = 0;
         constexpr int min_dim = 3;
         int filter_dim_a[min_dim];
 #ifndef USE_CUDNN_RNN_V8_API
@@ -902,7 +902,7 @@ std::vector<void*> get_expected_data_ptrs(
       // in a very limited subset of possible values.
       const std::array<int64_t, 2> linear_offsets = {0, num_linear_layers / 2};
       for (int64_t linear_id : linear_offsets) {
-        void* matrix_pointer;
+        void* matrix_pointer = nullptr;
 #ifndef USE_CUDNN_RNN_V8_API
         FilterDescriptor lin_layer_mat_desc;
         AT_CUDNN_CHECK(cudnn_method(
@@ -950,7 +950,7 @@ std::vector<void*> get_expected_data_ptrs(
       // assuming it's LSTM which has 8 "linear layers" (i.e. 4 weights and 4
       // biases)
       int64_t linear_id = 8;
-      void* matrix_pointer;
+      void* matrix_pointer = nullptr;
 #ifndef USE_CUDNN_RNN_V8_API
       FilterDescriptor lin_layer_mat_desc;
       AT_CUDNN_CHECK(cudnnGetRNNLinLayerMatrixParams(
@@ -1405,7 +1405,7 @@ Tensor _cudnn_rnn_flatten_weight(
       /*set_orig_weights_to_flat_buf=*/true));
 }
 
-Tensor _cudnn_rnn_flatten_weight_meta(
+static Tensor _cudnn_rnn_flatten_weight_meta(
     TensorList weight_arr,
     int64_t weight_stride0,
     c10::SymInt input_size,
@@ -1441,7 +1441,7 @@ Tensor _cudnn_rnn_flatten_weight_meta(
   return at::zeros_symint({num_weights}, weight_arr[0].options());
 }
 
-const char* WEIGHT_FORMAT_WARN =
+static const char* WEIGHT_FORMAT_WARN =
     "RNN module weights are not part of single contiguous "
     "chunk of memory. This means they need to be compacted "
     "at every call, possibly greatly increasing memory usage. "
@@ -1584,7 +1584,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
       IntArrayRef{cell_size},
       ", got ",
       cx.sizes());
-  size_t workspace_size;
+  size_t workspace_size = 0;
 #ifndef USE_CUDNN_RNN_V8_API
   auto x_descs_arr = descs.get_x_descs();
   auto y_descs_arr = descs.get_y_descs();
@@ -1605,7 +1605,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   // NB: Previously, the test was for fn.requires_grad, but we don't have
   // this information.  Use 'train' as a proxy.
   if (fn_train) {
-    size_t reserve_size;
+    size_t reserve_size = 0;
 #ifndef USE_CUDNN_RNN_V8_API
     AT_CUDNN_CHECK(cudnnGetRNNTrainingReserveSize(
         handle,
@@ -1735,7 +1735,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   return std::make_tuple(output, hy, cy, reserve, weight_buf);
 }
 
-std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
+static std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     const Tensor& input_r,
     const Tensor& weight_buf,
     const Tensor& hx,
@@ -1879,7 +1879,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   w_desc.set(weight_buf, 3);
 #endif
 
-  size_t workspace_size;
+  size_t workspace_size = 0;
 #ifndef USE_CUDNN_RNN_V8_API
   auto x_descs_arr = descs.get_x_descs();
   auto y_descs_arr = descs.get_y_descs();
@@ -1965,7 +1965,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
 // NB: This MUST BE CALLED AFTER _cudnn_rnn_backward_input.
 // We'll give a user friendly combined function...
-std::vector<Tensor> _cudnn_rnn_backward_weight(
+static std::vector<Tensor> _cudnn_rnn_backward_weight(
     // TODO: I think tensor geometry sufficient for weight_buf/weight
     const Tensor& input_r,
     TensorList weight_arr,
@@ -2067,7 +2067,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   w_desc.set(weight_buf, 3);
 #endif
 
-  size_t workspace_size;
+  size_t workspace_size = 0;
 #ifndef USE_CUDNN_RNN_V8_API
   auto x_descs_arr = descs.get_x_descs();
   auto y_descs_arr = descs.get_y_descs();

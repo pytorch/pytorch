@@ -122,7 +122,7 @@ void clearCublasWorkspaces() {
   cublaslt_handle_stream_to_workspace().clear();
 }
 
-size_t parseChosenWorkspaceSize() {
+static size_t parseChosenWorkspaceSize() {
   auto val = c10::utils::get_env("CUBLAS_WORKSPACE_CONFIG");
 #ifdef USE_ROCM
   if (!val) {
@@ -166,7 +166,7 @@ size_t parseChosenWorkspaceSize() {
   }
 }
 
-size_t parseCUDABlasLtWorkspaceSize() {
+static size_t parseCUDABlasLtWorkspaceSize() {
   auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
 #ifdef USE_ROCM
   if (!val.has_value()) {
@@ -225,11 +225,11 @@ size_t getCUDABlasLtWorkspaceSize() {
   return pool_size;
 }
 
-at::DataPtr getNewWorkspace() {
+static at::DataPtr getNewWorkspace() {
   return c10::cuda::CUDACachingAllocator::get()->allocate(getChosenWorkspaceSize());
 }
 
-at::DataPtr getNewCUDABlasLtWorkspace() {
+static at::DataPtr getNewCUDABlasLtWorkspace() {
   return c10::cuda::CUDACachingAllocator::get()->allocate(getCUDABlasLtWorkspaceSize());
 }
 
@@ -285,7 +285,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
       new CuBlasPoolType(), [](CuBlasPoolType* p) {
         // Leak the memory.
       });
-  thread_local std::unique_ptr<CuBlasPoolType::PoolWindow> myPoolWindow(
+  static thread_local std::unique_ptr<CuBlasPoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);

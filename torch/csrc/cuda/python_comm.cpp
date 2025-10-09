@@ -3,6 +3,7 @@
 #include <torch/csrc/cuda/Stream.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/comm.h>
+#include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/ATen.h>

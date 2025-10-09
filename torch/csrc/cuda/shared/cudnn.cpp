@@ -74,6 +74,7 @@ size_t getVersionInt() {
 
 namespace torch::cuda::shared {
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 void initCudnnBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
