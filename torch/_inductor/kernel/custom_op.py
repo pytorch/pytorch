@@ -39,7 +39,6 @@ def autotune_custom_op(
     inputs: list[Any],
     kwargs: Optional[dict[str, Any]] = None,
     default_impl: Optional[Callable[..., Any]] = None,
-    input_gen_fns: Optional[dict[int, Callable[[Buffer], torch.Tensor]]] = None,
 ) -> Union[TensorBox, Any]:
     """
     Autotune custom operations by comparing multiple decomposition implementations.
@@ -54,7 +53,6 @@ def autotune_custom_op(
         inputs: Input tensors/nodes
         kwargs: Additional arguments for decomposition functions
         default_impl: Default implementation to use as fallback (optional)
-        input_gen_fns: Input generation functions for benchmarking (optional)
 
     Returns:
         Optimized implementation result
@@ -112,6 +110,18 @@ def autotune_custom_op(
 
     if not choices:
         raise RuntimeError(f"No valid choices generated for {name}")
+
+    def simple_randn_gen(x: Buffer) -> torch.Tensor:
+        """Generate real tensor from fake tensor/buffer for autotuning."""
+        from torch._inductor.virtualized import V
+
+        return torch.randn(
+            [V.graph.sizevars.size_hint(i) for i in x.get_size()],
+            dtype=x.get_dtype(),
+            device=x.get_device(),
+        )
+
+    input_gen_fns = dict.fromkeys(range(len(input_nodes)), simple_randn_gen)
 
     return autotune_select_algorithm(
         name=name,
