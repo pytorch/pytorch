@@ -31,10 +31,18 @@ Tensor = torch.Tensor
 def fork_stream(
     from_index: int,
     from_device: torch.device,
-    from_device_index: int,
     to_index: int,
     to_device: torch.device,
-    to_device_index: int,
+) -> None:
+    pass
+
+
+@fork_stream.register_fake
+def _(
+    from_index: int,
+    from_device: torch.device,
+    to_index: int,
+    to_device: torch.device,
 ) -> None:
     pass
 
@@ -43,18 +51,26 @@ def fork_stream(
 def join_stream(
     from_index: int,
     from_device: torch.device,
-    from_device_index: int,
     to_index: int,
     to_device: torch.device,
-    to_device_index: int,
 ) -> None:
     pass
 
 
-_keep_alive = []
+@join_stream.register_fake
+def _(
+    from_index: int,
+    from_device: torch.device,
+    to_index: int,
+    to_device: torch.device,
+) -> None:
+    pass
 
 
-def add_dynamo_owned_stream(s):
+_keep_alive: list[torch.Stream] = []
+
+
+def add_dynamo_owned_stream(s: torch.Stream) -> None:
     global _keep_alive
     _keep_alive.append(s)
 
@@ -137,53 +153,43 @@ class StreamContextVariable(ContextWrappingVariable):
         self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
 
     def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
-        stream_id, device, device_index = (
-            StreamContextVariable._extract_stream_properties(
-                self._get_target_values()[0].as_proxy()
-            )
-        )
-        proxy = tx.output.create_proxy(
+        # to stream, from stream is the order of the arguments
+        # we are entering the target, and leaving the initial stream
+        tx.output.create_proxy(
             "call_function",
             torch.ops.streams.fork.default,
-            (stream_id, device, device_index, []),
+            self._target_stream_proxies() + self._initial_stream_proxies(),
             {},
         )
-        stream_state_mgr.push_stream_state(proxy.node)
         return ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslator", *args: tuple[Any]) -> "VariableTracker":
-        state = stream_state_mgr.pop_stream_state()
-        initial_stream_proxy = self.initial_values[0].as_proxy()
-        stream_id, device, device_index = (
-            StreamContextVariable._extract_stream_properties(initial_stream_proxy)
-        )
-        tx.output.create_node(
+        # to stream, from stream is the order of the arguments
+        # we are leaving the target, and entering the initial stream
+        tx.output.create_proxy(
             "call_function",
             torch.ops.streams.join.default,
-            (
-                stream_id.node,
-                device.node,
-                device_index.node,
-                list(state.internal_nodes),
-            ),
+            self._initial_stream_proxies() + self._target_stream_proxies(),
             {},
-        )
-        state.fork_node.args = (
-            state.fork_node.args[0],
-            state.fork_node.args[1],
-            state.fork_node.args[2],
-            list(state.external_nodes),
         )
         return ConstantVariable.create(None)
 
+    def _initial_stream_proxies(self) -> tuple[Proxy, Proxy]:
+        assert self.initial_values, "No initial stream to move from"
+        return StreamContextVariable._extract_stream_properties(
+            self.initial_values[0].as_proxy()
+        )
+
+    def _target_stream_proxies(self) -> tuple[Proxy, Proxy]:
+        return StreamContextVariable._extract_stream_properties(
+            self.target_values[0].as_proxy()
+        )
+
     @staticmethod
-    def _extract_stream_properties(stream_proxy: Proxy) -> tuple[Proxy, Proxy, Proxy]:
+    def _extract_stream_properties(stream_proxy: Proxy) -> tuple[Proxy, Proxy]:
         stream_index = GetAttrVariable.create_getattr_proxy(stream_proxy, "stream_id")
         stream_device = GetAttrVariable.create_getattr_proxy(stream_proxy, "device")
-        stream_device_index = GetAttrVariable.create_getattr_proxy(
-            stream_proxy, "device_index"
-        )
-        return stream_index, stream_device, stream_device_index
+        return stream_index, stream_device
 
     @staticmethod
     def _get_current_stream(
@@ -224,17 +230,22 @@ class StreamVariable(StreamContextVariable):
         device: torch.device,
         **kwargs: Any,
     ) -> None:
-        user_ind = kwargs.pop("user_obj_index", None)
+        # Index into the user object table
+        # used to pass arbitrary objects to the graph
+        user_object_index = kwargs.pop("user_obj_index", None)
         if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         assert value.device.type == device.type, (
             "stream value is not equal to the passed device"
         )
-        super().__init__(target_values=[], initial_values=None, device=device, **kwargs)
+        super().__init__(
+            target_values=[self], initial_values=None, device=device, **kwargs
+        )
         self.proxy = proxy
         self.value = value
         self.device = device
-        self.user_ind = user_ind
+
+        self.user_object_index = user_object_index
 
     def python_type(self) -> type:
         return torch.Stream
@@ -314,14 +325,14 @@ class StreamVariable(StreamContextVariable):
         # If we got here, this stream is fully subsumed by the graph - this means it is
         # not an input or global
         assert not self.source
-        if self.user_ind is not None:
+        if self.user_object_index is not None:
             codegen.add_push_null(
                 lambda: codegen.load_import_from(
                     torch._dynamo.graph_bytecode_inputs.__name__,
                     "get_user_object_by_index",
                 )
             )
-            codegen.append_output(codegen.create_load_const(self.user_ind))
+            codegen.append_output(codegen.create_load_const(self.user_object_index))
             codegen.extend_output(create_call_function(1, False))
         else:
             # TODO mlazos: evaluate if we still need this
