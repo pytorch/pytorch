@@ -55,17 +55,18 @@ def input_buffers_require_grads(graph_module):
 
 
 def is_trivial_graph(graph_module: GraphModule, is_score_graph: bool):
-    """Check if the flex graphs are trivial"""
+    """Check if the flex graphs are compatible with Flash Attention."""
     graph = graph_module.graph
     nodes = list(graph.nodes)
-    # Check if it's just placeholder -> output
     placeholders = [n for n in nodes if n.op == "placeholder"]
     output = [n for n in nodes if n.op == "output"]
     assert len(output) == 1, "Got graph w/ multiple outputs"
     output_val = output[0].args[0]
+
     if is_score_graph:
-        # Make sure we dont have any captures
-        return len(placeholders) == 5
+        if input_buffers_require_grads(graph_module):
+            return False
+        return True  # party on garth
     # mask mod graph is empty if we have 4 inputs and full_default output
     return len(placeholders) == 4 and output_val.target == torch.ops.aten.full.default
 
@@ -146,8 +147,6 @@ def create_flex_flash_attention_kernel(
     v_head_dim = value.get_size()[-1]
     device = query.get_device()
     dtype = query.get_dtype()
-
-    # Ensure device is not None
     assert device is not None, "Device must be specified"
 
     # Match stride pattern from query tensor
@@ -179,7 +178,6 @@ def create_flex_flash_attention_kernel(
 
     choices: list[Any] = []
     causal = kernel_options.get("causal", False)
-
     assert flash_attention_cutedsl_template is not None
     error = flash_attention_cutedsl_template.maybe_append_choice(
         choices,
