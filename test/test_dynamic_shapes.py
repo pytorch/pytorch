@@ -4050,6 +4050,17 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_select_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                nz = x.nonzero()
+                return nz[-1]
+
+        mod = M()
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(mod)(x), mod(x))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_select_index_with_check(self):
         def func3(x, y):
             u0 = y.item()
@@ -4210,6 +4221,21 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         compiled_result = compiled_func(x, torch.tensor([5]))
         eager_result = func(x, torch.tensor([5]))
         self.assertEqual(cnt.frame_count, 2)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_item(self):
+        def func():
+            _x_ms = torch.tensor([True, False], dtype=torch.int64)
+            _mask_ms = torch.zeros_like(_x_ms, dtype=torch.bool)
+            _mask_ms[:1] = True
+            var_node_2 = torch.masked_select(_x_ms, _mask_ms)
+            var_node_0 = var_node_2.item()
+            return var_node_0
+
+        result_original = func()
+        compiled_program = torch.compile(func, fullgraph=True, dynamic=True)
+        result_compiled = compiled_program()
+        self.assertEqual(result_original, result_compiled)
 
 
 instantiate_parametrized_tests(TestUnbacked)

@@ -838,7 +838,7 @@ test_dynamo_benchmark() {
       elif [[ "${suite}" == "timm_models" ]]; then
         export TORCHBENCH_ONLY_MODELS="inception_v3"
       elif [[ "${suite}" == "torchbench" ]]; then
-        export TORCHBENCH_ONLY_MODELS="hf_Bert"
+        export TORCHBENCH_ONLY_MODELS="BERT_pytorch"
       fi
     fi
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
@@ -869,13 +869,13 @@ test_inductor_torchbench_smoketest_perf() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
-    --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
+    --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only BERT_pytorch \
     --output "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
   # The threshold value needs to be actively maintained to make this check useful
   python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -t 1.4
 
   # Check memory compression ratio for a few models
-  for test in hf_Albert timm_vision_transformer; do
+  for test in BERT_pytorch yolov3; do
     python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
       --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
       --only $test --output "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv"
