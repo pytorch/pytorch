@@ -5593,7 +5593,6 @@ class TestMPS(TestCaseMPS):
         helper(2, 8, 4, 5)
 
     # Test clamp_max
-
     def test_clamp_max(self):
         def helper(n, c, h, w):
             cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=False)
@@ -5684,6 +5683,27 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(cpu_x, x)
 
         helper(2, 8, 4, 5)
+
+    def test_clamp_tensor_bounds_broadcasting(self):
+        def helper(input_shape, bound_shape):
+            cpu_x = torch.randn(input_shape, device="cpu", dtype=torch.float32, requires_grad=False)
+            mps_x = cpu_x.detach().clone().to("mps")
+
+            cpu_min_t = torch.randn(bound_shape, device="cpu", dtype=cpu_x.dtype, requires_grad=False)
+            cpu_max_t = cpu_min_t + torch.rand_like(cpu_min_t).abs()
+
+            mps_min_t = cpu_min_t.detach().clone().to("mps")
+            mps_max_t = cpu_max_t.detach().clone().to("mps")
+
+            clamp_cpu = torch.clamp(cpu_x, min=cpu_min_t, max=cpu_max_t)
+            clamp_mps = torch.clamp(mps_x, min=mps_min_t, max=mps_max_t)
+
+            self.assertEqual(clamp_mps.cpu(), clamp_cpu)
+
+        helper((2, 3), (1, 2, 3))
+        helper((4, 2, 3), (1, 2, 3))
+        helper((2, 3), (2, 3))
+
 
     def test_divmode(self):
         def helper(shape, rounding_mode):
