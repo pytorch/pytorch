@@ -1,8 +1,10 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
 from contextlib import contextmanager
 
 import torch
+from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.profiler import profile, ProfilerActivity
@@ -11,6 +13,10 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import parametrize
+
+
+if not ensure_flash_available():
+    raise unittest.SkipTest("Flash attention (CUTE) library is not available")
 
 
 def _times_two(score, _b, _h, _m, _n):
