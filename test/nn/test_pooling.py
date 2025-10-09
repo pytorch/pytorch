@@ -2002,6 +2002,48 @@ torch.cuda.synchronize()
                     lambda: fn_module(x),
                 )
 
+    @onlyNativeDeviceTypes
+    def test_pooling_int_overflow(self, device):
+        # INT_MAX + 1 exceeds 32-bit signed integer range (2^31)
+        overflow_value = 2147483648
+
+        # test avg_pool2d
+        x = torch.randn(1, 1, 4, 4, device=device, dtype=torch.float)
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"integer out of range",
+            lambda: F.avg_pool2d(x, kernel_size=1, stride=overflow_value),
+        )
+
+        # test LPPool2d
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"integer out of range",
+            lambda: nn.LPPool2d(norm_type=2, kernel_size=1, stride=overflow_value).to(
+                device
+            )(x),
+        )
+
+        # test with kernel_size overflow as well
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"integer out of range",
+            lambda: F.avg_pool2d(x, kernel_size=overflow_value, stride=1),
+        )
+
+        # test with padding overflow
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"integer out of range",
+            lambda: F.avg_pool2d(x, kernel_size=1, stride=1, padding=overflow_value),
+        )
+
+        # test that valid large values (within int32 range) still work
+        valid_large_stride = 10**6
+        x_small = torch.randn(2, 3, 8, 8, device=device, dtype=torch.float)
+        result = F.avg_pool2d(x_small, kernel_size=2, stride=valid_large_stride)
+        self.assertEqual(result.shape, torch.Size([2, 3, 1, 1]))
+
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     @dtypes(torch.float)
     def test_pool_large_size(self, device, dtype):
