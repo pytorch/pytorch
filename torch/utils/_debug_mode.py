@@ -47,11 +47,7 @@ def _tensor_debug_string(tensor, tensor_memo=None) -> str:
     else:
         raise RuntimeError(f"Unsupported tensor type: {type(tensor)}")
 
-    tensor_id = (
-        f"${tensor_memo.get(tensor)}"
-        if tensor_memo and tensor in tensor_memo
-        else ""
-    )
+    tensor_id = f"${tensor_memo.get(tensor)}" if tensor_memo and tensor in tensor_memo else ""
     return f"{prefix}{tensor_id}: {base_str}"
 
 
@@ -138,13 +134,15 @@ class DebugMode(TorchDispatchMode):
             self._next_tensor_id += 1
 
     def _track_tensor_ids(self, obj):
-        """Recursively assign IDs to all tensors in a pytree."""
-        tree_map_only(torch.Tensor, self._track_tensor_ids, obj)
+        """Recursively assign IDs to all tensors in a pytree"""
+        with torch._C.DisableTorchFunction():
+            tree_map_only(torch.Tensor, self._assign_tensor_id, obj)
 
     def _track_op_output(self, op_index, result):
-        """Assign IDs to output tensors and store in output_info."""
-        self._track_tensor_ids(result)
-        self._output_info[op_index] = result
+        """Assign IDs to output tensors and store in output_info"""
+        with torch._C.DisableTorchFunction():
+            self._track_tensor_ids(result)
+            self._output_info[op_index] = result
 
     # Without this override, running torch.compile under DebugMode
     # will force torch.compile to always use the "eager" backend
@@ -167,13 +165,10 @@ class DebugMode(TorchDispatchMode):
         try:
             self.call_depth += 1
             result = func(*args, **kwargs)
+            self._track_op_output(op_index, result)
+            return result
         finally:
             self.call_depth -= 1
-
-        # Track output
-        self._track_op_output(op_index, result)
-
-        return result
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
@@ -185,7 +180,6 @@ class DebugMode(TorchDispatchMode):
         # Record the operation with its call depth
         op_index = None
         if torch.distributed.tensor.DTensor in types:
-            op_index = len(self.operators)
             self.operators.append((func, args, kwargs, self.call_depth))
             return NotImplemented
         elif FakeTensor in types or isinstance(
@@ -241,12 +235,19 @@ class DebugMode(TorchDispatchMode):
         finally:
             self.call_depth -= 1
 
-    def debug_string(self, show_ids: bool = False) -> str:
+    def debug_string(self, show_outputs: bool = False, show_ids: bool = False) -> str:
         with torch._C.DisableTorchFunction():
             result = ""
             tensor_memo = self._tensor_memo if show_ids else None
             result += "\n".join(
-                "  " + "  " * depth + _op_to_str(op, *args, output=self._output_info.get(idx), tensor_memo=tensor_memo, **kwargs)
+                "  "
+                + "  " * depth
+                + _op_to_str(
+                    op,
+                    *args,
+                    output=self._output_info.get(idx) if show_outputs else None,
+                    tensor_memo=tensor_memo, **kwargs
+                )
                 for idx, (op, args, kwargs, depth) in enumerate(self.operators)
             )
         return result
