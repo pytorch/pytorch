@@ -31,6 +31,7 @@ project-excludes = [
   "torch/_export/utils.py",
   "torch/fx/experimental/unification/multipledispatch/__init__.py",
   "torch/nn/modules/__init__.py",
+  "torch/nn/modules/rnn.py", # only remove when parsing errors are fixed
   # ====
   "benchmarks/instruction_counts/main.py",
   "benchmarks/instruction_counts/definitions/setup.py",
