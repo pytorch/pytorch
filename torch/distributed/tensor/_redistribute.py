@@ -130,16 +130,14 @@ class DTensorRedistributePlanner:
             src_placement: The initial tuple of Placement objects.
             src_shard_order: (Optional) The initial ShardOrder representing
                 the mapping of tensor dimensions to mesh dimensions. If None,
-                the default sparse shard order is computed from src_placement and mesh.
+                the default shard order is computed from src_placement and mesh.
 
         Returns:
             A string showing the sequence of DistState transitions, separated by '->'.
         """
         assert len(src_placement) == mesh.ndim
         if src_shard_order is None:
-            src_shard_order = DTensorSpec.compute_default_sparse_shard_order(
-                src_placement
-            )
+            src_shard_order = DTensorSpec.compute_default_shard_order(src_placement)
         cur_placement = list(src_placement)
         shard_order_dict = DTensorRedistributePlanner._ShardOrder_to_dict(
             src_shard_order
