@@ -439,6 +439,22 @@ static void check_mps_shape(MPSShape* shape) {
   }
 }
 
+bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI) {
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI && is_macOS_15_0_or_newer) {
+    auto storage_numel = tensor.storage().nbytes() / tensor.element_size() - tensor.storage_offset();
+    if (storage_numel > std::numeric_limits<int32_t>::max()) {
+      return true;
+    }
+  }
+  for (auto size : tensor.sizes()) {
+    if (size > std::numeric_limits<int32_t>::max()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes, MPSShape* strides) {
   id<MTLBuffer> srcBuf = getMTLBufferStorage(t);
 

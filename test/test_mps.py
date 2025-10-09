@@ -80,6 +80,9 @@ if not torch.backends.mps.is_available():
 
 total_memory = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]))
 
+MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
+MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
+
 # Determine whether to enable MPS memory leak check (uses same code as CUDA).
 TEST_MPS_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_MPS_MEM_LEAK_CHECK', '0') == '1'
 
@@ -3636,6 +3639,70 @@ class TestMPS(TestCaseMPS):
                 self.assertEqual(cpu_result, mps_result.to("cpu"))
                 # TODO: enable memory format test
                 # self.assertEqual(cpu_result.is_contiguous(), mps_result.is_contiguous())
+
+    # Skip if a test needs more memory than the system has.
+    def _skip_if_exceeds_total_memory(self, required_memory):
+        if total_memory < required_memory:
+            self.skipTest(
+                f"Needs {required_memory / (1024**3):0.01f} GiB RAM, "
+                f"but only {total_memory / (1024**3):0.01f} GiB is available.")
+
+    @parametrize("dtype", MPS_DTYPES)
+    def test_cat_large_tensor(self, dtype):
+        a_shape = (1, 11 + (1 << 31), 1)
+        b_shape = (1, 100, 1)
+
+        # Assume up to 1% extra overhead memory might be required.
+        required_memory = 1.01 * (math.prod(a_shape) + math.prod(a_shape)) * dtype.itemsize
+        self._skip_if_exceeds_total_memory(required_memory)
+
+        a_cpu = make_tensor((1,), dtype=dtype, device='cpu').expand(a_shape)
+        b_cpu = make_tensor(b_shape, dtype=dtype, device='cpu')
+        r_cpu = torch.cat([a_cpu, b_cpu], dim=1)
+
+        # Pick a subset of output elements to compare, because comparing all of
+        # them takes too long.
+        rand_indices = torch.randint(0, a_cpu.shape[1] + b_cpu.shape[1], (10_000,))
+        r_cpu_part0 = r_cpu[:, rand_indices, :].clone()
+        r_cpu_part1 = r_cpu[:, -200:, :].clone()
+        r_cpu_part2 = r_cpu[:, :200, :].clone()
+
+        # Delete the CPU result to free up memory for the MPS run.
+        del r_cpu
+
+        a_mps = (
+            torch.empty(0, dtype=dtype, device='mps')
+            .set_(a_cpu.untyped_storage().mps())
+            .as_strided(size=a_cpu.size(), stride=a_cpu.stride())
+        )
+        b_mps = b_cpu.to('mps')
+
+        try:
+            r_mps = torch.cat([a_mps, b_mps], dim=1)
+
+        except RuntimeError as e:
+            if "Invalid buffer size" in str(e):
+                self.skipTest(f"Exceeds max buffer size for MPS: {str(e)}.")
+            raise e
+
+        self.assertEqual(r_mps[:, rand_indices, :], r_cpu_part0)
+        self.assertEqual(r_mps[:, -200:, :], r_cpu_part1)
+        self.assertEqual(r_mps[:, :200, :], r_cpu_part2)
+
+    def test_large_tensor_to_string(self):
+        shape = (2, 1 << 31)
+
+        # Assume up to 1% extra overhead memory might be required.
+        required_memory = 1.01 * 2 * math.prod(shape)
+        self._skip_if_exceeds_total_memory(required_memory)
+
+        self.assertEqual(
+            str(torch.ones(shape, dtype=torch.int8, device='mps')),
+            (
+                "tensor([[1, 1, 1,  ..., 1, 1, 1],\n"
+                "        [1, 1, 1,  ..., 1, 1, 1]], device='mps:0', dtype=torch.int8)"
+            ),
+        )
 
     # See https://github.com/pytorch/pytorch/issues/152701
     def test_jacfwd_cat(self):
@@ -12166,9 +12233,6 @@ class TestNoRegression(TestCase):
             self.assertEqual(x, x2)
             self.assertEqual(x2.device.type, "mps")
 
-
-MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
-MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
