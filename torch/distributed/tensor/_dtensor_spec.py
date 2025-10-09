@@ -1,4 +1,5 @@
 import itertools
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, NamedTuple, Optional
 
@@ -21,7 +22,7 @@ class ShardOrderEntry(NamedTuple):
         tensor_dim: The tensor dimension being sharded (e.g., 0, 1, 2 for a 3D tensor).
         mesh_dims: Tuple of mesh dimensions across which this tensor dimension is sharded,
                    in execution order. The first mesh dim is applied first, second is applied
-                   second, etc.
+                   second, etc. This tuple is guaranteed to be non-empty.
 
     Examples:
         >>> # Tensor dim 1 sharded across mesh dim 2, then mesh dim 0
@@ -32,7 +33,7 @@ class ShardOrderEntry(NamedTuple):
     """
 
     tensor_dim: int
-    mesh_dims: tuple[int, ...]
+    mesh_dims: tuple[int, ...]  # guaranteed to be non-empty
 
 
 # Type alias for the complete shard order specification
@@ -100,7 +101,7 @@ class DTensorSpec:
         to the mesh dimensions it's sharded on, in left-to-right order.
         """
         # follow default left-to-right device order if shard_order is not specified
-        tensor_dim_to_mesh_dims: dict[int, list[int]] = {}
+        tensor_dim_to_mesh_dims: defaultdict[int, list[int]] = defaultdict(list)
         mesh_ndim = len(placements)
         for mesh_dim in range(0, mesh_ndim):
             # shard_order doesn't work with _StridedShard
@@ -112,8 +113,6 @@ class DTensorSpec:
                 assert shard_dim >= 0, (
                     f"Shard dim {shard_dim} in placements {placements} must be normalized"
                 )
-                if shard_dim not in tensor_dim_to_mesh_dims:
-                    tensor_dim_to_mesh_dims[shard_dim] = []
                 tensor_dim_to_mesh_dims[shard_dim].append(mesh_dim)
 
         # Convert dict into ShardOrderEntry tuples
