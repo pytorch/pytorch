@@ -16,30 +16,6 @@ This directory contains YAML configuration files for running comprehensive atten
 - **Patterns**: All available patterns including rel, head_bias, prefix_lm, softcap
 - **Use case**: Complete performance analysis and comparison
 
-### `config_decoding.yaml`
-- **Purpose**: Decoding-specific benchmarks (query length = 1)
-- **Backends**: efficient, fav2, fakv (decoding-optimized)
-- **Patterns**: causal, alibi, sliding_window, softcap
-- **Use case**: Inference performance analysis
-
-### `config_memory_bound.yaml`
-- **Purpose**: Memory efficiency testing with large sequences
-- **Backends**: efficient, fav2
-- **Patterns**: causal, sliding_window, document_mask
-- **Use case**: Memory-constrained scenarios
-
-### `config_sdpa_only.yaml`
-- **Purpose**: SDPA backend comparison only
-- **Backends**: math, efficient, cudnn
-- **Patterns**: causal, alibi
-- **Use case**: Pure PyTorch SDPA performance analysis
-
-### `config_dynamic.yaml`
-- **Purpose**: Dynamic shapes testing for FlexAttention
-- **Backends**: efficient, fav2 (dynamic shape compatible)
-- **Patterns**: causal, alibi, sliding_window
-- **Use case**: Testing dynamic shape performance and compilation
-
 ## Compilation Optimization
 
 All configs now include `max_autotune: true` which enables:
@@ -60,21 +36,6 @@ python run_benchmark.py --config configs/config_basic.yaml
 
 # Run comprehensive benchmark
 python run_benchmark.py --config configs/config_comprehensive.yaml
-
-# Run decoding benchmark
-python run_benchmark.py --config configs/config_decoding.yaml
-
-# Run memory-bound benchmark
-python run_benchmark.py --config configs/config_memory_bound.yaml
-
-# Run SDPA-only benchmark
-python run_benchmark.py --config configs/config_sdpa_only.yaml
-
-# Run Flash Attention benchmark
-python run_benchmark.py --config configs/config_flash_attention.yaml
-
-# Dry run to see the command that would be executed
-python run_benchmark.py --config configs/config_basic.yaml --dry-run
 ```
 
 ### Direct CLI Usage (Simplified)

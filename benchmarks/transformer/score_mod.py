@@ -1,3 +1,4 @@
+import argparse
 import csv
 import gc
 import itertools
@@ -10,7 +11,6 @@ from functools import partial, wraps
 from typing import Callable, Literal, Optional, Union
 
 import numpy as np
-from jsonargparse import CLI
 from tabulate import tabulate
 from tqdm import tqdm
 
@@ -72,7 +72,7 @@ def safe_backend(backend_name=None):
 
 # Type definitions
 Backend = Literal[
-    "math", "efficient", "cudnn", "fav2", "fav3", "fakv", "flex", "og-eager"
+    "math", "efficient", "cudnn", "fav2", "fav3", "fakv", "og-eager"
 ]
 AttentionType = Literal[
     "noop",
@@ -281,28 +281,9 @@ def run_single_backend_sdpa(
     with backend_context:
         _device = torch.device("cuda")
 
-        # Special handling for flex attention backend
-        if backend == "flex":
-            # Create a compiled flex attention function
-            from torch.nn.attention.flex_attention import flex_attention
-
-            compiled_flex_attention = torch.compile(flex_attention)
-
-            def eager_flex_attention(query, key, value):
-                return compiled_flex_attention(
-                    query=query,
-                    key=key,
-                    value=value,
-                    score_mod=score_mod,
-                    block_mask=block_mask,
-                    enable_gqa=(query.shape[1] != key.shape[1]),
-                )
-
-            eager_sdpa = eager_flex_attention
-        else:
-            eager_sdpa = generate_eager_sdpa(
-                config.attn_type, config.shape, config.dtype, block_mask, score_mod
-            )
+        eager_sdpa = generate_eager_sdpa(
+            config.attn_type, config.shape, config.dtype, block_mask, score_mod
+        )
 
         if config.attn_type == "document_mask":
             q_eager, k_eager, v_eager = generate_jagged_inputs(
@@ -518,7 +499,7 @@ def run_single_experiment(
     sparsity = block_mask.sparsity() / 100.0 if block_mask is not None else 0.0
     sparsity = sparsity if config.attn_type != "document_mask" else 0.5
 
-    results["compiled"] = ExperimentResults(
+    results["flex"] = ExperimentResults(
         fwd_time=forward_compiled_time,
         bwd_time=backward_compile_time if config.calculate_bwd_time else None,
         sparsity=sparsity,
@@ -586,7 +567,7 @@ def calculate_tflops(config: ExperimentConfig, results: ExperimentResults) -> fl
 def get_average_speedups(results: list[Experiment], type: str, backend: str):
     # Calculate speedups
     speedups = [
-        calculate_speedup(r.results["compiled"], r.results[backend], type)
+        calculate_speedup(r.results["flex"], r.results[backend], type)
         for r in results
     ]
 
@@ -615,7 +596,7 @@ def get_average_speedups(results: list[Experiment], type: str, backend: str):
 def print_results(results: list[Experiment], save_path: Optional[str] = None):
     table_data = defaultdict(list)
     for experiment in results:
-        backends = experiment.config.backends + ["compiled"]
+        backends = experiment.config.backends + ["flex"]
         for key, value in experiment.asdict().items():
             if key in backends:
                 if value.fwd_time:
@@ -628,45 +609,45 @@ def print_results(results: list[Experiment], save_path: Optional[str] = None):
     # Calculate speedups
     for backend in results[0].config.backends:
         fwd_speedups = [
-            calculate_speedup(r.results["compiled"], r.results[backend], type="fwd")
+            calculate_speedup(r.results["flex"], r.results[backend], type="fwd")
             for r in results
         ]
-        table_data[f"fwd_{backend}_speedup"] = fwd_speedups
+        table_data[f"fwd_speedup_flex_over_{backend}"] = fwd_speedups
 
     if results[0].config.calculate_bwd_time:
         for backend in results[0].config.backends:
             bwd_speedups = [
-                calculate_speedup(r.results["compiled"], r.results[backend], type="bwd")
+                calculate_speedup(r.results["flex"], r.results[backend], type="bwd")
                 for r in results
             ]
-            table_data[f"bwd_{backend}_speedup"] = bwd_speedups
+            table_data[f"bwd_speedup_flex_over_{backend}"] = bwd_speedups
 
     # Calculate mem + computational throughput
     if results[0].config.cal_bandwidth:
         fwd_bandwidth = [
-            calculate_bandwidth(r.config, r.results["compiled"], type="fwd")
+            calculate_bandwidth(r.config, r.results["flex"], type="fwd")
             for r in results
         ]
         table_data["fwd_mem_bw (TB/s)"] = fwd_bandwidth
         fwd_tflops = [
-            calculate_tflops(r.config, r.results["compiled"]) for r in results
+            calculate_tflops(r.config, r.results["flex"]) for r in results
         ]
         table_data["TFlops/s"] = fwd_tflops
 
     print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
     for backend in results[0].config.backends:
-        if np.isnan(table_data[f"fwd_{backend}_speedup"]).all():
+        if np.isnan(table_data[f"fwd_speedup_flex_over_{backend}"]).all():
             continue
         print("\n")
-        print(f"FWD Speedups vs. {backend}".center(125, "="))
+        print(f"FWD Speedup of Flex over {backend}".center(125, "="))
         print("\n")
         average_data = get_average_speedups(results, type="fwd", backend=backend)
         print(tabulate(average_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
         if results[0].config.calculate_bwd_time:
             print("\n")
-            print(f"BWD Speedups vs. {backend}".center(125, "="))
+            print(f"BWD Speedup of Flex over {backend}".center(125, "="))
             print("\n")
             average_data = get_average_speedups(results, type="bwd", backend=backend)
             print(
@@ -869,7 +850,7 @@ def get_backend_context(backend: str):
     Returns a context manager for the specified backend.
     Args:
         backend (str): The name of the backend to use.
-                       Valid options are 'fav2', 'cudnn', 'math', 'efficient', 'fav3', 'fakv', 'og-eager'.
+                       Valid options are 'math', 'efficient', 'cudnn', 'fav2', 'fav3', 'fakv', 'og-eager'.
     Returns:
         A context manager for the specified backend.
     Raises:
@@ -880,7 +861,6 @@ def get_backend_context(backend: str):
         "cudnn": sdpa_kernel(SDPBackend.CUDNN_ATTENTION),
         "math": sdpa_kernel(SDPBackend.MATH),
         "efficient": sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
-        "flex": nullcontext(),
         "fav3": nullcontext(),
         "fakv": nullcontext(),
         "og-eager": nullcontext(),
@@ -1224,6 +1204,7 @@ def _output_json_for_dashboard(
             name: str
             type: str
             origins: list[str]
+            extra_info: dict[str, Any]
 
         @dataclass
         class MetricInfo:
@@ -1248,14 +1229,19 @@ def _output_json_for_dashboard(
                     "input_config": input_config,
                     "device": device,
                     "arch": device_arch,
-                    "backend": backend,
+                    "operator_name": backend,
                     "attn_type": config.attn_type,
                     "shape": str(config.shape),
                     "max_autotune": True,  # We always use max_autotune
                 },
             ),
             model=ModelInfo(
-                name=test_name, type="attention-benchmark", origins=["pytorch"]
+                name=test_name,
+                type="attention-benchmark",
+                origins=["pytorch"],
+                extra_info={
+                    "operator_name": backend,
+                },
             ),
             metric=MetricInfo(
                 name="forward_latency",
@@ -1277,14 +1263,15 @@ def _output_json_for_dashboard(
                         "input_config": input_config,
                         "device": device,
                         "arch": device_arch,
-                        "backend": backend,
+                        "operator_name": backend,
                         "attn_type": config.attn_type,
                         "shape": str(config.shape),
                         "max_autotune": True,
                     },
                 ),
                 model=ModelInfo(
-                    name=test_name, type="attention-benchmark", origins=["pytorch"]
+                    name=test_name, type="attention-benchmark", origins=["pytorch"],
+                    extra_info={"operator_name": backend,}
                 ),
                 metric=MetricInfo(
                     name="forward_memory_bandwidth",
@@ -1306,14 +1293,19 @@ def _output_json_for_dashboard(
                         "input_config": input_config,
                         "device": device,
                         "arch": device_arch,
-                        "backend": backend,
+                        "operator_name": backend,
                         "attn_type": config.attn_type,
                         "shape": str(config.shape),
                         "max_autotune": True,
                     },
                 ),
                 model=ModelInfo(
-                    name=test_name, type="attention-benchmark", origins=["pytorch"]
+                    name=test_name,
+                    type="attention-benchmark",
+                    origins=["pytorch"],
+                    extra_info={
+                        "operator_name": backend,
+                    }
                 ),
                 metric=MetricInfo(
                     name="forward_tflops",
@@ -1335,14 +1327,17 @@ def _output_json_for_dashboard(
                         "input_config": input_config,
                         "device": device,
                         "arch": device_arch,
-                        "backend": backend,
+                        "operator_name": backend,
                         "attn_type": config.attn_type,
                         "shape": str(config.shape),
                         "max_autotune": True,
                     },
                 ),
                 model=ModelInfo(
-                    name=test_name, type="attention-benchmark", origins=["pytorch"]
+                    name=test_name, type="attention-benchmark", origins=["pytorch"],
+                    extra_info={
+                        "operator_name": backend,
+                },
                 ),
                 metric=MetricInfo(
                     name="backward_latency",
@@ -1352,35 +1347,6 @@ def _output_json_for_dashboard(
                 ),
             )
             records.append(asdict(record_bwd_latency))
-
-        # Add record for sparsity (if available)
-        if results.sparsity is not None:
-            record_sparsity = BenchmarkRecord(
-                benchmark=BenchmarkInfo(
-                    name=benchmark_name,
-                    mode=mode,
-                    dtype=dtype,
-                    extra_info={
-                        "input_config": input_config,
-                        "device": device,
-                        "arch": device_arch,
-                        "backend": backend,
-                        "attn_type": config.attn_type,
-                        "shape": str(config.shape),
-                        "max_autotune": True,
-                    },
-                ),
-                model=ModelInfo(
-                    name=test_name, type="attention-benchmark", origins=["pytorch"]
-                ),
-                metric=MetricInfo(
-                    name="attention_sparsity",
-                    unit="%",
-                    benchmark_values=[results.sparsity * 100],
-                    target_value=None,
-                ),
-            )
-            records.append(asdict(record_sparsity))
 
     # Write all records to the output file
     with open(output_file, "w", encoding="utf-8") as f:
@@ -1409,16 +1375,16 @@ def main(
 
     Usage Examples:
         # Generate a config template
-        python score_mod.py --print_config > my_config.yaml
+        python score_mod.py --print-config > my_config.json
 
         # Use a config file
-        python score_mod.py --config configs/config_basic.yaml
+        python score_mod.py --config my_config.json
 
         # Override config with CLI args
-        python score_mod.py --config configs/config_basic.yaml --dtype float16 --max_autotune
+        python score_mod.py --config my_config.json -dtype float16 --max-autotune
 
         # Pure CLI usage
-        python score_mod.py --b 4 8 --s 1024 2048 --mods causal alibi --backend efficient
+        python score_mod.py -b 4 8 -s 1024 2048 -mods causal alibi --backend efficient
 
     Args:
         dynamic: Runs a dynamic shapes version of compiled flex attention
@@ -1429,7 +1395,7 @@ def main(
         s: Sequence lengths to benchmark
         d: Head dimensions to benchmark
         mods: Score modifications: noop, causal, rel, head_bias, alibi, sliding_window, document_mask, prefix_lm, softcap
-        backend: Backends for attention computation: math, efficient, cudnn, fav2, fav3, fakv
+        backend: Backends for attention computation: math, efficient, cudnn, fav2, fav3, fakv, og-eager
         max_autotune: Turn on max-autotune optimization
         decoding: Benchmark decoding mode (query sequence length = 1)
         kv_size: Key/value cache size in MiB (ignores batch size if specified)
@@ -1438,17 +1404,23 @@ def main(
         output_json_for_dashboard: Path to save results in JSON format for PyTorch OSS dashboard
         benchmark_name: Name of the benchmark for dashboard output
     """
-    # Convert dtype string to torch dtype
+    # Convert dtype string to torch dtype (if not already converted)
     import torch
 
-    dtype = getattr(torch, dtype)
+    if isinstance(dtype, str):
+        dtype = getattr(torch, dtype)
 
-    # Parse head configurations
-    nh_parsed = [heads_input_type(h) for h in nh]
+    # Parse head configurations (if not already parsed)
+    nh_parsed = []
+    for h in nh:
+        if isinstance(h, tuple):
+            nh_parsed.append(h)
+        else:
+            nh_parsed.append(heads_input_type(h))
 
     # Always calculate throughput
     throughput = True
-
+    print('Backend: ', backend)
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -1501,4 +1473,192 @@ def heads_input_type(s: str) -> tuple[int, int]:
 
 
 if __name__ == "__main__":
-    CLI(main, as_positional=False)
+    # Set up the argument parser
+    parser = argparse.ArgumentParser(
+        description="Run sweep over sizes and score mods for flex attention"
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        help="Path to JSON config file. CLI args override config file values.",
+        default=None,
+    )
+    parser.add_argument(
+        "--dynamic",
+        action="store_true",
+        help="Runs a dynamic shapes version of compiled flex attention.",
+    )
+    parser.add_argument(
+        "--calculate-bwd", action="store_true", help="Calculate backward pass times"
+    )
+
+    parser.add_argument("-dtype", type=str, help="dtype", default="bfloat16")
+
+    parser.add_argument(
+        "-b", type=int, nargs="+", help="batch sizes", default=[2, 8, 16]
+    )
+    parser.add_argument(
+        "-nh",
+        type=heads_input_type,
+        nargs="+",
+        help="# of q-heads,kv-heads",
+        default=[(16, 16), (16, 2)],
+    )
+    parser.add_argument(
+        "-s", type=int, nargs="+", help="sequence lengths", default=[512, 1024, 4096]
+    )
+    parser.add_argument("-d", type=int, nargs="+", help="head dims", default=[64, 128])
+    parser.add_argument(
+        "-mods",
+        type=str,
+        nargs="+",
+        help="score mods: noop, causal, rel, head_bias, alibi, sliding_window, document_mask, prefix_lm, softcap",
+        default=["noop", "causal", "alibi", "sliding_window"],
+    )
+    parser.add_argument(
+        "--max-autotune", action="store_true", help="Turn on max-autotune"
+    )
+    parser.add_argument(
+        "--decoding",
+        action="store_true",
+        help="Benchmark Decoding (query sequence length = 1)",
+    )
+    parser.add_argument(
+        "--kv-size",
+        type=int,
+        nargs="+",
+        required=False,
+        help="""
+key/value size in MiB.
+Ignores -b batch size and calculate batch size from kv size instead when specified.
+""",
+    )
+    parser.add_argument(
+        "--throughput",
+        action="store_true",
+        help="Calculate kernel memory bandwidth & computational throughput. ",
+    )
+    parser.add_argument(
+        "--save-path",
+        type=str,
+        help="Path to save the results JSON file (optional)",
+        default=None,
+    )
+    parser.add_argument(
+        "--backend",
+        type=str,
+        nargs="+",
+        choices=["math", "efficient", "cudnn", "fav2", "fav3", "fakv"],
+        default=["efficient"],
+        help="Backend to use for attention computation",
+    )
+    parser.add_argument(
+        "--output-json-for-dashboard",
+        type=str,
+        help="Path to save results in JSON format for PyTorch OSS dashboard",
+        default=None,
+    )
+    parser.add_argument(
+        "--benchmark-name",
+        type=str,
+        help="Name of the benchmark for dashboard output",
+        default="PyTorch attention benchmark",
+    )
+    # Parse arguments
+    args = parser.parse_args()
+
+    # Load config file if provided
+    if args.config:
+        with open(args.config, 'r') as f:
+            # Try to load as JSON first, then fall back to YAML
+            config_str = f.read()
+            try:
+                config = json.loads(config_str)
+            except json.JSONDecodeError:
+                # Simple YAML parser for basic configs (without external dependencies)
+                config = {}
+                for line in config_str.split('\n'):
+                    line = line.split('#')[0].strip()  # Remove comments
+                    if not line or ':' not in line:
+                        continue
+                    key, value = line.split(':', 1)
+                    key = key.strip()
+                    value = value.strip()
+
+                    # Parse value
+                    if value.lower() == 'true':
+                        config[key] = True
+                    elif value.lower() == 'false':
+                        config[key] = False
+                    elif value.lower() in ('null', 'none', ''):
+                        config[key] = None
+                    elif value.startswith('[') and value.endswith(']'):
+                        # Parse list - handle quoted strings properly
+                        import re
+                        # Match quoted strings (with anything inside) or unquoted items
+                        pattern = r'"([^"]+)"|\'([^\']+)\'|([^,\[\]\s]+)'
+                        matches = re.findall(pattern, value[1:-1])  # Remove [ ]
+                        parsed_items = []
+                        for match in matches:
+                            # match is a tuple of (double_quoted, single_quoted, unquoted)
+                            item = match[0] or match[1] or match[2]
+                            item = item.strip()
+                            if item:
+                                try:
+                                    parsed_items.append(int(item))
+                                except ValueError:
+                                    parsed_items.append(item)
+                        config[key] = parsed_items
+                    elif value.startswith('"') or value.startswith("'"):
+                        config[key] = value.strip('"\'')
+                    else:
+                        # Try to parse as number
+                        try:
+                            config[key] = int(value)
+                        except ValueError:
+                            try:
+                                config[key] = float(value)
+                            except ValueError:
+                                config[key] = value
+
+        # Merge config file with command line args (CLI args take precedence)
+        # Only override if the argument wasn't explicitly set on command line
+        for key, value in config.items():
+            # Convert key format (e.g., "calculate_bwd" to "calculate_bwd")
+            key_normalized = key.replace("-", "_")
+
+            # Check if this arg was set on command line by comparing with default
+            if hasattr(args, key_normalized):
+                arg_value = getattr(args, key_normalized)
+                default_value = parser.get_default(key_normalized)
+
+                # If the arg value equals default, use config file value
+                if arg_value == default_value:
+                    # Handle special case for 'nh' which needs conversion
+                    if key_normalized == "nh" and isinstance(value, list):
+                        setattr(args, key_normalized, [heads_input_type(h) if isinstance(h, str) else h for h in value])
+                    else:
+                        setattr(args, key_normalized, value)
+
+    # Convert dtype string to torch dtype (only if it's still a string)
+    if isinstance(args.dtype, str):
+        args.dtype = getattr(torch, args.dtype)
+
+    main(
+        dynamic=args.dynamic,
+        calculate_bwd=args.calculate_bwd,
+        dtype=args.dtype,
+        b=args.b,
+        nh=args.nh,
+        s=args.s,
+        d=args.d,
+        mods=args.mods,
+        backend=args.backend,
+        max_autotune=args.max_autotune,
+        decoding=args.decoding,
+        kv_size=args.kv_size,
+        throughput=args.throughput,
+        save_path=args.save_path,
+        output_json_for_dashboard=args.output_json_for_dashboard,
+        benchmark_name=args.benchmark_name,
+    )

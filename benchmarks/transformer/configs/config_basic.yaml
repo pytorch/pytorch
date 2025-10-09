@@ -16,7 +16,7 @@ d: [64, 128]  # head dimensions
 mods: ["noop", "causal", "alibi", "sliding_window", "document_mask"]
 
 # Backend and optimization
-backend: []
+backend: ["efficient", "fav2"]
 max_autotune: false
 
 # Decoding and cache settings
