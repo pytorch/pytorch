@@ -2,8 +2,6 @@
 
 from typing import Optional
 
-import torch
-
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec, TensorSpec
 
@@ -20,17 +18,12 @@ class UniqueOperator(Operator):
         return "torch.unique"
 
     def can_produce(self, output_spec: Spec) -> bool:
-        """Unique produces a 1D tensor with data-dependent size."""
-        if not isinstance(output_spec, TensorSpec):
-            return False
+        """Unique can produce 1D tensor outputs of arbitrary length without guards.
 
-        # Output is always 1D with data-dependent size
-        # Be very restrictive to avoid shape mismatches
-        return (
-            len(output_spec.size) == 1
-            and output_spec.size[0] <= 10  # Reasonable size
-            and output_spec.dtype not in [torch.bool]
-        )  # Avoid bool outputs
+        We will synthesize an input with exactly the desired number of unique
+        elements so that torch.unique returns the target size deterministically.
+        """
+        return isinstance(output_spec, TensorSpec) and len(output_spec.size) == 1
 
     def fuzz_inputs_specs(self, output_spec: Spec, num_inputs: int = 1) -> list[Spec]:
         """Generate input spec for unique operation."""
@@ -49,8 +42,15 @@ class UniqueOperator(Operator):
     def codegen(
         self, output_name: str, input_names: list[str], output_spec: Spec
     ) -> str:
-        """Generate code for unique operation."""
+        """Generate code for unique with deterministic target size input (no guards)."""
         if len(input_names) != 1:
             raise ValueError("UniqueOperator requires exactly one input")
-
-        return f"{output_name} = torch.unique({input_names[0]})"
+        # Desired output length and target dtype
+        desired_len = output_spec.size[0] if isinstance(output_spec, TensorSpec) else 0
+        # Synthesize in a wide dtype (int64) to guarantee desired_len distinct values,
+        # apply unique, then cast to the target dtype. No conditionals or guards.
+        return (
+            f"_inp_unique_wide = torch.arange({desired_len}, device={input_names[0]}.device, dtype=torch.int64)\n"
+            f"_uniq_wide = torch.unique(_inp_unique_wide)\n"
+            f"{output_name} = _uniq_wide.to({input_names[0]}.dtype)"
+        )
