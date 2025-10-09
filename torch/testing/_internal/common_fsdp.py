@@ -998,6 +998,42 @@ def patch_all_gather(new_all_gather_into_tensor: Callable):
 
 
 @contextlib.contextmanager
+def patch_foreach_all_gather(new_foreach_all_gather: Callable):
+    orig_foreach_all_gather = (
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather
+    )
+    dist.barrier()
+    torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather = (
+        new_foreach_all_gather
+    )
+    try:
+        yield
+    finally:
+        dist.barrier()
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather = (
+            orig_foreach_all_gather
+        )
+
+
+@contextlib.contextmanager
+def patch_foreach_reduce(new_foreach_reduce: Callable):
+    orig_foreach_foreach_reduce = (
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce
+    )
+    dist.barrier()
+    torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce = (
+        new_foreach_reduce
+    )
+    try:
+        yield
+    finally:
+        dist.barrier()
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce = (
+            orig_foreach_foreach_reduce
+        )
+
+
+@contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
     orig_reduce_scatter = dist.reduce_scatter_tensor
     dist.barrier()
