@@ -1575,11 +1575,12 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @parametrize("shift_k", [0, 1, 2, 3])
     @config.patch({"unbacked_symint_fallback": 12})
     @config.patch({"triton.autotune_at_compile_time": None})
-    def test_colin(self):
+    def test_colin(self, shift_k):
         if self.device != GPU_TYPE:
-            raise unittest.SkipTest("requires triton")
+            raise unittest.SkipTest("Need triton for user-defined triton kernel")
 
         INNER_DIM = 256
 
@@ -1598,44 +1599,44 @@ class AOTInductorTestsTemplate:
             return tensor
 
         class Repro(torch.nn.Module):
-            def forward(self, x, lst):
-                s0 = x.size(0)
-                s1 = x.size(1)
-                s2 = x.size(2)
+            def forward(self, x, y, lst):
+                s0, s1 = x.shape
+                s2, s3 = y.shape
+                u0, u1, u2, u3, u100 = lst.tolist()
 
-                u0, u1, u2, u100 = lst.tolist()
-
-                """
-                s27 + u1 = s77 + u0
-                s53 + u2 = s77 + u0
-                s77 + u0 = u3
-                """
                 expr1 = s0 + u0
                 expr2 = s1 + u1
-                expr3 = s2 + u2
-                expr4 = u100
+                expr3 = (s2 * s3) + (u2 // u3)  # make this one a lil complicated
+                expr4 = 300
 
-                t1 = realize_out_tensor_with_size(expr3)
+                t1 = realize_out_tensor_with_size(expr1)
                 t2 = realize_out_tensor_with_size(expr2)
-                t3 = realize_out_tensor_with_size(expr1)
+                t3 = realize_out_tensor_with_size(expr3)
                 t4 = realize_out_tensor_with_size(expr4)
 
-                cat = torch.cat([t1, t2, t3, t4], dim=1)
+                # shift tensors to change up the torch._check order
+                tensors = [t1, t2, t3, t4]
+                shifted_tensors = tensors[shift_k:] + tensors[:shift_k]
 
-                # Add deferred runtime assertion: s0 + s1 == u0
-                # torch._check(relevant_embeddings.size(0) == ones.size(0))
-                # relevant_embeddings += ones
-                # return relevant_embeddings * relevant_embeddings
+                # torch.cat implicitly runs torch._check(lhs == rhs)
+                cat = torch.cat(shifted_tensors, dim=1)
+
                 return cat * cat
 
+        # Disable cuda caching allocator to check for IMA
         torch.cuda.caching_allocator_enable(False)
         model = Repro()
         example_inputs = (
-            torch.randn((100, 200, 300), device=self.device),
-            torch.tensor([200, 100, 0, 300], device=self.device, dtype=torch.int),
+            # s0, s1
+            torch.randn((100, 200), device=self.device),
+            # s2, s3
+            torch.randn((100, 3), device=self.device),
+            # u0, u1, u2, u3, u100
+            torch.tensor([200, 100, 0, 1, 300], device=self.device, dtype=torch.int),
         )
         spec = {
-            "x": (Dim.DYNAMIC, Dim.DYNAMIC, Dim.DYNAMIC),
+            "x": (Dim.DYNAMIC, Dim.DYNAMIC),
+            "y": (Dim.DYNAMIC, Dim.DYNAMIC),
             "lst": (Dim.STATIC,),
         }
         self.check_model(model, example_inputs, dynamic_shapes=spec)
