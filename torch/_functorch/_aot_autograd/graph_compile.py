@@ -238,7 +238,21 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
 def aot_stage2_compile(
     aot_state: AOTState,
     aot_graph_capture: AOTGraphCapture,
+    partition_fn: Callable,
+    fw_compiler: Callable,
+    bw_compiler: Optional[Callable] = None,
+    inference_compiler: Optional[Callable] = None,
 ) -> DispatchReturn:
+    if bw_compiler is None:
+        bw_compiler = fw_compiler
+    if inference_compiler is None:
+        inference_compiler = fw_compiler
+    # Update the AOTState with the provided compilers
+    aot_state.aot_config.partition_fn = partition_fn
+    aot_state.aot_config.fw_compiler = fw_compiler
+    aot_state.aot_config.bw_compiler = bw_compiler
+    aot_state.aot_config.inference_compiler = inference_compiler
+
     if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
         return aot_stage2_autograd(aot_state, aot_graph_capture)
     else:
@@ -291,7 +305,7 @@ def aot_stage2_inference(
                 "name": "torch._functorch.config",
                 "encoding": "string",
             },
-            payload_fn=lambda: torch._functorch.config.get_config_copy(),
+            payload_fn=lambda: torch._functorch.config.get_serializable_config_copy(),
         )
 
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -425,7 +439,7 @@ def collect_fw_donated_buffer_idxs(
     """
 
     storage_refs = set()
-    # pyrefly: ignore  # bad-assignment
+
     for t in itertools.chain(fw_ins, user_fw_outs, bw_outs):
         # Only access storage if a tensor has storage (not sparse)
         if t is not None and isinstance(t, FakeTensor) and not is_sparse_any(t):
@@ -1396,6 +1410,10 @@ def aot_stage2_autograd(
             if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
 
+            # apply joint_gm callback here
+            if callable(torch._functorch.config.joint_custom_pass):
+                fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
+
             static_lifetime_input_indices = fw_metadata.static_input_indices
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g,
@@ -1477,7 +1495,7 @@ def aot_stage2_autograd(
                     "name": "torch._functorch.config",
                     "encoding": "string",
                 },
-                payload_fn=lambda: torch._functorch.config.get_config_copy(),
+                payload_fn=lambda: torch._functorch.config.get_serializable_config_copy(),
             )
             aot_graphs_log.info(
                 "aot_config id: %s, fw_metadata=%s, inner_meta=%s",

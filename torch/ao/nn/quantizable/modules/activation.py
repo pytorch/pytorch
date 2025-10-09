@@ -170,8 +170,11 @@ class MultiheadAttention(nn.MultiheadAttention):
             observed.linear_K.weight = nn.Parameter(other.k_proj_weight)
             observed.linear_V.weight = nn.Parameter(other.v_proj_weight)
             if other.in_proj_bias is None:
+                # pyrefly: ignore  # bad-assignment
                 observed.linear_Q.bias = None
+                # pyrefly: ignore  # bad-assignment
                 observed.linear_K.bias = None
+                # pyrefly: ignore  # bad-assignment
                 observed.linear_V.bias = None
             else:
                 observed.linear_Q.bias = nn.Parameter(
@@ -234,6 +237,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             _end = _start + fp.embed_dim
             fp.in_proj_weight[_start:_end, :] = wQ
             if fp.in_proj_bias is not None:
+                # pyrefly: ignore  # bad-argument-type
                 assert all(bQ == 0)
                 fp.in_proj_bias[_start:_end] = bQ
 
@@ -241,12 +245,14 @@ class MultiheadAttention(nn.MultiheadAttention):
             _end = _start + fp.embed_dim
             fp.in_proj_weight[_start:_end, :] = wK
             if fp.in_proj_bias is not None:
+                # pyrefly: ignore  # bad-argument-type
                 assert all(bK == 0)
                 fp.in_proj_bias[_start:_end] = bK
 
             _start = _end
             fp.in_proj_weight[_start:, :] = wV
             if fp.in_proj_bias is not None:
+                # pyrefly: ignore  # bad-argument-type
                 assert all(bV == 0)
                 fp.in_proj_bias[_start:] = bV
         else:
@@ -254,8 +260,11 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.k_proj_weight = nn.Parameter(wK)
             fp.v_proj_weight = nn.Parameter(wV)
             if fp.in_proj_bias is None:
+                # pyrefly: ignore  # bad-assignment
                 self.linear_Q.bias = None
+                # pyrefly: ignore  # bad-assignment
                 self.linear_K.bias = None
+                # pyrefly: ignore  # bad-assignment
                 self.linear_V.bias = None
             else:
                 fp.in_proj_bias[0 : fp.embed_dim] = bQ
@@ -463,6 +472,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             assert static_v.size(2) == head_dim
             v = static_v
 
+        # pyrefly: ignore  # missing-attribute
         src_len = k.size(1)
 
         if key_padding_mask is not None:
@@ -471,17 +481,35 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         if self.add_zero_attn:
             src_len += 1
+            # pyrefly: ignore  # missing-attribute
             k_zeros = torch.zeros((k.size(0), 1) + k.size()[2:])
+            # pyrefly: ignore  # missing-attribute
             if k.is_quantized:
                 k_zeros = torch.quantize_per_tensor(
-                    k_zeros, k.q_scale(), k.q_zero_point(), k.dtype
+                    k_zeros,
+                    # pyrefly: ignore  # missing-attribute
+                    k.q_scale(),
+                    # pyrefly: ignore  # missing-attribute
+                    k.q_zero_point(),
+                    # pyrefly: ignore  # missing-attribute
+                    k.dtype,
                 )
+            # pyrefly: ignore  # no-matching-overload
             k = torch.cat([k, k_zeros], dim=1)
+            # pyrefly: ignore  # missing-attribute
             v_zeros = torch.zeros((v.size(0), 1) + k.size()[2:])
+            # pyrefly: ignore  # missing-attribute
             if v.is_quantized:
                 v_zeros = torch.quantize_per_tensor(
-                    v_zeros, v.q_scale(), v.q_zero_point(), v.dtype
+                    v_zeros,
+                    # pyrefly: ignore  # missing-attribute
+                    v.q_scale(),
+                    # pyrefly: ignore  # missing-attribute
+                    v.q_zero_point(),
+                    # pyrefly: ignore  # missing-attribute
+                    v.dtype,
                 )
+            # pyrefly: ignore  # no-matching-overload
             v = torch.cat([v, v_zeros], dim=1)
 
             if attn_mask is not None:
