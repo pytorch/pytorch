@@ -142,8 +142,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
 namespace at {
 namespace native {
 
-#include <cudnn_frontend.h>
-
 namespace fe = cudnn_frontend;
 
 constexpr uint8_t MAX_MHA_DIM = 4;
@@ -373,8 +371,7 @@ struct MHAGraphCache {
   }
 
   void update(const KeyType& key, T& results) {
-    engine_cache.erase(key);
-    engine_cache.emplace(key, std::move(results));
+    engine_cache.insert_or_assign(key, std::move(results));
   }
 };
 
@@ -482,7 +479,9 @@ auto build_graph(
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
           .set_name("CUDNN_SDPA")
-          .set_generate_stats(return_softmaxstats)
+          .set_is_inference(return_softmaxstats == false)
+          // TODO(eqy): switch to this API once cuDNN FE is upgraded
+          // .set_generate_stats(return_softmaxstats)
           .set_causal_mask(is_causal)
           .set_attn_scale(attn_scale);
   if (use_ragged_in_dense(q, k, v, o, attn_bias.has_value())) {
@@ -702,7 +701,9 @@ auto build_graph_nestedtensor(
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
           .set_name("CUDNN_SDPA_NESTEDTENSOR")
-          .set_generate_stats(return_softmaxstats)
+          .set_is_inference(return_softmaxstats == false)
+          // TODO(eqy): switch to this API once cuDNN FE is upgraded
+          // .set_generate_stats(return_softmaxstats)
           .set_causal_mask(is_causal)
           .set_attn_scale(attn_scale)
           .set_seq_len_q(SEQ_LEN_Q_)
@@ -1375,7 +1376,7 @@ void run_cudnn_SDP_fprop(
   cudnnHandle_t handle = getCudnnHandle();
 
   // NB: The key initialization will round up sequence length, stride data etc.
-  // if use_ragged_in_dense is enabled (to allow multiple sequence lenghths to
+  // if use_ragged_in_dense is enabled (to allow multiple sequence lengths to
   // reuse the same cached value/graph)
   auto key = MHACacheKeyWrapper(
       b,

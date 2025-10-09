@@ -343,7 +343,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
         /* Prepare scratch space */
         std::vector<accscalar_t> mx_row(nvalues, -std::numeric_limits<accscalar_t>::infinity());
-        std::vector<scalar_t> exp_sums_row(nvalues, 0);
+        std::vector<accscalar_t> exp_sums_row(nvalues, 0);
 
         /* Compute mx */
         for (int64_t i : pool_indices) {

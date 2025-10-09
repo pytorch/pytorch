@@ -117,14 +117,8 @@ class CI(NamedTuple):
 
 
 CI_SKIP_OPTIMIZER = {
-    # TIMM
-    "convmixer_768_32",  # accuracy
-    "hrnet_w18",  # Stack issue in fx
     # HF
-    "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
-    "MobileBertForQuestionAnswering",  # Stack issue in fx
-    "PegasusForConditionalGeneration",  # OOM
 }
 
 try:
@@ -155,7 +149,6 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "detectron2_fasterrcnn_r_50_c4",
     "detectron2_fasterrcnn_r_50_dc5",
     "detectron2_fasterrcnn_r_50_fpn",
-    "hf_T5_generate",
     "Reformer",
     "llama",
 }.union(INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY)
@@ -182,51 +175,22 @@ BENCHMARK_USE_SGD = {
     "speech_transformer",
     "squeezenet1_1",
     "stable_diffusion_text_encoder",
-    "timm_efficientdet",
-    "timm_nfnet",
-    "timm_resnest",
-    "timm_vision_transformer",
-    "timm_vovnet",
     "vgg16",
-    "hf_T5",  # Fails dynamic https://github.com/pytorch/pytorch/issues/115968
     # HF
     "AlbertForMaskedLM",
     "BartForCausalLM",
-    "BartForConditionalGeneration",
-    "BlenderbotSmallForCausalLM",
-    "BlenderbotSmallForConditionalGeneration",
-    "DebertaV2ForQuestionAnswering",  # eager OOM
     "ElectraForCausalLM",
     "M2M100ForConditionalGeneration",
     "MBartForCausalLM",
-    "MBartForConditionalGeneration",
     "OPTForCausalLM",
     "PLBartForCausalLM",
-    "PLBartForConditionalGeneration",
     "PegasusForCausalLM",
     "TrOCRForCausalLM",
     "XGLMForCausalLM",
     # TIMM
     "adv_inception_v3",
-    "botnet26t_256",
-    "cait_m36_384",  # OOM
-    "coat_lite_mini",
-    "convit_base",
-    "dpn107",
-    "fbnetv3_b",
-    "gernet_l",
-    "lcnet_050",
-    "mixnet_l",
-    "res2net101_26w_4s",
-    "res2net50_14w_8s",
-    "res2next50",
-    "resnest101e",
-    "sebotnet33ts_256",
-    "swsl_resnext101_32x16d",
     "tf_efficientnet_b0",
     "ghostnet_100",
-    "gmixer_24_224",
-    "tinynet_a",
 }
 
 # These models OOM in CI
@@ -245,31 +209,21 @@ CI_USE_SGD = {
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
-    "hf_T5_base",
-    "hf_clip",
     "llama_v2_7b_16h",
     "mobilenet_v2_quantized_qat",
     "phi_1_5 resnet50_quantized_qat",
     "BlenderbotForCausalLM",
-    "cait_m36_384",
     "DALLE2_pytorch",
     "moco",
     "timm_efficientdet",
     "ghostnet_100",
-    "regnety_002",
-    "poolformer_m36",
     "inception_v3",
-    "tinynet_a",
-    "selecsls42b",
     "mobilevit_s",
     "pytorch_CycleGAN_and_pix2pix",
     "vision_maskrcnn",
-    "resmlp_12_224",
     "dlrm",
     "resnet50",
     "dm_nfnet_f0",
-    "pit_b_224",
-    "tf_mixnet_l",
 }
 
 
@@ -733,7 +687,7 @@ def timed(
 
     time_total = 0
     # Dont collect outputs to correctly measure timing
-    for _ in range(times):
+    for i in range(times):
         # If batch_size is 1, it too often collides with other non batch size
         # dimensions resulting in errors.
         if batch_size and batch_size > 1:
@@ -1106,7 +1060,13 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         elif args.torchscript_jit_trace:
             frozen_model_iter_fn = torchscript_jit_trace(model, example_inputs)
         else:
-            frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+            if kwargs["hf_llm"]:
+                # If it's an llm, we want to optimize model.forward, and use
+                # the generate function
+                model.forward = torch._dynamo.run(model)
+                frozen_model_iter_fn = model_iter_fn
+            else:
+                frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
@@ -1120,7 +1080,10 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             maybe_mark_step(args)
 
             # interleave the runs to handle frequency scaling and load changes
-            with maybe_mark_profile(p=p, mark="expected"):
+            with (
+                maybe_mark_profile(p=p, mark="expected"),
+                torch.compiler.set_stance("force_eager"),
+            ):
                 timings[rep, 0], expected_output = timed(
                     model,
                     model_iter_fn,
@@ -2059,8 +2022,6 @@ class BenchmarkRunner:
         from diffusers.models.transformer_2d import Transformer2DModel
         from torchbenchmark.models.nanogpt.model import Block
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-        from transformers.models.t5.modeling_t5 import T5Block
-        from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
 
         from torch.distributed.fsdp.wrap import (
             ModuleWrapPolicy,
@@ -2070,10 +2031,6 @@ class BenchmarkRunner:
         # handcrafted wrap policy
         MODEL_FSDP_WRAP = {
             "stable_diffusion_unet": (Transformer2DModel,),
-            "hf_T5": (T5Block,),
-            "hf_T5_base": (T5Block,),
-            "hf_T5_large": (T5Block,),
-            "hf_Whisper": (WhisperEncoderLayer,),
             "llama_v2_7b_16h": (LlamaDecoderLayer,),
             "nanogpt": (Block,),
         }
@@ -2233,11 +2190,12 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                correct_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
-                )
+                with torch.compiler.set_stance("force_eager"):
+                    model_copy = self.deepcopy_and_maybe_parallelize(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    correct_result = self.run_n_iterations(
+                        model_copy, clone_inputs(example_inputs), self.model_iter_fn
+                    )
             except Exception as e:
                 accuracy_status = (
                     "eager_1st_run_OOM"
@@ -2254,11 +2212,12 @@ class BenchmarkRunner:
             reset_rng_state()
             model_copy = None
             try:
-                model_copy = self.deepcopy_and_maybe_parallelize(model)
-                self.init_optimizer(name, current_device, model_copy.parameters())
-                correct_rerun_result = self.run_n_iterations(
-                    model_copy, clone_inputs(example_inputs), self.model_iter_fn
-                )
+                with torch.compiler.set_stance("force_eager"):
+                    model_copy = self.deepcopy_and_maybe_parallelize(model)
+                    self.init_optimizer(name, current_device, model_copy.parameters())
+                    correct_rerun_result = self.run_n_iterations(
+                        model_copy, clone_inputs(example_inputs), self.model_iter_fn
+                    )
             except Exception as e:
                 accuracy_status = (
                     "eager_2nd_run_OOM"
@@ -2271,7 +2230,9 @@ class BenchmarkRunner:
                 del model_copy
                 empty_gpu_cache(current_device)
 
-            # Two eager runs should have exactly same result
+            # Two eager runs should have exactly same result, within tolerance.
+            # TODO If we want the above to be true, then deterministic should be set.
+            # For example, MIOpen convolutions could be implemented with non-deterministic algos.
             is_same = True
             try:
                 if (
@@ -2281,7 +2242,7 @@ class BenchmarkRunner:
                         correct_rerun_result,
                         fp64_ref=None,
                         cos_similarity=False,
-                        tol=0,
+                        tol=tolerance if torch.version.hip else 0,
                         equal_nan=self.equal_nan,
                         use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
                             name
@@ -2542,7 +2503,11 @@ class BenchmarkRunner:
                     )
 
             baseline_timings = experiment(
-                model, example_inputs, mark="expected", **experiment_kwargs
+                self.model_iter_fn,
+                model,
+                example_inputs,
+                mark="expected",
+                **experiment_kwargs,
             )
 
             if self.args.export_aot_inductor:
@@ -2610,7 +2575,11 @@ class BenchmarkRunner:
                     )
 
             backend_timings = experiment(
-                model, example_inputs, mark="expected", **experiment_kwargs
+                self.model_iter_fn,
+                model,
+                example_inputs,
+                mark="expected",
+                **experiment_kwargs,
             )
             timings = np.stack((baseline_timings, backend_timings), axis=1)
             result_summary = latency_experiment_summary(
@@ -2629,9 +2598,17 @@ class BenchmarkRunner:
         tag=None,
         batch_size=None,
     ):
+        niters = 5
+        if getattr(self, "hf_llm", False):
+            # If we're benchmarking an llm, we want to use the generate function
+            self.model_iter_fn = self.generate
+            niters = 1
+
         if self.args.xla:
             with self.pick_grad(name, self.args.training):
-                return experiment(*self.maybe_cast(model, example_inputs))
+                return experiment(
+                    self.model_iter_fn, *self.maybe_cast(model, example_inputs)
+                )
 
         def warmup(fn, model, example_inputs, mode, niters=5):
             gc.collect()
@@ -2696,17 +2673,22 @@ class BenchmarkRunner:
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"eager_{self.args.only}"
             ):
-                eager_latency, eager_peak_mem, _ = warmup(
-                    self.model_iter_fn, copy.deepcopy(model), example_inputs, "eager"
-                )
-                if self.args.use_warm_peak_memory:
-                    _, eager_peak_mem, _ = warmup(
+                with torch.compiler.set_stance("force_eager"):
+                    eager_latency, eager_peak_mem, _ = warmup(
                         self.model_iter_fn,
                         copy.deepcopy(model),
                         example_inputs,
                         "eager",
-                        niters=1,
+                        niters=niters,
                     )
+                    if self.args.use_warm_peak_memory:
+                        _, eager_peak_mem, _ = warmup(
+                            self.model_iter_fn,
+                            copy.deepcopy(model),
+                            example_inputs,
+                            "eager",
+                            niters=1,
+                        )
 
             if (
                 self.args.export_aot_inductor
@@ -2715,7 +2697,13 @@ class BenchmarkRunner:
             ):
                 optimized_model_iter_fn = optimize_ctx
             else:
-                optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
+                if getattr(self, "hf_llm", False):
+                    # If it's an llm, we want to optimize model.forward, and use
+                    # the generate function
+                    model = optimize_ctx(model)
+                    optimized_model_iter_fn = self.model_iter_fn
+                else:
+                    optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
 
             with maybe_snapshot_memory(
                 self.args.snapshot_memory, f"compiled_{self.args.only}"
@@ -2793,7 +2781,13 @@ class BenchmarkRunner:
                     f"{ok:3}/{total:3} +{frames_third_pass} frames {compilation_time:3.0f}s"
                 )
 
-            results.append(experiment(model, example_inputs, **experiment_kwargs))
+            experiment_kwargs["hf_llm"] = getattr(self, "hf_llm", False)
+
+            results.append(
+                experiment(
+                    self.model_iter_fn, model, example_inputs, **experiment_kwargs
+                )
+            )
             return " ".join(map(str, results))
 
     def minify_model(
@@ -3536,18 +3530,10 @@ def process_caching_precompile():
     )
     from torch._dynamo.precompile_context import PrecompileContext
 
-    # Serialize all callables, clear PrecompileContext
-    # TODO: put this under torch.compiler API once ready
-    serialized = PrecompileContext.serialize()
-    PrecompileContext.clear()
-    if serialized is not None:
-        artifacts, info = serialized
-        print(
-            f"Saving {len(info.precompile_dynamo_artifacts)} Precompile Artifact(s)..."
-        )
-        results = PrecompileContext.deserialize(artifacts)
-        assert results is not None
-        PrecompileContext.populate_caches(results)
+    debug_info = PrecompileContext.save_to_dynamo_cache()
+    print(
+        f"Saved {len(debug_info['dynamo'])} precompile artifacts with {len(debug_info['backends'])} backends"
+    )
 
 
 def process_entry(rank, runner, original_dir, args):
@@ -3751,9 +3737,7 @@ def run(runner, args, original_dir=None):
             torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         if args.only is not None and args.only in {
-            "DebertaForQuestionAnswering",
             "nvidia_deeprecommender",
-            "crossvit_9_240",
         }:
             # These seem unhappy with numerics of larger cuBLASLt workspace
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
@@ -3781,7 +3765,6 @@ def run(runner, args, original_dir=None):
             runner.skip_models.update(
                 {
                     # xfail: https://github.com/pytorch/pytorch/issues/145773
-                    "convit_base",
                     "llama",
                     "cm3leon_generate",
                 }
@@ -3811,22 +3794,6 @@ def run(runner, args, original_dir=None):
     if args.devices != ["cpu"] and (HAS_CUDA or HAS_XPU):
         global synchronize
         synchronize = torch.cuda.synchronize if HAS_CUDA else torch.xpu.synchronize
-
-    if (
-        args.devices == ["cuda"]
-        and torch.cuda.get_device_properties(0).total_memory < 25 * 2**30
-    ):
-        # OOM errors on an RTX 3090 with 24gb RAM
-        runner.skip_models.update(
-            {
-                # torchbench
-                "hf_Longformer",
-                "timm_nfnet",
-                "timm_efficientdet",
-            }
-        )
-        if args.training:
-            runner.skip_models.add("hf_T5")
 
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)
@@ -4084,7 +4051,7 @@ def run(runner, args, original_dir=None):
         # Overwrite 'translation_validation' config, if specified.
         torch.fx.experimental._config.translation_validation = False
 
-    experiment = functools.partial(experiment, args, runner.model_iter_fn)
+    experiment = functools.partial(experiment, args)
 
     if args.only and should_diff_branch(args):
         import git

@@ -17,8 +17,9 @@ import operator
 import time
 import traceback
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import nullcontext
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
@@ -51,6 +52,7 @@ from torchgen.utils import dataclass_repr
 from .. import config
 from .autograd_cache import (
     AOTAutogradCache,
+    GenericAOTAutogradCacheEntry,
     serialize_graph_module,
     should_bundle_autograd_cache,
     should_use_remote_autograd_cache,
@@ -73,6 +75,7 @@ from .runtime_wrappers import (
     post_compile,
     pre_compile,
     RuntimeWrapper,
+    SerializableCompiledFunction,
 )
 from .schemas import (
     AOTConfig,
@@ -235,7 +238,21 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
 def aot_stage2_compile(
     aot_state: AOTState,
     aot_graph_capture: AOTGraphCapture,
+    partition_fn: Callable,
+    fw_compiler: Callable,
+    bw_compiler: Optional[Callable] = None,
+    inference_compiler: Optional[Callable] = None,
 ) -> DispatchReturn:
+    if bw_compiler is None:
+        bw_compiler = fw_compiler
+    if inference_compiler is None:
+        inference_compiler = fw_compiler
+    # Update the AOTState with the provided compilers
+    aot_state.aot_config.partition_fn = partition_fn
+    aot_state.aot_config.fw_compiler = fw_compiler
+    aot_state.aot_config.bw_compiler = bw_compiler
+    aot_state.aot_config.inference_compiler = inference_compiler
+
     if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
         return aot_stage2_autograd(aot_state, aot_graph_capture)
     else:
@@ -288,7 +305,7 @@ def aot_stage2_inference(
                 "name": "torch._functorch.config",
                 "encoding": "string",
             },
-            payload_fn=lambda: torch._functorch.config.get_config_copy(),
+            payload_fn=lambda: torch._functorch.config.get_serializable_config_copy(),
         )
 
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -363,6 +380,7 @@ def aot_stage2_inference(
             AOTAutogradCache.save(
                 cache_info.cache_key, entry, remote=should_use_remote_autograd_cache()
             )
+            compiled_fw = SerializableCompiledFunction(compiled_fw, lambda: entry)
 
     compiled_fw = fakified_out_wrapper.post_compile(
         compiled_fw,
@@ -421,6 +439,7 @@ def collect_fw_donated_buffer_idxs(
     """
 
     storage_refs = set()
+
     for t in itertools.chain(fw_ins, user_fw_outs, bw_outs):
         # Only access storage if a tensor has storage (not sparse)
         if t is not None and isinstance(t, FakeTensor) and not is_sparse_any(t):
@@ -490,6 +509,7 @@ def collect_bw_donated_buffer_idxs(
         fw_ins,
         user_fw_outs,
         bw_outs,
+        # pyrefly: ignore  # bad-argument-type
         saved_tensors,
     )
 
@@ -1315,7 +1335,8 @@ def maybe_inline_graph_saved_tensors_hooks(
 
 
 def aot_stage2_autograd(
-    aot_state: AOTState, aot_graph_capture: AOTGraphCapture
+    aot_state: AOTState,
+    aot_graph_capture: AOTGraphCapture,
 ) -> DispatchReturn:
     """
     Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
@@ -1388,6 +1409,10 @@ def aot_stage2_autograd(
             # TODO(anijain2305) - Add tensorify_python_scalars to the HOP graph passes.
             if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
+
+            # apply joint_gm callback here
+            if callable(torch._functorch.config.joint_custom_pass):
+                fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
             static_lifetime_input_indices = fw_metadata.static_input_indices
             fw_module, bw_module = aot_config.partition_fn(
@@ -1470,7 +1495,7 @@ def aot_stage2_autograd(
                     "name": "torch._functorch.config",
                     "encoding": "string",
                 },
-                payload_fn=lambda: torch._functorch.config.get_config_copy(),
+                payload_fn=lambda: torch._functorch.config.get_serializable_config_copy(),
             )
             aot_graphs_log.info(
                 "aot_config id: %s, fw_metadata=%s, inner_meta=%s",
@@ -1757,6 +1782,7 @@ def aot_stage2_autograd(
                     # (2408448, 1, 21504, 192). The solution mentioned will
                     # decide a stride of (802816, 1, 7168, 64) for this
                     # tensor which is wrong.
+                    # pyrefly: ignore  # bad-argument-type
                     placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
             compiled_bw_func = None
@@ -1832,6 +1858,7 @@ def aot_stage2_autograd(
     make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
     try_save_cache_entry: Optional[Callable] = None
+    entry: Optional[GenericAOTAutogradCacheEntry] = None
 
     if aot_config.cache_info is not None:
         forward_time_taken_ns = time.time_ns() - aot_config.cache_info.start_time_ns
@@ -1844,7 +1871,7 @@ def aot_stage2_autograd(
             bw_module: torch.fx.GraphModule,
             _fw_metadata: ViewAndMutationMeta,
             aot_config: AOTConfig,
-        ):
+        ) -> Optional[GenericAOTAutogradCacheEntry]:
             cache_info = aot_config.cache_info
 
             def should_save_cache():
@@ -1891,10 +1918,14 @@ def aot_stage2_autograd(
                 )
                 remote = should_use_remote_autograd_cache()
                 AOTAutogradCache.save(cache_info.cache_key, entry, remote)
+                return entry
+            return None
 
         if compiled_bw_func is not None:
             # If we already compiled the backward, we save its cache entry now
-            try_save_cache_entry(compiled_bw_func, bw_module, fw_metadata, aot_config)
+            entry = try_save_cache_entry(
+                compiled_bw_func, bw_module, fw_metadata, aot_config
+            )
             try_save_cache_entry = None
 
     compiled_fn = AOTDispatchAutograd.post_compile(
@@ -1910,6 +1941,9 @@ def aot_stage2_autograd(
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
     )
+
+    if entry is not None:
+        compiled_fn = SerializableCompiledFunction(compiled_fn, lambda: entry)
 
     if config.debug_assert:
         flat_requires_grad: list[Optional[bool]] = [

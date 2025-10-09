@@ -658,13 +658,6 @@
     "Iterable",
     "Optional"
   ],
-  "torch.onnx": [
-    "Dict",
-    "OperatorExportTypes",
-    "Optional",
-    "TensorProtoDataType",
-    "TrainingMode"
-  ],
   "torch.overrides": [
     "BaseTorchFunctionMode",
     "TorchFunctionMode",
@@ -1118,14 +1111,6 @@
     "_amp_update_scale_",
     "_assert_async",
     "_batch_norm_impl_index",
-    "_cast_Byte",
-    "_cast_Char",
-    "_cast_Double",
-    "_cast_Float",
-    "_cast_Half",
-    "_cast_Int",
-    "_cast_Long",
-    "_cast_Short",
     "_choose_qparams_per_tensor",
     "_coalesce",
     "_compute_linear_combination",
@@ -2207,21 +2192,6 @@
     "Tuple",
     "abstractmethod"
   ],
-  "torch.onnx.verification": [
-    "Any",
-    "Callable",
-    "Collection",
-    "Dict",
-    "FrozenSet",
-    "List",
-    "Mapping",
-    "Number",
-    "Optional",
-    "Sequence",
-    "Set",
-    "Tuple",
-    "Union"
-  ],
   "torch.quantization.fx": [
     "convert",
     "fuse",
@@ -2684,35 +2654,6 @@
   "torch.mtia": [
     "DeferredMtiaCallError",
     "StreamContext"
-  ],
-  "torch.onnx.symbolic_helper": [
-    "Any",
-    "Callable",
-    "List",
-    "Literal",
-    "NoReturn",
-    "Number",
-    "Optional",
-    "Sequence",
-    "Set",
-    "Tuple",
-    "Union"
-  ],
-  "torch.onnx.symbolic_opset18": [
-    "amax",
-    "amin",
-    "aminmax",
-    "embedding_bag",
-    "linalg_vector_norm",
-    "max",
-    "maximum",
-    "min",
-    "minimum"
-  ],
-  "torch.onnx.symbolic_opset20": [
-    "_affine_grid_generator",
-    "_grid_sampler",
-    "convert_grid_sample_mode"
   ],
   "torch.utils.data.datapipes.dataframe.dataframe_wrapper": [
     "Any",

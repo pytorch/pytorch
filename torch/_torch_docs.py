@@ -5308,7 +5308,7 @@ add_docstr(
 index_select(input, dim, index, *, out=None) -> Tensor
 
 Returns a new tensor which indexes the :attr:`input` tensor along dimension
-:attr:`dim` using the entries in :attr:`index` which is a `LongTensor`.
+:attr:`dim` using the entries in :attr:`index`.
 
 The returned tensor has the same number of dimensions as the original tensor
 (:attr:`input`).  The :attr:`dim`\ th dimension has the same size as the length
@@ -7132,7 +7132,7 @@ indices ``i`` and ``j`` in the sorted order, result is computed according to the
 - ``linear``: ``a + (b - a) * fraction``, where ``fraction`` is the fractional part of the computed quantile index.
 - ``lower``: ``a``.
 - ``higher``: ``b``.
-- ``nearest``: ``a`` or ``b``, whichever's index is closer to the computed quantile index (rounding down for .5 fractions).
+- ``nearest``: ``a`` or ``b``, whichever's index is closer to the computed quantile index (follows :func:`torch.round`).
 - ``midpoint``: ``(a + b) / 2``.
 
 If :attr:`q` is a 1D tensor, the first dimension of the output represents the quantiles and has size

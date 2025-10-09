@@ -24,7 +24,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -695,7 +695,6 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(grad1_norm.device_mesh, mesh_y)
 
     @with_comms
-    @skipIfRocm
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -880,6 +879,34 @@ class DistMathOpsTest(DTensorTestBase):
 
                 out_full = out_dt.full_tensor()
                 self.assertEqual(global_bins, out_full)
+
+    @with_comms
+    def test_logsumexp(self):
+        mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+        inp = torch.rand(3, 5, device=self.device_type)
+
+        shard_dim = 0
+        input_dtensor = distribute_tensor(
+            inp, device_mesh=mesh, placements=[Shard(shard_dim)]
+        )
+
+        logsumexp_dims = [0, 1]
+        for dim in logsumexp_dims:
+            output = torch.logsumexp(inp, dim=dim)
+            with comm_mode:
+                output_dtensor = torch.logsumexp(input_dtensor, dim=dim)
+                if dim == shard_dim:
+                    self.assertEqual(comm_mode.get_total_counts(), 1)
+                    self.assertEqual(
+                        comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                        1,
+                    )
+                    self.assertTrue(output_dtensor.placements[0].is_replicate())
+                else:
+                    self.assertEqual(comm_mode.get_total_counts(), 0)
+                    self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
+                self.assertEqual(output_dtensor.full_tensor(), output)
 
 
 if __name__ == "__main__":
