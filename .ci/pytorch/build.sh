@@ -304,7 +304,7 @@ else
     if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
       # Regression test for https://github.com/pytorch/pytorch/issues/164297
       # Torch should be importable and that's about it
-      python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"
+      pushd /; python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"; popd
     fi
 
     if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
