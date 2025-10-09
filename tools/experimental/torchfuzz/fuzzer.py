@@ -20,11 +20,42 @@ from torchfuzz.runner import ProgramRunner
 from torchfuzz.visualize_graph import visualize_operation_graph
 
 
+def _parse_supported_ops_with_weights(spec: str) -> tuple[list[str], dict[str, float]]:
+    """Parse --supported-ops string.
+
+    Format: comma-separated fully-qualified torch ops, each optionally with =weight.
+    Example: "torch.matmul=5,torch.nn.functional.rms_norm=5,torch.add"
+    Returns (ops_list, weights_dict)
+    """
+    ops: list[str] = []
+    weights: dict[str, float] = {}
+    if not spec:
+        return ops, weights
+    for entry in spec.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if "=" in entry:
+            name, w = entry.split("=", 1)
+            name = name.strip()
+            try:
+                weight = float(w.strip())
+            except ValueError:
+                continue
+            ops.append(name)
+            weights[name] = weight
+        else:
+            ops.append(entry)
+    return ops, weights
+
+
 def fuzz_and_execute(
     seed: Optional[int] = None,
     max_depth: Optional[int] = None,
     log_at_faluire: bool = False,
     template: str = "default",
+    supported_ops: Optional[list[str]] = None,
+    op_weights: Optional[dict[str, float]] = None,
 ) -> None:
     """
     Generate a fuzzed operation stack, convert it to Python code, and execute it.
@@ -113,6 +144,12 @@ def fuzz_and_execute(
         logger.debug("⏱️  Step 1: Generating target spec...")
         start_time = time.time()
         target_spec = fuzz_spec(template)
+
+        # Apply user-specified operator weights (if provided)
+        if op_weights:
+            from torchfuzz.operators import set_operator_weights
+
+            set_operator_weights(op_weights)
         logger.debug(
             "   Completed in %.3fs - %s", time.time() - start_time, target_spec
         )
@@ -120,7 +157,11 @@ def fuzz_and_execute(
         logger.debug("⏱️  Step 2: Generating operation graph...")
         start_time = time.time()
         operation_graph = fuzz_operation_graph(
-            target_spec, max_depth=max_depth, seed=seed, template=template
+            target_spec,
+            max_depth=max_depth,
+            seed=seed,
+            template=template,
+            supported_ops=supported_ops,
         )
 
         # Extract and print operation statistics
@@ -226,6 +267,15 @@ if __name__ == "__main__":
         default="default",
         help="Template to use for code generation (default: default)",
     )
+    parser.add_argument(
+        "--supported-ops",
+        type=str,
+        help=(
+            "Comma-separated fully-qualified torch ops to allow, each optionally with =weight. "
+            "Examples: 'torch.matmul,torch.nn.functional.rms_norm' or "
+            "'torch.matmul=5,torch.nn.functional.rms_norm=5'. Overrides template supported ops."
+        ),
+    )
 
     # Multi-process fuzzing arguments
     parser.add_argument(
@@ -272,8 +322,20 @@ if __name__ == "__main__":
     if args.seed is not None or args.single:
         # Single seed execution mode
         print("Running single fuzz_and_execute...")
+        # Parse supported ops and any inline weights from that flag
+        parsed_supported_ops: Optional[list[str]] = None
+        parsed_weights: dict[str, float] = {}
+        if args.supported_ops:
+            parsed_supported_ops, parsed_weights = _parse_supported_ops_with_weights(
+                args.supported_ops
+            )
+
         fuzz_and_execute(
-            seed=args.seed, max_depth=args.max_depth, template=args.template
+            seed=args.seed,
+            max_depth=args.max_depth,
+            template=args.template,
+            supported_ops=parsed_supported_ops,
+            op_weights=(parsed_weights if parsed_weights else None),
         )
     elif args.start is not None or args.count is not None:
         # Multi-process fuzzing mode
@@ -305,6 +367,7 @@ if __name__ == "__main__":
                 seed_count=args.count,
                 verbose=args.verbose,
                 template=args.template,
+                supported_ops=args.supported_ops,
             )
         except Exception as e:
             print(f"❌ Unexpected error: {str(e)}")
