@@ -6693,12 +6693,12 @@
 
 - func: native_norm(Tensor self, Scalar p=2) -> Tensor
   dispatch:
-    SparseCPU, SparseCUDA: norm_sparse
+    SparseCPU, SparseCUDA, SparseMPS: norm_sparse
   autogen: native_norm.out
 
 - func: native_norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, ScalarType? dtype) -> Tensor
   dispatch:
-    SparseCPU, SparseCUDA: norm_sparse
+    SparseCPU, SparseCUDA, SparseMPS: norm_sparse
   autogen: native_norm.ScalarOpt_dim_dtype_out
 
 - func: _batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)
@@ -6824,14 +6824,14 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_dtype_norm
+    SparseCPU, SparseCUDA, SparseMPS: sparse_dtype_norm
 
 - func: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
   structured_delegate: norm.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_norm
+    SparseCPU, SparseCUDA, SparseMPS: sparse_norm
 
 - func: norm.dtype_out(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
   structured: True

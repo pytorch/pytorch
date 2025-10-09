@@ -5124,7 +5124,7 @@ def gradcheck(fn, inputs, **kwargs):
 
     for key, value in default_values.items():
         # default value override values explicitly set to None
-        k = kwargs.get(key, None)
+        k = kwargs.get(key)
         kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
@@ -5144,7 +5144,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
 
     for key, value in default_values.items():
         # default value override values explicitly set to None
-        k = kwargs.get(key, None)
+        k = kwargs.get(key)
         kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
