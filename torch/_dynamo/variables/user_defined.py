@@ -804,7 +804,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
                 add_dynamo_owned_stream(stream)
                 ind = register_user_object(stream, torch_stream_src)
-                breakpoint()
                 tensor_variable = wrap_fx_proxy(
                     tx=tx,
                     proxy=tx.output.create_proxy(
