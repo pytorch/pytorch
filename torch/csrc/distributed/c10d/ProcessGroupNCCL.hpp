@@ -1463,6 +1463,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::unique_ptr<c10::cuda::MemPool> memPool_ = nullptr;
 };
 
+// Reset the flighrecorder recordings for the current rank.
+TORCH_API void reset_nccl_trace();
+
 // Dumps the NCCL comm traces and additional information about the Process
 // Group.
 TORCH_API std::string dump_nccl_trace(
