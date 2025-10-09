@@ -107,7 +107,7 @@ class device:
     @overload
     def __init__(self, type: str, index: _int) -> None: ...
 
-    # Uncomment if we ever make torch.device a decorator
+    # Uncomment if we ever rake torch.device a decorator
     # def __call__(self, func: T) -> T: ...
 
     def __enter__(self) -> Self: ...
@@ -2791,9 +2791,9 @@ class GreenContext:
         num_sms: _int,
         device_id: _int,
     ) -> GreenContext: ...
-    def make_current(
+    def set_context(
         self,
     ) -> None: ...
-    def pop_current(
+    def pop_context(
         self,
     ) -> None: ...

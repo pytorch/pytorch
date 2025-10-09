@@ -35,9 +35,9 @@ class TORCH_CUDA_CPP_API GreenContext {
 #endif
 
   // Make this context current
-  void makeCurrent();
+  void setContext();
 
-  void popCurrent();
+  void popContext();
 
  private:
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)

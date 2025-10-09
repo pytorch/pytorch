@@ -145,7 +145,7 @@ namespace at::cuda {
 #endif
 
   // Make this context current
-  void GreenContext::makeCurrent() {
+  void GreenContext::setContext() {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
     auto current_stream = c10::cuda::getCurrentCUDAStream();
     parent_stream_ = current_stream.stream();
@@ -174,7 +174,7 @@ namespace at::cuda {
 #endif
   }
 
-  void GreenContext::popCurrent() {
+  void GreenContext::popContext() {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
     // see above note about stream being hardcoded to the default stream
     at::cuda::CUDAEvent ev;
