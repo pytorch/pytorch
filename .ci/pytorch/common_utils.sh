@@ -288,7 +288,14 @@ EOF
   else
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     sccache --show-stats
+    sccache --stop-server
+    export SCCACHE_LOG_LEVEL=debug
+    export SCCACHE_ERROR_LOG=/tmp/sccache_errors.log
+    export SCCACHE_LOG=debug
+    export RUST_LOG=sccache::server=debug
+    sccache --start-server
     pip_build_and_install "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#subdirectory=fbgemm_gpu" dist/fbgemm_gpu
+    mv /tmp/sccache_errors.log dist/fbgemm_gpu/sccache_errors_fbgemm.log
     sccache --show-stats
   fi
 }
