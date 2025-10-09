@@ -648,7 +648,6 @@ class CustomOpDef:
 
             def adinplaceorview_impl(keyset, *args, **kwargs):
                 # Handle the mutated idx the user gave us explicitly
-
                 for idx in mutated_idxs:
                     increment_version(args[idx])
                 for key in mutated_keys:

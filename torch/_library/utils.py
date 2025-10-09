@@ -94,6 +94,7 @@ def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool
         is_non_mutating_view = len(rets) > 0 and any(
             r.alias_info is not None and not r.alias_info.is_write for r in rets
         )
+
         num_tensor_inputs = 0
         num_tensor_outputs = 0
 

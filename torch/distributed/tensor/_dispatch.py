@@ -146,6 +146,16 @@ class OpDispatcher:
         (2) registered sharding strategy, then rule
         (3) composite implicit autograd decomposition
         """
+        if op_call is torch.ops.dtensor._dtensor_local_tensor.default:
+            # This is the backend implementation of to local
+            if not isinstance(args[0], dtensor.DTensor):
+                raise TypeError(
+                    "The first argument to _dtensor_local_tensor should be a DTensor"
+                )
+            local_tensor = args[0]._local_tensor
+            # Always return a different Tensor object
+            return local_tensor.view_as(local_tensor)
+
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
