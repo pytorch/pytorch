@@ -108,6 +108,13 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
   return false;
 }
 
+bool use_cudnn(const Tensor& t) {
+  bool acceptable = at::cudnn_is_acceptable(t);
+  auto st = t.scalar_type();
+  bool bfloat16_cond = st == kBFloat16 && at::detail::getCUDAHooks().supportsBFloat16RNNWithCuDNN();
+  return acceptable && (bfloat16_cond || st == kDouble || st == kFloat || st == kHalf);
+}
+
 template<typename T>
 using pair_of = std::pair<T, T>;
 
@@ -1200,7 +1207,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       bool train,                                                           \
       bool bidirectional,                                                   \
       bool batch_first) {                                                   \
-    if (at::cudnn_is_acceptable(_input)) {                                  \
+    if (use_cudnn(_input)) {                                                \
       Tensor output, hy;                                                    \
       NAME##_cudnn_stub(                                                    \
           _input.device().type(),                                           \
@@ -1262,7 +1269,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       double dropout_p,                                                     \
       bool train,                                                           \
       bool bidirectional) {                                                 \
-    if (at::cudnn_is_acceptable(data)) {                                    \
+    if (use_cudnn(data)) {                                                  \
       Tensor output, hy;                                                    \
       NAME##_packed_cudnn_stub(                                             \
           data.device().type(),                                             \
@@ -1430,7 +1437,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  if (at::cudnn_is_acceptable(_input)) {
+  if (use_cudnn(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
@@ -1491,7 +1498,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  if (at::cudnn_is_acceptable(data)) {
+  if (use_cudnn(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);
