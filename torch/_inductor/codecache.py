@@ -94,6 +94,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import (
     ALIGN_BYTES,
     clear_on_fresh_cache,
+    determine_aoti_mmap_flags,
     is_linux,
     is_windows,
 )
@@ -2175,7 +2176,10 @@ end
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
-            if config.aot_inductor.package_constants_in_so:
+            if (
+                config.aot_inductor.package_constants_in_so
+                or config.aot_inductor.package_constants_on_disk_format == "binary_blob"
+            ):
                 serialized_weights = b"".join(
                     _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
                     for name in graph.constants.keys()
@@ -2184,7 +2188,7 @@ end
             else:
                 serialized_weights = b""
 
-            if config.aot_inductor.package_constants_on_disk:
+            if config.aot_inductor.package_constants_on_disk_format == "pickle_weights":
                 # We need to return a storage key here because the original value tensor might be a clone
                 weights_dict = Weights(
                     {
@@ -2200,15 +2204,27 @@ end
 
             consts_size = len(serialized_weights)
 
-            # TODO: Fix mmap weights with cuda
-            use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
-            if config.aot_inductor.force_mmap_weights:
-                use_mmap_weights = True
+            use_external_weights, use_mmap_weights = determine_aoti_mmap_flags(
+                consts_size
+            )
+            if use_external_weights and use_mmap_weights:
+                # Should never reach here, just a check for sanity
+                raise RuntimeError(
+                    "use_external_weights and  use_mmap_weights cannot both be True."
+                )
+
+            external_weights_path = None
+            if use_external_weights:
+                external_weights_filename = f"{wrapper_path_operator.stem}_weights.blob"
+                external_weights_path = str(
+                    wrapper_path_operator.with_name(external_weights_filename)
+                )
 
             compile_command: dict[str, Any] = {
                 "aot_mode": graph.aot_mode,
                 "device_type": device_type,
                 "use_mmap_weights": use_mmap_weights,
+                "use_mmap_weights_external": use_external_weights,
                 "use_relative_path": use_relative_path,
                 "vec_isa": picked_vec_isa,
             }
@@ -2287,7 +2303,15 @@ end
             if not use_mmap_weights:
                 aot_constants = serialized_weights
                 magic_number = 0
+                if use_external_weights:
+                    aot_constants = struct.pack("q", consts_size)
+                    assert external_weights_path is not None
+                    # For external weights, write weights to separate file and embed minimal placeholder
+                    with open(external_weights_path, "wb") as f_weights:
+                        f_weights.write(serialized_weights)
+                    generated_files.append(external_weights_path)
             else:
+                # we'll append weights binary to the end of .so file and mmap it when loading
                 magic_number = cast(
                     int, torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
                 )
@@ -2468,6 +2492,10 @@ end
                     os.remove(o_file)
 
                 if use_mmap_weights:
+                    if config.aot_inductor.cross_target_platform == "windows":
+                        raise RuntimeError(
+                            "when cross_target_platform is windows, use_mmap_weights should not be true."
+                        )
 
                     def get_page_size() -> int:
                         # Don't use resource.getpagesize() on Windows, as it is a Unix specific package
