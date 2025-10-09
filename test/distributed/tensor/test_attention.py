@@ -112,7 +112,7 @@ class RingAttentionTest(DTensorTestBase):
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],
-                "new_api": [True, False],
+                "use_context": [True, False],
             },
             self._test_ring_attention_sdpa,
         )
@@ -132,9 +132,9 @@ class RingAttentionTest(DTensorTestBase):
         rotater: _RotateMethod,
         test_forward_only: bool,
         load_balance: bool,
-        new_api: bool,
+        use_context: bool,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        if new_api:
+        if not use_context:
             cp_plan = _ContextParallel(
                 seq_dim=seq_dim,
                 attention_type=_ContextParallel.AttentionType.SDPA,
@@ -204,7 +204,7 @@ class RingAttentionTest(DTensorTestBase):
         for target in [cp_q, cp_k, cp_v]:
             target.requires_grad = False
 
-        if new_api:
+        if not use_context:
             _disable_context_parallel_dispatcher()
         else:
             cp_context.__exit__(None, None, None)
@@ -219,7 +219,7 @@ class RingAttentionTest(DTensorTestBase):
         load_balance: bool,
         rotater: _RotateMethod,
         test_forward_only: bool,
-        new_api: bool,
+        use_context: bool,
     ) -> None:
         def fn_eval(fn, *args, **kwargs):
             if test_forward_only:
@@ -283,7 +283,7 @@ class RingAttentionTest(DTensorTestBase):
             rotater=rotater,
             test_forward_only=test_forward_only,
             load_balance=load_balance,
-            new_api=new_api,
+            use_context=use_context,
         )
 
         # Due to numerical error, we need to choose different atol for different
