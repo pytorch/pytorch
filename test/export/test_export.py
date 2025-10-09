@@ -10907,6 +10907,7 @@ graph():
         test_inp = torch.randn(2, 3)
 
         torch_gm = _export_to_torch_ir(orig_eager, (torch.rand(2, 3),), {})
+        torch_gm.state_dict().keys()
         for k, v in orig_eager.state_dict().items():
             self.assertIn(k, torch_gm.state_dict())
             self.assertEqual(v, torch_gm.state_dict()[k])
@@ -10927,6 +10928,7 @@ graph():
             self.assertIn(k, ep.state_dict)
             self.assertEqual(v, ep.state_dict[k])
         self.assertTrue(torch.allclose(ep.module()(test_inp), orig_eager(test_inp)))
+        self.assertTrue(torch_gm.state_dict().keys(), orig_eager.state_dict().keys())
 
     def test_nn_module_stack(self):
         class Leaf(torch.nn.Module):
