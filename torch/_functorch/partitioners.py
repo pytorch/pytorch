@@ -199,6 +199,7 @@ def _extract_graph_with_inputs_outputs(
         new_node = new_graph.placeholder(node.name)
         # Can't use node_copy here as we may be turning previous call_function into placeholders
         new_node.meta = node.meta
+        # pyrefly: ignore  # unsupported-operation
         env[node] = new_node
 
     for node in joint_graph.nodes:
@@ -227,8 +228,10 @@ def _extract_graph_with_inputs_outputs(
             if any(all_args):
                 env[node] = InvalidNode  # type: ignore[assignment]
                 continue
+            # pyrefly: ignore  # unsupported-operation, bad-argument-type
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "get_attr":
+            # pyrefly: ignore  # unsupported-operation, bad-argument-type
             env[node] = new_graph.node_copy(node, lambda x: env[x])
         elif node.op == "output":
             pass
@@ -1403,12 +1406,14 @@ def functionalize_rng_ops(
     devices = OrderedSet(
         get_device(node_pair["fwd"]) for node_pair in recomputable_rng_ops_map.values()
     )
+    # pyrefly: ignore  # unbound-name
     devices.discard(torch.device("cpu"))
     # multiple cuda devices won't work with cudagraphs anyway,
     # fallback to non graphsafe rng checkpointing
     multi_cuda_devices = len(devices) > 1
 
     # this changes numerics, so if fallback_random is set we will not use it
+    # pyrefly: ignore  # unbound-name
     ind_config = torch._inductor.config
     use_rng_graphsafe_rng_functionalization = (
         config.graphsafe_rng_functionalization
@@ -2840,6 +2845,7 @@ def min_cut_rematerialization_partition(
         node_info,
         memory_budget=memory_budget,
     )
+    # pyrefly: ignore  # unbound-name
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_graph, saved_values)
     # save_for_backward on tensors and stashes symints in autograd .ctx
