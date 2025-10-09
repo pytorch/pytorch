@@ -27,9 +27,8 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_get_kernel_function(
     AOTIMetalKernelFunctionHandle* function_handle);
 
 // MetalKernelFunction functions
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_start_encoding(
-    AOTIMetalKernelFunctionHandle func);
-
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_mps_start_encoding(AOTIMetalKernelFunctionHandle func);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mps_set_arg_tensor(
     AOTIMetalKernelFunctionHandle func,

@@ -167,7 +167,8 @@ class MetalShaderLibrary {
       std::pair<MTLComputePipelineState_t, MTLFunction_t>>
       cplMap;
   // Cache for kernel functions returned by getCachedKernelFunctionPtr
-  std::unordered_map<std::string, std::unique_ptr<MetalKernelFunction>> kernelCache;
+  std::unordered_map<std::string, std::unique_ptr<MetalKernelFunction>>
+      kernelCache;
 };
 
 class DynamicMetalShaderLibrary : public MetalShaderLibrary {

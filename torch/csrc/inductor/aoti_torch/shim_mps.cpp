@@ -32,7 +32,8 @@ AOTITorchError aoti_torch_mps_create_shader_library(
     const char* metal_shader_source,
     AOTIMetalShaderLibraryHandle* library_handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* library = new at::native::mps::DynamicMetalShaderLibrary(std::string(metal_shader_source));
+    auto* library = new at::native::mps::DynamicMetalShaderLibrary(
+        std::string(metal_shader_source));
     *library_handle = reinterpret_cast<AOTIMetalShaderLibraryHandle>(library);
   });
 }
@@ -40,7 +41,8 @@ AOTITorchError aoti_torch_mps_create_shader_library(
 AOTITorchError aoti_torch_mps_delete_shader_library(
     AOTIMetalShaderLibraryHandle library_handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* library = reinterpret_cast<at::native::mps::MetalShaderLibrary*>(library_handle);
+    auto* library =
+        reinterpret_cast<at::native::mps::MetalShaderLibrary*>(library_handle);
     delete library;
   });
 }
@@ -50,16 +52,20 @@ AOTITorchError aoti_torch_mps_get_kernel_function(
     const char* kernel_name,
     AOTIMetalKernelFunctionHandle* function_handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* library = reinterpret_cast<at::native::mps::MetalShaderLibrary*>(library_handle);
-    auto* function = library->getCachedKernelFunctionPtr(std::string(kernel_name));
-    *function_handle = reinterpret_cast<AOTIMetalKernelFunctionHandle>(function);
+    auto* library =
+        reinterpret_cast<at::native::mps::MetalShaderLibrary*>(library_handle);
+    auto* function =
+        library->getCachedKernelFunctionPtr(std::string(kernel_name));
+    *function_handle =
+        reinterpret_cast<AOTIMetalKernelFunctionHandle>(function);
   });
 }
 
 AOTITorchError aoti_torch_mps_start_encoding(
     AOTIMetalKernelFunctionHandle func) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* function_ptr = reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
+    auto* function_ptr =
+        reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
     function_ptr->startEncoding();
   });
 }
@@ -68,7 +74,8 @@ AOTITorchError aoti_torch_mps_dispatch_single(
     AOTIMetalKernelFunctionHandle func,
     uint64_t length) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* function_ptr = reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
+    auto* function_ptr =
+        reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
     function_ptr->dispatch(length);
   });
 }
@@ -78,7 +85,8 @@ AOTITorchError aoti_torch_mps_dispatch_single_with_group_size(
     uint64_t length,
     uint64_t group_size) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* function_ptr = reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
+    auto* function_ptr =
+        reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
     function_ptr->dispatch(length, group_size);
   });
 }
@@ -88,7 +96,8 @@ AOTITorchError aoti_torch_mps_dispatch_array(
     const uint64_t* length,
     size_t length_size) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* function_ptr = reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
+    auto* function_ptr =
+        reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
     c10::ArrayRef<uint64_t> length_ref(length, length_size);
     function_ptr->dispatch(length_ref);
   });
@@ -101,7 +110,8 @@ AOTITorchError aoti_torch_mps_dispatch_array_with_group_size(
     const uint64_t* group_size,
     size_t group_size_size) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* function_ptr = reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
+    auto* function_ptr =
+        reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
     c10::ArrayRef<uint64_t> length_ref(length, length_size);
     c10::ArrayRef<uint64_t> group_size_ref(group_size, group_size_size);
     function_ptr->dispatch(length_ref, group_size_ref);
@@ -112,7 +122,9 @@ AOTITorchError aoti_torch_mps_dispatch_array_with_group_size(
 void aoti_torch_mps_shared_callback(
     AOTIMetalKernelFunctionHandle func,
     void* user_data) {
-  auto* function_wrapper = static_cast<std::function<void(AOTIMetalKernelFunctionHandle)>*>(user_data);
+  auto* function_wrapper =
+      static_cast<std::function<void(AOTIMetalKernelFunctionHandle)>*>(
+          user_data);
   (*function_wrapper)(func);
 }
 
@@ -122,9 +134,9 @@ AOTITorchError aoti_torch_mps_run_command_block(
     aoti_torch_mps_command_block_callback_t callback,
     void* user_data) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto* function_ptr = reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
-    function_ptr->runCommandBlock([callback, func, user_data]() {
-      callback(func, user_data);
-    });
+    auto* function_ptr =
+        reinterpret_cast<at::native::mps::MetalKernelFunction*>(func);
+    function_ptr->runCommandBlock(
+        [callback, func, user_data]() { callback(func, user_data); });
   });
 }
