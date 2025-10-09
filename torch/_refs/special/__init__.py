@@ -251,3 +251,4 @@ def zeta(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
         The Riemann zeta function corresponds to the case when b = 1
     """
     return prims.zeta(a, b)
+
