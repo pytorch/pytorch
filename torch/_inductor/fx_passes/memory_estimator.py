@@ -345,8 +345,8 @@ class MemoryTracker:
     def __init__(
         self,
         graph: fx.Graph,
-        is_releasable: Optional[Callable[fx.Node, bool]] = None,
-        device_filter: Optional[Callable[[Union[torch.device, str]], bool]] = None,
+        is_releasable: Optional[Callable[[fx.Node], bool]] = None,
+        device_filter: Optional[Callable[[torch.device], bool]] = None,
     ):
         """
         Initialize memory tracker for alternative scheduling of the given graph.
@@ -355,6 +355,7 @@ class MemoryTracker:
             graph: FX graph to track memory for under alternative scheduling
             device_filter: Function to determine which devices to track (default: non-CPU)
         """
+
         self.graph = graph
         self.nodes = list(graph.nodes)
         self.device_filter = device_filter or (lambda device: device.type != "cpu")
