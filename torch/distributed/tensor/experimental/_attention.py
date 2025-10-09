@@ -60,8 +60,8 @@ _dispatch_mode: _DispatchMode = _DispatchMode.MONKEY_PATCH
 @dataclass
 class _ContextParallelOptions:
     # Whether to upcast parameters and gradients to float32 to avoid accumulation
-    # errors. It is likely this is always True but we currently keep this variable
-    # for the experimental purpose.
+    # errors. It is likely this is always True, but we currently keep this variable
+    # for experimental purposes.
     convert_to_f32: bool = True
     enable_load_balance: bool = True
     rotate_method: _RotateMethod = _RotateMethod.ALL_GATHER
@@ -109,10 +109,10 @@ def _partial_update(
     add: bool,
 ) -> torch.Tensor:
     """
-    This API partially update a chunk of ``original`` tensor. The ``original``
-    tensor will be first chunked along ``dim`` dimension then the ``idx`` chunk
+    This API partially updates a chunk of ``original`` tensor. The ``original``
+    tensor will be first chunked along ``dim`` dimension, then the ``idx`` chunk
     will be updated with ``new``. If ``add`` is True, the chunk will be added
-    with ``new``, otherwise the chunk with be replaced by ``add``.
+    with ``new``, otherwise the chunk will be replaced by ``new``.
 
     The result is a tensor that is the same size as ``original``.
     """
@@ -126,7 +126,7 @@ def _partial_update(
 
 
 class _SDPAMerger:
-    """A class to help to merge the local SDPA result."""
+    """A class to help merge the local SDPA result."""
 
     def __init__(self, convert_to_f32: bool, seq_dim: int):
         self._seq_dim = seq_dim
@@ -235,7 +235,7 @@ class _RingRotater(ABC):
 
 
 class _AllToAllRotater(_RingRotater):
-    """Use all_to_all to send the kv to the next rank"""
+    """Use all_to_all to send the kv to the next rank."""
 
     def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
         self._pg = pg
@@ -255,7 +255,7 @@ class _AllToAllRotater(_RingRotater):
 
 class _AllGatherRotater(_RingRotater):
     """
-    Allgather the kv and return the only the required kv.
+    Allgather the kv and return only the required kv.
     Only one communication will be done.
     """
 
@@ -266,7 +266,7 @@ class _AllGatherRotater(_RingRotater):
         self._idx = 0
 
     def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
-        # We only need to perform the allgather once.
+        # We only need to perform allgather once.
         self._idx += 1
         if self._aggregated_buffer is None:
             self._aggregated_buffer = ft_c.all_gather_tensor(
@@ -307,7 +307,7 @@ def _templated_ring_attention(
     **kwargs: object,
 ) -> tuple[torch.Tensor, ...]:
     """
-    This is a generalized ring attention implementation that can support multiple attention ops.
+    A generalized ring attention implementation that can support multiple attention ops.
 
     Note [Context parallelism load balance algorithm for causal masking]
     =====================
@@ -395,7 +395,7 @@ def _templated_ring_attention(
 
     next_kv = None
 
-    # Without making key and value contiguous(), the lose curve is bad.
+    # Without making key and value contiguous(), the loss curve is bad.
     # TODO(fegin): figure out why this is a requirement since SDPA does not have
     # this requirement.
     key = key.contiguous()
@@ -437,8 +437,8 @@ def _templated_ring_attention(
             q, k, v, partial = (query, key, value, False)
         elif i <= rank:
             # Round-robin load balancing case, and i <= rank.
-            # We need to do SPDA, with only the first local chunk of the k, v.
-            # Note that q, k, v, each contains two local chunks.
+            # We need to do SDPA with only the first local chunk of k, v.
+            # Note that q, k, v each contains two local chunks.
             ROUND_ROBIN_CYCLE = 2
             q, k, v, partial = (
                 query,
@@ -448,9 +448,9 @@ def _templated_ring_attention(
             )
         else:
             # Round-robin load balancing case, and i > rank.
-            # We need to do SPDA with only the second half of the q, and update
-            # only the second part of  logsumexp. So partial is True.
-            # Note that q, k, v, each contains two chunks.
+            # We need to do SDPA with only the second half of q, and update
+            # only the second part of logsumexp. So partial is True.
+            # Note that q, k, v each contains two chunks.
             q, k, v, partial = query.chunk(2, dim=2)[1], key, value, True
 
         # See https://github.com/pytorch/pytorch/blob/release/2.4/aten/src/ATen/native/native_functions.yaml#L14695
@@ -482,7 +482,7 @@ def _templated_ring_attention_backward(
     is_causal: bool,
     **kwargs: Any,
 ) -> tuple[torch.Tensor, ...]:
-    """This API implements the backward of the ring attention."""
+    """This API implements the backward pass of the ring attention."""
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
     rank = dist.get_rank(group)
@@ -526,8 +526,8 @@ def _templated_ring_attention_backward(
                 q, k, v, out_, dout, lse = (query, key, value, out, grad_out, logsumexp)
             elif i <= rank:
                 # Round-robin load balancing case, and i <= rank.
-                # We need to do SPDA with only the first half of the k, v.
-                # Note that q, k, v, each contains two chunks.
+                # We need to do SDPA with only the first half of k, v.
+                # Note that q, k, v each contains two chunks.
                 q, k, v, out_, dout, lse = (
                     query,
                     key.chunk(2, dim=seq_dim)[0],
@@ -538,8 +538,8 @@ def _templated_ring_attention_backward(
                 )
             else:
                 # Round-robin load balancing case, and i > rank.
-                # We need to do SPDA with only the second half of the q
-                # Note that q, k, v, each contains two chunks.
+                # We need to do SDPA with only the second half of q.
+                # Note that q, k, v each contains two chunks.
                 q, k, v, out_, dout, lse = (
                     query.chunk(2, dim=seq_dim)[1],
                     key,
@@ -606,7 +606,7 @@ def _templated_ring_attention_backward(
                 grad_value += grad_value_
 
         next_grad_kv = torch.cat([grad_key.flatten(), grad_value.flatten()])
-        # Send the grad key, and grad value to the next rank.
+        # Send the grad key and grad value to the next rank.
         dkv_rotater.exchange_buffers(next_grad_kv)
 
         if i <= rank or not _cp_options.enable_load_balance:
@@ -970,11 +970,6 @@ def _distribute_function(
 
 def _restore_function(fn: Callable, fn_module: types.ModuleType) -> None:
     """Restore the function that is replaced by _distribute_function."""
-    # pyrefly: ignore  # unknown-name
-    global _original_functions
-    # pyrefly: ignore  # unknown-name
-    global _wrapper_functions
-
     if fn not in _replaced_functions:
         return
 
@@ -1022,7 +1017,7 @@ def _disable_context_parallel_dispatcher_impl() -> None:
     elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
         pass
     else:
-        raise NotImplementedError
+        raise NotImplementedError(f"Unknown dispatch mode: {_dispatch_mode}")
 
     _disable_cp_dtensor_dispatcher()
 
@@ -1045,18 +1040,18 @@ def _context_parallel_buffers(
         buffers (List[torch.Tensor]): the buffers to be sharded.
         seq_dims (List[int]): the sequence dimensions of ``buffers``. This list
             must have the same length as ``buffers``.
-        load_balancer (Optional[:class:`_Loadbalancer`]): an optional `_LoadBalancer`
-            object. If this argument is `None`, it means the `buffers` needs no
+        load_balancer (Optional[:class:`_LoadBalancer`]): an optional `_LoadBalancer`
+            object. If this argument is `None`, it means the `buffers` need no
             rearrangement before being sharded. If this argument is a `_LoadBalancer`
             object, call its `_generate_indices(restore=False)` to generate the
-            rearrange indices such that each shard of `buffer[rearrange_idx]` is
-            well-balanced (i.e. having close sparsities).
+            rearrangement indices such that each shard of `buffer[rearrange_idx]` is
+            well-balanced (i.e., having close sparsities).
 
     Returns:
         List[torch.Tensor]: the sharded buffers.
 
     Note:
-        For `_context_parallel_shard` we require not-None `load_balancer` object be
+        For `_context_parallel_shard` we require a non-None `load_balancer` object to be
         explicitly passed if load-balancing is needed.
     """
     # generate the index tensor for rearranging the buffer if a load-balance
@@ -1071,7 +1066,7 @@ def _context_parallel_buffers(
     sharded_buffer: torch.Tensor | BlockMask
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if isinstance(buffer, torch.Tensor):
-            # TODO: the load balance doesn's perform error handling.
+            # TODO: the load balance doesn't perform error handling.
             if load_balance_indices is not None:
                 if load_balance_indices.size(0) == 1:  # identical load-balance in batch
                     buffer = torch.index_select(
@@ -1079,7 +1074,7 @@ def _context_parallel_buffers(
                     )
                 else:
                     # load_balance_indices has shape (batch_size, seq_length)
-                    # TODO: this for-looop can be done in a smarter way
+                    # TODO: this for-loop can be done in a smarter way
                     for i in range(load_balance_indices.size(dim=0)):
                         # NOTE: assuming batch dim is 0
                         buffer_batch_i = torch.index_select(
@@ -1119,7 +1114,7 @@ def _create_cp_block_mask(
     load_balancer: Optional[_LoadBalancer] = None,
 ) -> BlockMask:
     """
-    Create a specialized BlockMask for Context Parallel FlexAttention.
+    Creates a specialized BlockMask for Context Parallel FlexAttention.
 
     This function creates a BlockMask that enables computation of attention results
     for sharded Q attending to global KV. The mask appropriately handles the query
@@ -1137,7 +1132,7 @@ def _create_cp_block_mask(
         Q_LEN (int): Global sequence length of the query.
         KV_LEN (int): Global sequence length of the key/value.
         device_mesh (DeviceMesh): Device mesh used for context parallelism.
-        load_balancer (optional[:class:`_LoadBalancer`]): The load-balancer used to rearrange
+        load_balancer (Optional[:class:`_LoadBalancer`]): The load-balancer used to rearrange
             QKV before sharding. This will be used to modify the block_mask generated.
 
     Returns:
@@ -1380,9 +1375,9 @@ def _context_parallel_shard(
         if isinstance(buffer, torch.Tensor):
             assert device == buffer.device, "All buffers must be on the same device"
         else:
-            assert device == buffer.kv_num_blocks.device, (
-                "All buffers must be on the same device"
-            )
+            assert (
+                device == buffer.kv_num_blocks.device
+            ), "All buffers must be on the same device"
 
     return _context_parallel_buffers(mesh, buffers, seq_dims, load_balancer)
 
