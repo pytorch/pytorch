@@ -1,4 +1,5 @@
 import collections
+import warnings
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
@@ -24,11 +25,15 @@ class TensorProperties:
 
         if not self.is_fake:
             # only get the storage pointer for real tensors
+            # pyrefly: ignore  # bad-assignment
             self.storage_ptr = tensor.untyped_storage().data_ptr()
             if self.is_contiguous:
                 # only get storage size and start/end pointers for contiguous tensors
+                # pyrefly: ignore  # bad-assignment
                 self.storage_size = tensor.untyped_storage().nbytes()
+                # pyrefly: ignore  # bad-assignment
                 self.start = tensor.data_ptr()
+                # pyrefly: ignore  # bad-assignment
                 self.end = _end_ptr(tensor)
 
         # info to recover tensor
@@ -101,11 +106,12 @@ def get_complete(
         if tensor_property.is_complete():
             return name_tuple
 
-    if len(group) == 1:
-        # When there is only one tensor in the group, we return it.
-        return name_tuple
-
-    raise RuntimeError("No complete tensor found in the group!")
+    warnings.warn(
+        "No complete tensor found in the group! Returning the first one. "
+        "This may cause issues when your weights are not on CPU."
+    )
+    assert len(group) > 0
+    return next(iter(group))
 
 
 def group_weights(all_weights: dict[str, Weights]) -> list[OrderedSet[tuple[str, str]]]:
