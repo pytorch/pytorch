@@ -15,10 +15,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import parametrize
 
 
-if not ensure_flash_available():
-    raise unittest.SkipTest("Flash attention (CUTE) library is not available")
-
-
 def _times_two(score, _b, _h, _m, _n):
     return score * 2
 
@@ -142,6 +138,9 @@ def name_fn(score_mod):
     return score_mod.__name__.lstrip("_")
 
 
+@unittest.skipIf(
+    not ensure_flash_available(), "Flash attention (CUTE) library is not available"
+)
 class TestFlexFlash(InductorTestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_basic(self, device, dtype):
