@@ -224,7 +224,7 @@ class TritonBenchmarker(Benchmarker):
         """Benchmark the GPU callable, `_callable`, and return the runtime, in milliseconds.
 
         Arguments:
-        - _callable: The callable to benchmark.
+        - _callable: The GPU callable to benchmark.
 
         Keyword Arguments:
         - quantiles: Optionally, a tuple of floats denoting the requested quantiles.
@@ -249,10 +249,6 @@ class TritonBenchmarker(Benchmarker):
         elif "return_mode" in kwargs:
             return self.triton_do_bench(_callable, **kwargs)
         return self.triton_do_bench(_callable, **kwargs, return_mode="median")
-
-    benchmark_cpu = triton_do_bench_wrapper  # type: ignore[assignment]
-    benchmark_gpu = triton_do_bench_wrapper  # type: ignore[assignment]
-
 
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     @cached_property
