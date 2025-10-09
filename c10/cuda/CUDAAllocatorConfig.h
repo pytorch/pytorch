@@ -167,7 +167,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
 
   size_t parseAllocatorConfig(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
-      size_t i);
+      size_t i,
+      bool& used_cudaMallocAsync);
   size_t parsePinnedUseCudaHostRegister(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
@@ -193,7 +194,6 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<size_t> m_pinned_reserve_segment_size_mb{0};
   std::atomic<bool> m_graph_capture_record_stream_reuse{false};
   std::atomic<bool> m_use_async_allocator{false};
-  std::atomic<bool> m_is_allocator_loaded{false};
 };
 
 // Keep this for backwards compatibility
