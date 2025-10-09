@@ -47,7 +47,9 @@ def _tensor_debug_string(tensor, tensor_memo=None) -> str:
     else:
         raise RuntimeError(f"Unsupported tensor type: {type(tensor)}")
 
-    tensor_id = f"${tensor_memo.get(tensor)}" if tensor_memo and tensor in tensor_memo else ""
+    tensor_id = (
+        f"${tensor_memo.get(tensor)}" if tensor_memo and tensor in tensor_memo else ""
+    )
     return f"{prefix}{tensor_id}: {base_str}"
 
 
@@ -145,7 +147,7 @@ class DebugMode(TorchDispatchMode):
             self._output_info[op_index] = result
 
     # Without this override, running torch.compile under DebugMode
-    # will force torch.compile to always use the "eager" backend
+    # will force torch.compile to always use the “eager” backend
     # With this, DebugMode will not take effect on torch.compile
     @classmethod
     def ignore_compile_internals(cls):
@@ -246,7 +248,8 @@ class DebugMode(TorchDispatchMode):
                     op,
                     *args,
                     output=self._output_info.get(idx) if show_outputs else None,
-                    tensor_memo=tensor_memo, **kwargs
+                    tensor_memo=tensor_memo,
+                    **kwargs,
                 )
                 for idx, (op, args, kwargs, depth) in enumerate(self.operators)
             )
