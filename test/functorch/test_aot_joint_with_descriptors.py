@@ -9,9 +9,11 @@
 from contextlib import ExitStack
 
 import torch
+import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 import torch.utils._pytree as pytree
 from torch._decomp import decomposition_table
+from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._dynamo.testing import normalize_gm
 from torch._functorch._aot_autograd.descriptors import (
     BufferAOTInput,
@@ -34,6 +36,7 @@ from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
 )
+from torch._guards import tracing, TracingContext
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -760,6 +763,55 @@ class inner_f(torch.nn.Module):
         compiled_fn = torch.compile(fullgraph=True)(model_fn)
         compiled_fn(*dict(model.named_parameters()).values(), inputs).sum().backward()
         self.assertIsNotNone(model.linear.weight.grad)
+
+    def test_preserve_annotate_simple(self):
+        """Test basic linear module with aot_export_joint_with_descriptors"""
+
+        class SimpleLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(3, 2)
+
+            def forward(self, x):
+                with fx_traceback.annotate({"pp_stage": 0}):
+                    y = self.linear(x)
+                return y - 1
+
+        inputs = (torch.randn(4, 3),)
+
+        for with_export in [False]:  # TODO: make dynamo work for annotation
+            with ExitStack() as stack:
+                model = SimpleLinear()
+                fake_mode = None
+
+                stack.enter_context(fx_traceback.preserve_node_meta())
+
+                if with_export:
+                    stack.enter_context(
+                        torch._dynamo.config.patch(install_free_tensors=True)
+                    )
+                    # TODO: switch to use the official graph_capture API once it is ready
+                    model = _dynamo_graph_capture_for_export(model)(*inputs)
+                    fake_mode = model.meta.get("fake_mode", None)
+
+                stack.enter_context(tracing(TracingContext(fake_mode)))
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack, model, inputs, decompositions={}
+                )
+
+                for node in joint_with_descriptors.graph_module.graph.nodes:
+                    if node.op in ("placeholder", "output"):
+                        continue
+                    if node.target != torch.ops.aten.sub.Tensor and node.op not in (
+                        "placeholder",
+                        "output",
+                    ):
+                        self.assertTrue(node.meta["custom"], {"pp_stage": 0})
+                    elif node.target == torch.ops.aten.sub.Tensor:
+                        if "custom" in node.meta:
+                            self.assertTrue(node.meta.get("custom", {}), {})
+                    else:
+                        raise AssertionError(f"Node not checked: {node}, {node.target}")
 
 
 if __name__ == "__main__":

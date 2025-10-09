@@ -4,16 +4,15 @@
 
 import itertools
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, cast, Optional, TypeVar, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-from torch._utils import _get_device_module
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -38,24 +37,21 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     TEST_SKIPS,
 )
-from torch.testing._internal.common_utils import TEST_CUDA, TEST_HPU, TEST_XPU
+from torch.testing._internal.common_utils import (
+    TEST_CUDA,
+    TEST_HPU,
+    TEST_PRIVATEUSE1,
+    TEST_XPU,
+)
 from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 
 
 DEVICE_COUNT: int
 
-if TEST_CUDA:
-    DEVICE_TYPE = "cuda"
-    PG_BACKEND = "nccl"
-    DEVICE_COUNT = _get_device_module("cuda").device_count()
-elif TEST_HPU:
-    DEVICE_TYPE = "hpu"
-    PG_BACKEND = "hccl"
-    DEVICE_COUNT = _get_device_module("hpu").device_count()
-elif TEST_XPU:
-    DEVICE_TYPE = "xpu"
-    PG_BACKEND = "xccl"
-    DEVICE_COUNT = _get_device_module("xpu").device_count()
+if TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1:
+    DEVICE_TYPE = torch.accelerator.current_accelerator().type
+    DEVICE_COUNT = torch.accelerator.device_count()
+    PG_BACKEND = dist.Backend.default_device_backend_map[DEVICE_TYPE]
 else:
     DEVICE_TYPE = "cpu"
     PG_BACKEND = "gloo"
@@ -63,7 +59,7 @@ else:
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
-if (TEST_CUDA or TEST_XPU or TEST_HPU) and DEVICE_COUNT > 1:
+if (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1) and DEVICE_COUNT > 1:
     # when we actually have multiple GPUs, relax the requirement to smaller counts.
     NUM_DEVICES = min(NUM_DEVICES, DEVICE_COUNT)
 
@@ -341,7 +337,10 @@ class DTensorContinuousTestBase(MultiProcContinuousTest):
     @classmethod
     def device_type(cls) -> str:
         # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
-        if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < cls.world_size:
+        if (
+            not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
+            or DEVICE_COUNT < cls.world_size
+        ):
             return "cpu"
         else:
             return DEVICE_TYPE
@@ -360,7 +359,10 @@ class DTensorTestBase(MultiProcessTestCase):
     @property
     def device_type(self) -> str:
         # if enough GPU/XPU/HPU we can use those devices, otherwise we fallback to CPU
-        if not (TEST_CUDA or TEST_XPU or TEST_HPU) or DEVICE_COUNT < self.world_size:
+        if (
+            not (TEST_CUDA or TEST_XPU or TEST_HPU or TEST_PRIVATEUSE1)
+            or DEVICE_COUNT < self.world_size
+        ):
             return "cpu"
         else:
             return DEVICE_TYPE
@@ -377,6 +379,8 @@ class DTensorTestBase(MultiProcessTestCase):
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+
         if backend is None:
             backend = self.backend
 
@@ -384,7 +388,7 @@ class DTensorTestBase(MultiProcessTestCase):
             "nccl",
             "gloo",
             "mpi",
-            "cpu:gloo,cuda:nccl",
+            f"cpu:gloo,{self.device_type}:{curr_backend}",
             "hccl",
             "xccl",
             "fake",

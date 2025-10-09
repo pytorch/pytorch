@@ -967,7 +967,7 @@ class TestProfiler(TestCase):
         profiler_output = prof.key_averages(group_by_input_shape=True).table(
             sort_by="cpu_time_total", row_limit=10
         )
-        self.assertIn("Total MFLOPs", profiler_output)
+        self.assertRegex(profiler_output, "Total M?FLOPs")
         if not (kineto_available() and torch.cuda.is_available()):
             return
 
@@ -983,7 +983,7 @@ class TestProfiler(TestCase):
         profiler_output = kineto_profiler.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1
         )
-        self.assertIn("Total MFLOPs", profiler_output)
+        self.assertRegex(profiler_output, "Total M?FLOPs")
 
     def test_override_time_units(self):
         US_IN_SECOND = 1000.0 * 1000.0
@@ -1804,6 +1804,82 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                     self.assertTrue("stream" not in args)
                     self.assertTrue("grid" not in args)
                     self.assertTrue(e["cat"] == "user_annotation")
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_profiler_op_event_kwargs_list_of_strings(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+        with profile(record_shapes=True) as p:
+            cm = torch._C._profiler._RecordFunctionFast(
+                "add_test_kwinputs_string_list",
+                [x, y],
+                {
+                    "string_list": ["hello", "world", "test"],
+                    "int_param": 42,
+                    "string_param": "single_string",
+                },
+            )
+            for _ in range(4):
+                with cm:
+                    x.add(y)
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                op_events = [
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "add_test_kwinputs_string_list"
+                ]
+                self.assertTrue(len(op_events) > 0)
+                for e in op_events:
+                    args = e["args"]
+                    self.assertTrue("string_list" in args)
+                    self.assertTrue("int_param" in args)
+                    self.assertTrue("string_param" in args)
+                    # Check that the list of strings is properly serialized
+                    # The list should be formatted as a JSON array by ivalueListToStr
+                    self.assertEqual(args["string_list"], ["hello", "world", "test"])
+                    self.assertEqual(args["int_param"], 42)
+                    self.assertEqual(args["string_param"], "single_string")
+                    self.assertTrue(e["cat"] == "cpu_op")
+
+        # Test mixed types that should be filtered out
+        with profile(record_shapes=True) as p1:
+            cm = torch._C._profiler._RecordFunctionFast(
+                "add_test_kwinputs_string_list_filtered",
+                [x, y],
+                {
+                    "valid_string_list": ["valid1", "valid2"],
+                    "mixed_list": ["string", 123],  # Should be filtered out
+                    "non_string_list": [1, 2, 3],  # Should be filtered out
+                    "valid_int": 100,
+                },
+            )
+            for _ in range(4):
+                with cm:
+                    x.add(y)
+        with TemporaryFileName(mode="w+") as fname1:
+            p1.export_chrome_trace(fname1)
+            with open(fname1) as f1:
+                j = json.load(f1)
+                op_events = [
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "add_test_kwinputs_string_list_filtered"
+                ]
+                self.assertTrue(len(op_events) > 0)
+                for e in op_events:
+                    args = e["args"]
+                    # Only valid types should be present
+                    self.assertTrue("valid_string_list" in args)
+                    self.assertTrue("valid_int" in args)
+                    # Invalid lists should be filtered out
+                    self.assertTrue("mixed_list" not in args)
+                    self.assertTrue("non_string_list" not in args)
+                    # Check values
+                    self.assertEqual(args["valid_string_list"], ["valid1", "valid2"])
+                    self.assertEqual(args["valid_int"], 100)
+                    self.assertTrue(e["cat"] == "cpu_op")
 
     def test_is_profiler_enabled(self):
         self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
@@ -3161,6 +3237,40 @@ aten::mm""",
             assert len(key_averages) == 3
             assert "Overload Name" in key_averages.table()
             validate_json(prof)
+
+    def test_expose_kineto_event_metadata(self):
+        def check_metadata(prof, op_name, metadata_key):
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+                    found_op = False
+                    for e in events:
+                        if "name" in e and "args" in e and e["name"] == op_name:
+                            assert metadata_key in e["args"], (
+                                f"Metadata for '{op_name}' in Chrome trace did not contain '{metadata_key}'."
+                            )
+                            found_op = True
+                    assert found_op, f"Could not find op '{op_name}' in Chrome trace."
+                found_op = False
+                for event in prof.events():
+                    if event.name == op_name:
+                        assert metadata_key in event.metadata_json, (
+                            f"Metadata for '{op_name}' in FunctionEvent did not contain '{metadata_key}'."
+                        )
+                        found_op = True
+                assert found_op, f"Could not find op '{op_name}' in prof.events()."
+
+        experimental_config = torch._C._profiler._ExperimentalConfig(
+            expose_kineto_event_metadata=True
+        )
+        with profile(
+            experimental_config=experimental_config,
+            activities=[ProfilerActivity.CPU],
+        ) as prof:
+            torch.add(1, 5)
+
+        check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requries CUDA")
     def test_profiler_debug_autotuner(self):

@@ -153,6 +153,7 @@ class CausalBias(torch.Tensor):
             diagonal=diagonal_offset,
         )
 
+    # pyrefly: ignore  # bad-return
     def _materialize(self, device: Optional[torch.device] = None) -> torch.Tensor:
         """
         Materializes the causal bias into a tensor form.

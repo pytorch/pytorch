@@ -5,7 +5,8 @@ import dataclasses
 import importlib
 import math
 import unittest
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -167,6 +168,8 @@ class BlockDescriptorTestBase(InductorTestCase):
         self.assertEqual(len(code), expected_num_programs)
         count_code("@triton.jit", expected_num_triton_kernels)
         count_code(self.block_descriptor_constructor_str, expected_num_block_pointers)
+        # Verify that 1D shapes aren't being transposed for the TMA store.
+        count_code("tl.trans", 0)
 
         return result, code
 
@@ -1072,7 +1075,6 @@ class CommonTemplate:
 
         def foo(x, length):
             unbacked = length.item()
-            torch._check_is_size(unbacked)
 
             repeated = x.repeat(1, unbacked, NUM_REPEAT)
             # permute creates split in middle with unbacked symint is the first range
@@ -1104,6 +1106,8 @@ class CommonTemplate:
     # bernoulli operation
     # TODO: fails for triton CPU "Failed to convert to LLVM IR"
     @test_torchinductor.xfail_if_triton_cpu
+    # Disable split_reductions on this test for now due to the interaction with LOAF
+    @config.patch(split_reductions=False)
     def test_removed_buffers(self):
         from torch.ops import aten
 
@@ -1114,8 +1118,8 @@ class CommonTemplate:
         result, code = self._run_and_compare(
             fn,
             *[torch.ones(200, 200, device=self.device) * p],
-            expected_num_triton_kernels=2,
-            expected_num_block_pointers=3,
+            expected_num_triton_kernels=1,
+            expected_num_block_pointers=1,
             atol=p * 0.06,
             rtol=0.06,
         )

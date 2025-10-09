@@ -4,7 +4,7 @@
 requires = [
     # 70.1.0: min version for integrated bdist_wheel command from wheel package
     # 77.0.0: min version for SPDX expression support for project.license
-    "setuptools>=70.1.0,<80.0",
+    "setuptools>=70.1.0",
     "cmake>=3.27",
     "ninja",
     "numpy",
@@ -187,10 +187,6 @@ ignore = [
     # TODO: Remove Python-3.10 specific suppressions
     "B905",
     "UP035",
-    "UP036",
-    "UP038",
-    "UP041",
-    "FURB161",
 ]
 select = [
     "B",
@@ -246,6 +242,7 @@ select = [
     "Q003",  # avoidable escaped quote
     "Q004",  # unnecessary escaped quote
     "RSE",
+    "RUF007", # pairwise over zip
     "RUF008", # mutable dataclass default
     "RUF013", # ban implicit optional
     "RUF015", # access first ele in constant time

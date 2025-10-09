@@ -193,21 +193,19 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         dtype = torch.float
         numel = 1024
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
-        symm_mem.rendezvous(tensor, group=group_name)
+        hdl = symm_mem.rendezvous(tensor, group=group_name)
+        signal_pad = hdl.get_signal_pad(self.rank)
+        signal_val = 5
 
         if self.rank == 0:
-            torch.ops.symm_mem.nvshmem_put(tensor, 1)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
+            torch.ops.symm_mem.nvshmem_put_with_signal(
+                tensor, signal_pad, signal_val, 1
+            )
         elif self.rank == 1:
-            # handle.wait_signal(src_rank=0)
-            # TODO: remove after we have wait_signal
-            dist.barrier()
+            torch.ops.symm_mem.nvshmem_wait_for_signal(signal_pad, signal_val, 0)
             torch.testing.assert_close(
                 tensor, torch.zeros(numel, dtype=dtype, device=self.device)
             )
-        else:
-            dist.barrier()
 
     @skipIfRocm
     def test_nvshmem_get(self) -> None:
@@ -299,28 +297,33 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             torch.randn(max_inp_numel, dtype=dtype, device=self.device)
         )
         out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device).fill_(-1)
-        in_out_splits = symm_mem.empty(
-            (3, self.world_size), dtype=torch.int64, device=self.device
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int64, device=self.device
         )
         # Row 0 is input splits
-        in_out_splits[0].copy_(inp_splits)
+        in_splits.copy_(inp_splits)
 
         # Sync all ranks to ensure remote tensors are allocated
         dist.barrier()
 
-        torch.ops.symm_mem.all_to_all_vdev(inp, out, in_out_splits, group_name)
+        torch.ops.symm_mem.all_to_all_vdev(
+            inp, out, in_splits, out_splits_offsets, group_name
+        )
 
         # Check input splits (row 0) -- should not change
-        torch.testing.assert_close(in_out_splits[0], inp_splits)
+        torch.testing.assert_close(in_splits, inp_splits)
 
         # Check output splits (row 1)
-        torch.testing.assert_close(in_out_splits[1], out_splits)
+        torch.testing.assert_close(out_splits_offsets[0], out_splits)
 
         # Check output offsets (row 2)
         out_offsets = torch.cumsum(out_splits, dim=0)  # inclusive scan
         # output offsets from `all_to_all_vdev` is exclusive scan
-        self.assertEqual(in_out_splits[2][0], 0)
-        torch.testing.assert_close(in_out_splits[2][1:], out_offsets[:-1])
+        self.assertEqual(out_splits_offsets[1][0], 0)
+        torch.testing.assert_close(out_splits_offsets[1][1:], out_offsets[:-1])
 
         # Check data
         expected = torch.empty(out_numel, dtype=dtype, device=self.device)
@@ -460,14 +463,6 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             0, k * nsplits, k, dtype=torch.int64, device=self.device
         )
 
-        # Exchange input splits to get output splits
-        out_splits = torch.zeros_like(inp_splits)
-        # First need to transpose the input splits
-        inp_splits_t = inp_splits.reshape(ne, self.world_size).t().contiguous()
-        dist.all_to_all_single(out_splits, inp_splits_t)
-
-        # Actual number of output elements
-        out_numel = out_splits.sum().item()
         # Max number of input elements (must be a constant across ranks for symmetric memory allocation)
         # Remember that we up-align each input split to k?
         max_inp_numel = k * nsplits
@@ -508,6 +503,11 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         torch.testing.assert_close(in_splits_offsets[1], inp_offsets)
 
         # Check output splits (row 1)
+        # Exchange input splits to get output splits
+        out_splits = torch.zeros_like(inp_splits)
+        # First need to transpose the input splits
+        inp_splits_t = inp_splits.reshape(ne, self.world_size).t().contiguous()
+        dist.all_to_all_single(out_splits, inp_splits_t)
         torch.testing.assert_close(received_out_splits, out_splits)
 
         # Check output offsets (row 2)
@@ -550,6 +550,8 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
 
         # Concatenate the output chunks received from all peers
         out_expected = torch.cat(out_chunks)
+        # Actual number of output elements
+        out_numel = out_splits.sum().item()
         self.assertEqual(out_expected.shape[0], out_numel)
 
         # Check data
@@ -697,6 +699,121 @@ class DispatchCombineInSubgroups(MultiProcContinuousTest):
         )
         subgroup = dm.get_group("ep")
         dispatch_then_combine(self.device, align=8, group=subgroup)
+
+
+@instantiate_parametrized_tests
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class NVSHMEMTileCommTest(MultiProcContinuousTest):
+    def _init_device(self) -> None:
+        # TODO: relieve this (seems to hang if without)
+        device_module.set_device(self.device)
+        # Set NVSHMEM as SymmMem backend
+        symm_mem.set_backend("NVSHMEM")
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    @skipIfRocm
+    @parametrize("tile_size", [32, 128, 512])
+    @parametrize("dtype", [torch.float, torch.half, torch.bfloat16])
+    def test_tile_reduce(self, tile_size: int, dtype: torch.dtype) -> None:
+        full_size = 1024
+        assert tile_size <= full_size
+
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        full_inp = symm_mem.empty(
+            full_size, full_size, dtype=dtype, device=self.device
+        ).fill_(self.rank)
+        full_out = symm_mem.empty(
+            full_size, full_size, dtype=dtype, device=self.device
+        ).fill_(0)
+
+        slice_ut = slice(tile_size, 2 * tile_size)
+        inp_tile = full_inp[slice_ut, slice_ut]
+        out_tile = full_out[slice_ut, slice_ut]
+
+        # Reduce the tile
+        root = 0
+        torch.ops.symm_mem.tile_reduce(inp_tile, out_tile, root, group_name)
+
+        # Check data
+        expected = torch.zeros_like(full_out)
+        expected_tile = expected[slice_ut, slice_ut]
+        if self.rank == root:
+            expected_tile.fill_(self.world_size * (self.world_size - 1) / 2)
+
+        torch.testing.assert_close(full_out, expected)
+
+    @skipIfRocm
+    @parametrize("tile_size", [32, 128, 512])
+    @parametrize(
+        "root_ratio", [1, 2]
+    )  # 1: all ranks are roots, 2: half of ranks are roots
+    @parametrize("dtype", [torch.float, torch.half, torch.bfloat16])
+    def test_multi_root_tile_reduce(
+        self, tile_size: int, root_ratio: int, dtype: torch.dtype
+    ) -> None:
+        full_size = 2048
+        num_slices_col = 2  # number of tiles on column dimension
+        num_slices_row = (
+            self.world_size // num_slices_col
+        )  # number of tiles on row dimension
+        assert tile_size * num_slices_col <= full_size
+        assert tile_size * num_slices_row <= full_size
+
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        full_inp = symm_mem.empty(
+            full_size, full_size, dtype=dtype, device=self.device
+        ).fill_(self.rank)
+        full_out = symm_mem.empty(
+            full_size, full_size, dtype=dtype, device=self.device
+        ).fill_(0)
+
+        # Get range of each slice in terms of element indices
+        slices_row = [
+            slice(s * tile_size, (s + 1) * tile_size) for s in range(num_slices_row)
+        ]
+        slices_col = [
+            slice(s * tile_size, (s + 1) * tile_size) for s in range(num_slices_col)
+        ]
+
+        # Active roots, can be a subset of all ranks
+        num_active_roots = self.world_size // root_ratio
+        active_roots = list(range(num_active_roots))
+
+        # Map rank to slice indices (e.g. rank 0 -> (0, 0), rank 1 -> (0, 1), rank 2 -> (1, 0), rank 3 -> (1, 1))
+        map_rank_to_slices = lambda r: (  # noqa: E731
+            slices_row[r // num_slices_col],
+            slices_col[r % num_slices_col],
+        )
+        # Populate input tiles
+        input_tiles_ij = [map_rank_to_slices(r) for r in active_roots]
+        input_tiles = [
+            full_inp[slice_i, slice_j] for (slice_i, slice_j) in input_tiles_ij
+        ]
+        # My output tile (i.e. the one that I will reduce)
+        out_tile_ij = map_rank_to_slices(self.rank)
+        out_tile = full_out[out_tile_ij[0], out_tile_ij[1]]
+
+        # Reduce the tiles
+        torch.ops.symm_mem.multi_root_tile_reduce(
+            input_tiles, out_tile, active_roots, group_name
+        )
+
+        # Check data
+        expected = torch.zeros_like(full_out)
+        expected_tile = expected[out_tile_ij[0], out_tile_ij[1]]
+        if self.rank in active_roots:
+            expected_tile.fill_(self.world_size * (self.world_size - 1) / 2)
+        torch.testing.assert_close(full_out, expected)
 
 
 if __name__ == "__main__":

@@ -30,12 +30,15 @@
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/profiler/util.h>
 
+#ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#endif // USE_DISTRIBUTED
 
 using namespace at;
 
 // Collective property attributes
 // https://github.com/pytorch/pytorch/issues/124674
+#ifdef USE_DISTRIBUTED
 constexpr auto kETCommsName = "collective_name";
 constexpr auto kETInMsgNelems = "in_msg_nelems";
 constexpr auto kETOutMsgNelems = "out_msg_nelems";
@@ -46,6 +49,7 @@ constexpr auto kETGlobalRankStride = "global_rank_stride";
 constexpr auto kETGroupSize = "pg_size";
 constexpr auto kETProcessGroupName = "pg_name";
 constexpr auto kETProcessGroupDesc = "pg_desc";
+#endif // USE_DISTRIBUTED
 
 namespace torch::profiler::impl {
 
@@ -105,15 +109,15 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   using ID = size_t;
 
   // Mapping of each thread to its own operator stack
-  std::map<size_t, std::stack<ID>> opStack{};
+  std::map<size_t, std::stack<ID>> opStack;
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
-  std::map<const void*, ID> objectId{};
+  std::map<const void*, ID> objectId;
 
   using weak_storage_ptr = c10::weak_intrusive_ptr<StorageImpl>;
-  std::unordered_map<const void*, ID> data_ptr_to_storage_id{};
+  std::unordered_map<const void*, ID> data_ptr_to_storage_id;
   std::unordered_map<const void*, weak_storage_ptr>
-      data_ptr_to_weak_storage_ptr{};
+      data_ptr_to_weak_storage_ptr;
 
   ID get_tensor_storage_ID(const c10::Storage& t_storage) {
     const std::lock_guard<std::recursive_mutex> lock(gMutex);
@@ -134,8 +138,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
         // So we need to remove the key and insert the key with the new value.
         data_ptr_to_storage_id.erase(raw_data_ptr);
         data_ptr_to_storage_id[raw_data_ptr] = id;
-        data_ptr_to_weak_storage_ptr.erase(raw_data_ptr);
-        data_ptr_to_weak_storage_ptr.emplace(
+        data_ptr_to_weak_storage_ptr.insert_or_assign(
             raw_data_ptr, t_storage.getWeakStorageImpl());
         return id;
       } else {
@@ -148,21 +151,21 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   enum class RunState { uninitialized, disabled, enabled };
 
   // Mutex for multithreaded access to the shared containers.
-  std::recursive_mutex gMutex{};
+  std::recursive_mutex gMutex;
   // Stream to write output JSON.
-  std::ofstream out{};
+  std::ofstream out;
 
   // Full path to the output file.
-  std::string fileName{};
+  std::string fileName;
 
-  std::string resourceDir{};
+  std::string resourceDir;
 
   // RecordFunction callback handle for this observer.
   CallbackHandle cbHandle{INVALID_CALLBACK_HANDLE};
 
   // Process ID.
   int32_t pid{-1};
-  std::string recordTime{};
+  std::string recordTime;
 
   ExecutionTraceObserver() = default;
 
@@ -189,7 +192,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   bool record_integral_tensor_range{false};
 
-  std::unordered_set<std::string> nodeListForSavingIntegerTensor{};
+  std::unordered_set<std::string> nodeListForSavingIntegerTensor;
 
  private:
   static bool callbackShouldBeEnabled(RunState run_state) {
@@ -265,6 +268,7 @@ static std::ofstream openOutputFile(const std::string& name) {
   return stream;
 }
 
+#ifdef USE_DISTRIBUTED
 static std::string getAttrJson(
     const std::string& name,
     const std::string& type,
@@ -277,6 +281,7 @@ static std::string getAttrJson(
       type,
       value);
 }
+#endif
 
 static void writeJsonNode(
     std::ofstream& out,
@@ -654,6 +659,7 @@ static void handleKernelBackendInfo(
 inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   std::vector<std::string> attrs;
 
+#ifdef USE_DISTRIBUTED
   // We rely on paramcommsdebug object that is available in thread local info
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
@@ -696,6 +702,8 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
   addAttr(kProcessGroupDesc, kETProcessGroupDesc, "string");
 
   addAttr(kGroupSize, kETGroupSize, "uint64");
+
+#endif // USE_DISTRIBUTED
 
   // XXX consider using as string stream?
   return attrs.empty() ? "" : fmt::format(", {}", fmt::join(attrs, ", "));

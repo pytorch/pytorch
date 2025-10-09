@@ -117,14 +117,8 @@ class CI(NamedTuple):
 
 
 CI_SKIP_OPTIMIZER = {
-    # TIMM
-    "convmixer_768_32",  # accuracy
-    "hrnet_w18",  # Stack issue in fx
     # HF
-    "pnasnet5large",  # Stack issue in fx
     "MobileBertForMaskedLM",  # Stack issue in fx
-    "MobileBertForQuestionAnswering",  # Stack issue in fx
-    "PegasusForConditionalGeneration",  # OOM
 }
 
 try:
@@ -155,7 +149,6 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "detectron2_fasterrcnn_r_50_c4",
     "detectron2_fasterrcnn_r_50_dc5",
     "detectron2_fasterrcnn_r_50_fpn",
-    "hf_T5_generate",
     "Reformer",
     "llama",
 }.union(INTERNAL_CI_SKIP_DYNAMIC_BATCH_ONLY)
@@ -182,51 +175,22 @@ BENCHMARK_USE_SGD = {
     "speech_transformer",
     "squeezenet1_1",
     "stable_diffusion_text_encoder",
-    "timm_efficientdet",
-    "timm_nfnet",
-    "timm_resnest",
-    "timm_vision_transformer",
-    "timm_vovnet",
     "vgg16",
-    "hf_T5",  # Fails dynamic https://github.com/pytorch/pytorch/issues/115968
     # HF
     "AlbertForMaskedLM",
     "BartForCausalLM",
-    "BartForConditionalGeneration",
-    "BlenderbotSmallForCausalLM",
-    "BlenderbotSmallForConditionalGeneration",
-    "DebertaV2ForQuestionAnswering",  # eager OOM
     "ElectraForCausalLM",
     "M2M100ForConditionalGeneration",
     "MBartForCausalLM",
-    "MBartForConditionalGeneration",
     "OPTForCausalLM",
     "PLBartForCausalLM",
-    "PLBartForConditionalGeneration",
     "PegasusForCausalLM",
     "TrOCRForCausalLM",
     "XGLMForCausalLM",
     # TIMM
     "adv_inception_v3",
-    "botnet26t_256",
-    "cait_m36_384",  # OOM
-    "coat_lite_mini",
-    "convit_base",
-    "dpn107",
-    "fbnetv3_b",
-    "gernet_l",
-    "lcnet_050",
-    "mixnet_l",
-    "res2net101_26w_4s",
-    "res2net50_14w_8s",
-    "res2next50",
-    "resnest101e",
-    "sebotnet33ts_256",
-    "swsl_resnext101_32x16d",
     "tf_efficientnet_b0",
     "ghostnet_100",
-    "gmixer_24_224",
-    "tinynet_a",
 }
 
 # These models OOM in CI
@@ -245,31 +209,21 @@ CI_USE_SGD = {
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
-    "hf_T5_base",
-    "hf_clip",
     "llama_v2_7b_16h",
     "mobilenet_v2_quantized_qat",
     "phi_1_5 resnet50_quantized_qat",
     "BlenderbotForCausalLM",
-    "cait_m36_384",
     "DALLE2_pytorch",
     "moco",
     "timm_efficientdet",
     "ghostnet_100",
-    "regnety_002",
-    "poolformer_m36",
     "inception_v3",
-    "tinynet_a",
-    "selecsls42b",
     "mobilevit_s",
     "pytorch_CycleGAN_and_pix2pix",
     "vision_maskrcnn",
-    "resmlp_12_224",
     "dlrm",
     "resnet50",
     "dm_nfnet_f0",
-    "pit_b_224",
-    "tf_mixnet_l",
 }
 
 
@@ -2068,8 +2022,6 @@ class BenchmarkRunner:
         from diffusers.models.transformer_2d import Transformer2DModel
         from torchbenchmark.models.nanogpt.model import Block
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-        from transformers.models.t5.modeling_t5 import T5Block
-        from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
 
         from torch.distributed.fsdp.wrap import (
             ModuleWrapPolicy,
@@ -2079,10 +2031,6 @@ class BenchmarkRunner:
         # handcrafted wrap policy
         MODEL_FSDP_WRAP = {
             "stable_diffusion_unet": (Transformer2DModel,),
-            "hf_T5": (T5Block,),
-            "hf_T5_base": (T5Block,),
-            "hf_T5_large": (T5Block,),
-            "hf_Whisper": (WhisperEncoderLayer,),
             "llama_v2_7b_16h": (LlamaDecoderLayer,),
             "nanogpt": (Block,),
         }
@@ -2282,7 +2230,9 @@ class BenchmarkRunner:
                 del model_copy
                 empty_gpu_cache(current_device)
 
-            # Two eager runs should have exactly same result
+            # Two eager runs should have exactly same result, within tolerance.
+            # TODO If we want the above to be true, then deterministic should be set.
+            # For example, MIOpen convolutions could be implemented with non-deterministic algos.
             is_same = True
             try:
                 if (
@@ -2292,7 +2242,7 @@ class BenchmarkRunner:
                         correct_rerun_result,
                         fp64_ref=None,
                         cos_similarity=False,
-                        tol=0,
+                        tol=tolerance if torch.version.hip else 0,
                         equal_nan=self.equal_nan,
                         use_larger_multiplier_for_smaller_tensor=self.use_larger_multiplier_for_smaller_tensor(
                             name
@@ -3787,9 +3737,7 @@ def run(runner, args, original_dir=None):
             torch.use_deterministic_algorithms(True, warn_only=True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         if args.only is not None and args.only in {
-            "DebertaForQuestionAnswering",
             "nvidia_deeprecommender",
-            "crossvit_9_240",
         }:
             # These seem unhappy with numerics of larger cuBLASLt workspace
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
@@ -3817,7 +3765,6 @@ def run(runner, args, original_dir=None):
             runner.skip_models.update(
                 {
                     # xfail: https://github.com/pytorch/pytorch/issues/145773
-                    "convit_base",
                     "llama",
                     "cm3leon_generate",
                 }
@@ -3847,22 +3794,6 @@ def run(runner, args, original_dir=None):
     if args.devices != ["cpu"] and (HAS_CUDA or HAS_XPU):
         global synchronize
         synchronize = torch.cuda.synchronize if HAS_CUDA else torch.xpu.synchronize
-
-    if (
-        args.devices == ["cuda"]
-        and torch.cuda.get_device_properties(0).total_memory < 25 * 2**30
-    ):
-        # OOM errors on an RTX 3090 with 24gb RAM
-        runner.skip_models.update(
-            {
-                # torchbench
-                "hf_Longformer",
-                "timm_nfnet",
-                "timm_efficientdet",
-            }
-        )
-        if args.training:
-            runner.skip_models.add("hf_T5")
 
     if args.nnc:
         torch._C._jit_override_can_fuse_on_cpu(True)

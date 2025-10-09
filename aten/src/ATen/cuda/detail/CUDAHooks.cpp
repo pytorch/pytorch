@@ -281,6 +281,9 @@ bool CUDAHooks::compiledWithMIOpen() const {
 
 bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
   // NOTE: extra parenthesis around numbers disable clang warnings about
   // dead code
   return true;
@@ -291,6 +294,9 @@ bool CUDAHooks::supportsDilatedConvolutionWithCuDNN() const {
 
 bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
 #if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // Check for Volta cores
   if (prop->major >= 7) {
@@ -305,6 +311,26 @@ bool CUDAHooks::supportsDepthwiseConvolutionWithCuDNN() const {
 
 bool CUDAHooks::supportsBFloat16ConvolutionWithCuDNNv8() const {
 #if AT_CUDNN_ENABLED()
+  if (!hasCUDA()) {
+    return false;
+  }
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  // Check for Volta cores
+  if (prop->major >= 8) {
+    return true;
+  } else {
+    return false;
+  }
+#else
+  return false;
+#endif
+}
+
+bool CUDAHooks::supportsBFloat16RNNWithCuDNN() const {
+#if AT_CUDNN_ENABLED() && (CUDNN_VERSION >= 91300)
+  if (!hasCUDA()) {
+    return false;
+  }
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   // Check for Volta cores
   if (prop->major >= 8) {

@@ -8,8 +8,8 @@ from __future__ import annotations
 __all__ = ["onnx_impl", "get_torchlib_ops"]
 
 import logging
-from collections.abc import Sequence
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable, Sequence
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import onnxscript

@@ -288,7 +288,7 @@ def _replace_pattern(
     elif isinstance(pattern, Graph):
         pattern_graph = pattern
     else:
-        pattern_graph = symbolic_trace(pattern).graph
+        pattern_graph = symbolic_trace(pattern).graph  # type: ignore[arg-type]
 
     matcher = SubgraphMatcher(
         pattern_graph,
@@ -321,7 +321,7 @@ def _replace_pattern(
         assert replacement_callback is not None, (
             "Must provide either a replacement GraphModule or a replacement callback"
         )
-        common_replacement_graph = None
+        common_replacement_graph = None  # type: ignore[assignment]
 
     # As we progressively replace nodes, we'll need to keep track of how the match results should change
     match_changed_node: dict[Node, Node] = {}

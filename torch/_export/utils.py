@@ -9,10 +9,10 @@ import math
 import operator
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._guards import detect_fake_mode
@@ -470,7 +470,12 @@ def _check_input_constraints_for_graph(
                 )
         elif isinstance(node_val, torch.SymInt):
             _check_symint(
-                node_val, arg, range_constraints, unification_map, key_path, None
+                node_val,
+                arg,
+                range_constraints,
+                unification_map,
+                key_path,
+                None,
             )
 
 
@@ -1115,12 +1120,14 @@ def placeholder_naming_pass(
         if (  # handle targets for custom objects
             spec.kind == InputKind.CUSTOM_OBJ and spec.target in name_map
         ):
+            # pyrefly: ignore  # index-error
             spec.target = name_map[spec.target][4:]  # strip obj_ prefix
 
     for spec in export_graph_signature.output_specs:
         if spec.arg.name in name_map:
             spec.arg.name = name_map[spec.arg.name]
         if spec.kind == OutputKind.USER_INPUT_MUTATION and spec.target in name_map:
+            # pyrefly: ignore  # index-error
             spec.target = name_map[spec.target]
 
     # rename keys in constants dict for custom objects

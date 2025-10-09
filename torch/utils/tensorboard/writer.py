@@ -254,7 +254,9 @@ class SummaryWriter:
         buckets = []
         neg_buckets = []
         while v < 1e20:
+            # pyrefly: ignore  # bad-argument-type
             buckets.append(v)
+            # pyrefly: ignore  # bad-argument-type
             neg_buckets.append(-v)
             v *= 1.1
         self.default_bins = neg_buckets[::-1] + [0] + buckets
@@ -262,15 +264,19 @@ class SummaryWriter:
     def _get_file_writer(self):
         """Return the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
+            # pyrefly: ignore  # bad-assignment
             self.file_writer = FileWriter(
                 self.log_dir, self.max_queue, self.flush_secs, self.filename_suffix
             )
+            # pyrefly: ignore  # bad-assignment, missing-attribute
             self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
             if self.purge_step is not None:
                 most_recent_step = self.purge_step
+                # pyrefly: ignore  # missing-attribute
                 self.file_writer.add_event(
                     Event(step=most_recent_step, file_version="brain.Event:2")
                 )
+                # pyrefly: ignore  # missing-attribute
                 self.file_writer.add_event(
                     Event(
                         step=most_recent_step,
@@ -950,6 +956,7 @@ class SummaryWriter:
         )
         self._projector_config.embeddings.extend([embedding_info])
 
+
         from google.protobuf import text_format
 
         config_pbtxt = text_format.MessageToString(self._projector_config)
@@ -1199,6 +1206,7 @@ class SummaryWriter:
         for writer in self.all_writers.values():
             writer.flush()
             writer.close()
+        # pyrefly: ignore  # bad-assignment
         self.file_writer = self.all_writers = None
 
     def __enter__(self):

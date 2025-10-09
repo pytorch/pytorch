@@ -9,8 +9,9 @@ This package is lazily initialized, so you can always import it, and use
 
 import threading
 import traceback
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._C
@@ -239,6 +240,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     # Only keep attributes that are safe for dictionary serialization.
     serializable_types = (int, float, bool, str, type(None), list, tuple, dict)
     return {
+        # pyrefly: ignore  # unbound-name
         key: value
         for key in dir(props)
         if not key.startswith("__")
@@ -246,7 +248,9 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     }
 
 
-def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
+def get_device_properties(
+    device: Optional[_device_t] = None,
+) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
     r"""Get the properties of a device.
 
     Args:
@@ -314,7 +318,7 @@ class StreamContext:
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
-            self.idx = -1
+            self.idx = -1  # pyrefly: ignore  # bad-assignment
 
     def __enter__(self):
         cur_stream = self.stream

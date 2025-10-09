@@ -12,6 +12,7 @@ import torch
 import torch._dynamo as torchdynamo
 from torch._C._nativert import PyModelRunner
 from torch._dynamo.test_case import TestCase
+from torch._environment import is_fbcode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nativert.backends._lower_utils import (
     lower_exported_program,
@@ -197,6 +198,7 @@ def make_dynamic_cls(cls, strict=False):
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestNativeRT(TestCase):
     @staticmethod
     def get_module():
@@ -342,13 +344,12 @@ class TestNativeRT(TestCase):
             pathlib.Path(filename).unlink(missing_ok=True)
 
 
-tests = [
-    test_export.TestExport,
-]
-for test in tests:
-    make_dynamic_cls(test, strict=True)
-    make_dynamic_cls(test, strict=False)
-del test
+if is_fbcode():
+    for test in [test_export.TestExport]:
+        make_dynamic_cls(test, strict=True)
+        make_dynamic_cls(test, strict=False)
+    del test
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

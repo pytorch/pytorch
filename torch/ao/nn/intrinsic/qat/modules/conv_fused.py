@@ -620,6 +620,7 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
             dilation=dilation,
             groups=groups,
             bias=bias,
+            # pyrefly: ignore  # bad-argument-type
             padding_mode=padding_mode,
             qconfig=qconfig,
         )
@@ -820,6 +821,7 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
             dilation=dilation,
             groups=groups,
             bias=bias,
+            # pyrefly: ignore  # bad-argument-type
             padding_mode=padding_mode,
             qconfig=qconfig,
         )
@@ -1021,6 +1023,7 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
             dilation=dilation,
             groups=groups,
             bias=bias,
+            # pyrefly: ignore  # bad-argument-type
             padding_mode=padding_mode,
             qconfig=qconfig,
         )

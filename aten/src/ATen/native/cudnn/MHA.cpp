@@ -142,8 +142,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
 namespace at {
 namespace native {
 
-#include <cudnn_frontend.h>
-
 namespace fe = cudnn_frontend;
 
 constexpr uint8_t MAX_MHA_DIM = 4;
@@ -373,8 +371,7 @@ struct MHAGraphCache {
   }
 
   void update(const KeyType& key, T& results) {
-    engine_cache.erase(key);
-    engine_cache.emplace(key, std::move(results));
+    engine_cache.insert_or_assign(key, std::move(results));
   }
 };
 
@@ -1379,7 +1376,7 @@ void run_cudnn_SDP_fprop(
   cudnnHandle_t handle = getCudnnHandle();
 
   // NB: The key initialization will round up sequence length, stride data etc.
-  // if use_ragged_in_dense is enabled (to allow multiple sequence lenghths to
+  // if use_ragged_in_dense is enabled (to allow multiple sequence lengths to
   // reuse the same cached value/graph)
   auto key = MHACacheKeyWrapper(
       b,

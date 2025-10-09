@@ -237,6 +237,12 @@ class inference_mode(_DecoratorContextManager):
        Unlike some other mechanisms that locally enable or disable grad,
        entering inference_mode also disables :ref:`forward-mode AD <forward-mode-ad>`.
 
+    .. warning::
+        `inference_mode` does NOT automatically set the model to evaluation mode.
+        For proper inference behavior (e.g., disabling dropout, using running statistics
+        in batch normalization), you must explicitly set your model to evaluation mode using
+        `model.eval()` in addition to using this context manager.
+
     Args:
         mode (bool or function): Either a boolean flag to enable or disable
             inference mode, or a Python function to decorate with inference
@@ -408,5 +414,6 @@ class _unsafe_preserve_version_counter(_DecoratorContextManager):
     def __enter__(self) -> None:
         pass
 
+    # pyrefly: ignore  # bad-override
     def __exit__(self, *args) -> None:
         torch._C._autograd._unsafe_set_version_counter(self.tensors, self.prev_versions)

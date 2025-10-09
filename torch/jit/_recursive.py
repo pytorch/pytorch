@@ -2,7 +2,6 @@
 import collections
 import functools
 import inspect
-import sys
 import textwrap
 import types
 import warnings
@@ -158,8 +157,6 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
 
 
 def get_annotations(obj):
-    if sys.version_info < (3, 10):
-        return getattr(obj, "__annotations__", {})
     # In Python-3.10+ it is recommended to use inspect.get_annotations
     # See https://docs.python.org/3.10/howto/annotations.html
     # But also, in 3.10 annotations from base class are not inherited
@@ -750,6 +747,7 @@ def get_overload_annotations(mod, jit_ignored_properties):
             if method_overloads is None:
                 continue
 
+            # pyrefly: ignore  # missing-attribute
             if item.__func__ in method_overloads:
                 raise RuntimeError(
                     _jit_internal.get_overload_no_implementation_error_message(

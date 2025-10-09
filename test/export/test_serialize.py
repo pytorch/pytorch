@@ -14,7 +14,8 @@ from collections import namedtuple
 from pathlib import Path
 from typing import NamedTuple
 
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 if HAS_GPU:
@@ -888,6 +889,92 @@ def forward(self, x):
         loaded_ep = load(buffer)
         self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
 
+    def test_1D_tensor_slicing(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.arange(8)[::2]
+
+            def forward(self, x):
+                return x + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(4),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
+    def test_2D_tensor_slicing(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.randn(4, 4)[:2, :2]
+
+            def forward(self, x):
+                return x + self.const
+
+        m = M()
+        sample_inputs = (torch.randn(2, 2),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
+    def test_non_float_weight(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p = torch.nn.Parameter(
+                    torch.ones(2, 2, dtype=torch.int8), requires_grad=False
+                )
+
+            def forward(self, x):
+                return x + self.p
+
+        m = M()
+        sample_inputs = (torch.randn(2, 2),)
+        ep = torch.export.export(m, sample_inputs)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
+    @requires_gpu
+    def test_weight_sharing_gpu(self) -> None:
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c2 = torch.ones(2, 4, device=GPU_TYPE)
+                self.c1 = self.c2[0, :]
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x) + self.c1 + self.c2
+
+        m = M().to(GPU_TYPE)
+        sample_inputs = (torch.randn(2, 4, device=GPU_TYPE),)
+        ep = torch.export.export(m, sample_inputs)
+        # Check that c1 and c2 share the same storage
+        self.assertEqual(
+            ep.constants["c1"].untyped_storage(), ep.constants["c2"].untyped_storage()
+        )
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        buffer.seek(0)
+        loaded_ep = load(buffer)
+        # Check that c1 and c2 share the same storage after serdes
+        self.assertEqual(
+            loaded_ep.constants["c1"].untyped_storage(),
+            loaded_ep.constants["c2"].untyped_storage(),
+        )
+        self.assertEqual(m(*sample_inputs), loaded_ep.module()(*sample_inputs))
+
     def test_complex_constant(self) -> None:
         class M(torch.nn.Module):
             def forward(self, x):
@@ -1130,7 +1217,8 @@ class TestDeserialize(TestCase):
 
             # check ShapeEnv counters
             shape_env = _get_shape_env_from_gm(loaded_ep.graph_module)
-            next_index = next(shape_env.unbacked_symint_counter)
+            next_index = shape_env.unbacked_symint_counter
+            shape_env.unbacked_symint_counter += 1
             for symbol in bound:
                 self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
                 self.assertTrue(
@@ -1324,7 +1412,6 @@ class TestDeserialize(TestCase):
             def forward(self, x):
                 y = x.nonzero()
                 z = y.size(0)
-                torch._check_is_size(z)
                 torch._check(z == 2)
                 return y
 
@@ -1335,7 +1422,6 @@ class TestDeserialize(TestCase):
             def forward(self, x):
                 y = x.nonzero()
                 z = y.size(0)
-                torch._check_is_size(z)
                 torch._check(z % 3 == 0)
                 torch._check(z == 3)
                 return y
@@ -1619,7 +1705,7 @@ def forward(self, x):
         class Module(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
+                torch._check(n >= 0)
                 return y.sum() + torch.ones(n, 5).sum()
 
         f = Module()
@@ -2134,7 +2220,8 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n, max=y.size(0) - 1)
+                torch._check(n >= 0)
+                torch._check(n < y.size(0))
                 return torch.empty(n), y[n]
 
         ep = torch.export.export(

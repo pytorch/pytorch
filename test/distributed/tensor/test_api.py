@@ -1,13 +1,17 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import tempfile
+
 import torch
+import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_module,
     distribute_tensor,
     DTensor,
+    Partial,
     Replicate,
     Shard,
 )
@@ -355,6 +359,33 @@ class DTensorAPITest(DTensorTestBase):
             self.assertIsInstance(param, DTensor)
             self.assertFalse(param.is_meta)
             self.assertTrue(param.device.type == device_mesh.device_type)
+
+    @with_comms
+    def test_checkpoint_apis_check_partial_placement(self):
+        device_mesh = self.build_device_mesh()
+        tensor = torch.randn(5, 5, device=self.device_type)
+        dtensor = DTensor.from_local(tensor, device_mesh, [Partial()])
+        with self.assertRaisesRegex(
+            ValueError, "Any checkpointing related operations are not supported for"
+        ):
+            dtensor.__create_write_items__("fqn", None)
+
+        with self.assertRaisesRegex(
+            ValueError, "Any checkpointing related operations are not supported for"
+        ):
+            dtensor.__create_chunk_list__()
+
+        with self.assertRaisesRegex(
+            ValueError, "Any checkpointing related operations are not supported for"
+        ):
+            dtensor.__get_tensor_shard__(0)
+
+        # Ideally we should not allow checkpointing related operations for DTensor
+        with self.assertRaisesRegex(
+            dcp.api.CheckpointException,
+            "Any checkpointing related operations are not supported for",
+        ):
+            dcp.save({"fqn": dtensor}, checkpoint_id=tempfile.mkdtemp())
 
 
 if __name__ == "__main__":

@@ -15,7 +15,6 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
-    skipIfRocm,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
 )
@@ -463,7 +462,6 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
 
-    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -683,7 +681,6 @@ class TestFlopCounter(TestCase):
             ),
         )
 
-    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION,

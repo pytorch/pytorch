@@ -69,12 +69,12 @@ def dp_knapsack(
 
     # Quantize the memory weights
     quantized_memory = torch.tensor(
-        [int(round(m * S)) for m in memory], dtype=torch.long, device="cpu"
+        [round(m * S) for m in memory], dtype=torch.long, device="cpu"
     )
     runtimes = torch.tensor(runtime, dtype=torch.float32, device="cpu")
 
     # Quantized pseudopolynomial DP for 0-1 Knapsack
-    quantized_max_memory = int(round(max_memory * S))
+    quantized_max_memory = round(max_memory * S)
 
     n = len(memory)
 

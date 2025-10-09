@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -53,6 +54,7 @@ class WhileLoopOp(HigherOrderOperator):
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
+    # pyrefly: ignore  # bad-override
     def gen_schema(self, cond_fn, body_fn, carried_inputs, additional_inputs):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -79,21 +81,13 @@ class WhileLoopOp(HigherOrderOperator):
                 assert not isinstance(real_inp, torch.Tensor)
                 return real_inp
 
-        example_inputs = [
-            _find_example_value(n, real_inp)
-            for n, real_inp in zip(
-                body_gm.graph.find_nodes(op="placeholder"),
-                carried_inputs + additional_inputs,
-            )
-        ]
-
         (
             _,
             _,
             _,
             body_mutated_inputs,
             body_outputs,
-        ) = check_input_alias_and_mutation_return_outputs(body_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(body_gm)
 
         (
             _,
@@ -101,7 +95,7 @@ class WhileLoopOp(HigherOrderOperator):
             _,
             cond_mutated_inputs,
             _,
-        ) = check_input_alias_and_mutation_return_outputs(cond_gm, example_inputs)
+        ) = check_input_alias_and_mutation_return_outputs(cond_gm)
 
         mutated_inputs = set(body_mutated_inputs) | set(cond_mutated_inputs)
 
@@ -437,6 +431,7 @@ def while_loop_tracing(
             elif isinstance(x, torch.Tensor):
                 x = x.clone()
                 if hasattr(x, "constant") and x.constant is not None:
+                    # pyrefly: ignore  # missing-attribute
                     x.constant = None
             return x
 
@@ -459,6 +454,7 @@ def while_loop_tracing(
 
         next_name = None
         i = 0
+        # pyrefly: ignore  # bad-assignment
         while not next_name:
             candidate = f"while_loop_cond_graph_{i}"
             if hasattr(proxy_mode.tracer.root, candidate):
@@ -703,6 +699,7 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
 
 class WhileLoopAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(
         ctx,
         cond_fn,
@@ -732,6 +729,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         ctx.additional_inputs = additional_inputs
         ctx.fw_outputs = fw_outputs
         loop_count = None
+        # pyrefly: ignore  # bad-assignment
         for out in fw_outputs:
             if isinstance(out, torch.Tensor):
                 if loop_count is not None:
@@ -748,6 +746,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             and (shape_env := loop_count.node.shape_env)
             and loop_count in shape_env.pending_fresh_unbacked_symbols
         ):
+            # pyrefly: ignore  # unbound-name
             shape_env.pending_fresh_unbacked_symbols.remove(loop_count)
 
         # Even when body function is not executed, we clone and unsqueeze the input
@@ -774,11 +773,11 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         # inductor codegen, where we need to do a non-unform treatment for None and tensors.
         # So we set up masks and filter the None gradients so that only tensors are returned from each step.
         carries_tensor_masks = [
-            True if isinstance(t, torch.Tensor) and t.dtype.is_floating_point else False
+            bool(isinstance(t, torch.Tensor) and t.dtype.is_floating_point)
             for t in ctx.carries
         ]
         additional_inputs_tensor_masks = [
-            True if isinstance(t, torch.Tensor) and t.dtype.is_floating_point else False
+            bool(isinstance(t, torch.Tensor) and t.dtype.is_floating_point)
             for t in ctx.additional_inputs
         ]
 
@@ -885,6 +884,7 @@ class WhileLoopAutogradOp(torch.autograd.Function):
             while_loop_op(
                 cond_gm,
                 body_gm,
+                # pyrefly: ignore  # bad-argument-type
                 (
                     init_idx,
                     *init_grad_carries,

@@ -8,7 +8,7 @@ from os import environ
 from pathlib import Path
 from random import randint
 from tempfile import gettempdir
-from typing import Any, Callable, Sequence
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -18,6 +18,10 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 
 class TestMixin:

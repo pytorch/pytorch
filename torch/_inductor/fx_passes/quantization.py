@@ -43,6 +43,7 @@ _VIEW_OPS = [
     aten.transpose.int,
     aten.permute.default,
     aten.view.default,
+    aten.reshape.default,
 ]
 
 """
@@ -3917,6 +3918,7 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
 
             # Further check the input node of the first view node has only 1 user node
             if could_lift_up and len(input_node.users) == 1:
+                counters["inductor"]["quant_lift_up_count"] += 1
                 # Replace dequant's input from quant to quant's input
                 quant_node.replace_all_uses_with(input_node_of_quant)
                 # Insert the new quant node

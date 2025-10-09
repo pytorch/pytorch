@@ -74,7 +74,7 @@ static const char* scalarTypeName(const at::ScalarType type) {
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CASE)
 #undef DEFINE_CASE
     default:
-      throw std::runtime_error("unknown scalar type");
+      TORCH_CHECK(false, "unknown scalar type");
   }
 }
 
@@ -99,8 +99,7 @@ static std::string variableType(const c10::Type& t) {
     return calcScalarTypeName(*scalar_type);
   }
   // something went wrong with the type analysis during shape propagation
-  throw std::runtime_error(
-      "unknown scalar type during JIT fusion code generation");
+  TORCH_CHECK(false, "unknown type during JIT fusion code generation");
 }
 
 static std::string typeCastedValueName(
@@ -129,8 +128,7 @@ static std::string typeCastedValueName(
     return vn;
   }
   // something went wrong with the type analysis during shape propagation
-  throw std::runtime_error(
-      "unknown scalar type during JIT fusion code generation");
+  TORCH_CHECK(false, "unknown type during JIT fusion code generation");
 }
 
 // Writes RHS of special handling "simple mappable" ops
@@ -155,11 +153,10 @@ static std::string encodeSpecialRHS(const Node* n, at::jit::TemplateEnv& env) {
       env.s("1", valueName(min));
       return format("(${0} < ${1} ? ${1} : ${0})", env);
     } else {
-      throw std::runtime_error(
-          "At least one of 'min' or 'max' must not be None");
+      TORCH_CHECK(false, "At least one of 'min' or 'max' must not be None");
     }
   } else {
-    throw std::runtime_error("Cannot encode RHS of the node, op not supported");
+    TORCH_CHECK(false, "Cannot encode RHS of the node, op not supported");
   }
 }
 
@@ -184,7 +181,6 @@ struct RHSTemplate {
 static std::string encodeRHS(const Node* n) {
   static std::unordered_map<NodeKind, RHSTemplate> simple_map_ops = {
       // unary
-      {aten::_cast_Float, "static_cast<float>(${0})"},
       {aten::abs, "fabs(${0})"},
       {aten::sigmoid, {"1.f / (1.f + expf(-${0}))", "1. / (1. + exp(-${0}))"}},
       {aten::relu, "${0} < 0 ? 0.f : ${0} "},

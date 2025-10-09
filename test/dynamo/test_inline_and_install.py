@@ -57,13 +57,6 @@ unittest.expectedFailure(
 )
 
 
-# These tests do string comparison on the graphs, and since buffers are now inlined, they
-# are named different, resulting in failure
-unittest.expectedFailure(
-    InlineAndInstallExportTests.test_param_buffer_safe_from_mutation_simple_inline_and_install  # noqa: F821
-)
-
-
 # This particular test is marked expecting failure, since dynamo was creating second param for a
 # and this was causing a failure in the sum; however with these changes, that test is fixed
 # so will now pass, so we need to mark that it is no longer expected to fail

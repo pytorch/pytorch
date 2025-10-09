@@ -38,7 +38,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-noble-rocm-py3.12-mi355
-      docker-image-name: ci-image:pytorch-linux-noble-rocm-alpha-py3
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
         { include: [

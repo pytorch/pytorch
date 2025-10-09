@@ -25,7 +25,7 @@ from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from ..codegen.subgraph import SubgraphChoiceCaller, SubgraphTemplate
 from ..ir import Buffer, ChoiceCaller, is_triton, Layout
 from ..kernel_inputs import MMKernelInputs
-from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
+from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -645,7 +645,27 @@ _blackwell_ws_persistent_device_tma = r"""
         )
         offs_cm = pid_m * BLOCK_M
         offs_cn = pid_n * BLOCK_N
-        # TODO: Add EPILOGUE_SUBTILE
+        {%- if EPILOGUE_SUBTILE %}
+        tl.static_assert(BLOCK_N % 2 == 0)
+        acc = tl.reshape(accumulator, (BLOCK_M, 2, BLOCK_N // 2))
+        acc = tl.permute(acc, (0, 2, 1))
+        acc0, acc1 = tl.split(acc)
+        {{store_output(
+            ("offs_cm", "offs_cn"),
+            "acc0",
+            indent_width=8,
+            val_shape=("BLOCK_M", "BLOCK_N // 2"),
+            block_indexing=True
+        )}}
+        offs_cn2 = offs_cn + BLOCK_N // 2
+        {{store_output(
+            ("offs_cm", "offs_cn2"),
+            "acc1",
+            indent_width=8,
+            val_shape=("BLOCK_M", "BLOCK_N // 2"),
+            block_indexing=True
+        )}}
+        {%- else %}
         {{store_output(
             ("offs_cm", "offs_cn"),
             "accumulator",
@@ -653,6 +673,7 @@ _blackwell_ws_persistent_device_tma = r"""
             val_shape=("BLOCK_M", "BLOCK_N"),
             block_indexing=True
         )}}
+        {%- endif %}
 """
 
 blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
@@ -669,6 +690,12 @@ def lazy_register_extern_choice(fn):
 
 
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out", op_overload=aten.mm.out)
+aten_mm_dtype = ExternKernelChoice(
+    torch.mm,
+    "at::_mm_dtype_out_cuda",
+    name="mm_dtype",
+    op_overload=aten.mm.dtype_out,
+)
 
 aten_addmm = ExternKernelChoice(
     torch.addmm, "at::addmm_out", op_overload=aten.addmm.out
@@ -837,17 +864,38 @@ addmm_contiguous_subgraph_template = ContiguousTemplate(
 
 
 @register_lowering(aten.mm, type_promotion_kind=None)
-def tuned_mm(mat1, mat2, *, layout=None):
+def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    if out_dtype is not None:
+        input_dtype = mat1.get_dtype()
+        torch._check(
+            mat2.get_dtype() == input_dtype,
+            lambda: "input dtypes must be the same",
+        )
+        torch._check(
+            mat1.get_device().type == "cuda",
+            lambda: "out_dtype is only supported for CUDA",
+        )
+        torch._check(
+            out_dtype == input_dtype
+            or (
+                out_dtype == torch.float32
+                and input_dtype in (torch.float16, torch.bfloat16)
+            ),
+            lambda: "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs",
+        )
+
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
+    m, n, k, layout, mat1, mat2 = mm_args(
+        mat1, mat2, layout=layout, out_dtype=out_dtype
+    )
     static_shape, is_nonzero = _is_static_problem(layout)
     name = "mm"
 
     # Create MMKernelInputs for standard MM at the top
-    kernel_inputs = MMKernelInputs([mat1, mat2])
+    kernel_inputs = MMKernelInputs([mat1, mat2], out_dtype=out_dtype)
 
     # below is for getting an overview logging info of inductor mms
     counters["aten_mm_info"][f"aten.mm_{m}_{n}_{k}"] += 1
@@ -864,32 +912,55 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices: list[ChoiceCaller] = []
     static_shape, is_nonzero = _is_static_problem(layout)
 
-    # Collect all templates for unified call
+    aten_handler: ExternKernelChoice = aten_mm
+    aten_extra_kwargs: dict[str, Any] = {}
+    if out_dtype is not None:
+        aten_handler = aten_mm_dtype
+        aten_extra_kwargs = {"out_dtype": out_dtype}
+
     templates_to_use: list[Union[ExternKernelChoice, KernelTemplate]] = []
+    kwarg_overrides: dict[str, dict[str, Any]] = {}
     if use_aten_gemm_kernels():
-        templates_to_use.append(aten_mm)
+        templates_to_use.append(aten_handler)
+        if aten_extra_kwargs:
+            kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
-    if is_nonzero and use_triton_template(layout, check_max_autotune=True):
-        templates_to_use.append(mm_template)
-
-        if use_triton_tma_template(mat1, mat2, output_layout=layout):
-            templates_to_use.append(persistent_tma_mm_template)
-
-        if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
-            templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
-
+    if (
+        out_dtype is None
+        and is_nonzero
+        and use_triton_template(layout, check_max_autotune=True)
+    ):
         if use_decompose_k_choice(m, n, k):
             templates_to_use.append(decompose_k_subgraph_template)
+        # Triton Templates typically perform very poorly for large K.
+        # Its highly unlikely that if we want to use decompose_k, then
+        # Triton will ever win.
+        #
+        # To be conservative we increase this threshold for N/M by 2.
+        is_exhaustive = inductor_config.max_autotune_gemm_search_space == "exhaustive"
+        if is_exhaustive or not use_decompose_k_choice(m, n, k, threshold_multiple=2):
+            templates_to_use.append(mm_template)
+
+            if use_triton_tma_template(mat1, mat2, output_layout=layout):
+                templates_to_use.append(persistent_tma_mm_template)
+
+            if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
+                templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
-    # Single unified call for all non-autoheuristic templates
     choices.extend(
-        V.choices.get_template_configs(kernel_inputs, templates_to_use, "mm")
+        V.choices.get_template_configs(
+            kernel_inputs,
+            templates_to_use,
+            "mm",
+            kwarg_overrides=kwarg_overrides,
+        )
     )
 
     if (
-        is_nonzero
+        out_dtype is None
+        and is_nonzero
         and use_cutlass_template(layout, m, n, k)
         and _use_cutlass_for_op("mm")
     ):
@@ -897,12 +968,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
             choices, layout, kernel_inputs.nodes()
         )
 
-    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
+    if out_dtype is None and is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
-    if is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
+    if out_dtype is None and is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
         CKTileGemmTemplate.add_choices(choices, layout, kernel_inputs.nodes())
 
-    if use_cpp_gemm_template(layout, mat1, mat2):
+    if out_dtype is None and use_cpp_gemm_template(layout, mat1, mat2):
         CppGemmTemplate.add_choices(
             choices,
             layout,
@@ -911,7 +982,8 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     input_nodes = [mat1, mat2]
     if (
-        is_nonzero
+        out_dtype is None
+        and is_nonzero
         and use_triton_template(layout)
         and torch._inductor.config.run_autoheuristic(name)
         and is_triton(mat1)
@@ -957,15 +1029,16 @@ def tuned_mm(mat1, mat2, *, layout=None):
             else:
                 choices = choices[:num_choices_before_extra_configs]
 
-    for k in inductor_config.external_matmul:
-        choices.append(
-            lazy_register_extern_choice(k).bind(kernel_inputs.nodes(), layout)
-        )
+    if out_dtype is None:
+        for k in inductor_config.external_matmul:
+            choices.append(
+                lazy_register_extern_choice(k).bind(kernel_inputs.nodes(), layout)
+            )
 
     best_config_future = None
-    # Purposely not awaiting the future here - this kicks off the best config lookup at lowering time
-    # The future will be awaited at scheduling time in select_algorithm.py
-    if torch._inductor.config.remote_gemm_autotune_cache:
+    if out_dtype is None and torch._inductor.config.remote_gemm_autotune_cache:
+        # Purposely not awaiting the future here - this kicks off the best config lookup at lowering time
+        # The future will be awaited at scheduling time in select_algorithm.py
         best_config_future = gen_best_config(mat1, mat2)
 
     return autotune_select_algorithm(
@@ -1178,9 +1251,6 @@ def tuned_sparse_semi_structured_mm(
     return autotune_select_algorithm(
         "sparse_semi_structured_mm", choices, (mat1, mat1_meta, mat2), layout
     )
-
-
-add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]

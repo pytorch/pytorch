@@ -1098,7 +1098,7 @@ namespace {
 
 void destroyNodeOutputs(ProcessedNode& p_node) {
   const auto borrows_outputs = borrowsOutputs(p_node.node()->kind());
-  const auto num_outputs = static_cast<uint32_t>(p_node.num_outputs());
+  const auto num_outputs = p_node.num_outputs();
   for (const auto i : c10::irange<uint32_t>(num_outputs)) {
     auto& output = p_node.Output(i);
     if (doesNotHeapAllocateWhenStoredInIValue(*output.type())) {
@@ -1863,7 +1863,7 @@ bool BlockRunner::check_for_memory_leak(
   const auto num_nodes = static_cast<uint32_t>(nodes_.size());
   for (const auto n : c10::irange(num_nodes)) {
     auto& pnode = nodes_[n];
-    const auto num_outputs = static_cast<uint32_t>(pnode.num_outputs());
+    const auto num_outputs = pnode.num_outputs();
     for (const auto i : c10::irange(num_outputs)) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
@@ -1943,7 +1943,7 @@ bool BlockRunner::checkOutputTensorMemoryLeaks() {
   const auto num_nodes = static_cast<uint32_t>(nodes_.size());
   for (const auto n : c10::irange(num_nodes)) {
     auto& pnode = nodes_[n];
-    const auto num_outputs = static_cast<uint32_t>(pnode.num_outputs());
+    const auto num_outputs = pnode.num_outputs();
     for (const auto i : c10::irange(num_outputs)) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
@@ -2042,7 +2042,7 @@ ProcessedFunction::ProcessedFunction(
         stack.emplace_back(static_cast<int>(size));
       }
       node_op(stack);
-      const auto num_outputs = static_cast<uint32_t>(pnode->num_outputs());
+      const auto num_outputs = pnode->num_outputs();
       TORCH_DCHECK_EQ(stack.size(), num_outputs);
       for (const auto i : c10::irange(num_outputs)) {
         pnode->Output(i) = std::move(stack[i]);
@@ -2158,7 +2158,7 @@ bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
 }
 
 bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
-  const auto n_outputs = static_cast<uint32_t>(num_outputs());
+  const auto n_outputs = num_outputs();
   for (const auto i : c10::irange(n_outputs)) {
     if (!Output(i).isTensor()) {
       continue;
@@ -2196,7 +2196,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
     return true;
   }
   const auto n_inputs = static_cast<uint32_t>(inputs_.size());
-  const auto n_outputs = static_cast<uint32_t>(num_outputs());
+  const auto n_outputs = num_outputs();
   for (const auto i : c10::irange<uint32_t>(n_inputs)) {
     const IValue* in = &Input(i);
     if (!in->isTensor()) {
@@ -2235,7 +2235,7 @@ bool ProcessedNode::check_and_correct_overlap_with(
 
 void ProcessedNode::verify_and_correct_memory_overlap() {
   const auto n_inputs = static_cast<uint32_t>(inputs_.size());
-  const auto n_outputs = static_cast<uint32_t>(num_outputs());
+  const auto n_outputs = num_outputs();
   for (const auto i : c10::irange(n_inputs)) {
     const IValue& in = Input(i);
     if (!in.isTensor()) {

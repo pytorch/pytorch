@@ -7,7 +7,7 @@ import dataclasses
 import difflib
 import io
 import sys
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -15,6 +15,8 @@ from torch._subclasses.fake_tensor import unset_fake_temporarily
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._subclasses import fake_tensor
 
 

@@ -5,32 +5,36 @@
 namespace c10d {
 
 void DebugInfoWriter::write(const std::string& trace) {
+  std::string filename = filename_;
+  if (enable_dynamic_filename_) {
+    filename = c10::str(getCvarString({"TORCH_FR_DUMP_TEMP_FILE"}, ""), rank_);
+  }
   // Open a file for writing. The ios::binary flag is used to write data as
   // binary.
-  std::ofstream file(filename_, std::ios::binary);
+  std::ofstream file(filename, std::ios::binary);
 
   // Check if the file was opened successfully.
   if (!file.is_open()) {
     LOG(ERROR) << "Error opening file for writing Flight Recorder debug info: "
-               << filename_;
+               << filename;
     return;
   }
 
   if (!file.write(trace.data(), static_cast<std::streamsize>(trace.size()))) {
     const auto bad = file.bad();
     LOG(ERROR) << "Error writing Flight Recorder debug info to file: "
-               << filename_ << " bad bit: " << bad;
+               << filename << " bad bit: " << bad;
     return;
   }
 
   // Flush the buffer to ensure data is written to the file
   file.flush();
   if (file.bad()) {
-    LOG(ERROR) << "Error flushing Flight Recorder debug info: " << filename_;
+    LOG(ERROR) << "Error flushing Flight Recorder debug info: " << filename;
     return;
   }
 
-  LOG(INFO) << "Finished writing Flight Recorder debug info to " << filename_;
+  LOG(INFO) << "Finished writing Flight Recorder debug info to " << filename;
 }
 
 DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
@@ -47,10 +51,12 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
     std::string fileNamePrefix = getCvarString(
         {"TORCH_FR_DUMP_TEMP_FILE", "TORCH_NCCL_DEBUG_INFO_TEMP_FILE"},
         defaultLocation.string().c_str());
+    bool useDynamicFileName =
+        getCvarBool({"TORCH_FR_DUMP_DYNAMIC_FILE_NAME"}, false);
     // Using std::unique_ptr here to auto-delete the writer object
     // when the pointer itself is destroyed.
     std::unique_ptr<DebugInfoWriter> writerPtr(
-        new DebugInfoWriter(fileNamePrefix, rank));
+        new DebugInfoWriter(fileNamePrefix, rank, useDynamicFileName));
     DebugInfoWriter::registerWriter(std::move(writerPtr));
   }
   return *writer_;

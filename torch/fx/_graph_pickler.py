@@ -65,6 +65,7 @@ class GraphPickler(pickle.Pickler):
         self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
 
     @override
+    # pyrefly: ignore  # bad-override
     def reducer_override(
         self, obj: object
     ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
@@ -201,6 +202,7 @@ class _SymNodePickleData:
     ]:
         args = (cls(obj.node), pickler._unpickle_state)
         if isinstance(obj, torch.SymInt):
+            # pyrefly: ignore  # bad-return
             return _SymNodePickleData.unpickle_sym_int, args
         else:
             raise NotImplementedError(f"Unhandled SymNode type {type(obj)}")
@@ -262,6 +264,14 @@ class _TensorPickleData:
             fake_mode=unpickle_state.fake_mode,
         )
 
+        # also need to set the fake_mode on the base of a tensor if it's a view
+        if metadata.is_view and metadata.base is not None:
+            new_base = dataclasses.replace(
+                metadata.base,
+                fake_mode=unpickle_state.fake_mode,
+            )
+            metadata = dataclasses.replace(metadata, base=new_base)
+
         def with_fake(
             make_meta_t: Callable[[], torch.Tensor], device: Union[torch.device, str]
         ) -> FakeTensor:
@@ -269,6 +279,7 @@ class _TensorPickleData:
                 return FakeTensor(
                     unpickle_state.fake_mode,
                     make_meta_t(),
+                    # pyrefly: ignore  # bad-argument-type
                     device,
                 )
 
@@ -321,7 +332,9 @@ class _TorchNumpyPickleData:
         if not (name := getattr(np, "__name__", None)):
             return None
 
+        # pyrefly: ignore  # unbound-name
         assert np == getattr(importlib.import_module(mod), name)
+        # pyrefly: ignore  # unbound-name
         return cls(mod, name)
 
 

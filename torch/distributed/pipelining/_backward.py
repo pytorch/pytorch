@@ -366,6 +366,13 @@ def stage_backward(
         for val in input_values:
             if isinstance(val, torch.Tensor):
                 grad_inputs.append(val.grad)
+                # Since gradients that will pass back to previous stages do not require gradient accumulation,
+                # by decrementing the gradients' reference count at this point, the memory of gradients will be
+                # returned to the allocator as soon as the next micro batch's get_bwd_send_ops comes and current
+                # asynchronous send completes.
+                # This prevents the gradients from persisting in GPU memory for the entire duration of step_microbatches
+                # until clear_runtime_states() is called.
+                val.grad = None
             else:
                 grad_inputs.append(None)
 

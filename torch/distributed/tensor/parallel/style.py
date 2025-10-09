@@ -473,9 +473,11 @@ class PrepareModuleInput(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Optional[Union[Placement, tuple[Optional[Placement]]]] = None,
+        input_layouts: Optional[
+            Union[Placement, tuple[Optional[Placement], ...]]
+        ] = None,
         desired_input_layouts: Optional[
-            Union[Placement, tuple[Optional[Placement]]]
+            Union[Placement, tuple[Optional[Placement], ...]]
         ] = None,
         input_kwarg_layouts: Optional[dict[str, Placement]] = None,
         desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
@@ -634,8 +636,8 @@ class PrepareModuleOutput(ParallelStyle):
     def __init__(
         self,
         *,
-        output_layouts: Union[Placement, tuple[Placement]],
-        desired_output_layouts: Union[Placement, tuple[Placement]],
+        output_layouts: Union[Placement, tuple[Optional[Placement], ...]],
+        desired_output_layouts: Union[Placement, tuple[Placement, ...]],
         use_local_output: bool = True,
     ):
         self.output_layouts = (
@@ -764,15 +766,17 @@ class PrepareModuleInputOutput(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Optional[Union[Placement, tuple[Optional[Placement]]]] = None,
+        input_layouts: Optional[
+            Union[Placement, tuple[Optional[Placement], ...]]
+        ] = None,
         desired_input_layouts: Optional[
-            Union[Placement, tuple[Optional[Placement]]]
+            Union[Placement, tuple[Optional[Placement], ...]]
         ] = None,
         input_kwarg_layouts: Optional[dict[str, Placement]] = None,
         desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
         use_local_input: bool = False,
-        output_layouts: Union[Placement, tuple[Placement]],
-        desired_output_layouts: Union[Placement, tuple[Placement]],
+        output_layouts: Union[Placement, tuple[Optional[Placement], ...]],
+        desired_output_layouts: Union[Placement, tuple[Placement, ...]],
         use_local_output: bool = True,
     ):
         self.prepare_module_input = PrepareModuleInput(

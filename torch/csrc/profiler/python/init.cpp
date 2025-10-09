@@ -2,6 +2,7 @@
 
 #include <ATen/record_function.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/util/Exception.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -250,9 +251,34 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
         if (THPUtils_checkString(value)) {
           ivalue = at::IValue(THPUtils_unpackString(value));
         } else {
+          // Handle other types (not strings, not lists)
           auto match = torch::jit::tryToInferPrimitiveType(value);
           if (match.success()) {
             ivalue = torch::jit::toIValue(value, match.type());
+          } else if (PyList_Check(value)) {
+            // Handle list of strings
+            bool all_strings = true;
+            std::vector<std::string> string_list;
+            Py_ssize_t list_size = PyList_Size(value);
+
+            for (Py_ssize_t i = 0; i < list_size; i++) {
+              PyObject* item = PyList_GetItem(value, i);
+              if (THPUtils_checkString(item)) {
+                string_list.push_back(THPUtils_unpackString(item));
+              } else {
+                all_strings = false;
+                break;
+              }
+            }
+
+            if (all_strings) {
+              c10::List<std::string> string_ivalue_list(string_list);
+              ivalue = at::IValue(string_ivalue_list);
+            } else {
+              TORCH_WARN(
+                  "Unable to infer type of value in the List for keyword: ",
+                  key_str);
+            }
           } else {
             TORCH_WARN("Unable to infer type of value for keyword: ", key_str);
             ivalue = at::IValue("NULL");
@@ -352,6 +378,7 @@ void initPythonBindings(PyObject* module) {
               bool /* profile_all_threads */,
               bool /* capture_overload_names */,
               bool /* record_python_gc_info */,
+              bool /* expose_kineto_event_metadata */,
               std::string /* custom_profiler_config*/
               >(),
           "An experimental config for Kineto features. Please note that"
@@ -372,6 +399,7 @@ void initPythonBindings(PyObject* module) {
           "    profile_all_threads (bool) : whether to profile all threads\n"
           "    capture_overload_names (bool) : whether to include ATen overload names in the profile\n"
           "    record_python_gc_info (bool) : adds python gc events to profile\n"
+          "    expose_kineto_event_metadata (bool) : whether to expose KinetoEvent metadata in the PyTorch Profiler\n"
           "    custom_profiler_config (string) : Used to pass some configurations to the custom profiler backend.\n",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
@@ -383,6 +411,7 @@ void initPythonBindings(PyObject* module) {
           py::arg("profile_all_threads") = false,
           py::arg("capture_overload_names") = false,
           py::arg("record_python_gc_info") = false,
+          py::arg("expose_kineto_event_metadata") = false,
           py::arg("custom_profiler_config") = "")
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
@@ -407,13 +436,12 @@ void initPythonBindings(PyObject* module) {
                 p.profile_all_threads,
                 p.capture_overload_names,
                 p.record_python_gc_info,
+                p.expose_kineto_event_metadata,
                 p.custom_profiler_config,
                 p.performance_events);
           },
           [](const py::tuple& t) { // __setstate__
-            if (t.size() >= 5) {
-              throw std::runtime_error("Expected at least 5 values in state");
-            }
+            TORCH_CHECK(t.size() < 5, "Expected at least 5 values in state");
 
             py::list py_metrics = t[0].cast<py::list>();
             std::vector<std::string> metrics{py_metrics.size()};

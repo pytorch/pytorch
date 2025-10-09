@@ -30,6 +30,11 @@ using AOTInductorStreamHandle = AOTInductorStreamOpaque*;
 struct AOTInductorConstantMap;
 using AOTInductorConstantMapHandle = AOTInductorConstantMap*;
 
+struct AOTInductorConstantMapEntry {
+  const char* name;
+  AtenTensorHandle handle;
+};
+
 // TODO: Deprecate this API. This was kept for BC compatibility.
 // Please use AOTInductorModelContainerCreateWithDevice instead.
 AOTI_API AOTIRuntimeError AOTInductorModelContainerCreate(
@@ -148,6 +153,16 @@ AOTI_API AOTIRuntimeError
 AOTInductorModelContainerUpdateUserManagedConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
+    bool use_inactive,
+    bool validate_full_update);
+
+// Same as AOTInductorModelContainerUpdateUserManagedConstantBuffer,
+// but no std::unordered_map crosses DLL boundaries for cross-compilation.
+AOTI_API AOTIRuntimeError
+AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
     bool use_inactive,
     bool validate_full_update);
 

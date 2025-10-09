@@ -12,7 +12,7 @@ void check_single_result(
     const at::TensorBase& result,
     const std::string& hook_name) {
   TORCH_CHECK(
-      value.defined(), "can't replace a empty gradient with a non-empty value")
+      value.defined(), "can't replace a empty gradient with a non-empty value");
   torch::autograd::check_variable_result(value, result, hook_name);
 }
 } // namespace

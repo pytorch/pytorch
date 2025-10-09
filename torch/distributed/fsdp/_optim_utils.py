@@ -351,7 +351,7 @@ def _broadcast_state(
         if isinstance(state, torch.Tensor):
             assert state.dim() == 0, (
                 "For non-zero ranks, a tensor state should have zero dimension, "
-                "but got the state with shape {state.shape()}."
+                f"but got the state with shape {state.shape}."
             )
             return state
         elif not isinstance(state, _PosDimTensorInfo):
@@ -1508,8 +1508,7 @@ def _allgather_orig_param_states(
         return output_states
 
     has_state_params: list[bool] = [
-        True if fqn in output_states else False
-        for fqn, idx in fsdp_param_info.param_indices.items()
+        fqn in output_states for fqn, idx in fsdp_param_info.param_indices.items()
     ]
 
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,
