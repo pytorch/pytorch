@@ -679,7 +679,7 @@ class FlopCounterMode:
 
 
         import tabulate
-        # pyrefly: ignore  # bad-assignment
+
         tabulate.PRESERVE_WHITESPACE = True
         header = ["Module", "FLOP", "% Total"]
         values = []

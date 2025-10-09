@@ -1453,7 +1453,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
         # To avoid PendingUnbackedSymbolNotFound errors, we tell the compiler it's fine to not bind these.
         with ctx():
             indices = [i.item() for i in tensor_indices_or_sections]
-        # WARNING: Tempted to torch._check_is_size on the indices here?  You
+        # WARNING: Tempted to torch._check(x>0) on the indices here?  You
         # can't: tensor_split works with negative values in indices:
         #
         # >>> torch.tensor_split(torch.randn(10), torch.tensor([-5, 5]))

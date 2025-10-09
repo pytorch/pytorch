@@ -1,5 +1,5 @@
 from .core import dispatch
-from .dispatcher import (  # pyrefly: ignore  # deprecated
+from .dispatcher import (
     Dispatcher,
     halt_ordering,
     MDNotImplementedError,
