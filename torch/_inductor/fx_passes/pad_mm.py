@@ -715,7 +715,7 @@ def run_autoheuristic(
     )
     choice = autoheuristic.get_choice()
     choice2should_pad = {orig_choice: False, pad_choice: True, "autotune": None}
-    ah_should_pad = choice2should_pad.get(choice, None)
+    ah_should_pad = choice2should_pad.get(choice)
 
     if torch._inductor.config.collect_autoheuristic(name):
         ah_ori_time = autoheuristic.get_collected_feedback(orig_choice)
