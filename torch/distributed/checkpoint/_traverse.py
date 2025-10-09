@@ -128,6 +128,7 @@ def set_element(
                 CONTAINER_TYPE, cur_container.setdefault(prev_key, def_val)
             )
         else:
+            # pyrefly: ignore  # bad-argument-type
             extend_list(cur_container, prev_key)
             if cur_container[prev_key] is None:
                 cur_container[prev_key] = def_val
@@ -154,6 +155,7 @@ def get_element(
         elif not isinstance(cur_value, Mapping) or part not in cur_value:
             return default_value
 
+        # pyrefly: ignore  # index-error
         cur_value = cast(CONTAINER_TYPE, cur_value[part])
     return cast(Optional[T], cur_value)
 

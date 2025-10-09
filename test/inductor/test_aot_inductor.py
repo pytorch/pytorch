@@ -202,7 +202,7 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             if self.device == "mps":
-                FileCheck().check("getKernelFunction(").run(code)
+                FileCheck().check("aoti_torch_mps_get_kernel_function(").run(code)
             elif self.device == GPU_TYPE:
                 FileCheck().check("launchKernel(").run(code)
                 if config.aot_inductor.embed_kernel_binary:
@@ -611,6 +611,9 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(32, 64, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @unittest.skip(
+        "install_free_tensors leads to OOM - https://github.com/pytorch/pytorch/issues/164062"
+    )
     def test_large_weight(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1642,6 +1645,61 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @skipIfMPS
+    @config.patch({"unbacked_symint_fallback": 12})
+    @config.patch({"triton.autotune_at_compile_time": None})
+    def test_replace_unbacked_symbol_with_backed_expr(self):
+        # This will test how autotune_at_compile_time generates sample inputs
+        # when the user torch._checks(s0 + s1 == u0).
+        # We may fail with IMA if the generated input sizes aren't correct.
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires triton")
+
+        def force_realize(tensor):
+            # Realize the tensor as an intermediate buffer
+            nrows, ncols = tensor.shape
+            numel = tensor.numel()
+            add_kernel[nrows,](
+                in_ptr0=tensor,
+                in_ptr1=tensor,
+                out_ptr=tensor,
+                n_elements=numel,
+                BLOCK_SIZE=ncols,
+            )
+
+        INNER_DIM = 256
+
+        class Repro(torch.nn.Module):
+            def forward(self, x, y, lengths):
+                # Realize an intermediate buffer with backed shape: s0 + s1
+                relevant_embeddings = torch.cat([x, y], dim=0)
+                force_realize(relevant_embeddings)
+
+                # Realize an intermediate buffer with unbacked shape: u0
+                num_relevant_embeddings = lengths.nonzero().size(0)
+                ones = torch.ones((num_relevant_embeddings, INNER_DIM), device=x.device)
+                force_realize(ones)
+
+                # Add deferred runtime assertion: s0 + s1 == u0
+                torch._check(relevant_embeddings.size(0) == ones.size(0))
+                relevant_embeddings += ones
+                return relevant_embeddings * relevant_embeddings
+
+        torch.cuda.caching_allocator_enable(False)
+        model = Repro()
+        example_inputs = (
+            torch.randn((1000, INNER_DIM), device=self.device),
+            torch.randn((2000, INNER_DIM), device=self.device),
+            torch.ones(3000),
+        )
+        spec = {
+            "x": (Dim.DYNAMIC, Dim.STATIC),
+            "y": (Dim.DYNAMIC, Dim.STATIC),
+            "lengths": (Dim.DYNAMIC,),
+        }
+        self.check_model(model, example_inputs, dynamic_shapes=spec)
+        torch.cuda.caching_allocator_enable(True)
+
     @config.patch({"triton.autotune_at_compile_time": None})
     def test_stride_with_unbacked_expr(self):
         class Repro(torch.nn.Module):
@@ -1677,7 +1735,6 @@ class AOTInductorTestsTemplate:
 
                 backed = z.size(0)
                 unbacked = scalar.item()
-                torch._check_is_size(unbacked)
 
                 unbacked_add_expr = backed + unbacked
                 repeated = x.repeat(unbacked_add_expr, 1)
@@ -1716,8 +1773,6 @@ class AOTInductorTestsTemplate:
                 index_select = torch.index_select(embeddings, 0, index)
 
                 u0, u1 = lst.tolist()
-                torch._check_is_size(u0)
-                torch._check_is_size(u1)
                 backed0, backed1 = z.size(0), z.size(1)
 
                 repeated0 = y.repeat(backed0 + u0, 1)
@@ -1767,9 +1822,6 @@ class AOTInductorTestsTemplate:
         class Repro(torch.nn.Module):
             def forward(self, values, repeats, mask, embeddings, x, y, z, lst):
                 u0, u1, u2 = lst.tolist()
-                torch._check_is_size(u0)
-                torch._check_is_size(u1)
-                torch._check_is_size(u2)
                 backed = z.size(0)
                 backed1 = z.size(1)
 
@@ -2841,7 +2893,7 @@ class AOTInductorTestsTemplate:
 
         if self.device == "mps":
             self.code_check_count(
-                model, example_inputs, '.getKernelFunction("generated_kernel")', 1
+                model, example_inputs, "aoti_torch_mps_get_kernel_function(", 1
             )
         elif self.device == GPU_TYPE:
             self.code_check_count(

@@ -34,12 +34,14 @@ fi
 
 
 # Patch numba to avoid CUDA-13 crash, see https://github.com/pytorch/pytorch/issues/162878
-NUMBA_CUDA_DIR=$(python -c "import os;import numba.cuda; print(os.path.dirname(numba.cuda.__file__))" 2>/dev/null || true)
-if [ -n "$NUMBA_CUDA_DIR" ]; then
-  NUMBA_PATCH="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/numba-cuda-13.patch"
-  pushd "$NUMBA_CUDA_DIR"
-  patch -p4 <"$NUMBA_PATCH"
-  popd
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+  NUMBA_CUDA_DIR=$(python -c "import os;import numba.cuda; print(os.path.dirname(numba.cuda.__file__))" 2>/dev/null || true)
+  if [ -n "$NUMBA_CUDA_DIR" ]; then
+    NUMBA_PATCH="$(dirname "$(realpath "${BASH_SOURCE[0]}")")/numba-cuda-13.patch"
+    pushd "$NUMBA_CUDA_DIR"
+    patch -p4 <"$NUMBA_PATCH"
+    popd
+  fi
 fi
 
 echo "Environment variables:"
@@ -836,7 +838,7 @@ test_dynamo_benchmark() {
       elif [[ "${suite}" == "timm_models" ]]; then
         export TORCHBENCH_ONLY_MODELS="inception_v3"
       elif [[ "${suite}" == "torchbench" ]]; then
-        export TORCHBENCH_ONLY_MODELS="hf_Bert"
+        export TORCHBENCH_ONLY_MODELS="BERT_pytorch"
       fi
     fi
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
@@ -867,13 +869,13 @@ test_inductor_torchbench_smoketest_perf() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
-    --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
+    --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only BERT_pytorch \
     --output "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
   # The threshold value needs to be actively maintained to make this check useful
   python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv" -t 1.4
 
   # Check memory compression ratio for a few models
-  for test in hf_Albert timm_vision_transformer; do
+  for test in BERT_pytorch yolov3; do
     python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
       --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
       --only $test --output "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv"
@@ -884,7 +886,7 @@ test_inductor_torchbench_smoketest_perf() {
   done
 
   # Perform some "warm-start" runs for a few huggingface models.
-  for test in AlbertForQuestionAnswering AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
+  for test in AllenaiLongformerBase DistilBertForMaskedLM DistillGPT2 GoogleFnet YituTechConvBert; do
     python benchmarks/dynamo/huggingface.py --accuracy --training --amp --inductor --device cuda --warm-start-latency \
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \

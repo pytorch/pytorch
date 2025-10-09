@@ -1413,7 +1413,7 @@ Resize can only operate on graph inputs, but got {node} which is resizing non-gr
         )
         resized_to_0_idxes = graph_input_to_resized_to_0_node_idxes.get(graph_input, [])
 
-        if not len(resized_to_full_idxes) == len(resized_to_0_idxes):
+        if len(resized_to_full_idxes) != len(resized_to_0_idxes):
             log.warning(
                 f"""
 Unequal number of resize-to-full and resize-to-0 nodes for graph input {graph_input}:
