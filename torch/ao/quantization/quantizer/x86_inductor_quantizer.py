@@ -1357,10 +1357,8 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_output_share_observer_as_input(
         self, input_node: Node, source_node: Node
     ):
-        source_node_quantization_annotation = (
-            source_node.meta[QUANT_ANNOTATION_KEY]
-            if QUANT_ANNOTATION_KEY in source_node.meta
-            else None
+        source_node_quantization_annotation = source_node.meta.get(
+            QUANT_ANNOTATION_KEY, None
         )
         if (
             source_node_quantization_annotation
@@ -1400,10 +1398,8 @@ class X86InductorQuantizer(Quantizer):
                     return
 
                 # Get the quantization_annotation from getitem_node
-                maxpool_node_quantization_annotation = (
-                    maxpool_node.meta[QUANT_ANNOTATION_KEY]
-                    if QUANT_ANNOTATION_KEY in maxpool_node.meta
-                    else None
+                maxpool_node_quantization_annotation = maxpool_node.meta.get(
+                    QUANT_ANNOTATION_KEY, None
                 )
                 if (
                     maxpool_node_quantization_annotation
