@@ -442,9 +442,6 @@ SparseTensor& add_out_sparse_mps(const SparseTensor& self,
 
 using OptTensor = std::optional<Tensor>;
 
-static inline Tensor maybe_cast(const Tensor& t, at::ScalarType to) {
-  return t.scalar_type() == to ? t : t.to(to);
-}
 
 static void sparse_mask_apply_out_mps_kernel(
     Tensor& result,
@@ -492,7 +489,6 @@ static void sparse_mask_apply_out_mps_kernel(
     auto out_values = src_nnz
       ? src._values().narrow(0, 0, 1).to(commonDtype)
       : at::zeros({1}, at::device(result.device()).dtype(commonDtype));
-    out_values = maybe_cast(out_values, result.scalar_type());
     alias_into_sparse(result, out_indices, out_values);
     result._coalesced_(mask.is_coalesced());
     return;
@@ -504,7 +500,6 @@ static void sparse_mask_apply_out_mps_kernel(
     auto out_val_sizes = src_values.sizes().vec();
     out_val_sizes[0] = mask_nnz;
     auto out_values = at::zeros(out_val_sizes, src_values.options());
-    out_values = maybe_cast(out_values, result.scalar_type());
     alias_into_sparse(result, out_indices, out_values);
     result._coalesced_(mask.is_coalesced());
     return;
@@ -559,7 +554,6 @@ static void sparse_mask_apply_out_mps_kernel(
     }
   }
 
-  out_values = maybe_cast(out_values, result.scalar_type());
   alias_into_sparse(result, mask_indices, out_values);
   result._coalesced_(mask.is_coalesced());
 }
