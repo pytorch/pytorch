@@ -6444,6 +6444,7 @@ def meta_scaled_mm(
                 )
             else:
                 # does not match any valid scaling type
+                # test comment for export
                 torch._check(
                     False,
                     lambda: (
