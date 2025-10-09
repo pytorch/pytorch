@@ -272,7 +272,10 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
 
 
 def do_bench_using_profiling(
-    fn: Callable[[], Any], warmup: int = 25, rep: int = 100
+    fn: Callable[[], Any],
+    warmup: int = 25,
+    rep: int = 100,
+    is_vetted_benchmarking: bool = False,
 ) -> float:
     """
     Returns benchmark results by examining torch profiler events.
@@ -281,6 +284,11 @@ def do_bench_using_profiling(
     vectorized_elementwise_kernel which is used to fill L2 cache,
     various CUDA events, etc, so could also be fragile.
     """
+
+    if not is_vetted_benchmarking:
+        from torch._inductor.runtime.benchmarking import may_ban_benchmarking
+
+        may_ban_benchmarking()
 
     fn()
     torch.cuda.synchronize()

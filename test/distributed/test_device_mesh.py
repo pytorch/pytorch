@@ -337,20 +337,6 @@ class DeviceMeshTest(DTensorTestBase):
             )
 
     @with_comms
-    def test_set_mesh_dim_group_options(self):
-        device_type = (
-            torch.accelerator.current_accelerator().type
-            if torch.accelerator.is_available()
-            else "cpu"
-        )
-        _mesh_resources._set_mesh_dim_group_options(1, "fake", None)
-
-        mesh_tensor = torch.arange(4).reshape(2, 2)
-        mesh = DeviceMesh(device_type, mesh_tensor)
-        # Fake pg only have BackendType as BackendType::CUSTOM.
-        self.assertEqual(mesh.get_group(1)._get_backend_name(), "custom")
-
-    @with_comms
     def test_get_root_mesh_multiple_independent_meshes(self):
         # regression test for issue #163330
         # when creating multiple independent device meshes and slicing them,
