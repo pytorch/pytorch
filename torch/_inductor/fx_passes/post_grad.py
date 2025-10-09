@@ -202,6 +202,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
     collectives_bucketing: bool = False
+
     if config.bucket_reduce_scatters_fx != "none":
         from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
         from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
@@ -704,7 +705,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
         iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
     )
-    past_mutating_epilogue = True if first_copy is None else False
+    past_mutating_epilogue = first_copy is None
 
     for node in reversed(graph.nodes):
         seen_nodes.add(node)
@@ -1760,7 +1761,7 @@ class ConstructorMoverPass:
             if not torch._subclasses.fake_tensor._is_tensor_constructor(node.target):
                 continue
 
-            if not node.kwargs.get("device") == torch.device("cpu"):
+            if node.kwargs.get("device") != torch.device("cpu"):
                 continue
 
             constructors.append(node)
@@ -1921,13 +1922,9 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
     # by explicitly moving cpu scalar tensors to gpu when profitable, relying on
     # graph partition to split off this data copy, and cudagraphifying
     # the remaining gpu ops.
-    allow_inputs_outputs = (
-        True
-        if (
-            torch._inductor.config.triton.cudagraphs
-            and torch._inductor.config.graph_partition
-        )
-        else False
+    allow_inputs_outputs = bool(
+        torch._inductor.config.triton.cudagraphs
+        and torch._inductor.config.graph_partition
     )
     ConstructorMoverPass(
         get_gpu_type(),

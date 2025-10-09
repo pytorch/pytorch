@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import logging
-import tempfile
 from dataclasses import dataclass
 
 from model_registry import ModelWithKwargs, MultiMLP, MultiMLPKwargs, MultiMLPWithDw
@@ -27,7 +26,15 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from torch.distributed.pipelining.schedules import _PipelineScheduleRuntime
+from torch.distributed.pipelining.schedules import (
+    _Action,
+    _PipelineContext,
+    _PipelineScheduleRuntime,
+    _wait_batch_p2p,
+    FORWARD,
+    OVERLAP_F_B,
+)
+from torch.distributed.pipelining.stage import _PipelineStageBase  # noqa: TC002
 from torch.nn.modules.loss import MSELoss
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -515,8 +522,7 @@ class ScheduleTest(MultiProcContinuousTest):
             ScheduleInterleavedZeroBubble,
         ],
     )
-    @parametrize("use_new_runtime", [False, True])
-    def test_grad_with_manual_interleaved(self, ScheduleClass, use_new_runtime):
+    def test_grad_with_manual_interleaved(self, ScheduleClass):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -542,46 +548,6 @@ class ScheduleTest(MultiProcContinuousTest):
         schedule = ScheduleClass(
             stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
         )
-
-        # Handle new runtime testing
-        if use_new_runtime:
-            old_schedule = schedule
-            tmp_schedule = _PipelineScheduleRuntime(
-                stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
-            )
-            tmp_schedule._prepare_schedule_with_comms(old_schedule.pipeline_order)
-
-            # Test CSV round-trip for compute_comms schedule
-            schedule = _PipelineScheduleRuntime(
-                stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
-            )
-            with tempfile.NamedTemporaryFile() as f:
-                tmp_schedule._dump_csv(f.name)
-                f.seek(0)
-                schedule._load_csv(f.name, format="compute_comms")
-
-            one_more_schedule = _PipelineScheduleRuntime(
-                stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
-            )
-            one_more_schedule._prepare_schedule_with_comms(
-                schedule.pipeline_order_with_comms, format="compute_comms"
-            )
-
-            # Verify schedule consistency
-            self.assertEqual(
-                len(schedule.pipeline_order_with_comms),
-                len(one_more_schedule.pipeline_order_with_comms),
-            )
-            for rank in schedule.pipeline_order_with_comms:
-                self.assertEqual(
-                    len(schedule.pipeline_order_with_comms[rank]),
-                    len(one_more_schedule.pipeline_order_with_comms[rank]),
-                )
-                for a, b in zip(
-                    schedule.pipeline_order_with_comms[rank],
-                    one_more_schedule.pipeline_order_with_comms[rank],
-                ):
-                    self.assertEqual(a, b)
 
         # Run pipeline with tensor leak checking
         out = None
@@ -706,8 +672,7 @@ class ScheduleTest(MultiProcContinuousTest):
         "schedule_class",
         [ScheduleZBVZeroBubble, ScheduleDualPipeV],
     )
-    @parametrize("use_new_runtime", [False, True])
-    def test_v_shape_schedules(self, schedule_class, use_new_runtime):
+    def test_v_shape_schedules(self, schedule_class):
         n_stages = 8
         rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
         mod, ref_mod, x, target, loss_fn = setup_models_and_data(
@@ -727,13 +692,6 @@ class ScheduleTest(MultiProcContinuousTest):
         schedule = schedule_class(
             stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
         )
-
-        if schedule_class != ScheduleDualPipeV and use_new_runtime:
-            old_schedule = schedule
-            schedule = _PipelineScheduleRuntime(
-                stages, num_microbatches, loss_fn=loss_fn
-            )
-            schedule._prepare_schedule_with_comms(old_schedule.pipeline_order)
 
         # Run pipeline - special case where first and last stage are on rank 0
         out = None
@@ -757,6 +715,201 @@ class ScheduleTest(MultiProcContinuousTest):
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, f"{backend} test requires 2+ GPUs"
+    )
+    def test_custom_function_callback(self):
+        """Test the custom function callback functionality with _PipelineScheduleRuntime."""
+        n_stages = 8
+        rank_stages = {0: [0, 7], 1: [1, 6], 2: [2, 5], 3: [3, 4]}
+        mod, ref_mod, x, target, loss_fn = setup_models_and_data(
+            self.config, n_layers=n_stages
+        )
+
+        # Run reference
+        ref_out, ref_loss = run_reference_model(ref_mod, x, target, loss_fn)
+
+        # Create multi-stage pipeline with custom stage indices
+        num_microbatches = 8
+        stage_indices = rank_stages[self.rank]
+        stages, stage_modules, submod_names = create_multi_stage_pipeline(
+            self.config, mod, len(stage_indices), n_stages, stage_indices
+        )
+
+        # Use DualPipeV schedule as the base schedule
+        base_schedule = ScheduleDualPipeV(
+            stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
+        )
+        base_schedule._prepare_schedule_with_comms(base_schedule.pipeline_order)
+
+        # Track both types of callbacks separately
+        forward_calls = []
+        overlap_calls = []
+
+        def forward_callback(action: _Action, ctx: _PipelineContext):
+            """Custom callback for FORWARD computation that mimics the original implementation."""
+            schedule = ctx.schedule_ref
+            assert isinstance(schedule, _PipelineScheduleRuntime)
+            stage_index_to_stage: dict[int, _PipelineStageBase] = {
+                stage.stage_index: stage for stage in schedule._stages
+            }
+            stage = stage_index_to_stage[action.stage_index]
+            stage_index = stage.stage_index
+            mb_index = action.microbatch_index
+            assert mb_index is not None
+            fwd_recv_ops = schedule.fwd_recv_ops
+            arg_mbs = ctx.arg_mbs
+            kwarg_mbs = ctx.kwarg_mbs
+
+            is_next_stage_on_this_rank = stage_index + 1 in stage_index_to_stage
+            is_prev_stage_on_this_rank = stage_index - 1 in stage_index_to_stage
+
+            # used in verification at the end
+            forward_calls.append((stage_index, mb_index))
+
+            if (
+                not stage.is_first
+                # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                and not is_prev_stage_on_this_rank
+            ):
+                assert (
+                    stage_index,
+                    mb_index,
+                ) in fwd_recv_ops, f"Computing {action=} before receiving input"
+                from torch.distributed.pipelining.schedules import _wait_batch_p2p
+
+                _wait_batch_p2p(fwd_recv_ops.pop((stage_index, mb_index)))
+
+            output = stage.forward_one_chunk(
+                mb_index,
+                arg_mbs[mb_index],  # type: ignore[index]
+                kwarg_mbs[mb_index],  # type: ignore[index]
+            )
+            schedule._maybe_compute_loss(stage, output, ctx.target_mbs, mb_index)
+
+            # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+            # see [Note: V-schedule special case]
+            if is_next_stage_on_this_rank:
+                stage_index_to_stage[stage_index + 1].set_local_fwd_input(
+                    output, mb_index
+                )
+
+        def overlap_callback(action: _Action, ctx: _PipelineContext):
+            """Custom callback for OVERLAP_F_B computation that mimics the original implementation."""
+            schedule = ctx.schedule_ref
+            assert isinstance(schedule, _PipelineScheduleRuntime)
+            stage_index_to_stage: dict[int, _PipelineStageBase] = {
+                stage.stage_index: stage for stage in schedule._stages
+            }
+            assert action.sub_actions is not None
+            fwd_action = action.sub_actions[0]
+            bwd_action = action.sub_actions[1]
+
+            # Forward ========================================================
+            forward_callback(fwd_action, ctx)
+            overlap_calls.append(
+                (
+                    fwd_action.stage_index,
+                    fwd_action.microbatch_index,
+                    bwd_action.stage_index,
+                    bwd_action.microbatch_index,
+                )
+            )
+
+            # Backward ========================================================
+            backward_stage_index = bwd_action.stage_index
+            backward_stage = stage_index_to_stage[backward_stage_index]
+            backward_mb_index = bwd_action.microbatch_index
+            assert backward_mb_index is not None
+            bwd_recv_ops = schedule.bwd_recv_ops
+            is_next_stage_on_this_rank = (
+                backward_stage.stage_index + 1 in stage_index_to_stage
+            )
+            is_prev_stage_on_this_rank = (
+                backward_stage.stage_index - 1 in stage_index_to_stage
+            )
+            if (
+                not backward_stage.is_last
+                # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                and not is_next_stage_on_this_rank
+            ):
+                assert (
+                    backward_stage_index,
+                    backward_mb_index,
+                ) in bwd_recv_ops, (
+                    f"Attempted to run compute {action=} before receiving input"
+                )
+                _wait_batch_p2p(
+                    bwd_recv_ops.pop((backward_stage_index, backward_mb_index))
+                )
+            loss = schedule._maybe_get_loss(backward_stage, backward_mb_index)
+            schedule.backward_counter[backward_stage_index] += 1
+            last_backward = (
+                schedule.backward_counter[backward_stage_index]
+                == schedule._n_microbatches
+            )
+            grad_scale_factor = schedule._n_microbatches if schedule.scale_grads else 1
+            backward_stage.backward_one_chunk(
+                backward_mb_index,
+                loss=loss,
+                full_backward=True,
+                last_backward=last_backward,
+            )
+            if last_backward:
+                backward_stage.scale_grads(grad_scale_factor)
+            # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+            # see [Note: V-schedule special case]
+            if is_prev_stage_on_this_rank:
+                stage_index_to_stage[backward_stage_index - 1].set_local_bwd_input(
+                    backward_stage.get_local_bwd_output(backward_mb_index),
+                    backward_mb_index,
+                )
+
+        # Add the callback for FORWARD computation type
+
+        base_schedule.register_custom_function(FORWARD, forward_callback)
+        base_schedule.register_custom_function(OVERLAP_F_B, overlap_callback)
+
+        # Run pipeline - special case where first and last stage are on rank 0
+        out = None
+        losses = []
+        num_loops = 2
+        for _ in range(num_loops):
+            zero_gradients(stage_modules)
+            if self.rank == 0:
+                out = base_schedule.step(x, target=target, losses=losses)
+            else:
+                base_schedule.step()
+
+        dist.barrier()
+
+        # Verify results (rank 0 has both first and last stages)
+        if self.rank == 0:
+            torch.testing.assert_close(out, ref_out)
+            pipe_loss = sum(losses)
+            torch.testing.assert_close(pipe_loss, ref_loss)
+
+            # Verify overlap callbacks were called
+            self.assertGreater(
+                len(overlap_calls), 0, "OVERLAP_F_B callback should have been called"
+            )
+
+            # In a V-schedule with 8 microbatches and 2 stages per rank,
+            # rank 0 should have 32 calls (8 microbatches * 2 stages * 2 loops)
+            expected_count = num_microbatches * 2 * num_loops
+            self.assertEqual(len(forward_calls), expected_count)
+
+            # Verify all callback calls are for stages on this rank
+            for stage_idx, _ in forward_calls:
+                self.assertIn(
+                    stage_idx,
+                    stage_indices,
+                    f"Callback called for stage {stage_idx} not on rank {self.rank}",
+                )
+
+        # Check gradients using helper method
+        check_gradients(self.config, stage_modules, ref_mod, submod_names)
+
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ GPUs"
     )
     @parametrize(
         "ScheduleClass",
@@ -855,8 +1008,7 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         "schedule_class",
         [ScheduleVShaped, ScheduleUnbalanced],
     )
-    @parametrize("use_new_runtime", [False, True])
-    def test_non_symmetric_stage_ids(self, schedule_class, use_new_runtime):
+    def test_non_symmetric_stage_ids(self, schedule_class):
         n_stages = schedule_class.n_stages
         rank_stages = schedule_class.rank_stages
 
@@ -878,13 +1030,6 @@ class CustomSchedulesTest(MultiProcContinuousTest):
         schedule = schedule_class(
             stages, num_microbatches, loss_fn=loss_fn, scale_grads=False
         )
-
-        if use_new_runtime:
-            old_schedule = schedule
-            schedule = _PipelineScheduleRuntime(
-                stages, num_microbatches, loss_fn=loss_fn
-            )
-            schedule._prepare_schedule_with_comms(old_schedule.pipeline_order)
 
         # Run pipeline - special case where first and last stage are on rank 0
         out = None
