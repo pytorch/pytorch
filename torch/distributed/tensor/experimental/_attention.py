@@ -384,9 +384,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(group, dist.ProcessGroup), (
-        "process group must be single dimension"
-    )
+    assert isinstance(
+        group, dist.ProcessGroup
+    ), "process group must be single dimension"
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -461,6 +461,7 @@ def _templated_ring_attention(
         )
         sdpa_merger.step(out, logsumexp, partial)
 
+    # pyrefly: ignore  # unbound-name
     return *sdpa_merger.results(), *rest
 
 
@@ -627,6 +628,7 @@ def _templated_ring_attention_backward(
         grad_query,
         grad_key,
         grad_value,
+        # pyrefly: ignore  # unbound-name
         *rest,
     )
 
@@ -965,7 +967,9 @@ def _distribute_function(
 
 def _restore_function(fn: Callable, fn_module: types.ModuleType) -> None:
     """Restore the function that is replaced by _distribute_function."""
+    # pyrefly: ignore  # unknown-name
     global _original_functions
+    # pyrefly: ignore  # unknown-name
     global _wrapper_functions
 
     if fn not in _replaced_functions:
@@ -1173,7 +1177,6 @@ def _create_cp_block_mask(
     def _rewrite_mask_mod(
         mask_mod: _mask_mod_signature,
         rank: int,
-        world_size: int,
         block_size: int,
         local_q_size: int,
         qkv_rearrange_indices: Optional[torch.Tensor] = None,
@@ -1231,7 +1234,6 @@ def _create_cp_block_mask(
         _rewrite_mask_mod(
             mask_mod,
             cp_rank,
-            cp_group_size,
             block_size,
             Q_SHARD_LEN,
             qkv_rearrange_indices=rearrange_indices,
@@ -1324,6 +1326,7 @@ class _ContextParallel(ParallelStyle):
         placement = [Shard(self.seq_dim)]
         all_args = []
 
+        # pyrefly: ignore  # bad-assignment, bad-argument-type
         for arg in itertools.chain(args, kwargs.values()):
             if isinstance(arg, torch.Tensor):
                 if isinstance(arg, DTensor):
@@ -1587,6 +1590,7 @@ def set_rotate_method(rotate_method: str) -> None:
     Returns:
         None
     """
+    logger.info("Note that FlexAttention CP doesn't support alltoall yet.")
     if rotate_method == "allgather":
         _cp_options.rotate_method = _RotateMethod.ALL_GATHER
     elif rotate_method == "alltoall":
