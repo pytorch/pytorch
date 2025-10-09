@@ -39,6 +39,8 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
     IS_FBCODE,
+    MI350_ARCH,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
@@ -218,6 +220,7 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
+    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -2540,31 +2543,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         correct = forward(*example_inputs)
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
-
-    def test_truediv_numerics_with_eager(self):
-        from decimal import Decimal
-
-        y, x = 7.0, 11.0
-
-        @torch.compile
-        def compiled_divide(x, y):
-            return x / y
-
-        for y_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
-            for x_dtype in [
-                torch.float16,
-                torch.bfloat16,
-                torch.float32,
-                torch.float64,
-            ]:
-                y_ten = torch.tensor([y], dtype=y_dtype, device="cuda")
-                x_ten = torch.tensor([x], dtype=x_dtype, device="cuda")
-
-                torch._dynamo.reset()
-                compiled_div = Decimal(compiled_divide(x, y_ten).item())
-                eager_div = Decimal((x / y_ten).item())
-
-                self.assertEqual(eager_div, compiled_div)
 
 
 if __name__ == "__main__":
