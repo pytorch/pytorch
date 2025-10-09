@@ -9,6 +9,7 @@ import sys
 import time
 import warnings
 from contextlib import contextmanager, nullcontext
+from itertools import chain
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias
 
@@ -681,12 +682,19 @@ def _restore_state_dict(
     Restores the state dict of the traced module to that of the original module.
     """
     param_buffer_table = _get_param_buffer_mapping(original_module, traced_module)
+    # Don't want to change the convention of previous call.
+    param_buffer_table_reverse = {v: k for k, v in param_buffer_table.items()}
 
     # Replace state dict attr names with the fqn
-    for name, fqn in param_buffer_table.items():
-        param = torch.fx.graph_module._get_attr(traced_module, name)
-        torch.fx.graph_module._assign_attr(param, traced_module, fqn)
-        torch.fx.graph_module._del_attr(traced_module, name)
+    for name, _ in chain(
+        original_module.named_parameters(remove_duplicate=False),
+        original_module.named_buffers(remove_duplicate=False),
+    ):
+        if name in param_buffer_table_reverse:
+            dynamo_name = param_buffer_table_reverse[name]
+            param = torch.fx.graph_module._get_attr(traced_module, dynamo_name)
+            torch.fx.graph_module._assign_attr(param, traced_module, name)
+            torch.fx.graph_module._del_attr(traced_module, dynamo_name)
 
     # Replace graph getattr nodes with the correct name
     for node in traced_module.graph.nodes:
