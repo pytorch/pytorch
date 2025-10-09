@@ -2887,9 +2887,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             not tx.export or not config.capture_sparse_compute
         ):
             unimplemented_v2(
-                gb_type="Attempted to wrap sparse Tensor",
-                context="",
-                explanation="torch.compile does not support sparse Tensors",
+                gb_type="Attempted to wrap sparse Tensor with VariableTracker",
+                context=str(example_value),
+                explanation="torch.compile does not support sparse Tensors with VariableTracker",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         var = construct_tensor_variable(
