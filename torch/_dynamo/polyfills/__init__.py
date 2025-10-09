@@ -115,8 +115,8 @@ def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequenc
 
     if op is operator.eq and left_len != right_len:
         return False
-    if op is operator.ne and left_len == right_len:
-        return False
+    if op is operator.ne and left_len != right_len:
+        return True
 
     # Apply `op` to the first pair that differ
     for a, b in zip(left, right):
