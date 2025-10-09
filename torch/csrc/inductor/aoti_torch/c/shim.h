@@ -172,6 +172,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_complex128(
 AOTI_TORCH_EXPORT bool aoti_torch_grad_mode_is_enabled();
 AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
 
+// Check if INTRA_OP_PARALLEL is defined
+AOTI_TORCH_EXPORT bool aoti_torch_get_intra_op_parallel_enabled();
+
+// Value of AT_PARALLEL_OPENMP
+AOTI_TORCH_EXPORT bool aoti_torch_get_parallel_openmp_enabled();
+
 // Free the tensor object
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
@@ -421,6 +427,44 @@ aoti_torch_cpu__wrapped_quantized_linear_prepacked(
     AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_zero_(AtenTensorHandle self);
+
+// parallel utilities
+AOTI_TORCH_EXPORT void aoti_torch_lazy_init_num_threads();
+AOTI_TORCH_EXPORT bool aoti_torch_in_parallel_region();
+AOTI_TORCH_EXPORT int32_t aoti_torch_get_num_threads();
+AOTI_TORCH_EXPORT int32_t aoti_torch_get_thread_num();
+
+struct ThreadIdGuardOpaque;
+using ThreadIdGuardHandle = ThreadIdGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_thread_id_guard(
+    int32_t thread_id,
+    ThreadIdGuardHandle* ret_guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_thread_id_guard(ThreadIdGuardHandle guard);
+
+struct ParallelGuardOpaque;
+using ParallelGuardHandle = ParallelGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_create_parallel_guard(bool state, ParallelGuardHandle* ret_guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_parallel_guard(ParallelGuardHandle guard);
+
+AOTI_TORCH_EXPORT bool aoti_torch_parallel_guard_is_enabled();
+
+// invoke_parallel function, only intended for use for the
+// AT_PARALLEL_NATIVE path, where the function is not inlined.
+typedef void (*AOTIParallelLambda)(int64_t begin, int64_t end, void* ctx);
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_invoke_parallel(
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size,
+    AOTIParallelLambda lambda,
+    void* ctx);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_check_inf_and_nan(const char* tensor_name, AtenTensorHandle tensor);

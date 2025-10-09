@@ -1,5 +1,6 @@
 import distutils.command.clean
 import shutil
+import sys
 from pathlib import Path
 
 from setuptools import find_packages, setup
@@ -35,6 +36,16 @@ def get_extension():
     extra_compile_args = {
         "cxx": ["-fdiagnostics-color=always"],
     }
+    extra_link_args = []
+
+    # Note that adding this flag does not mean extension's parallel_for will
+    # always use OPENMP path, OpenMP path will only be used if (1) AND (2)
+    # (1) libtorch was built with OpenMP
+    # (2) extension compiles and links with -fopenmp
+    # macOS clang does not support -fopenmp so we need to skip it
+    if sys.platform != "darwin":
+        extra_compile_args["cxx"].extend(["-fopenmp", "-D_OPENMP"])
+        extra_link_args.append("-fopenmp")
 
     extension = CppExtension
     # allow including <cuda_runtime.h>
@@ -50,7 +61,7 @@ def get_extension():
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,
             extra_compile_args=extra_compile_args,
-            extra_link_args=[],
+            extra_link_args=extra_link_args,
         )
     ]
 

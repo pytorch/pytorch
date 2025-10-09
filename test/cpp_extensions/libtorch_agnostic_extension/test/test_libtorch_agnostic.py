@@ -2,6 +2,7 @@
 
 import math
 from pathlib import Path
+from unittest import skipIf
 
 import torch
 from torch.testing._internal.common_device_type import (
@@ -12,6 +13,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     install_cpp_extension,
+    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     TestCase,
@@ -366,6 +368,33 @@ if not IS_WINDOWS:
             self.assertEqual(result, expected)
             self.assertNotEqual(result.data_ptr(), expected.data_ptr())
             self.assertEqual(result.stride(), expected.stride())
+
+        @onlyCPU
+        # TODO: Debug this:
+        # Dynamo failed to run FX node with fake tensors:
+        # call_function libtorch_agnostic.test_parallel_for.default(*(100, 10), **{}):
+        # got RuntimeError('libtorch_agnostic::test_parallel_for() expected at most
+        # 2 argument(s) but received 3 argument(s).
+        # Declaration: libtorch_agnostic::test_parallel_for(int size, int grain_size) -> Tensor')
+        @xfailIfTorchDynamo
+        @skipIf(IS_MACOS, "Default Apple clang/g++ on macos doesn't have -fopenmp flag")
+        def test_parallel_for(self, device):
+            import libtorch_agnostic
+
+            num_threads = torch.get_num_threads()
+            size = 100
+            grain_size = 10
+            expected_num_threads_used = min(
+                (size + grain_size - 1) // grain_size, num_threads
+            )
+
+            result = libtorch_agnostic.ops.test_parallel_for(size, grain_size)
+            result_thread_ids = torch.unique(torch.bitwise_right_shift(result, 32))
+            result_values = torch.bitwise_and(result, 0xFFFFFFFF)
+            expected = torch.arange(size, dtype=torch.int64)
+
+            self.assertEqual(result_values, expected)
+            self.assertEqual(result_thread_ids, torch.arange(expected_num_threads_used))
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
