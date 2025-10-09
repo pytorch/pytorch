@@ -1360,9 +1360,10 @@ class InstructionTranslatorBase(
                 "TRACE %s %s %s", inst.opname, inst.argval, self.stack
             )
 
-        # Store the latest 20 bytecode execution for the process
+        # Store the latest 20 bytecode execution for the process,
+        # Used repr for byte processing and limiting the length to 2048
         self.latest_bytecode_queue.append(
-            f"TRACE {inst.opname} {repr(inst.argval)} {repr(self.stack)}"
+            f"TRACE {inst.opname} {repr(inst.argval)} {repr(self.stack)[:2048]}"
         )
 
         self.update_block_stack(inst)
