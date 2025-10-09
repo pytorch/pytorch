@@ -76,10 +76,17 @@ class TORCH_API DebugInfoWriter {
   }
 
  protected:
-  DebugInfoWriter(const std::string& namePrefix, int rank) {
+  DebugInfoWriter(
+      const std::string& namePrefix,
+      int rank,
+      bool enableDynamicFilename = false) {
     filename_ = c10::str(namePrefix, rank);
+    enable_dynamic_filename_ = enableDynamicFilename;
+    rank_ = rank;
   }
   std::string filename_;
+  int rank_;
+  bool enable_dynamic_filename_;
 
  private:
   static std::unique_ptr<DebugInfoWriter> writer_;
@@ -223,6 +230,8 @@ struct FlightRecorder {
   TORCH_API void retire_id(
       std::optional<size_t> id,
       bool compute_duration = true);
+
+  TORCH_API void reset_all();
 
   const c10::List<c10::IValue> getCollectiveTrace(
       bool includeStacktraces,

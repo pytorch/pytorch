@@ -1702,7 +1702,11 @@ class SIMDScheduling(BaseScheduling):
         from ..ir import IRNode
 
         def get_size(arg):
-            if not isinstance(arg, IRNode) or (size := arg.maybe_get_size()) is None:
+            if not isinstance(arg, IRNode):
+                return None
+            if isinstance(arg, ir.BaseView):  # triton templates want the base tensor.
+                arg = arg.unwrap_view()
+            if (size := arg.maybe_get_size()) is None:
                 return None
             return tuple(s for s in size)
 
@@ -1891,6 +1895,8 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel_code_list = []
         for node_group in partitions:
+            if len(node_group) == 0:
+                continue
             fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ComboKernel(
                 enable_autotune=enable_autotune,

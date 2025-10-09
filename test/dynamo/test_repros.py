@@ -4261,7 +4261,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         @torch.compile(fullgraph=True)
         def f(x):
             y = x.item()
-            torch._check_is_size(y)
+            torch._check(y >= 0)
             if y >= 0:
                 return x * 2
             else:
@@ -7259,6 +7259,26 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         flag = False
         self.assertEqual(fn(inp), opt_fn(inp))
 
+    def test_cells_unsupported_step_exception(self):
+        # This error happened because:
+        #  - we were generating cells into a list on the stack
+        #  - we encountered an unsupported step, resulting in a step graph break
+        #  - we encounter an exception, which pops the stack until it reaches a certain length;
+        #    the presence of the list of cells then messes things up.
+
+        cell = 0
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1 + 2
+            torch._dynamo.step_unsupported()
+            with contextlib.nullcontext():
+                print(cell)
+                raise AssertionError
+
+        with self.assertRaises(AssertionError):
+            fn(torch.ones(3))
+
     def test_unbind_copy_out(self):
         def f(eye, out):
             torch.unbind_copy(eye, out=out)
@@ -7928,6 +7948,37 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
             unsafe_grad(y)  # should not warn
             self.assertEqual(len(w), 1)
+
+    @torch._dynamo.config.patch(install_free_tensors=True)
+    def test_partial_export(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def parallelize(self):
+                fn = self._call_impl
+
+                def wrapped_fn(fn, *args, **kwargs):
+                    new_args_0 = args[0].to(torch.bfloat16)
+                    new_args_1 = args[1].to(torch.bfloat16)
+                    return fn(new_args_0, new_args_1)
+
+                fn = functools.partial(wrapped_fn, fn)
+                self._call_impl = fn
+
+            def forward(self, a, b):
+                return a + b
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        foo = Foo()
+        foo.parallelize()
+        x = torch.randn(4, 4, dtype=torch.float32)
+        y = torch.randn(4, 4, dtype=torch.float32)
+        ref = foo(x, y)
+        gm = _dynamo_graph_capture_for_export(foo)(x, y)
+        res = gm(x, y)
+        self.assertEqual(res, ref)
 
     @parametrize("backend", ["eager", "inductor"])
     def test_issue_164247(self, backend: str):
