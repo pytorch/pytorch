@@ -48,14 +48,11 @@ class EventList(list):
     def _remove_dup_nodes(self):
         while True:
             to_delete = set()
-            # pyrefly: ignore  # bad-assignment
+
             for idx in range(len(self)):
                 if (
-                    # pyrefly: ignore  # index-error
                     self[idx].cpu_parent is not None
-                    # pyrefly: ignore  # index-error
                     and self[idx].cpu_parent.name == self[idx].name
-                    # pyrefly: ignore  # index-error
                     and len(self[idx].cpu_parent.cpu_children) == 1
                 ):
                     self[idx].cpu_parent.cpu_children = self[idx].cpu_children
@@ -65,11 +62,11 @@ class EventList(list):
                     to_delete.add(idx)
             if len(to_delete) == 0:
                 break
-            # pyrefly: ignore  # bad-argument-type
+
             new_evts = [ev for ind, ev in enumerate(self) if ind not in to_delete]
-            # pyrefly: ignore  # missing-attribute
+
             self.clear()
-            # pyrefly: ignore  # missing-attribute
+
             self.extend(new_evts)
 
     def _populate_cpu_children(self):

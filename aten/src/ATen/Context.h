@@ -38,6 +38,12 @@ namespace at {
 class Tensor;
 
 enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
+
+enum class CuBLASReductionOption : uint8_t {
+  AllowReducedPrecisionWithSplitK = 0,
+  DisallowReducedPrecisionAllowSplitK = 1,
+  DisallowReducedPrecisionDisallowSplitK = 2,
+};
 enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
 enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
 enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
@@ -357,10 +363,14 @@ class TORCH_API Context {
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
   Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
-  bool allowFP16ReductionCuBLAS() const;
-  void setAllowFP16ReductionCuBLAS(bool);
-  bool allowBF16ReductionCuBLAS() const;
-  void setAllowBF16ReductionCuBLAS(bool);
+  CuBLASReductionOption allowFP16ReductionCuBLAS() const;
+  void setAllowFP16ReductionCuBLAS(
+      bool allow_reduced_precision,
+      bool allow_splitk = true);
+  CuBLASReductionOption allowBF16ReductionCuBLAS() const;
+  void setAllowBF16ReductionCuBLAS(
+      bool allow_reduced_precision,
+      bool allow_splitk = true);
   bool allowFP16AccumulationCuBLAS() const;
   void setAllowFP16AccumulationCuBLAS(bool);
 
@@ -452,8 +462,10 @@ class TORCH_API Context {
       : at::Float32MatmulPrecision::HIGHEST;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
-  bool allow_fp16_reduction_cublas = true;
-  bool allow_bf16_reduction_cublas = true;
+  CuBLASReductionOption allow_fp16_reduction_cublas =
+      CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  CuBLASReductionOption allow_bf16_reduction_cublas =
+      CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
   bool allow_fp16_accumulation_cublas = false;
   std::optional<int32_t> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;
