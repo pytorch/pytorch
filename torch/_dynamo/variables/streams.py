@@ -173,7 +173,7 @@ class StreamContextVariable(ContextWrappingVariable):
 
     def _target_stream_proxies(self) -> tuple[Proxy, Proxy]:
         return StreamContextVariable._extract_stream_properties(
-            self.target_values[0].as_proxy()
+            self._get_target_values()[0].as_proxy()
         )
 
     @staticmethod
@@ -226,9 +226,7 @@ class StreamVariable(StreamContextVariable):
         assert value.device.type == device.type, (
             "stream value is not equal to the passed device"
         )
-        super().__init__(
-            target_values=[self], initial_values=None, device=device, **kwargs
-        )
+        super().__init__(target_values=[], initial_values=None, device=device, **kwargs)
         self.proxy = proxy
         self.value = value
         self.device = device
@@ -290,7 +288,7 @@ class StreamVariable(StreamContextVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
-        # NB: Set initial values and target values when we enter
+        # NB: Set initial values when we enter
         # Don't do this at object creation, as we need to record the current stream
         # at the time the context is entered.
         self.initial_values = [
