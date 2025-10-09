@@ -68,6 +68,8 @@ jit_core_sources = [
 # list for the shared files.
 
 core_sources_common = [
+    # This needs to belong here because it defines the first non-inline virtual
+    # function, which matters for AutogradMetaInterface's vtable.
     "torch/csrc/autograd/autograd_meta.cpp",
     "torch/csrc/autograd/forward_grad.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
@@ -913,7 +915,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_torch_functions_manual.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
-    "torch/csrc/distributed/python_placement.cpp",
     "torch/csrc/dynamo/python_compiled_autograd.cpp",
     "torch/csrc/dynamo/cache_entry.cpp",
     "torch/csrc/dynamo/cpp_shim.cpp",
