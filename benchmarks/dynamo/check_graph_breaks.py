@@ -10,7 +10,6 @@ import pandas as pd
 
 flaky_models = {
     "yolov3",
-    "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
     "detectron2_fcos_r_50_fpn",
@@ -32,7 +31,6 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
         flaky_models.update(
             {
                 "alexnet",
-                "cait_m36_384",
                 "demucs",
                 "densenet121",
                 "detectron2_fcos_r_50_fpn",
@@ -44,7 +42,6 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
                 "hf_Roberta_base",
                 "hf_T5",
                 "hf_T5_base",
-                "levit_128",
                 "llava",
                 "microbench_unbacked_tolist_sum",
                 "resnet50",
