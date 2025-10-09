@@ -13,13 +13,6 @@ import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
 
-try:
-    from pt2_internal import (  # type: ignore[import-not-found]
-        log_compilation_event as internal_log_compilation_event,
-    )
-except ImportError:
-    internal_log_compilation_event = None
-
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
@@ -135,10 +128,7 @@ def add_mlhub_insight(category: str, insight: str, insight_description: str):
 
 
 def log_compilation_event(metrics):
-    if internal_log_compilation_event:
-        internal_log_compilation_event(vars(metrics))
-    else:
-        log.info("%s", metrics)
+    log.info("%s", metrics)
 
 
 def upload_graph(graph):
