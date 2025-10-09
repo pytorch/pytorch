@@ -38,11 +38,13 @@ T = TypeVar("T", bound="Module")
 
 
 class _IncompatibleKeys(
+    # pyrefly: ignore  # invalid-inheritance
     namedtuple("IncompatibleKeys", ["missing_keys", "unexpected_keys"]),
 ):
     __slots__ = ()
 
     def __repr__(self) -> str:
+        # pyrefly: ignore  # missing-attribute
         if not self.missing_keys and not self.unexpected_keys:
             return "<All keys matched successfully>"
         return super().__repr__()
@@ -91,6 +93,7 @@ class _WrappedHook:
     def __getstate__(self) -> dict:
         result = {"hook": self.hook, "with_module": self.with_module}
         if self.with_module:
+            # pyrefly: ignore  # unsupported-operation
             result["module"] = self.module()
 
         return result
@@ -976,7 +979,9 @@ class Module:
                         # Decrement use count of the gradient by setting to None
                         param.grad = None
                     param_applied = torch.nn.Parameter(
-                        param_applied, requires_grad=param.requires_grad
+                        # pyrefly: ignore  # bad-argument-type
+                        param_applied,
+                        requires_grad=param.requires_grad,
                     )
                     torch.utils.swap_tensors(param, param_applied)
                 except Exception as e:
@@ -987,11 +992,13 @@ class Module:
                     ) from e
                 out_param = param
             elif p_should_use_set_data:
+                # pyrefly: ignore  # bad-assignment
                 param.data = param_applied
                 out_param = param
             else:
                 assert isinstance(param, Parameter)
                 assert param.is_leaf
+                # pyrefly: ignore  # bad-argument-type
                 out_param = Parameter(param_applied, param.requires_grad)
                 self._parameters[key] = out_param
 
@@ -2253,6 +2260,7 @@ class Module:
 
         if destination is None:
             destination = OrderedDict()
+            # pyrefly: ignore  # missing-attribute
             destination._metadata = OrderedDict()
 
         local_metadata = dict(version=self._version)
@@ -2402,7 +2410,9 @@ class Module:
             if k not in self._non_persistent_buffers_set
         }
         local_name_params = itertools.chain(
-            self._parameters.items(), persistent_buffers.items()
+            self._parameters.items(),
+            # pyrefly: ignore  # bad-argument-type
+            persistent_buffers.items(),
         )
         local_state = {k: v for k, v in local_name_params if v is not None}
         assign_to_params_buffers = local_metadata.get("assign_to_params_buffers", False)

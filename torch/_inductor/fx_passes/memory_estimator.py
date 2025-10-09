@@ -368,6 +368,7 @@ def get_peak_memory(
         build_memory_profile(fwd_graph, _safe_size_of, _is_releasable)
     )
 
+    # tmp change
     bwd_baseline_memory, bwd_do_not_delete = get_fwd_bwd_interactions(
         fwd_graph, bwd_graph, _safe_size_of
     )

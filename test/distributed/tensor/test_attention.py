@@ -4,7 +4,7 @@ import functools
 import itertools
 import random
 import unittest
-from typing import Callable, ClassVar, Union
+from typing import Callable, ClassVar, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -25,6 +25,11 @@ from torch.distributed.tensor.experimental._attention import (
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
+)
+from torch.distributed.tensor.experimental._load_balancer import (
+    _HeadTailLoadBalancer,
+    _LoadBalancer,
+    _PerDocumentHeadTailLoadBalancer,
 )
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
@@ -126,6 +131,7 @@ class RingAttentionTest(DTensorTestBase):
         backend: SDPBackend,
         rotater: _RotateMethod,
         test_forward_only: bool,
+        load_balance: bool,
         new_api: bool,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         if new_api:
@@ -135,10 +141,15 @@ class RingAttentionTest(DTensorTestBase):
             )
             attention = SDPAWrapper(compiled=compiled, backend=backend)
             attention = parallelize_module(attention, mesh, cp_plan)
+            if load_balance:
+                seq_len = cp_q.size(seq_dim)
+                load_balancer = _HeadTailLoadBalancer(seq_len, mesh.size(), cp_q.device)
+            else:
+                load_balancer = None
             cp_q, cp_k, cp_v = _context_parallel_shard(
-                mesh, (cp_q, cp_k, cp_v), (seq_dim,) * 3
+                mesh, (cp_q, cp_k, cp_v), (seq_dim,) * 3, load_balancer=load_balancer
             )
-            _enable_context_parallel_dispatcher(seq_dim, mesh)
+            _enable_context_parallel_dispatcher()
         else:
             # Theoretically, context_parallel() should not be used to shard
             # parameters because when require_grad is True, resize_ is not
@@ -147,6 +158,8 @@ class RingAttentionTest(DTensorTestBase):
             # In reality, context_paralle() should be used to shard the input.
             # In reality, context_parallel() should only be used to shard
             # the model inputs (batch).
+
+            _cp_options.enable_load_balance = load_balance
             cp_context = context_parallel(
                 mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(seq_dim,) * 3
             )
@@ -237,8 +250,6 @@ class RingAttentionTest(DTensorTestBase):
             else torch.float32
         )
 
-        _cp_options.enable_load_balance = load_balance
-
         q, k, v = [
             torch.rand(
                 (bs, nheads, seq_length * self.world_size, dim),
@@ -271,6 +282,7 @@ class RingAttentionTest(DTensorTestBase):
             backend=backend,
             rotater=rotater,
             test_forward_only=test_forward_only,
+            load_balance=load_balance,
             new_api=new_api,
         )
 
@@ -278,11 +290,16 @@ class RingAttentionTest(DTensorTestBase):
         # attention kernels
         (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [seq_dim])
         atol = (
-            1e-08
+            2e-06
+            if backend == SDPBackend.EFFICIENT_ATTENTION
+            else 8e-3 * self.world_size
+        )
+        rtol = (
+            1e-05
             if backend == SDPBackend.EFFICIENT_ATTENTION
             else 1e-3 * self.world_size
         )
-        self.assertTrue(torch.allclose(out, cp_out, atol=atol))
+        torch.testing.assert_close(out, cp_out, atol=atol, rtol=rtol)
 
         if test_forward_only:
             return
@@ -292,14 +309,9 @@ class RingAttentionTest(DTensorTestBase):
             [cp_dq, cp_dk, cp_dv],
             [seq_dim] * 3,
         )
-        atol = (
-            2e-06
-            if backend == SDPBackend.EFFICIENT_ATTENTION
-            else 8e-3 * self.world_size
-        )
-        self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
-        self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
-        self.assertTrue(torch.allclose(v.grad, cp_dv, atol=atol))
+        torch.testing.assert_close(q.grad, cp_dq, atol=atol, rtol=rtol)
+        torch.testing.assert_close(k.grad, cp_dk, atol=atol, rtol=rtol)
+        torch.testing.assert_close(v.grad, cp_dv, atol=atol, rtol=rtol)
 
     def test_is_causal_behavior(self) -> None:
         _cp_options.enable_load_balance = False
@@ -344,7 +356,7 @@ def causal_mask(b, h, q_idx, kv_idx):
 
 
 # copied from https://github.com/meta-pytorch/attention-gym/blob/main/attn_gym/masks/document_mask.py
-def generate_random_lengths(total_length, num_documents):
+def generate_random_lengths(total_length, num_documents) -> list[int]:
     # Initialize all lengths to 1 to ensure each document has at least one token
     lengths = [1] * num_documents
     remaining_length = total_length - num_documents
@@ -355,6 +367,26 @@ def generate_random_lengths(total_length, num_documents):
         lengths[index] += 1
 
     return lengths
+
+
+def generate_random_lengths_in_chunks(
+    total_length, num_documents, chunk_size
+) -> list[int]:
+    # Generate a list of random document lengths so that each document contains
+    # some number of chunks of size `chunk_size`. This means each document's length
+    # must be a multiple of `chunk_size`. Besides, the lengths of all the documents
+    # sum up to `total_length`.
+    num_chunks = total_length // chunk_size
+    assert total_length % chunk_size == 0 and num_chunks >= num_documents
+
+    num_chunks_per_document = [1] * num_documents
+    remaining_chunks = num_chunks - num_documents
+    # Randomly distribute the remaining chunks
+    for _ in range(remaining_chunks):
+        index = random.randint(0, num_documents - 1)  # document_id
+        num_chunks_per_document[index] += 1
+
+    return [num_chunks * chunk_size for num_chunks in num_chunks_per_document]
 
 
 def length_to_offsets(
@@ -438,20 +470,27 @@ class CPFlexAttentionTest(DTensorTestBase):
 
     def _test_cp_flex_attention(
         self,
-        qkv_size,
-        B=1,
-        mask_func=causal_mask,
-        atol=1e-6,
-        rtol=1e-2,
+        *,
+        qkv_size: int,
+        B: int = 1,
+        mask_func: _mask_mod_signature = causal_mask,
+        lb: Optional[_LoadBalancer] = None,
+        atol: float = 1e-6,
+        rtol: float = 1e-2,
     ) -> None:
-        torch.cuda.manual_seed(10)
+        # TODO: Reverify atol and rtol after
+        # https://github.com/pytorch/pytorch/pull/163185 is landed. The accuracy
+        # issue happens on the gradients.
+        torch.use_deterministic_algorithms(True)
+        torch.cuda.manual_seed(1234)
+
         dtype = torch.float32
         bs = B if B > 1 else 8
         dim = 32
         nheads = 8
         seq_dim = 2
 
-        q, k, v = [
+        qkv = [
             torch.rand(
                 (bs, nheads, qkv_size, dim),
                 device=self.device_type,
@@ -471,7 +510,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         )
 
         expect_out, expect_aux = compiled_flex_attention(
-            q, k, v, block_mask=block_mask, return_aux=AuxRequest(lse=True)
+            *qkv, block_mask=block_mask, return_aux=AuxRequest(lse=True)
         )
         expect_out.sum().backward()
 
@@ -481,12 +520,6 @@ class CPFlexAttentionTest(DTensorTestBase):
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
-
-        # NOTE: we do not test load balance here
-        _cp_options.enable_load_balance = False
-
-        # prepare input buffer
-        cp_q, cp_k, cp_v = [target.detach().clone() for target in [q, k, v]]
 
         flex_attention_wrapper_module = FlexAttentionWrapper()
         cp_plan = _ContextParallel(
@@ -499,17 +532,17 @@ class CPFlexAttentionTest(DTensorTestBase):
             cp_plan,
         )
 
-        cp_q, cp_k, cp_v, cp_block_mask = _context_parallel_shard(
-            device_mesh, [cp_q, cp_k, cp_v, block_mask], [seq_dim] * 4
+        *cp_qkv, cp_block_mask = _context_parallel_shard(
+            device_mesh,
+            [t.detach().clone() for t in qkv] + [block_mask],
+            [seq_dim] * 4,
+            load_balancer=lb,
         )
-
-        for target in [cp_q, cp_k, cp_v]:
-            target.requires_grad = True
+        for t in cp_qkv:
+            t.requires_grad = True
 
         cp_out, cp_aux = flex_attention_wrapper_module(
-            cp_q,
-            cp_k,
-            cp_v,
+            *cp_qkv,
             block_mask=cp_block_mask,
             return_aux=AuxRequest(lse=True),
         )
@@ -517,36 +550,52 @@ class CPFlexAttentionTest(DTensorTestBase):
         # backward run
         cp_out.sum().backward()
 
-        for target in [cp_q, cp_k, cp_v]:
-            target.requires_grad = False
-
         # unshard the output
         cp_out, cp_lse = context_parallel_unshard(
-            device_mesh, [cp_out, cp_aux.lse], [seq_dim, seq_dim]
+            device_mesh,
+            buffers=[cp_out, cp_aux.lse],
+            seq_dims=[seq_dim] * 2,
+            load_balancer=lb,
         )
         torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
         torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
 
         # unshard the gradient
-        cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
+        cp_qkv_grad = context_parallel_unshard(
             device_mesh,
-            [cp_q.grad, cp_k.grad, cp_v.grad],
-            [seq_dim] * 3,
+            buffers=[t.grad for t in cp_qkv],
+            seq_dims=[seq_dim] * 3,
+            load_balancer=lb,
         )
-        torch.testing.assert_close(cp_q_grad, q.grad, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_k_grad, k.grad, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_v_grad, v.grad, atol=atol, rtol=rtol)
+
+        qkv_grad = [t.grad for t in qkv]
+        for grad, cp_grad in zip(qkv_grad, cp_qkv_grad):
+            torch.testing.assert_close(grad, cp_grad, atol=atol, rtol=rtol)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    def test_cp_flex_attention(self) -> None:
-        self.run_subtests(
-            {"qkv_size": [128 * self.world_size, 2048]},
-            self._test_cp_flex_attention,
-        )
+    def test_cp_flex_attention_causal_mask(self) -> None:
+        restore_enable_load_balance = _cp_options.enable_load_balance
+
+        for enable_load_balance in [
+            False,  # test w/o load-balancing
+            True,  # test w/ the default load-balancing
+        ]:
+            _cp_options.enable_load_balance = enable_load_balance
+            self.run_subtests(
+                {
+                    "qkv_size": [
+                        (256 if enable_load_balance else 128) * self.world_size,
+                        2048,
+                    ],
+                },
+                self._test_cp_flex_attention,
+            )
+
+        _cp_options.enable_load_balance = restore_enable_load_balance
 
         # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
         with self.assertRaisesRegex(
@@ -564,17 +613,13 @@ class CPFlexAttentionTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
     def test_cp_flex_attention_document_mask(self) -> None:
+        restore_enable_load_balance = _cp_options.enable_load_balance
+
         random.seed(10)
 
-        # NOTE: Each (batch_size, seq_len) tuple introduces 2 create_block_mask
-        # compilations: 1 for single-rank flex_attention and 1 for CP flex_attention.
-        # In order to avoid the "exceeds_recompile_limit" error, we need to increase
-        # the cache_size_limit to 12 which is the total number of compilations in our
-        # test case.
-        torch._dynamo.config.cache_size_limit = 12
-
-        # initialize document mask
+        # parameters for testing
         doc_count = 28
+        enable_load_balance_list = [True, False]
         batch_size_list = [2, 4, 8]
         max_seq_len_list = [
             256 * self.world_size,
@@ -582,30 +627,63 @@ class CPFlexAttentionTest(DTensorTestBase):
             # 128 * self.world_size  # NOTE: Mismatched elements: 8 / 131072 (0.0%),
         ]
 
+        # NOTE: Each (enable_load_balance, batch_size, seq_len) tuple introduces 2
+        # create_block_mask compilations: 1 for single-rank flex_attention and 1 for
+        # CP flex_attention. In order to avoid the "exceeds_recompile_limit" error,
+        # we need to increase the cache_size_limit to 12 which is the total number
+        # of compilations in our test case.
+        torch._dynamo.config.cache_size_limit = (
+            2
+            * len(enable_load_balance_list)
+            * len(batch_size_list)
+            * len(max_seq_len_list)
+        )
+
         # TODO: change this for-loop to run_subtests
         # Use a for-loop instead of run_subtests because we need to intialize the mask
         # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
-        for batch_size, max_seq_len in itertools.product(
-            batch_size_list, max_seq_len_list
+        for enable_load_balance, batch_size, max_seq_len in itertools.product(
+            enable_load_balance_list, batch_size_list, max_seq_len_list
         ):
+            _cp_options.enable_load_balance = enable_load_balance
+
+            # initialize document mask
             lengths = [
-                generate_random_lengths(max_seq_len, doc_count)
+                (
+                    generate_random_lengths_in_chunks(
+                        max_seq_len, doc_count, chunk_size=2 * self.world_size
+                    )
+                    if enable_load_balance
+                    else generate_random_lengths(max_seq_len, doc_count)
+                )
                 for _ in range(batch_size)
             ]
             offsets = length_to_offsets(lengths, self.device_type)
             document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
+
+            # generate load balancer
+            load_balancer = (
+                _PerDocumentHeadTailLoadBalancer(
+                    lengths, self.world_size, torch.device(self.device_type)
+                )
+                if enable_load_balance
+                else None
+            )
 
             # construct testing function
             test_func = functools.partial(
                 self._test_cp_flex_attention,
                 qkv_size=max_seq_len,
                 B=batch_size,
+                lb=load_balancer,
                 mask_func=document_causal_mask,
                 atol=1e-6,
             )
 
             test_func()
+
+        _cp_options.enable_load_balance = restore_enable_load_balance
 
 
 if __name__ == "__main__":
