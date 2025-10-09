@@ -94,7 +94,7 @@ function pip_build_and_install() {
   # Build the wheel if it doesn't exist
   if [ "${found_whl}" == "0" ]; then
     python3 -m pip wheel \
-      --vvv \
+      -vvv \
       --no-build-isolation \
       --no-deps \
       --no-use-pep517 \
