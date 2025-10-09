@@ -3141,16 +3141,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 if unique_example_inputs[input_node.get_name()].is_mkldnn
                 else torch.as_strided(
                     unique_example_inputs[input_node.get_name()],
-                    V.graph.sizevars.size_hints(
-                        input_node.get_size(),
+                    tuple(V.graph.sizevars.atomically_apply_size_hint(
+                        size,
                         fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    ),
-                    V.graph.sizevars.size_hints(
-                        input_node.get_stride(),
+                    ) for size in input_node.get_size()),
+                    tuple(V.graph.sizevars.atomically_apply_size_hint(
+                        stride,
                         fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    ),
+                    ) for stride in input_node.get_stride()),
                     V.graph.sizevars.size_hint(
                         input_node.get_layout().offset,
                         fallback=config.unbacked_symint_fallback,
@@ -3605,24 +3603,21 @@ class AlgorithmSelectorCache(PersistentCache):
         # So we need call as_strided in the end to 'view' the tensor with the correct
         # sizes/strides
         return AlgorithmSelectorCache.generate_example_value(
-            V.graph.sizevars.size_hints(
-                node.get_size(),
+            tuple(V.graph.sizevars.atomically_apply_size_hint(
+                size,
                 fallback=config.unbacked_symint_fallback,
-                hint_override=hint_override,
-            ),
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
+            ) for size in node.get_size()),
+            tuple(V.graph.sizevars.atomically_apply_size_hint(
+                stride,
                 fallback=config.unbacked_symint_fallback,
-                hint_override=hint_override,
-            ),
+            ) for stride in node.get_stride()),
             node.get_device(),
             node.get_dtype(),
             node.layout.offset,
-            V.graph.sizevars.size_hints(
-                V.graph.get_allocation_size(node),
+            tuple(V.graph.sizevars.atomically_apply_size_hint(
+                size,
                 fallback=config.unbacked_symint_fallback,
-                hint_override=hint_override,
-            ),
+            ) for size in V.graph.get_allocation_size(node)),
         )
 
     @staticmethod
