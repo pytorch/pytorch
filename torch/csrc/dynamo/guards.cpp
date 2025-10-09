@@ -195,7 +195,6 @@ bool TensorCheck::check(
     const c10::SymIntArrayRef& sym_sizes,
     const c10::SymIntArrayRef& sym_strides,
     const bool& requires_grad) {
-
   // Mask to exclude Python keys, that can be artifically off during
   // compilation, due to ignore_compile_internals being set on custom
   // TorchDispatchModes.
