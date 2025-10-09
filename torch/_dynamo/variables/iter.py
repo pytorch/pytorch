@@ -449,7 +449,7 @@ class ZipVariable(IteratorVariable):
                 codegen.create_load_const("strict"),
                 codegen.create_load_const(self.strict),
                 create_instruction("BUILD_MAP", arg=1),
-                *create_call_function_ex(True),
+                *create_call_function_ex(True, False),
             ]
         )
 
@@ -487,7 +487,7 @@ class MapVariable(ZipVariable):
         codegen.extend_output(
             [
                 create_build_tuple(len(self.iterables) + 1),
-                *create_call_function_ex(False),
+                *create_call_function_ex(False, False),
             ]
         )
 
