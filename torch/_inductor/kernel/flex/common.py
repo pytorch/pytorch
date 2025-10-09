@@ -337,9 +337,10 @@ def next_power_of_two(n):
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 
-def load_template(name: str) -> str:
+def load_template(name: str, template_dir: Path | None = None) -> str:
     """Load a template file and return its content."""
-    with open(_TEMPLATE_DIR / f"{name}.py.jinja") as f:
+    dir_to_use = template_dir if template_dir else _TEMPLATE_DIR
+    with open(dir_to_use / f"{name}.py.jinja") as f:
         return f.read()
 
 

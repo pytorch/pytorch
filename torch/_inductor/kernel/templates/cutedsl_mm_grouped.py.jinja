@@ -1,0 +1,226 @@
+from cutlass.utils import TensorMapUpdateMode
+{{gen_defines()}}
+# ---- IMPORT GROUPED GEMM IMPL ----
+from torch._inductor.kernel.templates.cute_grouped_gemm_kernel import GroupedGemmKernel
+
+@cute.jit
+def {{kernel_name}}_jit(
+    initial_a: cute.Tensor,
+    initial_b: cute.Tensor,
+    initial_c: cute.Tensor,
+    group_count: cutlass.Constexpr[int],
+    tensor_of_dim_size_mnkl: cute.Tensor,   # (G,4) cutlass.Int32
+    tensor_of_strides_abc:   cute.Tensor,   # (G,3,2) cutlass.Int32
+    tensor_of_ptrs_abc:      cute.Tensor,   # (G,3) cutlass.Int64
+    total_num_clusters:      cutlass.Constexpr[int],
+    tensormap_cute_tensor:   cute.Tensor,   # (num_sms, 3, 16) cutlass.Int64
+    max_active_clusters:     cutlass.Constexpr[int],
+    stream
+):
+    grouped_gemm = GroupedGemmKernel(
+        acc_dtype=ACC_DTYPE,
+        use_2cta_instrs=USE_2_CTA,
+        mma_tiler_mn=(TILE_M, TILE_N),
+        cluster_shape_mn=(CLUSTER_M, CLUSTER_N),
+        tensormap_update_mode=TENSORMAP_UPDATE_MODE,
+    )
+    grouped_gemm(
+        initial_a,
+        initial_b,
+        initial_c,
+        group_count,
+        tensor_of_dim_size_mnkl,
+        tensor_of_strides_abc,
+        tensor_of_ptrs_abc,
+        total_num_clusters,
+        tensormap_cute_tensor,
+        max_active_clusters,
+        stream,
+    )
+
+
+@cute.kernel
+def build_group_ptrs_from_bases_kernel(
+    base_A_u64: cutlass.Int64,  # device addr of input_a (bytes)
+    base_B_u64: cutlass.Int64,  # device addr of input_b (bytes)
+    base_C_u64: cutlass.Int64,  # device addr of Output (bytes)
+    offs: cute.Tensor,  # [G], cutlass.Int32/64 cumulative
+    K: cutlass.Int32,
+    N: cutlass.Int32,
+    sizeof_A: cutlass.Int32,  # bytes
+    sizeof_B: cutlass.Int32,  # bytes
+    sizeof_C: cutlass.Int32,  # bytes
+    # -------- STRIDES (in ELEMENTS) --------
+    stride_A_m_elems: cutlass.Int64,            # A.stride(0)
+    stride_A_k_elems: cutlass.Int64,            # A.stride(1)
+    stride_B0_elems: cutlass.Int64,             # B.stride(0)
+    stride_Bk_elems: cutlass.Int64,             # B.stride(1)
+    stride_Bn_elems: cutlass.Int64,             # B.stride(2)
+    stride_C_m_elems: cutlass.Int64,            # C.stride(0)
+    stride_C_n_elems: cutlass.Int64,            # C.stride(1)
+    # -------- OUTPUTS --------
+    out_ptrs: cute.Tensor,              # [G,3] cutlass.Int64: (A_ptr, B_ptr, C_ptr)
+    out_problem: cute.Tensor,           # [G,4] cutlass.Int32: (m_g, n, k, 1)
+    out_strides_abc: cute.Tensor        # [G,3,2] cutlass.Int32 [[A_m,A_k],[B_n,B_k],[C_m,C_n]]
+):
+    tidx, _, _ = cute.arch.thread_idx()
+    g = tidx
+
+    m_beg_i32 = 0
+    if g > 0:
+        m_beg_i32 = offs[g - 1]
+    m_end_i32 = offs[g]
+    m_g_i32 = m_end_i32 - m_beg_i32
+
+    a_byte_off = cutlass.Int64(m_beg_i32) * stride_A_m_elems * cutlass.Int64(sizeof_A)
+    c_byte_off = cutlass.Int64(m_beg_i32) * stride_C_m_elems * cutlass.Int64(sizeof_C)
+    b_byte_off = cutlass.Int64(g)         * stride_B0_elems * cutlass.Int64(sizeof_B)
+
+    # ---- pointers ----
+    out_ptrs[g, 0] = base_A_u64 + a_byte_off
+    out_ptrs[g, 1] = base_B_u64 + b_byte_off
+    out_ptrs[g, 2] = base_C_u64 + c_byte_off
+
+    # ---- (m, n, k, 1) ----
+    out_problem[g, 0] = m_g_i32
+    out_problem[g, 1] = N
+    out_problem[g, 2] = K
+    out_problem[g, 3] = cutlass.Int32(1)
+
+    # ---- strides ----
+    out_strides_abc[g, 0, 0] = cutlass.Int32(stride_A_m_elems)
+    out_strides_abc[g, 0, 1] = cutlass.Int32(stride_A_k_elems)
+    out_strides_abc[g, 1, 0] = cutlass.Int32(stride_Bn_elems)
+    out_strides_abc[g, 1, 1] = cutlass.Int32(stride_Bk_elems)
+    out_strides_abc[g, 2, 0] = cutlass.Int32(stride_C_m_elems)
+    out_strides_abc[g, 2, 1] = cutlass.Int32(stride_C_n_elems)
+
+
+@cute.jit
+def launch_build_group_ptrs_from_bases(
+    base_A_u64: cutlass.Int64,
+    base_B_u64: cutlass.Int64,
+    base_C_u64: cutlass.Int64,
+    offs: cute.Tensor,
+    K: cutlass.Int32,
+    N: cutlass.Int32,
+    sizeof_A: cutlass.Int32,
+    sizeof_B: cutlass.Int32,
+    sizeof_C: cutlass.Int32,
+    stride_A_m_elems: cutlass.Int64,
+    stride_A_k_elems: cutlass.Int64,
+    stride_B0_elems: cutlass.Int64,
+    stride_Bk_elems: cutlass.Int64,
+    stride_Bn_elems: cutlass.Int64,
+    stride_C_m_elems: cutlass.Int64,
+    stride_C_n_elems: cutlass.Int64,
+    out_ptrs: cute.Tensor,          # [G,3] cutlass.Int64
+    out_problem: cute.Tensor,       # [G,4] cutlass.Int32
+    out_strides_abc: cute.Tensor,   # [3,2] cutlass.Int32
+    stream: cuda.CUstream,
+):
+    G = offs.shape[0]
+    build_group_ptrs_from_bases_kernel(
+        base_A_u64, base_B_u64, base_C_u64,
+        offs, K, N, sizeof_A, sizeof_B, sizeof_C,
+        stride_A_m_elems, stride_A_k_elems,
+        stride_B0_elems,  stride_Bk_elems, stride_Bn_elems,
+        stride_C_m_elems, stride_C_n_elems,
+        out_ptrs, out_problem, out_strides_abc
+    ).launch(grid=(1, 1, 1), block=(G, 1, 1), stream=stream)
+
+
+{{def_kernel("input_a", "input_b", "input_a_offs")}}
+    stream = cuda.CUstream(stream)
+
+    # TODO(nikhilap) figure out a way to get rid of this
+    input_b = input_b.transpose(1, 2).contiguous()
+
+    sumM, K = input_a.shape
+    G, N, Kb = input_b.shape
+
+    dev = input_a.device
+
+    base_A_u64 = int(input_a.data_ptr())
+    base_B_u64 = int(input_b.data_ptr())
+    base_C_u64 = int({{get_output()}}.data_ptr())
+    sizeof_A = int(input_a.element_size())
+    sizeof_B = int(input_b.element_size())
+    sizeof_C = int({{get_output()}}.element_size())
+
+    sA_m, sA_k = map(int, input_a.stride())
+    sB_0, sB_n, sB_k = map(int, input_b.stride())
+    sC_m, sC_n = map(int, {{get_output()}}.stride())
+
+    ptrs_t = torch.empty((G, 3), device=dev, dtype=torch.int64)
+    probs_t = torch.empty((G, 4), device=dev, dtype=torch.int32)
+    strides_t = torch.empty((G, 3, 2),device=dev, dtype=torch.int32)
+    ptrs = from_dlpack(ptrs_t)
+    probs = from_dlpack(probs_t)
+    strides = from_dlpack(strides_t)
+
+    # launch <<<1, G>>>
+    launch_build_group_ptrs_from_bases(
+        base_A_u64=base_A_u64,
+        base_B_u64=base_B_u64,
+        base_C_u64=base_C_u64,
+        offs=from_dlpack(input_a_offs),
+        K=int(K),
+        N=int(N),
+        sizeof_A=sizeof_A,
+        sizeof_B=sizeof_B,
+        sizeof_C=sizeof_C,
+        stride_A_m_elems=sA_m,
+        stride_A_k_elems=sA_k,
+        stride_B0_elems=sB_0,
+        stride_Bk_elems=sB_k,
+        stride_Bn_elems=sB_n,
+        stride_C_m_elems=sC_m,
+        stride_C_n_elems=sC_n,
+        out_ptrs=ptrs,
+        out_problem=probs,
+        out_strides_abc=strides,
+        stream=stream,
+    )
+
+    # --- Tensormap workspace per SM ---
+    hw = cutlass.utils.HardwareInfo()
+    sm_count = hw.get_max_active_clusters(1)
+    max_active_clusters = hw.get_max_active_clusters(CLUSTER_M * CLUSTER_N)
+    tensormap_zeros = torch.zeros((sm_count, 3, 128 // 8), device=dev, dtype=torch.int64)
+    tensormap_cute  = from_dlpack(tensormap_zeros)
+
+    # --- Total clusters ---
+    def _compute_cluster_tile_shape(mma_tiler_mn, cluster_shape_mn, use_2cta):
+        m, n = mma_tiler_mn
+        if use_2cta:
+            m //= 2
+        return (m * cluster_shape_mn[0], n * cluster_shape_mn[1])
+
+    def _compute_total_num_clusters(problem_sizes_mnkl_list, cluster_tile_shape_mn):
+        total = 0
+        for (m, n, k, l) in problem_sizes_mnkl_list:
+            tiles_m = (m + cluster_tile_shape_mn[0] - 1) // cluster_tile_shape_mn[0]
+            tiles_n = (n + cluster_tile_shape_mn[1] - 1) // cluster_tile_shape_mn[1]
+            total += tiles_m * tiles_n
+        return int(total)
+
+    cluster_tile_shape_mn = _compute_cluster_tile_shape(
+        (TILE_M, TILE_N), (CLUSTER_M, CLUSTER_N), bool(USE_2_CTA)
+    )
+    # TODO(nikhilap) remove read into probs_t on the host
+    total_num_clusters = _compute_total_num_clusters(probs_t, cluster_tile_shape_mn)
+
+    {{kernel_name}}_jit(
+        from_dlpack(input_a.unsqueeze(-1)),
+        from_dlpack(input_b[0].unsqueeze(-1)),
+        from_dlpack({{get_output()}}.unsqueeze(-1)),
+        G,
+        probs,
+        strides,
+        ptrs,
+        total_num_clusters,
+        tensormap_cute,
+        max_active_clusters,
+        stream,
+    )

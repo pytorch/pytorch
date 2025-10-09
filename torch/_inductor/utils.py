@@ -1838,6 +1838,24 @@ def use_triton_blackwell_tma_template(
     return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
 
 
+def use_cutedsl_blackwell_template(
+    layout: Layout,
+    *,
+    check_max_autotune: bool = True,
+) -> bool:
+    from .codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+
+    layout_dtypes = [torch.float16, torch.bfloat16]
+
+    return (
+        is_gpu(layout.device.type)
+        and _use_autotune_backend("CUTE")
+        and _use_template_for_gpu(layout, layout_dtypes)
+        and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
+        and is_datacenter_blackwell_arch()
+    )
+
+
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
 
