@@ -1579,7 +1579,7 @@ class StringFormatVariable(VariableTracker):
             variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
         }
         codegen(variables.ConstDictVariable(kwargs))
-        codegen.extend_output(create_call_function_ex(True))
+        codegen.extend_output(create_call_function_ex(True, False))
 
 
 class DebuggingVariable(VariableTracker):

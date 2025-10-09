@@ -1086,15 +1086,6 @@ def _is_make_fx_tracing():
         return False
 
 
-def _is_exporting():
-    # More details at https://github.com/pytorch/pytorch/issues/164062
-
-    # The weird code is because of TorchScript not returning early on `and` conditions.
-    if not torch.jit.is_scripting():
-        return torch.compiler.is_exporting()
-    return False
-
-
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information from different representation subspaces.
 
@@ -1420,40 +1411,6 @@ class MultiheadAttention(Module):
                 why_not_fast_path = "some Tensor argument has_torch_function"
             elif _is_make_fx_tracing():
                 why_not_fast_path = "we are running make_fx tracing"
-            elif _is_exporting():
-                # See test: test_export_vs_dynamo_for_multiheadattention
-                #
-                # Context:
-                # nn.MultiheadAttention has a "fast path" gated by several conditions, one of
-                # which is `_is_make_fx_tracing`. That flag is True during non-strict export
-                # because it uses make_fx directly, so non-strict export tends to hit the slow
-                # path.
-                #
-                # Before #164691:
-                # In strict export, Dynamo did not trace into built-in nn.Modules. As a result,
-                # Dynamo never observed `_is_make_fx_tracing`; AOTDispatcher performed the
-                # tracing instead, and we took the slow path.
-                #
-                # After #164691:
-                # Strict export now matches torch.compile semantics, so Dynamo does the tracing
-                # and we hit the fast path. This created a behavioral divergence between
-                # strict-export and torch.compile.
-                #
-                # Impact:
-                # The divergence led to an ExecuTorch failure:
-                #   buck run @mode/opt //executorch/backends/xnnpack/test:test_xnnpack_recipes -- -r \
-                #     test_all_models_with_recipes
-                #
-                # Temporary mitigation:
-                # #164721 forces torch.compile to also take the slow path to
-                # avoid the above failure, keeping behavior aligned (for now). I
-                # think this is undesirable but a good middle ground.
-                #
-                # TODO:
-                # 1) Understand why `_is_make_fx_tracing` needs to differ in MultiheadAttention.
-                # 2) Root-cause and fix the ExecuTorch failure so we can safely restore the fast
-                #    path where appropriate.
-                why_not_fast_path = "we are running torch.export"
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = (
                     "some Tensor argument's device is neither one of "
