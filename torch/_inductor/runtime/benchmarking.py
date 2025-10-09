@@ -250,6 +250,7 @@ class TritonBenchmarker(Benchmarker):
             return self.triton_do_bench(_callable, **kwargs)
         return self.triton_do_bench(_callable, **kwargs, return_mode="median")
 
+
 class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     @cached_property
     def L2_cache_size(self: Self) -> int:
