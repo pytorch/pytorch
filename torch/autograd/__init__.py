@@ -92,6 +92,7 @@ def _make_grads(
     is_grads_batched: bool,
 ) -> tuple[_OptionalTensor, ...]:
     new_grads: list[_OptionalTensor] = []
+    # pyrefly: ignore  # no-matching-overload
     for out, grad in zip(outputs, grads):
         out = cast(Union[torch.Tensor, graph.GradientEdge], out)
         out_size = None
@@ -341,6 +342,7 @@ def backward(
             Union[tuple[torch.Tensor], tuple[graph.GradientEdge]], (tensors,)
         )
     else:
+        # pyrefly: ignore  # bad-argument-type
         tensors = tuple(tensors)
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
@@ -440,10 +442,12 @@ def grad(
             Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]], (outputs,)
         )
     else:
+        # pyrefly: ignore  # bad-argument-type
         outputs = tuple(outputs)
     if is_tensor_like(inputs) or isinstance(inputs, graph.GradientEdge):
         inputs = cast(_TensorOrTensorsOrGradEdge, (inputs,))
     else:
+        # pyrefly: ignore  # bad-argument-type
         inputs = tuple(inputs)
     t_outputs = tuple(i for i in outputs if is_tensor_like(i))
     t_inputs = tuple(i for i in inputs if is_tensor_like(i))
