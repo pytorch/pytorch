@@ -253,8 +253,8 @@ class RNNBase(Module):
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
         unique_data_ptrs = {
-            p.data_ptr()  # type: ignore[union-attr]
-            for p in self._flat_weights
+            p.data_ptr()
+            for p in self._flat_weights  # type: ignore[union-attr]
         }
         if len(unique_data_ptrs) != len(self._flat_weights):
             return
@@ -1164,7 +1164,6 @@ class LSTM(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
                 output,
-    
                 batch_sizes,
                 sorted_indices,
                 unsorted_indices,
@@ -1440,7 +1439,6 @@ class GRU(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
                 output,
-    
                 batch_sizes,
                 sorted_indices,
                 unsorted_indices,
