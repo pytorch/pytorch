@@ -204,11 +204,6 @@ class TestCustomOpAutoTune(TestCase):
             rmsnorm_decomposition2,
         ]
 
-        input_gen_fns = {
-            0: self.simple_randn_gen,  # input tensor
-            1: self.simple_randn_gen,  # weight tensor
-        }
-
         @register_custom_op_autotuning(op_object.default)
         def _(input_tensor, weight, eps: float = 1e-8, default_impl=None):
             return autotune_custom_op(
@@ -217,7 +212,6 @@ class TestCustomOpAutoTune(TestCase):
                 inputs=[input_tensor, weight],
                 kwargs={"eps": eps},
                 default_impl=default_impl,
-                input_gen_fns=input_gen_fns,
             )
 
         # Test inputs
@@ -312,13 +306,6 @@ class TestCustomOpAutoTune(TestCase):
             mlp_decomposition3,
         ]
 
-        mlp_input_gen_fns = {
-            0: self.simple_randn_gen,  # input
-            1: self.simple_randn_gen,  # gate weight
-            2: self.simple_randn_gen,  # up weight
-            3: self.simple_randn_gen,  # down weight
-        }
-
         @register_custom_op_autotuning(op_object.default)
         def _(input_tensor, gate_weight, up_weight, down_weight, default_impl=None):
             return autotune_custom_op(
@@ -327,7 +314,6 @@ class TestCustomOpAutoTune(TestCase):
                 inputs=[input_tensor, gate_weight, up_weight, down_weight],
                 kwargs={},
                 default_impl=default_impl,
-                input_gen_fns=mlp_input_gen_fns,
             )
 
         # Test inputs
@@ -425,13 +411,6 @@ class TestCustomOpAutoTune(TestCase):
             decompose_k_decomposition5,  # k_splits=256
         ]
 
-        # Define simple input_gen_fns for decompose_k
-
-        decompose_k_input_gen_fns = {
-            0: self.simple_randn_gen,  # matrix A
-            1: self.simple_randn_gen,  # matrix B
-        }
-
         @register_custom_op_autotuning(op_object.default)
         def _(a, b, k_splits: int = 4, default_impl=None):
             return autotune_custom_op(
@@ -440,7 +419,6 @@ class TestCustomOpAutoTune(TestCase):
                 inputs=[a, b],
                 kwargs={},  # No kwargs - let autotune choose the best decomposition
                 default_impl=default_impl,
-                input_gen_fns=decompose_k_input_gen_fns,
             )
 
         # Test inputs
