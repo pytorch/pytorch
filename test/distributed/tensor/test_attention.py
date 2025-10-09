@@ -27,7 +27,7 @@ from torch.distributed.tensor.experimental._attention import (
     context_parallel_unshard,
     set_rotate_method,
 )
-from torch.distributed.tensor.experimental._cp_custom_ops import flex_cp_forward
+from torch.distributed.tensor.experimental._cp_custom_ops import flex_cp_allgather
 from torch.distributed.tensor.experimental._load_balancer import (
     _HeadTailLoadBalancer,
     _LoadBalancer,
@@ -710,7 +710,7 @@ class TestCPCustomOps(DTensorTestBase):
             ),
         ]
         for example in examples_k_v:
-            torch.library.opcheck(flex_cp_forward, example)
+            torch.library.opcheck(flex_cp_allgather, example)
 
 
 if __name__ == "__main__":

@@ -5,8 +5,8 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 
 
-@torch.library.custom_op("cplib::flex_cp_forward", mutates_args=())
-def flex_cp_forward(
+@torch.library.custom_op("cplib::flex_cp_allgather", mutates_args=())
+def flex_cp_allgather(
     k: torch.Tensor, v: torch.Tensor, seq_dim: int, pg_name: str
 ) -> tuple[torch.Tensor, torch.Tensor]:
     k = k.contiguous()
@@ -20,7 +20,7 @@ def flex_cp_forward(
     return k, v
 
 
-@flex_cp_forward.register_fake
+@flex_cp_allgather.register_fake
 def _(
     k: torch.Tensor, v: torch.Tensor, seq_dim: int, pg_name: str
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -33,8 +33,8 @@ def _(
     return new_k, new_v
 
 
-@torch.library.custom_op("cplib::flex_cp_backward", mutates_args=())
-def flex_cp_backward(
+@torch.library.custom_op("cplib::flex_cp_allgather_backward", mutates_args=())
+def flex_cp_allgather_backward(
     grad_full_k: torch.Tensor,
     grad_full_v: torch.Tensor,
     seq_dim: int,
@@ -50,7 +50,7 @@ def flex_cp_backward(
     return grad_k, grad_v
 
 
-@flex_cp_backward.register_fake
+@flex_cp_allgather_backward.register_fake
 def _(
     grad_full_k: torch.Tensor,
     grad_full_v: torch.Tensor,
@@ -70,10 +70,10 @@ def _(
     return new_grad_k, new_grad_v
 
 
-def _flex_cp_backward(
+def _flex_cp_allgather_backward(
     ctx: Any, grad_full_k: torch.Tensor, grad_full_v: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, None, None]:
-    grad_k, grad_v = flex_cp_backward(
+    grad_k, grad_v = flex_cp_allgather_backward(
         grad_full_k, grad_full_v, ctx.seq_dim, ctx.pg_name
     )
     return grad_k, grad_v, None, None
@@ -83,6 +83,6 @@ def _flex_cp_setup_context(ctx: Any, inputs: Any, output: Any) -> None:
     _, _, ctx.seq_dim, ctx.pg_name = inputs
 
 
-flex_cp_forward.register_autograd(
-    _flex_cp_backward, setup_context=_flex_cp_setup_context
+flex_cp_allgather.register_autograd(
+    _flex_cp_allgather_backward, setup_context=_flex_cp_setup_context
 )
