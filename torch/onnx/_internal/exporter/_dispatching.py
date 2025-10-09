@@ -58,7 +58,4 @@ def dispatch(
 
     # NOTE: Complex overload type matching logic has been removed to keep this simple
     # There should no longer be overloads (for the same opset version) in torchlib anymore
-    return (
-        decomp_metas[0].onnx_function,
-        "Fast path: Only one decomposition is defined",
-    )
+    return (decomp_metas[0].onnx_function, "The first implementation is used")
