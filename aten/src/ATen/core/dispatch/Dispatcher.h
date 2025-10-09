@@ -496,7 +496,7 @@ class TORCH_API OperatorHandle {
   }
 
   void checkInvariants() const {
-    return operatorDef_->op.checkInvariants();
+    operatorDef_->op.checkInvariants();
   }
 
   c10::ArrayRef<at::Tag> getTags() const {
@@ -932,7 +932,7 @@ inline void Dispatcher::redispatchBoxed(
   }
 #endif
   const auto& kernel = entry.lookup(dispatchKeySet);
-  return kernel.callBoxed(op, dispatchKeySet, stack);
+  kernel.callBoxed(op, dispatchKeySet, stack);
 }
 
 } // namespace c10
