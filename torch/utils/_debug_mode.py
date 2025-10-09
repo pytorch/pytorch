@@ -107,6 +107,11 @@ class DebugMode(TorchDispatchMode):
     def ignore_compile_internals(cls):
         return True
 
+    def log_operation(self, op, args, kwargs, depth):
+        # prevent dynamo's side-effect system from hardcoding this list
+        if not torch.compiler.is_compiling():
+            self.operators.append((op, args, kwargs, depth))
+
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
@@ -116,7 +121,7 @@ class DebugMode(TorchDispatchMode):
             and func.__name__ == "__get__"
         ):
             # filter out known noise
-            self.operators.append((func, args, kwargs, self.call_depth))
+            self.log_operation(func, args, kwargs, self.call_depth)
 
         try:
             self.call_depth += 1
@@ -130,17 +135,17 @@ class DebugMode(TorchDispatchMode):
 
         # Record the operation with its call depth
         if torch.distributed.tensor.DTensor in types:
-            self.operators.append((func, args, kwargs, self.call_depth))
+            self.log_operation(func, args, kwargs, self.call_depth)
             return NotImplemented
         elif FakeTensor in types or isinstance(
             _get_current_dispatch_mode(), FakeTensorMode
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    self.operators.append((func, args, kwargs, self.call_depth + 1))
+                    self.log_operation(func, args, kwargs, self.call_depth + 1)
         elif len(types) == 0:
             if self.record_realtensor:
-                self.operators.append((func, args, kwargs, self.call_depth + 1))
+                self.log_operation(func, args, kwargs, self.call_depth + 1)
 
         result = func(*args, **kwargs)
 
@@ -188,13 +193,11 @@ class DebugMode(TorchDispatchMode):
     @contextlib.contextmanager
     def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
         try:
-            self.operators.append(
-                (
-                    REDISTRIBUTE_FUNC,
-                    [arg_idx, src_placement, dst_placement],
-                    {},
-                    self.call_depth + 1,
-                )
+            self.log_operation(
+                REDISTRIBUTE_FUNC,
+                [arg_idx, src_placement, dst_placement],
+                {},
+                self.call_depth + 1,
             )
             self.call_depth += 1
             yield
