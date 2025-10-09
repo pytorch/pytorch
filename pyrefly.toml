@@ -34,7 +34,7 @@ project-excludes = [
   "torch/fx/experimental/unification/multipledispatch/__init__.py",
   "torch/nn/modules/__init__.py",
   "torch/_inductor/codecache.py",
-  "torch/distributed/elastic/metrics/__init__.py"
+  "torch/distributed/elastic/metrics/__init__.py",
   # ====
   "benchmarks/instruction_counts/main.py",
   "benchmarks/instruction_counts/definitions/setup.py",
