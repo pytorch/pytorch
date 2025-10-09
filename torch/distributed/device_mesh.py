@@ -85,8 +85,8 @@ else:
             # We considers the root mesh of a root mesh is itself.
             # We keep this function for backward compatibility.
             warnings.warn(
-                "This _get_all_submeshes API will be deprecated soon."
-                "Please use `_get_all_submeshes` inside DeviceMesh instead."
+                "This get_root_mesh API will be deprecated soon."
+                "Please use `get_root_mesh` inside DeviceMesh instead."
             )
             return device_mesh._get_root_mesh()
 
