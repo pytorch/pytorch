@@ -66,6 +66,14 @@
 
 #include <torch/custom_class.h>
 
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::BuiltinCommHookType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::DebugLevel)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ReduceOp::RedOpType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ProcessGroup::BackendType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::OpType)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::WorkResult)
+TORCH_MAKE_PYBIND_ENUM_FASTER(c10d::ErrorType)
+
 namespace {
 
 #ifdef USE_C10D_NCCL
