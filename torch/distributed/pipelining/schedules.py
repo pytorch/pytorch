@@ -1554,6 +1554,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # Run microbatches
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)
 
+        # This is only applicable in the FSDP case, any outstanding events need to be waited on
+        for stage in self._stages:
+            for event in stage.reduce_scatter_events:
+                if event is not None:
+                    torch.cuda.current_stream().wait_event(event)
+
         # Return merged results per original format
         for stage in self._stages:
             if stage.is_last:

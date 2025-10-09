@@ -203,6 +203,9 @@ class _PipelineStageBase(ABC):
             i: i % self.group_size for i in range(self.num_stages)
         }
 
+        # Populated during runtime
+        self.reduce_scatter_events: list[torch.Event | None] = []
+
     @property
     def has_backward(self) -> bool:
         """
@@ -669,7 +672,11 @@ class _PipelineStageBase(ABC):
                     # it would be much better if pipelining backward invoked .backward so autograd hooks
                     # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
                     # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
-                    distributed_state._root_post_backward_final_callback()
+                    # The stage passes in a list to hold the reduce scatter events for the last backward step. After
+                    # the pipeline is finished, we will wait on these events to ensure that the grad reduction ops are finished.
+                    distributed_state._root_post_backward_final_callback(
+                        self.reduce_scatter_events
+                    )
 
                 run_post_backward(self.submod)
 
