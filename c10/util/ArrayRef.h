@@ -18,7 +18,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
-#include <torch/headeronly/util/ArrayRef.h>
+#include <torch/headeronly/util/HOArrayRef.h>
 
 #include <array>
 #include <cstddef>

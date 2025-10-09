@@ -13,9 +13,9 @@
 
 namespace c10 {
 
-/// HOArrayRef (HO = HeaderOnly) - A subset of ArrayRef that is implemented only in headers.
-/// This will be a base class from which ArrayRef inherits, so that we can keep much
-/// of the implementation shared.
+/// HOArrayRef (HO = HeaderOnly) - A subset of ArrayRef that is implemented only
+/// in headers. This will be a base class from which ArrayRef inherits, so that
+/// we can keep much of the implementation shared.
 template <typename T>
 class HOArrayRef {
  public:
@@ -36,7 +36,8 @@ class HOArrayRef {
   // CHANGED void debugCheckNullptrInvariant() {
   //   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
   //       Data != nullptr || Length == 0,
-  //       "created ArrayRef with nullptr and non-zero length! std::optional relies on this being illegal");
+  //       "created ArrayRef with nullptr and non-zero length! std::optional
+  //       relies on this being illegal");
   // }
 
  public:
@@ -62,8 +63,8 @@ class HOArrayRef {
     // CHANGED debugCheckNullptrInvariant();
   }
 
-  /// CHANGED Construct an ArrayRef from a SmallVector. This is templated in order to
-  /// avoid instantiating SmallVectorTemplateCommon<T> whenever we
+  /// CHANGED Construct an ArrayRef from a SmallVector. This is templated in
+  /// order to avoid instantiating SmallVectorTemplateCommon<T> whenever we
   /// copy-construct an ArrayRef.
   // template <typename U>
   // /* implicit */ ArrayRef(const SmallVectorTemplateCommon<T, U>& Vec)
@@ -101,7 +102,8 @@ class HOArrayRef {
   /// Construct a HOArrayRef from a C array.
   template <size_t N>
   // NOLINTNEXTLINE(*c-arrays*)
-  /* implicit */ constexpr HOArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N) {}
+  /* implicit */ constexpr HOArrayRef(const T (&Arr)[N])
+      : Data(Arr), Length(N) {}
 
   /// Construct a HOArrayRef from a std::initializer_list.
   /* implicit */ constexpr HOArrayRef(const std::initializer_list<T>& Vec)
@@ -160,25 +162,28 @@ class HOArrayRef {
   constexpr const T& front() const {
     // CHANGED TO USE STD_TORCH_CHECK
     STD_TORCH_CHECK(
-        !this->empty(), "HOArrayRef: attempted to access front() of empty list");
+        !this->empty(),
+        "HOArrayRef: attempted to access front() of empty list");
     return this->Data[0];
   }
 
   /// back - Get the last element.
   constexpr const T& back() const {
     // CHANGED TO USE STD_TORCH_CHECK
-    STD_TORCH_CHECK(!this->empty(), "HOArrayRef: attempted to access back() of empty list");
+    STD_TORCH_CHECK(
+        !this->empty(), "HOArrayRef: attempted to access back() of empty list");
     return this->Data[this->Length - 1];
   }
 
   /// equals - Check for element-wise equality.
   constexpr bool equals(HOArrayRef RHS) const {
-    return this->Length == RHS.Length && std::equal(begin(), end(), RHS.begin());
+    return this->Length == RHS.Length &&
+        std::equal(begin(), end(), RHS.begin());
   }
 
   /// slice(n, m) - Take M elements of the array starting at element N
   constexpr HOArrayRef<T> slice(size_t N, size_t M) const {
-    // CHANGEDDDDD TO USE STD_TORCH_CHECK  
+    // CHANGEDDDDD TO USE STD_TORCH_CHECK
     STD_TORCH_CHECK(
         N + M <= this->size(),
         "HOArrayRef: invalid slice, N = ",
@@ -192,10 +197,15 @@ class HOArrayRef {
 
   /// slice(n) - Chop off the first N elements of the array.
   constexpr HOArrayRef<T> slice(size_t N) const {
-    // CHANGED TO USE STD_TORCH_CHECK, slice may be the only op that needs a this->
+    // CHANGED TO USE STD_TORCH_CHECK, slice may be the only op that needs a
+    // this->
     STD_TORCH_CHECK(
-        N <= this->size(), "HOArrayRef: invalid slice, N = ", N, "; size = ", this->size());
-    return this->slice(N, this->size() - N);
+        N <= this->size(),
+        "HOArrayRef: invalid slice, N = ",
+        N,
+        "; size = ",
+        this->size());
+    return slice(N, this->size() - N);
   }
 
   /// @}
@@ -249,4 +259,4 @@ class HOArrayRef {
 namespace torch::headeronly {
 using c10::HOArrayRef;
 using IntHOArrayRef = HOArrayRef<int64_t>;
-}
+} // namespace torch::headeronly
