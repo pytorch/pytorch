@@ -39,9 +39,16 @@ static void std_var_kernel_cuda(TensorIterator& iter, double correction, bool ta
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void mean_kernel_impl(TensorIterator& iter) {
   //  returns acc_t for all non-complex dtypes and returns T for c10::complex<T>
+  const bool is_16_bits =
+    ( (std::is_same<at::Half, scalar_t>::value) ||
+      (std::is_same<at::BFloat16, scalar_t>::value) );
   using factor_t = typename c10::scalar_value_type<acc_t>::type;
   factor_t factor = static_cast<factor_t>(iter.num_output_elements()) / iter.numel();
-  gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<scalar_t, acc_t, factor_t, out_t> {factor});
+  if (is_16_bits) {
+    gpu_reduce_kernel<scalar_t, out_t, /*vt0=*/8, /*input_vec_size=*/8>(iter, MeanOps<scalar_t, acc_t, factor_t, out_t> {factor});
+  } else {
+    gpu_reduce_kernel<scalar_t, out_t>(iter, MeanOps<scalar_t, acc_t, factor_t, out_t> {factor});
+  }
 }
 
 static void mean_kernel_cuda(TensorIterator& iter) {

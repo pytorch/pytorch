@@ -37,7 +37,7 @@ struct sum_functor {
         iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
           return a + b;
         }));
-    // }
+    }
   }
 };
 
