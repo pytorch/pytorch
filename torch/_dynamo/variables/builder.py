@@ -2887,10 +2887,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             not tx.export or not config.capture_sparse_compute
         ):
             unimplemented_v2(
-                gb_type="Sparse tensor operations are not supported by Inductor",
+                gb_type="Attempted to wrap sparse Tensor",
                 context="",
-                explanation="torch.compile with inductor backend does not support sparse tensors. "
-                "Operations that produce sparse tensors will cause a graph break.",
+                explanation="torch.compile does not support sparse Tensors",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         var = construct_tensor_variable(
