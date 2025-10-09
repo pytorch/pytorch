@@ -1,5 +1,6 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAException.h>
@@ -2499,7 +2500,8 @@ class DeviceCachingAllocator {
     if (size < kMinBlockSize) {
       return kMinBlockSize;
     } else {
-      auto divisions = CUDAAllocatorConfig::roundup_power2_divisions(size);
+      auto divisions =
+          AcceleratorAllocatorConfig::roundup_power2_divisions(size);
       if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
       } else if (divisions == 1) {
