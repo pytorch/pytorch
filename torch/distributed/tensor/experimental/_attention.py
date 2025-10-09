@@ -384,9 +384,9 @@ def _templated_ring_attention(
     if not is_causal and _cp_options.enable_load_balance:
         raise RuntimeError("Load balancing requires `is_causal=True`.")
 
-    assert isinstance(
-        group, dist.ProcessGroup
-    ), "process group must be single dimension"
+    assert isinstance(group, dist.ProcessGroup), (
+        "process group must be single dimension"
+    )
     rank = dist.get_rank(group)
     size = dist.get_world_size(group)
 
@@ -1360,6 +1360,33 @@ def _context_parallel_shard(
     seq_dims: list[int],
     load_balancer: Optional[_LoadBalancer] = None,
 ) -> list[torch.Tensor | BlockMask]:
+    """
+    Shard the buffers along the specified sequence dimensions (`seq_dims`), so that each
+    rank retains only its corresponding shard according to the provided `mesh`. If a
+    `load_balancer` is provided, the buffers will be rearranged by the load balancer
+    before sharding to improve load balance. Buffers can be either tensors or `BlockMask`
+    objects. If a buffer is a `BlockMask`, its sharding dimension is determined by the
+    `BlockMask` implementation, and the corresponding `seq_dim` is ignored.
+
+    Note:
+        For `_context_parallel_shard`, a non-None `load_balancer` must be explicitly passed
+        if load balancing is required.
+
+    Args:
+        mesh (DeviceMesh): The device mesh used for context parallelism.
+        buffers (List[torch.Tensor | BlockMask]): Buffers whose usage depends on the sequence
+            dimension. Examples include input batches, labels, and positional embedding buffers.
+            These buffers must be sharded along the sequence dimension to ensure correctness.
+        seq_dims (List[int]): The sequence dimensions for each buffer in `buffers`. Must have
+            the same length as `buffers`.
+        load_balancer (Optional[_LoadBalancer]): An optional load balancer object. If provided,
+            it rearranges the buffers before sharding to achieve better load balance. If not
+            provided, no rearrangement is performed.
+
+    Returns:
+        List[torch.Tensor | BlockMask]: The sharded buffers, each corresponding to the local
+            shard for the current rank.
+    """
     # TODO: these global variables are going to bite us someday.
     # We will have to remove them soon.
     # For the new API, we only support the module wrapper mode.
