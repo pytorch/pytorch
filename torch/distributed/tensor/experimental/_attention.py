@@ -1019,7 +1019,7 @@ def _disable_context_parallel_dispatcher_impl() -> None:
     elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
         pass
     else:
-        raise NotImplementedError
+        raise NotImplementedError(f"Unknown dispatch mode: {_dispatch_mode}")
 
     _disable_cp_dtensor_dispatcher()
 
