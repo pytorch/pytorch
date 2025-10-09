@@ -391,7 +391,7 @@ class DetachExecutor(fx.Interpreter):
 
         """
         def dont_traverse_size(a):
-            return type(a) != torch.Size
+            return type(a) is not torch.Size
         """
 
         args = map_aggregate(
