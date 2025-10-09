@@ -30,6 +30,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch._library.opaque_object import register_opaque_type
 
 
 __all__ = [
@@ -46,15 +47,9 @@ __all__ = [
 
 aten = torch.ops.aten
 
-
-def _dtensor_local_tensor(self: "DTensor") -> torch.Tensor:
-    local_tensor = self._local_tensor
-    return local_tensor.view_as(local_tensor)  # fresh tensor object
-
-
 # NOTE [Autograd interaction between torch.Tensor]
 #
-# The autograd functions defined below are being used by the public
+# The ops defined below are being used by the public
 # facing APIs (i.e. from_local, to_local) to ensure DTensor to work
 # together with torch.Tensor within the autograd engine. This
 # allows DTensor to only exist on part of the module hierarchy.
@@ -72,54 +67,104 @@ def _dtensor_local_tensor(self: "DTensor") -> torch.Tensor:
 #
 # So from_local/to_local must be Autograd functions.
 #
-class _ToTorchTensor(torch.autograd.Function):
-    @staticmethod
-    def forward(  # type: ignore[override]
-        ctx,
-        input: "DTensor",
-        grad_placements: Optional[Sequence[Placement]],
-    ):
-        ctx.dtensor_spec = input._spec
-        ctx.grad_placements = grad_placements
-        local_tensor = input._local_tensor
+# Custom ops are being used here to ensure we can properly track view relashionship
+# and get full support of view+inplace from the autograd engine.
+#
 
-        # We need to return a fresh Tensor object there as autograd metadata
-        # will be inplaced into it. So we don't want to pollute the Tensor
-        # object stored in the _local_tensor of this DTensor.
-        return local_tensor.view_as(local_tensor)
+register_opaque_type(Placement)
 
-    @staticmethod
-    def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
-        dtensor_spec = ctx.dtensor_spec
-        mesh = dtensor_spec.mesh
-        grad_placements = ctx.grad_placements
-        dtensor_meta = dtensor_spec.tensor_meta
+@torch.library.custom_op(
+    "dtensor::_dtensor_local_tensor",
+    mutates_args=(),
+    schema="(Tensor(a) input, Placement[]?) -> Tensor(a)",
+)
+def _dtensor_local_tensor(tx, idx):
+    raise RuntimeError("Should never be called")
 
-        _, tensor_stride = compute_global_tensor_info(
-            grad_output, mesh, dtensor_spec.placements
-        )
-        tensor_stride = tuple(tensor_stride)
-        grad_placements = grad_placements or dtensor_spec.placements
-        grad_spec = DTensorSpec(
-            mesh,
-            grad_placements,
-            tensor_meta=TensorMeta(
-                shape=dtensor_meta.shape,
-                stride=tensor_stride,
-                dtype=dtensor_meta.dtype,
-            ),
-        )
+def backward(ctx, grad_output):
+    dtensor_spec = ctx.dtensor_spec
+    mesh = dtensor_spec.mesh
+    grad_placements = ctx.grad_placements
+    dtensor_meta = dtensor_spec.tensor_meta
 
-        return (
-            DTensor(
-                grad_output,
-                grad_spec,
-                requires_grad=grad_output.requires_grad,
-            ),
-            None,
-        )
+    _, tensor_stride = compute_global_tensor_info(
+        grad_output, mesh, dtensor_spec.placements
+    )
+    tensor_stride = tuple(tensor_stride)
+    grad_placements = grad_placements or dtensor_spec.placements
+    grad_spec = DTensorSpec(
+        mesh,
+        grad_placements,
+        tensor_meta=TensorMeta(
+            shape=dtensor_meta.shape,
+            stride=tensor_stride,
+            dtype=dtensor_meta.dtype,
+        ),
+    )
+
+    return (
+        DTensor(
+            grad_output,
+            grad_spec,
+            requires_grad=grad_output.requires_grad,
+        ),
+        None,
+    )
+
+def setup_ctx(ctx, inputs, output):
+    ctx._is_pure_view = True
+    ctx.dtensor_spec = inputs[0]._spec
+    ctx.grad_placements = inputs[1]
 
 
+# class _ToTorchTensor(torch.autograd.Function):
+#     @staticmethod
+#     def forward(  # type: ignore[override]
+#         ctx,
+#         input: "DTensor",
+#         grad_placements: Optional[Sequence[Placement]],
+#     ):
+#         ctx.dtensor_spec = input._spec
+#         ctx.grad_placements = grad_placements
+#         local_tensor = input._local_tensor
+
+#         # We need to return a fresh Tensor object there as autograd metadata
+#         # will be inplaced into it. So we don't want to pollute the Tensor
+#         # object stored in the _local_tensor of this DTensor.
+#         return local_tensor.view_as(local_tensor)
+
+#     @staticmethod
+#     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
+#         dtensor_spec = ctx.dtensor_spec
+#         mesh = dtensor_spec.mesh
+#         grad_placements = ctx.grad_placements
+#         dtensor_meta = dtensor_spec.tensor_meta
+
+#         _, tensor_stride = compute_global_tensor_info(
+#             grad_output, mesh, dtensor_spec.placements
+#         )
+#         tensor_stride = tuple(tensor_stride)
+#         grad_placements = grad_placements or dtensor_spec.placements
+#         grad_spec = DTensorSpec(
+#             mesh,
+#             grad_placements,
+#             tensor_meta=TensorMeta(
+#                 shape=dtensor_meta.shape,
+#                 stride=tensor_stride,
+#                 dtype=dtensor_meta.dtype,
+#             ),
+#         )
+
+#         return (
+#             DTensor(
+#                 grad_output,
+#                 grad_spec,
+#                 requires_grad=grad_output.requires_grad,
+#             ),
+#             None,
+#         )
+
+# TODO: update the Tensor->DTensor similarly to what was done above for DTensor->Tensor
 class _FromTorchTensor(torch.autograd.Function):
     @staticmethod
     def forward(  # type: ignore[override]
@@ -462,17 +507,10 @@ class DTensor(torch.Tensor):
         .. note:: ``to_local`` is differentiable, the ``requires_grad`` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
         """
-        if not torch.is_grad_enabled():
-            return self._local_tensor
-
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
-        if grad_placements is None:
-            return torch._dtensor_local_tensor(self)
-        else:
-            return _ToTorchTensor.apply(
-                self, grad_placements
-            )  # pyre-ignore[16]: autograd func
+
+        return torch.ops.dtensor._dtensor_local_tensor.default(self, grad_placements)
 
     def redistribute(
         self,

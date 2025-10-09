@@ -146,10 +146,13 @@ class OpDispatcher:
         (2) registered sharding strategy, then rule
         (3) composite implicit autograd decomposition
         """
-        if op_call is torch.ops.aten._dtensor_local_tensor.default:
-            from ._api import _dtensor_local_tensor
-
-            return _dtensor_local_tensor(*args, **kwargs)
+        if op_call is torch.ops.dtensor._dtensor_local_tensor.default:
+            # This is the backend implementation of to local
+            if not isinstance(args[0], DTensor):
+                raise TypeError("The first argument to _dtensor_local_tensor should be a DTensor")
+            local_tensor = args[0]._local_tensor
+            # Always return a different Tensor object
+            return local_tensor.view_as(local_tensor)
 
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
@@ -194,7 +197,10 @@ class OpDispatcher:
 
             local_tensor_args = (
                 pytree.tree_unflatten(
-                    cast(list[object], op_info.local_args), op_info.args_tree_spec
+                    # pyrefly: ignore  # bad-argument-type
+                    cast(list[object], op_info.local_args),
+                    # pyrefly: ignore  # bad-argument-type
+                    op_info.args_tree_spec,
                 )
                 if op_info.args_tree_spec
                 else op_info.local_args
@@ -366,7 +372,11 @@ class OpDispatcher:
 
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
-                            local_tensor, arg_spec, reshard_arg_spec
+                            # pyrefly: ignore  # bad-argument-type
+                            local_tensor,
+                            arg_spec,
+                            # pyrefly: ignore  # bad-argument-type
+                            reshard_arg_spec,
                         )
                     new_local_args.append(resharded_local_tensor)
                 else:
@@ -436,7 +446,11 @@ class OpDispatcher:
                     op_call, args_list
                 )
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
-                    op_call, v, compute_mesh
+                    # pyrefly: ignore  # bad-argument-type
+                    op_call,
+                    v,
+                    # pyrefly: ignore  # bad-argument-type
+                    compute_mesh,
                 )
                 local_kwargs[k] = v
             else:
@@ -452,6 +466,7 @@ class OpDispatcher:
             OpSchema(
                 op_call,
                 (
+                    # pyrefly: ignore  # bad-argument-type
                     pytree.tree_unflatten(args_schema, args_spec)
                     if args_spec
                     else tuple(args_schema)

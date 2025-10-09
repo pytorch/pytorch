@@ -891,7 +891,14 @@ class DTensorMeshTest(DTensorTestBase):
         dtensor_vocab_parallel_logits = dtensor_leaf * 2  # make this non-leaf
         vocab_parallel_logits = dtensor_vocab_parallel_logits.to_local()
         logits_max = torch.randn(seq, device=self.device_type)
-        vocab_parallel_logits -= logits_max.unsqueeze(dim=1)
+        # Use multiplication here to ensure non-trivial gradient
+        vocab_parallel_logits *= logits_max.unsqueeze(dim=1)
+
+        dtensor_vocab_parallel_logits.sum().backward()
+        print(leaf)
+        print(dtensor_leaf)
+        print(logits_max)
+        print(leaf.grad)
 
     @with_comms
     def test_auto_implicit_replication(self):
