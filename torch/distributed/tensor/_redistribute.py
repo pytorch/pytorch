@@ -174,16 +174,14 @@ class DTensorRedistributePlanner:
             src_placement: The initial tuple of Placement objects.
             src_shard_order: (Optional) The initial ShardOrder representing
                 the mapping of tensor dimensions to mesh dimensions. If None,
-                the default sparse shard order is computed from src_placement and mesh.
+                the default shard order is computed from src_placement and mesh.
 
         Returns:
             A string showing the sequence of DistState transitions, separated by '->'.
         """
         assert len(src_placement) == mesh.ndim
         if src_shard_order is None:
-            src_shard_order = DTensorSpec.compute_default_sparse_shard_order(
-                src_placement
-            )
+            src_shard_order = DTensorSpec.compute_default_shard_order(src_placement)
         cur_placement = list(src_placement)
         shard_order_dict = DTensorRedistributePlanner._ShardOrder_to_dict(
             src_shard_order
@@ -254,7 +252,7 @@ class DTensorRedistributePlanner:
     def get_next_state(
         self,
         placements: tuple[Placement, ...],
-        tensor_mesh_dim_tuple: TensorDimTuple,
+        tensor_mesh_dim_tuple: ShardOrder,
     ) -> dict["DTensorRedistributePlanner.DistState", int]:
         # We map tensor dimensions to device mesh axes, similar to JAX-style
         # sharding representation. Notation:
@@ -301,7 +299,7 @@ class DTensorRedistributePlanner:
         # list of [DistState, cost]
         all_next_state: dict[DTensorRedistributePlanner.DistState, int] = {}
 
-        tensor_mesh_dim_dict = DTensorRedistributePlanner._TensorDimTuple_to_dict(
+        tensor_mesh_dim_dict = DTensorRedistributePlanner._ShardOrder_to_dict(
             tensor_mesh_dim_tuple
         )
         ######################################################################
@@ -310,7 +308,8 @@ class DTensorRedistributePlanner:
         # interchangeably.
 
         # convert sparse tuple
-        for src_tensor_dim, *src_mesh_dims in tensor_mesh_dim_tuple:
+        for entry in tensor_mesh_dim_tuple:
+            src_tensor_dim = entry.tensor_dim
             for dst_tensor_dim in range(self.tensor_dimension):
                 if src_tensor_dim == dst_tensor_dim:
                     continue
@@ -322,7 +321,7 @@ class DTensorRedistributePlanner:
                 new_placements[move_mesh_dim] = Shard(dst_tensor_dim)
                 dist_state = self.DistState(
                     self._to_tuple(new_placements),
-                    DTensorRedistributePlanner._dict_to_TensorDimTuple(
+                    DTensorRedistributePlanner._dict_to_ShardOrder(
                         tensor_mesh_dim_dict
                     ),
                 )
@@ -335,15 +334,14 @@ class DTensorRedistributePlanner:
 
         ######################################################################
         # handle case 2: Shard() -> Replicate()
-        for src_tensor_dim, *src_mesh_dims in tensor_mesh_dim_tuple:
+        for entry in tensor_mesh_dim_tuple:
+            src_tensor_dim = entry.tensor_dim
             move_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim].pop()
             new_placements = list(placements)
             new_placements[move_mesh_dim] = Replicate()
             dist_state = self.DistState(
                 self._to_tuple(new_placements),
-                DTensorRedistributePlanner._dict_to_TensorDimTuple(
-                    tensor_mesh_dim_dict
-                ),
+                DTensorRedistributePlanner._dict_to_ShardOrder(tensor_mesh_dim_dict),
             )
             tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
             all_next_state[dist_state] = self.all_gather_cost
@@ -372,7 +370,7 @@ class DTensorRedistributePlanner:
                 tensor_mesh_dim_dict[dst_tensor_dim].append(mesh_dim)
                 dist_state = self.DistState(
                     self._to_tuple(new_placements),
-                    DTensorRedistributePlanner._dict_to_TensorDimTuple(
+                    DTensorRedistributePlanner._dict_to_ShardOrder(
                         tensor_mesh_dim_dict
                     ),
                 )
@@ -391,7 +389,7 @@ class DTensorRedistributePlanner:
                 tensor_mesh_dim_dict[dst_tensor_dim].append(mesh_dim)
                 dist_state = self.DistState(
                     self._to_tuple(new_placements),
-                    DTensorRedistributePlanner._dict_to_TensorDimTuple(
+                    DTensorRedistributePlanner._dict_to_ShardOrder(
                         tensor_mesh_dim_dict
                     ),
                 )
@@ -472,7 +470,9 @@ class DTensorRedistributePlanner:
     ) -> list[int]:
         new_logical_shape = list(full_tensor_shape)
         assert self.coordinate is not None
-        for tensor_dim, *mesh_dims in src_state.tensor_dim_to_mesh_dim:
+        for entry in src_state.tensor_dim_to_mesh_dim:
+            tensor_dim = entry.tensor_dim
+            mesh_dims = entry.mesh_dims
             assert len(mesh_dims) > 0
             for mdim in mesh_dims:
                 if mdim == mesh_dim:

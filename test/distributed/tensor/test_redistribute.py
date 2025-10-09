@@ -17,6 +17,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor._collective_utils import shard_dim_alltoall
+from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import (
@@ -835,15 +836,18 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         """convert shard_order to placement with only Replicate() and Shard()"""
         placements = [Replicate() for _ in range(mesh.ndim)]
         if shard_order is not None:
-            for tensor_dim, *mesh_dims in shard_order:
+            for entry in shard_order:
+                tensor_dim = entry.tensor_dim
+                mesh_dims = entry.mesh_dims
                 for mesh_dim in mesh_dims:
                     placements[mesh_dim] = Shard(tensor_dim)
         return tuple(placements)
 
-    def _convert_shard_order_dict_to_TensorDimTuple(self, shard_order):
-        """convert shard_order to TensorDimTuple"""
+    def _convert_shard_order_dict_to_ShardOrder(self, shard_order):
+        """Convert shard_order dict to ShardOrder"""
         return tuple(
-            (TensorDim, *mesh_dims) for TensorDim, mesh_dims in shard_order.items()
+            ShardOrderEntry(tensor_dim=tensor_dim, mesh_dims=tuple(mesh_dims))
+            for tensor_dim, mesh_dims in shard_order.items()
         )
 
     @with_comms
@@ -854,16 +858,34 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         input_data = torch.randn((8, 8, 8), device=self.device_type)
         sharding_src_dst_pairs_with_expected_trace = [
             (
-                ([Shard(0), Shard(0), Shard(0)], ((0, 0, 1, 2),)),
-                ([Replicate(), Shard(0), Shard(0)], ((0, 1, 2),)),
+                (
+                    [Shard(0), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),),
+                ),
+                (
+                    [Replicate(), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 2)),),
+                ),
             ),
             (
-                ([Shard(0), Shard(0), Shard(0)], ((0, 1, 0, 2),)),
-                ([Replicate(), Shard(0), Shard(0)], ((0, 1, 2),)),
+                (
+                    [Shard(0), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+                ),
+                (
+                    [Replicate(), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 2)),),
+                ),
             ),
             (
-                ([Shard(0), Shard(0), Shard(0)], ((0, 1, 0, 2),)),
-                ([Shard(0), Shard(0), Replicate()], ((0, 0, 1),)),
+                (
+                    [Shard(0), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+                ),
+                (
+                    [Shard(0), Shard(0), Replicate()],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+                ),
             ),
             # If we use the graph search solution, the redistribution path will
             # be S(0)[0, 1] -> S(0)[0]S(1)[1] -> S(1)[1] -> S(0)[2]S(1)[1],
@@ -872,8 +894,17 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             # which results in path: S(0)[0, 1] -> S(0)[0]S(1)[1] -> S(1)[1] ->
             # S(0)[2]S(1)[1] with 2 comm count
             (
-                ([Shard(0), Shard(0), Replicate()], ((0, 0, 1),)),
-                ([Replicate(), Shard(1), Shard(0)], ((0, 2), (1, 1))),
+                (
+                    [Shard(0), Shard(0), Replicate()],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+                ),
+                (
+                    [Replicate(), Shard(1), Shard(0)],
+                    (
+                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1,)),
+                    ),
+                ),
             ),
         ]
         for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
@@ -892,24 +923,22 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """\
-S(0)[0, 1, 2]->S(0)[0, 1]S(1)[2]->S(0)[0]S(1)[2, 1]->S(1)[2, 1]->S(0)[1]S(1)[2]->S(0)[1, 2]""",
+                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]S(1)->S(0)S(1)[1]S(1)[0]->RS(1)[1]S(1)[0]->RS(0)S(1)->RS(0)[0]S(0)[1]""",
                 )
             elif idx == 1:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[1, 0, 2]->S(0)[1, 0]S(1)[2]->S(0)[1]S(1)[2]->S(0)[1, 2]""",
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]S(1)->RS(0)S(1)->RS(0)[0]S(0)[1]""",
                 )
             elif idx == 2:
                 self.assertExpectedInline(
                     trace_str,
-                    """\
-S(0)[1, 0, 2]->S(0)[1, 0]->S(0)[1]S(1)[0]->S(1)[0]S(2)[1]->S(0)[0]S(2)[1]->S(0)[0, 1]""",
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->S(1)S(0)R->S(1)S(2)R->S(0)S(2)R->S(0)[0]S(0)[1]R""",
                 )
             elif idx == 3:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0, 1]->S(0)[0]S(1)[1]->S(1)[1]->S(0)[2]S(1)[1]""",
+                    """S(0)[0]S(0)[1]R->S(0)S(1)R->RS(1)R->RS(1)S(0""",
                 )
             expected_dt = self.distribute_tensor(
                 input_data.clone(), mesh, dst_placement, shard_order=dst_order
@@ -952,9 +981,7 @@ S(0)[1, 0, 2]->S(0)[1, 0]->S(0)[1]S(1)[0]->S(1)[0]S(2)[1]->S(0)[0]S(2)[1]->S(0)[
                             shard_order[tensor_dim] = device_order[
                                 mesh_dims[0] : mesh_dims[-1] + 1
                             ]
-                        yield self._convert_shard_order_dict_to_TensorDimTuple(
-                            shard_order
-                        )
+                        yield self._convert_shard_order_dict_to_ShardOrder(shard_order)
 
     @with_comms
     def test_generate_shard_orders(self):
