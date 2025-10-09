@@ -3194,7 +3194,7 @@ class TestGuardsExpressions(TestCase):
         self.assertIn("float(", guards)
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
-        
+
     @skipIfTorchDynamo("Attempt to trace generator")
     @torch.fx.experimental._config.patch("use_duck_shape", False)
     def test_size_comparison_no_recompile(self):

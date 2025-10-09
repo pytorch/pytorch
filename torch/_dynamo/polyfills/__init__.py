@@ -8,6 +8,7 @@ Python polyfills for common builtins.
 
 # mypy: allow-untyped-defs
 
+import operator
 import types
 from collections import OrderedDict
 from collections.abc import Hashable, Iterable, MutableMapping, Sequence
@@ -106,7 +107,6 @@ def accumulate_grad(x, new_grad):
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
     """emulate `(1,2,3) > (1,2)` etc"""
-    import operator
 
     # Optimization: For equality, short-circuit if lengths differ
     # This avoids iterating through elements and triggering guards on SymInts
