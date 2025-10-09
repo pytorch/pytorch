@@ -440,7 +440,9 @@ class FlexAttentionWrapper(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, *args: object, **kwargs: object) -> [
+    def forward(
+        self, *args: object, **kwargs: object
+    ) -> [
         torch.Tensor | tuple[torch.Tensor, torch.Tensor],
         tuple[torch.Tensor, AuxOutput],
     ]:

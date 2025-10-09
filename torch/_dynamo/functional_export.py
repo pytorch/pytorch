@@ -465,6 +465,12 @@ def _dynamo_graph_capture_for_export(
                 capture_scalar_outputs=True,
                 constant_fold_autograd_profiler_enabled=True,
                 log_graph_in_out_metadata=True,
+                # install_free_tensors ensures that params and buffers are still
+                # added as graph attributes, and makes Dynamo emits graphs that
+                # follow export pytree-able input requirements In future, if we
+                # fully rely on bytecode for the runtime, we can turn this flag
+                # off.
+                install_free_tensors=torch._dynamo.config.install_free_tensors_for_export,
             )
 
             with (

@@ -155,21 +155,25 @@ class cuBLASModule:
         if name == "allow_tf32":
             return torch._C._get_cublas_allow_tf32()
         elif name == "allow_fp16_reduced_precision_reduction":
+            # pyrefly: ignore  # not-iterable
             allow_reduced_precision, _ = (
                 torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
             )
             return allow_reduced_precision
         elif name == "allow_fp16_reduced_precision_reduction_split_k":
+            # pyrefly: ignore  # not-iterable
             _, allow_splitk = (
                 torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
             )
             return allow_splitk
         elif name == "allow_bf16_reduced_precision_reduction":
+            # pyrefly: ignore  # not-iterable
             allow_reduced_precision, _ = (
                 torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
             )
             return allow_reduced_precision
         elif name == "allow_bf16_reduced_precision_reduction_split_k":
+            # pyrefly: ignore  # not-iterable
             _, allow_splitk = (
                 torch._C._get_cublas_allow_bf16_reduced_precision_reduction()
             )
@@ -188,14 +192,20 @@ class cuBLASModule:
                 value, "allow_fp16_reduced_precision_reduction"
             )
             return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(
-                allow_reduced_precision, allow_splitk
+                # pyrefly: ignore  # bad-argument-count
+                allow_reduced_precision,
+                # pyrefly: ignore  # bad-argument-count
+                allow_splitk,
             )
         elif name == "allow_bf16_reduced_precision_reduction":
             allow_reduced_precision, allow_splitk = self._parse_reduction_setting(
                 value, "allow_bf16_reduced_precision_reduction"
             )
             return torch._C._set_cublas_allow_bf16_reduced_precision_reduction(
-                allow_reduced_precision, allow_splitk
+                # pyrefly: ignore  # bad-argument-count
+                allow_reduced_precision,
+                # pyrefly: ignore  # bad-argument-count
+                allow_splitk,
             )
         elif name == "allow_fp16_accumulation":
             return torch._C._set_cublas_allow_fp16_accumulation(value)
