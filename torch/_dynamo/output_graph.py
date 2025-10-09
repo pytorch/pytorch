@@ -79,6 +79,7 @@ from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_binary_slice,
     create_binary_subscr,
+    create_build_tuple,
     create_call_function,
     create_dup_top,
     create_instruction,
@@ -708,6 +709,7 @@ class OutputGraph(OutputGraphCommon):
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = None
 
+        # pyrefly: ignore  # bad-override
         self.name_of_builtins_dict_key_in_fglobals: str = (
             self.install_builtins_dict_in_fglobals()
         )
@@ -1147,6 +1149,7 @@ class OutputGraph(OutputGraphCommon):
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
 
                 assert "tensor_dict" not in vt.as_proxy().node.meta
+                # pyrefly: ignore  # bad-argument-type
                 vt.as_proxy().node.meta["tensor_dict"] = _extract_tensor_dict(target)
 
                 return vt
@@ -1158,6 +1161,7 @@ class OutputGraph(OutputGraphCommon):
                 install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
                 def wrap_name(module_key: str) -> VariableTracker:
+                    # pyrefly: ignore  # bad-argument-type
                     return NNModuleVariable(type(target), module_key, target, **options)
 
             else:
@@ -1553,8 +1557,9 @@ class OutputGraph(OutputGraphCommon):
 
         # Codegen stack convention before the unsupported instruction
         # NOTE: in these comment blocks, "locals" EXCLUDE free and cell vars.
-        # NOTE: stack and locals must be codegen'd BEFORE the unsupported instruction, since the latter
+        # NOTE: stack/locals/cells must be codegen'd BEFORE the unsupported instruction, since the latter
         # can arbitrarily mutate the former.
+        # [frame N cells, .., frame 1 cells],
         # [
         #   frame N locals,
         #   frame N-1 stack + locals,
@@ -1564,7 +1569,7 @@ class OutputGraph(OutputGraphCommon):
 
         # see symbolic_convert.py for
         # codegen stack convention after the unsupported instruction
-        # NOTE: cells are loaded into continuation functions directly
+        # NOTE: cells will be loaded into continuation functions directly by symbolic_convert
 
         # this determines the order that values are codegen'd to the stack
         stack_values_flat = [val for vals in all_stack_values for val in vals]
@@ -1596,12 +1601,19 @@ class OutputGraph(OutputGraphCommon):
             and not all_stack_locals_metas[-1].locals_null_keys
         ):
             # optimization to generate better code in a common case
+
+            # codegen cells
+            # no side effects, so no new cells created - no need to call side_effects.codegen_save_tempvars
+            cell_cg = PyCodegen(self.root_tx)
+            self.codegen_cells(tx, cell_cg)
             self.add_output_instructions(
                 [
                     # load in reverse since UNPACK_SEQUENCE will reverse
                     *self.compile_and_call_fx_graph(
                         tx, list(reversed(stack_values_flat)), root
                     ),
+                    *cell_cg.get_instructions(),
+                    *create_swap(2),
                     create_instruction("UNPACK_SEQUENCE", arg=len(stack_values_flat)),
                 ]
             )
@@ -1703,6 +1715,7 @@ class OutputGraph(OutputGraphCommon):
 
         # store all stack and locals for each frame
         # current state of the stack:
+        # all cells,
         # *(frame N stack), *(frame N locals),
         # ...,
         # *(frame 1 stack), *(frame 1 locals)
@@ -1717,6 +1730,7 @@ class OutputGraph(OutputGraphCommon):
         )
 
         # current state of the stack:
+        # all cells,
         # *(frame N stack), [
         #     *(frame N locals),
         #     *(frame N-1 stack), *(frame N-1 locals),
@@ -1777,7 +1791,8 @@ class OutputGraph(OutputGraphCommon):
             # *(frame N stack), metas[0] stack + locals, ..., metas[i] stack + locals, stack_values_flat
 
         # current state of the stack:
-        # *(frame N stack)
+        # all cells,
+        # *(frame N stack),
         # frame N locals,
         # frame N-1 stack, frame N-1 locals,
         # ...
@@ -1794,6 +1809,7 @@ class OutputGraph(OutputGraphCommon):
         )
 
         # final state of the stack before running the unsupported bytecode:
+        # all cells,
         # [
         #   [frame N locals],
         #   [frame N-1 stack + locals],
@@ -1850,6 +1866,31 @@ class OutputGraph(OutputGraphCommon):
 
         return all_stack_locals_metas
 
+    def codegen_cells(self, tx: "InstructionTranslatorBase", cg: PyCodegen) -> None:
+        # no need to codegen if reason.graph_break is False (since we won't resume)
+        if self.compile_subgraph_reason.graph_break:
+            tx_cnt = 0
+            cur_tx: Optional[InstructionTranslatorBase] = tx
+            while cur_tx is not None:
+                # NOTE: we generate cells in the same order as resume_execution.py: sorted freevars + cellvars
+                # Emitting `LOAD_FAST/LOAD_CLOSURE` with names in `co_freevars`
+                # requires that in the generated bytecode, these cells would keep
+                # their original local names, which we ensure via
+                # `CellVariable.local_name`.
+                freevars = tuple(sorted(cur_tx.cell_and_freevars()))
+                for cell in freevars:
+                    if cur_tx is self.root_tx:  # root frame
+                        cg.append_output(cg.create_load_closure(cell))
+                    else:  # nested frame
+                        assert cur_tx.post_prune_cell_and_freevars
+                        cg(cur_tx.post_prune_cell_and_freevars[cell])
+                cg.append_output(create_build_tuple(len(freevars)))
+                cur_tx = cur_tx.parent
+                tx_cnt += 1
+            cg.append_output(create_instruction("BUILD_LIST", arg=tx_cnt))
+        else:
+            cg.append_output(create_instruction("BUILD_LIST", arg=0))
+
     def codegen_suffix(
         self,
         tx: "InstructionTranslatorBase",
@@ -1869,6 +1910,7 @@ class OutputGraph(OutputGraphCommon):
                 cg.store_attr(name)
         self.side_effects.codegen_hooks(cg)
 
+        # TODO get debug_locals working for nested graph breaks
         # Return variables used for logging at the end
         for debug_var, args in tx.debug_locals:
             cg.add_push_null(lambda: cg(debug_var))
@@ -1876,6 +1918,9 @@ class OutputGraph(OutputGraphCommon):
                 cg(arg)
             cg.extend_output(create_call_function(len(args), False))
             cg.extend_output([create_instruction("POP_TOP")])
+
+        # codegen cells before we apply side effects
+        self.codegen_cells(tx, cg)
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg)
@@ -1894,7 +1939,7 @@ class OutputGraph(OutputGraphCommon):
             node.meta.pop("creation_timestamp", None)
 
         grad_enabled = torch.is_grad_enabled()
-        for node1, node2 in zip(nodes, nodes[1:]):
+        for node1, node2 in itertools.pairwise(nodes):
             if (
                 node1.target is torch._C._set_grad_enabled
                 and tuple(node1.args) == (not grad_enabled,)
@@ -1992,7 +2037,9 @@ class OutputGraph(OutputGraphCommon):
         tx = self.root_tx
         assert tx is not None
         if (ds := tx.distributed_state) is not None and ds.all_states is None:
+            # pyrefly: ignore  # unbound-name
             compile_pg = ds.compile_pg
+            # pyrefly: ignore  # unbound-name
             log.info("compiler_collective %s", ds.local_state)
             torch._logging.trace_structured(
                 "artifact",
@@ -2000,6 +2047,7 @@ class OutputGraph(OutputGraphCommon):
                     "name": "compiler_collective",
                     "encoding": "string",
                 },
+                # pyrefly: ignore  # unbound-name
                 payload_fn=lambda: ds.local_state.render(),
             )
             device_types = compile_pg._device_types
@@ -2013,7 +2061,9 @@ class OutputGraph(OutputGraphCommon):
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
             ):
                 all_states: list[Any] = [None] * compile_pg.size()
+                # pyrefly: ignore  # unbound-name
                 dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
+                # pyrefly: ignore  # unbound-name
                 ds.all_states = all_states
             # Clear speculation log, because are tracing may diverge due to
             # this information from the compiler collective
@@ -2343,6 +2393,7 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
+        # pyrefly: ignore  # unbound-name
         return compiled_fn
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
@@ -2397,6 +2448,7 @@ class OutputGraph(OutputGraphCommon):
                 isinstance(b, torch.SymBool)
                 and (r := b.node.maybe_as_bool()) is not None
             ):
+                # pyrefly: ignore  # unbound-name
                 return r
             # TODO: We can also technically remove all cases when the input
             # doesn't have unbacked inputs, since it's all in the ShapeEnv
@@ -2762,6 +2814,7 @@ def check_pt2_compliant_op(
                 hints=[],
             )
 
+        # pyrefly: ignore  # unbound-name
         op = getattr(target, overload)
         if torch.Tag.pt2_compliant_tag in op.tags:
             encountered_compliant_op(op)
@@ -2769,6 +2822,7 @@ def check_pt2_compliant_op(
             encountered_non_compliant_op(
                 op,
                 f"Encountered the torch.ops.OpOverloadPacket {target} "
+                # pyrefly: ignore  # unbound-name
                 f"which resolves to the overload ({overload}) that is "
                 f"not PT2 compliant.",
             )
@@ -2789,6 +2843,7 @@ class LazyProxy:
         **kwargs: P.kwargs,
     ) -> None:
         self.tracer = tracer
+        # pyrefly: ignore  # invalid-type-var
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
