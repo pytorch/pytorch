@@ -13654,15 +13654,19 @@ class TestAutogradStreamSynchronization(TestCase):
 
                     c.backward()
 
-                filter_str = "_set_warn_on_accumulate_grad_stream_mismatch"
+                filter_str = "set_warn_on_accumulate_grad_stream_mismatch"
                 return sum([filter_str in str(w.message) for w in warns]) > 0
 
             if suppress_warn:
                 try:
-                    torch._C._set_warn_on_accumulate_grad_stream_mismatch(False)
+                    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(
+                        False
+                    )
                     actual_warn = _test()
                 finally:
-                    torch._C._set_warn_on_accumulate_grad_stream_mismatch(True)
+                    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(
+                        True
+                    )
             else:
                 actual_warn = _test()
 

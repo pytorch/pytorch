@@ -246,7 +246,7 @@ void InputBuffer::add(
         "loss, or if you are using DDP, which will stash a reference to the node. To resolve the "
         "mismatch, delete all references to the autograd graph or ensure that DDP initialization is "
         "performed under the same stream as subsequent forwards. If the mismatch is intentional, "
-        "you can use torch._C._set_warn_on_accumulate_grad_stream_mismatch(False) to suppress this "
+        "you can use torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False) to suppress this "
         "warning.");
   }
   // See Note: [Autograd Producer-Consumer Stream Syncs]
