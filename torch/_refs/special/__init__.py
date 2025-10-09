@@ -230,9 +230,24 @@ def spherical_bessel_j0(a: TensorLikeType) -> TensorLikeType:
     return prims.spherical_bessel_j0(a)
 
 
-# TODO: add docstring
 @_make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def zeta(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    """
+    Computes the Hurwitz zeta function, elementwise.
+
+    .. math::
+        \zeta(a, b) = \sum_{k=0}^{\infty} \frac{1}{(b + k)^a}
+
+    Args:
+        a (TensorLikeType): The exponent parameter
+        b (TensorLikeType): The shift parameter
+
+    Returns:
+        TensorLikeType: The computed zeta values
+
+    Note:
+        The Riemann zeta function corresponds to the case when b = 1
+    """
     return prims.zeta(a, b)
