@@ -72,7 +72,6 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "inductor_autotune_lookup_table",
 ]
 
-from torch._inductor.runtime.benchmarking import may_distort_benchmarking_result
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
@@ -272,7 +271,6 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
     return res
 
 
-@may_distort_benchmarking_result
 def do_bench_using_profiling(
     fn: Callable[[], Any],
     warmup: int = 25,
