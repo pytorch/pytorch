@@ -636,7 +636,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypes(
         torch.bfloat16,
     )
-    @largeTensorTest
+    @largeTensorTest("80GB", device="cuda")
     def test_embedding_backward_large_batch_overflow(self, device, dtype):
         """
         Test that embedding_dense_backward handles large batches that exceed INT32_MAX thread IDs.
