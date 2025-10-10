@@ -118,7 +118,7 @@ gemm_notrans_(
   scale_(m, n, beta, c, ldc);
 
   // c += alpha * (a @ b)
-  const uint64_t unsigned_m = static_cast<int64_t>(m);
+  const uint64_t unsigned_m = m;
   const uint64_t i_m = unsigned_m / 4;
   for (const uint64_t l : c10::irange(k)) {
     for (const uint64_t j : c10::irange(n)) {
