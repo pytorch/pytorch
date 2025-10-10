@@ -10,7 +10,7 @@ from contextlib import nullcontext
 from enum import Enum
 from functools import partial, reduce
 from itertools import chain, product
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, Optional, Union, Tuple
 
 import torch
 import torch._meta_registrations
@@ -653,6 +653,139 @@ def binary_cross_entropy_backward(
     if reduction == Reduction.MEAN.value:
         result = result / self.numel()
     return result
+
+
+@register_decomposition(aten.linear_cross_entropy)
+@out_wrapper()
+def linear_cross_entropy(
+    input: Tensor,
+    weight: Tensor,
+    target: Tensor,
+    bias: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+    chunking_strategy: str = "auto",
+) -> Tensor:
+    logits = aten.linear.default(input, weight, bias)
+    logits_flat = aten.reshape.default(logits, [-1, logits.size(-1)])
+    target_flat = aten.reshape.default(target, [-1])
+    if target.dtype.is_floating_point:
+        # Fallback to the unfused reference for probability targets.
+        return torch.nn.functional._linear_cross_entropy_naive(
+            input,
+            weight,
+            target,
+            bias,
+            "mean" if reduction == Reduction.MEAN.value else "sum" if reduction == Reduction.SUM.value else "none",
+            ignore_index,
+            label_smoothing,
+        )
+    target_indices = aten.to.dtype(target_flat, torch.long)
+    loss = aten.cross_entropy_loss.default(
+        logits_flat,
+        target_indices,
+        None,
+        reduction,
+        ignore_index,
+        label_smoothing,
+    )
+    if reduction == Reduction.NONE.value:
+        loss = aten.reshape.default(loss, target.shape)
+    return loss
+
+
+@register_decomposition(aten.linear_cross_entropy_backward)
+def linear_cross_entropy_backward(
+    grad_output: Tensor,
+    input: Tensor,
+    weight: Tensor,
+    target: Tensor,
+    bias: Optional[Tensor] = None,
+    reduction: int = Reduction.MEAN.value,
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+    chunking_strategy: str = "auto",
+) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
+    logits = aten.linear.default(input, weight, bias)
+    logits_flat = aten.reshape.default(logits, [-1, logits.size(-1)])
+    input_flat = aten.reshape.default(input, [-1, input.size(-1)])
+    target_flat = aten.reshape.default(target, [-1])
+
+    if target.dtype.is_floating_point:
+        # Forward decomposition falls back to the naive path, so reuse it in backward.
+        ref = torch.nn.functional._linear_cross_entropy_naive(
+            input,
+            weight,
+            target,
+            bias,
+            "mean" if reduction == Reduction.MEAN.value else "sum" if reduction == Reduction.SUM.value else "none",
+            ignore_index,
+            label_smoothing,
+        )
+        grad_inputs = torch.autograd.grad(
+            ref,
+            (input, weight) if bias is None else (input, weight, bias),
+            grad_output,
+            retain_graph=True,
+            allow_unused=True,
+        )
+        grad_input = grad_inputs[0] if grad_inputs[0] is not None else torch.zeros_like(input)
+        grad_weight = grad_inputs[1] if grad_inputs[1] is not None else torch.zeros_like(weight)
+        grad_bias: Optional[Tensor]
+        if bias is not None:
+            grad_bias = grad_inputs[2]
+        else:
+            grad_bias = None
+        return grad_input, grad_weight, grad_bias
+
+    target_indices = aten.to.dtype(target_flat, torch.long)
+
+    vocab_size = weight.size(0)
+    prob = aten.softmax.default(logits_flat, -1)
+    valid_mask = aten.ne(target_indices, ignore_index)
+    safe_targets = aten.where(valid_mask, target_indices, aten.zeros_like(target_indices))
+    target_one_hot = aten.zeros_like(prob)
+    target_one_hot = aten.scatter.value(
+        target_one_hot,
+        1,
+        aten.reshape.default(safe_targets, [-1, 1]),
+        1.0,
+    )
+    mask = aten.unsqueeze(valid_mask.to(prob.dtype), 1)
+    target_one_hot = target_one_hot * mask
+
+    if label_smoothing > 0.0:
+        smoothing = label_smoothing
+        uniform = smoothing / float(vocab_size) if vocab_size > 0 else 0.0
+        target_dist = target_one_hot * (1.0 - smoothing)
+        target_dist = target_dist + mask * uniform
+    else:
+        target_dist = target_one_hot
+
+    grad_logits = (prob - target_dist) * mask
+    grad_output_tensor = grad_output.to(grad_logits.dtype)
+
+    if reduction == Reduction.NONE.value:
+        grad_output_flat = aten.reshape.default(grad_output_tensor, [-1, 1])
+        grad_logits = grad_logits * grad_output_flat
+    elif reduction == Reduction.SUM.value:
+        grad_logits = grad_logits * grad_output_tensor
+    else:
+        valid_count = aten.sum.default(mask)
+        scale = grad_output_tensor / aten.clamp_min(valid_count, 1.0)
+        grad_logits = grad_logits * scale
+
+    grad_input_flat = aten.mm(grad_logits, weight)
+    grad_input = aten.reshape.default(grad_input_flat, input.shape)
+    grad_weight = aten.mm(aten.transpose(grad_logits, 0, 1), input_flat)
+    grad_bias: Optional[Tensor]
+    if bias is not None:
+        grad_bias = aten.sum.dim_IntList(grad_logits, [0])
+    else:
+        grad_bias = None
+
+    return grad_input, grad_weight, grad_bias
 
 
 @register_decomposition(aten.soft_margin_loss)

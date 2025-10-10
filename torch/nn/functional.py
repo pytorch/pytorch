@@ -3503,6 +3503,156 @@ def cross_entropy(
     )
 
 
+def _linear_cross_entropy_naive(
+    input: Tensor,
+    weight: Tensor,
+    target: Tensor,
+    bias: Optional[Tensor],
+    reduction: str,
+    ignore_index: int,
+    label_smoothing: float,
+) -> Tensor:
+    logits = linear(input, weight, bias)
+    logits_flat = logits.reshape(-1, logits.size(-1))
+    target_flat = target.reshape(-1)
+    loss = cross_entropy(
+        logits_flat,
+        target_flat,
+        reduction=reduction,
+        ignore_index=ignore_index,
+        label_smoothing=label_smoothing,
+    )
+    if reduction == "none":
+        loss = loss.reshape(target.shape)
+    return loss
+
+
+def linear_cross_entropy(
+    input: Tensor,
+    weight: Tensor,
+    target: Tensor,
+    bias: Optional[Tensor] = None,
+    reduction: str = "mean",
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+    chunking_strategy: str = "auto",
+) -> Tensor:
+    r"""Compute fused linear transformation and cross entropy loss on CPU.
+
+    This is a convenience wrapper around :func:`linear` followed by
+    :func:`cross_entropy`.  When the inputs live on CPU it uses a fused ATen
+    kernel that chunks the vocabulary or batch dimension to avoid materialising
+    large logit tensors.  For other devices it falls back to the unfused
+    composition.
+    """
+    if has_torch_function_variadic(input, weight, target, bias):
+        return handle_torch_function(
+            linear_cross_entropy,
+            (input, weight, target, bias),
+            input,
+            weight,
+            target,
+            bias=bias,
+            reduction=reduction,
+            ignore_index=ignore_index,
+            label_smoothing=label_smoothing,
+            chunking_strategy=chunking_strategy,
+        )
+
+    if not isinstance(reduction, str):
+        if hasattr(reduction, "node"):
+            from torch.fx.proxy import TraceError
+
+            raise TraceError(
+                "symbolically traced variables cannot be used as inputs to control flow"
+            )
+        raise ValueError(
+            f"reduction must be one of ('mean', 'sum', 'none'), got '{reduction}'"
+        )
+
+    if reduction not in ("mean", "sum", "none"):
+        raise ValueError(
+            f"reduction must be one of ('mean', 'sum', 'none'), got '{reduction}'"
+        )
+
+    if not (0.0 <= label_smoothing <= 1.0):
+        raise ValueError(
+            f"label_smoothing must be between 0.0 and 1.0, got {label_smoothing}"
+        )
+
+    if chunking_strategy not in ("auto", "vocab", "batch", "none"):
+        raise ValueError(
+            "chunking_strategy must be one of ('auto', 'vocab', 'batch', 'none'), "
+            f"got '{chunking_strategy}'"
+        )
+
+    if (
+        input.device.type != "cpu"
+        or weight.device != input.device
+        or target.device != input.device
+        or (bias is not None and bias.device != input.device)
+    ):
+        result = _linear_cross_entropy_naive(
+            input,
+            weight,
+            target,
+            bias,
+            reduction,
+            ignore_index,
+            label_smoothing,
+        )
+    else:
+        op = torch.ops.aten.linear_cross_entropy.default
+        # Only exercise the fused path when the operator is actually built for
+        # this runtime; otherwise fall back to the explicit composition so the
+        # behaviour matches older binaries.
+        if not op.has_kernel_for_dispatch_key("CPU"):
+            result = _linear_cross_entropy_naive(
+                input,
+                weight,
+                target,
+                bias,
+                reduction,
+                ignore_index,
+                label_smoothing,
+            )
+        else:
+            reduction_enum = _Reduction.get_enum(reduction)
+            needs_grad = torch.is_grad_enabled() and (
+                input.requires_grad
+                or weight.requires_grad
+                or (bias is not None and bias.requires_grad)
+            )
+            # Some downstream builds may omit the generated autograd kernel; if
+            # that happens we still provide gradients by delegating to the
+            # unfused implementation.
+            if needs_grad and not op.has_kernel_for_dispatch_key("AutogradCPU"):
+                result = _linear_cross_entropy_naive(
+                    input,
+                    weight,
+                    target,
+                    bias,
+                    reduction,
+                    ignore_index,
+                    label_smoothing,
+                )
+            else:
+                result = torch.ops.aten.linear_cross_entropy(
+                    input,
+                    weight,
+                    target,
+                    bias,
+                    reduction_enum,
+                    ignore_index,
+                    label_smoothing,
+                    chunking_strategy,
+                )
+
+    if reduction == "none":
+        return result.reshape(target.shape)
+    return result
+
+
 def binary_cross_entropy(
     input: Tensor,
     target: Tensor,
