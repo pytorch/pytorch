@@ -181,7 +181,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
       const auto& keys =
           c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
       TORCH_CHECK(
-          keys.find(config_item_view) != keys.end(),
+          keys.find(config[i]) != keys.end(),
           "Unrecognized key '",
           config_item_view,
           "' in Accelerator allocator config.");
