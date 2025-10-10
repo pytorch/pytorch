@@ -11,11 +11,11 @@ template <>
 struct ThreadLocalCachedOutputTensor<RAIIAtenTensorHandle> {
   explicit ThreadLocalCachedOutputTensor(const RAIIAtenTensorHandle&) {}
   void copy_data_from(const RAIIAtenTensorHandle& handle) {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 
   AtenTensorHandle tensor() const {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 };
 
@@ -23,11 +23,11 @@ template <>
 struct ThreadLocalCachedOutputTensor<AtenTensorHandle> {
   explicit ThreadLocalCachedOutputTensor(const AtenTensorHandle&) {}
   void copy_data_from(const AtenTensorHandle& handle) {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 
   AtenTensorHandle tensor() const {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 };
 
@@ -35,11 +35,11 @@ template <>
 struct ThreadLocalCachedOutputTensor<ConstantHandle> {
   explicit ThreadLocalCachedOutputTensor(const ConstantHandle&) {}
   void copy_data_from(const ConstantHandle& handle) {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 
   AtenTensorHandle tensor() const {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 };
 
@@ -92,18 +92,18 @@ struct ThreadLocalCachedOutputArray;
 template <>
 struct ThreadLocalCachedOutputArray<RAIIAtenTensorHandle> {
   explicit ThreadLocalCachedOutputArray(const RAIIAtenTensorHandle&) {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 
   // Not supported yet! We would need to put contiguous() or
   // expect_contiguous() into the ABI.
   void copy_data_from(const RAIIAtenTensorHandle&) {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 
   template <typename U>
   ArrayRefTensor<U> arrayref_tensor() const {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 };
 
@@ -111,18 +111,18 @@ struct ThreadLocalCachedOutputArray<RAIIAtenTensorHandle> {
 template <>
 struct ThreadLocalCachedOutputArray<ConstantHandle> {
   explicit ThreadLocalCachedOutputArray(const ConstantHandle&) {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 
   // Not supported yet! We would need to put contiguous() or
   // expect_contiguous() into the ABI.
   void copy_data_from(const ConstantHandle&) {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 
   template <typename U>
   ArrayRefTensor<U> arrayref_tensor() const {
-    TORCH_CHECK(false, "can't happen");
+    AOTI_TORCH_CHECK(false, "can't happen");
   }
 };
 

@@ -7,7 +7,7 @@ namespace torch::aot_inductor {
 
 template <typename T>
 inline RAIIAtenTensorHandle scalar_to_tensor_handle(T value) {
-  TORCH_CHECK(false, "Unsupported scalar_to_tensor_handle");
+  AOTI_TORCH_CHECK(false, "Unsupported scalar_to_tensor_handle");
 }
 
 // Specialize for supported C++ primitive types
