@@ -2754,7 +2754,6 @@ def forward(self, x):
     def test_exported_graph_serialization(self):
         def f(x, y):
             b = x.item()
-            torch._check_is_size(b)
             return torch.empty((b, y.shape[0]))
 
         x = torch.tensor([3])
@@ -3149,7 +3148,6 @@ def forward(self, x):
             gm, _ = torch._dynamo.export(f, aten_graph=True)(*example_inputs)
             self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
-    @unittest.expectedFailure  # TODO: Not sure why dynamo creates a new inputs for self.a
     def test_sum_param(self):
         # Setting a new attribute inside forward()
         class Foo(torch.nn.Module):
@@ -3540,24 +3538,16 @@ class GraphModule(torch.nn.Module):
             [[], [], [], []],
         )
 
-    def test_invalid_input_global(self) -> None:
+    def test_input_global(self) -> None:
         global bulbous_bouffant
         bulbous_bouffant = torch.randn(3)
 
         def f(y):
             return bulbous_bouffant + y
 
-        self.assertExpectedInlineMunged(
-            UserError,
-            lambda: torch._dynamo.export(f)(torch.randn(3)),
-            """\
-G['bulbous_bouffant'], accessed at:
-  File "test_export.py", line N, in f
-    return bulbous_bouffant + y
-""",
-        )
+        torch._dynamo.export(f)(torch.randn(3))
 
-    def test_invalid_input_global_multiple_access(self) -> None:
+    def test_input_global_multiple_access(self) -> None:
         global macademia
         macademia = torch.randn(3)
 
@@ -3571,33 +3561,17 @@ G['bulbous_bouffant'], accessed at:
             y = g(y)
             return macademia + y
 
-        # NB: This doesn't actually work (it only reports the first usage),
-        # but I'm leaving the test here in case we fix it later
-        self.assertExpectedInlineMunged(
-            UserError,
-            lambda: torch._dynamo.export(f)(torch.randn(3)),
-            """\
-G['macademia'], accessed at:
-  File "test_export.py", line N, in f
-    y = g(y)
-  File "test_export.py", line N, in g
-    y = macademia + y
-""",
-        )
+        torch._dynamo.export(f)(torch.randn(3))
 
-    def test_invalid_input_nonlocal(self) -> None:
+    def test_input_nonlocal(self) -> None:
         arglebargle = torch.randn(3)
 
         def f(y):
             return arglebargle + y
 
-        self.assertExpectedInlineMunged(
-            UserError,
-            lambda: torch._dynamo.export(f)(torch.randn(3)),
-            """L['arglebargle'], a closed over free variable""",
-        )
+        torch._dynamo.export(f)(torch.randn(3))
 
-    def test_invalid_input_unused_nonlocal_ok(self) -> None:
+    def test_input_unused_nonlocal_ok(self) -> None:
         arglebargle = torch.randn(3)
 
         def f(y):
@@ -4669,7 +4643,6 @@ class ExportTestsDevice(torch._dynamo.test_case.TestCase):
         class MyModel(torch.nn.Module):
             def forward(self, numel, scalar):
                 u0 = numel.item()
-                torch._check_is_size(u0)
                 x = torch.ones(u0 + 1)
                 return scalar - x
 

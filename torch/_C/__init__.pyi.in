@@ -1254,17 +1254,19 @@ def _get_float32_matmul_precision() -> str: ...  # THPModule_float32MatmulPrecis
 def _set_float32_matmul_precision(
     arg: str,
 ) -> None: ...  # THPModule_setFloat32MatmulPrecision
-def _get_cublas_allow_fp16_reduced_precision_reduction() -> (
-    _bool
-): ...  # THPModule_allowFP16ReductionCuBLAS
+def _get_cublas_allow_fp16_reduced_precision_reduction() -> tuple[
+    _bool, _bool
+]: ...  # THPModule_allowFP16ReductionCuBLAS
 def _set_cublas_allow_fp16_reduced_precision_reduction(
     arg: _bool,
+    allow_splitk: _bool = ...,
 ) -> None: ...  # THPModule_setAllowFP16ReductionCuBLAS
-def _get_cublas_allow_bf16_reduced_precision_reduction() -> (
-    _bool
-): ...  # THPModule_allowBF16ReductionCuBLAS
+def _get_cublas_allow_bf16_reduced_precision_reduction() -> tuple[
+    _bool, _bool
+]: ...  # THPModule_allowBF16ReductionCuBLAS
 def _set_cublas_allow_bf16_reduced_precision_reduction(
     arg: _bool,
+    allow_splitk: _bool = ...,
 ) -> None: ...  # THPModule_setAllowBF16ReductionCuBLAS
 def _get_cublas_allow_fp16_accumulation() -> (
     _bool
