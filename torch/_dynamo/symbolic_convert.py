@@ -43,6 +43,7 @@ import threading
 import traceback
 import types
 import weakref
+from collections import deque
 from traceback import StackSummary
 from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias, TypeIs
@@ -544,6 +545,7 @@ def log_graph_break(
     reason: str = "",
     exc_info: bool = False,
     user_stack: Optional[StackSummary] = None,
+    latest_bytecode_log: Optional[str] = None,
 ) -> None:
     if user_stack is None:
         user_stack = torch._guards.TracingContext.extract_stack()
@@ -606,6 +608,10 @@ def log_graph_break(
         # This log line MUST contain the string "Graph break in user code",
         # This log line is exercised from
         #   python test/dynamo/test_exc.py -k test_graph_break_log
+        if latest_bytecode_log and config.verbose:
+            user_stack_trace += "Most recent bytecode instructions traced (max 20):\n"
+            user_stack_trace += latest_bytecode_log
+
         graph_break_log.debug(
             user_stack_trace,
         )
@@ -933,6 +939,7 @@ def break_graph_if_unsupported(
                     exc_info=True,
                     reason=str(excp),
                     user_stack=excp.real_stack,
+                    latest_bytecode_log="\n".join(self.latest_bytecode_queue),
                 )
 
                 if self.maybe_has_backedge():
@@ -1184,6 +1191,8 @@ class InstructionTranslatorBase(
     parent: Optional[InstructionTranslatorBase]
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
     package: Optional[CompilePackage]
+    latest_bytecode_queue: deque[str]
+    # Store the latest bytecode before graph_break() call by user
 
     def mark_inconsistent_side_effects(self) -> None:
         """
@@ -1350,6 +1359,17 @@ class InstructionTranslatorBase(
             trace_bytecode_log.debug(
                 "TRACE %s %s %s", inst.opname, inst.argval, self.stack
             )
+
+        # Store the latest 20 bytecode execution for the process,
+        # Used repr for byte processing and limiting the length to 2048
+        try:
+            stack_repr = repr(self.stack)
+        except ValueError:
+            # Handle large integers that exceed sys.int_info.str_digits_check_threshold
+            stack_repr = "<self.stack repr truncated due to large integer>"
+        self.latest_bytecode_queue.append(
+            f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
+        )
 
         self.update_block_stack(inst)
 
@@ -4083,6 +4103,7 @@ class InstructionTranslatorBase(
         self.accept_prefix_inst = True
         self.prefix_insts = []
         self.exn_vt_stack = exn_vt_stack
+        self.latest_bytecode_queue = deque(maxlen=20)
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
