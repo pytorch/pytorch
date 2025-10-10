@@ -45,7 +45,8 @@ class PassBase(abc.ABC):
 
         self.requires(graph_module)
         res = self.call(graph_module)
-        self.ensures(graph_module)
+        if res:
+            self.ensures(res.graph_module)
         return res
 
     @abc.abstractmethod
