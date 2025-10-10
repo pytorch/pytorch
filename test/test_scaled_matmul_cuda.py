@@ -215,8 +215,6 @@ def scaled_mm_wrap(
         )
         return out
 
-wrap_grouped: bool = True
-
 def scaled_grouped_mm_wrap(
     a,
     b,
@@ -231,7 +229,7 @@ def scaled_grouped_mm_wrap(
     use_fast_accum=False,
     offs=None,
     bias=None,
-    wrap_v2=wrap_grouped
+    wrap_v2=True,
 ):
     if not wrap_v2:
         return torch._scaled_grouped_mm(
