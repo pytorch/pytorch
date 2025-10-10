@@ -285,34 +285,40 @@ class TestMHADeviceType(TestCase):
                 self.skipTest("Large numerical errors on ROCM to investigate.")
             if use_padding and not pad_all and fused:
                 self.skipTest("Large numerical errors on ROCM to investigate.")
-        backend = None
         print(device)
-        if device == "cuda":
-            backend = torch.backends.cuda.sdp_kernel(
-                    enable_flash=False, enable_mem_efficient=False
-                    ) if not fused else torch.backends.cuda.sdp_kernel(
-                            enable_flash=True, enable_mem_efficient=True
-                            )
-        elif "xpu" in device:
-            backend = torch.nn.attention.sdpa_kernel([SDPBackend.MATH]) if not fused else torch.nn.attention.sdpa_kernel([SDPBackend.OVERRIDEABLE])
-        print(backend)
         print(fused)
         for need_weights in (False, not pad_all):
             with self.subTest(use_padding=use_padding, pad_all=pad_all,
                               use_nt=use_nt, need_weights=need_weights,
                               average_attn_weights=average_attn_weights):
-                with backend:
-                    print("it is ok", flush=True)
-                    self._test_multihead_attention_impl(
-                        device,
-                        dtype,
-                        "self",
-                        use_nt=use_nt,
-                        use_padding=use_padding,
-                        pad_all=pad_all,
-                        need_weights=need_weights,
-                        average_attn_weights=average_attn_weights,
-                        )
+                if device == "cuda":
+                    with torch.backends.cuda.sdp_kernel(
+                        enable_flash=False, enable_mem_efficient=False
+                        ) if not fused else torch.backends.cuda.sdp_kernel(
+                                enable_flash=True, enable_mem_efficient=True
+                                ):
+                        self._test_multihead_attention_impl(
+                            device,
+                            dtype,
+                            "self",
+                            use_nt=use_nt,
+                            use_padding=use_padding,
+                            pad_all=pad_all,
+                            need_weights=need_weights,
+                            average_attn_weights=average_attn_weights,
+                            )
+                elif "xpu" in device:
+                    with torch.nn.attention.sdpa_kernel([SDPBackend.MATH]) if not fused else torch.nn.attention.sdpa_kernel([SDPBackend.OVERRIDEABLE]):
+                        self._test_multihead_attention_impl(
+                            device,
+                            dtype,
+                            "self",
+                            use_nt=use_nt,
+                            use_padding=use_padding,
+                            pad_all=pad_all,
+                            need_weights=need_weights,
+                            average_attn_weights=average_attn_weights,
+                            )
 
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
