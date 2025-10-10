@@ -880,7 +880,6 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             return set_ranges(*lengths)
 
         new_ranges, return_getters_groups = cls._split_iteration_ranges(groups, lengths)
-
         itervars = [*itertools.chain.from_iterable(set_ranges(*new_ranges))]
         return [[fn(itervars) for fn in fns] for fns in return_getters_groups]
 

@@ -109,6 +109,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
+
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             post_grad_custom_pre_pass
@@ -139,7 +140,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
             remove_assert_ops
         )
-
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
