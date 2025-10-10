@@ -1,13 +1,16 @@
 # Owner(s): ["module: unknown"]
 
 import collections
+import importlib
 import json
 import os
 import re
+import sys
 import textwrap
 import timeit
 import unittest
 from typing import Any
+from unittest import mock
 
 import expecttest
 import numpy as np
@@ -186,6 +189,21 @@ class TestBenchmarkUtils(TestCase):
             .median
         )
         self.assertIsInstance(sample, float)
+
+    def test_lazy_timer_safe_to_import(self):
+        """Ensure importing lazy timer module does not trigger device initialization logic."""
+
+        with mock.patch(
+            "torch.accelerator.is_available",
+            side_effect=RuntimeError("Accelerator touched during import"),
+        ):
+            try:
+                sys.modules.pop("torch.utils.benchmark.utils.timer", None)
+                importlib.import_module("torch.utils.benchmark.utils.timer")
+            except RuntimeError as e:
+                self.fail(
+                    f"Importing timer module triggered device initialization: {e}"
+                )
 
     @slowTest
     @unittest.skipIf(IS_SANDCASTLE, "C++ timing is OSS only.")
