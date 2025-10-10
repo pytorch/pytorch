@@ -634,7 +634,7 @@ class NormalizedLinearNode:
         if len(self.node.args) > 2:
             return self.node.args[2]  # type: ignore[return-value]
         else:
-            return self.node.kwargs["bias"] if "bias" in self.node.kwargs else None  # type: ignore[return-value]
+            return self.node.kwargs.get("bias", None)  # type: ignore[return-value]
 
 
 class NormalizedMatmulNode:

@@ -185,6 +185,7 @@ def _ignore_backend_decomps():
 def _disable_custom_triton_op_functional_decomposition():
     old = torch._functorch.config.decompose_custom_triton_ops
     try:
+        # pyrefly: ignore  # bad-assignment
         torch._functorch.config.decompose_custom_triton_ops = False
         yield torch._functorch.config.decompose_custom_triton_ops
     finally:
@@ -365,6 +366,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                                 return self
 
                             def __getitem__(self, idx):
+                                # pyrefly: ignore  # bad-argument-type
                                 parts.append(str(idx))
                                 return self
 
@@ -375,6 +377,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
 
                 nn_module_stack = {
                     root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
+                    # pyrefly: ignore  # unbound-name
                     **nn_module_stack,
                 }
                 node.meta["nn_module_stack"] = {
@@ -523,6 +526,7 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
                 simplify=True,
             )
         ):
+            # pyrefly: ignore  # unbound-name
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
@@ -828,6 +832,12 @@ def _export_to_torch_ir(
                     gm_torch_level = _dynamo_graph_capture_for_export(
                         f, constraints=constraints, dynamic_shapes=dynamic_shapes
                     )(*args, **kwargs)
+                    # We can't serialize entire fake mode yet, so this is to make sure
+                    # things like copy.deepcopy(ep.graph_module) not crash.
+                    # see test_export.py::test_custom_tag_metadata_re_export
+                    # Once we delete the old strict export, we can use this fake mode in the
+                    # subsequent logic when lowering to aten IR.
+                    del gm_torch_level.meta["fake_mode"]
 
                 else:
                     gm_torch_level, _ = torch._dynamo.export(
