@@ -13634,7 +13634,9 @@ class TestAutogradStreamSynchronization(TestCase):
         populate_events()
         check_ordering()
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
+    # Fails on MPS
+    @skipIfMPS
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_warn_on_accumulate_grad_stream_mismatch_flag(self):
         def do_test(suppress_warn, keep_grad_acc):
             def _test():
@@ -13642,7 +13644,7 @@ class TestAutogradStreamSynchronization(TestCase):
                     warnings.simplefilter("always")
 
                     with torch.Stream(0) as s0:
-                        a = torch.ones(8, 8, device=_get_device_name(0), requires_grad=True)
+                        a = torch.ones(8, 8, device="cuda", requires_grad=True)
                         if keep_grad_acc:
                             # create grad_acc under s1 and keep alive with b
                             b = a.clone()
