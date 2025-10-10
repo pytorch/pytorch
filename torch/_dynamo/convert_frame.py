@@ -123,7 +123,11 @@ from .guards import (
 )
 from .hooks import Hooks
 from .output_graph import DynamoTracerOutput, OutputGraphCommon
-from .pgo import log_frame_dynamic_whitelist, put_code_state
+from .pgo import (
+    _log_size_mismatch_recompile,
+    log_frame_dynamic_whitelist,
+    put_code_state,
+)
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -1591,6 +1595,8 @@ def _compile(
                 and output_graph.has_outputs()
             ):
                 log_frame_dynamic_whitelist(code)
+                if recompile_reason and "size mismatch at index" in recompile_reason:
+                    _log_size_mismatch_recompile()
 
             return guarded_code
         except Exception as e:
