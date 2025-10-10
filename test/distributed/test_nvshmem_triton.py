@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import IS_H100, requires_triton
-
+from torch.testing._internal.common_cuda import SM100OrLater
 
 if not symm_mem.is_nvshmem_available():
     print("NVSHMEM not available, skipping tests")
@@ -265,7 +265,7 @@ def my_reduce_kernel(
 
 
 @skip_but_pass_in_sandcastle_if(
-    True,
+    SM100OrLater,
     "Skipping all NVSHMEM Triton tests due to https://github.com/pytorch/pytorch/issues/162897",
 )
 @instantiate_parametrized_tests
