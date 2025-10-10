@@ -11,6 +11,7 @@ from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.fx.passes.regional_inductor import compile_fx_annotated_nodes_with_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
@@ -42,6 +43,7 @@ def aot_eager_regional_inductor():
     )
 
 
+@skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class RegionalInductorTests(torch._inductor.test_case.TestCase):
     def test_simple(self):
         def fn(x, y):

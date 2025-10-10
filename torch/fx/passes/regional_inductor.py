@@ -4,6 +4,7 @@ import functools
 import logging
 
 import torch
+from torch.fx._compatibility import compatibility
 
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 # standalone_inductor returns a callable class object - this does not sit well
 # with Fx graph node op call_function which expects a function. So this is just
 # a wrapper function to make Fx graph codegen happy.
-def dummy_wrapper(fn):
+def _dummy_wrapper(fn):
     @functools.wraps(fn)
     def inner(*args, **kwargs):
         return fn(*args, **kwargs)
@@ -20,7 +21,7 @@ def dummy_wrapper(fn):
     return inner
 
 
-def partition_by_supported_nodes(gm, supported_ops, prefix):
+def _partition_by_supported_nodes(gm, supported_ops, prefix):
     from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
     from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
@@ -39,7 +40,7 @@ def partition_by_supported_nodes(gm, supported_ops, prefix):
     return partitioned_gm
 
 
-def compile_submod(gm, prefix):
+def _compile_submod(gm, prefix):
     for node in gm.graph.nodes:
         if node.op == "call_module" and node.target.startswith(prefix):
             fake_inputs = []
@@ -53,8 +54,8 @@ def compile_submod(gm, prefix):
 
             submod = getattr(gm, node.target)
 
-            # dummy_wrapper is to make call_function happy
-            compiled_submod = dummy_wrapper(
+            # _dummy_wrapper is to make call_function happy
+            compiled_submod = _dummy_wrapper(
                 torch._inductor.standalone_compile(
                     submod, fake_inputs, dynamic_shapes="from_tracing_context"
                 )
@@ -73,7 +74,7 @@ def compile_submod(gm, prefix):
     return gm
 
 
-def needs_inductor_compile(node):
+def _needs_inductor_compile(node):
     return (
         node.op not in ("placeholder", "output")
         and hasattr(node, "meta")
@@ -87,7 +88,7 @@ def _compile_fx_annotated_nodes_with_inductor(gm):
 
     found_marked_node = False
     for node in gm.graph.nodes:
-        if needs_inductor_compile(node):
+        if _needs_inductor_compile(node):
             found_marked_node = True
             break
 
@@ -97,30 +98,31 @@ def _compile_fx_annotated_nodes_with_inductor(gm):
 
     class InductorMarkedNodes(OperatorSupport):
         def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-            return needs_inductor_compile(node)
+            return _needs_inductor_compile(node)
 
     marked_nodes = InductorMarkedNodes()
-    gm = partition_by_supported_nodes(gm, marked_nodes, "__marked_inductor_submod")
-    gm = compile_submod(gm, "__marked_inductor_submod")
+    gm = _partition_by_supported_nodes(gm, marked_nodes, "__marked_inductor_submod")
+    gm = _compile_submod(gm, "__marked_inductor_submod")
     return gm
 
 
-def recursive_compile_fx_annotated_nodes_with_inductor(gm):
+def _recursive_compile_fx_annotated_nodes_with_inductor(gm):
     for node in gm.graph.find_nodes(op="get_attr"):
-        if needs_inductor_compile(node):
+        if _needs_inductor_compile(node):
             # If the get_attr itself is marked for compile, the outer graph will
             # take care of it. If we dont do that, we end up with nested
             # regional inductor compiles that do not work well.
             continue
         submod = getattr(gm, node.target)
         if isinstance(submod, torch.fx.GraphModule):
-            recursive_compile_fx_annotated_nodes_with_inductor(submod)
+            _recursive_compile_fx_annotated_nodes_with_inductor(submod)
 
     return _compile_fx_annotated_nodes_with_inductor(gm)
 
 
+@compatibility(is_backward_compatible=False)
 def compile_fx_annotated_nodes_with_inductor(gm, *example_args):
     # fuser utils create new nodes using create_proxy which retains the seq_nr
     # metadata and cause issues
     with torch.fx.traceback.preserve_node_meta(enable=False):
-        return recursive_compile_fx_annotated_nodes_with_inductor(gm)
+        return _recursive_compile_fx_annotated_nodes_with_inductor(gm)
