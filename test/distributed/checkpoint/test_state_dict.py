@@ -2,6 +2,7 @@
 
 import copy
 import functools
+import os
 import sys
 from collections.abc import Callable
 from itertools import chain
@@ -15,7 +16,7 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
 )
-from torch.distributed.checkpoint import state_dict as ptd_state_dict
+from torch.distributed.checkpoint import load, save, state_dict as ptd_state_dict
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -35,7 +36,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
-from torch.distributed.tensor import DTensor
+from torch.distributed.tensor import distribute_tensor, DTensor
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -48,12 +49,18 @@ from torch.testing._internal.common_dist_composable import (
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MultiProcessTestCase,
     with_comms,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.distributed.common_state_dict import (
     FusionEmbedding,
     FusionEmbeddingWithHook,
@@ -468,10 +475,10 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
 
         self.assertTrue(
-            tree_all(lambda v: not isinstance(v, (DTensor, ShardedTensor)), mst)
+            tree_all(lambda v: not isinstance(v, DTensor | ShardedTensor), mst)
         )
         self.assertTrue(
-            tree_all(lambda v: not isinstance(v, (DTensor, ShardedTensor)), ost)
+            tree_all(lambda v: not isinstance(v, DTensor | ShardedTensor), ost)
         )
 
         mst, ost = get_state_dict(
@@ -1093,6 +1100,60 @@ class TestNoComm(MultiProcessTestCase):
         set_optimizer_state_dict(model, optim, osd)
         set_optimizer_state_dict(model, optim, optim.state_dict())
 
+
+class ShardOrderStateDict(DTensorTestBase):
+    # At the time of writing this test, shard propagation support for device
+    # order is not yet available. So we test whether simple DTensor with mutated
+    # shard_order can be correctly gathered in state dict or not.
+
+    @property
+    def world_size(self):
+        return 4
+
+    # TODO(zpcore): Once the `from_local()` function supports the `shard_order`
+    # argument, test with Partial() placement.
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    @parametrize(
+        "shard_order",
+        [
+            {0: [0, 1]},  # default order
+            {0: [1, 0]},  # reversed order on tensor dim 0
+            {},  # default to all replicate
+            {1: [1, 0]},  # reversed order on tensor dim 1
+        ],
+    )
+    def test_dtensor_checkpoint_with_shard_order(self, shard_order):
+        """
+        Test that DTensor with arbitrary shard_order can be saved and loaded via checkpoints.
+        """
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+        checkpoint_path = os.path.join(self.temp_dir, "checkpoint")  # pyright: ignore[reportAttributeAccessIssue]
+
+        # Create a distributed tensor with custom shard_order
+        x = torch.randn(8, 4, device=self.device_type)
+        x_dt = distribute_tensor(x, device_mesh, shard_order=shard_order)
+
+        # Save the distributed tensor to checkpoint. By default full_tensor()
+        # will be triggered to gather DTensor.
+        state_dict_to_save = {"x_dt": x_dt}
+        save(state_dict=state_dict_to_save, checkpoint_id=checkpoint_path)
+
+        # Create a new tensor with the same shape for loading
+        x_new = torch.zeros_like(x)
+        state_dict_to_load = {"x_dt": x_new}
+
+        # Load the distributed tensor from checkpoint
+        load(state_dict=state_dict_to_load, checkpoint_id=checkpoint_path)
+
+        # Verify the loaded tensor
+        x_dt_loaded = state_dict_to_load["x_dt"]
+        self.assertEqual(x, x_dt_loaded)
+
+
+instantiate_parametrized_tests(ShardOrderStateDict)
 
 if __name__ == "__main__":
     run_tests()

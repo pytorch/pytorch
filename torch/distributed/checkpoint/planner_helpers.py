@@ -174,7 +174,7 @@ def _sharded_tensor_metadata(
 
 def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
     sizes, offsets = compute_local_shape_and_global_offset(
-        tensor.shape, tensor.device_mesh, tensor.placements
+        tensor.shape, tensor.device_mesh, tensor.placements, tensor.shard_order
     )
     sizes, offsets = torch.Size(sizes), torch.Size(offsets)
 
@@ -338,7 +338,7 @@ def _create_write_items(fqn: str, object: Any) -> list[WriteItem]:
 
 def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
     sizes, offsets = compute_local_shape_and_global_offset(
-        tensor.shape, tensor.device_mesh, tensor.placements
+        tensor.shape, tensor.device_mesh, tensor.placements, tensor.shard_order
     )
     sizes, offsets = torch.Size(sizes), torch.Size(offsets)
     return ChunkStorageMetadata(
@@ -471,7 +471,7 @@ def _iterate_state_dict(
     elif isinstance(iter_object, torch.Tensor):
         return tensor_func(iter_object)
     elif (
-        isinstance(iter_object, (int, float, str, bytes, io.BytesIO))
+        isinstance(iter_object, int | float | str | bytes | io.BytesIO)
         or iter_object is None
     ):
         return iter_object
@@ -481,7 +481,7 @@ def _iterate_state_dict(
                 value, dtensor_func, sharded_tensor_func, tensor_func
             )
         return iter_object
-    elif isinstance(iter_object, (list, tuple)):
+    elif isinstance(iter_object, list | tuple):
         ret = [
             _iterate_state_dict(v, dtensor_func, sharded_tensor_func, tensor_func)
             for v in iter_object
