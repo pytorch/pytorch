@@ -274,6 +274,8 @@ runs:
           -w /var/lib/jenkins/workspace \
           "${DOCKER_IMAGE}"
         )
+        # Propagate download.pytorch.org IP to container
+        grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
         echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
         docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 

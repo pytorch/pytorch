@@ -33,6 +33,10 @@ runs:
         )
 
         echo "CONTAINER_NAME=${container_name}" >> "$GITHUB_ENV"
+        if [[ "${GPU_ARCH_TYPE}" != "rocm" && "${BUILD_ENVIRONMENT}" != "linux-aarch64-binary-manywheel" && "${BUILD_ENVIRONMENT}" != "linux-s390x-binary-manywheel" && "${GPU_ARCH_TYPE}" != "xpu" ]]; then
+          # Propagate download.pytorch.org IP to container. This is only needed on Linux non aarch64 runner
+          grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" bash -c "/bin/cat >> /etc/hosts"
+        fi
 
         docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
         # Generate test script
