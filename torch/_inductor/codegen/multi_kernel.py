@@ -373,7 +373,7 @@ class MultiKernelCall:
         be picked.
         """
 
-        def get_args_kwargs(kernel, index) -> tuple[tuple, dict[str, Any]]:
+        def get_args_kwargs(kernel, index) -> tuple[tuple, dict[str, Any]]:  # type: ignore[type-arg]
             filtered_args = self._get_filtered_args(args, index)
             args_clone, kwargs_clone = kernel.clone_args(*filtered_args, **kwargs)
             return args_clone, kwargs_clone
