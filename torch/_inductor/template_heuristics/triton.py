@@ -243,6 +243,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 32, 3, 4),
             GemmConfig(128, 128, 64, 3, 4),
             GemmConfig(128, 128, 64, 5, 8),
+            GemmConfig(128, 128, 128, 4, 8),
         ]
 
         # Exhaustive search for mm configs
@@ -312,6 +313,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(128, 128, 128, 3, 4),
             GemmConfig(256, 128, 64, 3, 8),
             GemmConfig(128, 128, 128, 3, 8),
+        ]
+
+        self.blackwell_persistent_addmm_configs: list[BaseConfig] = [
+            GemmConfig(256, 128, 64, 2, 4),
         ]
 
         self.scaled_mm_configs: list[BaseConfig] = [
@@ -1633,6 +1638,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         )
 
         # Build options dict
+        # pyrefly: ignore  # no-matching-overload
         options_dict = dict(
             EVEN_K=even_k_symbolic,
             USE_FAST_ACCUM=False,  # Option for _scaled_mm
@@ -1715,6 +1721,7 @@ class TMAWorkspaceMixin(MMTemplateConfigMixin):
         )
         return kwargs
 
+    # pyrefly: ignore  # bad-override
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         TMA specific filtering, as num_warps=2 not safe for TMA
@@ -1939,6 +1946,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
     This inherits from BaseScaledMMConfigMixin and adds TMA-specific options.
     """
 
+    # pyrefly: ignore  # bad-override
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         TMA specific filtering:
@@ -1979,6 +1987,7 @@ class ScaledBlackwellTMAConfigMixin(
     This inherits from ScaledMMConfigMixin, which inherits the scale_mm_epilogue, and adds TMA-specific options.
     """
 
+    # pyrefly: ignore  # bad-override
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         Warp specialization-specific filtering (BlackwellTMATemplateConfigMixin)
@@ -2093,7 +2102,11 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        self.mm_configs = self.blackwell_persistent_mm_configs
+        # NOTE: to ensure that we pass tests, addmm needs a small config
+        self.mm_configs = (
+            self.blackwell_persistent_mm_configs
+            + self.blackwell_persistent_addmm_configs
+        )
 
 
 @register_template_heuristic(
@@ -2107,6 +2120,7 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
+    # pyrefly: ignore  # bad-override
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
         return super()._filter_configs(configs)
@@ -2116,6 +2130,7 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
     scaled_mm_device_tma_template.uid,
     "cuda",
     register=torch.version.hip is None,
+    op_name="scaled_mm",
 )
 class CUDAScaledTMATemplateConfigHeuristic(ScaledTMAConfigMixin, CUDAConfigHeuristic):
     """Scaled TMA template heuristic for CUDA"""
