@@ -4,8 +4,9 @@ import functools
 import types
 import typing
 import warnings
-from typing import Callable, cast, Optional, TypeVar, Union
-from typing_extensions import deprecated, ParamSpec, TypeAlias
+from collections.abc import Callable
+from typing import cast, Optional, TypeAlias, TypeVar, Union
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 from torch import Tensor
@@ -40,9 +41,11 @@ def _no_grad(func: Callable[_P, _R]) -> Callable[_P, _R]:
 
     def _no_grad_wrapper(*args, **kwargs):
         with torch.no_grad():
+            # pyrefly: ignore  # invalid-param-spec
             return func(*args, **kwargs)
 
     functools.update_wrapper(_no_grad_wrapper, func)
+    # pyrefly: ignore  # bad-return
     return _no_grad_wrapper
 
 
