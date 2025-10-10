@@ -5067,7 +5067,7 @@ def _is_safe_to_split() -> bool:
     users must be aware that a pg is only splittable after the first collective is
     issued.
     """
-    return _get_default_group().bound_device_id is not None
+    return False if _get_default_group().bound_device_id is None else True
 
 
 @_time_logger
