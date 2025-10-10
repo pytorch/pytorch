@@ -8,8 +8,6 @@
 
 namespace c10::cuda::CUDACachingAllocator {
 
-constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
-
 CUDAAllocatorConfig::CUDAAllocatorConfig()
     : m_pinned_num_register_threads(1),
       m_pinned_reserve_segment_size_mb(0),
