@@ -718,7 +718,11 @@ def validate_args_and_maybe_create_graph_inputs(
                     new_proxy = tracer.create_graph_input(
                         arg_name, a.python_type(), example_value
                     )
-                    example_value = node.meta.get("example_value", None)
+                    example_value = (
+                        node.meta["example_value"]
+                        if "example_value" in node.meta
+                        else None
+                    )
                     a = wrap_fx_proxy_cls(
                         target_cls=type(a),
                         tx=tx,
@@ -756,7 +760,9 @@ def validate_args_and_maybe_create_graph_inputs(
             # If `a` can be put into a graph
             elif a.maybe_fx_node() is not None:
                 node = a.maybe_fx_node()
-                example_value = node.meta.get("example_value", None)
+                example_value = (
+                    node.meta["example_value"] if "example_value" in node.meta else None
+                )
                 arg_name = node.name if sub_args_names is None else sub_args_names[idx]
                 new_proxy = tracer.create_graph_input(
                     arg_name, a.python_type(), example_value
@@ -3532,7 +3538,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         from torch.distributed.tensor.experimental._func_map import _local_map_wrapped
 
         # check is important to avoid subclass dispatch
-        if type(value) != type(_local_map_wrapped):
+        if type(value) is not type(_local_map_wrapped):
             return False
 
         return value == _local_map_wrapped and cls._enabled

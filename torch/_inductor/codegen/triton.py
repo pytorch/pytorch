@@ -121,6 +121,18 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
 
 
+def is_sympy_integer_like(expr: object):
+    """ "
+    Is this expression a Sympy Integer or is it an integer sympy Expr
+    containing no free symbols. The latter case can happen with Identity expr.
+    """
+    if not isinstance(expr, sympy.Expr):
+        return False
+    return isinstance(expr, sympy.Integer) or (
+        expr.is_integer and len(expr.free_symbols) == 0
+    )
+
+
 class OpDtypeSupport:
     """
     Some Triton ops such as libdevice and tl.math only support float32 and float64.
@@ -2455,7 +2467,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 return self.dense_size_str(), tuple(self.dense_size_list())
 
-        if isinstance(index, sympy.Integer):
+        if is_sympy_integer_like(index):
             expand_str, expand_shape = _get_expand_str()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
@@ -2806,7 +2818,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     line, indexing.block_shape, indexing.final_shape, True
                 )
                 shape = indexing.final_shape
-            elif isinstance(original_index, sympy.Integer):
+            elif is_sympy_integer_like(original_index):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
                 shape = ()
@@ -4274,6 +4286,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def inductor_meta_common():
         inductor_meta = {
             "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+            "are_deterministic_algorithms_enabled": torch.are_deterministic_algorithms_enabled(),
             "assert_indirect_indexing": config.assert_indirect_indexing,
             "autotune_local_cache": config.autotune_local_cache,
             "autotune_pointwise": config.triton.autotune_pointwise,
@@ -4287,12 +4300,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "store_cubin": config.triton.store_cubin,
             "deterministic": config.deterministic,
         }
-
-        if config.write_are_deterministic_algorithms_enabled:
-            inductor_meta["are_deterministic_algorithms_enabled"] = (
-                torch.are_deterministic_algorithms_enabled()
-            )
-
         if torch.version.hip is not None:
             inductor_meta["is_hip"] = True
         if config.is_fbcode():

@@ -121,7 +121,7 @@ def set_element(
     for i in range(1, len(path)):
         prev_key = path[i - 1]
         key = path[i]
-        def_val = cast(STATE_DICT_ITEM, {} if type(key) == str else [])
+        def_val = cast(STATE_DICT_ITEM, {} if type(key) is str else [])
 
         if isinstance(cur_container, Mapping):
             cur_container = cast(
@@ -135,7 +135,7 @@ def set_element(
             cur_container = cur_container[prev_key]
 
     key = path[-1]
-    if type(key) == int:
+    if type(key) is int:
         extend_list(cast(list[STATE_DICT_ITEM], cur_container), key)
 
     cur_container[key] = value

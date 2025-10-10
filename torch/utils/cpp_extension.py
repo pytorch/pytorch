@@ -11,6 +11,7 @@ import setuptools
 import subprocess
 import sys
 import sysconfig
+import types
 import collections
 from pathlib import Path
 import errno
@@ -2095,7 +2096,7 @@ def _jit_compile(name,
                  with_sycl: Optional[bool],
                  is_python_module,
                  is_standalone,
-                 keep_intermediates=True) -> None:
+                 keep_intermediates=True) -> Union[types.ModuleType, str]:
     if is_python_module and is_standalone:
         raise ValueError("`is_python_module` and `is_standalone` are mutually exclusive.")
 
