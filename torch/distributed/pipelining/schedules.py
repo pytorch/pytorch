@@ -246,6 +246,7 @@ def _format_pipeline_order(
         pipeline_order.get(key, [""] * num_steps) for key in sorted(pipeline_order)
     ]
     # Transpose the list of lists (rows to columns)
+    # pyrefly: ignore  # no-matching-overload
     transposed_actions = list(itertools.zip_longest(*rank_actions, fillvalue=""))
     # Generate column labels for ranks
     num_ranks = len(pipeline_order)
@@ -1558,7 +1559,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
         for stage in self._stages:
             for event in stage.reduce_scatter_events:
                 if event is not None:
-                    torch.cuda.current_stream().wait_event(event)
+                    torch.accelerator.current_stream(event.device).wait_event(event)
+            stage.reduce_scatter_events.clear()
 
         # Return merged results per original format
         for stage in self._stages:

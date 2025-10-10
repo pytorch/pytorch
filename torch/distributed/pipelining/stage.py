@@ -155,6 +155,7 @@ class _PipelineStageBase(ABC):
         self.submod = submodule
         self.stage_index = stage_index
         self.num_stages = num_stages
+        # pyrefly: ignore  # read-only
         self.device = device
         self.group = group
 
@@ -204,6 +205,7 @@ class _PipelineStageBase(ABC):
         }
 
         # Populated during runtime
+        # These hold the FSDP reduce scatter events which are later waited on
         self.reduce_scatter_events: list[torch.Event | None] = []
 
     @property

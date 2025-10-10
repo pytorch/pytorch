@@ -379,6 +379,8 @@ class DTensorTestBase(MultiProcessTestCase):
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+
         if backend is None:
             backend = self.backend
 
@@ -386,7 +388,7 @@ class DTensorTestBase(MultiProcessTestCase):
             "nccl",
             "gloo",
             "mpi",
-            "cpu:gloo,cuda:nccl",
+            f"cpu:gloo,{self.device_type}:{curr_backend}",
             "hccl",
             "xccl",
             "fake",
