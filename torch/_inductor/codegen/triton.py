@@ -11,6 +11,7 @@ import math
 import operator
 import os
 import textwrap
+import typing_extensions
 from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
@@ -3076,6 +3077,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             shape=tuple(target_shape),
         )
 
+    @typing_extensions.override
     def reduction(
         self,
         dtype: torch.dtype,
