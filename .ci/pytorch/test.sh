@@ -797,11 +797,6 @@ test_single_dynamo_benchmark() {
 }
 
 test_inductor_micro_benchmark() {
-  # torchao requires cuda 8.0 or above for bfloat16 support
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-    export TORCH_CUDA_ARCH_LIST="8.0;8.6"
-  fi
-  install_torchao
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   if [[ "${TEST_CONFIG}" == *cpu* ]]; then
     test_inductor_set_cpu_affinity
@@ -1703,39 +1698,52 @@ elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
     elif [[ "${TEST_CONFIG}" == *all* ]]; then
       TEST_MODE="all"
     fi
-
     test_operator_benchmark cpu ${TEST_MODE}
-
   fi
 elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
   test_operator_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    install_torchao
+  fi
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
 elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
+  install_torchao
   test_inductor_micro_benchmark
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    install_torchao
+  fi
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    install_torchao
+  fi
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == cachebench ]]; then
   install_torchaudio
   install_torchvision
+  install_torchao
   PYTHONPATH=/torchbench test_cachebench
 elif [[ "${TEST_CONFIG}" == verify_cachebench ]]; then
   install_torchaudio
   install_torchvision
+  install_torchao
   PYTHONPATH=/torchbench test_verify_cachebench
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchaudio
   install_torchvision
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    install_torchao
+  fi
   id=$((SHARD_NUMBER-1))
   # https://github.com/opencv/opencv-python/issues/885
   pip_install opencv-python==4.8.0.74
@@ -1755,12 +1763,18 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchvision
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    install_torchao
+  fi
   PYTHONPATH=/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
     test_inductor_aoti
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    install_torchao
+  fi
   test_inductor_shard "${SHARD_NUMBER}"
 elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
