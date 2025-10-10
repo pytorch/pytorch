@@ -5680,6 +5680,11 @@ class TritonScheduling(SIMDScheduling):
                 if len(wrapped_jit_function.mutated_arg_names) > 0:
                     ms = ms - benchmarker.benchmark(
                         lambda: wrapped_jit_function.clone_args(*args),
+                        device=str(device),
+                    )
+
+            log.debug(
+                "The fused kernel for %s took %.3f ms to run",
                 node_names,
                 ms,
             )
@@ -5853,6 +5858,11 @@ class TritonScheduling(SIMDScheduling):
                 )
                 ms_clone = benchmarker.benchmark(
                     lambda: wrapped_jit_function.clone_args(*args)[0],
+                    device=device,
+                )
+
+            log.debug(
+                "The fused kernel for %s took %.3f ms to run, %.3f ms to clone inputs",
                 OrderedSet(n.get_name() for n in node_group),
                 ms,
                 ms_clone,

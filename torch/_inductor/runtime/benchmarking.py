@@ -150,6 +150,8 @@ class Benchmarker:
 
         Arguments:
         - fn: The function to benchmark.
+        - fn_args: the function's arguments.
+        - fn_kwargs: the function's kwargs.
 
         Keyword Arguments:
         - device: Which device to use for benchmarking. If not provided the device will be attempted
