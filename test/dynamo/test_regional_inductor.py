@@ -11,33 +11,28 @@ from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.fx.passes.regional_inductor import compile_fx_annotated_nodes_with_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
-
-# from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
-# Some issues raised in the HOP meeting
-# 1) CSE will not differentiate different meta custom nodes and do wrong thing.
-# 2) SAC - The recomputed forward will be smaller than the forward. Will we
-# compile a smaller region than?
-# 3) What happens if you have a op in the middle whcih does not disturb
-# topology, is it still 1 subgraph?
-# 4) What happens with the nesting of fx_traceback.annotate? Are there ordering
-# requirements?
-# 5) What are we going to use the annotations for?
+# Open questions / follow-ups
+# 1) CSE behavior with meta custom nodes
+#   Common subexpression elimination may not differentiate between distinct meta
+#   custom nodes and could remove expressions, which might confuse users.
+#
+# 2) SAC: recompute vs. forward size
+#   If the recomputed forward is smaller than the original forward, do we end up
+#   compiling only the smaller region?
+#
+# 3) fx_traceback.annotate nesting
+#   How does nesting behave? Are there any ordering requirements?
+#
+# 4) Planned uses for annotations
 #   a) compile flex
 #   b) streams
-#   c) nn.MOdule info to organize MoE runtime
-#   d) PP stages
-#   e) rename graph nodes for more debugging.
-#   f) No nested regional compile
-
-
-def checkpoint_wrapper(fn):
-    def inner(*args):
-        return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
-
-    return inner
+#   c) nn.Module info to organize MoE runtime
+#   d) pipeline-parallel stages
+#   e) rename graph nodes for easier debugging
+#   f) disallow nested regional compile
 
 
 def aot_eager_regional_inductor():
@@ -75,7 +70,7 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         x = torch.randn(10, requires_grad=True)
         y = torch.randn(10, requires_grad=True)
 
-        # Check that inductor compilation is called twicw
+        # Check that inductor compilation is called twice
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
         self.assertEqual(len(codes), 2)
 

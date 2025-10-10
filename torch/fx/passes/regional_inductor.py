@@ -1,13 +1,12 @@
 # mypy: allow-untyped-defs
 
 import functools
+import logging
 
 import torch
 
-# from torch._dynamo.backends.common import aot_autograd as auto_autograd_backend
-from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
-from torch.fx.passes.operator_support import OperatorSupport
-from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
+
+logger = logging.getLogger(__name__)
 
 
 # standalone_inductor returns a callable class object - this does not sit well
@@ -22,6 +21,9 @@ def dummy_wrapper(fn):
 
 
 def partition_by_supported_nodes(gm, supported_ops, prefix):
+    from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
+    from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
+
     partitioner = CapabilityBasedPartitioner(
         gm, supported_ops, allows_single_node_partition=True
     )
@@ -29,7 +31,7 @@ def partition_by_supported_nodes(gm, supported_ops, prefix):
     candidate_partitions = partitioner.propose_partitions()
     partitioned_gm = fuse_by_partitions(
         partitioner.graph_module,
-        [candidate_partitions[i].nodes for i in range(len(candidate_partitions))],
+        [partition.nodes for partition in candidate_partitions],
         prefix=prefix,
         always_return_tuple=True,
     )
@@ -71,9 +73,9 @@ def compile_submod(gm, prefix):
     return gm
 
 
-def has_marked_node_custom_metadata(node):
+def needs_inductor_compile(node):
     return (
-        node.op != "placeholder"
+        node.op not in ("placeholder", "output")
         and hasattr(node, "meta")
         and node.meta.get("custom", None)
         and "compile_with_inductor" in node.meta["custom"]
@@ -81,19 +83,21 @@ def has_marked_node_custom_metadata(node):
 
 
 def _compile_fx_annotated_nodes_with_inductor(gm):
+    from torch.fx.passes.operator_support import OperatorSupport
+
     found_marked_node = False
     for node in gm.graph.nodes:
-        if has_marked_node_custom_metadata(node):
+        if needs_inductor_compile(node):
             found_marked_node = True
             break
 
     if not found_marked_node:
-        print("No inductor marked nodes found")
+        logger.info("No inductor marked nodes found")
         return gm
 
     class InductorMarkedNodes(OperatorSupport):
         def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-            return has_marked_node_custom_metadata(node)
+            return needs_inductor_compile(node)
 
     marked_nodes = InductorMarkedNodes()
     gm = partition_by_supported_nodes(gm, marked_nodes, "__marked_inductor_submod")
@@ -103,7 +107,7 @@ def _compile_fx_annotated_nodes_with_inductor(gm):
 
 def recursive_compile_fx_annotated_nodes_with_inductor(gm):
     for node in gm.graph.find_nodes(op="get_attr"):
-        if has_marked_node_custom_metadata(node):
+        if needs_inductor_compile(node):
             # If the get_attr itself is marked for compile, the outer graph will
             # take care of it. If we dont do that, we end up with nested
             # regional inductor compiles that do not work well.
