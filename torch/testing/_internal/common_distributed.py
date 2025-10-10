@@ -1432,7 +1432,7 @@ class MultiThreadedTestCase(TestCase):
                 logger.error("Caught exception: \n%s exiting thread %s", msg, rank)
                 error_msg += f"Thread {rank} exited with exception:\n{msg}\n"
             elif isinstance(exc, SystemExit):
-                if type(exc.code) == int and skip_code < 0:
+                if type(exc.code) is int and skip_code < 0:
                     skip_code = exc.code
 
         # check exceptions
