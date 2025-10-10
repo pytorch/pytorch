@@ -45,6 +45,37 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cuda(
   at::native::sparse::sparse_sampled_addmm_check_inputs(
       self, mat1, mat2, beta, alpha, result);
 
+  // cuSPARSE SDDMM doesn't support BFloat16, so we need to upcast to Float32
+  //
+  // Performance Note: This workaround incurs significant memory overhead due to multiple copies:
+  // 1. Copy sparse tensor values from bfloat16 to float32 (self.to(at::kFloat))
+  // 2. Copy dense matrix mat1 from bfloat16 to float32 (mat1.to(at::kFloat))
+  // 3. Copy dense matrix mat2 from bfloat16 to float32 (mat2.to(at::kFloat))
+  // 4. Copy result values from float32 back to bfloat16 (result.values().copy_())
+  //
+  // This overhead is unavoidable given cuSPARSE limitations. Users requiring optimal
+  // performance should consider using float32 instead of bfloat16 for this operation.
+  if (self.scalar_type() == at::ScalarType::BFloat16) {
+    auto result_fp32 = at::empty({0, 0}, self.options().dtype(at::kFloat));
+    sparse_sampled_addmm_out_sparse_csr_cuda(
+        self.to(at::kFloat),
+        mat1.to(at::kFloat),
+        mat2.to(at::kFloat),
+        beta,
+        alpha,
+        result_fp32);
+    // Copy result back to bfloat16
+    if (&result != &self) {
+      auto result_sizes = DimVector(mat1.sizes().slice(0, mat1.dim() - 2));
+      result_sizes.push_back(self.size(-2));
+      result_sizes.push_back(self.size(-1));
+      at::sparse_csr::get_sparse_csr_impl(result)->resize_(self._nnz(), result_sizes);
+      result.copy_(self);
+    }
+    result.values().copy_(result_fp32.values());
+    return result;
+  }
+
   if (&result != &self) {
     // We allow self to be a single matrix when mat1 and mat2 are batched
     auto result_sizes = DimVector(mat1.sizes().slice(0, mat1.dim() - 2));
