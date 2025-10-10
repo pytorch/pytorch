@@ -937,7 +937,7 @@ class DetCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
 @instantiate_parametrized_tests
 class TestDet(DetCases, TestCase):
     def test_zero(self):
-        # NB: comment out tests of type(det) == double : we return zero-dim arrays
+        # NB: comment out tests of type(det) is double : we return zero-dim arrays
         assert_equal(linalg.det([[0.0]]), 0.0)
         #    assert_equal(type(linalg.det([[0.0]])), double)
         assert_equal(linalg.det([[0.0j]]), 0.0)
@@ -1103,7 +1103,7 @@ class TestMatrixPower(TestCase):
 
         for mat in self.rshft_all:
             tz(mat.astype(dt))
-            if dt != object:
+            if dt is not object:
                 tz(self.stacked.astype(dt))
 
     @parametrize("dt", [np.dtype(c) for c in "?bBhilefdFD"])
@@ -1115,27 +1115,27 @@ class TestMatrixPower(TestCase):
 
         for mat in self.rshft_all:
             tz(mat.astype(dt))
-            if dt != object:
+            if dt is not object:
                 tz(self.stacked.astype(dt))
 
     @parametrize("dt", [np.dtype(c) for c in "?bBhilefdFD"])
     def test_power_is_two(self, dt):
         def tz(mat):
             mz = matrix_power(mat, 2)
-            mmul = matmul if mat.dtype != object else dot
+            mmul = matmul if mat.dtype is not object else dot
             assert_equal(mz, mmul(mat, mat))
             assert_equal(mz.dtype, mat.dtype)
 
         for mat in self.rshft_all:
             tz(mat.astype(dt))
-            if dt != object:
+            if dt is not object:
                 tz(self.stacked.astype(dt))
 
     @parametrize("dt", [np.dtype(c) for c in "?bBhilefdFD"])
     def test_power_is_minus_one(self, dt):
         def tz(mat):
             invmat = matrix_power(mat, -1)
-            mmul = matmul if mat.dtype != object else dot
+            mmul = matmul if mat.dtype is not object else dot
             assert_almost_equal(mmul(invmat, mat), identity_like_generalized(mat))
 
         for mat in self.rshft_all:
