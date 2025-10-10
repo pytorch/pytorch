@@ -801,8 +801,6 @@ def run_test_retries(
         )
     if len(consistent_failures) > 0:
         print_to_file(f"The following tests failed consistently: {consistent_failures}")
-        for x in consistent_failures:
-            print_to_file(f"[FAILED CONSISTENTLY] {x}")
         return 1, True
     return ret_code, any(x > 0 for x in num_failures.values())
 
