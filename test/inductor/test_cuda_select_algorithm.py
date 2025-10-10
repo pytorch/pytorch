@@ -83,7 +83,7 @@ class TestSelectAlgorithmCuda(BaseTestSelectAlgorithm):
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @unittest.skipIf(TEST_WITH_SLOW_GRADCHECK, "Leaking memory, likely after c9f16f2")
+    @unittest.skipIf(TEST_WITH_SLOW_GRADCHECK, "Leaking memory")
     def test_int8_woq_mm_cuda(
         self, dtype, batch_size, mid_dim, in_features, out_features
     ):
