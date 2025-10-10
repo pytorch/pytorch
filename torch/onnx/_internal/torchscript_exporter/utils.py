@@ -136,7 +136,7 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
     try:
         yield
     finally:
-        if hasattr(model, "training") and not mode == _C_onnx.TrainingMode.PRESERVE:
+        if hasattr(model, "training") and mode != _C_onnx.TrainingMode.PRESERVE:
             model.train(originally_training)
 
 

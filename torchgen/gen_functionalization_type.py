@@ -654,28 +654,6 @@ def emit_inplace_functionalization_body(
         for e in translate(unwrapped_args_ctx, functional_sig.arguments(), method=False)
     ]
 
-    if f.func.is_out_fn():
-        mutable_input_post_processing = "\n".join(
-            [
-                f"""
-      at::functionalization::impl::replace_(
-        {a.name}, {"std::get<" + str(i) + ">(tmp_output)" if len(f.func.returns) > 1 else "tmp_output"});
-      at::functionalization::impl::commit_update({a.name});"""
-                for (i, a) in enumerate(f.func.arguments.out)
-                if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
-            ]
-        )
-    else:
-        mutable_input_post_processing = "\n".join(  # noqa: F841
-            [
-                f"""
-      at::functionalization::impl::replace_({a.name}, tmp_output);
-      at::functionalization::impl::commit_update({a.name});"""
-                for a in f.func.arguments.flat_all
-                if a.annotation and a.annotation.is_write and a.type.is_tensor_like()
-            ]
-        )
-
     meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
     # We don't want to run the inplace meta func for ops like .set_(), because:
     # (1) they're unnecessary: inplace meta checks are only useful for ops like add_(),
