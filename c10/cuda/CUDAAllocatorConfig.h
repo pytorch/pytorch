@@ -79,10 +79,11 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return 128;
   }
 
-  static size_t roundup_power2_divisions(size_t size) {
-    return c10::CachingAllocator::AcceleratorAllocatorConfig::
-        roundup_power2_divisions(size);
-  }
+  // This is used to round-up allocation size to nearest power of 2 divisions.
+  // More description below in function roundup_power2_next_division
+  // As an example, if we want 4 divisions between 2's power, this can be done
+  // using env variable: PYTORCH_CUDA_ALLOC_CONF=roundup_power2_divisions:4
+  static size_t roundup_power2_divisions(size_t size);
 
   static std::vector<size_t> roundup_power2_divisions() {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::
