@@ -1154,7 +1154,7 @@ class NamedTupleVariable(TupleVariable):
     def __init__(self, items, tuple_cls, dynamic_attributes=None, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
-        self.dynamic_attributes = {} if not dynamic_attributes else dynamic_attributes
+        self.dynamic_attributes = dynamic_attributes if dynamic_attributes else {}
 
     def is_namedtuple(self):
         return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(

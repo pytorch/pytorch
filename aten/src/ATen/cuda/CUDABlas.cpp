@@ -323,7 +323,7 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
     descriptor_.reset(raw_descriptor);
   }
   template <typename T>
-  inline void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
+  void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
     // NOLINTNEXTLINE(bugprone-sizeof-expression)
     TORCH_CUDABLAS_CHECK(::cublasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(value)));
   }
@@ -345,7 +345,7 @@ class CuBlasLtMatrixLayout : public CuBlasLtDescriptor<
     descriptor_.reset(raw_descriptor);
   }
   template <typename T>
-  inline void setAttribute(cublasLtMatrixLayoutAttribute_t attr, const T value) {
+  void setAttribute(cublasLtMatrixLayoutAttribute_t attr, const T value) {
     TORCH_CUDABLAS_CHECK(::cublasLtMatrixLayoutSetAttribute(descriptor(), attr, &value, sizeof(T)));
   }
 };
@@ -360,7 +360,7 @@ class CuBlasLtMatmulPreference : public CuBlasLtDescriptor<
     descriptor_.reset(raw_descriptor);
   }
   template <typename T>
-  inline void setAttribute(cublasLtMatmulPreferenceAttributes_t attr, const T value) {
+  void setAttribute(cublasLtMatmulPreferenceAttributes_t attr, const T value) {
     TORCH_CUDABLAS_CHECK(::cublasLtMatmulPreferenceSetAttribute(descriptor(), attr, &value, sizeof(T)));
   }
 };
@@ -395,7 +395,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if constexpr (std::is_same_v<Dtype, float>) {
-    if (at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
+    if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
   } else if constexpr (std::is_same_v<Dtype, c10::complex<double>>) {
@@ -422,18 +422,34 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     abType = CUDA_R_16F;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
 #ifndef USE_ROCM
-    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
-      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
-        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
+    if (fp16_reduction !=
+        at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
+      uint32_t mask =
+          fp16_reduction ==
+                  at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
+              ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
+                 CUBLASLT_REDUCTION_SCHEME_NONE)
+              : CUBLASLT_REDUCTION_SCHEME_NONE;
+      preference.setAttribute(
+          CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, mask);
     }
 #endif
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abType = CUDA_R_16BF;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16BF;
 #ifndef USE_ROCM
-    if (!at::globalContext().allowBF16ReductionCuBLAS()) {
-      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
-        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
+    if (bf16_reduction !=
+        at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
+      uint32_t mask =
+          bf16_reduction ==
+                  at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
+              ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
+                 CUBLASLT_REDUCTION_SCHEME_NONE)
+              : CUBLASLT_REDUCTION_SCHEME_NONE;
+      preference.setAttribute(
+          CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, mask);
     }
 #endif
   } else {
@@ -1120,8 +1136,15 @@ inline void gemm_internal_cublas_half_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DTYPE(
   }
   if (prop->major >= 5) {
     cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
-    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
-      cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
+    auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
+    TORCH_CHECK(fp16_reduction !=
+        at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK,
+          "torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction("
+          "..., allow_splitk=False) requires the cuBLASLt backend");
+    if (fp16_reduction !=
+        at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
+      cublas_flags = static_cast<cublasMath_t>(
+          cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
     }
     // Disallow fp16 reductions that could lead to unexpected overflow issues.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
@@ -1180,8 +1203,15 @@ inline void gemm_internal_cublas_bfloat16_helper(CUDABLAS_GEMM_ARGTYPES_AND_C_DT
   GEMM_CHECK_ARGVALUES(at::BFloat16);
 #ifndef USE_ROCM
   cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
-  if (!at::globalContext().allowBF16ReductionCuBLAS()) {
-    cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
+  auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
+  TORCH_CHECK(bf16_reduction !=
+      at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK,
+        "torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction("
+        "..., allow_splitk=False) requires the cuBLASLt backend");
+  if (bf16_reduction !=
+      at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
+    cublas_flags = static_cast<cublasMath_t>(
+        cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
   }
 #endif
 #if defined(USE_ROCM)
@@ -1270,7 +1300,7 @@ void gemm_internal<float>(CUDABLAS_GEMM_ARGTYPES(float))
   }
 #if defined(USE_ROCM) && defined(USE_ROCM_CK_GEMM)
   else if (at::globalContext().blasPreferredBackend() == BlasBackend::Ck) {
-    if (at::detail::getCUDAHooks().isGPUArch({"gfx1100"})) { //no CK GEMM version for gfx1100
+    if (at::detail::getCUDAHooks().isGPUArch({"gfx11", "gfx12"})) { //no CK GEMM version
       gemm_internal_cublaslt<float>(CUDABLAS_GEMM_ARGS(float));
     } else{
       at::native::gemm_internal_ck<float>(CUDABLAS_GEMM_ARGS(float));
@@ -1559,7 +1589,7 @@ bool gemm_and_bias(
     computeType = CUBLAS_COMPUTE_64F;
     scaleType = CUDA_R_64F;
   } else if constexpr (std::is_same_v<Dtype, float>) {
-    if (at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
+    if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
       computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
     }
   } else if constexpr (std::is_same_v<Dtype, at::Half>) {
@@ -1577,18 +1607,34 @@ bool gemm_and_bias(
     abType = CUDA_R_16F;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
 #ifndef USE_ROCM
-    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
-      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
-        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
+    if (fp16_reduction !=
+        at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
+      uint32_t mask =
+          fp16_reduction ==
+                  at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
+              ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
+                 CUBLASLT_REDUCTION_SCHEME_NONE)
+              : CUBLASLT_REDUCTION_SCHEME_NONE;
+      preference.setAttribute(
+          CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, mask);
     }
 #endif
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abType = CUDA_R_16BF;
     cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16BF;
 #ifndef USE_ROCM
-    if (!at::globalContext().allowBF16ReductionCuBLAS()) {
-      preference.setAttribute(CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK,
-        CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE | CUBLASLT_REDUCTION_SCHEME_NONE);
+    auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
+    if (bf16_reduction !=
+        at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
+      uint32_t mask =
+          bf16_reduction ==
+                  at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
+              ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
+                 CUBLASLT_REDUCTION_SCHEME_NONE)
+              : CUBLASLT_REDUCTION_SCHEME_NONE;
+      preference.setAttribute(
+          CUBLASLT_MATMUL_PREF_REDUCTION_SCHEME_MASK, mask);
     }
 #endif
   }
@@ -1814,6 +1860,8 @@ template bool gemm_and_bias(
     float* result_ptr,
     int64_t result_ld,
     GEMMAndBiasActivationEpilogue activation);
+
+using at::blas::ScalingType;
 
 int get_scale_mode(ScalingType scaling_type, ScalarType scale_dtype, bool use_fast_accum) {
   switch (scaling_type) {
