@@ -269,6 +269,42 @@ AOTIRuntimeError AOTInductorModelContainerUpdateUserManagedConstantBufferPairs(
   })
 }
 
+AOTIRuntimeError AOTInductorModelContainerUpdateUserManagedConstantBufferPairsFQNNames(
+    AOTInductorModelContainerHandle container_handle,
+    const AOTInductorConstantMapEntry* pairs,
+    size_t num_pairs,
+    bool use_inactive,
+    bool validate_full_update) {
+  auto* container =
+      reinterpret_cast<torch::aot_inductor::AOTInductorModelContainer*>(container_handle);
+
+  std::unordered_map<std::string, std::string> fqn_to_constant_name;
+  for (size_t i=0; i < container->num_constants(); ++i) {
+    fqn_to_constant_name.emplace(container->constant_original_fqn(i), container->constant_name(i));
+  }
+
+  // Build a local unordered_map inside
+  std::unordered_map<std::string, AtenTensorHandle> input_map;
+  input_map.reserve(num_pairs);
+  for (size_t i = 0; i < num_pairs; ++i) {
+    std::string constant_name = "";
+
+    auto it = fqn_to_constant_name.find(pairs[i].name);
+     if (it != fqn_to_constant_name.end()) {
+      input_map.emplace(it->second, pairs[i].handle);
+    } else {
+      throw std::runtime_error(std::string("Constant not found for FQN: ") + pairs[i].name);
+    }
+
+  }
+  CONVERT_EXCEPTION_TO_ERROR_CODE({
+    container->update_constant_buffer(
+        input_map, use_inactive, validate_full_update, /*user_managed=*/true);
+  })
+}
+
+
+
 AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
     AOTInductorModelContainerHandle container_handle,
     AOTInductorConstantMapHandle constant_map_handle,
