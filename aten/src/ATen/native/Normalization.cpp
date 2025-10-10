@@ -742,10 +742,29 @@ Tensor instance_norm(
   shape[1] = b * c;
   shape[0] = SymInt(1);
 
-  Tensor weight_ = repeat_if_defined(weight, b);
-  Tensor bias_ = repeat_if_defined(bias, b);
-  Tensor running_mean_ = repeat_if_defined(running_mean, b);
-  Tensor running_var_ = repeat_if_defined(running_var, b);
+  // handle mixed types by converting parameters to input dtype if needed
+  Tensor weight_converted = weight;
+  Tensor bias_converted = bias;
+  Tensor running_mean_converted = running_mean;
+  Tensor running_var_converted = running_var;
+
+  if (weight.defined() && weight.scalar_type() != input.scalar_type()) {
+    weight_converted = weight.to(input.scalar_type());
+  }
+  if (bias.defined() && bias.scalar_type() != input.scalar_type()) {
+    bias_converted = bias.to(input.scalar_type());
+  }
+  if (running_mean.defined() && running_mean.scalar_type() != input.scalar_type()) {
+    running_mean_converted = running_mean.to(input.scalar_type());
+  }
+  if (running_var.defined() && running_var.scalar_type() != input.scalar_type()) {
+    running_var_converted = running_var.to(input.scalar_type());
+  }
+
+  Tensor weight_ = repeat_if_defined(weight_converted, b);
+  Tensor bias_ = repeat_if_defined(bias_converted, b);
+  Tensor running_mean_ = repeat_if_defined(running_mean_converted, b);
+  Tensor running_var_ = repeat_if_defined(running_var_converted, b);
 
   auto input_reshaped = input.contiguous().view_symint(shape);
   auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
