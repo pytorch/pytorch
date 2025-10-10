@@ -443,7 +443,7 @@ def get_callable_argument_names(fn) -> list[str]:
     for name, param in callable_signature.parameters.items():
         # All four other types of arguments do not map to individual values
         # with a keyword as name.
-        if not param.kind == param.POSITIONAL_OR_KEYWORD:
+        if param.kind != param.POSITIONAL_OR_KEYWORD:
             continue
 
         argument_names.append(name)
