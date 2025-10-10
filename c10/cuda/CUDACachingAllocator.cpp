@@ -638,11 +638,11 @@ struct ExpandableSegment {
     return *stream_;
   }
 
-  size_t getMappedSize() {
+  size_t getMappedSize() const {
     return mapped_size_;
   }
 
-  size_t getSegmentSize() {
+  size_t getSegmentSize() const {
     return segment_size_;
   }
 
@@ -799,11 +799,11 @@ struct ExpandableSegment {
     return nullptr;
   }
 
-  size_t getMappedSize() {
+  size_t getMappedSize() const {
     return 0;
   }
 
-  size_t getSegmentSize() {
+  size_t getSegmentSize() const {
     return 0;
   }
   void addPeer(c10::DeviceIndex device) {}
@@ -824,14 +824,14 @@ struct BlockState {
   // maintain invariant that event_count == 0 ;
   // history will be left alone in checkpoint
 
-  BlockState(Block* block);
+  explicit BlockState(Block* block);
 };
 
 struct SegmentState {
   std::vector<BlockState> blocks;
   bool is_small = false;
 
-  SegmentState(Block* head);
+  explicit SegmentState(Block* head);
 };
 
 struct PrivatePoolState : AllocatorState {
@@ -949,7 +949,7 @@ class EventPool {
 
 // CUDA graphs helper
 struct PrivatePool {
-  PrivatePool(MempoolId_t id, CUDAAllocator* allocator = nullptr)
+  explicit PrivatePool(MempoolId_t id, CUDAAllocator* allocator = nullptr)
       : id(std::move(id)),
         allocator_(allocator),
         large_blocks(/*small=*/false, this),
@@ -1078,7 +1078,7 @@ class RingBuffer {
     }
   }
 
-  void getEntries(std::vector<T>& result) {
+  void getEntries(std::vector<T>& result) const {
     std::lock_guard<std::mutex> lk(alloc_trace_lock);
     result.reserve(alloc_trace->size());
     result.insert(
@@ -1106,7 +1106,7 @@ class RingBuffer {
 
   // Both alloc_trace and alloc_trace_next needs to be used
   // under alloc_trace_lock.
-  std::mutex alloc_trace_lock;
+  mutable std::mutex alloc_trace_lock;
   size_t alloc_trace_next = 0;
   std::vector<T>*
       alloc_trace; // pointer because we need to intentionally leak this on
@@ -1299,7 +1299,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  bool isHistoryEnabled() {
+  bool isHistoryEnabled() const {
     return record_history;
   }
 
@@ -1315,7 +1315,7 @@ class DeviceCachingAllocator {
 
   bool checkPoolLiveAllocations(
       MempoolId_t mempool_id,
-      const std::unordered_set<void*>& expected_live_allocations) {
+      const std::unordered_set<void*>& expected_live_allocations) const {
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
     PrivatePool* pool = nullptr;
@@ -2081,7 +2081,7 @@ class DeviceCachingAllocator {
   }
 
   /** Returns a copy of the memory allocator stats **/
-  DeviceStats getStats() {
+  DeviceStats getStats() const {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     return stats;
   }
@@ -2457,7 +2457,7 @@ class DeviceCachingAllocator {
   }
 
   std::vector<TraceEntry> trace(
-      const std::function<time_t(approx_time_t)>& tsc_to_us) {
+      const std::function<time_t(approx_time_t)>& tsc_to_us) const {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::vector<TraceEntry> result;
     alloc_buffer.getEntries(result);
@@ -2593,7 +2593,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  int getPoolUseCount(MempoolId_t mempool_id) {
+  int getPoolUseCount(MempoolId_t mempool_id) const {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     auto pp = get_private_pool(mempool_id);
     return pp->use_count;
@@ -2689,7 +2689,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  PrivatePool* get_private_pool(MempoolId_t mempool_id) {
+  PrivatePool* get_private_pool(MempoolId_t mempool_id) const {
     auto it = graph_pools.find(mempool_id);
     TORCH_INTERNAL_ASSERT(it != graph_pools.end());
     return it->second.get();
@@ -3686,7 +3686,7 @@ class DeviceCachingAllocator {
     if (!compile_context.empty()) {
       compile_string = compile_context.top();
     }
-    auto te = TraceEntry(
+    TraceEntry te(
         action,
         device,
         addr,

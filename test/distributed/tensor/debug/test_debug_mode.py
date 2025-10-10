@@ -263,14 +263,21 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
     def test_compile(self):
-        @torch.compile
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt)
         def f(x):
             return x.sin().cos()
 
         x = torch.randn(8)
         with DebugMode() as debug_mode:
             f(x)
-        self.assertEqual(len(debug_mode.debug_string()), 0)
+            self.assertEqual(len(debug_mode.debug_string()), 0)
+            f(x)
+            f(x)
+        self.assertEqual(
+            cnt.frame_count, 1
+        )  # check DebugMode doesn't trigger additional recompilations
 
     def test_bwd_compiled_with_torch_function(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
