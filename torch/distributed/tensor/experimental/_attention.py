@@ -1124,13 +1124,16 @@ def _create_cp_block_mask(
         Support for padding in this scenario is planned for future work.
 
     Example:
-        >>> def causal_mask(b, h, q_idx, kv_idx):
-        >>>     return q_idx >= kv_idx
-        >>> block_mask = _create_cp_block_mask(
-        >>>     mask_mod=causal_mask,
-        >>>     B=2, H=8, Q_LEN=1024, KV_LEN=1024,
-        >>>     device_mesh=mesh
-        >>> )
+        >>> def create_cp_causal_mask(mesh):
+        >>>     def causal_mask(b, h, q_idx, kv_idx):
+        >>>         return q_idx >= kv_idx
+        >>>
+        >>>     block_mask = _create_cp_block_mask(
+        >>>         mask_mod=causal_mask,
+        >>>         B=2, H=8, Q_LEN=1024, KV_LEN=1024,
+        >>>         device_mesh=mesh
+        >>>     )
+        >>>     return block_mask
     """
 
     from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
