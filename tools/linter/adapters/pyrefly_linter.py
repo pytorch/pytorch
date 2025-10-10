@@ -158,16 +158,22 @@ def check_files(
             errors = result.get("errors", [])
         else:
             errors = []
-
+        # For now filter out deprecated warnings and only report type errors as warnings
+        # until we remove mypy
+        errors = [error for error in errors if error["name"] != "deprecated"]
         rc = [
             LintMessage(
                 path=error["path"],
                 name=error["name"],
-                description=error.get("description", error.get("concise_description", "")),
+                description=error.get(
+                    "description", error.get("concise_description", "")
+                ),
                 line=error["line"],
                 char=error["column"],
                 code=code,
-                severity=LintSeverity.ADVICE if error["name"] == "deprecated" else LintSeverity.ERROR,
+                severity=LintSeverity.ADVICE,
+                # uncomment and replace when we switch to pyrefly
+                # severity=LintSeverity.ADVICE if error["name"] == "deprecated" else LintSeverity.ERROR,
                 original=None,
                 replacement=None,
             )
@@ -229,25 +235,7 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    # Use a dictionary here to preserve order. pyrefly cares about order
-    filenames: dict[str, bool] = {}
-
-    # If a stub file exists, have mypy check it instead of the original file, in
-    # accordance with PEP-484 (see https://www.python.org/dev/peps/pep-0484/#stub-files)
-    # for filename in args.filenames:
-    #     if filename.endswith(".pyi"):
-    #         filenames[filename] = True
-    #         continue
-
-    #     stub_filename = filename.replace(".py", ".pyi")
-    #     if Path(stub_filename).exists():
-    #         filenames[stub_filename] = True
-    #     else:
-    #         filenames[filename] = True
-
-    lint_messages = check_pyrefly_installed(args.code) + check_files(
-        args.code
-    )
+    lint_messages = check_pyrefly_installed(args.code) + check_files(args.code)
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 
