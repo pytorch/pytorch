@@ -60,6 +60,21 @@ class TestDTensorDebugMode(TestCase):
       aten::sum(t: f32[1, 32])""",
         )
 
+        self.assertExpectedInline(
+            debug_mode.debug_string(show_outputs=True),
+            """\
+  torch.mm(dt: f32[8, 8][S(0)], dt: f32[8, 32][S(0)]) -> dt: f32[8, 32][S(0)]
+    aten::mm(dt: f32[8, 8][S(0)], dt: f32[8, 32][S(0)])
+      redistribute_input(1, [S(0)] -> [R])
+        redistribute_input(t: f32[1, 32], [S(0)] -> [R])
+          _c10d_functional::all_gather_into_tensor(t: f32[1, 32], 8, 0) -> t: f32[8, 32]
+          _c10d_functional::wait_tensor(t: f32[8, 32]) -> t: f32[8, 32]
+      aten::mm(t: f32[1, 8], t: f32[8, 32]) -> t: f32[1, 32]
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 32][S(0)]) -> dt: f32[][P]
+    aten::sum(dt: f32[8, 32][S(0)])
+      aten::sum(t: f32[1, 32]) -> t: f32[]""",
+        )
+
     def test_debug_string_inside_context(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
@@ -108,11 +123,44 @@ class TestDTensorDebugMode(TestCase):
         aten::clone(t: f32[8, 1])
       aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
       redistribute_input(t: f32[8, 8], [R] -> [S(0)])
-        aten::detach(t: f32[8, 1])
         aten::split.Tensor(t: f32[8, 8], 1)
+        aten::new_empty_strided(t: f32[8, 1], [8, 1], [1, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
+        aten::copy_(t: f32[8, 1], t: f32[8, 1])
         aten::clone(t: f32[1, 8])
       aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
-      aten::detach(t: f32[1, 8])""",
+      aten::new_empty_strided(t: f32[1, 8], [1, 8], [8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
+      aten::copy_(t: f32[1, 8], t: f32[1, 8])""",
+        )
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(show_ids=True),
+            """\
+  <method 'add' of 'torch._C.TensorBase' objects>(dt$0: f32[8, 8][S(0)], dt$1: f32[8, 8][S(1)])
+    aten::add.Tensor(dt$0: f32[8, 8][S(0)], dt$1: f32[8, 8][S(1)])
+      redistribute_input(1, [S(1)] -> [S(0)])
+        redistribute_input(t$4: f32[8, 1], [S(1)] -> [S(0)])
+          _dtensor::shard_dim_alltoall(t$4: f32[8, 1], 1, 0, 0)
+      aten::add.Tensor(t$6: f32[1, 8], t$5: f32[1, 8])
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt$8: f32[8, 8][S(0)])
+    aten::sum(dt$8: f32[8, 8][S(0)])
+      aten::sum(t$7: f32[1, 8])
+  torch._tensor.backward(dt$11: f32[][P], gradient=None, retain_graph=None, create_graph=False, inputs=None)
+    aten::ones_like(dt$11: f32[][P], pin_memory=False, memory_format=torch.preserve_format)
+      aten::ones_like(t$10: f32[], pin_memory=False, memory_format=torch.preserve_format)
+    aten::expand(dt$14: f32[][R], [8, 8])
+      aten::expand(t$13: f32[], [8, 8])
+      redistribute_input(t$16: f32[8, 8], [R] -> [S(1)])
+        aten::split.Tensor(t$16: f32[8, 8], 1, 1)
+        aten::clone(t$17: f32[8, 1])
+      aten::_to_copy(t$25: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
+      redistribute_input(t$16: f32[8, 8], [R] -> [S(0)])
+        aten::split.Tensor(t$16: f32[8, 8], 1)
+        aten::new_empty_strided(t$26: f32[8, 1], [8, 1], [1, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
+        aten::copy_(t$35: f32[8, 1], t$26: f32[8, 1])
+        aten::clone(t$27: f32[1, 8])
+      aten::_to_copy(t$36: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
+      aten::new_empty_strided(t$37: f32[1, 8], [1, 8], [8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
+      aten::copy_(t$38: f32[1, 8], t$37: f32[1, 8])""",
         )
 
     def test_debug_mode_einsum(self):
