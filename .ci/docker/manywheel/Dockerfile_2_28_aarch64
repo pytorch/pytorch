@@ -50,6 +50,10 @@ RUN rm install_ninja.sh
 ENV PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${GCCTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
+# Build a newer version of libgomp than that supported in in Almalinux 8.
+COPY ./common/install_libgomp.sh install_libgomp.sh
+RUN bash ./install_libgomp.sh && rm install_libgomp.sh
+
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
 # Override this behaviour by treating every folder as safe
