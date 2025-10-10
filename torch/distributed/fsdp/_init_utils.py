@@ -905,7 +905,6 @@ def _materialize_meta_module(
                 # As a contract to the user, only call `reset_parameters()` if
                 # the module has directly managed parameters/buffers
                 module_state_iter = itertools.chain(
-                    # pyrefly: ignore  # bad-argument-type
                     module.parameters(recurse=False),
                     # pyrefly: ignore  # bad-argument-type
                     module.buffers(recurse=False),
