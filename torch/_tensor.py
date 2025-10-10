@@ -904,24 +904,14 @@ class Tensor(torch._C.TensorBase):
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
     def solve(self, other):
-        from torch._linalg_utils import solve
+        from torch.linalg import solve
 
         return solve(self, other)
 
     def lstsq(self, other):
-        from torch._linalg_utils import lstsq
+        from torch.linalg import lstsq
 
         return lstsq(self, other)
-
-    def eig(self, eigenvectors=False):
-        from torch._linalg_utils import eig
-
-        return eig(self, eigenvectors=eigenvectors)
-
-    def symeig(self, eigenvectors=False):
-        from torch._linalg_utils import _symeig
-
-        return _symeig(self, eigenvectors=eigenvectors)
 
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""

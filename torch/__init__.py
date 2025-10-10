@@ -2309,15 +2309,6 @@ quantized_gru = ops.aten.quantized_gru
 # [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
 # information.
 from torch import masked as masked
-
-# Import removed ops with error message about removal
-from torch._linalg_utils import (  # type: ignore[misc]
-    _symeig as symeig,
-    eig,
-    lstsq,
-    matrix_rank,
-    solve,
-)
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
