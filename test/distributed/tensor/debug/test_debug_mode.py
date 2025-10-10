@@ -4,6 +4,7 @@ import contextlib
 
 import torch
 import torch.distributed as dist
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
 from torch.testing._internal.common_utils import (
@@ -262,14 +263,21 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
     def test_compile(self):
-        @torch.compile
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt)
         def f(x):
             return x.sin().cos()
 
         x = torch.randn(8)
         with DebugMode() as debug_mode:
             f(x)
-        self.assertEqual(len(debug_mode.debug_string()), 0)
+            self.assertEqual(len(debug_mode.debug_string()), 0)
+            f(x)
+            f(x)
+        self.assertEqual(
+            cnt.frame_count, 1
+        )  # check DebugMode doesn't trigger additional recompilations
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
