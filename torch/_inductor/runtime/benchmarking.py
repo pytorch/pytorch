@@ -104,8 +104,8 @@ class Benchmarker:
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: tuple[Any, ...],
-        fn_kwargs: dict[str, Any],
+        fn_args: Optional[tuple[Any, ...]] = None,
+        fn_kwargs: Optional[dict[str, Any]] = None,
         device: Optional[Union[str, torch.device]] = None,
         **kwargs: Any,
     ) -> float:
@@ -120,8 +120,8 @@ class Benchmarker:
 
         Arguments:
         - fn: The function to benchmark.
-        - fn_args: The function's arguments.
-        - fn_kwargs: The function's kwargs.
+        - fn_args: the function's arguments.
+        - fn_kwargs: the function's kwargs.
 
         Keyword Arguments:
         - device: Which device to use for benchmarking. If not provided the device will be attempted
@@ -137,6 +137,13 @@ class Benchmarker:
                 torch.device(device) if isinstance(device, str) else device
             )
         else:
+            if fn_args is None and fn_kwargs is None:
+                raise ValueError(
+                    "`fn_args` and `fn_kwargs` cannot both be None if `device` is not provided."
+                )
+
+            fn_args = fn_args or tuple()
+            fn_kwargs = fn_kwargs or {}
             # pyrefly: ignore  # bad-assignment
             for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
                 if not isinstance(arg_or_kwarg, torch.Tensor):
@@ -154,6 +161,9 @@ class Benchmarker:
                 " in `fn_args` or `fn_kwargs` and `device` not explicitly provided!"
                 " You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."
             )
+
+        fn_args = fn_args or tuple()
+        fn_kwargs = fn_kwargs or {}
 
         # No need to wrap if the callable takes no arguments
         if len(fn_args) == 0 and len(fn_kwargs) == 0:

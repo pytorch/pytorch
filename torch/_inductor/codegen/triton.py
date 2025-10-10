@@ -4726,7 +4726,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             result.writeline("args = get_args()")
             result.writeline(
-                f"ms = benchmarker.benchmark(lambda: call(args), fn_args=tuple(), fn_kwargs=dict(), device={V.graph.get_current_device_or_throw().type}, rep=40)"  # noqa: B950 line too long
+                f"ms = benchmarker.benchmark(lambda: call(args), device={V.graph.get_current_device_or_throw().type}, rep=40)"  # noqa: B950 line too long
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -5671,8 +5671,6 @@ class TritonScheduling(SIMDScheduling):
                 # generating out of range indices for later calls.
                 ms = benchmarker.benchmark(
                     lambda: call(wrapped_jit_function.clone_args(*args)[0]),
-                    fn_args=tuple(),
-                    fn_kwargs=dict(),
                     device=device,
                 )
                 # overhead of cloning args gives bias for fusing the kernel
@@ -5682,8 +5680,6 @@ class TritonScheduling(SIMDScheduling):
                 if len(wrapped_jit_function.mutated_arg_names) > 0:
                     ms = ms - benchmarker.benchmark(
                         lambda: wrapped_jit_function.clone_args(*args),
-                        fn_args=tuple(),
-                        fn_kwargs=dict(),
                         device=str(device),
                     )
 
@@ -5858,14 +5854,10 @@ class TritonScheduling(SIMDScheduling):
                 # generating out of range indices for later calls.
                 ms = benchmarker.benchmark(
                     lambda: call(wrapped_jit_function.clone_args(*args)[0]),
-                    fn_args=tuple(),
-                    fn_kwargs=dict(),
                     device=device,
                 )
                 ms_clone = benchmarker.benchmark(
                     lambda: wrapped_jit_function.clone_args(*args)[0],
-                    fn_args=tuple(),
-                    fn_kwargs=dict(),
                     device=device,
                 )
 

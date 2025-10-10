@@ -113,7 +113,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         return benchmarker.benchmark(
             bm_func,
             fn_args=([*sym_inputs, *args],),
-            fn_kwargs=dict(),
         )
 
     def hash_key(self) -> str:
