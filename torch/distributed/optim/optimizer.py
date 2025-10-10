@@ -52,8 +52,7 @@ class _ScriptLocalOptimizer(nn.Module):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
         # apply functional optimizer step with a list of gradients
         grads: list[Optional[Tensor]] = [
-            all_local_grads[p] if p in all_local_grads else None
-            for p in self._local_params
+            all_local_grads.get(p, None) for p in self._local_params
         ]
 
         self.optim.step(grads)

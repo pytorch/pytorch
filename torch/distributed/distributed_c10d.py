@@ -2002,7 +2002,6 @@ def _new_process_group_helper(
             if not is_gloo_available():
                 raise RuntimeError("Distributed package doesn't have Gloo built in")
             backend_class = ProcessGroupGloo(
-                # pyrefly: ignore  # bad-argument-type
                 backend_prefix_store,
                 group_rank,
                 group_size,
@@ -2048,7 +2047,6 @@ def _new_process_group_helper(
             # RuntimeError if is_ucc_available() returns false.
 
             backend_class = ProcessGroupUCC(
-                # pyrefly: ignore  # bad-argument-type
                 backend_prefix_store,
                 group_rank,
                 group_size,
@@ -5069,7 +5067,7 @@ def _is_safe_to_split() -> bool:
     users must be aware that a pg is only splittable after the first collective is
     issued.
     """
-    return False if _get_default_group().bound_device_id is None else True
+    return _get_default_group().bound_device_id is not None
 
 
 @_time_logger

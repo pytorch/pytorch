@@ -407,6 +407,7 @@ reorder_iterative_debug_limit_to_reorder: Optional[int] = (
     else int(env_str)
 )
 sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    # pyrefly: ignore  # unbound-name
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
 
@@ -1259,7 +1260,7 @@ class triton:
     cudagraph_trees_history_recording = False
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
-    cudagraph_support_input_mutation = False if is_fbcode() else True
+    cudagraph_support_input_mutation = not is_fbcode()
 
     # Maximal number of allowed cudagraph re-record for a function and
     # a cudagraph node due to static input tensor address changes or
@@ -2003,6 +2004,10 @@ _cache_config_ignore_prefix: list[str] = [
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
+write_are_deterministic_algorithms_enabled = (
+    os.getenv("TORCHINDUCTOR_WRITE_ARE_DETERMINISTIC_ALGORITHMS_ENABLED", "1") == "1"
+)
+
 
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
@@ -2046,6 +2051,14 @@ class test_configs:
     # A test config to ease the test for perf of reduction config filtering
     force_filter_reduction_configs = (
         os.getenv("TORCHINDUCTOR_FORCE_FILTER_REDUCTION_CONFIGS") == "1"
+    )
+
+    # a testing config to distort benchmarking result
+    # - empty string to disable
+    # - "inverse" to inverse the numbers
+    # - "random" return a random value
+    distort_benchmarking_result = os.getenv(
+        "TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT", ""
     )
 
 
