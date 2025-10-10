@@ -236,6 +236,7 @@ def create_symbool(shape_env, b: bool) -> SymBool:
 def create_symfloat(shape_env, f: float) -> SymFloat:
     return create_symtype(SymFloat, float, shape_env, f)
 
+
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
 )
