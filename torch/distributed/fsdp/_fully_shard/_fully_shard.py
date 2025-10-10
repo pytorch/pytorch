@@ -50,6 +50,7 @@ def get_cls_to_fsdp_cls() -> dict[type, type]:
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def fully_shard(
     module: nn.Module,
     *,
@@ -63,6 +64,7 @@ def fully_shard(
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def fully_shard(
     module: list[nn.Module],
     *,
