@@ -178,8 +178,16 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
       i = parseGraphCaptureRecordStreamReuse(config, i);
       used_native_specific_option = true;
     } else {
+      const auto& keys =
+          c10::CachingAllocator::AcceleratorAllocatorConfig::getKeys();
       TORCH_CHECK(
-          false, "Unrecognized CachingAllocator option: ", config_item_view);
+          keys.find(config_item_view) != keys.end(),
+          "Unrecognized key '",
+          config_item_view,
+          "' in Accelerator allocator config.");
+      // Skip the key and its value
+      consumeToken(config, ++i, ':');
+      i++;
     }
 
     if (i + 1 < config.size()) {
