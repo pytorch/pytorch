@@ -373,6 +373,12 @@ def _load_global_deps() -> None:
             "cufile": "libcufile.so.*[0-9]",
         }
 
+        # libnvToolsExt.so.*[0-9] is only available on CUDA < 12.9
+        if cuda_version:
+            major, minor, *_ = [__builtins__.int(x) for x in cuda_version.split(".")]
+            if (major, minor) < (12, 9):
+                cuda_libs["nvtx"] = "libnvToolsExt.so.*[0-9]"
+
         is_cuda_lib_err = [
             lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
         ]
