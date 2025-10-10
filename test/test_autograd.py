@@ -11664,18 +11664,39 @@ class TestAutogradForwardMode(TestCase):
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
     def test_min_max_median_backprops_to_all_values(self, device):
+        # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
             x1 = torch.tensor(
                 [1.0, 0.0, 1.0, 0.0, 1.0, 0.0], device=device, requires_grad=True
             )
             x2 = torch.tensor(
-                [float("nan"), float("nan"), float("nan")], requires_grad=True
+                [float("nan"), float("nan"), float("nan")],
+                device=device,
+                requires_grad=True,
             )
             for x in [x1, x2]:
                 y = f(x)
                 y.backward()
                 self.assertEqual(x.grad.sum(), 1.0)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
+
+        # 2) Explicit amin/amax plus the two components of aminmax
+        def amin2(x):
+            return torch.aminmax(x)[0]  # min part
+
+        def amax2(x):
+            return torch.aminmax(x)[1]
+
+        for f in [torch.amin, torch.amax, amax2, amin2]:
+            x1 = torch.tensor(
+                [1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+                device=device,
+                requires_grad=True,
+            )
+            y = f(x1)
+            y.backward()
+            self.assertEqual(x1.grad.sum(), 1.0)
+            self.assertEqual((x1.grad == 1.0 / 3.0).sum(), 3)
 
     def test_scatter_index_reduce_amin_amax_backprops_to_all_values(self, device):
         # tests that gradients are evenly distributed when there are multiple max/min values
