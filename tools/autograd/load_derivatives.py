@@ -969,7 +969,7 @@ def saved_variables(
         if nctype.type == OptionalCType(BaseCType(stringT)):
             formula = re.sub(
                 rf"\b{name}\b",
-                f"{name}.has_value() ? std::optional<std::string_view>({name}.value()) : std::nullopt",
+                f"{name}.has_value() ? std::optional<::std::string_view>({name}.value()) : std::nullopt",
                 formula,
             )
 
