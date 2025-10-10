@@ -1775,9 +1775,9 @@ def _fused_rms_norm(
     # computation_dtype would be one of [Double, Float, ComplexFloat, ComplexDouble]
     if eps is None:
         if computation_dtype in (torch.float32, torch.complex64):
-            eps_val = sys.float_info.epsilon
+            eps_val = torch.finfo(torch.float32).eps
         else:
-            eps_val = sys.float_info.epsilon
+            eps_val = torch.finfo(torch.float64).eps
     else:
         eps_val = eps
 
