@@ -7708,7 +7708,16 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
             return x_sparse * 2
 
         test_tensor = torch.randn(10, 10)
-        self.assertEqual(forward(test_tensor), torch.compile(forward)(test_tensor))
+        pt = forward(test_tensor)
+        eager = torch.compile(forward, backend="eager")(test_tensor)
+        aot_eager = torch.compile(forward, backend="aot_eager")(test_tensor)
+        # Inductor should raise BackendCompilerFailed wrapping NotImplementedError for sparse tensors
+        from torch._dynamo.exc import BackendCompilerFailed
+
+        with self.assertRaisesRegex(
+            BackendCompilerFailed, "Inductor does not support sparse tensors"
+        ):
+            torch.compile(forward)(test_tensor)
 
     def test_nested_sequential_try_with(self):
         def fn(x):
