@@ -17,7 +17,11 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
-from torch.testing._internal.common_utils import TEST_WITH_SLOW_GRADCHECK, parametrize, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    parametrize,
+    TEST_CUDA,
+    TEST_WITH_SLOW_GRADCHECK,
+)
 
 
 try:
