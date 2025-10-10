@@ -8,11 +8,11 @@ Python polyfills for common builtins.
 
 # mypy: allow-untyped-defs
 
-import operator
 import types
 from collections import OrderedDict
 from collections.abc import Hashable, Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
+from operator import eq, ne
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
@@ -29,6 +29,7 @@ if TYPE_CHECKING:
         builtins as builtins,
         functools as functools,
         itertools as itertools,
+        operator as operator,
         os as os,
         pytree as pytree,
         struct as struct,
@@ -112,9 +113,9 @@ def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequenc
     left_len = len(left)
     right_len = len(right)
 
-    if op is operator.eq and left_len != right_len:
+    if op is eq and left_len != right_len:
         return False
-    if op is operator.ne and left_len != right_len:
+    if op is ne and left_len != right_len:
         return True
 
     # Apply `op` to the first pair that differ
