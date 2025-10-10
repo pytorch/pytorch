@@ -1279,15 +1279,17 @@ def infer_size(a, b):
         # Additionally, if either tensor has a zero-sized dimension anywhere,
         # the result will be empty regardless of dimension mismatch, so we can
         # skip the strict equality check.
-        # Also, if one of the sizes is unbacked (no hint), we check that first
-        # to avoid guard_or_false trying to guard on unbacked symints.
+        # If either size is unbacked, we need to be careful not to call
+        # guard_or_false on it (which would try to create a guard), so we
+        # check that first and skip directly to the equality check.
         has_unbacked = not has_hint(sizeA) or not has_hint(sizeB)
         torch._check(
             has_zero_dim
-            or has_unbacked
-            or guard_or_false(sizeA == 1)
-            or guard_or_false(sizeB == 1)
-            or sizeA == sizeB,
+            or (
+                (guard_or_false(sizeA == 1) if not has_unbacked else False)
+                or (guard_or_false(sizeB == 1) if not has_unbacked else False)
+                or sizeA == sizeB
+            ),
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
