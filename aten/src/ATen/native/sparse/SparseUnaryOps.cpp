@@ -259,16 +259,16 @@ Tensor& threshold_backward_sparse_out(
 }
 
 Tensor nan_to_num_sparse(
-    const Tensor &self, std::optional<double> nan,
-    std::optional<double> posinf, std::optional<double> neginf) {
+    const Tensor &self, const std::optional<Scalar> &nan,
+    const std::optional<Scalar> &posinf, const std::optional<Scalar> &neginf) {
   return coalesced_unary_ufunc(
       self, [&](const Tensor &t) {
         return at::nan_to_num(t, nan, posinf, neginf);
       });
 }
 Tensor& nan_to_num_sparse_out(
-    const Tensor &self, std::optional<double> nan,
-    std::optional<double> posinf, std::optional<double> neginf,
+    const Tensor &self, const std::optional<Scalar> &nan,
+    const std::optional<Scalar> &posinf, const std::optional<Scalar> &neginf,
     Tensor &out) {
   return coalesced_unary_ufunc_out(
       self, out, [&](const Tensor &t, Tensor &out) {
@@ -276,8 +276,8 @@ Tensor& nan_to_num_sparse_out(
       });
 }
 Tensor& nan_to_num_sparse_(
-    Tensor &self, std::optional<double> nan,
-    std::optional<double> posinf, std::optional<double> neginf) {
+    Tensor &self, const std::optional<Scalar> &nan,
+    const std::optional<Scalar> &posinf, const std::optional<Scalar> &neginf) {
   TORCH_CHECK(self.is_coalesced(), "nan_to_num_ requires coalesced input");
   return nan_to_num_sparse_out(self, nan, posinf, neginf, self);
 }
