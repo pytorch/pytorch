@@ -84,7 +84,15 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     steps:
+      - name: Checkout code
+        if: ${{ endsWith(matrix.runner, '.b') }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
       - name: Checkout PyTorch
+        if: ${{ !endsWith(matrix.runner, '.b') }}
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
