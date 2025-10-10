@@ -1905,7 +1905,7 @@ static auto cell_params_base_registry =
             [](CellParamsSerializationType state)
                 -> c10::intrusive_ptr<CellParamsBase> {
               std::string type = std::get<0>(state);
-              TORCH_INTERNAL_ASSERT(cell_params_deserializers.count(type));
+              TORCH_INTERNAL_ASSERT(cell_params_deserializers.contains(type));
               return cell_params_deserializers[type](std::move(state));
             });
 
