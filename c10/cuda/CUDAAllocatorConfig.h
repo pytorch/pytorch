@@ -1,15 +1,9 @@
 #pragma once
 
+#include <c10/core/AllocatorConfig.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
-
-#include <atomic>
-#include <cstddef>
-#include <cstdlib>
-#include <mutex>
-#include <string>
-#include <vector>
 
 namespace c10::cuda::CUDACachingAllocator {
 
@@ -111,13 +105,40 @@ class C10_CUDA_API CUDAAllocatorConfig {
         env = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
       }
 #endif
-      inst->parseArgs(env);
+      // Note: keep the parsing order and logic stable to avoid potential
+      // performance regressions in internal tests.
+      if (!env.has_value()) {
+        auto env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+      }
+      if (env.has_value()) {
+        inst->parseArgs(env.value());
+      }
       return inst;
     })();
     return *s_instance;
   }
 
-  void parseArgs(const std::optional<std::string>& env);
+  // Use `Construct On First Use Idiom` to avoid `Static Initialization Order`
+  // issue.
+  static const std::unordered_set<std::string>& getKeys() {
+    static std::unordered_set<std::string> keys{
+        "backend",
+        // keep BC for Rocm: `cuda` -> `cud` `a`, to avoid hipify issues
+        // NOLINTBEGIN(bugprone-suspicious-missing-comma,-warnings-as-errors)
+        "release_lock_on_cud"
+        "amalloc",
+        "pinned_use_cud"
+        "a_host_register",
+        // NOLINTEND(bugprone-suspicious-missing-comma,-warnings-as-errors)
+        "release_lock_on_hipmalloc",
+        "pinned_use_hip_host_register",
+        "graph_capture_record_stream_reuse",
+        "pinned_reserve_segment_size_mb",
+        "pinned_num_register_threads"};
+    return keys;
+  }
+
+  void parseArgs(const std::string& env);
 
  private:
   CUDAAllocatorConfig();
@@ -174,7 +195,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::mutex m_last_allocator_settings_mutex;
 };
 
-// General caching allocator utilities
-C10_CUDA_API void setAllocatorSettings(const std::string& env);
+// Keep this for backwards compatibility
+using c10::CachingAllocator::setAllocatorSettings;
 
 } // namespace c10::cuda::CUDACachingAllocator
