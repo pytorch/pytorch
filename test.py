@@ -1,5 +1,6 @@
 import torch
 
+
 def fuzzed_program_2():
     _uniq_wide = torch.unique(torch.arange(1)).float()
     return torch.matmul(_uniq_wide, torch.full((1, 18), 0.5))

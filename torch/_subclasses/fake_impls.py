@@ -1243,7 +1243,10 @@ def register_fast_op_impl(func: OpOverload):
 
 # infer_size_impl in ExpandUtils
 def infer_size(a, b):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false, has_free_unbacked_symbols
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        has_free_unbacked_symbols,
+    )
 
     dimsA = len(a)
     dimsB = len(b)
@@ -1267,23 +1270,23 @@ def infer_size(a, b):
         # expression of an or statement as-is, without bool()'ing it; if this
         # were not the case, we'd need to write this using torch.sym_or() or
         # something like that).
-        
+
         # Special handling for unbacked symbols: if sizeA contains unbacked
         # symbols, we allow broadcasting and prefer sizeB for the output size
         sizeA_unbacked = has_free_unbacked_symbols(sizeA)
         sizeB_unbacked = has_free_unbacked_symbols(sizeB)
-        
+
         # If sizeA is unbacked, prefer sizeB for the output size
         # This handles cases like unique() output being broadcast with a known size
         if sizeA_unbacked and not sizeB_unbacked:
             expandedSizes[i] = sizeB
             continue
-        
+
         # If sizeB is unbacked but sizeA is not, prefer sizeA
         if sizeB_unbacked and not sizeA_unbacked:
             expandedSizes[i] = sizeA
             continue
-        
+
         # Standard broadcasting logic
         torch._check(
             guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
