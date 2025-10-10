@@ -7374,6 +7374,11 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
     @parametrize("backend", ["eager", "inductor"])
     def test_issue164247(self, backend: str):
+        if backend == "inductor" and torch._dynamo.config.dynamic_shapes:
+            raise unittest.SkipTest(
+                "Skip only in dynamic-shapes wrapper (known issue #157612)"
+            )
+
         class MixedFakeModeModel(nn.Module):
             def __init__(self, dim=64):
                 super().__init__()
