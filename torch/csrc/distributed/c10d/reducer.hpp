@@ -122,15 +122,7 @@ class TORCH_API Reducer {
 
   // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
   // according to when tensors received grads in the backward pass.
-  // TODO this function makes broadcast communication call and
-  // could be overlapped with next forward() call, thus
-  // it could be async. Will make it async when rebuilding buckets for
-  // find_unused_parameters = true case, as we could rebuild buckets more than
-  // once for find_unused_parameters = true case, where subgraphs are trained
-  // and parameter indices order may change more frequently.
-  // For find_unused_parameters = false case, buckets are only rebuilt once,
-  // the performance cost is negligible. Returns true if the buckets were
-  // rebuilt.
+  // Returns true if the buckets were rebuilt.
   bool rebuild_buckets();
 
   void setSparseMetadata(std::map<std::string, at::Tensor>& metadata);
@@ -142,10 +134,28 @@ class TORCH_API Reducer {
       const c10::List<c10::intrusive_ptr<c10::ivalue::Future>>& futs);
 
   // Returns true if we should rebuild buckets, else false. We only rebuild
-  // buckets once after the first iteration and never rebuild them if
-  // find_unused_parameters_.
+  // buckets once after the first iteration.
+  // We always rebuild buckets when find_unused_parameters=False, as the 
+  // graph is static when find_unused_parameters=False.
+  // There are two major cases when find_unused_parameters=True:
+  // 1. If grad ready order does not change over iterations, then
+  // enabling bucket rebuild after the first iteration can potentially 
+  // improve performance.
+  // 2. If grad ready order changes over iterations, then using static bucket 
+  // order or dynamic bucket order in the first iteration does not matter
+  // much, as order changes per iteration. It is expensive to rebuild 
+  // buckets every iteration for this case though, as bucket rebuild
+  // requires a broadcast collective call. In fact, the benefit of rebuilding
+  // buckets is almost completely outweighed by the collective broadcast.
+  // So by default buckets are rebuilt when find_unused_parameters=True, but
+  // setting os.environ["DISABLE_BUCKET_REBUILD"] = "1" overrides the 
+  // behavior if users want to disable this feature for debugging purposes.
   inline bool should_rebuild_buckets() const {
-    return (static_graph_ || !find_unused_parameters_) && !has_rebuilt_bucket_;
+    return (static_graph_ || 
+        !find_unused_parameters_ ||
+        (find_unused_parameters_ && (rebuild_bucket_iter_counter >= rebuild_bucket_after_every)) ||
+        (getCvarString({"DISABLE_BUCKET_REBUILD"}, "1") != "0")
+    ) && !has_rebuilt_bucket_;
   }
 
   // Pushes all parameters to be rebuilt.
@@ -563,6 +573,11 @@ class TORCH_API Reducer {
   void checkAndRaiseMarkedTwiceError(size_t curVariableIndex);
   // Retrieves parameter corresponding to the given VariableIndex.
   at::Tensor& get_param_from_index(size_t index);
+  // Counter that determines the number of iterations we wait
+  // to rebuild buckets
+  std::size_t rebuild_bucket_after_every = 1;
+  // Number of iterations since last bucket rebuild
+  std::size_t rebuild_bucket_iter_counter;
   // Python reducer keeps C++ reducer initialized. To remove this flag,
   // we need to refactor the DDP wrapper's initialization.
   bool use_python_reducer_;

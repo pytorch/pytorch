@@ -532,6 +532,7 @@ void Reducer::push_rebuilt_params_for_all_indices() {
   for (const auto variable_index : c10::irange(variable_count)) {
     push_rebuilt_params(variable_index);
   }
+  rebuild_bucket_iter_counter = 0;
 }
 
 void Reducer::push_rebuilt_params(const size_t& index) {
@@ -926,7 +927,10 @@ void Reducer::mark_variable_ready(size_t variable_index) {
       }
       // Check that all buckets were completed and had their work kicked off.
       TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
-      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
+      // pushing unused parameters at the end of buckets for better performance.
+      // This code will be hit only for cases when static_graph_after_1st_iteration()
+      // is True or static_graph = False.
+      if (should_rebuild_buckets()) {
         for (const auto& unused_index : unused_parameters_) {
           push_rebuilt_params(unused_index);
         }
@@ -1843,6 +1847,7 @@ bool Reducer::rebuild_buckets() {
   // exception below.
   std::lock_guard<std::mutex> lock(mutex_);
   ensure_prior_reduction_finished();
+  rebuild_bucket_iter_counter += 1;
   if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
     return false;
   }
