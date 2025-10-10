@@ -1553,6 +1553,39 @@ graph():
             ep = export(m, (x, y))
         self.assertEqual(ep.module()(x, y), m(x, y))
 
+    def test_subclass_context(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        input = TwoTensor(
+            TwoTensor(torch.randn(4, 4), torch.rand(4, 4)),
+            TwoTensor(torch.randn(4, 4), torch.rand(4, 4)),
+        )
+
+        input_test = TwoTensor(
+            TwoTensor(torch.randn(6, 6), torch.rand(6, 6)),
+            TwoTensor(torch.randn(6, 6), torch.rand(6, 6)),
+        )
+
+        for strict in [True, False]:
+            dim = torch.export.ShapesCollection()
+            dim[input] = [Dim.STATIC, Dim.AUTO]
+            ep = torch.export.export(Foo(), (input,), strict=strict, dynamic_shapes=dim)
+            self.assertExpectedInline(
+                str(ep.graph).strip(),
+                """\
+graph():
+    %x : [num_users=1] = placeholder[target=x]
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, 1), kwargs = {})
+    return (add,)""",
+            )
+
+            with self.assertRaisesRegex(
+                AssertionError, escape("Guard failed: x.size()[0] == 4")
+            ):
+                ep.module()(input_test)
+
     def test_basic_non_strict_real_tensor(self):
         class Basic(torch.nn.Module):
             def __init__(self) -> None:
@@ -3255,6 +3288,32 @@ def forward(self, causal_mask, fill_value):
                     "x": {0: Dim.DYNAMIC(min=32)},
                 },
             )
+
+    def test_unbacked_slice_forward(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, xs):
+                u0, u1 = xs.tolist()
+                out = x[u0:u1]
+                return out
+
+        x = torch.randn(10)
+        idxs = torch.tensor([3, 6])
+        mod = Foo()
+        ep = export(mod, (x, idxs))
+        for xs in [
+            idxs,
+            torch.tensor([-9, -1]),
+            torch.tensor([-10000, 10000]),
+            torch.tensor([0, -10]),
+        ]:
+            self.assertTrue(torch.allclose(ep.module()(x, xs), mod(x, xs)))
+
+        # check unbacked bindings
+        # should be 4 symbols: u0, u1, output size, output storage offset
+        bound_unbacked = set()
+        for node in ep.graph.nodes:
+            bound_unbacked |= node.meta.get("unbacked_bindings", {}).keys()
+        self.assertEqual(len(bound_unbacked), 4)
 
     def test_dim_hint_ranges(self):
         class Foo(torch.nn.Module):
@@ -5389,7 +5448,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         # check ShapeEnv counters compared to binding indices
         shape_env = _get_shape_env_from_gm(ep.graph_module)
-        next_index = next(shape_env.unbacked_symint_counter)
+        next_index = shape_env.unbacked_symint_counter
+        shape_env.unbacked_symint_counter += 1
         for symbol in bound:
             self.assertTrue(symbol_is_type(symbol, SymT.UNBACKED_INT))
             self.assertTrue(
@@ -6180,7 +6240,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    def test_unbacked_slice(self):
+    def test_unbacked_slice_simple(self):
         class M(torch.nn.Module):
             def forward(self, scores, score_thr, topk: torch.Tensor, results=None):
                 valid_mask = scores > score_thr
@@ -8899,12 +8959,12 @@ def forward(self, b_a_buffer, x):
                 self.assertExpectedInline(
                     ep.graph_module.code.strip(),
                     """\
-def forward(self, b____modules__a____buffers__buffer, x):
+def forward(self, b_a_buffer, x):
     sym_size_int_1 = torch.ops.aten.sym_size.int(x, 0)
     gt = sym_size_int_1 > 4;  sym_size_int_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b____modules__a____buffers__buffer));  gt = true_graph_0 = false_graph_0 = x = b____modules__a____buffers__buffer = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, (x, b_a_buffer));  gt = true_graph_0 = false_graph_0 = x = b_a_buffer = None
     getitem = cond[0];  cond = None
     return (getitem,)""",
                 )
@@ -10233,6 +10293,28 @@ graph():
         args = (torch.randn(4, 3),)
         ep = export(m, args)
         self.assertEqual(ep.module()(*args), m(*args))
+
+    def test_cdist_forward_compute_mode_zero_export(self):
+        class CDistModel(torch.nn.Module):
+            def __init__(self):
+                super(CDistModel, self).__init__()
+
+            def forward(self, x, y, compute_mode):
+                return torch.ops.aten._cdist_forward(
+                    x, y, p=2.0, compute_mode=compute_mode
+                )
+
+        x = torch.ones([3, 3])
+        y = torch.ones([3, 3])
+        model = CDistModel()
+
+        expected_none = model(x, y, None)
+        ep_none = torch.export.export(model, (x, y, None))
+        self.assertTrue(torch.equal(ep_none.module()(x, y, None), expected_none))
+
+        expected_0 = model(x, y, 0)
+        ep_0 = torch.export.export(model, (x, y, 0))
+        self.assertTrue(torch.equal(ep_0.module()(x, y, 0), expected_0))
 
     def test_export_then_compile_tensor_ctor(self):
         class M(torch.nn.Module):
@@ -13609,29 +13691,16 @@ def forward(self, x):
             torch.randn(4),
         )
         ep = export(Foo(), inputs)
-        if is_inline_and_install_strict_test(self._testMethodName):
-            # when installed, prefix name
-            expected_names = [  # user inputs should be prioritized, unprefixed
-                ("p____parameters__param", InputKind.PARAMETER),
-                ("b____buffers__alpha", InputKind.BUFFER),
-                ("b____buffers__beta", InputKind.BUFFER),
-                ("c_gamma_1", InputKind.CONSTANT_TENSOR),
-                ("p_param", InputKind.USER_INPUT),
-                ("b_alpha", InputKind.USER_INPUT),
-                ("b_beta", InputKind.USER_INPUT),
-                ("c_gamma", InputKind.USER_INPUT),
-            ]
-        else:
-            expected_names = [  # user inputs should be prioritized, unprefixed
-                ("p_param_1", InputKind.PARAMETER),
-                ("b_alpha_1", InputKind.BUFFER),
-                ("b_beta_1", InputKind.BUFFER),
-                ("c_gamma_1", InputKind.CONSTANT_TENSOR),
-                ("p_param", InputKind.USER_INPUT),
-                ("b_alpha", InputKind.USER_INPUT),
-                ("b_beta", InputKind.USER_INPUT),
-                ("c_gamma", InputKind.USER_INPUT),
-            ]
+        expected_names = [  # user inputs should be prioritized, unprefixed
+            ("p_param_1", InputKind.PARAMETER),
+            ("b_alpha_1", InputKind.BUFFER),
+            ("b_beta_1", InputKind.BUFFER),
+            ("c_gamma_1", InputKind.CONSTANT_TENSOR),
+            ("p_param", InputKind.USER_INPUT),
+            ("b_alpha", InputKind.USER_INPUT),
+            ("b_beta", InputKind.USER_INPUT),
+            ("c_gamma", InputKind.USER_INPUT),
+        ]
         real_names = [
             (spec.arg.name, spec.kind) for spec in ep.graph_signature.input_specs
         ]
@@ -15159,9 +15228,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    # TODO: following tests should be fixed
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_preserve_annotation(self):
         class M(torch.nn.Module):
             def forward(self, x):

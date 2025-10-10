@@ -476,7 +476,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             # u0==u1 assume the same, no broadcasting!
             torch._check(
                 x == y,
-                "sizes assumed to be the same due to unbacked broadcasting semantics",
+                lambda: "sizes assumed to be the same due to unbacked broadcasting semantics",
             )
 
         return False
@@ -3613,7 +3613,7 @@ def istft(
             n_fft // 2 + 1 == fft_size,
             lambda: (
                 "istft expected the frequency dimension (3rd to the last) of the input tensor "
-                + "to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
+                + f"to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
             ),
         )
     else:
@@ -3621,7 +3621,7 @@ def istft(
             n_fft == fft_size,
             lambda: (
                 "istft expected the frequency dimension (3rd to the last) of the input tensor "
-                + "to match n_fft when onesided=False, but got {fft_size}",
+                + f"to match n_fft when onesided=False, but got {fft_size}",
             ),
         )
 
@@ -5928,7 +5928,8 @@ def norm(
 @out_wrapper()
 def trace(self: TensorLikeType) -> TensorLikeType:
     torch._check(
-        self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
+        self.ndim == 2,
+        lambda: f"expected a matrix, but got tensor with dim {self.ndim}",
     )
     return torch.sum(torch.diag(self, 0))
 
