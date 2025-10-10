@@ -5,11 +5,12 @@ from collections import namedtuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.nn.attention import varlen_attn
+from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 VarlenShape = namedtuple(
@@ -21,6 +22,18 @@ default_tolerances = {
     torch.bfloat16: {"atol": 9e-2, "rtol": 5e-2},
     torch.float32: {"atol": 1e-5, "rtol": 1.3e-6},
 }
+
+
+class OpLoggingMode(TorchDispatchMode):
+    """Logging mode that captures all dispatched operations"""
+
+    def __init__(self):
+        self.called_ops = []
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        op_name = str(func)
+        self.called_ops.append(op_name)
+        return func(*args, **(kwargs or {}))
 
 
 class AttentionBlock(nn.Module):
@@ -146,6 +159,45 @@ class TestVarlenAttention(NNTestCase):
         self.assertEqual(output.shape, (total_tokens, shape.embed_dim))
         self.assertEqual(output.device, torch.device(device))
         self.assertEqual(output.dtype, dtype)
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @parametrize("dtype", [torch.bfloat16, torch.float16])
+    def test_custom_op_registration(self, device, dtype):
+        torch.manual_seed(42)
+
+        shape = VarlenShape(batch_size=2, max_seq_len=512, embed_dim=1024, num_heads=16)
+
+        attention_block = AttentionBlock(
+            shape.embed_dim, shape.num_heads, device, dtype
+        )
+
+        total_tokens = shape.batch_size * shape.max_seq_len
+        x_packed = torch.randn(
+            total_tokens, shape.embed_dim, device=device, dtype=dtype
+        )
+        cu_seq = torch.tensor(
+            [0, shape.max_seq_len, total_tokens], device=device, dtype=torch.int32
+        )
+
+        compiled_forward = torch.compile(
+            attention_block.forward_varlen, backend="eager", fullgraph=True
+        )
+        with OpLoggingMode() as mode:
+            output = compiled_forward(
+                x_packed, cu_seq, shape.max_seq_len, is_causal=False
+            )
+            self.assertEqual(output.shape, (total_tokens, shape.embed_dim))
+            self.assertEqual(output.device, torch.device(device))
+            self.assertEqual(output.dtype, dtype)
+
+        called_ops = mode.called_ops
+
+        custom_op_called = any(
+            "torch_nn_attention._varlen_attn" in op for op in called_ops
+        )
+        assert custom_op_called
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
