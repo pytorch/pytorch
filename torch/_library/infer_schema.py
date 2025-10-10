@@ -9,6 +9,8 @@ import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
+from .opaque_object import OpaqueType, OpaqueTypeStr
+
 
 # This is used as a negative test for
 # test_custom_ops.py::TestTypeConversion::test_type_eval.
@@ -124,7 +126,13 @@ def infer_schema(
         annotation_type, _ = unstringify_type(param.annotation)
 
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if annotation_type.__origin__ is tuple:
+            if annotation_type == torch._C.ScriptObject:
+                error_fn(
+                    f"Parameter {name}'s type cannot be inferred from the schema "
+                    "as it is a ScriptObject. Please manually specify the schema "
+                    "using the `schema=` kwarg with the actual type of the ScriptObject."
+                )
+            elif annotation_type.__origin__ is tuple:
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
@@ -159,6 +167,7 @@ def infer_schema(
             schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor') :]}"
         seen_args.add(name)
         if param.default is inspect.Parameter.empty:
+            # pyrefly: ignore  # bad-argument-type
             params.append(f"{schema_type} {name}")
         else:
             default_repr = None
@@ -176,6 +185,7 @@ def infer_schema(
                     f"Parameter {name} has an unsupported default value type {type(param.default)}. "
                     f"Please file an issue on GitHub so we can prioritize this."
                 )
+            # pyrefly: ignore  # bad-argument-type
             params.append(f"{schema_type} {name}={default_repr}")
     if mutates_args != UNKNOWN_MUTATES:
         mutates_args_not_seen = set(mutates_args) - seen_args
@@ -202,6 +212,7 @@ def derived_types(
 ):
     result: list[tuple[Union[type, typing._SpecialForm, GenericAlias], str]] = [
         (base_type, cpp_type),
+        # pyrefly: ignore  # not-a-type
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
 
@@ -220,6 +231,7 @@ def derived_types(
     if optional_base_list:
         result.extend(
             (seq_typ, f"{cpp_type}?[]")
+            # pyrefly: ignore  # not-a-type
             for seq_typ in derived_seq_types(typing.Optional[base_type])
         )
     if optional_list_base:
@@ -231,6 +243,7 @@ def derived_types(
 
 
 def get_supported_param_types():
+    # pyrefly: ignore  # bad-assignment
     data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
@@ -241,6 +254,7 @@ def get_supported_param_types():
         (types.Number, "Scalar", True, False, False),
         (dtype, "ScalarType", False, False, False),
         (device, "Device", False, False, False),
+        (OpaqueType, OpaqueTypeStr, False, False, False),
     ]
     result = []
     for line in data:
@@ -273,6 +287,7 @@ def parse_return(annotation, error_fn):
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
+        # pyrefly: ignore  # index-error
         return SUPPORTED_RETURN_TYPES[annotation]
 
     args = typing.get_args(annotation)

@@ -220,6 +220,12 @@ class TestCppExtensionJIT(common.TestCase):
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/163721
+        lib = torch.mps.compile_shader("void kernel noop(device float *x) {}")
+        lib.noop(mps_output)
+        module.mps_add_one_new_context(mps_output)
+        self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
+
     def _run_jit_cuda_archflags(self, flags, expected):
         # Compile an extension with given `flags`
         def _check_cuobjdump_output(expected_values, is_ptx=False):
@@ -322,12 +328,15 @@ class TestCppExtensionJIT(common.TestCase):
                 [f"{capability[0]}{capability[1]}" for capability in capabilities],
                 None,
             ),
-            "Maxwell+Tegra;6.1": (["53", "61"], None),
-            "Volta": (["70"], ["70"]),
         }
         archflags["7.5+PTX"] = (["75"], ["75"])
-        archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
-        if int(torch.version.cuda.split(".")[0]) < 12:
+        major, minor = map(int, torch.version.cuda.split(".")[:2])
+        if major < 12 or (major == 12 and minor <= 9):
+            # Compute capability <= 7.0 is only supported up to CUDA 12.9
+            archflags["Maxwell+Tegra;6.1"] = (["53", "61"], None)
+            archflags["Volta"] = (["70"], ["70"])
+            archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
+        if major < 12:
             # CUDA 12 drops compute capability < 5.0
             archflags["Pascal 3.5"] = (["35", "60", "61"], None)
 
@@ -1224,7 +1233,7 @@ class TestCppExtensionJIT(common.TestCase):
         #include <torch/csrc/inductor/aoti_runtime/utils.h>
         #include <torch/csrc/inductor/aoti_torch/utils.h>
         #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-        #include <torch/csrc/stable/library.h>
+        #include <torch/csrc/stable/stableivalue_conversions.h>
 
         using RAIIATH = torch::aot_inductor::RAIIAtenTensorHandle;
 

@@ -10,9 +10,9 @@ namespace c10::cuda {
 
 void c10_cuda_check_implementation(
     const int32_t err,
-    const char* /*filename*/,
-    const char* /*function_name*/,
-    const int /*line_number*/,
+    const char* filename,
+    const char* function_name,
+    const uint32_t line_number,
     const bool include_device_assertions) {
   const auto cuda_error = static_cast<cudaError_t>(err);
   const auto cuda_kernel_failure = include_device_assertions
@@ -30,7 +30,7 @@ void c10_cuda_check_implementation(
   check_message.append("CUDA error: ");
   const char* error_string = cudaGetErrorString(cuda_error);
   check_message.append(error_string);
-  check_message.append(c10::cuda::get_cuda_error_help(error_string));
+  check_message.append(c10::cuda::get_cuda_error_help(cuda_error));
   check_message.append(c10::cuda::get_cuda_check_suffix());
   check_message.append("\n");
   if (include_device_assertions) {
@@ -41,7 +41,7 @@ void c10_cuda_check_implementation(
   }
 #endif
   throw c10::AcceleratorError(
-      {__func__, __FILE__, int32_t(__LINE__)}, err, check_message);
+      {function_name, filename, line_number}, err, check_message);
 }
 
 } // namespace c10::cuda

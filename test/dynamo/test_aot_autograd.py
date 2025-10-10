@@ -715,6 +715,42 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         out = compiled_fn(x, y)
         out.sum().backward()
 
+    def test_joint_custom_pass(self):
+        is_called = False
+
+        def joint_custom_pass(joint_gm: torch.fx.GraphModule, joint_inputs):
+            nonlocal is_called
+            is_called = True
+
+            self.assertTrue(isinstance(joint_gm, torch.fx.GraphModule))
+
+            self.assertTrue(isinstance(joint_inputs, tuple))
+            # first input is list of primals
+            self.assertTrue(isinstance(joint_inputs[0], list))
+            # second input is list of tangents
+            self.assertTrue(isinstance(joint_inputs[1], list))
+
+            return joint_gm
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        x = torch.randn(10, requires_grad=False)
+        compiled_fn = torch.compile(M(), backend="aot_eager")
+
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
+            _ = compiled_fn(x)
+        # x doesn't require grad, shouldn't trigger joint graph compiler
+        self.assertFalse(is_called)
+
+        y = torch.randn(10, requires_grad=True)
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
+            out = compiled_fn(y)
+        # y requires grad, should trigger joint graph compiler
+        self.assertTrue(is_called)
+        out.sum().backward()
+
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     @patch("torch._functorch.config.debug_assert", True)
@@ -880,43 +916,43 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
             dedent(
                 """\
 SeqNr|OrigAten|SrcFn|FwdSrcFn
-0|aten.convolution.default|l__self___conv1|
-0|aten.add.Tensor|l__self___bn1|
-1|aten._native_batch_norm_legit_functional.default|l__self___bn1|
-2|aten.relu.default|l__self___relu1|
-2|aten.detach.default|l__self___relu1|
-2|aten.detach.default|l__self___relu1|
+0|aten.convolution.default|conv2d|
+0|aten.add.Tensor|add_|
+1|aten._native_batch_norm_legit_functional.default|batch_norm|
+2|aten.relu.default|relu|
+2|aten.detach.default|relu|
+2|aten.detach.default|relu|
 3|aten.add.Tensor|add|
 4|aten.view.default|flatten|
-5|aten.view.default|l__self___fc1|
-6|aten.t.default|l__self___fc1|
-7|aten.addmm.default|l__self___fc1|
-8|aten.view.default|l__self___fc1|
-9|aten.sub.Tensor|l__self___loss_fn|
-10|aten.abs.default|l__self___loss_fn|
-11|aten.mean.default|l__self___loss_fn|
-11|aten.ones_like.default||l__self___loss_fn
-11|aten.expand.default||l__self___loss_fn
-11|aten.div.Scalar||l__self___loss_fn
-10|aten.sgn.default||l__self___loss_fn
-10|aten.mul.Tensor||l__self___loss_fn
-8|aten.view.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.mm.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.mm.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.sum.dim_IntList||l__self___fc1
-7|aten.view.default||l__self___fc1
-6|aten.t.default||l__self___fc1
-5|aten.view.default||l__self___fc1
-4|aten.view.default||
-2|aten.detach.default||l__self___relu1
-2|aten.detach.default||l__self___relu1
-2|aten.threshold_backward.default||l__self___relu1
-1|aten.native_batch_norm_backward.default||l__self___bn1
-0|aten.convolution_backward.default||l__self___conv1
-11|aten.add.Tensor||l__self___loss_fn
+5|aten.view.default|linear|
+6|aten.t.default|linear|
+7|aten.addmm.default|linear|
+8|aten.view.default|linear|
+9|aten.sub.Tensor|l1_loss|
+10|aten.abs.default|l1_loss|
+11|aten.mean.default|l1_loss|
+11|aten.ones_like.default||l1_loss
+11|aten.expand.default||l1_loss
+11|aten.div.Scalar||l1_loss
+10|aten.sgn.default||l1_loss
+10|aten.mul.Tensor||l1_loss
+8|aten.view.default||linear
+7|aten.t.default||linear
+7|aten.mm.default||linear
+7|aten.t.default||linear
+7|aten.mm.default||linear
+7|aten.t.default||linear
+7|aten.sum.dim_IntList||linear
+7|aten.view.default||linear
+6|aten.t.default||linear
+5|aten.view.default||linear
+4|aten.view.default||flatten
+2|aten.detach.default||relu
+2|aten.detach.default||relu
+2|aten.threshold_backward.default||relu
+1|aten.native_batch_norm_backward.default||batch_norm
+0|aten.convolution_backward.default||conv2d
+11|aten.add.Tensor||l1_loss
 """
             ),
         )
@@ -1213,7 +1249,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch(donated_buffer=True)
     def test_donated_buffer1(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         @torch.compile()
         def relu(x):
@@ -1233,7 +1269,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer2(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         # we will reuse the graph for g across f1 and f2
         @torch.compile()
@@ -1255,7 +1291,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer3(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         # we will reuse the graph for g across f1 and f2
         @torch.compile()
@@ -1278,7 +1314,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer4(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
@@ -1309,7 +1345,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer5(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         @torch.compile()
         def f(x, z):
@@ -1339,6 +1375,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_donated_buffer6(self):
         if is_dynamic_shape_test(self._testMethodName):
             # parameters should not be dynamic shape
@@ -1346,7 +1383,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             #    SymNodeVariable() is not a constant
             return
 
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         def fn(x):
             p = torch.nn.Parameter(x + 123)

@@ -23,7 +23,6 @@ TARGET_DET_LIST = [
     "test_cpp_extensions_aot_ninja",
     "test_cpp_extensions_aot_no_ninja",
     "test_cpp_extensions_jit",
-    "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_cuda",
@@ -187,7 +186,7 @@ def get_dep_modules(test: str) -> set[str]:
 
 
 def parse_test_module(test: str) -> str:
-    return test.split(".")[0]
+    return test.split(".", maxsplit=1)[0]
 
 
 def print_to_stderr(message: str) -> None:

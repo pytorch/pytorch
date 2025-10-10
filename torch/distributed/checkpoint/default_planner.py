@@ -408,7 +408,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
             return True
 
         if key in self.keys:
-            True
+            return True
 
         unflattened_keys: list[str] = []
         planner_data = metadata.planner_data.get(key)
@@ -548,7 +548,7 @@ def create_default_global_save_plan(
     for plan in all_plans:
         new_items = []
         for item in plan.items:
-            if not item.type == WriteItemType.SHARD:
+            if item.type != WriteItemType.SHARD:
                 assert item.index.fqn not in md
 
             if item.type == WriteItemType.BYTE_IO:
@@ -654,7 +654,7 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
 
         # Check whether combined chunk cover the whole tensor
         tensor_volume = reduce(operator.mul, value.size, 1)
-        if chunks_volume != tensor_volume:
+        if len(global_plan) > 1 and chunks_volume != tensor_volume:
             logger.warning(
                 """
                     key:%s invalid fill tensor-volume:

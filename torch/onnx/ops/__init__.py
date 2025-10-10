@@ -17,14 +17,14 @@ __all__ = [
 ]
 
 
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.onnx.ops import _impl, _symbolic_impl
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 # https://github.com/onnx/onnx/blob/f542e1f06699ea7e1db5f62af53355b64338c723/onnx/onnx.proto#L597
@@ -208,7 +208,7 @@ def symbolic_multi_out(
 
                 # Create a symbolic ONNX operator with the name "CustomOp" in the "custom_domain" domain.
                 # The output tensors will have the specified dtypes and shapes
-                (out1, out2) = torch.onnx.ops.symbolic(
+                (out1, out2) = torch.onnx.ops.symbolic_multi_out(
                     "custom_domain::CustomOp",
                     (x,),
                     dict(attr_key="attr_value"),

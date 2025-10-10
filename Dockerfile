@@ -47,26 +47,13 @@ WORKDIR /opt/pytorch
 COPY . .
 RUN git submodule update --init --recursive
 
-FROM conda as build
-ARG CMAKE_VARS
-WORKDIR /opt/pytorch
-COPY --from=conda /opt/conda /opt/conda
-COPY --from=submodule-update /opt/pytorch /opt/pytorch
-RUN make triton
-RUN --mount=type=cache,target=/opt/ccache \
-    export eval ${CMAKE_VARS} && \
-    TORCH_CUDA_ARCH_LIST="7.0 7.2 7.5 8.0 8.6 8.7 8.9 9.0 9.0a" TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
-    CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
-    python -m pip install --no-build-isolation -v .
-
 FROM conda as conda-installs
 ARG PYTHON_VERSION=3.11
 ARG CUDA_PATH=cu121
-ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=whl/nightly
 # Automatically set by buildx
-RUN /opt/conda/bin/conda update -y -n base -c defaults conda
-RUN /opt/conda/bin/conda install -y python=${PYTHON_VERSION}
+# pinning version of conda here see: https://github.com/pytorch/pytorch/issues/164574
+RUN /opt/conda/bin/conda install -y python=${PYTHON_VERSION} conda=25.7.0
 
 ARG TARGETPLATFORM
 
@@ -109,4 +96,5 @@ WORKDIR /workspace
 
 FROM official as dev
 # Should override the already installed version from the official-image stage
-COPY --from=build /opt/conda /opt/conda
+COPY --from=conda /opt/conda /opt/conda
+COPY --from=submodule-update /opt/pytorch /opt/pytorch

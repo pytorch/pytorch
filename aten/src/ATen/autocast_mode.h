@@ -377,7 +377,7 @@ Keep it simple for now by assuming only one such flag is
 present in the argument list.  If I ever need a function
 with more than flag I'll figure out something else.
 The policy is:
-If the user has explicity specified a dtype, respect it.
+If the user has explicitly specified a dtype, respect it.
 Otherwise, set it to the autocast type.
 ********************************************************/
 

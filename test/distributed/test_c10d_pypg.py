@@ -181,6 +181,19 @@ class TestDDPWithWorkWrapper(AbstractDDPSingleRank, MultiThreadedTestCase):
         return True
 
 
+class BlockWork(dist._Work):
+    """
+    Dummy work that is used to test blocking the current stream.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.future_ = torch.futures.Future()
+
+    def get_future(self):
+        return self.future_
+
+
 class TestPyProcessGroup(TestCase):
     def test_attr_overrides(self):
         pg = DummyAttrProcessGroup(0, 1)
@@ -202,34 +215,61 @@ class TestPyProcessGroup(TestCase):
 
     @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
     def test_block_current_stream(self) -> None:
-        class BlockWork(dist._Work):
-            def __init__(self):
-                super().__init__()
-                self.future_ = torch.futures.Future()
+        torch.cuda.synchronize()
 
-            def get_future(self):
-                return self.future_
+        stream = torch.cuda.Stream()
+        with stream:
+            # nothing in queue so instantly resolves
+            event1 = torch.cuda.Event()
+            event1.record()
+            time.sleep(0.1)
+            self.assertTrue(event1.query())
 
-        # nothing in queue so instantly resolves
-        event1 = torch.cuda.Event()
-        event1.record()
-        time.sleep(0.1)
-        self.assertTrue(event1.query())
+            work = BlockWork()
+            work.block_current_stream()
 
-        work = BlockWork()
-        work.block_current_stream()
+            # stream is blocked so doesn't resolve
+            event = torch.cuda.Event()
+            event.record()
+            time.sleep(0.1)
+            self.assertFalse(event.query())
 
-        # stream is blocked so doesn't resolve
-        event = torch.cuda.Event()
-        event.record()
-        time.sleep(0.1)
-        self.assertFalse(event.query())
+            # resolve the work
+            work.get_future().set_result(None)
 
-        # resolve the work
-        work.get_future().set_result(None)
+            stream.synchronize()
+            self.assertTrue(event.query())
 
-        torch.cuda.current_stream().synchronize()
-        self.assertTrue(event.query())
+    @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
+    def test_block_current_stream_use_after_free(self) -> None:
+        """
+        This tests that the CPU control tensor is not freed before the CUDA kernel executes.
+        """
+        torch.cuda.synchronize()
+        stream = torch.cuda.Stream()
+        with stream:
+            a = BlockWork()
+            a.block_current_stream()
+
+            b = BlockWork()
+            b.block_current_stream()
+
+            # unblock b first though a is still blocking
+            b.get_future().set_result(None)
+            # delete b
+            del b
+
+            # a is still blocking so this doesn't resolve
+            event = torch.cuda.Event()
+            event.record()
+            time.sleep(0.1)
+            self.assertFalse(event.query())
+
+            # unblock a
+            a.get_future().set_result(None)
+
+            stream.synchronize()
+            self.assertTrue(event.query())
 
 
 if __name__ == "__main__":

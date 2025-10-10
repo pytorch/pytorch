@@ -8,23 +8,6 @@
 using namespace ::testing;
 
 namespace torch::nativert {
-TEST(PlacementTest, NormalizeDevice) {
-  c10::Device cpuDevice = c10::Device(c10::DeviceType::CPU);
-  c10::Device cpuDevice1 = c10::Device(c10::DeviceType::CPU);
-  cpuDevice1.set_index(1);
-
-  EXPECT_EQ(normalizeDevice(cpuDevice), cpuDevice);
-  EXPECT_NE(normalizeDevice(cpuDevice1), cpuDevice1);
-
-  c10::Device cudaDevice = c10::Device(c10::DeviceType::CUDA);
-  c10::Device cudaDevice1 = c10::Device(c10::DeviceType::CUDA, 1);
-  EXPECT_EQ(normalizeDevice(cudaDevice), c10::Device(c10::DeviceType::CUDA, 0));
-  EXPECT_EQ(
-      normalizeDevice(cudaDevice1), c10::Device(c10::DeviceType::CUDA, 1));
-
-  EXPECT_NE(
-      normalizeDevice(cudaDevice1), c10::Device(c10::DeviceType::CUDA, 0));
-}
 
 TEST(PlacementTest, IsSameDevice) {
   c10::Device cpuDevice = c10::Device(c10::DeviceType::CPU);
@@ -90,11 +73,11 @@ TEST(PlacementTest, Placement) {
       {c10::Device("cuda:0"), c10::Device("cuda:1")}};
   Placement p1(deviceMap1);
   EXPECT_EQ(p1.getMappedDevice(c10::Device("cpu")), c10::Device("cpu"));
-  EXPECT_EQ(p1.getMappedDevice(c10::Device("cuda")), c10::Device("cuda:1"));
+  EXPECT_EQ(p1.getMappedDevice(c10::Device("cuda")), c10::Device("cuda"));
   EXPECT_EQ(p1.getMappedDevice(c10::Device("cuda:0")), c10::Device("cuda:1"));
 
   std::unordered_map<c10::Device, c10::Device> deviceMap2 = {
-      {c10::Device("cpu"), c10::Device("cuda")}};
+      {c10::Device("cpu"), c10::Device("cuda:0")}};
   Placement p2(deviceMap2);
   EXPECT_EQ(p2.getMappedDevice(c10::Device("cpu")), c10::Device("cuda:0"));
   EXPECT_EQ(p2.getMappedDevice(c10::Device("cuda:0")), c10::Device("cuda:0"));

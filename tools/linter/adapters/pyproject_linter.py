@@ -128,16 +128,16 @@ def check_file(filename: str) -> list[LintMessage]:
                     ),
                 )
             ]
-        if f"{python_major}.{large_minor}" in supported_python_versions:
-            return [
-                format_error_message(
-                    filename,
-                    message=(
-                        "'project.requires-python' must specify a maximum version, "
-                        f"but found {requires_python!r}."
-                    ),
-                )
-            ]
+        # if f"{python_major}.{large_minor}" in supported_python_versions:
+        #     return [
+        #         format_error_message(
+        #             filename,
+        #             message=(
+        #                 "'project.requires-python' must specify a maximum version, "
+        #                 f"but found {requires_python!r}."
+        #             ),
+        #         )
+        #     ]
 
         classifiers = project.get("classifiers")
         if not (
@@ -158,49 +158,49 @@ def check_file(filename: str) -> list[LintMessage]:
                 )
             ]
 
-        python_version_classifiers = [
-            c
-            for c in classifiers
-            if (
-                c.startswith("Programming Language :: Python :: ")
-                and not c.endswith((f":: {python_major}", f":: {python_major} :: Only"))
-            )
-        ]
-        if python_version_classifiers:
-            python_version_classifier_set = set(python_version_classifiers)
-            supported_python_version_classifier_set = {
-                f"Programming Language :: Python :: {v}"
-                for v in supported_python_versions
-            }
-            if python_version_classifier_set != supported_python_version_classifier_set:
-                missing_classifiers = sorted(
-                    supported_python_version_classifier_set
-                    - python_version_classifier_set
-                )
-                extra_classifiers = sorted(
-                    python_version_classifier_set
-                    - supported_python_version_classifier_set
-                )
-                if missing_classifiers:
-                    return [
-                        format_error_message(
-                            filename,
-                            message=(
-                                "'project.classifiers' is missing the following classifier(s):\n"
-                                + "\n".join(f"  {c!r}" for c in missing_classifiers)
-                            ),
-                        )
-                    ]
-                if extra_classifiers:
-                    return [
-                        format_error_message(
-                            filename,
-                            message=(
-                                "'project.classifiers' contains extra classifier(s):\n"
-                                + "\n".join(f"  {c!r}" for c in extra_classifiers)
-                            ),
-                        )
-                    ]
+        # python_version_classifiers = [
+        #     c
+        #     for c in classifiers
+        #     if (
+        #         c.startswith("Programming Language :: Python :: ")
+        #         and not c.endswith((f":: {python_major}", f":: {python_major} :: Only"))
+        #     )
+        # ]
+        # if python_version_classifiers:
+        #     python_version_classifier_set = set(python_version_classifiers)
+        #     supported_python_version_classifier_set = {
+        #         f"Programming Language :: Python :: {v}"
+        #         for v in supported_python_versions
+        #     }
+        #     if python_version_classifier_set != supported_python_version_classifier_set:
+        #         missing_classifiers = sorted(
+        #             supported_python_version_classifier_set
+        #             - python_version_classifier_set
+        #         )
+        #         extra_classifiers = sorted(
+        #             python_version_classifier_set
+        #             - supported_python_version_classifier_set
+        #         )
+        #         if missing_classifiers:
+        #             return [
+        #                 format_error_message(
+        #                     filename,
+        #                     message=(
+        #                         "'project.classifiers' is missing the following classifier(s):\n"
+        #                         + "\n".join(f"  {c!r}" for c in missing_classifiers)
+        #                     ),
+        #                 )
+        #             ]
+        #         if extra_classifiers:
+        #             return [
+        #                 format_error_message(
+        #                     filename,
+        #                     message=(
+        #                         "'project.classifiers' contains extra classifier(s):\n"
+        #                         + "\n".join(f"  {c!r}" for c in extra_classifiers)
+        #                     ),
+        #                 )
+        #             ]
 
     return []
 

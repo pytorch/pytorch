@@ -69,7 +69,18 @@ if triton is not None:
         def _log2(x: Any) -> Any:
             raise NotImplementedError
 
-    HAS_WARP_SPEC = hasattr(tl, "async_task")
+    def _triton_config_has(param_name: str) -> bool:
+        if not hasattr(triton, "Config"):
+            return False
+        if not hasattr(triton.Config, "__init__"):
+            return False
+        return param_name in inspect.signature(triton.Config.__init__).parameters
+
+    HAS_WARP_SPEC = (
+        hasattr(tl, "async_task")
+        and _triton_config_has("num_consumer_groups")
+        and _triton_config_has("num_buffers_warp_spec")
+    )
 
     try:
         from triton import knobs

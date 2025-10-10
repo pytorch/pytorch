@@ -94,16 +94,16 @@ class CheckpointWriter:
 
     def write(
         self,
-        state_dict: STATE_DICT,
         path: str,
+        state_dict: STATE_DICT,
         **kwargs: dict[str, Any],
     ) -> Optional[Future[None]]:
         """
         Writes the state_dict to storage.
 
         Args:
-            state_dict (STATE_DICT): The state_dict to write.
             path (str): The path to write the checkpoint to.
+            state_dict (STATE_DICT): The state_dict to write.
             **kwargs: Additional keyword arguments passed to hooks.
 
         Returns:

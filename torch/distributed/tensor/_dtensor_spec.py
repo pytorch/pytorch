@@ -32,10 +32,6 @@ class DTensorSpec:
     def __post_init__(self) -> None:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
-        if not len(self.placements) == self.mesh.ndim:
-            raise ValueError(
-                f"DTensorSpec requires one placement per mesh dim (mesh.ndim={self.mesh.ndim}), got {self.placements=}"
-            )
         self._hash: Optional[int] = None
 
     def __setattr__(self, attr: str, value: Any) -> None:
@@ -44,6 +40,16 @@ class DTensorSpec:
         # change (though we do not expect `mesh` or `placements` to change)
         if hasattr(self, "_hash") and attr in ("mesh", "placements", "tensor_meta"):
             self._hash = None
+        # This assert was triggered by buggy handling for dict outputs in some
+        # FX passes, where you accidentally iterate over a dict and try to put
+        # keys into TensorMeta.  See https://github.com/pytorch/pytorch/issues/157919
+        if attr == "tensor_meta" and value is not None:
+            from torch.fx.passes.shape_prop import TensorMetadata
+
+            # TODO: the TensorMetadata arises from
+            # test/distributed/tensor/experimental/test_tp_transform.py::TensorParallelTest::test_tp_transform_e2e
+            # but I actually can't reproduce it, maybe it is also a bug!
+            assert isinstance(value, (TensorMeta, TensorMetadata)), value
 
     def _hash_impl(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
@@ -72,7 +78,7 @@ class DTensorSpec:
             self._hash = self._hash_impl()
         return self._hash
 
-    def __eq__(self, other: object, /) -> bool:
+    def _check_equals(self, other: object, skip_shapes: bool = False) -> bool:
         if not (
             isinstance(other, DTensorSpec)
             and self.mesh == other.mesh
@@ -82,11 +88,16 @@ class DTensorSpec:
         if self.tensor_meta is None or other.tensor_meta is None:
             return self.tensor_meta == other.tensor_meta
 
+        if skip_shapes:
+            return self.tensor_meta.dtype == other.tensor_meta.dtype
         return (
             self.tensor_meta.shape == other.tensor_meta.shape  # type: ignore[union-attr]
             and self.tensor_meta.stride == other.tensor_meta.stride  # type: ignore[union-attr]
             and self.tensor_meta.dtype == other.tensor_meta.dtype  # type: ignore[union-attr]
         )
+
+    def __eq__(self, other: object, /) -> bool:
+        return self._check_equals(other)
 
     def __str__(self) -> str:
         """
@@ -244,7 +255,7 @@ class DTensorSpec:
                 if placement.is_shard():
                     placement = cast(Shard, placement)
                     raise RuntimeError(
-                        f"DeviceMesh dimension cann't be mapped to two dimension of the same tensor: {i} and {placement.dim}"
+                        f"DeviceMesh dimension can't be mapped to two dimension of the same tensor: {i} and {placement.dim}"
                     )
                 elif placement.is_partial():
                     raise RuntimeError(

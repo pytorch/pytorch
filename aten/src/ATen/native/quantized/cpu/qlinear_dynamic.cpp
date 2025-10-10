@@ -545,7 +545,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
       /*reduce_range=*/reduce_range);
   const std::vector<int32_t>& src_zero_point = std::vector<int32_t>(1, q_params.zero_point);
   // weights, dst
-  auto w = *(weight_.get());
+  auto w = *weight_;
   auto dst_dims = {x.get_dim(0), w.get_dim(1)};
   const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/q_params.scale);
   const ideep::scale_t& weights_scales = w.get_scale();
@@ -888,7 +888,7 @@ class QLinearUnpackedDynamicFp16 final {
   static at::Tensor run(
       at::Tensor input,
       const at::Tensor& weight,
-      const at::Tensor& bias) {
+      const std::optional<at::Tensor>& bias) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -908,7 +908,7 @@ class QLinearUnpackedDynamicFp16 final {
   static at::Tensor meta(
       at::Tensor input,
       const at::Tensor& weight,
-      const at::Tensor& bias) {
+      const std::optional<at::Tensor>& bias) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -929,7 +929,7 @@ class QLinearUnpackedDynamicFp16 final {
   static at::Tensor run(
       at::Tensor /* input */,
       const at::Tensor& weight,
-      const at::Tensor& bias) {
+      const std::optional<at::Tensor>& bias) {
     // We make a strong guarantee that models using these operators will have
     // the same numerics across different machines. Therefore, we do not provide
     // a fallback path and rather fail loudly if we cannot run FBGEMM.
@@ -940,7 +940,7 @@ class QLinearUnpackedDynamicFp16 final {
   static at::Tensor meta(
       at::Tensor /* input */,
       const at::Tensor& weight,
-      const at::Tensor& bias) {
+      const std::optional<at::Tensor>& bias) {
     TORCH_CHECK(
         false, "This PyTorch installation was not built with FBGEMM operators");
   }

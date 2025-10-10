@@ -14,6 +14,12 @@
 ```{eval-rst}
 .. autofunction:: flex_attention
 ```
+```{eval-rst}
+.. autoclass:: AuxOutput
+```
+```{eval-rst}
+.. autoclass:: AuxRequest
+```
 
 ## BlockMask Utilities
 
@@ -24,9 +30,6 @@
 .. autofunction:: create_mask
 ```
 ```{eval-rst}
-.. autofunction:: create_nested_block_mask
-```
-```{eval-rst}
 .. autofunction:: and_masks
 ```
 ```{eval-rst}
@@ -34,6 +37,14 @@
 ```
 ```{eval-rst}
 .. autofunction:: noop_mask
+```
+
+## FlexKernelOptions
+
+```{eval-rst}
+.. autoclass:: FlexKernelOptions
+    :members:
+    :undoc-members:
 ```
 
 ## BlockMask

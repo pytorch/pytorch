@@ -7,8 +7,9 @@ import functools
 import sys
 import warnings
 from collections import OrderedDict
+from collections.abc import Callable
 from inspect import getfullargspec, signature
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
@@ -16,9 +17,16 @@ from torch.fx import Node
 from torch.nn.utils.parametrize import is_parametrized
 
 
-NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
-if sys.version_info < (3, 14):
+if sys.version_info < (3, 12):
+    NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
     NodePattern.__module__ = "torch.ao.quantization.utils"
+else:
+    from typing import TypeAliasType
+
+    NodePattern = TypeAliasType(
+        "NodePattern", Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
+    )
+
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
 # Define separately to prevent circular imports.
@@ -30,11 +38,27 @@ QuantizerCls = Any
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
-Pattern = Union[
-    Callable, tuple[Callable, Callable], tuple[Callable, tuple[Callable, Callable]], Any
-]
-if sys.version_info < (3, 14):
+
+if sys.version_info < (3, 12):
+    Pattern = Union[
+        Callable,
+        tuple[Callable, Callable],
+        tuple[Callable, tuple[Callable, Callable]],
+        Any,
+    ]
     Pattern.__module__ = "torch.ao.quantization.utils"
+else:
+    from typing import TypeAliasType
+
+    Pattern = TypeAliasType(
+        "Pattern",
+        Union[
+            Callable,
+            tuple[Callable, Callable],
+            tuple[Callable, tuple[Callable, Callable]],
+            Any,
+        ],
+    )
 
 
 # TODO: maybe rename this to MatchInputNode
@@ -478,9 +502,9 @@ def calculate_qmin_qmax(
                 quant_min, quant_max = 0, 255
         elif dtype in [torch.qint32, torch.int32]:
             quant_min, quant_max = -1 * (2**31), (2**31) - 1
-        elif dtype in [torch.uint16]:
+        elif dtype == torch.uint16:
             quant_min, quant_max = 0, 2**16 - 1
-        elif dtype in [torch.int16]:
+        elif dtype == torch.int16:
             quant_min, quant_max = -(2**15), 2**15 - 1
         else:
             quant_min, quant_max = 0, 15

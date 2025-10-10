@@ -135,9 +135,11 @@ def _rewrite_spec_if_needed(
             break
     if rewrite:
         spec = copy.deepcopy(spec)
+        # pyrefly: ignore  # missing-attribute
         for i, placement in enumerate(spec.placements):
             placement = cast(_remote_device, placement)
             if placement.rank() == rank and placement.device() != tensor.device:
+                # pyrefly: ignore  # missing-attribute
                 spec.placements[i] = _remote_device(f"rank:{rank}/{tensor.device}")
 
     return spec
@@ -326,7 +328,7 @@ class DTensorExtensions(FSDPExtensions):
         super().__init__()
         self.compute_stream = None
         self.device_handle = device_handle
-        # we have to use the dynamo disable this way to disable dynamo as the decorater way would
+        # we have to use the dynamo disable this way to disable dynamo as the decorator way would
         # trigger build failure with torch deploy...
         self.post_unflatten_transform = torch._dynamo.disable(  # type: ignore[method-assign]
             self.post_unflatten_transform

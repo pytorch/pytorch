@@ -991,7 +991,7 @@ class TestExceptionPropagation(TestCase):
         s = OrderedSet([1, 2, 3])
         try:
             for i in s:
-                s.update([4])
+                s.update([4])  # noqa: B909
         except RuntimeError:
             pass
         else:

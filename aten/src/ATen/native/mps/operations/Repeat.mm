@@ -129,16 +129,8 @@ void computeRepeatIndices(const index_t* repeat_ptr,
   });
 }
 
-Tensor repeat_interleave_mps(const Tensor& repeat_, std::optional<int64_t> output_size) {
+Tensor repeat_interleave_mps(const Tensor& repeat, std::optional<int64_t> output_size) {
   Tensor output;
-  Tensor repeat = repeat_;
-  if (repeat.scalar_type() == kLong && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS)) {
-    // #103810551: `repeat_interleave_common` uses cumsum to calculate the final shape of output,
-    // which currently doesn't support int64_t as input. Casting internally the indices to int32_t.
-    TORCH_WARN_ONCE(
-        "MPS: no support for int64 repeats mask, casting it to int32. Support has been added in macOS 13.3");
-    repeat = repeat.to(kInt);
-  }
   AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_mps", [&]() {
     output = repeat_interleave_common<index_t, computeRepeatIndices<index_t>>(repeat, output_size);
   });

@@ -7,17 +7,17 @@ import itertools
 import logging
 import math
 import operator
+from collections.abc import Callable
 from typing import (
-    Callable,
     Generic,
     Optional,
     overload,
     SupportsFloat,
     TYPE_CHECKING,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import TypeGuard
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
@@ -123,7 +123,9 @@ AllFn2 = Union[ExprFn2, BoolFn2]
 class ValueRanges(Generic[_T]):
     if TYPE_CHECKING:
         # ruff doesn't understand circular references but mypy does
+        # pyrefly: ignore  # unbound-name
         ExprVR = ValueRanges[sympy.Expr]  # noqa: F821
+        # pyrefly: ignore  # unbound-name
         BoolVR = ValueRanges[SympyBoolean]  # noqa: F821
         AllVR = Union[ExprVR, BoolVR]
 
@@ -144,16 +146,14 @@ class ValueRanges(Generic[_T]):
         self: ValueRanges[sympy.Expr],
         lower: ExprIn,
         upper: ExprIn,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def __init__(  # type: ignore[misc]
         self: ValueRanges[SympyBoolean],
         lower: BoolIn,
         upper: BoolIn,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def __init__(self, lower: AllIn, upper: AllIn) -> None:
         lower = simple_sympify(lower)
@@ -240,15 +240,13 @@ class ValueRanges(Generic[_T]):
     def __and__(
         self: ValueRanges[sympy.Expr],
         other: ValueRanges[sympy.Expr],
-    ) -> ValueRanges[sympy.Expr]:
-        ...
+    ) -> ValueRanges[sympy.Expr]: ...
 
     @overload
     def __and__(  # type: ignore[misc]
         self: ValueRanges[SympyBoolean],
         other: ValueRanges[SympyBoolean],
-    ) -> ValueRanges[SympyBoolean]:
-        ...
+    ) -> ValueRanges[SympyBoolean]: ...
 
     def __and__(self: AllVR, other: AllVR) -> AllVR:
         if other in (ValueRanges.unknown(), ValueRanges.unknown_int()):
@@ -272,15 +270,13 @@ class ValueRanges(Generic[_T]):
     def __or__(
         self: ValueRanges[sympy.Expr],
         other: ValueRanges[sympy.Expr],
-    ) -> ValueRanges[sympy.Expr]:
-        ...
+    ) -> ValueRanges[sympy.Expr]: ...
 
     @overload
     def __or__(  # type: ignore[misc]
         self: ValueRanges[SympyBoolean],
         other: ValueRanges[SympyBoolean],
-    ) -> ValueRanges[SympyBoolean]:
-        ...
+    ) -> ValueRanges[SympyBoolean]: ...
 
     def __or__(self: AllVR, other: AllVR) -> AllVR:
         if ValueRanges.unknown() in (self, other):
@@ -343,8 +339,7 @@ class ValueRanges(Generic[_T]):
 
     @overload
     @staticmethod
-    def decreasing_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR:
-        ...
+    def decreasing_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR: ...
 
     @overload
     @staticmethod
@@ -384,8 +379,7 @@ class ValueRanges(Generic[_T]):
         x: Union[ExprIn, ExprVR],
         y: Union[ExprIn, ExprVR],
         fn: ExprFn2,
-    ) -> ExprVR:
-        ...
+    ) -> ExprVR: ...
 
     @overload
     @staticmethod
@@ -393,8 +387,7 @@ class ValueRanges(Generic[_T]):
         x: Union[BoolIn, BoolVR],
         y: Union[BoolIn, BoolVR],
         fn: BoolFn2,
-    ) -> BoolVR:
-        ...
+    ) -> BoolVR: ...
 
     @staticmethod
     def coordinatewise_increasing_map(
@@ -473,6 +466,7 @@ class SymPyValueRangeAnalysis:
     @staticmethod
     def to_dtype(a, dtype, src_dtype=None):
         if dtype == torch.float64:
+            # pyrefly: ignore  # bad-argument-type
             return ValueRanges.increasing_map(a, ToFloat)
         elif dtype == torch.bool:
             return ValueRanges.unknown_bool()
@@ -482,6 +476,7 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def trunc_to_int(a, dtype):
+        # pyrefly: ignore  # bad-argument-type
         return ValueRanges.increasing_map(a, TruncToInt)
 
     @staticmethod
@@ -630,7 +625,10 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.unknown()
         else:
             return ValueRanges.coordinatewise_monotone_map(
-                a, b, _keep_float(IntTrueDiv)
+                a,
+                b,
+                # pyrefly: ignore  # bad-argument-type
+                _keep_float(IntTrueDiv),
             )
 
     @staticmethod
@@ -643,7 +641,10 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.unknown()
         else:
             return ValueRanges.coordinatewise_monotone_map(
-                a, b, _keep_float(FloatTrueDiv)
+                a,
+                b,
+                # pyrefly: ignore  # bad-argument-type
+                _keep_float(FloatTrueDiv),
             )
 
     @staticmethod
@@ -722,6 +723,7 @@ class SymPyValueRangeAnalysis:
             # We should know that b >= 0 but we may have forgotten this fact due
             # to replacements, so don't assert it, but DO clamp it to prevent
             # degenerate problems
+            # pyrefly: ignore  # no-matching-overload
             return ValueRanges.coordinatewise_increasing_map(
                 a, b & ValueRanges(0, int_oo), PowByNatural
             )
@@ -888,6 +890,7 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def round_to_int(cls, number, dtype):
+        # pyrefly: ignore  # bad-argument-type
         return ValueRanges.increasing_map(number, RoundToInt)
 
     # It's used in some models on symints
@@ -1001,6 +1004,7 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def trunc(x):
+        # pyrefly: ignore  # bad-argument-type
         return ValueRanges.increasing_map(x, TruncToFloat)
 
 
@@ -1028,7 +1032,7 @@ def bound_sympy(
 
     # If there's a tracing context, augment available constrained ranges.
     context = torch._guards.TracingContext.try_get()
-    if context and context.fake_mode.shape_env:
+    if context and context.fake_mode and context.fake_mode.shape_env:
         if ranges:
             ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
         else:

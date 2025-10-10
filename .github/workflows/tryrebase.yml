@@ -25,7 +25,7 @@ jobs:
           architecture: x64
           check-latest: false
           cache: pip
-      - run: pip install pyyaml==6.0
+      - run: pip install pyyaml==6.0.2
 
       - name: Setup committer id
         run: |

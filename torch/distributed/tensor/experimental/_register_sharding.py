@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import partial
-from typing import Callable, Union
+from typing import Union
 
 import torch
 from torch._ops import OpOverload
@@ -41,7 +41,7 @@ def register_sharding(op: Union[OpOverload, list[OpOverload]]):
         as the original op (except that if an arg is a :class:`torch.Tensor`, it will be
         replaced by a tensor-like object that DTensor uses internally). The function should
         return a sequence of 2-tuples, each specifying acceptable output placements and its
-        corresponding intput placements.
+        corresponding input placements.
 
     Example:
         >>> # xdoctest: +SKIP("distributed")

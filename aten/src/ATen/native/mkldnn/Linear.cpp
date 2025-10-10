@@ -69,8 +69,13 @@ mkldnn_scaled_mm(const Tensor& mat1, const Tensor& mat2,
 namespace at::native {
 
 static bool use_mkldnn_bf32_linear() {
-  return at::globalContext().float32Precision("mkldnn", "matmul") == "bf16" &&
+  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::BF16 &&
       mkldnn_bf16_device_check();
+}
+
+static bool use_mkldnn_tf32_linear() {
+  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::TF32 &&
+      cpuinfo_has_x86_amx_fp16();
 }
 
 Tensor mkldnn_linear(
@@ -259,6 +264,9 @@ Tensor mkldnn_linear_pointwise(
   if (use_mkldnn_bf32_linear() && input_t.scalar_type() == at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
+  if (use_mkldnn_tf32_linear() && input_t.scalar_type() == at::kFloat){
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
+  }
   if (mkldnn_bias.has_value()) {
     ideep::inner_product_forward::compute</*reorder_src=*/false, /*reorder_weight=*/false>(
         mkldnn_input,
@@ -350,6 +358,10 @@ Tensor mkldnn_linear_pointwise_binary(
 
   if (use_mkldnn_bf32_linear() && input_t.scalar_type() == at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
+
+  if (use_mkldnn_tf32_linear() && input_t.scalar_type() == at::kFloat){
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
 
   if (mkldnn_bias.has_value()) {

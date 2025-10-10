@@ -1,5 +1,6 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
 #include <c10/util/env.h>
+#include <cuda_runtime.h>
 #include <cstring>
 #include <string>
 
@@ -7,11 +8,19 @@ namespace c10::cuda {
 
 // Explain common CUDA errors
 // NOLINTNEXTLINE(bugprone-exception-escape,-warnings-as-errors)
-std::string get_cuda_error_help(const char* error_string) noexcept {
+std::string get_cuda_error_help(cudaError_t error) noexcept {
   std::string help_text;
-  if (strstr(error_string, "invalid device ordinal")) {
-    help_text.append(
-        "\nGPU device may be out of range, do you have enough GPUs?");
+  switch (error) {
+    case cudaErrorInvalidDevice:
+      help_text.append(
+          "\nGPU device may be out of range, do you have enough GPUs?");
+      break;
+    default:
+      help_text.append("\nSearch for `")
+          .append(cudaGetErrorName(error))
+          .append(
+              "' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.");
+      break;
   }
   return help_text;
 }

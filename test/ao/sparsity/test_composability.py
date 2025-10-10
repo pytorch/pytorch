@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 
 
 import torch
@@ -411,7 +411,6 @@ class TestFxComposability(TestCase):
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
-    @xfailIfS390X
     def test_q_prep_fx_s_prep_ref_conv(self):
         r"""
         This checks that the ordering: prepare_fx -> sparse prepare -> convert_to_reference_fx
@@ -586,7 +585,6 @@ class TestFxComposability(TestCase):
         )
         self.assertGreaterAlmostEqual(cur_sparsity, sparse_config[0]["sparsity_level"])
 
-    @xfailIfS390X
     def test_s_prep_q_prep_fx_ref(self):
         r"""
         This checks that the ordering: sparse prepare -> prepare_fx -> convert_to_reference_fx

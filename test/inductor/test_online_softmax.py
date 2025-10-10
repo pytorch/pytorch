@@ -13,9 +13,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
-    serialTest,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -78,17 +77,12 @@ class TestOnlineSoftmax(TestCase):
         out, source_codes = run_and_get_code(f, x)
         return source_codes[0]
 
-    @serialTest()
     def test_codegen_3pass_softmax_due_to_disable(self):
-        with inductor_config.patch(
-            online_softmax=False,
-            realize_acc_reads_size_threshold=float("inf"),
-        ):
+        with inductor_config.patch(online_softmax=False):
             wrapper_code = self.get_softmax_wrapper()
 
         self.assertEqual(wrapper_code.count("for r0_offset in"), 3)
 
-    @serialTest()
     @parametrize("V", [2048, 50304])
     @parametrize("use_log_softmax", [False, True])
     def test_codegen_online_softmax(self, use_log_softmax, V):
@@ -299,9 +293,22 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(not act.isnan().any())
         self.assertTrue(torch.allclose(ref, act))
 
+    @inductor_config.patch(split_reductions=False)
+    def test_3d_tiled_online_softmax(self):
+        def f(x, y):
+            return (x * y).softmax(dim=-1)
+
+        M, N, K = 32, 8, 1024
+
+        x = torch.randn(K, N, M, device=GPU_TYPE).permute(2, 1, 0)
+        y = torch.randn(K, M, N, device=GPU_TYPE).permute(1, 2, 0)
+
+        opt_f = torch.compile(f)
+        torch.testing.assert_close(f(x, y), opt_f(x, y), atol=1e-3, rtol=1e-3)
+
 
 instantiate_parametrized_tests(TestOnlineSoftmax)
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA:
+    if IS_LINUX and HAS_CUDA_AND_TRITON:
         run_tests()

@@ -256,8 +256,10 @@ def convolution_backward_handler(
     kwargs: dict[str, object],
 ) -> object:
     # Redistribute grad_output tensor to the same placement as input tensor
+    # pyrefly: ignore  # bad-assignment
     args = list(args)
     assert isinstance(args[0], dtensor.DTensor) and isinstance(args[1], dtensor.DTensor)
+    # pyrefly: ignore  # unsupported-operation
     args[0] = args[0].redistribute(args[1].device_mesh, args[1].placements)
     args = tuple(args)
 

@@ -11,6 +11,7 @@ set(XPU_HOST_CXX_FLAGS)
 find_package(SYCLToolkit REQUIRED)
 if(NOT SYCL_FOUND)
   set(PYTORCH_FOUND_XPU FALSE)
+  # Exit early to avoid populating XPU_HOST_CXX_FLAGS.
   return()
 endif()
 set(PYTORCH_FOUND_XPU TRUE)
@@ -36,6 +37,8 @@ torch_xpu_get_arch_list(XPU_ARCH_FLAGS)
 # propagate to torch-xpu-ops
 set(TORCH_XPU_ARCH_LIST ${XPU_ARCH_FLAGS})
 
+# Ensure USE_XPU is enabled.
+string(APPEND XPU_HOST_CXX_FLAGS " -DUSE_XPU")
 string(APPEND XPU_HOST_CXX_FLAGS " -DSYCL_COMPILER_VERSION=${SYCL_COMPILER_VERSION}")
 
 if(DEFINED ENV{XPU_ENABLE_KINETO})
