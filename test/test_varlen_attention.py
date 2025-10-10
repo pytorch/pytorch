@@ -244,7 +244,6 @@ class TestVarlenAttention(NNTestCase):
         )
         assert custom_op_called
 
-
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
