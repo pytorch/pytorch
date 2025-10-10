@@ -1219,7 +1219,7 @@ class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     """
 
     def __init__(self, value, **kwargs) -> None:
-        source = kwargs.get("source", None)
+        source = kwargs.get("source")
         assert source is not None, (
             "FSDPManagedNNModule depends on having an accurate source to control guarding."
         )
