@@ -32,7 +32,7 @@ __all__ = [
     "mm",
     "sum",
     "softmax",
-    "solve",
+    "spsolve",
     "log_softmax",
     "SparseSemiStructuredTensor",
     "SparseSemiStructuredTensorCUTLASS",
