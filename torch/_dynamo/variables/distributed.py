@@ -29,6 +29,7 @@ from torch.fx.experimental._backward_state import BackwardState
 
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
+from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented_v2
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
@@ -154,7 +155,7 @@ class PlacementClassVariable(DistributedVariable):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if (
-            inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
+            inspect.getattr_static(self.value, "__new__", None) == object.__new__
             and self.source
         ):
             # NOTE: we don't need to track mutations to the placement class as they
@@ -230,6 +231,30 @@ class PlacementVariable(DistributedVariable):
             return ConstantVariable.create(constant_val)
 
         return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen):
+        # Reconstruct the Placement object by calling its constructor
+        # e.g., Shard(0), Replicate(), Partial()
+        from torch.distributed.tensor.placement_types import Partial, Replicate, Shard
+
+        placement_type = type(self.value)
+
+        # Load the placement class
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch.distributed.tensor.placement_types", placement_type.__name__
+            )
+        )
+
+        # For Shard, we need to pass the dim argument
+        if isinstance(self.value, Shard):
+            codegen(ConstantVariable.create(self.value.dim))
+            codegen.extend_output(create_call_function(1, False))
+        # Replicate and Partial have no required args
+        elif istype(self.value, (Replicate, Partial)):
+            codegen.extend_output(create_call_function(0, False))
+        else:
+            super().reconstruct(codegen)
 
 
 class DeviceMeshVariable(DistributedVariable):

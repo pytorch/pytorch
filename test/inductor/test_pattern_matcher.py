@@ -1429,6 +1429,41 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
 
+    def test_input_output_same(self):
+        def pattern(x, y):
+            out1 = torch.add(x, y)
+            return out1, x
+
+        def replace(x, y):
+            out1 = torch.mul(x, y)
+            out2 = torch.mul(out1, y)
+            return out1, out2
+
+        my_patterns = PatternMatcherPass()
+        inputs = (torch.ones(3, 3), torch.ones(3, 3))
+        register_replacement(pattern, replace, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+            _ = my_patterns.apply(graph)
+            stable_topological_sort(graph)
+            graph.eliminate_dead_code()
+            return graph
+
+        @torch.compile(
+            options={
+                "post_grad_custom_post_pass": custom_pass,
+            }
+        )
+        def f(x, y):
+            res = torch.add(x, y)
+            sub = torch.sub(res, x)
+            return sub
+
+        test, (code,) = run_and_get_code(f, *(torch.ones(3, 3), torch.ones(3, 3)))
+
+        self.assertTrue("aten.add.default" not in code)
+        self.assertTrue("aten.mul.default" not in code)
+
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations3(self):
         counter = 0
