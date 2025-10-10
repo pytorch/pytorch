@@ -4,8 +4,9 @@ import functools
 import operator
 import warnings
 from collections import namedtuple
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -163,7 +164,7 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
         torch.nn.functional.conv_transpose2d: torch.ops.quantized.conv_transpose2d_prepack,
         torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
     }
-    prepack_op = prepack_ops.get(conv_op, None)
+    prepack_op = prepack_ops.get(conv_op)
     assert prepack_op, f"Didn't find prepack op for {conv_op}"
     return prepack_op
 
