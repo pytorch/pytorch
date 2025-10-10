@@ -182,6 +182,7 @@ class TestEmbeddingNN(NNTestCase):
         self.assertEqual(res_old, res_F)
 
     # https://github.com/pytorch/pytorch/issues/130806
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @largeTensorTest("40GB", device="cuda")
     def test_large_tensors(self):
         input = torch.randint(low=0, high=16032, size=[131072], device="cuda")
@@ -595,7 +596,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     device=device,
                     requires_grad=True,
                 )
-                weights_check = weights.clone().detach().requires_grad_(True)
+                weights_check = weights.detach().clone().requires_grad_(True)
 
                 bag = torch.nn.functional.embedding_bag(
                     indices_1D,
@@ -714,7 +715,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     device=device,
                     requires_grad=True,
                 )
-                weights_check = weights.clone().detach().requires_grad_(True)
+                weights_check = weights.detach().clone().requires_grad_(True)
 
                 msg = (
                     f"mode: '{mode}', sparse: {sparse}, padding_idx: {padding_idx}, "
@@ -1617,6 +1618,19 @@ class TestEmbeddingNNDeviceType(NNTestCase):
             odtype=dtypes[1],
             test_backward=True,
         )
+
+    @parametrize_test(
+        "bag_use_grad,per_sample_weights_use_grad",
+        [(True, True), (True, False), (False, True), (False, False)],
+    )
+    def test_embedding_bag_per_sample_weights_grad(
+        self, device, bag_use_grad: bool, per_sample_weights_use_grad: bool
+    ):
+        bag = torch.nn.EmbeddingBag(256, 256, mode="sum", device=device)
+        bag.requires_grad_(bag_use_grad)
+        x = torch.arange(1, 5, device=device).expand(3, -1)
+        w = torch.rand(3, 4, device=device, requires_grad=per_sample_weights_use_grad)
+        bag(x, per_sample_weights=F.softmax(w, dim=-1))
 
 
 instantiate_device_type_tests(TestEmbeddingNNDeviceType, globals())

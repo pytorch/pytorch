@@ -3,20 +3,19 @@ import logging
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
 from torch._C._distributed_c10d import _resolve_process_group
+from torch._logging import warning_once
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
     broadcast,
-    get_global_rank,
     get_group_rank,
     get_rank,
-    GroupMember,
     ProcessGroup,
     scatter,
     Work,
@@ -26,34 +25,26 @@ from torch.distributed.distributed_c10d import (
 logger = logging.getLogger(__name__)
 
 
-if not torch._running_with_deploy():
+@torch.library.register_fake("_dtensor::shard_dim_alltoall")
+def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
+    group_size = _get_group_size_by_name(group_name)
+    stacked_list = [torch.empty_like(input) for _ in range(group_size)]
+    group = _resolve_process_group(group_name)
+    group_rank = get_group_rank(group, get_rank())
 
-    @torch.library.register_fake("_dtensor::shard_dim_alltoall")
-    def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
-        group_size = _get_group_size_by_name(group_name)
-        stacked_list = [torch.empty_like(input) for _ in range(group_size)]
-        group = _resolve_process_group(group_name)
-        group_rank = get_group_rank(group, get_rank())
-
-        return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)[
-            group_rank
-        ]
-
-else:
-    import warnings
-
-    warnings.warn(
-        "PyTorch Distributed functional collectives do not work with torch::deploy."
+    return (
+        torch.cat(stacked_list, dim=gather_dim)
+        .chunk(group_size, dim=shard_dim)[group_rank]
+        .contiguous()
     )
 
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
     if mesh.device_type == "cpu":
         # Gloo does not support alltoall, so falling back to allgather + chunk
-
-        # TODO: This logs way too much
-        logger.warning(
-            "CPU process group does not support alltoall yet, falling back with allgather + chunk!"
+        warning_once(
+            logger,
+            "CPU process group does not support alltoall yet, falling back with allgather + chunk!",
         )
         out = funcol.all_gather_tensor(input, gather_dim, (mesh, mesh_dim))
         if isinstance(out, funcol.AsyncCollectiveTensor):
@@ -62,7 +53,7 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
         out = torch.chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
             mesh.get_local_rank(mesh_dim)
         ]
-        return out.contiguous() if not out.is_contiguous() else out
+        return out.contiguous()
 
     group_name = funcol._resolve_group_name((mesh, mesh_dim))
     # TODO: enable async op for shard_dim_alltoall
@@ -73,10 +64,12 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
 
 def mesh_scatter(
     output: torch.Tensor,
-    scatter_list: List[torch.Tensor],
+    scatter_list: list[torch.Tensor],
     mesh: DeviceMesh,
     mesh_dim: int = 0,
     async_op: bool = False,
+    *,
+    group_src: int = 0,
 ) -> Optional[Work]:
     """
     scatter a list of tensors to a device mesh dimension. We by default
@@ -92,6 +85,13 @@ def mesh_scatter(
             to scatter on, we by default choose the first rank on the
             mesh dimension as source of truth.
 
+    Keyword args:
+        group_src (int, optional): the group rank of the source data for the
+        logical/global tensor, on the specific mesh dimension. By default, we
+        use ``group_rank=0`` on each DeviceMesh dimension as the source data
+        to preserve the single-device semantic. If passing ``None`` explicitly,
+        this method simply uses its local data with no communication.
+
     Returns:
         A :class:`Work` object
     """
@@ -103,27 +103,22 @@ def mesh_scatter(
         return None
     dim_group = mesh.get_group(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
-    # src need to be global rank
-    src_for_dim = 0
 
-    if dim_group is not GroupMember.WORLD:
-        src_for_dim = get_global_rank(dim_group, 0)
-
-    if src_for_dim == get_rank():
+    if group_src == get_rank(dim_group):
         fut = scatter(
             output,
             scatter_list=scatter_list,
-            src=src_for_dim,
             group=dim_group,
             async_op=async_op,
+            group_src=group_src,
         )
     else:
         fut = scatter(
             output,
             scatter_list=None,
-            src=src_for_dim,
             group=dim_group,
             async_op=async_op,
+            group_src=group_src,
         )
 
     return fut
@@ -134,6 +129,8 @@ def mesh_broadcast(
     mesh: DeviceMesh,
     mesh_dim: int = 0,
     async_op: bool = False,
+    *,
+    group_src: int = 0,
 ) -> Optional[Work]:
     """
     broadcast the tensor to a device mesh dimension. We by default
@@ -148,6 +145,13 @@ def mesh_broadcast(
             to scatter on, we by default choose the first rank on the
             mesh dimension as source of truth.
 
+    Keyword args:
+        group_src (int, optional): the group rank of the source data for the
+        logical/global tensor, on the specific mesh dimension. By default, we
+        use ``group_rank=0`` on each DeviceMesh dimension as the source data
+        to preserve the single-device semantic. If passing ``None`` explicitly,
+        this method simply uses its local data with no communication.
+
     Returns:
         A :class:`Work` object
     """
@@ -159,12 +163,8 @@ def mesh_broadcast(
         return None
     dim_group = mesh.get_group(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
-    # src need to be global rank
-    src_for_dim = 0
-    if dim_group is not GroupMember.WORLD:
-        src_for_dim = get_global_rank(dim_group, 0)
 
-    return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
+    return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
 def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
@@ -186,17 +186,14 @@ def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Ten
 
 
 def fill_empty_tensor_to_shards(
-    shards: List[torch.Tensor], shard_dim: int, num_empty_tensors: int
-) -> List[torch.Tensor]:
+    shards: list[torch.Tensor], shard_dim: int, num_empty_tensors: int
+) -> list[torch.Tensor]:
     if num_empty_tensors == 0:
         return shards
     tensor_size = list(shards[0].size())
-    tensor_size = [
-        size if idx != shard_dim else 0 for idx, size in enumerate(tensor_size)
-    ]
+    tensor_size[shard_dim] = 0
     tensor = shards[0].new_zeros(tensor_size)
-    for _ in range(num_empty_tensors):
-        shards.append(tensor)
+    shards.extend(tensor for _ in range(num_empty_tensors))
     return shards
 
 
@@ -236,9 +233,9 @@ class MeshTopoInfo:
     """
 
     mesh: DeviceMesh
-    mesh_dim_devices: List[int]
-    mesh_dim_bandwidth: List[float]
-    mesh_dim_latency: List[float]
+    mesh_dim_devices: list[int]
+    mesh_dim_bandwidth: list[float]
+    mesh_dim_latency: list[float]
 
     @staticmethod
     @lru_cache(None)
@@ -289,7 +286,7 @@ def allreduce_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> f
     num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
     mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
     # allreduce have almost 2x comm bytes compare to allgather/reduce_scatter
-    num_hops = 2 * num_devices_on_mesh_dim - 1
+    num_hops = 2 * (num_devices_on_mesh_dim - 1)
 
     latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]
     bw = (bytes_gb * num_hops / num_devices_on_mesh_dim) / mesh_dim_bandwidth
@@ -319,7 +316,7 @@ def redistribute_cost(
 
     NOTE:
     1. Only consider communication cost here, since computation costs for redistribute
-       are quite trival (i.e. we only need to narrow or simple division)
+       are quite trivial (i.e. we only need to narrow or simple division)
     2. Only consider redistribute cost on same mesh, cross mesh communication cost is
        not quite needed for operator strategy estimation/selection.
     """

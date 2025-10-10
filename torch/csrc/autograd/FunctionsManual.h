@@ -35,9 +35,7 @@ TORCH_API Tensor toNonOptFwGrad(const std::optional<Tensor>& t);
 TORCH_API Tensor toNonOptPrimal(const std::optional<Tensor>& t);
 TORCH_API Tensor toNonOptTensor(const std::optional<Tensor>& t);
 
-TORCH_API inline std::optional<Tensor> wrap_opt_if(
-    const Tensor& t,
-    const bool cond) {
+inline std::optional<Tensor> wrap_opt_if(const Tensor& t, const bool cond) {
   using OptTensor = std::optional<Tensor>;
   return cond ? OptTensor(t) : static_cast<OptTensor>(std::nullopt);
 }
@@ -144,22 +142,13 @@ template <typename T>
 at::Tensor div_tensor_self_backward(
     const Tensor& grad,
     T other,
-    ScalarType self_st);
-at::Tensor div_tensor_other_backward(
-    const Tensor& grad,
-    const Tensor& self,
-    const Tensor& other);
-template <typename T>
-at::Tensor div_tensor_self_backward(
-    const Tensor& grad,
-    T other,
     ScalarType self_st,
-    const std::optional<c10::string_view>& rounding_mode);
+    const std::optional<std::string_view>& rounding_mode = std::nullopt);
 at::Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& other,
-    const std::optional<c10::string_view>& rounding_mode);
+    const std::optional<std::string_view>& rounding_mode = std::nullopt);
 at::Tensor mvlgamma_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -300,7 +289,7 @@ at::Tensor clamp_jvp(
     const Tensor& max_t);
 at::SymIntArrayRef strides_or_error(
     const Tensor& input,
-    c10::string_view const& input_name);
+    std::string_view const& input_name);
 at::Tensor mm_mat1_backward(
     const Tensor& grad,
     const Tensor& mat2,
@@ -314,6 +303,22 @@ at::Tensor mm_mat2_backward(
     at::SymIntArrayRef sizes,
     at::SymIntArrayRef strides,
     c10::Layout layout,
+    const at::Scalar& alpha);
+at::Tensor _grouped_mm_mat1_backward(
+    const Tensor& grad,
+    const Tensor& mat2,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
+    c10::Layout mat1_layout,
+    std::optional<Tensor> offs,
+    const Scalar& alpha);
+at::Tensor _grouped_mm_mat2_backward(
+    const at::Tensor& grad,
+    const at::Tensor& mat1,
+    at::SymIntArrayRef sizes,
+    at::SymIntArrayRef strides,
+    c10::Layout layout,
+    std::optional<Tensor> offs,
     const at::Scalar& alpha);
 at::Tensor mm_mat1_sparse_backward(
     const at::Tensor& grad,
@@ -640,11 +645,18 @@ Tensor linalg_eig_backward(
     const Tensor& V,
     const bool is_hermitian,
     const bool symeig_eigenvectors = true);
-Tensor linalg_lstsq_jvp(
+Tensor linalg_lstsq_solution_jvp(
     const Tensor& A,
-    const Tensor& B,
+    const Tensor& B_,
     const Tensor& dA,
-    const Tensor& dB);
+    const Tensor& dB_);
+Tensor linalg_lstsq_residuals_jvp(
+    const Tensor& A,
+    const Tensor& B_,
+    const Tensor& dA,
+    const Tensor& dB_,
+    const Tensor& X_,
+    const Tensor& L);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor& grad_x,
     const Tensor& grad_m,
@@ -693,13 +705,13 @@ std::tuple<Tensor, Tensor> linalg_qr_jvp(
     const Tensor& dA,
     const Tensor& Q,
     const Tensor& R,
-    const c10::string_view mode);
+    const std::string_view mode);
 Tensor linalg_qr_backward(
     const Tensor& gQ,
     const Tensor& gR,
     const Tensor& Q,
     const Tensor& R,
-    const c10::string_view mode);
+    const std::string_view mode);
 Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
@@ -777,7 +789,7 @@ Tensor gelu_double_backward(
     const Tensor& ggI,
     const Tensor& gO,
     const Tensor& input,
-    c10::string_view approximate);
+    std::string_view approximate);
 Tensor as_strided_backward(
     Tensor grad,
     const TensorGeometry& input_geometry,
@@ -813,6 +825,15 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& save_invstd,
     c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask);
+
+std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
+    const Tensor& dY,
+    const Tensor& drstd,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& rstd,
+    const std::optional<Tensor>& weight_opt,
+    std::array<bool, 2> grad_input_mask);
 
 std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,
@@ -896,9 +917,11 @@ Tensor linalg_det_jvp(
     const Tensor& pivots,
     const bool use_A_T);
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
-    const Tensor& grad,
+    const Tensor& gX_,
+    const Tensor& gL,
     const Tensor& A,
     const Tensor& B_,
+    const Tensor& X_,
     const std::array<bool, 2>& grad_input_mask);
 Tensor linalg_lu_backward(
     const Tensor& L_grad,
@@ -950,6 +973,20 @@ Tensor layer_norm_jvp(
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
     c10::SymIntArrayRef normalized_shape);
+
+Tensor rms_norm_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape);
+
+Tensor rms_norm_rstd_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape);
 
 Tensor group_norm_jvp(
     const Tensor& input_p,
@@ -1046,7 +1083,7 @@ Tensor scatter_reduce_jvp(
     const Tensor& index,
     const Tensor& src_p,
     const Tensor& src_t,
-    c10::string_view reduce,
+    std::string_view reduce,
     bool include_self,
     const Tensor& result);
 
@@ -1056,7 +1093,7 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     int dim,
     const Tensor& index,
     const Tensor& src,
-    c10::string_view reduce,
+    std::string_view reduce,
     bool include_self,
     const Tensor& result);
 
@@ -1070,7 +1107,7 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     int dim,
     const Tensor& index,
     const Tensor& source,
-    c10::string_view reduce,
+    std::string_view reduce,
     bool include_self,
     const Tensor& result);
 

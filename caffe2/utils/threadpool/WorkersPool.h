@@ -39,7 +39,7 @@ struct AllocAligned {
 #elif defined(_MSC_VER)
     p = _aligned_malloc(sizeof(T), kGEMMLOWPCacheLineSize);
 #else
-    auto res = posix_memalign((void**)&p, kGEMMLOWPCacheLineSize, sizeof(T));
+    auto res = posix_memalign(&p, kGEMMLOWPCacheLineSize, sizeof(T));
     (void)res;
 #endif
 
@@ -188,7 +188,6 @@ class BlockingCounter {
   // returns false.
   bool DecrementCount() {
     const auto count_value = count_.fetch_sub(1, std::memory_order_relaxed) - 1;
-    TORCH_DCHECK_GE(count_value, 0);
     if (count_value == 0) {
       std::lock_guard<std::mutex> g(mutex_);
       cond_.notify_one();

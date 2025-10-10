@@ -2,32 +2,18 @@
 
 import torch
 from torch.utils._pytree import tree_map
-from typing import Iterator, List, Optional
+from typing import Optional
+from collections.abc import Iterator
 import logging
 import contextlib
 import itertools
+from torch.utils._dtype_abbrs import dtype_abbrs as _dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.weak import WeakTensorKeyDictionary
 import functools
 from torch._C._profiler import gather_traceback, symbolize_tracebacks
 
 logger = logging.getLogger("LoggingTensor")
-
-_dtype_abbrs = {
-    torch.bfloat16: "bf16",
-    torch.float64: "f64",
-    torch.float32: "f32",
-    torch.float16: "f16",
-    torch.complex32: "c32",
-    torch.complex64: "c64",
-    torch.complex128: "c128",
-    torch.int8: "i8",
-    torch.int16: "i16",
-    torch.int32: "i32",
-    torch.int64: "i64",
-    torch.bool: "b8",
-    torch.uint8: "u8",
-}
 
 # How the chain of calls works for LoggingTensor:
 # 1. Call torch.sin
@@ -56,7 +42,7 @@ class LoggingTensor(torch.Tensor):
         # The wrapping tensor (LoggingTensor) shouldn't hold any
         # memory for the class in question, but it should still
         # advertise the same device as before
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls, elem.size(),
             strides=elem.stride(), storage_offset=elem.storage_offset(),
             # TODO: clone storage aliasing
@@ -97,8 +83,8 @@ class LoggingTensorReentrant(LoggingTensor):
 # https://stackoverflow.com/questions/36408496/python-logging-handler-to-append-to-list
 class LoggingTensorHandler(logging.Handler):
     def __init__(
-            self, log_list: List[str], use_shortid_for_all_tensors: bool,
-            with_type: bool, tracebacks_list: Optional[List]) -> None:
+            self, log_list: list[str], use_shortid_for_all_tensors: bool,
+            with_type: bool, tracebacks_list: Optional[list]) -> None:
         logging.Handler.__init__(self)
         self.log_list = log_list
         self.use_shortid_for_all_tensors = use_shortid_for_all_tensors
@@ -150,10 +136,10 @@ class GatherTraceback(logging.Filter):
         return True
 
 @contextlib.contextmanager
-def capture_logs(is_mode=False, python_tb=False, script_tb=False, cpp_tb=False) -> Iterator[List[str]]:
+def capture_logs(is_mode=False, python_tb=False, script_tb=False, cpp_tb=False) -> Iterator[list[str]]:
     collect_traceback = python_tb or script_tb or cpp_tb
-    log_list: List[str] = []
-    tracebacks_list: List[str] = []
+    log_list: list[str] = []
+    tracebacks_list: list[str] = []
     handler = LoggingTensorHandler(
         log_list,
         with_type=True,

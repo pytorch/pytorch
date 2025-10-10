@@ -6,7 +6,7 @@ import torch
 import torch.fx
 from torch.fx.experimental import const_fold
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 class TestConstFold(TestCase):
@@ -706,3 +706,7 @@ class TestConstFold(TestCase):
         base_result = mod(in_x, in_y)
         fold_result = mod_folded(in_x, in_y)
         self.assertTrue(torch.equal(fold_result, base_result))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

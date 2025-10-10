@@ -169,13 +169,13 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
             False,
             qconfig,
         )
-        qat_linearbn.weight = linear.weight
-        qat_linearbn.bias = linear.bias
-        qat_linearbn.bn.weight = bn.weight
-        qat_linearbn.bn.bias = bn.bias
-        qat_linearbn.bn.running_mean = bn.running_mean
-        qat_linearbn.bn.running_var = bn.running_var
-        qat_linearbn.bn.num_batches_tracked = bn.num_batches_tracked
+        qat_linearbn.weight = linear.weight  # type: ignore[assignment]
+        qat_linearbn.bias = linear.bias  # type: ignore[assignment]
+        qat_linearbn.bn.weight = bn.weight  # type: ignore[assignment]
+        qat_linearbn.bn.bias = bn.bias  # type: ignore[assignment]
+        qat_linearbn.bn.running_mean = bn.running_mean  # type: ignore[assignment]
+        qat_linearbn.bn.running_var = bn.running_var  # type: ignore[assignment]
+        qat_linearbn.bn.num_batches_tracked = bn.num_batches_tracked  # type: ignore[assignment]
         return qat_linearbn
 
     def to_float(self):

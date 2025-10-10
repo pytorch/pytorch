@@ -20,7 +20,7 @@ For now we omit data preprocessing as well as result post-processing.
 
 ### Running a single benchmark
 
-The togglable commmand line arguments to the script are as follows:
+The togglable command line arguments to the script are as follows:
   - `num_iters` (default: 100): how many requests to send to the backend
     excluding the first warmup request
   - `batch_size` (default: 32): the batch size of the requests.

@@ -3,18 +3,8 @@ import copy as copymodule
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import (
-    Any,
-    Callable,
-    Deque,
-    Iterator,
-    List,
-    Literal,
-    Optional,
-    Sized,
-    Tuple,
-    TypeVar,
-)
+from collections.abc import Callable, Iterator, Sized
+from typing import Any, Literal, Optional, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -54,7 +44,7 @@ class ConcaterIterDataPipe(IterDataPipe):
         [0, 1, 2, 0, 1, 2, 3, 4]
     """
 
-    datapipes: Tuple[IterDataPipe]
+    datapipes: tuple[IterDataPipe]
 
     def __init__(self, *datapipes: IterDataPipe):
         if len(datapipes) == 0:
@@ -69,6 +59,7 @@ class ConcaterIterDataPipe(IterDataPipe):
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):
+            # pyrefly: ignore  # bad-argument-type
             return sum(len(dp) for dp in self.datapipes)
         else:
             raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
@@ -126,16 +117,13 @@ class _ContainerTemplate(ABC):
     r"""Abstract class for container ``DataPipes``. The followings are three required methods."""
 
     @abstractmethod
-    def get_next_element_by_instance(self, instance_id: int):
-        ...
+    def get_next_element_by_instance(self, instance_id: int): ...
 
     @abstractmethod
-    def is_every_instance_exhausted(self) -> bool:
-        ...
+    def is_every_instance_exhausted(self) -> bool: ...
 
     @abstractmethod
-    def reset(self) -> None:
-        ...
+    def reset(self) -> None: ...
 
     @abstractmethod
     def get_length_by_instance(self, instance_id: int):
@@ -164,7 +152,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
-        self.buffer: Deque = deque()
+        self.buffer: deque = deque()
         self.buffer_size = buffer_size
         if self.buffer_size < 0:
             warnings.warn(
@@ -183,15 +171,16 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 f"Unknown copy method `{copy}` requested, choose one of None, `shallow` or `deep`."
             )
 
-        self.child_pointers: List[int] = [
+        self.child_pointers: list[int] = [
             0
         ] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0  # The index to read by the slowest child
         self.leading_ptr = 0  # The index to read by the fastest child
         self.end_ptr: Optional[int] = None  # The index to stop child
-        self._child_stop: List[bool] = [True for _ in range(num_instances)]
+        self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def __len__(self):
+        # pyrefly: ignore  # bad-argument-type
         return len(self.main_datapipe)
 
     def get_next_element_by_instance(self, instance_id: int):
@@ -251,6 +240,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         return self.end_ptr is not None and all(self._child_stop)
 
     def get_length_by_instance(self, instance_id: int) -> int:
+        # pyrefly: ignore  # bad-argument-type
         return len(self.main_datapipe)
 
     def reset(self) -> None:
@@ -336,6 +326,7 @@ class _ChildDataPipe(IterDataPipe):
     def __init__(self, main_datapipe: IterDataPipe, instance_id: int):
         assert isinstance(main_datapipe, _ContainerTemplate)
 
+        # pyrefly: ignore  # bad-assignment
         self.main_datapipe: IterDataPipe = main_datapipe
         self.instance_id = instance_id
 
@@ -413,7 +404,9 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         >>> # It can also filter out any element that gets `None` from the `classifier_fn`
         >>> def odd_or_even_no_zero(n):
         ...     return n % 2 if n != 0 else None
-        >>> dp1, dp2 = source_dp.demux(num_instances=2, classifier_fn=odd_or_even_no_zero, drop_none=True)
+        >>> dp1, dp2 = source_dp.demux(
+        ...     num_instances=2, classifier_fn=odd_or_even_no_zero, drop_none=True
+        ... )
         >>> list(dp1)
         [2, 4]
         >>> list(dp2)
@@ -438,7 +431,9 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency
         # like throwing Error when classification result is out of o range
-        container = _DemultiplexerIterDataPipe(datapipe, num_instances, classifier_fn, drop_none, buffer_size)  # type: ignore[abstract]
+        container = _DemultiplexerIterDataPipe(
+            datapipe, num_instances, classifier_fn, drop_none, buffer_size
+        )  # type: ignore[abstract]
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
 
@@ -458,6 +453,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         drop_none: bool,
         buffer_size: int,
     ):
+        # pyrefly: ignore  # invalid-type-var
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
@@ -469,11 +465,13 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 UserWarning,
             )
         self.current_buffer_usage = 0
-        self.child_buffers: List[Deque[_T_co]] = [deque() for _ in range(num_instances)]
+        # pyrefly: ignore  # invalid-type-var
+        self.child_buffers: list[deque[_T_co]] = [deque() for _ in range(num_instances)]
+        # pyrefly: ignore  # invalid-type-var
         self.classifier_fn = classifier_fn
         self.drop_none = drop_none
         self.main_datapipe_exhausted = False
-        self._child_stop: List[bool] = [True for _ in range(num_instances)]
+        self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def _find_next(self, instance_id: int) -> _T_co:  # type: ignore[type-var]
         while True:
@@ -612,16 +610,18 @@ class MultiplexerIterDataPipe(IterDataPipe):
     Example:
         >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
-        >>> dp1, dp2, dp3 = IterableWrapper(range(3)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> dp1, dp2, dp3 = (
+        ...     IterableWrapper(range(3)),
+        ...     IterableWrapper(range(10, 15)),
+        ...     IterableWrapper(range(20, 25)),
+        ... )
         >>> list(dp1.mux(dp2, dp3))
         [0, 10, 20, 1, 11, 21, 2, 12, 22]
     """
 
     def __init__(self, *datapipes):
         self.datapipes = datapipes
-        self.buffer: List = (
-            []
-        )  # Store values to be yielded only when every iterator provides one
+        self.buffer: list = []  # Store values to be yielded only when every iterator provides one
 
     def __iter__(self):
         iterators = [iter(x) for x in self.datapipes]
@@ -668,7 +668,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
 
 @functional_datapipe("zip")
-class ZipperIterDataPipe(IterDataPipe[Tuple[_T_co]]):
+class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
     r"""
     Aggregates elements into a tuple from each of the input DataPipes (functional name: ``zip``).
 
@@ -680,27 +680,32 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[_T_co]]):
     Example:
         >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
-        >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
+        >>> dp1, dp2, dp3 = (
+        ...     IterableWrapper(range(5)),
+        ...     IterableWrapper(range(10, 15)),
+        ...     IterableWrapper(range(20, 25)),
+        ... )
         >>> list(dp1.zip(dp2, dp3))
         [(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)]
     """
 
-    datapipes: Tuple[IterDataPipe]
+    datapipes: tuple[IterDataPipe]
 
     def __init__(self, *datapipes: IterDataPipe):
         if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
             raise TypeError(
-                "All inputs are required to be `IterDataPipe` " "for `ZipIterDataPipe`."
+                "All inputs are required to be `IterDataPipe` for `ZipIterDataPipe`."
             )
         super().__init__()
         self.datapipes = datapipes  # type: ignore[assignment]
 
-    def __iter__(self) -> Iterator[Tuple[_T_co]]:
+    def __iter__(self) -> Iterator[tuple[_T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
         yield from zip(*iterators)
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):
+            # pyrefly: ignore  # bad-argument-type
             return min(len(dp) for dp in self.datapipes)
         else:
             raise TypeError(f"{type(self).__name__} instance doesn't have valid length")

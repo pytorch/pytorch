@@ -1,4 +1,4 @@
-from typing import Callable
+from collections.abc import Callable
 
 from torch._utils import CallbackRegistry
 
@@ -12,9 +12,7 @@ EventDeletionCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
 EventRecordCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry(
     "CUDA event record"
 )
-EventWaitCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry(
-    "CUDA event wait"
-)
+EventWaitCallbacks: "CallbackRegistry[int, int]" = CallbackRegistry("CUDA event wait")
 MemoryAllocationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
     "CUDA memory allocation"
 )

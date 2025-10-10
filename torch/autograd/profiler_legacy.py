@@ -101,12 +101,14 @@ class profile:
 
         records = _disable_profiler_legacy()
         parsed_results = _parse_legacy_records(records)
+        # pyrefly: ignore  # bad-assignment
         self.function_events = EventList(
             parsed_results,
             use_device="cuda" if self.use_cuda else None,
             profile_memory=self.profile_memory,
             with_flops=self.with_flops,
         )
+        # pyrefly: ignore  # missing-attribute
         self.function_events._build_tree()
         return False
 
@@ -188,10 +190,8 @@ def _parse_legacy_records(thread_records):
         """Return a tuple for correlating start and end records in `_parse_legacy_records`."""
         return (record.handle(), record.node_id())
 
-    next_id = 0
     start_record = None
     functions = []
-    record_stack = []
 
     # '__start_profile' is not guaranteed to be first, so we must find it here
     for record in itertools.chain.from_iterable(thread_records):

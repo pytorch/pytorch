@@ -19,15 +19,13 @@ replace_needed_sofiles() {
     find $1 -name '*.so*' -o -name 'ld.lld' | while read sofile; do
         origname=$2
         patchedname=$3
-        if [[ "$origname" != "$patchedname" ]]; then
-            set +e
-            origname=$($PATCHELF_BIN --print-needed $sofile | grep "$origname.*")
-            ERRCODE=$?
-            set -e
-            if [ "$ERRCODE" -eq "0" ]; then
-                echo "patching $sofile entry $origname to $patchedname"
-                $PATCHELF_BIN --replace-needed $origname $patchedname $sofile
-            fi
+        set +e
+        origname=$($PATCHELF_BIN --print-needed $sofile | grep "$origname.*")
+        ERRCODE=$?
+        set -e
+        if [ "$ERRCODE" -eq "0" ]; then
+            echo "patching $sofile entry $origname to $patchedname"
+            $PATCHELF_BIN --replace-needed $origname $patchedname $sofile
         fi
     done
 }
@@ -78,7 +76,7 @@ for pkg in /$WHEELHOUSE_DIR/*triton*.whl; do
         echo "Copied $filepath to $patchedpath"
     done
 
-    # Go through all required shared objects and see if any of our other objects are dependants.  If so, replace so.ver wth so
+    # Go through all required shared objects and see if any of our other objects are dependants.  If so, replace so.ver with so
     for ((i=0;i<${#deps[@]};++i)); do
         echo "replacing "${deps_soname[i]} ${patched[i]}
         replace_needed_sofiles $PREFIX/$ROCM_LIB ${deps_soname[i]} ${patched[i]}

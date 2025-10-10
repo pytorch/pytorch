@@ -35,8 +35,7 @@ std::optional<size_t> ConstantValueMap::GetRank(const std::string& tensorName) {
 }
 
 void ConstantValueMap::SetAllGraphInputsStatic(bool all_static) {
-  ConstantValueMap::getInstance().allGraphInputsStatic =
-      std::make_optional(all_static);
+  ConstantValueMap::getInstance().allGraphInputsStatic = all_static;
 }
 
 std::optional<bool> ConstantValueMap::GetAllGraphInputsStatic() {
@@ -235,7 +234,7 @@ DimSymbolMap& ConstantValueMap::GetDimSymbolMap() {
 }
 
 template <typename Map>
-void UpdateStrKey(
+static void UpdateStrKey(
     Map& map,
     const std::string& old_key,
     const std::string& new_key) {

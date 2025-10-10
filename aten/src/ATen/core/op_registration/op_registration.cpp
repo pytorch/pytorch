@@ -16,10 +16,10 @@ void build_feature_required_feature_not_available(const char* feature) {
 }
 } // namespace impl
 
-static_assert(std::is_nothrow_move_constructible<
-              std::optional<RegistrationHandleRAII>>::value);
-static_assert(std::is_nothrow_move_assignable<
-              std::optional<RegistrationHandleRAII>>::value);
+static_assert(std::is_nothrow_move_constructible_v<
+              std::optional<RegistrationHandleRAII>>);
+static_assert(std::is_nothrow_move_assignable_v<
+              std::optional<RegistrationHandleRAII>>);
 
 void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
   TORCH_CHECK(
@@ -73,7 +73,7 @@ c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(
 
   std::optional<FunctionSchema> inferred_schema = std::nullopt;
   for (const auto& kernel : options.kernels) {
-    if (nullptr != kernel.inferred_function_schema.get()) {
+    if (nullptr != kernel.inferred_function_schema) {
       if (!inferred_schema.has_value()) {
         inferred_schema = *kernel.inferred_function_schema;
         break;

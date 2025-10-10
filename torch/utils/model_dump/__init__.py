@@ -66,6 +66,7 @@ Possible improvements:
 
 import argparse
 import io
+import itertools
 import json
 import os
 import pickle
@@ -75,7 +76,7 @@ import sys
 import urllib.parse
 import zipfile
 from pathlib import Path
-from typing import Dict
+import warnings
 
 import torch.utils.show_pickle
 
@@ -207,19 +208,21 @@ def get_model_info(
     with zipfile.ZipFile(path_or_file) as zf:
         path_prefix = None
         zip_files = []
+        # pyrefly: ignore  # bad-assignment
         for zi in zf.infolist():
             prefix = re.sub("/.*", "", zi.filename)
             if path_prefix is None:
                 path_prefix = prefix
             elif prefix != path_prefix:
                 raise Exception(f"Mismatched prefixes: {path_prefix} != {prefix}")  # noqa: TRY002
-            zip_files.append(dict(
-                filename=zi.filename,
-                compression=zi.compress_type,
-                compressed_size=zi.compress_size,
-                file_size=zi.file_size,
-            ))
-
+            zip_files.append(
+                {
+                    "filename": zi.filename,
+                    "compression": zi.compress_type,
+                    "compressed_size": zi.compress_size,
+                    "file_size": zi.file_size,
+                }
+            )
         assert path_prefix is not None
         version = zf.read(path_prefix + "/version").decode("utf-8").strip()
 
@@ -232,14 +235,14 @@ def get_model_info(
         model_data = get_pickle("data")
         constants = get_pickle("constants")
 
-        # Intern strings that are likely to be re-used.
+        # Intern strings that are likely to be reused.
         # Pickle automatically detects shared structure,
-        # so re-used strings are stored efficiently.
+        # so reused strings are stored efficiently.
         # However, JSON has no way of representing this,
         # so we have to do it manually.
-        interned_strings : Dict[str, int] = {}
+        interned_strings : dict[str, int] = {}
 
-        def ist(s):
+        def intern(s):
             if s not in interned_strings:
                 interned_strings[s] = len(interned_strings)
             return interned_strings[s]
@@ -279,7 +282,7 @@ def get_model_info(
                 debug_info.append((len(raw_code), (('', '', 0), 0, 0)))
 
             code_parts = []
-            for di, di_next in zip(debug_info, debug_info[1:]):
+            for di, di_next in itertools.pairwise(debug_info):
                 start, source_range, *_ = di
                 end = di_next[0]
                 assert end > start
@@ -293,7 +296,7 @@ def get_model_info(
                     s_start = 0
                     s_end = 0
                 text = raw_code[start:end]
-                code_parts.append([text.decode("utf-8"), ist(s_file), s_line, ist(s_text), s_start, s_end])
+                code_parts.append([text.decode("utf-8"), intern(s_file), s_line, intern(s_text), s_start, s_end])
             code_files[zi.filename] = code_parts
 
         extra_files_json_pattern = re.compile(re.escape(path_prefix) + "/extra/.*\\.json")
@@ -332,18 +335,20 @@ def get_model_info(
                 continue
             extra_pickles[zi.filename] = contents
 
-    return {"model": dict(
-        title=title,
-        file_size=file_size,
-        version=version,
-        zip_files=zip_files,
-        interned_strings=list(interned_strings),
-        code_files=code_files,
-        model_data=model_data,
-        constants=constants,
-        extra_files_jsons=extra_files_jsons,
-        extra_pickles=extra_pickles,
-    )}
+    return {
+        "model": {
+            "title": title,
+            "file_size": file_size,
+            "version": version,
+            "zip_files": zip_files,
+            "interned_strings": list(interned_strings),
+            "code_files": code_files,
+            "model_data": model_data,
+            "constants": constants,
+            "extra_files_jsons": extra_files_jsons,
+            "extra_pickles": extra_pickles,
+        }
+    }
 
 
 def get_inline_skeleton():
@@ -355,9 +360,12 @@ def get_inline_skeleton():
 
     import importlib.resources
 
+    # pyrefly: ignore  # bad-argument-type
     skeleton = importlib.resources.read_text(__package__, "skeleton.html")
+    # pyrefly: ignore  # bad-argument-type
     js_code = importlib.resources.read_text(__package__, "code.js")
     for js_module in ["preact", "htm"]:
+        # pyrefly: ignore  # bad-argument-type
         js_lib = importlib.resources.read_binary(__package__, f"{js_module}.mjs")
         js_url = "data:application/javascript," + urllib.parse.quote(js_lib)
         js_code = js_code.replace(f"https://unpkg.com/{js_module}?module", js_url)
@@ -389,6 +397,7 @@ def get_info_and_burn_skeleton(path_or_bytesio, **kwargs):
 
 
 def main(argv, *, stdout=None):
+    warnings.warn("torch.utils.model_dump is deprecated and will be removed in a future PyTorch release.")
     parser = argparse.ArgumentParser()
     parser.add_argument("--style", choices=["json", "html"])
     parser.add_argument("--title")

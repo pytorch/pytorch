@@ -27,7 +27,7 @@ TEST(ProfilerTest, LinuxPerf) {
     profiler.Configure(standard_events);
 
     profiler.Enable();
-    auto pi = calc_pi();
+    calc_pi();
     profiler.Disable(counters);
   } catch (const c10::Error&) {
     // Bail here if something bad happened during the profiling, we don't want
@@ -84,19 +84,19 @@ TEST(ProfilerTest, LinuxPerfNestedDepth) {
     //
 
     profiler.Enable();
-    auto A = calc_pi();
+    calc_pi();
 
     profiler.Enable();
-    auto B = calc_pi();
+    calc_pi();
 
     profiler.Enable();
-    auto C = calc_pi();
+    calc_pi();
     profiler.Disable(counters_C);
 
-    auto B2 = calc_pi();
+    calc_pi();
     profiler.Disable(counters_B);
 
-    auto A2 = calc_pi();
+    calc_pi();
     profiler.Disable(counters_A);
   } catch (const c10::Error&) {
     // Bail here if something bad happened during the profiling, we don't want
@@ -153,20 +153,20 @@ TEST(ProfilerTest, LinuxPerfNestedMultiple) {
     //      B  +-**-+ B    C +-*--+ C
 
     profiler.Enable();
-    auto A1 = calc_pi();
+    calc_pi();
 
     profiler.Enable();
-    auto B1 = calc_pi();
-    auto B2 = calc_pi();
+    calc_pi();
+    calc_pi();
     profiler.Disable(counters_B);
 
-    auto A2 = calc_pi();
+    calc_pi();
 
     profiler.Enable();
-    auto C1 = calc_pi();
+    calc_pi();
     profiler.Disable(counters_C);
 
-    auto A3 = calc_pi();
+    calc_pi();
     profiler.Disable(counters_A);
   } catch (const c10::Error&) {
     // Bail here if something bad happened during the profiling, we don't want
@@ -218,7 +218,7 @@ TEST(ProfilerTest, LinuxPerfNestedSingle) {
     profiler.Enable();
     profiler.Enable();
     profiler.Enable();
-    auto A1 = calc_pi();
+    calc_pi();
     profiler.Disable(counters_C);
     profiler.Disable(counters_B);
     profiler.Disable(counters_A);

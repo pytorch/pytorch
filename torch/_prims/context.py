@@ -1,7 +1,13 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
 import functools
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Optional, Sequence
+from typing import Any, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 import torch
 import torch._decomp
@@ -14,8 +20,12 @@ import torch.overrides
 from torch._prims_common import torch_function_passthrough
 
 
-@functools.lru_cache(None)
-def torch_to_refs_map():
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+@functools.cache
+def torch_to_refs_map() -> dict[Any, Any]:
     """
     Mapping of torch API functions to torch._refs functions.
     E.g. torch_to_refs_map()[torch.add] == torch._refs.add
@@ -28,7 +38,7 @@ def torch_to_refs_map():
         (torch.fft, torch._refs.fft),
         (torch.linalg, torch._refs.linalg),
     ]
-    r: Dict[Any, Any] = {
+    r: dict[Any, Any] = {
         torch.Tensor.__invert__: torch._refs.bitwise_not,
         torch.Tensor.__xor__: torch._refs.bitwise_xor,
         torch.Tensor.__and__: torch._refs.bitwise_and,
@@ -69,8 +79,8 @@ def torch_to_refs_map():
     return r
 
 
-@functools.lru_cache(None)
-def all_prims():
+@functools.cache
+def all_prims() -> set[Any]:
     """
     Set of all prim functions, e.g., torch._prims.add in all_prims()
     """
@@ -94,27 +104,28 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
 
     def __init__(
         self,
-        strict=False,
-        should_fallback_fn=lambda *_: False,
-        prims_mode_cls=nullcontext,
-    ):
+        strict: bool = False,
+        should_fallback_fn: Callable[..., bool] = lambda *_: False,
+        prims_mode_cls: type = nullcontext,
+    ) -> None:
         self.strict = strict
         self.should_fallback_fn = should_fallback_fn
         self.prims_mode_cls = prims_mode_cls
 
     def __torch_function__(
         self,
-        orig_func: Callable,
-        types: Sequence,
+        orig_func: Callable[_P, _R],
+        types: Sequence[type],
         args: Sequence[Any] = (),
-        kwargs: Optional[Dict] = None,
-    ):
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
         if kwargs is None:
             kwargs = {}
         # For primitive operations, run them as is without interception
         # Unless we are in prims_mode, in which case we want to use nvprims
         if orig_func in torch_function_passthrough or orig_func in all_prims():
             with self.prims_mode_cls():
+                # pyrefly: ignore  # invalid-param-spec
                 return orig_func(*args, **kwargs)
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
@@ -129,12 +140,15 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
             func = torch._decomp.decomposition_table.get(orig_func, None)
         elif func is None and isinstance(orig_func, torch._ops.OpOverloadPacket):
             default = getattr(orig_func, "default", None)
+            if default is None and orig_func._dir:
+                default = getattr(orig_func, orig_func._dir[0], None)
             if default is not None:
                 func = torch._decomp.decomposition_table.get(default, None)
 
         if func is not None:
             # If the ref exists query whether we should use it or not
             if self.should_fallback_fn(self, orig_func, func, args, kwargs):
+                # pyrefly: ignore  # invalid-param-spec
                 return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
             with self:
@@ -143,4 +157,5 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
             raise RuntimeError(
                 f"no _refs support for {torch.overrides.resolve_name(orig_func)}"
             )
+        # pyrefly: ignore  # invalid-param-spec
         return orig_func(*args, **kwargs)

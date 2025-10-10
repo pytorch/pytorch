@@ -20,6 +20,17 @@
 namespace at::native {
 
 Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
+  TORCH_CHECK(self.dim() > 2,
+              "channel_shuffle expects input with > 2 dims, but got input with sizes ",
+              self.sizes());
+  int64_t c = self.size(1);
+  TORCH_CHECK(groups > 0,
+              "Number of groups to divide channels in must be positive.",
+              " Value of groups:", groups);
+  TORCH_CHECK((c % groups) == 0,
+              "Number of channels must be divisible by groups. Got ",
+              c, " channels and ", groups, " groups.");
+
   Tensor output;
   if (self.numel() == 0) {
     output = self.alias();
@@ -70,7 +81,7 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
   // TODO: contiguous can be made to preserve the memory format
   // of the input. However since the above reshape clobbers h and w
   // it may not be safe to do that, since channels_last contiguous
-  // may think oc and and the last dim correspond to h,w?
+  // may think oc and the last dim correspond to h,w?
   // It is not clear, however from initial looking around it feels that
   // this may not be correct.
   // In this case channels last will likely require custom implementation

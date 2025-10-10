@@ -1,3 +1,4 @@
+#!/bin/bash
 set -ex
 
 # Set ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
@@ -30,9 +31,14 @@ fi
 # Remove packaged libs and headers
 rm -rf $TRITON_ROCM_DIR/include/*
 
-LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
 LIBELF_PATH="/usr/lib64/libelf.so.1"
+OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
+if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
+    LIBTINFO_PATH="/usr/lib64/libtinfo.so.5"
+else
+    LIBTINFO_PATH="/usr/lib64/libtinfo.so.6"
+fi
 
 OS_SO_PATHS=(
     $LIBELF_PATH
@@ -45,25 +51,15 @@ do
     cp $lib $TRITON_ROCM_DIR/lib/
 done
 
-# Required ROCm libraries
-if [[ "${MAJOR_VERSION}" == "6" ]]; then
-    libamdhip="libamdhip64.so.6"
-else
-    libamdhip="libamdhip64.so.5"
-fi
-
 # Required ROCm libraries - ROCm 6.0
 ROCM_SO=(
-    "${libamdhip}"
-    "libhsa-runtime64.so.1"
-    "libamd_comgr.so.2"
-    "libdrm.so.2"
-    "libdrm_amdgpu.so.1"
+    "libamdhip64.so"
+    "libhsa-runtime64.so"
+    "libdrm.so"
+    "libdrm_amdgpu.so"
+    "libamd_comgr.so"
+    "librocprofiler-register.so"
 )
-
-if [[ $ROCM_INT -ge 60100 ]]; then
-    ROCM_SO+=("librocprofiler-register.so.0")
-fi
 
 for lib in "${ROCM_SO[@]}"
 do
@@ -85,10 +81,6 @@ do
     fi
 
     cp $file_path $TRITON_ROCM_DIR/lib
-    # When running locally, and not building a wheel, we need to satisfy shared objects requests that don't look for versions
-    LINKNAME=$(echo $lib | sed -e 's/\.so.*/.so/g')
-    ln -sf $lib $TRITON_ROCM_DIR/lib/$LINKNAME
-
 done
 
 # Copy Include Files

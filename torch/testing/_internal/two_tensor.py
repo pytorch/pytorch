@@ -2,13 +2,14 @@
 
 import torch
 import torch.utils._pytree as pytree
+from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
 # A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
 class TwoTensor(torch.Tensor):
     @staticmethod
-    def __new__(cls, a, b, outer_size=None, outer_stride=None):
+    def __new__(cls, a, b, outer_size=None, outer_stride=None, *, requires_grad=None):
         if outer_size is None:
             outer_size = a.size()
         if outer_stride is None:
@@ -27,7 +28,7 @@ class TwoTensor(torch.Tensor):
         kwargs["storage_offset"] = a.storage_offset()
         kwargs["device"] = a.device
         kwargs["layout"] = a.layout
-        kwargs["requires_grad"] = a.requires_grad
+        kwargs["requires_grad"] = requires_grad or a.requires_grad
         kwargs["dtype"] = a.dtype
         out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
 
@@ -36,7 +37,9 @@ class TwoTensor(torch.Tensor):
         assert a.storage_offset() == b.storage_offset()
         return out
 
-    def __init__(self, a, b, outer_size=None, outer_stride=None):
+    @torch._disable_dynamo
+    @mark_subclass_constructor_exportable_experimental
+    def __init__(self, a, b, outer_size=None, outer_stride=None, *, requires_grad=None):
         self.a = a
         self.b = b
 
@@ -84,6 +87,9 @@ class TwoTensor(torch.Tensor):
             return out
         else:
             return return_and_correct_aliasing(func, args, kwargs, out)
+
+    def get_elem_a(self):
+        return self.a
 
 
 class TwoTensorMode(torch.utils._python_dispatch.TorchDispatchMode):

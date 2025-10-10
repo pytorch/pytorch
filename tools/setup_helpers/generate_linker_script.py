@@ -1,4 +1,7 @@
+import argparse
+import os
 import subprocess
+from pathlib import Path
 
 
 def gen_linker_script(
@@ -9,8 +12,8 @@ def gen_linker_script(
         prioritized_text = [
             line.replace("\n", "") for line in prioritized_text if line != "\n"
         ]
-
-    linker_script_lines = subprocess.check_output(["ld", "-verbose"], text=True).split(
+    ld = os.environ.get("LD", "ld")
+    linker_script_lines = subprocess.check_output([ld, "-verbose"], text=True).split(
         "\n"
     )
 
@@ -27,6 +30,10 @@ def gen_linker_script(
     assert len(text_line_start) == 1, "The linker script has multiple text sections!"
     text_line_start = text_line_start[0]
 
+    # ensure that parent directory exists before writing
+    fout = Path(fout)
+    fout.parent.mkdir(parents=True, exist_ok=True)
+
     with open(fout, "w") as f:
         for lineid, line in enumerate(linker_script_lines):
             if lineid == text_line_start + 2:
@@ -35,3 +42,20 @@ def gen_linker_script(
                     f.write(f"      .text.{plines}\n")
                 f.write("    )\n")
             f.write(f"{line}\n")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Generate linker file based on prioritized symbols. Used for link-time optimization.",
+    )
+    parser.add_argument(
+        "--filein",
+        help="Path to prioritized_text.txt input file",
+        default=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--fout", help="Output path for linker ld file", default=argparse.SUPPRESS
+    )
+    # convert args to a dict to pass to gen_linker_script
+    kwargs = vars(parser.parse_args())
+    gen_linker_script(**kwargs)

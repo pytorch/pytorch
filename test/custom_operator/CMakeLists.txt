@@ -1,5 +1,5 @@
 # Basic CMake setup
-cmake_minimum_required(VERSION 3.1 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 project(custom_ops)
 
 if(USE_ROCM)

@@ -16,8 +16,9 @@ import inspect
 import os
 import re
 import warnings
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -70,7 +71,7 @@ def _unique_state_dict(module, keep_vars=False):
     # as values, and deduplicate the params using Parameters and Buffers
     state_dict = module.state_dict(keep_vars=True)
     filtered_dict = type(state_dict)()
-    seen_ids: Set[int] = set()
+    seen_ids: set[int] = set()
     for k, v in state_dict.items():
         if id(v) in seen_ids:
             continue
@@ -112,7 +113,7 @@ class ONNXTracedModule(torch.nn.Module):
         outs = []
 
         def wrapper(*args):
-            in_args: List[torch.Tensor] = []
+            in_args: list[torch.Tensor] = []
             for i in range(len(in_vars)):
                 if not isinstance(args[i], torch.Tensor):
                     raise RuntimeError("Expected Tensor argument")
@@ -168,6 +169,7 @@ def _clone_inputs(args):
         else:
             return a.clone(memory_format=torch.preserve_format)
 
+    # pyrefly: ignore  # missing-attribute
     return function._nested_map(
         lambda x: isinstance(x, torch.Tensor), clone_input, condition_msg="tensors"
     )(args)
@@ -334,6 +336,7 @@ def _check_trace(
 
         if is_trace_module:
             copied_dict = {}
+            # pyrefly: ignore  # missing-attribute
             for name, data in inputs.items():
                 copied_dict[name] = _clone_inputs(data)
             check_mod = torch.jit.trace_module(
@@ -738,6 +741,7 @@ def _trace_impl(
         example_inputs = (example_inputs,)
     # done primarily so that weird iterables fail here and not pybind11 code
     elif example_kwarg_inputs is None and not isinstance(example_inputs, tuple):
+        # pyrefly: ignore  # bad-argument-type
         example_inputs = tuple(example_inputs)
 
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
@@ -764,6 +768,7 @@ def _trace_impl(
         traced = torch._C._create_function_from_trace(
             name,
             func,
+            # pyrefly: ignore  # bad-argument-type
             example_inputs,
             var_lookup_fn,
             strict,
@@ -960,6 +965,7 @@ def trace(
         import torch
         import torch.nn as nn
 
+
         class Net(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -967,6 +973,7 @@ def trace(
 
             def forward(self, x):
                 return self.conv(x)
+
 
         n = Net()
         example_weight = torch.rand(1, 1, 3, 3)
@@ -991,11 +998,7 @@ def trace(
             stacklevel=2,
         )
 
-    from torch._utils_internal import (
-        check_if_torch_exportable,
-        log_torch_jit_trace_exportability,
-        log_torchscript_usage,
-    )
+    from torch._utils_internal import log_torchscript_usage
 
     traced_func = _trace_impl(
         func,
@@ -1012,107 +1015,10 @@ def trace(
         _store_inputs,
     )
     log_torchscript_usage("trace", model_id=_get_model_id(traced_func))
-
-    if check_if_torch_exportable():
-        from torch._export.converter import TS2EPConverter
-        from torch.export._trace import (
-            _convert_ts_to_export_experimental,
-            _process_jit_trace_inputs_for_export,
-        )
-
-        traced_func_for_export = _trace_impl(
-            func,
-            example_inputs=example_inputs,
-            optimize=optimize,
-            check_trace=False,
-            check_inputs=check_inputs,
-            check_tolerance=check_tolerance,
-            strict=strict,
-            _force_outplace=_force_outplace,
-            _module_class=_module_class,
-            _compilation_unit=_compilation_unit,
-            example_kwarg_inputs=example_kwarg_inputs,
-            _store_inputs=_store_inputs,
-        )
-
-        export_args, _ = _process_jit_trace_inputs_for_export(
-            example_inputs, example_kwarg_inputs
-        )
-
-        def _log_exportability(func_to_export, export_func, export_args, export_type):
-            try:
-                traced_result = func_to_export(*export_args)
-            except Exception as e:
-                _ = e
-                log_torch_jit_trace_exportability(
-                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
-                )
-                return
-
-            try:
-                ep_module = export_func(func_to_export, export_args)
-            except Exception as e:
-                log_torch_jit_trace_exportability(
-                    "trace",
-                    str(export_type),
-                    str(_ExportOutcome.FAILED_TO_EXPORT),
-                    str(e),
-                )
-                return
-
-            try:
-                export = ep_module(*export_args)
-            except Exception as e:
-                log_torch_jit_trace_exportability(
-                    "trace", str(export_type), str(_ExportOutcome.FAILED_TO_RUN), str(e)
-                )
-                return
-
-            if not analyze_ts_result_with_export_result(export, traced_result):
-                log_torch_jit_trace_exportability(
-                    "trace",
-                    str(export_type),
-                    str(_ExportOutcome.ACCURACY_ERROR),
-                    "accuracy error",
-                )
-                return
-
-            log_torch_jit_trace_exportability(
-                "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
-            )
-
-        def _direct_export_and_lower(func, export_args):
-            return torch.export.export(func, export_args, strict=False).module()
-
-        def _convert_ts_to_export_source_to_source(func, export_args):
-            return TS2EPConverter(func, export_args).convert().module()
-
-        # torch.jit.trace is noop when the original module is torch.jit.ScriptModule
-        if not isinstance(traced_func_for_export, torch.jit.ScriptModule):
-            _log_exportability(
-                traced_func_for_export,
-                _direct_export_and_lower,
-                export_args,
-                _ExportType.DIRECT_EXPORT,
-            )
-
-        _log_exportability(
-            traced_func_for_export,
-            _convert_ts_to_export_experimental,
-            export_args,
-            _ExportType.TRACE_AND_EXPORT,
-        )
-        _log_exportability(
-            traced_func_for_export,
-            _convert_ts_to_export_source_to_source,
-            export_args,
-            _ExportType.SOURCE_TO_SOURCE,
-        )
-
     return traced_func
 
 
-_trace_module_map: Optional[Dict[Any, Any]] = None
+_trace_module_map: Optional[dict[Any, Any]] = None
 
 
 def trace_module(
@@ -1176,6 +1082,7 @@ def trace_module(
         import torch
         import torch.nn as nn
 
+
         class Net(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1202,7 +1109,10 @@ def trace_module(
 
         # Trace specific methods on a module (specified in `inputs`), constructs
         # a `ScriptModule` with `forward` and `weighted_kernel_sum` methods
-        inputs = {'forward' : example_forward_input, 'weighted_kernel_sum' : example_weight}
+        inputs = {
+            "forward": example_forward_input,
+            "weighted_kernel_sum": example_weight,
+        }
         module = torch.jit.trace_module(n, inputs)
 
     """
@@ -1226,7 +1136,7 @@ def trace_module(
 
     old_module_map = torch.jit._trace._trace_module_map
     try:
-        trace_module_map: Dict[Any, Any] = {}
+        trace_module_map: dict[Any, Any] = {}
 
         def register_submods(mod, prefix):
             for name, child in mod.named_children():

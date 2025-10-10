@@ -36,7 +36,7 @@ class TestException(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "This op may not exist or may not be currently " "supported in TorchScript",
+            "This op may not exist or may not be currently supported in TorchScript",
         ):
 
             @torch.jit.script
@@ -197,3 +197,10 @@ class TestException(TestCase):
             "jit.myexception.MyKeyError: This is a user defined key error",
         ):
             fn()
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

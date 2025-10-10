@@ -96,7 +96,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   std::unordered_set<int> miscellaneousSockets_;
 
   Socket storeListenSocket_;
-  std::vector<Socket> sockets_{};
+  std::vector<Socket> sockets_;
 #ifdef _WIN32
   const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds{10};
   HANDLE ghStopEvent_{};
@@ -512,8 +512,7 @@ void TCPStoreMasterDaemon::run() {
   tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
 
   // receive the queries
-  bool finished = false;
-  while (!finished) {
+  while (true) {
     for (const auto i : c10::irange(sockets_.size())) {
       fds[i].revents = 0;
     }
@@ -524,7 +523,6 @@ void TCPStoreMasterDaemon::run() {
     if (res == 0) {
       auto rv = WaitForSingleObject(ghStopEvent_, 0);
       if (rv != WAIT_TIMEOUT) {
-        finished = true;
         break;
       }
       continue;
@@ -567,8 +565,7 @@ void TCPStoreMasterDaemon::run() {
     tcputil::addPollfd(fds, controlPipeFd_[0], POLLIN | POLLHUP);
 
     // receive the queries
-    bool finished = false;
-    while (!finished) {
+    while (true) {
       for (const auto i : c10::irange(sockets_.size())) {
         fds[i].revents = 0;
       }
@@ -602,7 +599,6 @@ void TCPStoreMasterDaemon::run() {
               "Unexpected poll revent on the control pipe's reading fd: " +
                   std::to_string(fds[1].revents));
         }
-        finished = true;
         break;
       }
       queryFds(fds);

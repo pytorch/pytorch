@@ -13,7 +13,7 @@ namespace torch::jit {
 // "Whether to emit compact debug_pkl when saving a model to .pt file."
 // "Compact file is smaller but cannot be loaded by old torch binaries."
 // TODO(qihan) remove when all binaries are using string table.
-thread_local bool should_use_format_with_string_table_ = true;
+static thread_local bool should_use_format_with_string_table_ = true;
 
 class SourceRangeSerializer {
  public:
@@ -167,9 +167,7 @@ std::vector<char> SourceRangePickler::pickle(
     }
 
     ivalues.emplace_back(c10::ivalue::Tuple::create(
-        {(int64_t)range.bytes,
-         srs->serialize(range.range),
-         static_cast<int64_t>(source_range_tag)}));
+        {(int64_t)range.bytes, srs->serialize(range.range), source_range_tag}));
   }
 
   std::vector<at::Tensor> table;

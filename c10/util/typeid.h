@@ -19,7 +19,6 @@
 #include <c10/util/TypeIndex.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/irange.h>
-#include <c10/util/string_view.h>
 
 #include <c10/core/ScalarType.h>
 
@@ -135,7 +134,7 @@ struct TypeMetaData final {
       PlacementDelete* placementDelete,
       Delete* deleteFn,
       TypeIdentifier id,
-      c10::string_view name) noexcept
+      std::string_view name) noexcept
       : itemsize_(itemsize),
         new_(newFn),
         placementNew_(placementNew),
@@ -152,7 +151,7 @@ struct TypeMetaData final {
   PlacementDelete* placementDelete_;
   Delete* delete_;
   TypeIdentifier id_;
-  c10::string_view name_;
+  std::string_view name_;
 };
 
 // Mechanism for throwing errors which can't be prevented at compile time
@@ -394,7 +393,7 @@ class C10_API TypeMeta final {
     return data().placementNew_;
   }
   /**
-   * Returns the typed copy function pointer for individual iterms.
+   * Returns the typed copy function pointer for individual items.
    */
   Copy* copy() const noexcept {
     return data().copy_;
@@ -411,7 +410,7 @@ class C10_API TypeMeta final {
   /**
    * Returns a printable name for the type.
    */
-  c10::string_view name() const noexcept {
+  std::string_view name() const noexcept {
     return data().name_;
   }
 
@@ -430,7 +429,7 @@ class C10_API TypeMeta final {
   }
 
   template <class T>
-  static c10::string_view TypeName() noexcept {
+  static std::string_view TypeName() noexcept {
     return c10::util::get_fully_qualified_type_name<T>();
   }
 
@@ -477,7 +476,7 @@ class C10_API TypeMeta final {
   /**
    * convert TypeMeta handles to ScalarType enum values
    */
-  inline ScalarType toScalarType() {
+  inline ScalarType toScalarType() const {
     if (C10_LIKELY(isScalarType())) {
       return static_cast<ScalarType>(index_);
     }

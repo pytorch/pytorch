@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <ATen/ATen.h>
+#include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -16,6 +17,16 @@ constexpr auto kBackendDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
 
 namespace c10d {
+
+enum class ErrorType {
+  SUCCESS = 0,
+  TIMEOUT = 1,
+  // e.g., NCCL error, etc
+  COMM_ERROR = 2,
+  // TODO, do we need to distinguish between remote timeout or remote COMM
+  // errors?
+  REMOTE_ERROR = 3
+};
 
 class TORCH_API Backend : public torch::CustomClassHolder {
  public:
@@ -35,6 +46,8 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backend name
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::string backend;
+    std::string group_name;
+    std::vector<uint64_t> global_ranks_in_group;
   };
 
   explicit Backend(int rank, int size);
@@ -58,6 +71,21 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  virtual bool supportsCoalescing() const {
+    return false;
+  }
+
+  virtual bool supportsTimeEstimation() const {
+    return false;
+  }
+
+  virtual void setTimeout(std::chrono::milliseconds timeout) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support setting timeout"));
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
@@ -77,6 +105,16 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Subclasses must override this method to return the backend name
   virtual const std::string getBackendName() const {
     TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
+  }
+
+  // Subclasses must override this method to return the backend name
+  virtual c10::intrusive_ptr<Options> getBackendOptions() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ",
+            getBackendName(),
+            " does not implement getBackendOptions."));
   }
 
   virtual c10::intrusive_ptr<Work> broadcast(
@@ -353,6 +391,29 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         " is missing implementation of enableCollectivesTiming.");
   }
 
+  virtual c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Options>& opts) {
+    TORCH_CHECK(
+        false,
+        "Backend ",
+        getBackendName(),
+        " is missing implementation of split.");
+  }
+
+  virtual c10::intrusive_ptr<Backend> merge(
+      const c10::intrusive_ptr<Store>& store,
+      const c10::intrusive_ptr<Options>& opts,
+      const int& rank,
+      const int& size) {
+    TORCH_CHECK(
+        false,
+        "Backend ",
+        getBackendName(),
+        " is missing implementation of merge.");
+  }
+
   bool hasHooks() const {
     return onCompletionHook_ != nullptr;
   }
@@ -392,6 +453,42 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     }
     bound_device_id_ = device;
   }
+
+  virtual ErrorType getError() {
+    TORCH_CHECK(
+        false,
+        c10::str("Backend ", getBackendName(), " does not support getError"));
+  }
+
+  virtual std::shared_ptr<c10::Allocator> getMemAllocator() {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support getMemAllocator"));
+  }
+
+  // Allocate tensor (aten::empty) from backend's communication-optimized memory
+  // pool
+  virtual at::Tensor allocateTensor(long size, at::TensorOptions options = {}) {
+    TORCH_CHECK(
+        false,
+        c10::str(
+            "Backend ", getBackendName(), " does not support allocateTensor"));
+  }
+
+  // Returns true if backend supports tensor allocation
+  virtual bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+    // Change to true in concrete backend if supported
+    return false;
+  }
+
+  // Aborts all pending operations and connections in the backend if the backend
+  // supports it.
+  virtual void abort() {}
+
+  // Shutdown the backend if the backend supports it. This should be used for
+  // normal shutdown.
+  virtual void shutdown() {}
 
  protected:
   // Implementations of this interface need to call this to setup

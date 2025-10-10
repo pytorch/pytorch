@@ -128,7 +128,7 @@ typename c10::guts::infer_function_traits_t<Functor>::return_type
 call_torchbind_method_from_stack(
     Functor& functor,
     jit::Stack& stack,
-    std::index_sequence<ivalue_arg_indices...>) {
+    std::index_sequence<ivalue_arg_indices...> /*unused*/) {
   (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would
                  // be unused and we have to silence the compiler warning.
 
@@ -227,6 +227,7 @@ TORCH_API at::ClassTypePtr getCustomClass(const std::string& name);
 
 // Given an IValue, return true if the object contained in that IValue
 // is a custom C++ class, otherwise return false.
+// NOLINTNEXTLINE(readability-redundant-declaration)
 TORCH_API bool isCustomClass(const c10::IValue& v);
 
 // This API is for testing purposes ONLY. It should not be used in

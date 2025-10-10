@@ -8,6 +8,8 @@ import sympy
 import torch
 from torch.utils._sympy.functions import (
     _keep_float,
+    BitwiseFn_bitwise_and,
+    BitwiseFn_bitwise_or,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
@@ -173,6 +175,7 @@ class ReferenceAnalysis:
 
     @staticmethod
     def pow(a, b):
+        # pyrefly: ignore  # bad-argument-type
         return _keep_float(FloatPow)(a, b)
 
     @staticmethod
@@ -194,6 +197,14 @@ class ReferenceAnalysis:
     @staticmethod
     def round_decimal(a, b):
         return RoundDecimal(a, b)
+
+    @staticmethod
+    def bitwise_and(a, b):
+        return BitwiseFn_bitwise_and(a, b)
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return BitwiseFn_bitwise_or(a, b)
 
 
 # Unlike ReferenceAnalysis, does NOT sympyify, instead, works with plain
@@ -307,6 +318,14 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     def round_decimal(a, b):
         return round(a, ndigits=b)
 
+    @staticmethod
+    def bitwise_and(a, b):
+        return a & b
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return a | b
+
 
 # Like PythonReferenceAnalysis, but some export-unfriendly choices of
 # operators to make things faster
@@ -357,6 +376,14 @@ class TensorReferenceAnalysis:
     @staticmethod
     def and_(a, b):
         return torch.ops.aten.logical_and.default(a, b)
+
+    @staticmethod
+    def bitwise_and(a, b):
+        return torch.ops.aten.bitwise_and(a, b)
+
+    @staticmethod
+    def bitwise_or(a, b):
+        return torch.ops.aten.bitwise_or(a, b)
 
     @staticmethod
     def eq(a, b):

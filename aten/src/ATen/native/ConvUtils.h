@@ -353,31 +353,48 @@ TORCH_API void _cudnn_set_conv_benchmark_empty_cache(bool enable);
 TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
 
 
-inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
+inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
       input.scalar_type() == at::kDouble ||
       weight.scalar_type() == at::kDouble) {
-    return false;
+    return at::MemoryFormat::Contiguous;
   }
 
-  bool can_use_miopen_channels_last_2d = false;
   // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-  // See #64427
-  static std::optional<bool> PYTORCH_MIOPEN_SUGGEST_NHWC = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC");
+  // See https://github.com/pytorch/pytorch/issues/64427.
+  // non static variable is used to be able to change environment variable in runtime for testing
+  // enabled by default for ROCm >= 7.0.0 with miopen 3.5
+  int miopen_version = detail::getCUDAHooks().compiledWithMIOpen() ? detail::getCUDAHooks().versionMIOpen() : 0;
+  bool is_miopen_3_5 = miopen_version >= 30500;  // ROCm 7.0
+  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(is_miopen_3_5);
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
+  auto weight_ndim = weight.ndimension();
 
-  can_use_miopen_channels_last_2d = PYTORCH_MIOPEN_SUGGEST_NHWC &&  *PYTORCH_MIOPEN_SUGGEST_NHWC && (
-            ( (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-            (weight_memory_format == at::MemoryFormat::ChannelsLast) )
-        );
+  bool can_use_miopen_channels_last_2d = suggest_nhwc && (weight_ndim == 4) && (
+    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
+    (weight_memory_format == at::MemoryFormat::ChannelsLast)
+  );
+  if (can_use_miopen_channels_last_2d) {
+    return at::MemoryFormat::ChannelsLast;
+  }
 
-  bool can_use_miopen_channels_last_3d = false;
+  bool can_use_miopen_channels_last_3d = suggest_nhwc && (weight_ndim == 5) && (
+    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
+    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
+  );
+  if (can_use_miopen_channels_last_3d) {
+    return at::MemoryFormat::ChannelsLast3d;
+  }
 
-  return can_use_miopen_channels_last_2d || can_use_miopen_channels_last_3d;
+  return at::MemoryFormat::Contiguous;
+}
+
+// deprecated, but to remove would be BC-breaking
+inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+  return miopen_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous;
 }
 
 inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
@@ -425,25 +442,34 @@ inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor
   if (!input.is_xpu() || !weight.is_xpu()) {
     return false;
   }
-
-  // disable NHWC for float64 input.
-  if (input.scalar_type() == at::kDouble ||
-      weight.scalar_type() == at::kDouble) {
+  if (!input.defined() || input.is_sparse()) {
+    // suggest channels_first
     return false;
   }
 
-  auto input_memory_format = input.suggest_memory_format();
-  auto weight_memory_format = weight.suggest_memory_format();
+  auto is_channel_last = [](const at::Tensor& t) {
+    auto fmt = t.suggest_memory_format();
+    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  };
+  return is_channel_last(input) || is_channel_last(weight);
+}
 
-  bool can_use_xpu_channels_last_2d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast);
+inline bool mps_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
-  bool can_use_xpu_channels_last_3d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-      (weight_memory_format == at::MemoryFormat::ChannelsLast3d);
+  // check layout only for mps tensor.
+  if (!input.is_mps() || !weight.is_mps()) {
+    return false;
+  }
+  if (!input.defined() || input.is_sparse()) {
+    // suggest channels_first
+    return false;
+  }
 
-  return can_use_xpu_channels_last_2d || can_use_xpu_channels_last_3d;
+  auto is_channel_last = [](const at::Tensor& t) {
+    auto fmt = t.suggest_memory_format();
+    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  };
+  return is_channel_last(input) || is_channel_last(weight);
 }
 
 } // namespace at::native

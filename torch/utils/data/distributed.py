@@ -1,5 +1,6 @@
 import math
-from typing import Iterator, Optional, TypeVar
+from collections.abc import Iterator
+from typing import Optional, TypeVar
 
 import torch
 import torch.distributed as dist
@@ -130,6 +131,7 @@ class DistributedSampler(Sampler[_T_co]):
         indices = indices[self.rank : self.total_size : self.num_replicas]
         assert len(indices) == self.num_samples
 
+        # pyrefly: ignore  # bad-return
         return iter(indices)
 
     def __len__(self) -> int:

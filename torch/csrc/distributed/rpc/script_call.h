@@ -3,7 +3,6 @@
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <optional>
 #include <vector>
 

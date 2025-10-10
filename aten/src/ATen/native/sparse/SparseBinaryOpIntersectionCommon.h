@@ -51,10 +51,10 @@ ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
       // Similarly, an upper bound is a value at *it with the smallest index
       // such that *it > value if such value exists, or last if does not.
       // Let is_lower = true and *it < value, then we know that *it and values
-      // preceeding *it cannot contain a lower bound, so we adjust initial iterator range
+      // preceding *it cannot contain a lower bound, so we adjust initial iterator range
       // from [first, first + count] to [first + step + 1, first + count - (step + 1)],
       // where +1 skips the element at which we have just evaluated *it < value.
-      // Samilar logic holds when is_lower = false.
+      // Similar logic holds when is_lower = false.
       if (is_lower ? *it < value : value >= *it) {
         first = ++it;
         count -= step + 1;
@@ -246,8 +246,7 @@ void _sparse_binary_op_intersection_kernel_impl(
       source._indices().options());
   const auto probably_coalesced_nnz_arange = nnz_arange.narrow(-1, 0, probably_coalesced._nnz());
 
-  // non-const because of gcc-5/clang-5 issues
-  auto sparse_dim = probably_coalesced.sparse_dim();
+  const auto sparse_dim = probably_coalesced.sparse_dim();
 
   // Apply the hash function to probably_coalesced.indices
   const auto probably_coalesced_indices_hash = [&]() -> Tensor {
@@ -257,9 +256,8 @@ void _sparse_binary_op_intersection_kernel_impl(
     }
 
     const auto indices = probably_coalesced._indices();
-    // non-const because of gcc-5/clang-5 issues
-    auto indices_dim_stride = indices.stride(0);
-    auto indices_nnz_stride = indices.stride(1);
+    const auto indices_dim_stride = indices.stride(0);
+    const auto indices_nnz_stride = indices.stride(1);
 
     auto hash = at::empty({probably_coalesced._nnz()}, indices.options().dtype(kLong));
 

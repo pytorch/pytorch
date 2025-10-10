@@ -6,16 +6,11 @@ import unittest
 
 import torch
 from torch.nn import init
-from torch.testing._internal.common_utils import skipIfLegacyJitExecutor
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfLegacyJitExecutor,
+)
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestGenerator(JitTestCase):
@@ -37,7 +32,7 @@ class TestGenerator(JitTestCase):
 
         # Run this 3 times to ensure that the generator is being manually seeded
         # each time the traced function is run
-        for i in range(3):
+        for _ in range(3):
             torch.manual_seed(1)
 
             eager_tensor = f()
@@ -64,7 +59,7 @@ class TestGenerator(JitTestCase):
 
         # Run this 3 times to ensure that the generator is being manually seeded
         # each time the traced function is run
-        for i in range(3):
+        for _ in range(3):
             torch.manual_seed(1)
 
             eager_tensor = f()
@@ -193,3 +188,7 @@ class TestGenerator(JitTestCase):
         except:  # noqa: B001, E722
             print(loaded_module.forward.code)
             raise
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

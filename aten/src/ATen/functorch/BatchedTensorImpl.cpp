@@ -126,7 +126,7 @@ SymIntArrayRef BatchedTensorImpl::sym_strides_custom() const {
 
 // TODO: implement proper contiguity on batched tensor, then put
 // sizes_strides_policy back to Default
-bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
+c10::SymBool BatchedTensorImpl::sym_is_contiguous_custom(at::MemoryFormat memory_format) const {
   TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
       "NYI: querying is_contiguous inside of vmap for memory_format ",
       "other than torch.contiguous_format");
@@ -171,18 +171,18 @@ void BatchedTensorImpl::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& 
   TORCH_CHECK(false, "mutating directly with `.data` under vmap transform is not allowed.");
 }
 
-Tensor makeBatched(const Tensor& tensor, int64_t bdim, int64_t level) {
+Tensor makeBatched(Tensor tensor, int64_t bdim, int64_t level) {
   DispatchKeySet key_set = getKeysToPropagateToWrapper(tensor);
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
     auto batched_level = batched->level();
     TORCH_INTERNAL_ASSERT(level > batched_level, " batched_level: ", batched_level, " level: ", level);
   }
-  return at::detail::make_tensor<BatchedTensorImpl>(key_set, tensor, bdim, level);
+  return at::detail::make_tensor<BatchedTensorImpl>(key_set, std::move(tensor), bdim, level);
 }
 
-Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level) {
-  return makeBatched(tensor, dim, level);
+Tensor addBatchDim(Tensor tensor, int64_t dim, int64_t level) {
+  return makeBatched(std::move(tensor), dim, level);
 }
 
 } // namespace at::functorch

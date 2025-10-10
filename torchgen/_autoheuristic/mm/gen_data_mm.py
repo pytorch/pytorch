@@ -1,12 +1,11 @@
 import itertools
-import os
 import random
 import sys
+from pathlib import Path
+from typing import Any
 
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from typing import Any, Tuple
+sys.path.append(str(Path(__file__).absolute().parents[1]))
 
 from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
@@ -17,7 +16,7 @@ from benchmark_utils import (  # type: ignore[import-not-found]
 )
 
 import torch
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 class BenchmarkRunnerMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimported]
@@ -28,7 +27,7 @@ class BenchmarkRunnerMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimporte
     def __init__(self) -> None:
         super().__init__("mm")
 
-    def create_input(self) -> Tuple[Any, ...]:
+    def create_input(self) -> tuple[Any, ...]:
         dtype = random.choices([torch.float32, torch.float16, torch.bfloat16])[0]
         set_precision(dtype)
         m, k, n = self.get_m_k_n(dtype)
@@ -58,7 +57,7 @@ class BenchmarkRunnerMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimporte
                 dtype_right=dtype,
             )
 
-            with fresh_inductor_cache():
+            with fresh_cache():
 
                 def mixed_mm(A: Any, B: Any) -> Any:
                     return torch.mm(A, B)
@@ -100,7 +99,7 @@ class BenchmarkRunnerMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimporte
         print(f"random_type {distr_type} not supported")
         sys.exit(1)
 
-    def get_m_k_n(self, dtype: Any) -> Tuple[int, int, int]:
+    def get_m_k_n(self, dtype: Any) -> tuple[int, int, int]:
         numel_max = 2**31
 
         # repeat until tensors fit in memory

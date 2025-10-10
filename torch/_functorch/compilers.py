@@ -5,9 +5,10 @@ import logging
 import os
 import pickle
 import random
+from collections.abc import Callable
 from contextlib import contextmanager
 from functools import partial
-from typing import Callable, Union
+from typing import Union
 
 import sympy
 
@@ -31,7 +32,7 @@ from .partitioners import (
 log = logging.getLogger(__name__)
 
 
-# These canonicalizations are needed here (and not decompositions), as the ops
+# These canonicalization are needed here (and not decompositions), as the ops
 # we're trying to canonicalize to CompositeImplicitAutograd.
 def _canonicalize(fx_g):
     for node in fx_g.graph.find_nodes(
@@ -150,18 +151,18 @@ class DebugInterpreter(fx.Interpreter):
         def check(nv, rv, desc):
             assert callable(desc)
             assert nv.dtype == rv.dtype, f"{desc()}: {nv.dtype} != {rv.dtype}"
-            assert (
-                subst_symint_tuple(nv.size()) == rv.size()
-            ), f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
+            assert subst_symint_tuple(nv.size()) == rv.size(), (
+                f"{desc()}: {nv.size()} aka {subst_symint_tuple(nv.size())} != {rv.size()}"
+            )
             same_strides = check_significant_strides(nv, rv)
-            assert (
-                same_strides
-            ), f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
+            assert same_strides, (
+                f"{desc()}: {nv.stride()} aka {subst_symint_tuple(nv.stride())} != {rv.stride()}"
+            )
 
         r = super().run_node(n)
         if "val" in n.meta:
-            n_vals, n_spec = pytree.tree_flatten(n.meta["val"])
-            r_vals, r_spec = pytree.tree_flatten(r)
+            n_vals, _n_spec = pytree.tree_flatten(n.meta["val"])
+            r_vals, _r_spec = pytree.tree_flatten(r)
             # TODO: There is some sort of problem where we record that an
             # operator returned a tuple/list, and then later it turns out the
             # real version of the operator returned a list/tuple. Need to
@@ -249,7 +250,7 @@ def memory_efficient_fusion(
 
     Args:
         fn (Union[Callable, nn.Module]): A Python function or a ``nn.Module``
-            that takes one ore more arguments. Must return one or more Tensors.
+            that takes one or more arguments. Must return one or more Tensors.
         **kwargs: Any other overrides you want to make to the settings
 
     Returns:
@@ -317,7 +318,7 @@ def get_inputs(input_data_path):
                 type = meta
                 input = type(random.rand())
             else:
-                type, shape, stride, dtype, device = meta
+                type, shape, _stride, dtype, device = meta
                 if dtype in {
                     torch.int,
                     torch.int32,

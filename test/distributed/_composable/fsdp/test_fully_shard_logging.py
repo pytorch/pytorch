@@ -6,14 +6,18 @@ import unittest.mock
 import torch.distributed as dist
 from torch._dynamo.test_case import run_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
+
+import torch
+from torch.testing._internal.common_fsdp import get_devtype
+
+
+device_type = torch.device(get_devtype())
 
 
 @skip_if_lt_x_gpu(2)
@@ -26,16 +30,16 @@ class LoggingTests(LoggingTestCase):
         env["WORLD_SIZE"] = "1"
         env["MASTER_PORT"] = "34715"
         env["MASTER_ADDR"] = "localhost"
-        stdout, stderr = self.run_process_no_exception(
-            """\
+        _, stderr = self.run_process_no_exception(
+            f"""\
 import logging
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed.fsdp import fully_shard
 logger = logging.getLogger("torch.distributed._composable.fsdp")
 logger.setLevel(logging.DEBUG)
-device = "cuda"
+device = {device_type.type}
 torch.manual_seed(0)
 model = nn.Sequential(*[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)])
 for layer in model:

@@ -7,7 +7,8 @@ import inspect
 import logging
 import types
 import typing
-from typing import Any, Iterator, Mapping, Optional, Sequence, TypeVar, Union
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any, Optional, TypeVar, Union
 
 import onnx
 
@@ -224,9 +225,9 @@ def _get_attr_type(type_: type) -> ir.AttributeType:
         if origin_type in (
             collections.abc.Sequence,
             Sequence,
-            typing.List,
             list,
-            typing.Tuple,
+            list,
+            tuple,
             tuple,
         ):
             inner_type = typing.get_args(type_)[0]
@@ -306,9 +307,9 @@ def _get_allowed_types_from_type_annotation(
         allowed_types = set()
         subtypes = typing.get_args(type_)
         for subtype in subtypes:
-            assert (
-                subtype is not type(None)
-            ), "Union should not contain None type because it is handled by _is_optional."
+            assert subtype is not type(None), (
+                "Union should not contain None type because it is handled by _is_optional."
+            )
             allowed_types.update(_get_allowed_types_from_type_annotation(subtype))
         return allowed_types
 
@@ -345,6 +346,7 @@ class OpSignature:
     params_map: Mapping[str, Parameter | AttributeParameter] = dataclasses.field(
         init=False, repr=False
     )
+    opset_version: int | None = None
 
     def __post_init__(self):
         self.params_map = {param.name: param for param in self.params}
@@ -424,11 +426,18 @@ class OpSignature:
             overload="",
             params=params,
             outputs=outputs,
+            opset_version=opschema.since_version,
         )
 
     @classmethod
     def from_function(
-        cls, func, domain: str, name: str | None = None, overload: str = ""
+        cls,
+        func,
+        domain: str,
+        name: str | None = None,
+        overload: str = "",
+        *,
+        opset_version: int = 1,
     ) -> OpSignature:
         """Produce an OpSignature from a function using type annotation."""
 
@@ -532,6 +541,7 @@ class OpSignature:
                 if (
                     return_param_name := _get_type_constraint_name(return_type_i)
                 ) in type_constraints:
+                    # pyrefly: ignore  # index-error
                     type_constraint = type_constraints[return_param_name]
                 else:
                     return_param_name = f"TReturn{i}"
@@ -544,6 +554,7 @@ class OpSignature:
                     type_constraints[return_param_name] = type_constraint
                 outputs.append(
                     Parameter(
+                        # pyrefly: ignore  # bad-argument-type
                         name=return_param_name,
                         type_constraint=type_constraint,
                         required=True,
@@ -558,4 +569,5 @@ class OpSignature:
             overload=overload,
             params=params,
             outputs=outputs,
+            opset_version=opset_version,
         )

@@ -40,7 +40,7 @@ echo "Building PyTorch C++ API docs..."
 rm -rf cppdocs
 git clone https://github.com/pytorch/cppdocs
 
-set -ex
+set -ex -o pipefail
 
 # Generate ATen files
 pushd "${pt_checkout}"
@@ -58,7 +58,7 @@ time python tools/setup_helpers/generate_code.py \
 
 # Build the docs
 pushd docs/cpp
-time make VERBOSE=1 html -j
+time make VERBOSE=1 html
 
 popd
 popd

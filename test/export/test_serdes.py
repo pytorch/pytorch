@@ -16,7 +16,11 @@ test_classes = {}
 
 
 def mocked_serder_export_strict(*args, **kwargs):
-    ep = export(*args, **kwargs)
+    if "strict" not in kwargs:
+        ep = export(*args, **kwargs, strict=True)
+    else:
+        ep = export(*args, **kwargs)
+
     buffer = io.BytesIO()
     save(ep, buffer)
     buffer.seek(0)
@@ -25,10 +29,7 @@ def mocked_serder_export_strict(*args, **kwargs):
 
 
 def mocked_serder_export_non_strict(*args, **kwargs):
-    if "strict" in kwargs:
-        ep = export(*args, **kwargs)
-    else:
-        ep = export(*args, **kwargs, strict=False)
+    ep = export(*args, **kwargs)
     buffer = io.BytesIO()
     save(ep, buffer)
     buffer.seek(0)
@@ -41,7 +42,7 @@ def make_dynamic_cls(cls, strict):
         test_class = testing.make_test_cls_with_mocked_export(
             cls,
             "SerDesExport",
-            test_export.SERDES_SUFFIX,
+            test_export.SERDES_STRICT_SUFFIX,
             mocked_serder_export_strict,
             xfail_prop="_expected_failure_serdes",
         )

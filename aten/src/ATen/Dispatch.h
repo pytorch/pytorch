@@ -1,12 +1,11 @@
 #pragma once
 
-#include <ATen/core/DeprecatedTypeProperties.h>
+#include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/complex.h>
-#include <c10/util/string_view.h>
 
 #ifdef __CUDACC__
 #include <cuda.h> // For CUDA_VERSION
@@ -100,13 +99,6 @@ namespace detail {
 
 inline at::ScalarType scalar_type(at::ScalarType s) {
   return s;
-}
-
-C10_DEPRECATED_MESSAGE(
-    "passing at::DeprecatedTypeProperties to an AT_DISPATCH macro is deprecated, "
-    "pass an at::ScalarType instead")
-inline at::ScalarType scalar_type(const at::DeprecatedTypeProperties& t) {
-  return t.scalarType();
 }
 
 } // namespace detail
@@ -208,7 +200,7 @@ inline at::ScalarType scalar_type(const at::DeprecatedTypeProperties& t) {
     switch (_st) {                                                          \
       __VA_ARGS__                                                           \
       default:                                                              \
-        TORCH_CHECK(                                                        \
+        TORCH_CHECK_NOT_IMPLEMENTED(                                        \
             false,                                                          \
             '"',                                                            \
             at_dispatch_name,                                               \

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from collections import OrderedDict
 import contextlib
-from typing import Dict, Any
+from typing import Any
 
 from tensorboard.compat.proto.config_pb2 import RunMetadata
 from tensorboard.compat.proto.graph_pb2 import GraphDef
@@ -55,11 +55,11 @@ class NodeBase:
     def __repr__(self):
         repr = []
         repr.append(str(type(self)))
-        for m in dir(self):
-            if "__" not in m:
-                repr.append(
-                    m + ": " + str(getattr(self, m)) + str(type(getattr(self, m)))
-                )
+        repr.extend(
+            m + ": " + str(getattr(self, m)) + str(type(getattr(self, m)))
+            for m in dir(self)
+            if "__" not in m
+        )
         return "\n".join(repr) + "\n\n"
 
 
@@ -188,6 +188,7 @@ class GraphPy:
 
         for key, node in self.nodes_io.items():
             if type(node) == NodeBase:
+                # pyrefly: ignore  # unsupported-operation
                 self.unique_name_to_scoped_name[key] = node.scope + "/" + node.debugName
             if hasattr(node, "input_or_output"):
                 self.unique_name_to_scoped_name[key] = (
@@ -198,6 +199,7 @@ class GraphPy:
                 self.unique_name_to_scoped_name[key] = node.scope + "/" + node.debugName
                 if node.scope == "" and self.shallowest_scope_name:
                     self.unique_name_to_scoped_name[node.debugName] = (
+                        # pyrefly: ignore  # unsupported-operation
                         self.shallowest_scope_name + "/" + node.debugName
                     )
 
@@ -216,17 +218,16 @@ class GraphPy:
         """Convert graph representation of GraphPy object to TensorBoard required format."""
         # TODO: compute correct memory usage and CPU time once
         # PyTorch supports it
-        nodes = []
-        for v in self.nodes_io.values():
-            nodes.append(
-                node_proto(
-                    v.debugName,
-                    input=v.inputs,
-                    outputsize=v.tensor_size,
-                    op=v.kind,
-                    attributes=v.attributes,
-                )
+        nodes = [
+            node_proto(
+                v.debugName,
+                input=v.inputs,
+                outputsize=v.tensor_size,
+                op=v.kind,
+                attributes=v.attributes,
             )
+            for v in self.nodes_io.values()
+        ]
         return nodes
 
 
@@ -252,7 +253,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
         if node.type().kind() != CLASSTYPE_KIND:
             nodes_py.append(NodePyIO(node, "input"))
 
-    attr_to_scope: Dict[Any, str] = {}
+    attr_to_scope: dict[Any, str] = {}
     for node in graph.nodes():
         if node.kind() == GETATTR_KIND:
             attr_name = node.s("name")
@@ -342,7 +343,7 @@ def graph(model, args, verbose=False, use_strict_trace=True):
     # and pass it correctly to TensorBoard.
     #
     # Definition of StepStats and DeviceStepStats can be found at
-    # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/graph/tf_graph_common/test/graph-test.ts
+    # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/plugins/graph/tf_graph_common/proto.ts
     # and
     # https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/step_stats.proto
     stepstats = RunMetadata(

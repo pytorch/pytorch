@@ -6,6 +6,7 @@ This module contains functionality to support the JIT's scripting frontend, nota
 This is not intended to be imported directly; please use the exposed
 functionalities in `torch.jit`.
 """
+
 import collections
 import copy
 import enum
@@ -13,7 +14,9 @@ import functools
 import inspect
 import pickle
 import warnings
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from collections.abc import Callable
+from typing import Any, Union
+from typing_extensions import deprecated
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -62,6 +65,8 @@ ScriptFunction.__doc__ = """
 Functionally equivalent to a :class:`ScriptModule`, but represents a single
 function and does not have any attributes or Parameters.
 """
+ScriptFunction.__name__ = "ScriptFunction"
+ScriptFunction.__qualname__ = "torch.jit.ScriptFunction"
 set_module(ScriptFunction, "torch.jit")
 
 
@@ -277,12 +282,12 @@ class OrderedModuleDict(OrderedDictWrapper):
 class ScriptMeta(type):
     def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
-        cls._methods: Dict[str, Any] = {}
+        cls._methods: dict[str, Any] = {}
         cls._constants_set = set(getattr(cls, "__constants__", ()))
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
                 cls._methods[k] = v
-            base_constants: Set = getattr(base, "_constants_set", set())
+            base_constants: set = getattr(base, "_constants_set", set())
             cls._constants_set = cls._constants_set.union(base_constants)
 
         # find all the script methods of the current class
@@ -315,10 +320,10 @@ class ScriptMeta(type):
                     else:
                         return infer_methods_to_compile(module)
 
-                self.__dict__[
-                    "_actual_script_module"
-                ] = torch.jit._recursive.create_script_module(
-                    self, make_stubs, share_types=not added_methods_in_init
+                self.__dict__["_actual_script_module"] = (
+                    torch.jit._recursive.create_script_module(
+                        self, make_stubs, share_types=not added_methods_in_init
+                    )
                 )
 
                 # Delete the Python attributes that now shadow the ScriptModule
@@ -540,6 +545,7 @@ if _enabled:
                 #
                 # This ensures that if we use the attr again in `__init__`, it
                 # will look like the actual value, not an instance of Attribute.
+                # pyrefly: ignore  # invalid-argument
                 if isinstance(value, Attribute):
                     # NB: Ensure that we set __annotations__ on the specific
                     # class in question, and not on a superclass (which would
@@ -651,6 +657,7 @@ if _enabled:
 
             # Finalize the ScriptModule: replace the nn.Module state with our
             # custom implementations and flip the _initializing bit.
+            # pyrefly: ignore  # missing-attribute
             RecursiveScriptModule._finalize_scriptmodule(script_module)
             return script_module
 
@@ -701,10 +708,7 @@ if _enabled:
 
         @property
         def graph(self):
-            r"""Return a string representation of the internal graph for the ``forward`` method.
-
-            See :ref:`interpreting-graphs` for details.
-            """
+            r"""Return a string representation of the internal graph for the ``forward`` method."""
             return self._c._get_method("forward").graph
 
         @property
@@ -713,7 +717,6 @@ if _enabled:
             Return a string representation of the internal graph for the ``forward`` method.
 
             This graph will be preprocessed to inline all function and method calls.
-            See :ref:`interpreting-graphs` for details.
             """
             return self.forward.inlined_graph  # type: ignore[attr-defined]
 
@@ -722,7 +725,6 @@ if _enabled:
             r"""
             Return a pretty-printed representation (as valid Python syntax) of the internal graph for the ``forward`` method.
 
-            See :ref:`inspecting-code` for details.
             """
             return self.forward.code  # type: ignore[attr-defined]
 
@@ -737,7 +739,6 @@ if _enabled:
             [1] a ConstMap following the CONSTANT.cN format of the output in [0].
             The indices in the [0] output are keys to the underlying constant's values.
 
-            See :ref:`inspecting-code` for details.
             """
             r = self.forward.code_with_constants  # type: ignore[attr-defined]
             return (r[0], ConstMap(r[1]))
@@ -753,6 +754,10 @@ if _enabled:
             """
             return self._c.save(str(f), **kwargs)
 
+        @deprecated(
+            "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+            https://docs.pytorch.org/executorch/stable/getting-started.html"
+        )
         def _save_for_lite_interpreter(self, *args, **kwargs):
             r"""Add (or update) the bytecode session to the script model.
 
@@ -766,9 +771,23 @@ if _enabled:
                 _extra_files: Map from filename to contents which will be stored as part of 'f'.
 
             """
+            warnings.warn(
+                "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+                https://docs.pytorch.org/executorch/stable/getting-started.html",
+                DeprecationWarning,
+            )
             return self._c._save_for_mobile(*args, **kwargs)
 
+        @deprecated(
+            "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+            https://docs.pytorch.org/executorch/stable/getting-started.html"
+        )
         def _save_to_buffer_for_lite_interpreter(self, *args, **kwargs):
+            warnings.warn(
+                "Lite Interpreter is deprecated. Please consider switching to ExecuTorch. \
+                https://docs.pytorch.org/executorch/stable/getting-started.html",
+                DeprecationWarning,
+            )
             return self._c._save_to_buffer_for_mobile(*args, **kwargs)
 
         def save_to_buffer(self, *args, **kwargs):
@@ -912,6 +931,7 @@ if _enabled:
                 # Don't do anything here, we'll initialize the ScriptModule below
                 return
 
+            # pyrefly: ignore  # missing-attribute
             return RecursiveScriptModule._construct(
                 self._c._replicate_for_data_parallel(), init_fn
             )
@@ -921,6 +941,7 @@ if _enabled:
     # This is because `super().foo()` does not use
     # `__getattr__` to look up `foo`. So we need to make each method available on
     # the ScriptModule manually.
+    # pyrefly: ignore  # missing-attribute
     for name, item in RecursiveScriptModule.__dict__.items():
         if not callable(item) and not isinstance(item, property):
             continue
@@ -989,6 +1010,7 @@ if _enabled:
         if name.startswith("__") or name.endswith("_call_impl"):
             continue
         if (
+            # pyrefly: ignore  # missing-attribute
             name not in RecursiveScriptModule.__dict__
             and name not in _compiled_methods_allowlist
         ):
@@ -1020,7 +1042,10 @@ def call_prepare_scriptable_func_impl(obj, memo):
     if obj_id in memo:
         return memo[id(obj)]
 
-    obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
+    obj = (
+        # pyrefly: ignore  # not-callable
+        obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj
+    )  # type: ignore[operator]
     # Record obj in memo to avoid infinite recursion in the case of cycles in the module
     # hierarchy when recursing below.
     memo[obj_id] = obj
@@ -1046,7 +1071,7 @@ def call_prepare_scriptable_func_impl(obj, memo):
 
 
 def call_prepare_scriptable_func(obj):
-    memo: Dict[int, torch.nn.Module] = {}
+    memo: dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
 
@@ -1089,7 +1114,7 @@ def _script_impl(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
 ):
     global type_trace_db
 
@@ -1116,9 +1141,10 @@ def _script_impl(
         # the provide example inputs. This logs all the traces in type_trace_db
         type_trace_db = JitTypeTraceStore()
         if monkeytype_trace:
+            # pyrefly: ignore  # bad-argument-count
             monkeytype_config = JitTypeTraceConfig(type_trace_db)
             with monkeytype_trace(monkeytype_config):
-                if isinstance(example_inputs, Dict):
+                if isinstance(example_inputs, dict):
                     # If the obj is an nn.Module or a class, then each method is
                     # executed with the arguments provided in the example inputs.
                     # example inputs here will be of type Dict(class.method, (arguments))
@@ -1127,7 +1153,7 @@ def _script_impl(
                     for module, example_input in example_inputs.items():
                         for example in example_input:
                             module(*example)
-                elif isinstance(example_inputs, List):
+                elif isinstance(example_inputs, list):
                     for examples in example_inputs:
                         obj(*examples)
                 else:
@@ -1148,7 +1174,11 @@ def _script_impl(
             obj, torch.jit._recursive.infer_methods_to_compile
         )
     else:
-        obj = obj.__prepare_scriptable__() if hasattr(obj, "__prepare_scriptable__") else obj  # type: ignore[operator]
+        obj = (
+            obj.__prepare_scriptable__()
+            if hasattr(obj, "__prepare_scriptable__")
+            else obj
+        )  # type: ignore[operator]
 
     if isinstance(obj, dict):
         return create_script_dict(obj)
@@ -1207,6 +1237,8 @@ def _script_impl(
         )
         # Forward docstrings
         fn.__doc__ = obj.__doc__
+        fn.__name__ = "ScriptFunction"
+        fn.__qualname__ = "torch.jit.ScriptFunction"
         # Allow torch.compile() to inline
         fn._torchdynamo_inline = obj  # type: ignore[attr-defined]
         _set_jit_function_cache(obj, fn)
@@ -1220,7 +1252,7 @@ def script(
     optimize=None,
     _frames_up=0,
     _rcb=None,
-    example_inputs: Union[List[Tuple], Dict[Callable, List[Tuple]], None] = None,
+    example_inputs: Union[list[tuple], dict[Callable, list[tuple]], None] = None,
 ):
     r"""Script the function.
 
@@ -1235,7 +1267,7 @@ def script(
     subsequently passed by reference between Python and TorchScript with zero copy overhead.
 
     ``torch.jit.script`` can be used as a function for modules, functions, dictionaries and lists
-     and as a decorator ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
+     and as a decorator ``@torch.jit.script`` for torchscript-classes and functions.
 
     Args:
         obj (Callable, class, or nn.Module):  The ``nn.Module``, function, class type,
@@ -1374,6 +1406,7 @@ def script(
             import torch
             import torch.nn as nn
 
+
             class MyModule(nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
@@ -1387,12 +1420,14 @@ def script(
                     # This function won't be compiled, so any
                     # Python APIs can be used
                     import pdb
+
                     pdb.set_trace()
 
                 def forward(self, input):
                     if self.training:
                         self.python_only_fn(input)
                     return input * 99
+
 
             scripted_module = torch.jit.script(MyModule())
             print(scripted_module.some_entry_point(torch.randn(2, 2)))
@@ -1493,11 +1528,10 @@ def _get_overloads(obj):
             _jit_internal.get_overload_no_implementation_error_message("function", obj)
         )
 
-    compiled_fns = []
-    for overload_fn in uncompiled_overloads:
-        compiled_fns.append(
-            _compile_function_with_overload(overload_fn, qual_name, obj)
-        )
+    compiled_fns = [
+        _compile_function_with_overload(overload_fn, qual_name, obj)
+        for overload_fn in uncompiled_overloads
+    ]
 
     if existing_compiled_fns:
         compiled_fns = existing_compiled_fns + compiled_fns
@@ -1620,14 +1654,14 @@ class _ScriptProfileColumn:
         self.header = header
         self.alignment = alignment
         self.offset = offset
-        self.rows: Dict[int, Any] = {}
+        self.rows: dict[int, Any] = {}
 
     def add_row(self, lineno: int, value: Any):
         self.rows[lineno] = value
 
     def materialize(self):
         max_length = len(self.header)
-        rows: List[Tuple[int, str]] = []
+        rows: list[tuple[int, str]] = []
         for key, value in self.rows.items():
             cell = str(value)
             rows.append((key, cell))
@@ -1644,13 +1678,13 @@ class _ScriptProfileColumn:
 
 
 class _ScriptProfileTable:
-    def __init__(self, cols: List[_ScriptProfileColumn], source_range: List[int]):
+    def __init__(self, cols: list[_ScriptProfileColumn], source_range: list[int]):
         self.cols = cols
         self.source_range = source_range
 
     def dump_string(self):
-        outputs: List[str] = []
-        cells: List[Tuple[str, Dict[int, str]]] = []
+        outputs: list[str] = []
+        cells: list[tuple[str, dict[int, str]]] = []
         header_buffer = ""
         for col in self.cols:
             header, rows = col.materialize()
@@ -1682,7 +1716,7 @@ class _ScriptProfile:
         self.profile.disable()
 
     def dump_string(self) -> str:
-        outputs: List[str] = []
+        outputs: list[str] = []
         for source_stats in self.profile._dump_stats():
             source_ref = source_stats.source()
             source_lines = source_ref.text().splitlines()

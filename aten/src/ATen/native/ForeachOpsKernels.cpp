@@ -44,6 +44,7 @@
 #include <ATen/ops/_foreach_pow_native.h>
 #include <ATen/ops/_foreach_reciprocal_native.h>
 #include <ATen/ops/_foreach_round_native.h>
+#include <ATen/ops/_foreach_rsqrt_native.h>
 #include <ATen/ops/_foreach_sigmoid_native.h>
 #include <ATen/ops/_foreach_sign_native.h>
 #include <ATen/ops/_foreach_sin_native.h>
@@ -259,6 +260,7 @@ namespace at::native {
     check_foreach_api_restrictions(input, tensors1, tensors2);            \
                                                                           \
     std::vector<Tensor> result;                                           \
+    result.reserve(input.size());                                         \
     for (const auto i : c10::irange(input.size())) {                      \
       result.emplace_back(input[i].OP(tensors1[i], tensors2[i], scalar)); \
     }                                                                     \
@@ -287,6 +289,7 @@ namespace at::native {
     check_foreach_api_restrictions(input, tensors1, tensors2, scalars);       \
                                                                               \
     std::vector<Tensor> result;                                               \
+    result.reserve(input.size());                                             \
     for (const auto i : c10::irange(input.size())) {                          \
       result.emplace_back(input[i].OP(tensors1[i], tensors2[i], scalars[i])); \
     }                                                                         \
@@ -393,6 +396,7 @@ FOREACH_UNARY_OP(tanh)
 FOREACH_UNARY_OP(sin)
 FOREACH_UNARY_OP(sinh)
 FOREACH_UNARY_OP(round)
+FOREACH_UNARY_OP(rsqrt)
 FOREACH_UNARY_OP(lgamma)
 FOREACH_UNARY_OP(frac)
 FOREACH_UNARY_OP(trunc)
@@ -409,26 +413,51 @@ FOREACH_POINTWISE_OP_SCALARLIST(addcmul)
 FOREACH_POINTWISE_OP_TENSOR(addcdiv)
 FOREACH_POINTWISE_OP_TENSOR(addcmul)
 
-#define FOREACH_TERNARY_OP(OP)                                         \
-  std::vector<Tensor> foreach_tensor_ternary_##OP##_slow(              \
-      TensorList tensors1, TensorList tensors2, TensorList tensors3) { \
-    check_foreach_api_restrictions(tensors1, tensors2, tensors3);      \
-    std::vector<Tensor> result;                                        \
-    for (const auto i : c10::irange(tensors1.size())) {                \
-      result.emplace_back(tensors1[i].OP(tensors2[i], tensors3[i]));   \
-    }                                                                  \
-    return result;                                                     \
-  }                                                                    \
-                                                                       \
-  void foreach_tensor_ternary_##OP##_slow_(                            \
-      TensorList tensors1, TensorList tensors2, TensorList tensors3) { \
-    check_foreach_api_restrictions(tensors1, tensors2, tensors3);      \
-    for (const auto i : c10::irange(tensors1.size())) {                \
-      tensors1[i].OP##_(tensors2[i], tensors3[i]);                     \
-    }                                                                  \
+std::vector<Tensor> foreach_tensor_ternary_lerp_slow(
+    TensorList tensors1,
+    TensorList tensors2,
+    TensorList tensors3) {
+  check_foreach_api_restrictions(tensors1, tensors2, tensors3);
+  std::vector<Tensor> result;
+  result.reserve(tensors1.size());
+  for (const auto i : c10::irange(tensors1.size())) {
+    result.emplace_back(tensors1[i].lerp(tensors2[i], tensors3[i]));
   }
+  return result;
+}
 
-FOREACH_TERNARY_OP(lerp)
+void foreach_tensor_ternary_lerp_slow_(
+    TensorList tensors1,
+    TensorList tensors2,
+    TensorList tensors3) {
+  check_foreach_api_restrictions(tensors1, tensors2, tensors3);
+  for (const auto i : c10::irange(tensors1.size())) {
+    tensors1[i].lerp_(tensors2[i], tensors3[i]);
+  }
+}
+
+std::vector<Tensor> foreach_tensor_lerp_scalarlist_kernel_slow(
+    TensorList tensors1,
+    TensorList tensors2,
+    at::ArrayRef<Scalar> scalars) {
+  check_foreach_api_restrictions(tensors1, tensors2, scalars);
+  std::vector<Tensor> result;
+  result.reserve(tensors1.size());
+  for (const auto i : c10::irange(tensors1.size())) {
+    result.emplace_back(tensors1[i].lerp(tensors2[i], scalars[i]));
+  }
+  return result;
+}
+
+void foreach_tensor_lerp_scalarlist_kernel_slow_(
+    TensorList tensors1,
+    TensorList tensors2,
+    at::ArrayRef<Scalar> scalars) {
+  check_foreach_api_restrictions(tensors1, tensors2, scalars);
+  for (const auto i : c10::irange(tensors1.size())) {
+    tensors1[i].lerp_(tensors2[i], scalars[i]);
+  }
+}
 
 void foreach_tensor_zero_slow_(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
@@ -444,6 +473,7 @@ std::vector<Tensor> foreach_tensor_norm_slow(
     std::optional<ScalarType> dtype) {
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;
+  result.reserve(tensors.size());
   for (const auto& t : tensors) {
     result.emplace_back(at::linalg_vector_norm(t, ord, {}, false, dtype));
   }
@@ -453,6 +483,7 @@ std::vector<Tensor> foreach_tensor_norm_slow(
 std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;
+  result.reserve(tensors.size());
   for (const auto& t : tensors) {
     result.emplace_back(at::max(t));
   }

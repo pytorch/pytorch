@@ -3,6 +3,7 @@ import functools
 
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
+from torch._inductor.utils import GPU_TYPES
 
 from ..._dynamo.utils import counters
 from .. import config
@@ -47,7 +48,9 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     binary_folding = counters["inductor"]["binary_folding"]
     fake_tensor_prop(gm, aot_example_inputs, True)
 
-    torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_convs(gm)
+    torch._inductor.fx_passes.binary_folding.mark_mixed_dtype_allowed_computation_ops(
+        gm
+    )
     for _ in range(4):
         constant_fold(gm)
         # Make sure meta['val'] is properly set for all nodes
@@ -59,7 +62,9 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
             break
         binary_folding = counters["inductor"]["binary_folding"]
 
-    torch._inductor.fx_passes.binary_folding.recover_original_precision_folded_convs(gm)
+    torch._inductor.fx_passes.binary_folding.recover_original_precision_folded_computation_ops(
+        gm
+    )
 
     constant_fold(gm)
     fake_tensor_prop(gm, aot_example_inputs, True)
@@ -97,9 +102,12 @@ def lazy_init():
 
 
 def register_freezing_graph_pattern(pattern, extra_check=_return_true, pass_number=0):
+    while pass_number > len(pass_patterns) - 1:
+        pass_patterns.append(PatternMatcherPass())
     return register_graph_pattern(
         pattern,
         extra_check=extra_check,
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=pass_patterns[pass_number],
     )
 
@@ -108,20 +116,59 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
     return register_graph_pattern(
         pattern,
         extra_check=extra_check,
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=binary_folding_pass,
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def addmm_patterns_init():
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
-    else:
-        device = "cpu"
+    """
+    addmm related patterns.
+    To avoid duplication, also includes int8 WoQ GEMM pattern without bias.
+    """
+    device = next(
+        (gpu for gpu in GPU_TYPES if getattr(torch, gpu).is_available()), "cpu"
+    )
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
+    scale = functools.partial(torch.empty, (10,), device=device, requires_grad=False)
+
+    def check_int8_woq_concat_linear_weights(match):
+        is_cpu = match.kwargs["inp"].meta["val"].is_cpu
+        if not is_cpu or not config.cpp.enable_concat_linear:
+            # Currently, this pattern is only supported on CPU
+            return False
+
+        weight_inputs = ["w1", "w2"]
+        if "w3" in match.kwargs:
+            weight_inputs.append("w3")
+
+        if not all(
+            match.kwargs[wgt].target == torch.ops.prims.convert_element_type.default
+            for wgt in weight_inputs
+        ):
+            return False
+
+        if not all(
+            next(iter(match.kwargs[wgt]._input_nodes.keys())).meta["val"].dtype
+            is torch.int8
+            for wgt in weight_inputs
+        ):
+            return False
+
+        if not all(
+            match.kwargs[wgt].meta["val"].dtype is torch.bfloat16
+            for wgt in weight_inputs
+        ):
+            return False
+
+        return True
 
     def check_concat_weights(match):
+        is_cpu = match.kwargs["inp"].meta["val"].is_cpu
+        if is_cpu and not config.cpp.enable_concat_linear:
+            return False
+
         weight_inputs = ["w1", "w2"]
         if "w3" in match.kwargs:
             weight_inputs.append("w3")
@@ -144,8 +191,30 @@ def addmm_patterns_init():
                 for inp in inps
             ):
                 return False
-
         return True
+
+    def int8_woq_fusion_pattern(inp, w1, w2, w3, s1, s2, s3):
+        return ((inp @ w1) * s1, (inp @ w2) * s2, (inp @ w3) * s3)
+
+    def int8_woq_fusion_replacement(inp, w1, w2, w3, s1, s2, s3):
+        cat_w = torch.cat((w1, w2, w3), dim=1)
+        cat_s = torch.cat((s1, s2, s3), dim=0)
+        mm = (inp @ cat_w).mul(cat_s)
+        n1, n2 = w1.size(1), w2.size(1)
+        return mm.tensor_split([n1, n1 + n2], dim=-1)
+
+    register_replacement(
+        # pyrefly: ignore  # bad-argument-type
+        int8_woq_fusion_pattern,
+        # pyrefly: ignore  # bad-argument-type
+        int8_woq_fusion_replacement,
+        [val(), val(), val(), val(), scale(), scale(), scale()],
+        fwd_only,
+        # pyrefly: ignore  # bad-argument-type
+        pass_patterns[0],
+        extra_check=check_int8_woq_concat_linear_weights,
+        exclusive_arg_names=("w1", "w2", "w3", "s1", "s2", "s3"),
+    )
 
     def matmul_fuse_pattern(inp, w1, w2, w3):
         return (inp @ w1, inp @ w2, inp @ w3)
@@ -156,10 +225,13 @@ def addmm_patterns_init():
         return mm.chunk(3, dim=1)
 
     register_replacement(
+        # pyrefly: ignore  # bad-argument-type
         matmul_fuse_pattern,
+        # pyrefly: ignore  # bad-argument-type
         matmul_replacement,
         [val(), val(), val(), val()],
         fwd_only,
+        # pyrefly: ignore  # bad-argument-type
         pass_patterns[0],
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3"),
@@ -174,10 +246,13 @@ def addmm_patterns_init():
         return mm.chunk(2, dim=1)
 
     register_replacement(
+        # pyrefly: ignore  # bad-argument-type
         matmul_fuse_pattern_two,
+        # pyrefly: ignore  # bad-argument-type
         matmul_replacement_two,
         [val(), val(), val()],
         fwd_only,
+        # pyrefly: ignore  # bad-argument-type
         pass_patterns[0],
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2"),
@@ -196,10 +271,13 @@ def addmm_patterns_init():
         return aten.addmm(cat_b, inp, cat_w).chunk(3, dim=1)
 
     register_replacement(
+        # pyrefly: ignore  # bad-argument-type
         addmm_fuse_pattern_second,
+        # pyrefly: ignore  # bad-argument-type
         addmm_fuse_replacement_second,
         [val() for _ in range(7)],
         fwd_only,
+        # pyrefly: ignore  # bad-argument-type
         pass_patterns[0],
         extra_check=check_concat_weights,
         exclusive_arg_names=("w1", "w2", "w3", "b1", "b2", "b3"),
@@ -216,6 +294,7 @@ def same_dtype(match):
         Ignored(),
         KeywordArg("dtype"),
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=pass_patterns[0],
     extra_check=same_dtype,
 )

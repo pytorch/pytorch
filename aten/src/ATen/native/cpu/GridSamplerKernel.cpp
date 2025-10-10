@@ -14,6 +14,12 @@
 
 namespace at::native { namespace {
 
+// fixes segfaults for GCC >= 12 on some AArch64 cpus https://github.com/pytorch/pytorch/issues/157626
+#if defined(__GNUC__) && __GNUC__ >= 12 && defined(__aarch64__)
+#pragma GCC push_options
+#pragma GCC optimize ("no-strict-aliasing")
+#endif
+
 /**  NOTE [ Grid Sample CPU Kernels ]
  *
  *   Implementation of vectorized grid sample CPU kernels is divided into three
@@ -1014,6 +1020,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   }
 };
 
+#if defined(__GNUC__) && __GNUC__ >= 12 && defined(__aarch64__)
+#pragma GCC pop_options
+#endif
+
 // ~~~~~~~~~~~~~~~~~~ grid_sample_2d_grid_slice_iterator ~~~~~~~~~~~~~~~~~~~~~~
 // Function to apply a vectorized function on a grid slice tensor (without batch
 // dimension).
@@ -1052,10 +1062,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
                              std::min(step, len * 2));
       auto vec2 = Vec::loadu(grid_ptr + grid_offset + step,
                              std::max(static_cast<int64_t>(0), len * 2 - step));
-      auto vec_xy_pair = deinterleave2(vec1, vec2);
-
-      auto x = std::get<0>(vec_xy_pair);
-      auto y = std::get<1>(vec_xy_pair);
+      auto [x, y] = deinterleave2(vec1, vec2);
 
       // make sure that x and y are valid grid sample locations
       if (len < step) {
@@ -1184,7 +1191,7 @@ void grid_sampler_2d_cpu_kernel_impl(
     return;                                                                    \
   }
 
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_2d_cpu_kernel_impl", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "grid_sampler_2d_cpu_kernel_impl", [&] {
     auto out_acc = output.accessor<scalar_t, 4>();
     auto inp_acc = input.accessor<const scalar_t, 4>();
     auto grid_acc = grid.accessor<const scalar_t, 4>();
@@ -1272,7 +1279,7 @@ void grid_sampler_2d_backward_cpu_kernel_impl(
     return;                                                                 \
   }
 
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "grid_sampler_2d_backward_cpu_kernel_impl", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(), "grid_sampler_2d_backward_cpu_kernel_impl", [&] {
     auto gGrid_acc = grad_grid.accessor<scalar_t, 4>();
     auto inp_acc = input.accessor<const scalar_t, 4>();
     auto grid_acc = grid.accessor<const scalar_t, 4>();

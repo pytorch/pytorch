@@ -1,33 +1,8 @@
-"""This file exports ONNX ops for opset 19.
+"""Backward compatibility module for torch.onnx.symbolic_opset19."""
 
-Note [ONNX Operators that are added/updated in opset 19]
-
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-https://github.com/onnx/onnx/blob/main/docs/Changelog.md#version-19-of-the-default-onnx-operator-set
-New operators:
-AveragePool
-Cast
-CastLike
-Constant
-DeformConv
-DequantizeLinear
-Equal
-Identity
-If
-Loop
-Pad
-QuantizeLinear
-Reshape
-Resize
-Scan
-Shape
-Size
-"""
-
-from typing import List
+from __future__ import annotations
 
 
-# EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
+__all__: list[str] = []
 
-__all__: List[str] = []
+from torch.onnx._internal.torchscript_exporter.symbolic_opset19 import *  # noqa: F401,F403

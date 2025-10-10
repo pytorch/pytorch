@@ -3,7 +3,6 @@
 
 import os
 import random
-import re
 import shutil
 import subprocess
 import sys
@@ -12,15 +11,15 @@ import textwrap
 import traceback
 import unittest
 import warnings
-from typing import Any, Dict, List
+from typing import Any
 
 import torch
 import torch.cuda
 import torch.nn as nn
 import torch.utils.cpp_extension
 import torch.utils.data
-from torch.autograd._functions.utils import check_onnx_broadcast
-from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
+from torch._utils import try_import
+from torch._utils_internal import deprecated
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -58,6 +57,9 @@ HAS_CUDA = torch.cuda.is_available()
 
 
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+# mypy: disable-error-code="name-defined"
 
 
 class RandomDatasetMock(torch.utils.data.Dataset):
@@ -439,7 +441,7 @@ class TestCheckpoint(TestCase):
         # get de-allocated directly. So using cuda memory usage as a proxy
 
         def _do_test(fn, should_free):
-            stats: List[int] = []
+            stats: list[int] = []
 
             def track(x, idx):
                 # Track that at each step of the backward, some Tensor were
@@ -561,11 +563,6 @@ class TestCheckpoint(TestCase):
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
 
-    def setUp(self):
-        super().setUp()
-        self.dataset = torch.randn(5, 3, 3, 2)
-        self.batch_size = 3
-
     def test_random_seed(self):
         def run():
             dataloader = torch.utils.data.DataLoader(
@@ -584,12 +581,12 @@ class TestDataLoaderUtils(TestCase):
         self.assertEqual(x1, x2)
 
     def test_single_keep(self):
-        # self.dataset is a Tensor here; technically not a valid input because
+        # torch.rand(5, 3, 3, 2) is a Tensor here; technically not a valid input because
         # not a Dataset subclass, but needs to stay working so add ignore's
         # for type checking with mypy
         dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            batch_size=3,
             num_workers=0,
             drop_last=False,
         )
@@ -598,8 +595,8 @@ class TestDataLoaderUtils(TestCase):
 
     def test_single_drop(self):
         dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            batch_size=3,
             num_workers=0,
             drop_last=True,
         )
@@ -611,8 +608,8 @@ class TestDataLoaderUtils(TestCase):
     )
     def test_multi_keep(self):
         dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            batch_size=3,
             num_workers=2,
             drop_last=False,
             timeout=self.MAX_TIMEOUT_IN_SECOND,
@@ -622,8 +619,8 @@ class TestDataLoaderUtils(TestCase):
 
     def test_multi_drop(self):
         dataloader: DataLoader = DataLoader(
-            self.dataset,  # type: ignore[arg-type]
-            batch_size=self.batch_size,
+            torch.rand(5, 3, 3, 2),  # type: ignore[arg-type]
+            batch_size=3,
             num_workers=2,
             drop_last=True,
             timeout=self.MAX_TIMEOUT_IN_SECOND,
@@ -633,151 +630,6 @@ class TestDataLoaderUtils(TestCase):
 
 
 test_dir = os.path.abspath(os.path.dirname(str(__file__)))
-
-
-@unittest.skipIf(
-    "SKIP_TEST_BOTTLENECK" in os.environ.keys(), "SKIP_TEST_BOTTLENECK is set"
-)
-class TestBottleneck(TestCase):
-    def _run(self, command, timeout=30):
-        """Returns (return-code, stdout, stderr)"""
-        import subprocess
-
-        p = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=True,
-        )
-        try:
-            output, err = p.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            p.kill()
-            output, err = p.communicate()
-        rc = p.returncode
-        output_str = output.decode("ascii")
-        err_str = err.decode("ascii")
-        return (rc, output_str, err_str)
-
-    def _run_bottleneck(self, test_file, scriptargs=""):
-        curdir = os.path.dirname(os.path.abspath(__file__))
-        filepath = f"{curdir}/{test_file}"
-        if scriptargs != "":
-            scriptargs = f" {scriptargs}"
-        rc, out, err = self._run(
-            f"{sys.executable} -m torch.utils.bottleneck {filepath}{scriptargs}"
-        )
-        return rc, out, err
-
-    def _check_run_args(self):
-        # Check that this fails due to missing args
-        rc, out, err = self._run_bottleneck("bottleneck_test/test_args.py")
-        self.assertEqual(
-            rc,
-            2,
-            atol=0,
-            rtol=0,
-            msg=self._fail_msg("Missing args should error", out + err),
-        )
-
-        # This should succeed
-        rc, out, err = self._run_bottleneck(
-            "bottleneck_test/test_args.py", "--foo foo --bar bar"
-        )
-        self.assertEqual(
-            rc,
-            0,
-            atol=0,
-            rtol=0,
-            msg=self._fail_msg("Should pass args to script", out + err),
-        )
-
-    def _fail_msg(self, msg, output):
-        return f"{msg}, output was:\n{output}"
-
-    def _check_environment_summary(self, output):
-        results = re.search("Environment Summary", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have Environment Summary", output)
-        )
-
-        # Up to five lines away from the heading, there should be the version number
-        results = re.search(
-            r"Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+", output
-        )
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have PyTorch version", output)
-        )
-
-    def _check_cprof_summary(self, output):
-        results = re.search("cProfile output", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have cProfile output", output)
-        )
-
-        # This assumes that after the cProfile output section we have
-        # the autograd profiler output
-        results = re.search(
-            r"cProfile output.*(\n.*){6,50}\n.*autograd profiler output", output
-        )
-        self.assertIsNotNone(
-            results,
-            self._fail_msg(
-                "Distance between cProfile and autograd prof out not in [6, 50] lines",
-                output,
-            ),
-        )
-
-    def _check_autograd_summary(self, output):
-        results = re.search("autograd profiler output", output)
-        self.assertIsNotNone(
-            results, self._fail_msg("Should have autograd profiler output", output)
-        )
-
-        # This assumes that after the autograd profiler output is the end of the
-        # output.
-        results = re.search(r"autograd profiler output.*(\n.*){6,100}", output)
-        self.assertIsNotNone(
-            results,
-            self._fail_msg(
-                "Distance between autograd prof output and end of output not in [6, 100] lines",
-                output,
-            ),
-        )
-
-    def _check_cuda(self, output):
-        if HAS_CUDA:
-            results = re.search("CUDA mode", output)
-            self.assertIsNotNone(
-                results, self._fail_msg("Should tell users CUDA", output)
-            )
-        else:
-            results = re.search("CUDA mode", output)
-            self.assertIsNone(
-                results, self._fail_msg("Should not tell users about CUDA", output)
-            )
-
-    @unittest.skipIf(HAS_CUDA, "CPU-only test")
-    def test_bottleneck_cpu_only(self):
-        rc, out, err = self._run_bottleneck("bottleneck_test/test.py")
-        self.assertEqual(rc, 0, msg=f"Run failed with\n{err}")
-
-        self._check_run_args()
-        self._check_environment_summary(out)
-        self._check_autograd_summary(out)
-        self._check_cprof_summary(out)
-        self._check_cuda(out)
-
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_bottleneck_cuda(self):
-        rc, out, err = self._run_bottleneck("bottleneck_test/test_cuda.py")
-        self.assertEqual(rc, 0, msg=f"Run failed with\n{err}")
-
-        self._check_run_args()
-        self._check_environment_summary(out)
-        self._check_autograd_summary(out)
-        self._check_cprof_summary(out)
-        self._check_cuda(out)
 
 
 from torch.utils.collect_env import get_pretty_env_info
@@ -790,65 +642,6 @@ class TestCollectEnv(TestCase):
         self.assertTrue(info_output.count("\n") >= 17)
 
 
-class TestONNXUtils(TestCase):
-    def test_prepare_onnx_paddings(self):
-        sizes = [2, 3, 4]
-        pad = [1, 2, 3, 4]
-        paddings = _prepare_onnx_paddings(len(sizes), pad)
-        self.assertEqual(paddings, [0, 3, 1, 0, 4, 2])
-
-    def test_check_onnx_broadcast(self):
-        def try_check_onnx_broadcast(dims1, dims2, expect_broadcast, expect_fail):
-            broadcast = True
-            fail = False
-            try:
-                broadcast = check_onnx_broadcast(dims1, dims2)
-            except ValueError:
-                fail = True
-            self.assertEqual(broadcast, expect_broadcast)
-            self.assertEqual(fail, expect_fail)
-
-        # Case 1, check the case when len(dims1) < len(dims2) and numel(dims2) > 1
-        dims1 = [3, 4]
-        dims2 = [2, 3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 2, check the case when len(dims1) < len(dims2) and numel(dims2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 3, check the case when len(dims1) > len(dims2) and numel(dims2) == 1
-        dims1 = [1, 1]
-        dims2 = [1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 4, check the case when len(dims1) > len(dims2) and dims1[x:] == dims2
-        dims1 = [2, 3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-        # Case 5, check the case when len(dims1) > len(dims2), but dims1[x:] != dims2
-        dims1 = [2, 3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 6, check the equal case, no broadcast
-        dims1 = [3, 4]
-        dims2 = [3, 4]
-        try_check_onnx_broadcast(dims1, dims2, False, False)
-
-        # Case 7, check the case when len(dims1) == len(dims2), but dims1 != dims2
-        dims1 = [3, 4]
-        dims2 = [1, 4]
-        try_check_onnx_broadcast(dims1, dims2, True, True)
-
-        # Case 8, check the case when len(dims1) == len(dims2) and numel(s2) == 1
-        dims1 = [3, 4]
-        dims2 = [1, 1]
-        try_check_onnx_broadcast(dims1, dims2, True, False)
-
-
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
@@ -856,7 +649,9 @@ class TestHipify(TestCase):
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
-        self.trie = torch.utils.hipify.hipify_python.Trie()
+        from torch.utils.hipify import hipify_python
+
+        self.trie = hipify_python.Trie()
 
     def test_add_and_search_trie(self):
         self.trie.add("banana")
@@ -1007,85 +802,6 @@ class TestStandaloneCPPJIT(TestCase):
             shutil.rmtree(build_dir)
 
 
-class DummyPrivateUse1Module:
-    @staticmethod
-    def is_available():
-        return True
-
-    @staticmethod
-    def is_autocast_enabled():
-        return True
-
-    @staticmethod
-    def get_autocast_dtype():
-        return torch.float16
-
-    @staticmethod
-    def set_autocast_enabled(enable):
-        pass
-
-    @staticmethod
-    def set_autocast_dtype(dtype):
-        pass
-
-    @staticmethod
-    def get_amp_supported_dtype():
-        return [torch.float16]
-
-
-class TestExtensionUtils(TestCase):
-    def tearDown(self):
-        # Clean up
-        backend_name = torch._C._get_privateuse1_backend_name()
-        if hasattr(torch, backend_name):
-            delattr(torch, backend_name)
-        if f"torch.{backend_name}" in sys.modules:
-            del sys.modules[f"torch.{backend_name}"]
-
-    def test_external_module_register(self):
-        # Built-in module
-        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module("cuda", torch.cuda)
-
-        # Wrong device type
-        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
-            torch._register_device_module("dummmy", DummyPrivateUse1Module)
-
-        with self.assertRaises(AttributeError):
-            torch.privateuseone.is_available()  # type: ignore[attr-defined]
-
-        torch._register_device_module("privateuseone", DummyPrivateUse1Module)
-
-        torch.privateuseone.is_available()  # type: ignore[attr-defined]
-
-        # No supporting for override
-        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
-            torch._register_device_module("privateuseone", DummyPrivateUse1Module)
-
-    def test_external_module_register_with_renamed_backend(self):
-        torch.utils.rename_privateuse1_backend("foo")
-        with self.assertRaisesRegex(RuntimeError, "has already been set"):
-            torch.utils.rename_privateuse1_backend("dummmy")
-
-        custom_backend_name = torch._C._get_privateuse1_backend_name()
-        self.assertEqual(custom_backend_name, "foo")
-
-        with self.assertRaises(AttributeError):
-            torch.foo.is_available()  # type: ignore[attr-defined]
-
-        with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
-            with torch.autocast(device_type=custom_backend_name):
-                pass
-        torch._register_device_module("foo", DummyPrivateUse1Module)
-
-        torch.foo.is_available()  # type: ignore[attr-defined]
-        with torch.autocast(device_type=custom_backend_name):
-            pass
-
-        self.assertEqual(torch._utils._get_device_index("foo:1"), 1)
-        self.assertEqual(torch._utils._get_device_index(torch.device("foo:2")), 2)
-
-
 class TestRenderUtils(TestCase):
     def test_basic(self):
         self.assertExpectedInline(
@@ -1143,18 +859,33 @@ class TestDeviceUtils(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_get_default_device_more(self):
-        torch.set_default_device("cuda")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+        try:
+            torch.set_default_device("cuda")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
 
-        torch.set_default_device("cuda")
-        torch.cuda.set_device("cuda:1")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+            torch.set_default_device("cuda")
+            torch.cuda.set_device("cuda:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
 
-        torch.set_default_device("cuda:1")
-        self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
-        torch.set_default_device(None)
+            torch.set_default_device("cuda:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.set_default_device(None)
+
+            torch.set_default_device("cuda:1")
+            with torch.device("cuda:0"):
+                self.assertEqual(torch.get_default_device(), torch.device("cuda", 0))
+
+            torch.set_default_device("cpu")
+            self.assertEqual(torch.get_default_device(), torch.device("cpu"))
+            with torch.device("cuda:0"):
+                self.assertEqual(torch.get_default_device(), torch.device("cuda", 0))
+
+            self.assertEqual(torch.get_default_device(), torch.device("cpu"))
+        finally:
+            # Reset the device at the end.
+            torch.set_default_device(None)
 
     @onlyCPU
     @ops(op_db)
@@ -1208,7 +939,7 @@ def f(x):
     return g(x) + 1
 """
 
-        out: Dict[str, Any] = {}
+        out: dict[str, Any] = {}
         scope = {"__compile_source__": source}
         exec(source, scope, out)
 
@@ -1245,6 +976,39 @@ def f(x):
         rs = CapturedTraceback.format_all([tb, CapturedTraceback.extract()])
         self.assertEqual(len(rs), 2)
         self.assertIn("test_captured_traceback_format_all", "".join(rs[0]))
+
+
+class TestTryImport(TestCase):
+    def test_import_imported(self):
+        self.assertIn("os", sys.modules)
+        os_module = try_import("os")
+        self.assertIs(os_module, os)
+
+    def test_import_existing(self):
+        self.assertNotIn("imaplib", sys.modules)
+        imaplib_module = try_import("imaplib")
+        self.assertIsNotNone(imaplib_module)
+        self.assertFalse(hasattr(imaplib_module, "not_attribute"))
+        self.assertTrue(hasattr(imaplib_module, "IMAP4"))
+
+    def test_import_missing(self):
+        missing_module = try_import("missing_module")
+        self.assertIsNone(missing_module)
+
+
+@deprecated()
+def _deprecated_api(x, y=15):
+    return x + y
+
+
+class TestDeprecate(TestCase):
+    def test_deprecated(self):
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            deprecated_api(1, 2)  # noqa: F821
+        with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            deprecated_api(1, y=2)  # noqa: F821
+        _deprecated_api(1, 2)
+        _deprecated_api(1, y=2)
 
 
 if __name__ == "__main__":

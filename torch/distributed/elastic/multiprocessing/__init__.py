@@ -20,22 +20,23 @@ Usage 1: Launching two trainers as a function
 
  from torch.distributed.elastic.multiprocessing import Std, start_processes
 
+
  def trainer(a, b, c):
-     pass # train
+     pass  # train
 
 
  # runs two trainers
  # LOCAL_RANK=0 trainer(1,2,3)
  # LOCAL_RANK=1 trainer(4,5,6)
  ctx = start_processes(
-         name="trainer",
-         entrypoint=trainer,
-         args={0: (1,2,3), 1: (4,5,6)},
-         envs={0: {"LOCAL_RANK": 0}, 1: {"LOCAL_RANK": 1}},
-         log_dir="/tmp/foobar",
-         redirects=Std.ALL, # write all worker stdout/stderr to a log file
-         tee={0: Std.ERR}, # tee only local rank 0's stderr to console
-       )
+     name="trainer",
+     entrypoint=trainer,
+     args={0: (1, 2, 3), 1: (4, 5, 6)},
+     envs={0: {"LOCAL_RANK": 0}, 1: {"LOCAL_RANK": 1}},
+     log_dir="/tmp/foobar",
+     redirects=Std.ALL,  # write all worker stdout/stderr to a log file
+     tee={0: Std.ERR},  # tee only local rank 0's stderr to console
+ )
 
  # waits for all copies of trainer to finish
  ctx.wait()
@@ -62,7 +63,8 @@ was launched a :class:`api.SubprocessContext` is returned. Both are specific
 implementations of the parent :class:`api.PContext` class.
 """
 
-from typing import Callable, Dict, Optional, Tuple, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     _validate_full_rank,
@@ -79,6 +81,7 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     to_map,
 )
 from torch.distributed.elastic.utils.logging import get_logger
+from torch.numa.binding import NumaOptions
 
 
 __all__ = [
@@ -100,11 +103,12 @@ __all__ = [
 def start_processes(
     name: str,
     entrypoint: Union[Callable, str],
-    args: Dict[int, Tuple],
-    envs: Dict[int, Dict[str, str]],
+    args: dict[int, tuple],
+    envs: dict[int, dict[str, str]],
     logs_specs: LogsSpecs,
-    log_line_prefixes: Optional[Dict[int, str]] = None,
+    log_line_prefixes: Optional[dict[int, str]] = None,
     start_method: str = "spawn",
+    numa_options: Optional[NumaOptions] = None,
 ) -> PContext:
     """
     Start ``n`` copies of ``entrypoint`` processes with the provided options.
@@ -138,8 +142,8 @@ def start_processes(
     For each process, the ``log_dir`` will contain:
 
     #. ``{local_rank}/error.json``: if the process failed, a file with the error info
-    #. ``{local_rank}/stdout.json``: if ``redirect & STDOUT == STDOUT``
-    #. ``{local_rank}/stderr.json``: if ``redirect & STDERR == STDERR``
+    #. ``{local_rank}/stdout.log``: if ``redirect & STDOUT == STDOUT``
+    #. ``{local_rank}/stderr.log``: if ``redirect & STDERR == STDERR``
 
     .. note:: It is expected that the ``log_dir`` exists, is empty, and is a directory.
 
@@ -213,6 +217,7 @@ def start_processes(
             envs=envs,
             logs_specs=logs_specs,
             log_line_prefixes=log_line_prefixes,
+            numa_options=numa_options,
         )
     else:
         context = MultiprocessContext(
@@ -223,6 +228,7 @@ def start_processes(
             log_line_prefixes=log_line_prefixes,
             start_method=start_method,
             logs_specs=logs_specs,
+            numa_options=numa_options,
         )
 
     try:

@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import subprocess
 from datetime import datetime
 from socket import gethostname
@@ -84,6 +85,10 @@ class StrobelightCompileTimeProfiler:
     ignored_profile_runs: int = 0
     inside_profile_compile_time: bool = False
     enabled: bool = False
+
+    # A regex that can be used to filter out what frames to profile. ex: "1/.*"
+    frame_id_filter: Optional[str] = os.environ.get("COMPILE_STROBELIGHT_FRAME_FILTER")
+
     # A unique identifier that is used as the run_user_name in the strobelight profile to
     # associate all compile time profiles together.
     identifier: Optional[str] = None
@@ -104,6 +109,12 @@ class StrobelightCompileTimeProfiler:
     )
 
     @classmethod
+    def get_frame(cls) -> str:
+        from torch._guards import CompileContext
+
+        return (str)(CompileContext.current_trace_id())
+
+    @classmethod
     def enable(cls, profiler_class: Any = StrobelightCLIFunctionProfiler) -> None:
         if cls.enabled:
             logger.info("compile time strobelight profiling already enabled")
@@ -116,7 +127,7 @@ class StrobelightCompileTimeProfiler:
 
             if not shutil.which("strobeclient"):
                 logger.info(
-                    "strobeclient not found, cant enable compile time strobelight profiling, seems"
+                    "strobeclient not found, can't enable compile time strobelight profiling, seems"
                     "like you are not on a FB machine."
                 )
                 return
@@ -134,7 +145,7 @@ class StrobelightCompileTimeProfiler:
             async_stack_max_len=cls.max_stack_length,
             run_user_name="pt2-profiler/"
             + os.environ.get("USER", os.environ.get("USERNAME", "")),
-            sample_tags={cls.identifier},
+            sample_tags={cls.identifier},  # pyrefly: ignore  # bad-argument-type
         )
 
     @classmethod
@@ -164,25 +175,43 @@ class StrobelightCompileTimeProfiler:
     def profile_compile_time(
         cls, func: Any, phase_name: str, *args: Any, **kwargs: Any
     ) -> Any:
-        if not cls.enabled:
+        def skip() -> Any:
             return func(*args, **kwargs)
+
+        if not cls.enabled:
+            return skip()
 
         if cls.profiler is None:
             logger.error("profiler is not set")
             return
 
+        frame_id = cls.get_frame()
+
         if cls.inside_profile_compile_time:
             cls.ignored_profile_runs += 1
             logger.info(
-                "profile_compile_time is requested for phase: %s while already in running phase: %s, recursive call ignored",
+                "profile_compile_time is requested for phase: %s, frame %s, while already in running phase: %s,"
+                "frame %s, recursive call ignored",
                 phase_name,
+                frame_id,
                 cls.current_phase,
+                frame_id,
             )
-            return func(*args, **kwargs)
+            return skip()
+
+        if cls.frame_id_filter is not None:
+            should_run = re.match(cls.frame_id_filter, frame_id) is not None
+            if not should_run:
+                logger.info(
+                    "profiling frame %s is skipped due to frame_id_filter %s",
+                    frame_id,
+                    cls.frame_id_filter,
+                )
+                return skip()
 
         cls.inside_profile_compile_time = True
         cls.current_phase = phase_name
-
+        logger.info("profiling frame %s", frame_id)
         work_result = cls.profiler.profile(func, *args, **kwargs)
 
         if cls.profiler.profile_result is not None:

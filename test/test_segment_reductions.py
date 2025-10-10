@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     gradcheck,
     parametrize,
-    skipIfRocm,
 )
 
 
@@ -92,7 +91,7 @@ class TestSegmentReductions(TestCase):
             self.assertEqual(
                 expected_grad, data.grad, rtol=1e-02, atol=1e-05, equal_nan=True
             )
-            data = data.clone().detach().requires_grad_(True)
+            data = data.detach().clone().requires_grad_(True)
 
             # gradcheck does not work well with bfloat16 or fp16 cpu types
             # also there is small numerical difference with fp32
@@ -231,7 +230,6 @@ class TestSegmentReductions(TestCase):
                             length_type,
                         )
 
-    @skipIfRocm
     @dtypes(
         *product(
             (torch.half, torch.bfloat16, torch.float, torch.double),
@@ -239,7 +237,7 @@ class TestSegmentReductions(TestCase):
         )
     )
     def test_multi_d_simple(self, device, dtypes):
-        val_dtype, length_type = dtypes
+        val_dtype, _ = dtypes
         axis = 0
         lengths = [1, 2, 3, 0]
         data = [[1, 1], [float("nan"), 1], [3, float("nan")], [4, 1], [3, 2], [2, 3]]
@@ -478,8 +476,8 @@ class TestSegmentReductions(TestCase):
                     elif mode == 'offsets':
                         segment_reduce_kwargs[mode] = indptr
                     return torch._segment_reduce(*segment_reduce_args, **segment_reduce_kwargs)
-                self.assertTrue(gradcheck(partial(fn, mode='lengths'), (data.clone().detach().requires_grad_(True))))
-                self.assertTrue(gradcheck(partial(fn, mode='offsets'), (data.clone().detach().requires_grad_(True))))
+                self.assertTrue(gradcheck(partial(fn, mode='lengths'), (data.detach().clone().requires_grad_(True))))
+                self.assertTrue(gradcheck(partial(fn, mode='offsets'), (data.detach().clone().requires_grad_(True))))
 
 
     @dtypes(
@@ -489,7 +487,7 @@ class TestSegmentReductions(TestCase):
         )
     )
     def test_multi_d(self, device, dtypes):
-        val_dtype, length_type = dtypes
+        val_dtype, _ = dtypes
         axis = 0
         lengths = [0, 2, 3, 0]
         data = np.arange(50).reshape(5, 2, 5).tolist()
@@ -558,7 +556,7 @@ class TestSegmentReductions(TestCase):
         lengths = torch.tensor([0, 2, 3, 0], device=device, dtype=length_type)
         data = torch.arange(6, dtype=torch.float, device=device)
 
-        # test for error on 1-D lenghts
+        # test for error on 1-D lengths
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(data, 'sum', lengths=lengths, axis=0, unsafe=False)
 

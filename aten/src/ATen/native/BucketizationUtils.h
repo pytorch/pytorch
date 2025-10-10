@@ -70,7 +70,7 @@ inline void searchsorted_maybe_trim_input_tensors(
     const Tensor& raw_boundaries) {
   Tensor trimmed_sorter;
   Tensor raw_sorter;
-  return searchsorted_maybe_trim_input_tensors(
+  searchsorted_maybe_trim_input_tensors(
       trimmed_input,
       trimmed_boundaries,
       trimmed_sorter,
@@ -107,10 +107,10 @@ inline void searchsorted_pre_check(
     const Tensor& output,
     const bool out_int32,
     const bool right,
-    const std::optional<c10::string_view> side_opt,
+    const std::optional<std::string_view> side_opt,
     const Tensor& sorter) {
   if (side_opt) {
-    const c10::string_view side = *side_opt;
+    const std::string_view side = *side_opt;
     TORCH_CHECK(side == "left" || side == "right", "torch.searchsorted(): side can only be 'left' or 'right' but ",
       "got ", side);
 

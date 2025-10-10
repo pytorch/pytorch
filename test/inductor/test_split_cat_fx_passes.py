@@ -2,7 +2,7 @@
 
 
 import torch
-from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
@@ -111,6 +111,33 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["normalization_pass"],
                 expected_split_norm_count,
+                msg=f"for {fn}",
+            )
+            counters.clear()
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_cat_normalization(self):
+        def caoncat_only(x):
+            return torch.concat(list(torch.split(x, 2, 1)), dim=1)
+
+        args = [
+            torch.randn(2, 32),
+        ]
+        for fn, dynamic, expected_cat_norm_count in [
+            (caoncat_only, False, 2),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn, dynamic=dynamic)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["normalization_pass"],
+                expected_cat_norm_count,
                 msg=f"for {fn}",
             )
             counters.clear()
@@ -258,6 +285,18 @@ class TestSplitCatFxPasses(TestCase):
 
             return torch.cat(final_items, dim=1)
 
+        def next_split_getitem_partial_used(x):
+            fs = torch.split(x, [4, 4, 24], dim=1)
+            item0 = fs[0]
+            item2 = fs[2]
+
+            final_items = [item0]
+            ns = item2.split((4, 4, 4, 4, 4, 4), 1)
+            final_items.extend(ns[0:1])
+            final_items.extend(ns[3:4])
+
+            return torch.cat(final_items, dim=1)
+
         args = [
             torch.randn(2, 32),
         ]
@@ -277,6 +316,7 @@ class TestSplitCatFxPasses(TestCase):
             (duplicate_getitems_neg_index, 1),
             (split_getitem_gap, 1),
             (split_getitem_out_of_order, 1),
+            (next_split_getitem_partial_used, 1),
             (split_partial_getitem_cat, 1),
         ]:
             expected = fn(*args)
@@ -287,8 +327,6 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["merge_splits_pass"],
                 expected_split_merged,
             )
-            if expected_split_merged > 0:
-                self.assertIn("merge_splits_pass_pre_grad", optimus_scuba_log)
             counters.clear()
 
     @patch
@@ -768,7 +806,7 @@ class TestSplitCatFxPasses(TestCase):
         def unbind_stack(x):
             return torch.stack(torch.unbind(x, 1), 1)
 
-        def unbind_cat(x):
+        def unbind_cat(x):  # noqa: F841
             return torch.cat(torch.unbind(x, dim=-3), 1)
 
         def unbind_stack_argspec1(x):

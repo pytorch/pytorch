@@ -5,6 +5,7 @@
 Things imported from here have numpy-compatible signatures but operate on
 pytorch tensors.
 """
+
 # Contents of this module ends up in the main namespace via _funcs.py
 # where type annotations are used in conjunction with the @normalizer decorator.
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 import builtins
 import itertools
 import operator
-from typing import Optional, Sequence, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch
 
@@ -20,6 +21,8 @@ from . import _dtypes_impl, _util
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ._normalizations import (
         ArrayLike,
         ArrayLikeOrScalar,
@@ -93,7 +96,7 @@ def _concat_cast_helper(tensors, out=None, dtype=None, casting="same_kind"):
     else:
         out_dtype = _dtypes_impl.result_type_impl(*tensors)
 
-    # cast input arrays if necessary; do not broadcast them agains `out`
+    # cast input arrays if necessary; do not broadcast them against `out`
     tensors = _util.typecast_tensors(tensors, out_dtype, casting)
 
     return tensors
@@ -939,7 +942,7 @@ def choose(
     ]
 
     idx_list[0] = a
-    return choices[idx_list].squeeze(0)
+    return choices[tuple(idx_list)].squeeze(0)
 
 
 # ### unique et al. ###
@@ -1287,7 +1290,7 @@ def cross(a: ArrayLike, b: ArrayLike, axisa=-1, axisb=-1, axisc=-1, axis=None):
 
 def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=False):
     # Have to manually normalize *operands and **kwargs, following the NumPy signature
-    # We have a local import to avoid poluting the global space, as it will be then
+    # We have a local import to avoid polluting the global space, as it will be then
     # exported in funcs.py
     from ._ndarray import ndarray
     from ._normalizations import (
@@ -1864,7 +1867,7 @@ def common_type(*tensors: ArrayLike):
         if not (t.is_floating_point or t.is_complex):
             p = 2  # array_precision[_nx.double]
         else:
-            p = array_precision.get(t, None)
+            p = array_precision.get(t)
             if p is None:
                 raise TypeError("can't get common type for non-numeric array")
         precision = builtins.max(precision, p)

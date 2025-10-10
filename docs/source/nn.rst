@@ -1,10 +1,15 @@
 .. role:: hidden
     :class: hidden-section
 
+.. toctree::
+   :maxdepth: 2
+   :hidden:
+
+   nn.aliases.rst
+
 torch.nn
 ===================================
 .. automodule:: torch.nn
-.. automodule:: torch.nn.modules
 
 These are the basic building blocks for graphs:
 
@@ -373,6 +378,8 @@ Utility functions to clip parameter gradients.
     clip_grad_norm_
     clip_grad_norm
     clip_grad_value_
+    get_total_norm
+    clip_grads_with_norm_
 
 Utility functions to flatten and unflatten Module parameters to and from a single vector.
 
@@ -473,6 +480,8 @@ for more information on how to implement your own parametrizations.
     parametrize.remove_parametrizations
     parametrize.cached
     parametrize.is_parametrized
+    parametrize.transfer_parametrizations_and_params
+    parametrize.type_before_parametrizations
 
 .. autosummary::
     :toctree: generated
@@ -503,14 +512,17 @@ Utility functions in other modules
     nn.utils.rnn.pack_sequence
     nn.utils.rnn.unpack_sequence
     nn.utils.rnn.unpad_sequence
+    nn.utils.rnn.invert_permutation
+    nn.parameter.is_lazy
+    nn.factory_kwargs
 
 .. autosummary::
     :toctree: generated
     :nosignatures:
     :template: classtemplate.rst
 
-    nn.Flatten
-    nn.Unflatten
+    nn.modules.flatten.Flatten
+    nn.modules.flatten.Unflatten
 
 Quantized Functions
 --------------------
@@ -529,18 +541,6 @@ Lazy Modules Initialization
 
     nn.modules.lazy.LazyModuleMixin
 
-Aliases
-_______
-
-The following are aliases to their counterparts in ``torch.nn``:
-
-.. currentmodule:: torch
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    nn.modules.normalization.RMSNorm
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes

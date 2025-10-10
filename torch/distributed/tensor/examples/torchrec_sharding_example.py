@@ -3,10 +3,11 @@
 The following example demonstrates how to represent torchrec's embedding
 sharding with the DTensor API.
 """
+
 import argparse
 import os
 from functools import cached_property
-from typing import List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch.distributed.checkpoint.metadata import (
@@ -43,12 +44,12 @@ supported_ops = [aten.view.default, aten._to_copy.default]
 # this torch.Tensor subclass is a wrapper around all local shards associated
 # with a single sharded embedding table.
 class LocalShardsWrapper(torch.Tensor):
-    local_shards: List[torch.Tensor]
+    local_shards: list[torch.Tensor]
     storage_meta: TensorStorageMetadata
 
     @staticmethod
     def __new__(
-        cls, local_shards: List[torch.Tensor], offsets: List[torch.Size]
+        cls, local_shards: list[torch.Tensor], offsets: list[torch.Size]
     ) -> "LocalShardsWrapper":
         assert len(local_shards) > 0
         assert len(local_shards) == len(offsets)
@@ -68,7 +69,7 @@ class LocalShardsWrapper(torch.Tensor):
             ChunkStorageMetadata(o, s.shape) for s, o in zip(local_shards, offsets)
         ]
 
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+        r = torch.Tensor._make_wrapper_subclass(
             cls,
             wrapper_shape,
         )
@@ -83,14 +84,17 @@ class LocalShardsWrapper(torch.Tensor):
 
     # necessary for ops dispatching from this subclass to its local shards
     @classmethod
-    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         kwargs = kwargs or {}
 
         # TODO: we shall continually extend this function to support more ops if needed
         if func in supported_ops:
             res_shards_list = [
-                func(shard, *args[1:], **kwargs) for shard in args[0].shards
+                func(shard, *args[1:], **kwargs)
+                # pyrefly: ignore  # index-error
+                for shard in args[0].shards
             ]
+            # pyrefly: ignore  # index-error
             return LocalShardsWrapper(res_shards_list, args[0].shard_offsets)
         else:
             raise NotImplementedError(
@@ -98,19 +102,19 @@ class LocalShardsWrapper(torch.Tensor):
             )
 
     @property
-    def shards(self) -> List[torch.Tensor]:
+    def shards(self) -> list[torch.Tensor]:
         return self.local_shards
 
     @shards.setter
-    def shards(self, local_shards: List[torch.Tensor]):
+    def shards(self, local_shards: list[torch.Tensor]):
         self.local_shards = local_shards
 
     @cached_property
-    def shard_sizes(self) -> List[torch.Size]:
+    def shard_sizes(self) -> list[torch.Size]:
         return [chunk.sizes for chunk in self.storage_meta.chunks]
 
     @cached_property
-    def shard_offsets(self) -> List[torch.Size]:
+    def shard_offsets(self) -> list[torch.Size]:
         return [chunk.offsets for chunk in self.storage_meta.chunks]
 
 
@@ -140,6 +144,7 @@ def run_torchrec_row_wise_even_sharding_example(rank, world_size):
     local_tensor = torch.randn(local_shard_shape, device=device)
     # row-wise sharding: one shard per rank
     # create the local shards wrapper
+    # pyrefly: ignore  # no-matching-overload
     local_shards_wrapper = LocalShardsWrapper(
         local_shards=[local_tensor],
         offsets=[local_shard_offset],
@@ -158,7 +163,7 @@ def run_torchrec_row_wise_even_sharding_example(rank, world_size):
     # this is the sharding placement we use in DTensor to represent row-wise sharding
     # row_wise_sharding_placements means that the global tensor is sharded by first dim
     # over the 1-d mesh.
-    row_wise_sharding_placements: List[Placement] = [Shard(0)]
+    row_wise_sharding_placements: list[Placement] = [Shard(0)]
 
     # create a DTensor from the local shard
     dtensor = DTensor.from_local(
@@ -218,6 +223,7 @@ def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
     # local shards
     # row-wise sharding: one shard per rank
     # create the local shards wrapper
+    # pyrefly: ignore  # no-matching-overload
     local_shards_wrapper = LocalShardsWrapper(
         local_shards=[local_tensor],
         offsets=[local_shard_offset],
@@ -226,11 +232,11 @@ def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
     ###########################################################################
     # example 1: transform local_shards into DTensor
     # create the DTensorMetadata which torchrec should provide
-    row_wise_sharding_placements: List[Placement] = [Shard(0)]
+    row_wise_sharding_placements: list[Placement] = [Shard(0)]
 
     # note: for uneven sharding, we need to specify the shape and stride because
     # DTensor would assume even sharding and compute shape/stride based on the
-    # assumption. Torchrec needs to pass in this information explicitely.
+    # assumption. Torchrec needs to pass in this information explicitly.
     # shape/stride are global tensor's shape and stride
     dtensor = DTensor.from_local(
         local_shards_wrapper,  # a torch.Tensor subclass
@@ -296,6 +302,7 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
         local_shard_offset = torch.Size((0, 0))
         # wrap local shards into a wrapper
         local_shards_wrapper = (
+            # pyrefly: ignore  # no-matching-overload
             LocalShardsWrapper(
                 local_shards=[local_tensor],
                 offsets=[local_shard_offset],
@@ -323,7 +330,7 @@ def run_torchrec_table_wise_sharding_example(rank, world_size):
         # create a DTensor from the local shard for the current table
         # note: for uneven sharding, we need to specify the shape and stride because
         # DTensor would assume even sharding and compute shape/stride based on the
-        # assumption. Torchrec needs to pass in this information explicitely.
+        # assumption. Torchrec needs to pass in this information explicitly.
         dtensor = DTensor.from_local(
             local_shards,
             device_submesh,

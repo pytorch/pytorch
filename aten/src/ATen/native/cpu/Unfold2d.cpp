@@ -50,12 +50,8 @@ static void unfolded2d_acc(
     int64_t output_width) {
   at::parallel_for(0, n_input_plane, 0, [&](int64_t start, int64_t end) {
     for (const auto nip : c10::irange(start, end)) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t kw, kh, y, x;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t ix, iy;
-      for (kh = 0; kh < kH; kh++) {
-        for (kw = 0; kw < kW; kw++) {
+      for (int64_t kh = 0; kh < kH; kh++) {
+        for (int64_t kw = 0; kw < kW; kw++) {
           scalar_t* src = finput_data +
               nip * ((size_t)kH * kW * output_height * output_width) +
               kh * ((size_t)kW * output_height * output_width) +
@@ -63,16 +59,14 @@ static void unfolded2d_acc(
           scalar_t* dst =
               input_data + nip * ((size_t)input_height * input_width);
           if (padW > 0 || padH > 0) {
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            int64_t lpad, rpad;
-            for (y = 0; y < output_height; y++) {
-              iy = (int64_t)y * dH - padH + kh;
+            for (int64_t y = 0; y < output_height; y++) {
+              auto iy = y * dH - padH + kh;
               if (iy < 0 || iy >= input_height) {
               } else {
                 if (dW == 1) {
-                  ix = 0 - padW + kw;
-                  lpad = std::max<int64_t>(0, padW - kw);
-                  rpad = std::max<int64_t>(0, padW - (kW - kw - 1));
+                  auto ix = 0 - padW + kw;
+                  auto lpad = std::max<int64_t>(0, padW - kw);
+                  auto rpad = std::max<int64_t>(0, padW - (kW - kw - 1));
                   scalar_t* dst_slice =
                       dst + (size_t)iy * input_width + ix + lpad;
                   cadd(
@@ -81,8 +75,8 @@ static void unfolded2d_acc(
                       src + (size_t)y * output_width + lpad,
                       output_width - lpad - rpad);
                 } else {
-                  for (x = 0; x < output_width; x++) {
-                    ix = (int64_t)x * dW - padW + kw;
+                  for (int64_t x = 0; x < output_width; x++) {
+                    auto ix = x * dW - padW + kw;
                     if (ix < 0 || ix >= input_width) {
                     } else {
                       scalar_t* dst_slice = dst + (size_t)iy * input_width + ix;
@@ -93,9 +87,9 @@ static void unfolded2d_acc(
               }
             }
           } else {
-            for (y = 0; y < output_height; y++) {
-              iy = (int64_t)y * dH + kh;
-              ix = 0 + kw;
+            for (int64_t y = 0; y < output_height; y++) {
+              auto iy = y * dH + kh;
+              auto ix = 0 + kw;
               if (dW == 1) {
                 scalar_t* dst_slice = dst + (size_t)iy * input_width + ix;
                 cadd(
@@ -104,7 +98,7 @@ static void unfolded2d_acc(
                     src + (size_t)y * output_width,
                     output_width);
               } else {
-                for (x = 0; x < output_width; x++) {
+                for (int64_t x = 0; x < output_width; x++) {
                   scalar_t* dst_slice =
                       dst + (size_t)iy * input_width + ix + x * dW;
                   *dst_slice = *dst_slice + src[(size_t)y * output_width + x];
@@ -175,6 +169,10 @@ static void unfolded2d_acc_channels_last(
 
 /* note: due to write issues, this one cannot be parallelized as well as
  * unfolded2d_copy */
+#if defined(__GNUC__) && __GNUC__ == 14 && defined(__ARM_FEATURE_SVE) && !defined(__ARM_FEATURE_BF16)
+// Workaround for gcc-14.2.0 ICE during RTL pass: vregs when compiling for SVE without BF16
+__attribute__((optimize("no-tree-vectorize")))
+#endif
 void unfolded2d_acc_kernel(
     ScalarType dtype,
     void *finput_data,
@@ -242,16 +240,12 @@ static void unfolded2d_copy(
     int64_t output_height,
     int64_t output_width) {
   at::parallel_for(
-      0, (int64_t)n_input_plane * kH * kW, 0, [&](int64_t start, int64_t end) {
+      0, n_input_plane * kH * kW, 0, [&](int64_t start, int64_t end) {
         for (const auto k : c10::irange(start, end)) {
           int64_t nip = k / (kH * kW);
           int64_t rest = k % (kH * kW);
           int64_t kh = rest / kW;
           int64_t kw = rest % kW;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t x, y;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t ix, iy;
           scalar_t* dst = finput_data +
               nip * ((size_t)kH * kW * output_height * output_width) +
               kh * ((size_t)kW * output_height * output_width) +
@@ -259,10 +253,8 @@ static void unfolded2d_copy(
           const scalar_t* src =
               input_data + nip * ((size_t)input_height * input_width);
           if (padW > 0 || padH > 0) {
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            int64_t lpad, rpad;
-            for (y = 0; y < output_height; y++) {
-              iy = (int64_t)y * dH - padH + kh;
+            for (int64_t y = 0; y < output_height; y++) {
+              auto iy = y * dH - padH + kh;
               if (iy < 0 || iy >= input_height) {
                 memset(
                     dst + (size_t)y * output_width,
@@ -270,9 +262,9 @@ static void unfolded2d_copy(
                     sizeof(scalar_t) * output_width);
               } else {
                 if (dW == 1) {
-                  ix = 0 - padW + kw;
-                  lpad = std::max<int64_t>(0, padW - kw);
-                  rpad = std::max<int64_t>(0, padW - (kW - kw - 1));
+                  auto ix = 0 - padW + kw;
+                  auto lpad = std::max<int64_t>(0, padW - kw);
+                  auto rpad = std::max<int64_t>(0, padW - (kW - kw - 1));
                   if (output_width - rpad - lpad <= 0) {
                     memset(
                         dst + (size_t)y * output_width,
@@ -295,8 +287,8 @@ static void unfolded2d_copy(
                           sizeof(scalar_t) * rpad);
                   }
                 } else {
-                  for (x = 0; x < output_width; x++) {
-                    ix = (int64_t)x * dW - padW + kw;
+                  for (int64_t x = 0; x < output_width; x++) {
+                    auto ix = x * dW - padW + kw;
                     if (ix < 0 || ix >= input_width)
                       memset(
                           dst + (size_t)y * output_width + x,
@@ -312,19 +304,19 @@ static void unfolded2d_copy(
               }
             }
           } else {
-            for (y = 0; y < output_height; y++) {
-              iy = (int64_t)y * dH + kh;
-              ix = 0 + kw;
+            for (int64_t y = 0; y < output_height; y++) {
+              auto iy = y * dH + kh;
+              auto ix = 0 + kw;
               if (dW == 1)
                 memcpy(
                     dst + (size_t)y * output_width,
                     src + (size_t)iy * input_width + ix,
                     sizeof(scalar_t) * output_width);
               else {
-                for (x = 0; x < output_width; x++)
+                for (int64_t x = 0; x < output_width; x++)
                   memcpy(
                       dst + (size_t)y * output_width + x,
-                      src + (size_t)iy * input_width + ix + (int64_t)x * dW,
+                      src + (size_t)iy * input_width + ix + x * dW,
                       sizeof(scalar_t) * (1));
               }
             }

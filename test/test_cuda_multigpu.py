@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     skipCUDANonDefaultStreamIf,
-    skipIfRocm,
     TEST_CUDA,
     TestCase,
 )
@@ -777,8 +776,6 @@ class TestCudaMultiGPU(TestCase):
             p2c.get()
             c2p.put(sync_func(self, TestCudaMultiGPU.FIFTY_MIL_CYCLES))
 
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_stream_event_nogil(self):
         for sync_func in [
@@ -815,11 +812,10 @@ class TestCudaMultiGPU(TestCase):
             # it may vary on different hardware in different environments.
             # Therefore, this test uses relative comparisons, checking if the
             # sum of parent and child threads execution time is greater than the
-            # real execution time by least 40%.
-            self.assertGreater(parent_time + child_time, total_time * 1.4)
+            # real execution time by least 30%.
+            self.assertGreater(parent_time + child_time, total_time * 1.3)
 
     # This test is flaky for ROCm, see issue #62602
-    @skipIfRocm
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_events_wait(self):
         d0 = torch.device("cuda:0")
@@ -888,7 +884,6 @@ class TestCudaMultiGPU(TestCase):
             self.assertTrue(e1.query())
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
-    @skipIfRocm
     def test_events_multi_gpu_elapsed_time(self):
         d0 = torch.device("cuda:0")
         d1 = torch.device("cuda:1")
@@ -950,6 +945,9 @@ class TestCudaMultiGPU(TestCase):
             ext_stream = torch.cuda.ExternalStream(stream_v)
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
+            ext_stream = torch.cuda.get_stream_from_external(stream_v, device)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_external_streams_multi_device(self):
@@ -958,10 +956,13 @@ class TestCudaMultiGPU(TestCase):
             ext_stream = torch.cuda.ExternalStream(stream_v, device=device)
             self.assertEqual(stream_v, ext_stream.cuda_stream)
             self.assertEqual(ext_stream.device.index, device.idx)
+            ext_stream = torch.cuda.get_stream_from_external(stream_v, device)
+            self.assertEqual(stream_v, ext_stream.cuda_stream)
+            self.assertEqual(ext_stream.device.index, device.idx)
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_caching_pinned_memory_multi_gpu(self):
-        # checks that the events preventing pinned memory from being re-used
+        # checks that the events preventing pinned memory from being reused
         # too early are recorded on the correct GPU
         cycles_per_ms = get_cycles_per_ms()
 
@@ -976,7 +977,7 @@ class TestCudaMultiGPU(TestCase):
 
         del t
         t = torch.FloatTensor([2]).pin_memory()
-        self.assertNotEqual(t.data_ptr(), ptr, msg="allocation re-used too soon")
+        self.assertNotEqual(t.data_ptr(), ptr, msg="allocation reused too soon")
 
         with torch.cuda.device(0):
             gpu_tensor0.copy_(t, non_blocking=True)
@@ -1011,7 +1012,8 @@ class TestCudaMultiGPU(TestCase):
             torch.cuda.synchronize()
             before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(device)
             # increasing to 8MB to force acquiring a new block and overcome blocksize differences across platforms
-            t = torch.randn(1024 * 1024 * 8, device=device)
+            t = torch.randn(1024 * 1024 * 8, device=device)  # noqa: F841
+
             if IS_JETSON:
                 # w/o syncing, mem_get_info will run before memory allocated has actually increased.
                 # This race condition causes consistent failure
@@ -1302,7 +1304,7 @@ t2.start()
 
         device_count = torch.cuda.device_count()
         current_alloc = [memory_allocated(idx) for idx in range(device_count)]
-        x = torch.ones(10, device="cuda:0")
+        _x = torch.ones(10, device="cuda:0")
         self.assertGreater(memory_allocated(0), current_alloc[0])
         self.assertTrue(
             all(

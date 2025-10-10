@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Sized, Tuple, TypeVar
+from collections.abc import Sized
+from typing import TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import MapDataPipe
@@ -34,7 +35,7 @@ class ConcaterMapDataPipe(MapDataPipe):
         [0, 1, 2, 0, 1, 2]
     """
 
-    datapipes: Tuple[MapDataPipe]
+    datapipes: tuple[MapDataPipe]
 
     def __init__(self, *datapipes: MapDataPipe):
         if len(datapipes) == 0:
@@ -48,18 +49,21 @@ class ConcaterMapDataPipe(MapDataPipe):
     def __getitem__(self, index) -> _T_co:  # type: ignore[type-var]
         offset = 0
         for dp in self.datapipes:
+            # pyrefly: ignore  # bad-argument-type
             if index - offset < len(dp):
                 return dp[index - offset]
             else:
+                # pyrefly: ignore  # bad-argument-type
                 offset += len(dp)
         raise IndexError(f"Index {index} is out of range.")
 
     def __len__(self) -> int:
+        # pyrefly: ignore  # bad-argument-type
         return sum(len(dp) for dp in self.datapipes)
 
 
 @functional_datapipe("zip")
-class ZipperMapDataPipe(MapDataPipe[Tuple[_T_co, ...]]):
+class ZipperMapDataPipe(MapDataPipe[tuple[_T_co, ...]]):
     r"""
     Aggregates elements into a tuple from each of the input DataPipes (functional name: ``zip``).
 
@@ -78,7 +82,7 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[_T_co, ...]]):
         [(0, 10), (1, 11), (2, 12)]
     """
 
-    datapipes: Tuple[MapDataPipe[_T_co], ...]
+    datapipes: tuple[MapDataPipe[_T_co], ...]
 
     def __init__(self, *datapipes: MapDataPipe[_T_co]) -> None:
         if len(datapipes) == 0:
@@ -89,7 +93,7 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[_T_co, ...]]):
             raise TypeError("Expected all inputs to be `Sized`")
         self.datapipes = datapipes
 
-    def __getitem__(self, index) -> Tuple[_T_co, ...]:
+    def __getitem__(self, index) -> tuple[_T_co, ...]:
         res = []
         for dp in self.datapipes:
             try:
@@ -101,4 +105,5 @@ class ZipperMapDataPipe(MapDataPipe[Tuple[_T_co, ...]]):
         return tuple(res)
 
     def __len__(self) -> int:
+        # pyrefly: ignore  # bad-argument-type
         return min(len(dp) for dp in self.datapipes)

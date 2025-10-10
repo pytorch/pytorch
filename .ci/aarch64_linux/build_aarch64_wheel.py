@@ -12,22 +12,22 @@ import os
 import subprocess
 import sys
 import time
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import boto3
 
 
 # AMI images for us-east-1, change the following based on your ~/.aws/config
 os_amis = {
-    "ubuntu18_04": "ami-078eece1d8119409f",  # login_name: ubuntu
     "ubuntu20_04": "ami-052eac90edaa9d08f",  # login_name: ubuntu
     "ubuntu22_04": "ami-0c6c29c5125214c77",  # login_name: ubuntu
     "redhat8": "ami-0698b90665a2ddcf1",  # login_name: ec2-user
 }
-ubuntu18_04_ami = os_amis["ubuntu18_04"]
+
+ubuntu20_04_ami = os_amis["ubuntu20_04"]
 
 
-def compute_keyfile_path(key_name: Optional[str] = None) -> Tuple[str, str]:
+def compute_keyfile_path(key_name: Optional[str] = None) -> tuple[str, str]:
     if key_name is None:
         key_name = os.getenv("AWS_KEY_NAME")
         if key_name is None:
@@ -57,7 +57,7 @@ def ec2_instances_by_id(instance_id):
 
 
 def start_instance(
-    key_name, ami=ubuntu18_04_ami, instance_type="t4g.2xlarge", ebs_size: int = 50
+    key_name, ami=ubuntu20_04_ami, instance_type="t4g.2xlarge", ebs_size: int = 50
 ):
     inst = ec2.create_instances(
         ImageId=ami,
@@ -96,7 +96,7 @@ class RemoteHost:
         self.keyfile_path = keyfile_path
         self.login_name = login_name
 
-    def _gen_ssh_prefix(self) -> List[str]:
+    def _gen_ssh_prefix(self) -> list[str]:
         return [
             "ssh",
             "-o",
@@ -108,13 +108,13 @@ class RemoteHost:
         ]
 
     @staticmethod
-    def _split_cmd(args: Union[str, List[str]]) -> List[str]:
+    def _split_cmd(args: Union[str, list[str]]) -> list[str]:
         return args.split() if isinstance(args, str) else args
 
-    def run_ssh_cmd(self, args: Union[str, List[str]]) -> None:
+    def run_ssh_cmd(self, args: Union[str, list[str]]) -> None:
         subprocess.check_call(self._gen_ssh_prefix() + self._split_cmd(args))
 
-    def check_ssh_output(self, args: Union[str, List[str]]) -> str:
+    def check_ssh_output(self, args: Union[str, list[str]]) -> str:
         return subprocess.check_output(
             self._gen_ssh_prefix() + self._split_cmd(args)
         ).decode("utf-8")
@@ -157,7 +157,7 @@ class RemoteHost:
     def using_docker(self) -> bool:
         return self.container_id is not None
 
-    def run_cmd(self, args: Union[str, List[str]]) -> None:
+    def run_cmd(self, args: Union[str, list[str]]) -> None:
         if not self.using_docker():
             return self.run_ssh_cmd(args)
         assert self.container_id is not None
@@ -178,7 +178,7 @@ class RemoteHost:
         if rc != 0:
             raise subprocess.CalledProcessError(rc, docker_cmd)
 
-    def check_output(self, args: Union[str, List[str]]) -> str:
+    def check_output(self, args: Union[str, list[str]]) -> str:
         if not self.using_docker():
             return self.check_ssh_output(args)
         assert self.container_id is not None
@@ -230,7 +230,7 @@ class RemoteHost:
             )
         self.download_file(remote_file, local_file)
 
-    def list_dir(self, path: str) -> List[str]:
+    def list_dir(self, path: str) -> list[str]:
         return self.check_output(["ls", "-1", path]).split("\n")
 
 
@@ -241,7 +241,7 @@ def wait_for_connection(addr, port, timeout=15, attempt_cnt=5):
         try:
             with socket.create_connection((addr, port), timeout=timeout):
                 return
-        except (ConnectionRefusedError, socket.timeout):  # noqa: PERF203
+        except (ConnectionRefusedError, TimeoutError):  # noqa: PERF203
             if i == attempt_cnt - 1:
                 raise
             time.sleep(timeout)
@@ -299,40 +299,6 @@ def install_condaforge_python(host: RemoteHost, python_version="3.8") -> None:
         )
 
 
-def build_OpenBLAS(host: RemoteHost, git_clone_flags: str = "") -> None:
-    print("Building OpenBLAS")
-    host.run_cmd(
-        f"git clone https://github.com/xianyi/OpenBLAS -b v0.3.28 {git_clone_flags}"
-    )
-    make_flags = "NUM_THREADS=64 USE_OPENMP=1 NO_SHARED=1 DYNAMIC_ARCH=1 TARGET=ARMV8"
-    host.run_cmd(
-        f"pushd OpenBLAS && make {make_flags} -j8 && sudo make {make_flags} install && popd && rm -rf OpenBLAS"
-    )
-
-
-def build_ArmComputeLibrary(host: RemoteHost, git_clone_flags: str = "") -> None:
-    print("Building Arm Compute Library")
-    acl_build_flags = " ".join(
-        [
-            "debug=0",
-            "neon=1",
-            "opencl=0",
-            "os=linux",
-            "openmp=1",
-            "cppthreads=0",
-            "arch=armv8a",
-            "multi_isa=1",
-            "fixed_format_kernels=1",
-            "build=native",
-        ]
-    )
-    host.run_cmd(
-        f"git clone https://github.com/ARM-software/ComputeLibrary.git -b v24.09 {git_clone_flags}"
-    )
-
-    host.run_cmd(f"cd ComputeLibrary && scons Werror=1 -j8 {acl_build_flags}")
-
-
 def embed_libgomp(host: RemoteHost, use_conda, wheel_name) -> None:
     host.run_cmd("pip3 install auditwheel")
     host.run_cmd(
@@ -358,7 +324,7 @@ def checkout_repo(
     branch: str = "main",
     url: str,
     git_clone_flags: str,
-    mapping: Dict[str, Tuple[str, str]],
+    mapping: dict[str, tuple[str, str]],
 ) -> Optional[str]:
     for prefix in mapping:
         if not branch.startswith(prefix):
@@ -438,13 +404,11 @@ def build_torchvision(
         )
         build_vars += f"BUILD_VERSION={version}.dev{build_date}"
     elif build_version is not None:
-        build_vars += (
-            f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-')[0]}"
-        )
+        build_vars += f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-', maxsplit=1)[0]}"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
-    host.run_cmd(f"cd vision && {build_vars} python3 setup.py bdist_wheel")
+    host.run_cmd(f"cd vision && {build_vars} python3 -m build --wheel --no-isolation")
     vision_wheel_name = host.list_dir("vision/dist")[0]
     embed_libgomp(host, use_conda, os.path.join("vision", "dist", vision_wheel_name))
 
@@ -495,13 +459,11 @@ def build_torchdata(
         )
         build_vars += f"BUILD_VERSION={version}.dev{build_date}"
     elif build_version is not None:
-        build_vars += (
-            f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-')[0]}"
-        )
+        build_vars += f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-', maxsplit=1)[0]}"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
-    host.run_cmd(f"cd data && {build_vars} python3 setup.py bdist_wheel")
+    host.run_cmd(f"cd data && {build_vars} python3 -m build --wheel --no-isolation")
     wheel_name = host.list_dir("data/dist")[0]
     embed_libgomp(host, use_conda, os.path.join("data", "dist", wheel_name))
 
@@ -553,13 +515,11 @@ def build_torchtext(
         )
         build_vars += f"BUILD_VERSION={version}.dev{build_date}"
     elif build_version is not None:
-        build_vars += (
-            f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-')[0]}"
-        )
+        build_vars += f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-', maxsplit=1)[0]}"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
-    host.run_cmd(f"cd text && {build_vars} python3 setup.py bdist_wheel")
+    host.run_cmd(f"cd text && {build_vars} python3 -m build --wheel --no-isolation")
     wheel_name = host.list_dir("text/dist")[0]
     embed_libgomp(host, use_conda, os.path.join("text", "dist", wheel_name))
 
@@ -613,15 +573,15 @@ def build_torchaudio(
         )
         build_vars += f"BUILD_VERSION={version}.dev{build_date}"
     elif build_version is not None:
-        build_vars += (
-            f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-')[0]}"
-        )
+        build_vars += f"BUILD_VERSION={build_version} PYTORCH_VERSION={branch[1:].split('-', maxsplit=1)[0]}"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
 
-    host.run_cmd(f"cd audio && export FFMPEG_ROOT=$(pwd)/third_party/ffmpeg && export USE_FFMPEG=1 \
+    host.run_cmd(
+        f"cd audio && export FFMPEG_ROOT=$(pwd)/third_party/ffmpeg && export USE_FFMPEG=1 \
         && ./packaging/ffmpeg/build.sh \
-        && {build_vars} python3 setup.py bdist_wheel")
+        && {build_vars} python3 -m build --wheel --no-isolation"
+    )
 
     wheel_name = host.list_dir("audio/dist")[0]
     embed_libgomp(host, use_conda, os.path.join("audio", "dist", wheel_name))
@@ -655,18 +615,6 @@ def configure_system(
             "sudo apt-get install -y python3-dev python3-yaml python3-setuptools python3-wheel python3-pip"
         )
     host.run_cmd("pip3 install dataclasses typing-extensions")
-    # Install and switch to gcc-8 on Ubuntu-18.04
-    if not host.using_docker() and host.ami == ubuntu18_04_ami and compiler == "gcc-8":
-        host.run_cmd("sudo apt-get install -y g++-8 gfortran-8")
-        host.run_cmd(
-            "sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 100"
-        )
-        host.run_cmd(
-            "sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-8 100"
-        )
-        host.run_cmd(
-            "sudo update-alternatives --install /usr/bin/gfortran gfortran /usr/bin/gfortran-8 100"
-        )
     if not use_conda:
         print("Installing Cython + numpy from PyPy")
         host.run_cmd("sudo pip3 install Cython")
@@ -679,7 +627,7 @@ def build_domains(
     branch: str = "main",
     use_conda: bool = True,
     git_clone_flags: str = "",
-) -> Tuple[str, str, str, str]:
+) -> tuple[str, str, str, str]:
     vision_wheel_name = build_torchvision(
         host, branch=branch, use_conda=use_conda, git_clone_flags=git_clone_flags
     )
@@ -706,7 +654,7 @@ def start_build(
     pytorch_build_number: Optional[str] = None,
     shallow_clone: bool = True,
     enable_mkldnn: bool = False,
-) -> Tuple[str, str, str, str, str]:
+) -> tuple[str, str, str, str, str]:
     git_clone_flags = " --depth 1 --shallow-submodules" if shallow_clone else ""
     if host.using_docker() and not use_conda:
         print("Auto-selecting conda option for docker images")
@@ -718,7 +666,6 @@ def start_build(
     configure_system(
         host, compiler=compiler, use_conda=use_conda, python_version=python_version
     )
-    build_OpenBLAS(host, git_clone_flags)
 
     if host.using_docker():
         print("Move libgfortant.a into a standard location")
@@ -741,10 +688,12 @@ def start_build(
         f"git clone --recurse-submodules -b {branch} https://github.com/pytorch/pytorch {git_clone_flags}"
     )
 
+    host.run_cmd("pytorch/.ci/docker/common/install_openblas.sh")
+
     print("Building PyTorch wheel")
     build_opts = ""
     if pytorch_build_number is not None:
-        build_opts += f" --build-number {pytorch_build_number}"
+        build_opts += f" -C--build-option=--build-number={pytorch_build_number}"
     # Breakpad build fails on aarch64
     build_vars = "USE_BREAKPAD=0 "
     if branch == "nightly":
@@ -757,19 +706,22 @@ def start_build(
         version = host.check_output("cat pytorch/version.txt").strip()[:-2]
         build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={version}.dev{build_date} PYTORCH_BUILD_NUMBER=1"
     if branch.startswith(("v1.", "v2.")):
-        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1:branch.find('-')]} PYTORCH_BUILD_NUMBER=1"
+        build_vars += f"BUILD_TEST=0 PYTORCH_BUILD_VERSION={branch[1 : branch.find('-')]} PYTORCH_BUILD_NUMBER=1"
     if host.using_docker():
         build_vars += " CMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=0x10000"
     if enable_mkldnn:
-        build_ArmComputeLibrary(host, git_clone_flags)
+        host.run_cmd("pytorch/.ci/docker/common/install_acl.sh")
         print("build pytorch with mkldnn+acl backend")
         build_vars += " USE_MKLDNN=ON USE_MKLDNN_ACL=ON"
+        build_vars += " BLAS=OpenBLAS"
+        build_vars += " OpenBLAS_HOME=/opt/OpenBLAS"
+        build_vars += " ACL_ROOT_DIR=/acl"
         host.run_cmd(
-            f"cd $HOME/pytorch && export ACL_ROOT_DIR=$HOME/ComputeLibrary && {build_vars} python3 setup.py bdist_wheel{build_opts}"
+            f"cd $HOME/pytorch && {build_vars} python3 -m build --wheel --no-isolation{build_opts}"
         )
         print("Repair the wheel")
         pytorch_wheel_name = host.list_dir("pytorch/dist")[0]
-        ld_library_path = "$HOME/acl/build:$HOME/pytorch/build/lib"
+        ld_library_path = "/acl/build:$HOME/pytorch/build/lib"
         host.run_cmd(
             f"export LD_LIBRARY_PATH={ld_library_path} && auditwheel repair $HOME/pytorch/dist/{pytorch_wheel_name}"
         )
@@ -781,7 +733,7 @@ def start_build(
     else:
         print("build pytorch without mkldnn backend")
         host.run_cmd(
-            f"cd pytorch && {build_vars} python3 setup.py bdist_wheel{build_opts}"
+            f"cd pytorch && {build_vars} python3 -m build --wheel --no-isolation{build_opts}"
         )
 
     print("Deleting build folder")
@@ -925,14 +877,14 @@ def terminate_instances(instance_type: str) -> None:
 def parse_arguments():
     from argparse import ArgumentParser
 
-    parser = ArgumentParser("Builid and test AARCH64 wheels using EC2")
+    parser = ArgumentParser("Build and test AARCH64 wheels using EC2")
     parser.add_argument("--key-name", type=str)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--test-only", type=str)
-    parser.add_argument(
-        "--os", type=str, choices=list(os_amis.keys()), default="ubuntu20_04"
-    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--os", type=str, choices=list(os_amis.keys()))
+    group.add_argument("--ami", type=str)
     parser.add_argument(
         "--python-version",
         type=str,
@@ -962,7 +914,13 @@ def parse_arguments():
 
 if __name__ == "__main__":
     args = parse_arguments()
-    ami = os_amis[args.os]
+    ami = (
+        args.ami
+        if args.ami is not None
+        else os_amis[args.os]
+        if args.os is not None
+        else ubuntu20_04_ami
+    )
     keyfile_path, key_name = compute_keyfile_path(args.key_name)
 
     if args.list_instances:
@@ -1016,7 +974,7 @@ if __name__ == "__main__":
         install_condaforge_python(host, args.python_version)
         sys.exit(0)
 
-    python_version = args.python_version if args.python_version is not None else "3.8"
+    python_version = args.python_version if args.python_version is not None else "3.10"
 
     if args.use_torch_from_pypi:
         configure_system(host, compiler=args.compiler, python_version=python_version)

@@ -173,7 +173,7 @@ TORCH_META_FUNC2(div, Tensor) (const Tensor& self, const Tensor& other) {
   build_borrowing_binary_float_op(maybe_get_output(), self, other);
 }
 
-TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode) {
+TORCH_META_FUNC2(div, Tensor_mode) (const Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode) {
   if (!rounding_mode.has_value()) {
     build_borrowing_binary_float_op(maybe_get_output(), self, other);
   // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -448,7 +448,7 @@ TORCH_IMPL_FUNC(div_out) (const Tensor& self, const Tensor& other, const Tensor&
 }
 
 TORCH_IMPL_FUNC(div_out_mode) (
-  const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode, const Tensor& result
+  const Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode, const Tensor& result
 ) {
   if (!rounding_mode.has_value()) {
     div_true_stub(device_type(), *this);
@@ -896,11 +896,11 @@ Tensor& div_(Tensor& self, const Scalar& other) {
   return self.div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
-Tensor div(const Tensor& self, const Scalar& other, std::optional<c10::string_view> rounding_mode) {
+Tensor div(const Tensor& self, const Scalar& other, std::optional<std::string_view> rounding_mode) {
   return self.div(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
-Tensor& div_(Tensor& self, const Scalar& other, std::optional<c10::string_view> rounding_mode) {
+Tensor& div_(Tensor& self, const Scalar& other, std::optional<std::string_view> rounding_mode) {
   return self.div_(wrapped_scalar_tensor(other), std::move(rounding_mode)); // redispatch!
 }
 
@@ -925,23 +925,23 @@ Tensor& divide_(Tensor& self, const Scalar& other) {
   return self.div_(other);
 }
 
-Tensor& divide_out(const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode, Tensor& result) {
+Tensor& divide_out(const Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode, Tensor& result) {
   return at::div_out(result, self, other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode) {
+Tensor divide(const Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode) {
+Tensor& divide_(Tensor& self, const Tensor& other, std::optional<std::string_view> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
-Tensor divide(const Tensor& self, const Scalar& other, std::optional<c10::string_view> rounding_mode) {
+Tensor divide(const Tensor& self, const Scalar& other, std::optional<std::string_view> rounding_mode) {
   return self.div(other, std::move(rounding_mode));
 }
 
-Tensor& divide_(Tensor& self, const Scalar& other, std::optional<c10::string_view> rounding_mode) {
+Tensor& divide_(Tensor& self, const Scalar& other, std::optional<std::string_view> rounding_mode) {
   return self.div_(other, std::move(rounding_mode));
 }
 
@@ -1383,35 +1383,35 @@ Tensor bitwise_right_shift(const Scalar& self, const Tensor& other) {
 }
 
 template <typename Stub>
-Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
+static Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Tensor& other, Stub& stub) {
   auto iter = TensorIterator::comparison_op(result, self, other);
   stub(iter.device_type(), iter);
   return result;
 }
 
 template <typename OutImpl>
-Tensor comparison_op(const Tensor& self, const Tensor& other, OutImpl& out_impl) {
+static Tensor comparison_op(const Tensor& self, const Tensor& other, OutImpl& out_impl) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
   return out_impl(result, self, other);
 }
 
 template <typename OutImpl>
-Tensor& comparison_op_(Tensor& self, const Tensor& other, OutImpl& out_impl) {
+static Tensor& comparison_op_(Tensor& self, const Tensor& other, OutImpl& out_impl) {
   return out_impl(self, self, other);
 }
 
 template <typename OutImpl>
-Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Scalar& other, OutImpl& out_impl) {
+static Tensor& comparison_op_out(Tensor& result, const Tensor& self, const Scalar& other, OutImpl& out_impl) {
   return out_impl(result, self, wrapped_scalar_tensor(other));
 }
 
 template <typename OutImpl>
-Tensor comparison_op(const Tensor& self, const Scalar& other, OutImpl& out_impl) {
+static Tensor comparison_op(const Tensor& self, const Scalar& other, OutImpl& out_impl) {
   return comparison_op(self, wrapped_scalar_tensor(other), out_impl);
 }
 
 template <typename OutImpl>
-Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
+static Tensor& comparison_op_(Tensor& self, const Scalar& other, OutImpl& out_impl) {
   return out_impl(self, self, wrapped_scalar_tensor(other));
 }
 

@@ -15,15 +15,19 @@ class Stream(torch._C._XpuStreamBase):
     r"""Wrapper around a XPU stream.
 
     A XPU stream is a linear sequence of execution that belongs to a specific
-    device, independent from other streams.
+    device, independent from other streams. It supports with statement as a
+    context manager to ensure the operators within the with block are running
+    on the corresponding stream.
 
     Args:
         device(torch.device or int, optional): a device on which to allocate
             the stream. If :attr:`device` is ``None`` (default) or a negative
             integer, this will use the current device.
-        priority(int, optional): priority of the stream, should be 0 or
-            negative, where negative numbers indicate higher priority. By default,
-            streams have priority 0.
+        priority(int, optional): priority of the stream, which can be positive, 0, or negative.
+            A lower number indicates a higher priority. By default, the priority is set to 0.
+            If the value falls outside of the allowed priority range, it will automatically be
+            mapped to the nearest valid priority (lowest for large positive numbers or
+            highest for large negative numbers).
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
@@ -122,7 +126,7 @@ class Event(torch._C._XpuEventBase):
         """
         if stream is None:
             stream = torch.xpu.current_stream()
-        super().record(stream)
+        super().record(stream)  # pyrefly: ignore  # bad-argument-type
 
     def wait(self, stream=None) -> None:
         r"""Make all future work submitted to the given stream wait for this event.

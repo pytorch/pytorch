@@ -7,6 +7,7 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/core/GradMode.h>
@@ -62,8 +63,6 @@
 #include <utility>
 #endif
 
-int register_linear_params();
-
 namespace at::native {
 
 namespace {
@@ -107,6 +106,13 @@ bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
       input.numel() != 0;
 #endif
   return false;
+}
+
+bool use_cudnn(const Tensor& t) {
+  bool acceptable = at::cudnn_is_acceptable(t);
+  auto st = t.scalar_type();
+  bool bfloat16_cond = st == kBFloat16 && at::detail::getCUDAHooks().supportsBFloat16RNNWithCuDNN();
+  return acceptable && (bfloat16_cond || st == kDouble || st == kFloat || st == kHalf);
 }
 
 template<typename T>
@@ -727,10 +733,9 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
-    const auto& hx = std::get<0>(hidden);
-    const auto& cx = std::get<1>(hidden);
+    const auto& [hx, cx] = hidden;
 
-    if (input.is_cuda() || input.is_privateuseone()) {
+    if (input.is_cuda() || input.is_xpu() || input.is_privateuseone()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hx);
@@ -882,7 +887,7 @@ struct FullBidirectionalLayer
       step_inputs = input_w.unbind(0);
       auto fw_result = layer_(
           step_inputs, input_hidden.first, params.first, true);
-      TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
+      TORCH_CHECK(!fw_result.outputs.empty(), "Expected sequence length to be larger than 0 in RNN");
       auto fw_output = at::stack(fw_result.outputs, 0);
       input_w = params.second.linear_ih(input);
       step_inputs = input_w.unbind(0);
@@ -897,7 +902,7 @@ struct FullBidirectionalLayer
 
     step_inputs = input.unbind(0);
     auto fw_result = layer_(step_inputs, input_hidden.first, params.first);
-    TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
+    TORCH_CHECK(!fw_result.outputs.empty(), "Expected sequence length to be larger than 0 in RNN");
     auto fw_output = at::stack(fw_result.outputs, 0);
     auto rev_step_inputs = reverse(std::move(step_inputs));
     auto rev_result =
@@ -1202,7 +1207,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       bool train,                                                           \
       bool bidirectional,                                                   \
       bool batch_first) {                                                   \
-    if (at::cudnn_is_acceptable(_input)) {                                  \
+    if (use_cudnn(_input)) {                                                \
       Tensor output, hy;                                                    \
       NAME##_cudnn_stub(                                                    \
           _input.device().type(),                                           \
@@ -1264,7 +1269,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       double dropout_p,                                                     \
       bool train,                                                           \
       bool bidirectional) {                                                 \
-    if (at::cudnn_is_acceptable(data)) {                                    \
+    if (use_cudnn(data)) {                                                  \
       Tensor output, hy;                                                    \
       NAME##_packed_cudnn_stub(                                             \
           data.device().type(),                                             \
@@ -1432,7 +1437,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  if (at::cudnn_is_acceptable(_input)) {
+  if (use_cudnn(_input)) {
     Tensor output, hy, cy;
     lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
@@ -1493,7 +1498,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
       TensorList _params, bool has_biases,
       int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  if (at::cudnn_is_acceptable(data)) {
+  if (use_cudnn(data)) {
     Tensor output, hy, cy;
     lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
             _params, has_biases, num_layers, dropout_p, train, bidirectional);

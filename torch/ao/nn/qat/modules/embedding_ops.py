@@ -23,6 +23,7 @@ class Embedding(nn.Embedding):
     Attributes:
         weight: fake quant module for weight
     """
+
     _FLOAT_MODULE = nn.Embedding
 
     def __init__(
@@ -49,6 +50,7 @@ class Embedding(nn.Embedding):
             scale_grad_by_freq,
             sparse,
             _weight,
+            # pyrefly: ignore  # bad-argument-type
             **factory_kwargs,
         )
         assert qconfig, "qconfig must be provided for QAT module"
@@ -137,6 +139,7 @@ class EmbeddingBag(nn.EmbeddingBag):
     Attributes:
         weight: fake quant module for weight
     """
+
     _FLOAT_MODULE = nn.EmbeddingBag
 
     def __init__(

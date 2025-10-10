@@ -2,7 +2,7 @@
 r"""Dynamically quantized convolution modules."""
 
 import warnings
-from typing import ClassVar, Optional, Type
+from typing import ClassVar, Literal, Optional
 
 import torch
 import torch.ao.nn.quantized as nnq
@@ -48,9 +48,9 @@ class Conv1d(nnq.Conv1d):
 
     """
 
-    _FLOAT_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
+    _FLOAT_MODULE: ClassVar[type[nn.Conv1d]] = nn.Conv1d
+    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
 
     def __init__(
         self,
@@ -62,7 +62,7 @@ class Conv1d(nnq.Conv1d):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
         reduce_range=True,
@@ -73,6 +73,7 @@ class Conv1d(nnq.Conv1d):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _single(kernel_size)
         stride = _single(stride)
+        # pyrefly: ignore  # bad-assignment
         padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
 
@@ -133,9 +134,10 @@ class Conv2d(nnq.Conv2d):
         >>> output = m(input)
 
     """
-    _FLOAT_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
+
+    _FLOAT_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
+    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
 
     def __init__(
         self,
@@ -217,9 +219,10 @@ class Conv3d(nnq.Conv3d):
         >>> output = m(input)
 
     """
-    _FLOAT_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = None
+
+    _FLOAT_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
+    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
 
     def __init__(
         self,
@@ -309,7 +312,7 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
         torch.Size([1, 16, 12])
     """
 
-    _FLOAT_MODULE: ClassVar[Type[nn.ConvTranspose1d]] = nn.ConvTranspose1d
+    _FLOAT_MODULE: ClassVar[type[nn.ConvTranspose1d]] = nn.ConvTranspose1d
 
     def __init__(
         self,
@@ -391,7 +394,7 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
         torch.Size([1, 16, 12, 12])
     """
 
-    _FLOAT_MODULE: ClassVar[Type[nn.ConvTranspose2d]] = nn.ConvTranspose2d
+    _FLOAT_MODULE: ClassVar[type[nn.ConvTranspose2d]] = nn.ConvTranspose2d
 
     def __init__(
         self,
@@ -473,7 +476,7 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
         torch.Size([1, 16, 12, 12, 12])
     """
 
-    _FLOAT_MODULE: ClassVar[Type[nn.ConvTranspose3d]] = nn.ConvTranspose3d
+    _FLOAT_MODULE: ClassVar[type[nn.ConvTranspose3d]] = nn.ConvTranspose3d
 
     def __init__(
         self,

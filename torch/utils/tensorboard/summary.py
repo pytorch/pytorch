@@ -4,10 +4,11 @@ import logging
 import os
 import struct
 
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 import numpy as np
+
 
 from google.protobuf import struct_pb2
 
@@ -74,13 +75,13 @@ def int_to_half(i: int) -> float:
     buf = struct.pack("i", i)
     return struct.unpack("f", buf)[0]
 
-def _tensor_to_half_val(t: torch.Tensor) -> List[int]:
+def _tensor_to_half_val(t: torch.Tensor) -> list[int]:
     return [half_to_int(x) for x in t.flatten().tolist()]
 
-def _tensor_to_complex_val(t: torch.Tensor) -> List[float]:
+def _tensor_to_complex_val(t: torch.Tensor) -> list[float]:
     return torch.view_as_real(t).flatten().tolist()
 
-def _tensor_to_list(t: torch.Tensor) -> List[Any]:
+def _tensor_to_list(t: torch.Tensor) -> list[Any]:
     return t.flatten().tolist()
 
 # type maps: torch.Tensor type -> (protobuf type, protobuf val field)
@@ -497,6 +498,7 @@ def make_histogram(values, bins, max_bins=None):
         subsampling = num_bins // max_bins
         subsampling_remainder = num_bins % subsampling
         if subsampling_remainder != 0:
+            # pyrefly: ignore  # no-matching-overload
             counts = np.pad(
                 counts,
                 pad_width=[[0, subsampling - subsampling_remainder]],
@@ -726,9 +728,9 @@ def custom_scalars(layout):
     categories = []
     for k, v in layout.items():
         charts = []
-        for chart_name, chart_meatadata in v.items():
-            tags = chart_meatadata[1]
-            if chart_meatadata[0] == "Margin":
+        for chart_name, chart_metadata in v.items():
+            tags = chart_metadata[1]
+            if chart_metadata[0] == "Margin":
                 assert len(tags) == 3
                 mgcc = layout_pb2.MarginChartContent(
                     series=[
@@ -834,17 +836,21 @@ def compute_curve(labels, predictions, num_thresholds=None, weights=None):
         weights = 1.0
 
     # Compute bins of true positives and false positives.
+    # pyrefly: ignore  # unsupported-operation
     bucket_indices = np.int32(np.floor(predictions * (num_thresholds - 1)))
     float_labels = labels.astype(np.float64)
+    # pyrefly: ignore  # unsupported-operation
     histogram_range = (0, num_thresholds - 1)
     tp_buckets, _ = np.histogram(
         bucket_indices,
+        # pyrefly: ignore  # bad-argument-type
         bins=num_thresholds,
         range=histogram_range,
         weights=float_labels * weights,
     )
     fp_buckets, _ = np.histogram(
         bucket_indices,
+        # pyrefly: ignore  # bad-argument-type
         bins=num_thresholds,
         range=histogram_range,
         weights=(1.0 - float_labels) * weights,

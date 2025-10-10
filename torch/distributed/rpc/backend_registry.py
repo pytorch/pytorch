@@ -3,7 +3,7 @@
 
 import collections
 import enum
-from typing import cast, Dict, List, Set, Tuple
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -95,6 +95,7 @@ def register_backend(
     BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
     if BackendType.__doc__:
         BackendType.__doc__ = _backend_type_doc
+    # pyrefly: ignore  # unsupported-operation
     return BackendType[backend_name]
 
 
@@ -163,8 +164,8 @@ def _tensorpipe_validate_devices(devices, device_count):
 def _tensorpipe_exchange_and_check_all_device_maps(
     my_name, my_device_count, my_device_maps, my_devices, group
 ):
-    gathered: List[
-        Tuple[str, int, Dict[str, Dict[torch.device, torch.device]], List[torch.device]]
+    gathered: list[
+        tuple[str, int, dict[str, dict[torch.device, torch.device]], list[torch.device]]
     ] = [("", 0, {}, []) for _ in range(group.size())]
     dist.all_gather_object(
         gathered, (my_name, my_device_count, my_device_maps, my_devices), group
@@ -188,9 +189,7 @@ def _validate_device_maps(
     for node in all_names:
         devices = all_devices[node]
         if len(set(devices)) != len(devices):
-            raise ValueError(
-                f"Node {node} has duplicated devices\n" f"devices = {devices}"
-            )
+            raise ValueError(f"Node {node} has duplicated devices\ndevices = {devices}")
         if not _tensorpipe_validate_devices(devices, all_device_counts[node]):
             raise ValueError(
                 f"Node {node} has devices with invalid indices\n"
@@ -253,7 +252,7 @@ def _validate_device_maps(
 
 def _create_device_list(my_devices, my_device_maps, reverse_device_maps):
     if not my_devices:
-        devices_set: Set[torch.device] = set()
+        devices_set: set[torch.device] = set()
         for map_ in my_device_maps.values():
             devices_set.update(map_.keys())
         for map_ in reverse_device_maps.values():
@@ -265,7 +264,7 @@ def _create_device_list(my_devices, my_device_maps, reverse_device_maps):
 
 
 def _create_reverse_mapping(my_name, all_names, all_device_maps):
-    reverse_device_maps: Dict[str, Dict[torch.device, torch.device]] = {}
+    reverse_device_maps: dict[str, dict[torch.device, torch.device]] = {}
     for node in all_names:
         if my_name in all_device_maps[node]:
             reverse_device_maps[node] = {
@@ -352,7 +351,7 @@ def _tensorpipe_init_backend_handler(
 
     device_count = torch.cuda.device_count()
 
-    is_static_group = True if world_size else False
+    is_static_group = bool(world_size)
     # world_size is specified so this is a static group (ranks cannot join and leave)
     if is_static_group:
         # The agent's join method is required to behave like a barrier and perform

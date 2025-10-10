@@ -49,7 +49,9 @@ def call_for_per_sample_grads(
     grad_outputs by 1 / batch_size from cross batch interaction.
         >>> model = nn.Linear(4, 3)
         >>> batched_input = torch.randn(5, 4)  # batch size of 5
-        >>> res = call_for_per_sample_grads(model, 5, loss_reduction="mean")(batched_input).mean()
+        >>> res = call_for_per_sample_grads(model, 5, loss_reduction="mean")(
+        ...     batched_input
+        ... ).mean()
         >>> res.backward()
 
     Note::

@@ -1,60 +1,11 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <c10/util/irange.h>
-
-#include <array>
+#include <c10/core/Stream.h>
 
 namespace c10::CachingDeviceAllocator {
 
-struct Stat {
-  void increase(size_t amount) {
-    current += static_cast<int64_t>(amount);
-    peak = std::max(current, peak);
-    allocated += static_cast<int64_t>(amount);
-  }
-
-  void decrease(size_t amount) {
-    current -= static_cast<int64_t>(amount);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        current >= 0,
-        "Negative tracked stat in device allocator (likely logic error).");
-    freed += static_cast<int64_t>(amount);
-  }
-
-  void reset_accumulated() {
-    allocated = 0;
-    freed = 0;
-  }
-
-  void reset_peak() {
-    peak = current;
-  }
-
-  int64_t current = 0;
-  int64_t peak = 0;
-  int64_t allocated = 0;
-  int64_t freed = 0;
-};
-
-enum struct StatType : uint64_t {
-  AGGREGATE = 0,
-  SMALL_POOL = 1,
-  LARGE_POOL = 2,
-  NUM_TYPES = 3 // remember to update this whenever a new stat type is added
-};
-
-using StatArray = std::array<Stat, static_cast<size_t>(StatType::NUM_TYPES)>;
-using StatTypes = std::array<bool, static_cast<size_t>(StatType::NUM_TYPES)>;
-
-template <typename Func>
-void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
-  for (const auto stat_type : c10::irange(stat_types.size())) {
-    if (stat_types[stat_type]) {
-      f(stat_type);
-    }
-  }
-}
+using namespace c10::CachingAllocator;
 
 // Struct containing memory allocator summary statistics for a device.
 struct DeviceStats {
@@ -68,7 +19,7 @@ struct DeviceStats {
   // released via device memory deallocation)
   StatArray inactive_split;
 
-  // SUM: bytes allocated by this memory alocator
+  // SUM: bytes allocated by this memory allocator
   StatArray allocated_bytes;
   // SUM: bytes reserved by this memory allocator (both free and used)
   StatArray reserved_bytes;
@@ -108,24 +59,56 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
-// Size pretty-printer
-inline std::string format_size(uint64_t size) {
-  std::ostringstream os;
-  os.precision(2);
-  os << std::fixed;
-  if (size <= 1024) {
-    os << size << " bytes";
-  } else if (size <= 1048576) {
-    os << (static_cast<double>(size) / 1024.0);
-    os << " KiB";
-  } else if (size <= 1073741824ULL) {
-    os << static_cast<double>(size) / 1048576.0;
-    os << " MiB";
-  } else {
-    os << static_cast<double>(size) / 1073741824.0;
-    os << " GiB";
-  }
-  return os.str();
+} // namespace c10::CachingDeviceAllocator
+
+namespace c10 {
+
+using CaptureId_t = unsigned long long;
+
+// first is set if the instance is created by Graph mode capture_begin.
+// second is set if the instance is created by Graph mode graph_pool_handle.
+using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
+
+struct C10_API DeviceAllocator : public c10::Allocator {
+  DeviceAllocator();
+  ~DeviceAllocator() override;
+
+  // Returns true if the allocator has been properly initialized and is ready
+  // for use
+  virtual bool initialized() = 0;
+
+  // Releases all cached device memory from the specified memory pool back to
+  // the system
+  virtual void emptyCache(MempoolId_t mempool_id = {0, 0}) = 0;
+
+  // Associates a memory allocation with a stream to establish dependency
+  // tracking. Prevents memory reuse until all operations on the specified
+  // stream complete
+  virtual void recordStream(const DataPtr& ptr, c10::Stream stream) = 0;
+
+  // Retrieves comprehensive memory statistics for the specified device,
+  // including allocation patterns, usage metrics
+  virtual CachingDeviceAllocator::DeviceStats getDeviceStats(
+      c10::DeviceIndex device) = 0;
+
+  // Resets cumulative allocation statistics for the specified device to zero
+  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+
+  // Resets peak memory usage statistics for the specified device
+  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
+};
+
+// This function is used to get the DeviceAllocator for a specific device type
+// and keep backward compatibility with c10::GetAllocator.
+C10_API inline DeviceAllocator* getDeviceAllocator(const DeviceType& t) {
+  TORCH_CHECK(
+      t != DeviceType::CPU,
+      "getDeviceAllocator is not supported for CPU device type.");
+  auto* allocator = c10::GetAllocator(t);
+  auto* device_allocator = dynamic_cast<DeviceAllocator*>(allocator);
+  TORCH_INTERNAL_ASSERT(
+      device_allocator, "Allocator for ", t, " is not a DeviceAllocator.");
+  return device_allocator;
 }
 
-} // namespace c10::CachingDeviceAllocator
+} // namespace c10

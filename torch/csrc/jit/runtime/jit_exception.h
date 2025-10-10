@@ -18,7 +18,7 @@ struct TORCH_API JITException : public std::runtime_error {
     return python_class_name_;
   }
 
-  // the original msg if this is from a python exception. The interpretor has
+  // the original msg if this is from a python exception. The interpreter has
   // changed the original message by adding "The following operation failed in
   // the TorchScript interpreter." in front of it in the handleError function.
   std::optional<std::string> getOriginalMsg() const {

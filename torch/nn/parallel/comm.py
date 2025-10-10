@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import List
 
 import torch
 from torch._utils import (
@@ -44,6 +43,7 @@ def broadcast(tensor, devices=None, *, out=None):
         devices = [_get_device_index(d) for d in devices]
         return torch._C._broadcast(tensor, devices)
     else:
+        # pyrefly: ignore  # bad-argument-type
         return torch._C._broadcast_out(tensor, out)
 
 
@@ -137,7 +137,7 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     """
     # TODO: When `len(inputs) == 1` and all inputs are on `destination`, just
     #       return `inputs`.
-    dense_tensors: List[List] = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
+    dense_tensors: list[list] = [[] for _ in inputs]  # shape (num_gpus, num_tensors)
     output = []
     ref_order = []
     # process sparse ones first since they may have different sizes on different gpus
@@ -201,6 +201,7 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
     """
     tensor = _handle_complex(tensor)
     if out is None:
+        # pyrefly: ignore  # not-iterable
         devices = [_get_device_index(d) for d in devices]
         return tuple(torch._C._scatter(tensor, devices, chunk_sizes, dim, streams))
     else:

@@ -11,10 +11,8 @@ void check_single_result(
     const at::TensorBase& value,
     const at::TensorBase& result,
     const std::string& hook_name) {
-  if (!value.defined()) {
-    throw std::runtime_error(
-        "can't replace a empty gradient with a non-empty value");
-  }
+  TORCH_CHECK(
+      value.defined(), "can't replace a empty gradient with a non-empty value");
   torch::autograd::check_variable_result(value, result, hook_name);
 }
 } // namespace
@@ -62,6 +60,11 @@ variable_list CppFunctionSingleTensorPreHook::operator()(
       "CppFunctionSingleTensorPreHook currently only supports hooks that don't return");
   variable_list results(values);
   return results;
+}
+
+void CppFunctionSingleTensorPreHook::compiled_args(
+    torch::dynamo::autograd::CompiledNodeArgs& args) const {
+  args.add_cpp_single_tensor_pre_hook(hook_, value_idx_);
 }
 
 } // namespace torch::autograd

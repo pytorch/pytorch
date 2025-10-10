@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 
 import numpy as np
 import math
@@ -140,7 +141,6 @@ def _compress_uniform_simplified(X, bit_rate, xmin, xmax, fp16_scale_bias=True):
 
 class TestQuantizedTensor(TestCase):
     def test_qtensor_equal(self):
-        # ASAN regression test reported in https://github.com/pytorch/pytorch/issues/116087
         x = torch.rand(5)
         x_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
         y_q = torch.quantize_per_tensor(x, 0.1, 10, torch.quint4x2)
@@ -1408,6 +1408,9 @@ class TestQuantizedTensor(TestCase):
             ref = param_search_greedy(x.numpy(), bit_rate=bit_width)
             self.assertEqual(y[0].numpy(), ref[0])
             self.assertEqual(y[1].numpy(), ref[1])
+
+        with self.assertRaisesRegex(ValueError, "input tensor is empty and has no data"):
+            torch.choose_qparams_optimized(torch.tensor([]), numel=0, n_bins=200, ratio=0.16, bit_width=8)
 
     def _test_pickle_checkpoint_qtensor(self, device):
         with TemporaryFileName() as fname:

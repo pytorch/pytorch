@@ -7,7 +7,7 @@
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/lazy/core/hash.h>
 
-C10_DECLARE_bool(ltc_enable_symbolic_shapes);
+TORCH_DECLARE_bool(ltc_enable_symbolic_shapes);
 
 namespace torch::lazy {
 
@@ -60,9 +60,9 @@ class TORCH_API Shape {
 
   // Sizes are the upper bound sizes for a tensor, used by XLA.
   std::vector<int64_t> sizes_;
-  // Stores which dimmensions are symbolic
+  // Stores which dimensions are symbolic
   // If nullopt, either it hasn't been initialized or the symbolic
-  // dimmensions are not calculatable
+  // dimensions are not calculable
   std::optional<std::vector<bool>> is_symbolic_ = std::nullopt;
 };
 

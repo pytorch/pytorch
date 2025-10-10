@@ -7,6 +7,7 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/env.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
 #include <array>
@@ -45,9 +46,9 @@ static_assert(
     "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
 
 TypeVerbosity type_verbosity() {
-  static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
+  static const auto c_verbosity = c10::utils::get_env("PYTORCH_JIT_TYPE_VERBOSITY");
   static TypeVerbosity verbosity = c_verbosity ?
-    static_cast<TypeVerbosity>(std::stoi(c_verbosity)) : TypeVerbosity::Default;
+    static_cast<TypeVerbosity>(std::stoi(c_verbosity.value())) : TypeVerbosity::Default;
   return verbosity;
 }
 
@@ -61,8 +62,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     } else {
       out << "Tensor";
     }
-    if (auto ndim = value->sizes().size()) {
-      bool has_valid_strides_info = *ndim > 0 &&
+    if (auto ndim = value->sizes().size(); ndim.has_value()) {
+      bool has_valid_strides_info = ndim > 0 &&
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
@@ -87,7 +88,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
           if (i > 0) {
             out << ", ";
           }
-          out << *value->strides()[i];
+          out << value->strides()[i].value();
         }
         out << "]";
       }
@@ -903,7 +904,8 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
 
 std::string TupleType::str() const {
   std::stringstream ss;
-  if (schema_ && name()) {
+  if (schema_ && name().has_value()) {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     ss << name()->qualifiedName();
   } else {
     ss << "(";
@@ -997,8 +999,7 @@ bool InterfaceType::isSubTypeImpl(
         }
         return false;
       }
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
+      if (!self_schema->isSubtypeOf(schema, /*as_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on interface '" << lhs.repr_str()
                    << "' (1) is not compatible with interface '"

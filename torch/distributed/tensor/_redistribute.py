@@ -1,12 +1,14 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import contextlib
 import logging
-from functools import lru_cache
-from typing import cast, List, NamedTuple, Tuple
+from functools import cache
+from typing import cast, NamedTuple, Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
@@ -15,6 +17,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.utils._debug_mode import get_active_debug_mode
 
 
 logger = logging.getLogger(__name__)
@@ -22,15 +25,15 @@ logger = logging.getLogger(__name__)
 
 class _TransformInfo(NamedTuple):
     mesh_dim: int
-    src_dst_placements: Tuple[Placement, Placement]
+    src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
-    logical_shape: List[int]
+    logical_shape: list[int]
 
 
 def _gen_transform_infos_non_cached(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-) -> List[_TransformInfo]:
+) -> list[_TransformInfo]:
     """
     Generate the transform infos from the source placements to the target placements.
 
@@ -42,7 +45,7 @@ def _gen_transform_infos_non_cached(
     the former is a nested-sharding of a tensor already already sharded dimension 0, whereras
     the latter is the first sharding on tensor dimension 0.
     """
-    transform_infos: List[_TransformInfo] = []
+    transform_infos: list[_TransformInfo] = []
 
     device_mesh = src_spec.device_mesh
     my_coordinate = device_mesh.get_coordinate()
@@ -73,7 +76,7 @@ def _gen_transform_infos_non_cached(
             if i < device_mesh.ndim - 1:
                 # calculate and save the logical shape for this sharding
                 mesh_dim_size = device_mesh.size(mesh_dim=i)
-                local_shard_size, _ = src._local_shard_size_on_dim(
+                local_shard_size, _ = src._local_shard_size_and_offset(
                     current_logical_shape[src.dim],
                     mesh_dim_size,
                     my_coordinate[i],
@@ -145,11 +148,11 @@ def _gen_transform_infos_non_cached(
     return transform_infos
 
 
-@lru_cache(maxsize=None)
+@cache
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-) -> List[_TransformInfo]:
+) -> list[_TransformInfo]:
     return _gen_transform_infos_non_cached(src_spec, dst_spec)
 
 
@@ -171,7 +174,7 @@ def redistribute_local_tensor(
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
 
-    new_local_tensor = None
+    new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
 
     my_coordinate = device_mesh.get_coordinate()
@@ -181,105 +184,117 @@ def redistribute_local_tensor(
         # which should be an empty tensor
         return local_tensor
 
-    has_symints = any(isinstance(s, torch.SymInt) for s in current_spec.shape) or any(
-        isinstance(s, torch.SymInt) for s in target_spec.shape
-    )
-    if has_symints:
+    if _are_we_tracing():
         transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
     else:
         transform_infos = _gen_transform_infos(current_spec, target_spec)
 
-    for transform_info in transform_infos:
-        i = transform_info.mesh_dim
-        current, target = transform_info.src_dst_placements
-        device_mesh.size(mesh_dim=i)
+    debug_mode = get_active_debug_mode()
+    redistribute_context = (
+        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
+            local_tensor, current_spec, target_spec
+        )
+        if debug_mode is not None
+        else contextlib.nullcontext()
+    )
 
-        if current == target:
-            # short cut, just use the original local tensor
-            new_local_tensor = local_tensor
-            continue
+    with redistribute_context:
+        for transform_info in transform_infos:
+            i = transform_info.mesh_dim
+            current, target = transform_info.src_dst_placements
+            num_chunks = device_mesh.size(mesh_dim=i)
 
-        logger.debug("redistribute from %s to %s on mesh dim %s", current, target, i)
+            if current == target:
+                # short cut, just use the original local tensor
+                new_local_tensor = local_tensor
+                continue
 
-        if target.is_replicate():
-            # Case 1: target is Replicate
-            if current.is_partial():
-                partial_spec = cast(Partial, current)
-                new_local_tensor = partial_spec._reduce_value(
-                    local_tensor, device_mesh, i
-                )
-            elif current.is_shard():
-                current_placement = cast(Shard, current)
-                new_local_tensor = current_placement._to_replicate_tensor(
-                    local_tensor, device_mesh, i, transform_info.logical_shape
-                )
-            else:
-                raise RuntimeError(
-                    f"redistribute from {current} to {target} not supported yet"
-                )
-        elif target.is_shard():
-            # Case 2: target is Shard
-            target_placement = cast(Shard, target)
-            if current.is_partial():
-                partial_spec = cast(Partial, current)
-                new_local_tensor = partial_spec._reduce_shard_value(
-                    local_tensor, device_mesh, i, target_placement
-                )
-            elif current.is_replicate():
-                # split the tensor and return the corresponding cloned local shard
-                new_local_tensor = target_placement._replicate_to_shard(
-                    local_tensor, device_mesh, i, my_coordinate[i]
-                )
-            else:
-                assert (
-                    current.is_shard()
-                ), f"Current placement should be shard but found {current}"
-                shard_spec = cast(Shard, current)
-                if shard_spec.dim != target_placement.dim:
-                    new_local_tensor = shard_spec._to_new_shard_dim(
-                        local_tensor,
-                        device_mesh,
-                        i,
-                        transform_info.logical_shape,
-                        target_placement.dim,
+            if num_chunks == 1:
+                # short cut, if there's only one shard, we don't need to do any collective
+                # comm, just use the original local tensor
+                new_local_tensor = local_tensor
+                continue
+
+            logger.debug(
+                "redistribute from %s to %s on mesh dim %s", current, target, i
+            )
+
+            if target.is_replicate():
+                # Case 1: target is Replicate
+                if current.is_partial():
+                    partial_spec = cast(Partial, current)
+                    new_local_tensor = partial_spec._reduce_value(
+                        local_tensor, device_mesh, i
                     )
-        elif target.is_partial():
-            if current.is_replicate():
-                partial_spec = cast(Partial, target)
-                # skip the replicate to partial transformation when we are in backward pass
-                # In this case we keep the grad as replicate, this is because we don't
-                # want to convert the replicated gradients back to partial, although
-                # that's logically conform with the same layout, converting the gradients
-                # back to partial is actually useless as you would have to do reduce later
-                # which would be more expensive than keeping it replicate! For this reason,
-                # we keep the replicate grad here.
-                new_local_tensor = (
-                    partial_spec._partition_value(local_tensor, device_mesh, i)
-                    if not is_backward
-                    else local_tensor
-                )
-            elif current.is_shard():
-                if not is_backward:
+                elif current.is_shard():
+                    current_placement = cast(Shard, current)
+                    new_local_tensor = current_placement._to_replicate_tensor(
+                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    )
+                else:
                     raise RuntimeError(
                         f"redistribute from {current} to {target} not supported yet"
                     )
-                # for backward shard -> partial, we just need to convert the shard to replicate
-                current_placement = cast(Shard, current)
-                new_local_tensor = current_placement._to_replicate_tensor(
-                    local_tensor, device_mesh, i, transform_info.logical_shape
-                )
-            else:
-                # partial -> partial no op, should never hit
-                new_local_tensor = local_tensor
+            elif target.is_shard():
+                # Case 2: target is Shard
+                target_placement = cast(Shard, target)
+                if current.is_partial():
+                    partial_spec = cast(Partial, current)
+                    new_local_tensor = partial_spec._reduce_shard_value(
+                        local_tensor, device_mesh, i, target_placement
+                    )
+                elif current.is_replicate():
+                    # split the tensor and return the corresponding cloned local shard
+                    new_local_tensor = target_placement._replicate_to_shard(
+                        local_tensor, device_mesh, i, my_coordinate[i]
+                    )
+                else:
+                    assert current.is_shard(), (
+                        f"Current placement should be shard but found {current}"
+                    )
+                    shard_spec = cast(Shard, current)
+                    if shard_spec.dim != target_placement.dim:
+                        new_local_tensor = shard_spec._to_new_shard_dim(
+                            local_tensor,
+                            device_mesh,
+                            i,
+                            transform_info.logical_shape,
+                            target_placement.dim,
+                        )
+            elif target.is_partial():
+                if current.is_replicate():
+                    partial_spec = cast(Partial, target)
+                    # skip the replicate to partial transformation when we are in backward pass
+                    # In this case we keep the grad as replicate, this is because we don't
+                    # want to convert the replicated gradients back to partial, although
+                    # that's logically conform with the same layout, converting the gradients
+                    # back to partial is actually useless as you would have to do reduce later
+                    # which would be more expensive than keeping it replicate! For this reason,
+                    # we keep the replicate grad here.
+                    new_local_tensor = (
+                        partial_spec._partition_value(local_tensor, device_mesh, i)
+                        if not is_backward
+                        else local_tensor
+                    )
+                elif current.is_shard():
+                    if not is_backward:
+                        raise RuntimeError(
+                            f"redistribute from {current} to {target} not supported yet"
+                        )
+                    # for backward shard -> partial, we just need to convert the shard to replicate
+                    current_placement = cast(Shard, current)
+                    new_local_tensor = current_placement._to_replicate_tensor(
+                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    )
+                else:
+                    # partial -> partial no op, should never hit
+                    new_local_tensor = local_tensor
 
-        assert new_local_tensor is not None
-        local_tensor = new_local_tensor
-
-    assert new_local_tensor is not None, "redistribute failed!"
-
-    if not async_op and isinstance(new_local_tensor, funcol.AsyncCollectiveTensor):
-        new_local_tensor = new_local_tensor.wait()
-
+            if not async_op and isinstance(
+                new_local_tensor, funcol.AsyncCollectiveTensor
+            ):
+                new_local_tensor = new_local_tensor.wait()
+            local_tensor = new_local_tensor
     return new_local_tensor
 
 
@@ -290,25 +305,43 @@ class Redistribute(torch.autograd.Function):
         ctx,
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
-        placements: Tuple[Placement, ...],
+        placements: tuple[Placement, ...],
         async_op: bool = False,
+        forward_dtype: Optional[torch.dtype] = None,
+        backward_dtype: Optional[torch.dtype] = None,
     ):
-        current_spec = input._spec
-        ctx.current_spec = current_spec
         ctx.async_op = async_op
+        ctx.backward_dtype = backward_dtype
+        ctx.original_dtype = input._local_tensor.dtype
+
+        if forward_dtype is not None and forward_dtype != input._local_tensor.dtype:
+            local_tensor = input._local_tensor.to(dtype=forward_dtype)
+            current_spec = DTensorSpec(
+                mesh=device_mesh,
+                placements=input._spec.placements,
+                tensor_meta=TensorMeta(
+                    shape=input.shape,
+                    stride=input.stride(),
+                    dtype=forward_dtype,
+                ),
+            )
+        else:
+            local_tensor = input._local_tensor
+            current_spec = input._spec
+
+        ctx.current_spec = current_spec
 
         if current_spec.placements != placements:
             target_spec = DTensorSpec(
-                device_mesh, placements, tensor_meta=input._spec.tensor_meta
+                device_mesh, placements, tensor_meta=current_spec.tensor_meta
             )
 
-            local_tensor = input._local_tensor
             output = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, async_op=async_op
             )
         else:
             # use the same local tensor if placements are the same.
-            output = input._local_tensor
+            output = local_tensor
             target_spec = current_spec
 
         return dtensor.DTensor(
@@ -320,10 +353,29 @@ class Redistribute(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
-        current_spec = grad_output._spec
         async_op = ctx.async_op
+        backward_dtype = ctx.backward_dtype or ctx.original_dtype
 
-        local_tensor = grad_output._local_tensor
+        if backward_dtype != grad_output._local_tensor.dtype:
+            local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
+            current_spec = DTensorSpec(
+                mesh=grad_output._spec.device_mesh,
+                placements=grad_output._spec.placements,
+                tensor_meta=TensorMeta(
+                    shape=grad_output.shape,
+                    stride=grad_output.stride(),
+                    dtype=backward_dtype,
+                ),
+            )
+            previous_spec = DTensorSpec(
+                mesh=previous_spec.device_mesh,
+                placements=previous_spec.placements,
+                tensor_meta=current_spec.tensor_meta,
+            )
+        else:
+            local_tensor = grad_output._local_tensor
+            current_spec = grad_output._spec
+
         output = redistribute_local_tensor(
             local_tensor,
             current_spec,
@@ -331,8 +383,12 @@ class Redistribute(torch.autograd.Function):
             async_op=async_op,
             is_backward=True,
         )
+
+        if output.dtype != ctx.original_dtype:
+            output = output.to(ctx.original_dtype)
+
         # normalize the target placement to replicate if it is partial
-        normalized_placements: List[Placement] = []
+        normalized_placements: list[Placement] = []
         for previous_placement in previous_spec.placements:
             if previous_placement.is_partial():
                 # keep target placement to replicate instead of partial in this case
@@ -346,7 +402,7 @@ class Redistribute(torch.autograd.Function):
             tensor_meta=TensorMeta(
                 shape=grad_output.shape,
                 stride=grad_output.stride(),
-                dtype=grad_output.dtype,
+                dtype=output.dtype,
             ),
         )
         output_dtensor = dtensor.DTensor(
@@ -357,6 +413,8 @@ class Redistribute(torch.autograd.Function):
 
         return (
             output_dtensor,
+            None,
+            None,
             None,
             None,
             None,

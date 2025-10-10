@@ -8,7 +8,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/DynamicLibrary.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>
@@ -98,7 +97,7 @@ void lazy_linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& i
 void lazy_svd_kernel(const Tensor& A,
                      const bool full_matrices,
                      const bool compute_uv,
-                     const std::optional<c10::string_view>& driver,
+                     const std::optional<std::string_view>& driver,
                      const Tensor& U,
                      const Tensor& S,
                      const Tensor& Vh,

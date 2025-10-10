@@ -4,7 +4,7 @@ import copy
 import sys
 import warnings
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 from torch import nn
@@ -61,12 +61,12 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         >>> # tensor_1 and tensor_2 will have sparsity_level of 0.7 but tensor_3 will have sparsity_level=0.3
     """
 
-    def __init__(self, data_list: Optional[List[Tuple[str, Any]]] = None, **defaults):
+    def __init__(self, data_list: Optional[list[tuple[str, Any]]] = None, **defaults):
         super().__init__(defaults=defaults)
 
         self._container = _Container()
 
-        self.data_groups: Dict[str, Dict] = defaultdict(dict)  # name -> {**config}
+        self.data_groups: dict[str, dict] = defaultdict(dict)  # name -> {**config}
         if data_list is not None:
             # add data with default config here
             [self.add_data(name, data, **self.defaults) for name, data in data_list]
@@ -91,9 +91,9 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             4. By default, the config of the replaced data is used as config for the replacing data, unless something
                is specified in the config dictionary.
         """
-        assert (
-            type(data) in SUPPORTED_TYPES
-        ), "specified data type not supported at the moment"
+        assert type(data) in SUPPORTED_TYPES, (
+            "specified data type not supported at the moment"
+        )
         local_args = copy.deepcopy(self.defaults)
         local_args.update(config)
         weight = self._extract_weight(data)
@@ -115,9 +115,9 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
 
             if reuse_mask:
                 current_data = self.get_data(name=name)
-                assert (
-                    weight.shape == current_data.shape
-                ), "to retain the old mask, the shape of the new data must be the same as the previous one"
+                assert weight.shape == current_data.shape, (
+                    "to retain the old mask, the shape of the new data must be the same as the previous one"
+                )
                 mask = self.get_mask(
                     name=name
                 )  # reuse mask instead of creating a new one
@@ -310,7 +310,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
                 self.update_mask(name, data, **config)
 
     @abc.abstractmethod
-    def update_mask(self, name, data, **kwargs):
+    def update_mask(self, name, data, **kwargs):  # type: ignore[override]
         pass
 
     def _delete_data(self, name):

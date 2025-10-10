@@ -10,22 +10,67 @@ import pandas as pd
 
 flaky_models = {
     "yolov3",
-    "gluon_inception_v3",
     "detectron2_maskrcnn_r_101_c4",
     "XGLMForCausalLM",  # discovered in https://github.com/pytorch/pytorch/pull/128148
+    "moondream",  # discovered in https://github.com/pytorch/pytorch/pull/159291
+    # discovered in https://github.com/pytorch/pytorch/issues/161419. Its not flaky but really hard to repro, so skipping it
+    "mobilenetv3_large_100",
 }
 
 
 def get_field(csv, model_name: str, field: str):
     try:
         return csv.loc[csv["name"] == model_name][field].item()
-    except Exception as e:
+    except Exception:
         return None
 
 
 def check_accuracy(actual_csv, expected_csv, expected_filename):
     failed = []
     improved = []
+
+    if "rocm" in expected_filename:
+        flaky_models.update(
+            {
+                "Background_Matting",
+                "alexnet",
+                "demucs",
+                "densenet121",
+                "detectron2_fcos_r_50_fpn",
+                "doctr_det_predictor",
+                "doctr_reco_predictor",
+                "dpn107",
+                "fbnetv3_b",
+                "levit_128",
+                "llava",
+                "microbench_unbacked_tolist_sum",
+                "mnasnet1_0",
+                "mobilenet_v2",
+                "pytorch_CycleGAN_and_pix2pix",
+                "pytorch_stargan",
+                "resnet152",
+                "resnet18",
+                "resnet50",
+                "resnext50_32x4d",
+                "sam",
+                "sam_fast",
+                "shufflenet_v2_x1_0",
+                "squeezenet1_1",
+                "stable_diffusion_text_encoder",
+                "stable_diffusion_unet",
+                "swsl_resnext101_32x16d",
+                "torchrec_dlrm",
+                "vgg16",
+                # LLM
+                "meta-llama/Llama-3.2-1B",
+                "google/gemma-2-2b",
+                "google/gemma-3-4b-it",
+                "openai/whisper-tiny",
+                "Qwen/Qwen3-0.6B",
+                "mistralai/Mistral-7B-Instruct-v0.3",
+                "openai/gpt-oss-20b",
+            }
+        )
 
     for model in actual_csv["name"]:
         accuracy = get_field(actual_csv, model, "accuracy")
@@ -58,7 +103,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             msg += textwrap.dedent(
                 f"""
             Error: {len(failed)} models have accuracy status regressed:
-                {' '.join(failed)}
+                {" ".join(failed)}
 
             """
             )
@@ -66,7 +111,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
             msg += textwrap.dedent(
                 f"""
             Improvement: {len(improved)} models have accuracy status improved:
-                {' '.join(improved)}
+                {" ".join(improved)}
 
             """
             )

@@ -12,7 +12,9 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
     ) -> None:
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(num_features, eps, momentum, True, True, **factory_kwargs)
+        # pyrefly: ignore  # bad-argument-type
         self.register_buffer("scale", torch.tensor(1.0, **factory_kwargs))
+        # pyrefly: ignore  # bad-argument-type
         self.register_buffer("zero_point", torch.tensor(0, **factory_kwargs))
 
     @staticmethod
@@ -83,7 +85,7 @@ class BatchNorm2d(_BatchNorm):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return _BatchNorm.from_float(
             cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -122,7 +124,7 @@ class BatchNorm3d(_BatchNorm):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         return _BatchNorm.from_float(
             cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )

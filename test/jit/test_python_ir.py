@@ -6,16 +6,8 @@ import numpy as np
 
 import torch
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_MACOS, raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestPythonIr(JitTestCase):
@@ -100,3 +92,7 @@ class TestPythonIr(JitTestCase):
 
         FileCheck().check_not("aten::mul").check("aten::add").run(foo.graph)
         self.assertEqual(foo(torch.ones([2, 2])), torch.ones([2, 2]) * 4)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

@@ -10,8 +10,8 @@ from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 
 import torch
 from torch.onnx import _constants, utils
-from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import jit_utils
+from torch.onnx._internal.torchscript_exporter import jit_utils
+from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.testing._internal import common_utils
 
 
@@ -350,7 +350,7 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         # the added "Cast" node doesn't stop shape inference.
         cond = g.addInput()
         cond.setType(input.type().with_dtype(torch.int32).with_sizes([1]))
-        if_op, (if_context, else_context), new_node = jit_utils.add_op_with_blocks(
+        _, (if_context, else_context), new_node = jit_utils.add_op_with_blocks(
             as_graphcontext(g), "If", cond, n_blocks=2
         )
         block1_output = if_context.op("Add", input, input)
@@ -396,6 +396,7 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             f,
             opset_version=self.opset_version,
             custom_opsets={"com.microsoft": 1},
+            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
@@ -430,6 +431,7 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             f,
             opset_version=self.opset_version,
             custom_opsets={"com.microsoft": 1},
+            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
@@ -468,6 +470,7 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             custom_opsets={"com.microsoft": 1},
             input_names=["x"],
             dynamic_axes={"x": {0: "batch"}},
+            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))
@@ -508,6 +511,7 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             f,
             opset_version=self.opset_version,
             custom_opsets={"com.microsoft": 1},
+            dynamo=False,
         )
 
         model_proto = onnx.load(io.BytesIO(f.getvalue()))

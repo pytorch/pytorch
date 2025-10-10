@@ -327,7 +327,7 @@ struct TORCH_API Module : public Object {
   // Map of function names to the traced inputs that they have been traced with
   c10::Dict<std::string, c10::impl::GenericList> traced_inputs_;
 
-  // Mutex to keep registring buffer or parameter thread safe.
+  // Mutex to keep registering buffer or parameter thread safe.
   std::shared_ptr<std::mutex> register_mutex_ = std::make_shared<std::mutex>();
 };
 

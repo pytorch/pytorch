@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 """Spectral Normalization from https://arxiv.org/abs/1802.05957."""
+
 from typing import Any, Optional, TypeVar
 
 import torch
@@ -331,6 +332,7 @@ def spectral_norm(
         else:
             dim = 0
     SpectralNorm.apply(module, name, n_power_iterations, dim, eps)
+    # pyrefly: ignore  # bad-return
     return module
 
 

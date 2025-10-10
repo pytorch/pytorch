@@ -1,12 +1,15 @@
 # Owner(s): ["module: fx"]
-
 import copy
 import unittest
-from typing import Optional, Set, Type
+from typing import Optional
 
 import torch
 import torch.fx
-from torch.testing._internal.common_utils import IS_MACOS, TestCase
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    raise_on_run_directly,
+    TestCase,
+)
 
 
 class TestDCE(TestCase):
@@ -39,7 +42,7 @@ class TestDCE(TestCase):
         self,
         m: torch.nn.Module,
         expect_dce_changes: bool,
-        modules_to_be_leafs: Optional[Set[Type]] = None,
+        modules_to_be_leafs: Optional[set[type]] = None,
         custom: bool = False,
     ):
         class TestTracer(torch.fx.Tracer):
@@ -92,7 +95,7 @@ class TestDCE(TestCase):
                 self.attr_1 = torch.nn.Parameter(torch.tensor([-0.9]))
 
             def forward(self, x):
-                a = x + 1
+                a = x + 1  # noqa: F841
                 return x + self.attr_1
 
         self._run_dce_and_test(TestModule(), expect_dce_changes=True)
@@ -109,7 +112,7 @@ class TestDCE(TestCase):
 
             def forward(self, x):
                 a = x + 1
-                b = a * 7
+                b = a * 7  # noqa: F841
                 return x + self.attr_1
 
         self._run_dce_and_test(TestModule(), expect_dce_changes=True)
@@ -126,7 +129,7 @@ class TestDCE(TestCase):
 
             def forward(self, x):
                 a = x + 1
-                b = a * self.attr_1
+                b = a * self.attr_1  # noqa: F841
                 return x + 11
 
         self._run_dce_and_test(TestModule(), expect_dce_changes=True)
@@ -153,7 +156,7 @@ class TestDCE(TestCase):
 
         class TestModule(torch.nn.Module):
             def forward(self, x, y):
-                a = y + 2
+                a = y + 2  # noqa: F841
                 return x + 7
 
         self._run_dce_and_test(TestModule(), expect_dce_changes=True)
@@ -172,7 +175,7 @@ class TestDCE(TestCase):
                 self.relu = ReLUImpure()
 
             def forward(self, a: torch.Tensor) -> torch.Tensor:
-                r = self.relu(a)
+                r = self.relu(a)  # noqa: F841
                 return a * 2
 
         self._run_dce_and_test(
@@ -193,6 +196,33 @@ class TestDCE(TestCase):
         # because it's known to.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False)
 
+    def test_keep_setitem(self):
+        """
+        Fix issue: https://github.com/pytorch/pytorch/issues/145697
+        Test that DCE doesn't remove operator.setitem since it has side effects.
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                a[0, 0, 0, 0] *= 2.0
+                return a * 2
+
+        def dce_backend(gm, inputs, **kwargs):
+            import torch._inductor.constant_folding
+
+            torch._inductor.constant_folding.constant_fold(gm)
+            return gm
+
+        x = torch.randn(1, 3, 224, 224)
+        dce_x = x.detach().clone()
+        model = TestModule().eval()
+        dce_mod = torch.compile(copy.deepcopy(model), backend=dce_backend)
+
+        with torch.inference_mode():
+            eager_out = model(x)
+            out = dce_mod(dce_x)
+        self.assertEqual(eager_out, out, atol=1e-5, rtol=1e-5)
+
     def test_impure_nodes_args(self):
         """
         Test that DCE doesn't remove call_function nodes with side effects.
@@ -205,6 +235,74 @@ class TestDCE(TestCase):
 
         # %add_ node should not be removed because it has side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False)
+
+    def test_impure_random(self):
+        """
+        Test that DCE doesn't remove call_function for torch.rand and other random functions.
+        Tests both FX tracing and AOT compilation (issue #151524).
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, a: torch.Tensor) -> torch.Tensor:
+                x = torch.rand([10])  # noqa: F841
+                return a * 2
+
+        # Test FX tracing + DCE
+        self._run_dce_and_test(TestModule(), expect_dce_changes=False)
+
+        # Test comprehensive random functions in AOT compilation
+        class ComprehensiveRandomModule(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # Test various random functions that should be preserved
+                a = torch.rand(1)  # noqa: F841
+                b = torch.randn(1)  # noqa: F841
+                c = torch.randint(0, 10, (1,))  # noqa: F841
+                d = torch.randperm(5)  # noqa: F841
+                e = torch.normal(0, 1, (1,))  # noqa: F841
+                f = torch.poisson(torch.tensor([1.0]))  # noqa: F841
+                g = torch.rand(1)  # Used
+
+                # Test that random operations with explicit generators are also preserved
+                gen = torch.Generator().manual_seed(123)
+                h = torch.rand(1, generator=gen)  # noqa: F841
+                i = torch.randn(1, generator=gen)  # noqa: F841
+                j = torch.rand(1, generator=gen)  # Used
+                return x + g + j
+
+        def aot_backend(gm, example_inputs):
+            def count_random_ops():
+                return len(
+                    [
+                        n
+                        for n in gm.graph.nodes
+                        if n.op == "call_function"
+                        and any(
+                            fn in str(n.target)
+                            for fn in [
+                                "rand",
+                                "randn",
+                                "randint",
+                                "randperm",
+                                "normal",
+                                "poisson",
+                            ]
+                        )
+                    ]
+                )
+
+            rand_count = count_random_ops()
+            gm.graph.eliminate_dead_code()
+            self.assertEqual(
+                count_random_ops(), rand_count, "Random ops should be preserved"
+            )
+            return gm.forward
+
+        model = ComprehensiveRandomModule()
+        torch.manual_seed(42)
+        eager_result = model(torch.tensor([1.0]))
+        torch.manual_seed(42)
+        compiled_result = torch.compile(model, backend=aot_backend)(torch.tensor([1.0]))
+        self.assertEqual(eager_result, compiled_result)
 
     def test_impure_kwargs(self):
         """
@@ -228,7 +326,7 @@ class TestDCE(TestCase):
         class TestModule(torch.nn.Module):
             def forward(self, a: torch.Tensor) -> torch.Tensor:
                 b = a + 1
-                c = torch._ops.ops.aten.add(b, b)
+                c = torch._ops.ops.aten.add(b, b)  # noqa: F841
                 return a
 
         # %add_out node should not be removed because it has side effects.
@@ -240,8 +338,6 @@ class TestDCE(TestCase):
         Test that DCE doesn't remote collective ops even the results are not used.
         """
 
-        from torch.testing._internal.distributed.fake_pg import FakeStore
-
         class TestModule(torch.nn.Module):
             def forward(
                 self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor
@@ -249,16 +345,13 @@ class TestDCE(TestCase):
                 d = torch.ops.aten.mul.Tensor(a, b)
                 e = torch.ops.aten.mul.Tensor(a, c)
                 future = torch.ops._c10d_functional.all_reduce.default(e, "sum", "0")
-                synced_e = torch.ops._c10d_functional.wait_tensor.default(
-                    future
-                )  # synced_e is not used
+                torch.ops._c10d_functional.wait_tensor.default(future)
                 return d
 
         torch.distributed.init_process_group(
             backend="fake",
             world_size=2,
             rank=0,
-            store=FakeStore(),
         )
         # collective nodes should not be removed because they have side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)
@@ -270,8 +363,6 @@ class TestDCE(TestCase):
         Test that DCE doesn't remote collective ops (no overload version) even the results are not used.
         """
 
-        from torch.testing._internal.distributed.fake_pg import FakeStore
-
         class TestModule(torch.nn.Module):
             def forward(
                 self, a: torch.Tensor, b: torch.Tensor, c: torch.Tensor
@@ -279,17 +370,18 @@ class TestDCE(TestCase):
                 d = torch.ops.aten.mul(a, b)
                 e = torch.ops.aten.mul(a, c)
                 future = torch.ops._c10d_functional.all_reduce(e, "sum", "0")
-                synced_e = torch.ops._c10d_functional.wait_tensor(
-                    future
-                )  # synced_e is not used
+                torch.ops._c10d_functional.wait_tensor(future)
                 return d
 
         torch.distributed.init_process_group(
             backend="fake",
             world_size=2,
             rank=0,
-            store=FakeStore(),
         )
         # collective nodes should not be removed because they have side effects.
         self._run_dce_and_test(TestModule(), expect_dce_changes=False, custom=False)
         torch.distributed.destroy_process_group()
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

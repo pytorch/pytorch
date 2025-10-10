@@ -5,13 +5,13 @@ import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed._tensor.device_mesh import init_device_mesh
 from torch.distributed.checkpoint.format_utils import (
     BroadcastingTorchSaveReader,
     dcp_to_torch_save,
     DynamicMetaLoadPlanner,
     torch_save_to_dcp,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
@@ -20,6 +20,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class SimpleModelUneven(nn.Module):
@@ -40,7 +43,7 @@ class SimpleModelUneven(nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(4, 5, device="cuda")
+        return torch.rand(4, 5, device=device_type)
 
 
 class TestFormatUtils(DTensorTestBase):
@@ -87,7 +90,7 @@ class TestFormatUtils(DTensorTestBase):
 
         # Load into a sharded model
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model = SimpleModelUneven().cuda()
+        model = SimpleModelUneven().to(self.device_type)
         model = FSDP(
             model,
             device_mesh=device_mesh,

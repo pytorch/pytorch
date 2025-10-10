@@ -1,18 +1,10 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <c10/core/GeneratorImpl.h>
 #include <c10/util/Exception.h>
-
 #include <c10/util/Registry.h>
 
 #include <ATen/detail/AcceleratorHooksInterface.h>
-
-#include <memory>
-
-namespace at {
-class Context;
-}
 
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
@@ -30,8 +22,9 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot initialize HIP without ATen_hip library.");
   }
 
-  virtual std::unique_ptr<c10::GeneratorImpl> initHIPGenerator(Context*) const {
-    AT_ERROR("Cannot initialize HIP generator without ATen_hip library.");
+  const Generator& getDefaultGenerator(
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
+    TORCH_CHECK(false, "Cannot initialize HIP without ATen_hip library.");
   }
 
   virtual bool hasHIP() const {
@@ -42,7 +35,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
     return -1;
   }
 
-  bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* /*data*/ ) const override {
     return false;
   }
 
@@ -50,15 +43,11 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Pinned memory requires HIP.");
   }
 
-  virtual void registerHIPTypes(Context*) const {
-    AT_ERROR("Cannot registerHIPTypes() without ATen_hip library.");
-  }
-
   virtual int getNumGPUs() const {
     return 0;
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/ ) const override {
     TORCH_CHECK(false, "Cannot check primary context without ATen_hip library.");
   }
 };

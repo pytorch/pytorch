@@ -9,7 +9,7 @@ performance of operations several times. For example, for large tensor
 shapes, the usage of a bsr tensor as mat1 argument in addmm-based
 operations typically outperforms the corresponding operation with
 strided-only inputs when the blocked representation of a tensor
-provides a better alignement with memory access than what the strided
+provides a better alignment with memory access than what the strided
 representation would provide.
 
 Pre-computed kernel parameters
@@ -57,10 +57,10 @@ Computing optimal kernel parameters
 If the approximations listed above are unacceptable, e.g. when one
 seeks a maximal performance possible, the optimal kernel parameters
 for a particular GPU can be computed by simply running this script in
-the pytorch developement tree::
+the pytorch development tree::
 
   cd /path/to/pytorch
-  python setup.py develop
+  python -m pip install --no-build-isolation -v -e .
   python torch/sparse/_triton_ops_meta.py
 
 This will compute the optimal kernel parameters for the GPU device
@@ -91,19 +91,20 @@ torch.nn.functional.linear will benefit from using the computed
 optimal set of kernel parameters.
 
 Note that running tune_bsr_dense_addmm can take several minutes. So,
-use it wisely, e.g. by implementing persisten storage of optimized
+use it wisely, e.g. by implementing persistent storage of optimized
 kernel parameters. See the source code of get_meta and
 tune_bsr_dense_addmm to learn how to register a custom set of optimal
 kernel parameters for addmm-based operations.
 
 """
+
 __all__ = ["get_meta", "tune_bsr_dense_addmm", "tune__int_bsr_dense_addmm"]
 
 import inspect
 import itertools
 import re
 import warnings
-from typing import Any, Dict
+from typing import Any
 
 import torch
 from torch.hub import tqdm
@@ -231,10 +232,11 @@ def dump():
     part2 = current_content[end_data_index:]
     data_part = []
     for op_key in sorted(_operation_device_version_data, key=sort_key):
+        # pyrefly: ignore  # bad-argument-type
         data_part.append("    " + repr(op_key).replace("'", '"') + ": {")
         op_data = _operation_device_version_data[op_key]
-        for key in sorted(op_data):
-            data_part.append(f"        {key}: {op_data[key]},")
+        # pyrefly: ignore  # bad-argument-type
+        data_part.extend(f"        {key}: {op_data[key]}," for key in sorted(op_data))
         data_part.append("    },")
     new_content = part1 + "\n".join(data_part) + "\n" + part2
     if current_content != new_content:
@@ -367,6 +369,7 @@ def minimize(
                 if next_target < minimal_target:
                     minimal_target = next_target
                     parameters = next_parameters
+                    # pyrefly: ignore  # unsupported-operation
                     pbar.total += i + 1
                     break
         else:
@@ -433,9 +436,9 @@ def minimize(
 
 
 def create_blocked_tensor(B, M, N, blocksize, sparsity, dtype, device):
-    assert (
-        sparsity <= 1.0 and sparsity >= 0.0
-    ), "sparsity should be a value between 0 and 1"
+    assert sparsity <= 1.0 and sparsity >= 0.0, (
+        "sparsity should be a value between 0 and 1"
+    )
     assert M % blocksize[0] == 0
     assert N % blocksize[1] == 0
     shape = (B, M // blocksize[0], N // blocksize[1])[int(B == 0) :]
@@ -853,7 +856,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
 
     if 0:
         # Check performance dependence on sparsity and apply
-        # adjustments when differences are noticable (more than 10%).
+        # adjustments when differences are noticeable (more than 10%).
         #
         # When using NVIDIA A100 GPU, the performance dependence on
         # sparsity is insignificant (0 % ... 10 %) for majority of
@@ -938,7 +941,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                     dump()
 
 
-_operation_device_version_data: Dict[Any, Dict] = {
+_operation_device_version_data: dict[Any, dict] = {
     # Warning: the data in between the BEGIN/END DATA comment lines
     # below is generated. It can be updated either manually or via
     # calling dump function defined above.

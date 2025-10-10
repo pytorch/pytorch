@@ -2,7 +2,7 @@
 import copy
 import warnings
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import torch
 from torch import nn
@@ -75,13 +75,18 @@ class ActivationSparsifier:
         >>>     return torch.eye(data.shape).to(data.device)
         >>>
         >>>
-        >>> act_sparsifier.register_layer(model.some_layer, aggregate_fn=agg_fn, reduce_fn=reduce_fn, mask_fn=mask_fn)
+        >>> act_sparsifier.register_layer(
+        ...     model.some_layer,
+        ...     aggregate_fn=agg_fn,
+        ...     reduce_fn=reduce_fn,
+        ...     mask_fn=mask_fn,
+        ... )
         >>>
         >>> # start training process
         >>> for _ in [...]:
-        >>>     # epoch starts
-        >>>         # model.forward(), compute_loss() and model.backwards()
-        >>>     # epoch ends
+        >>> # epoch starts
+        >>> # model.forward(), compute_loss() and model.backwards()
+        >>> # epoch ends
         >>>     act_sparsifier.step()
         >>> # end training process
         >>> sparsifier.squash_mask()
@@ -98,7 +103,7 @@ class ActivationSparsifier:
         **sparse_config,
     ):
         self.model = model
-        self.defaults: Dict[str, Any] = defaultdict()
+        self.defaults: dict[str, Any] = defaultdict()
         self.defaults["sparse_config"] = sparse_config
 
         # functions
@@ -110,11 +115,11 @@ class ActivationSparsifier:
         self.defaults["features"] = features
         self.defaults["feature_dim"] = feature_dim
 
-        self.data_groups: Dict[str, Dict] = defaultdict(
+        self.data_groups: dict[str, dict] = defaultdict(
             dict
         )  # contains all relevant info w.r.t each registered layer
 
-        self.state: Dict[str, Any] = defaultdict(dict)  # layer name -> mask
+        self.state: dict[str, Any] = defaultdict(dict)  # layer name -> mask
 
     @staticmethod
     def _safe_rail_checks(args):
@@ -154,7 +159,7 @@ class ActivationSparsifier:
                 if data is None:
                     out_data = [
                         0 for _ in range(0, len(features))
-                    ]  # create one incase of 1st forward
+                    ]  # create one in case of 1st forward
                     self.state[name]["mask"] = [0 for _ in range(0, len(features))]
                 else:
                     out_data = data  # a list
@@ -231,9 +236,9 @@ class ActivationSparsifier:
         self.data_groups[name] = local_args
         agg_hook = layer.register_forward_pre_hook(self._aggregate_hook(name=name))
 
-        self.state[name][
-            "mask"
-        ] = None  # mask will be created when model forward is called.
+        self.state[name]["mask"] = (
+            None  # mask will be created when model forward is called.
+        )
 
         # attach agg hook
         self.data_groups[name]["hook"] = agg_hook
@@ -255,9 +260,9 @@ class ActivationSparsifier:
             Hence, if get_mask() is called before model.forward(), an
             error will be raised.
         """
-        assert (
-            name is not None or layer is not None
-        ), "Need at least name or layer obj to retrieve mask"
+        assert name is not None or layer is not None, (
+            "Need at least name or layer obj to retrieve mask"
+        )
 
         if name is None:
             assert layer is not None
@@ -360,9 +365,9 @@ class ActivationSparsifier:
                 configs["hook"] = configs["layer"].register_forward_pre_hook(
                     self._sparsify_hook(name)
                 )
-            configs[
-                "hook_state"
-            ] = "sparsify"  # signals that sparsify hook is now attached
+            configs["hook_state"] = (
+                "sparsify"  # signals that sparsify hook is now attached
+            )
 
     def _get_serializable_data_groups(self):
         """Exclude hook and layer from the config keys before serializing
@@ -370,7 +375,7 @@ class ActivationSparsifier:
         TODO: Might have to treat functions (reduce_fn, mask_fn etc) in a different manner while serializing.
               For time-being, functions are treated the same way as other attributes
         """
-        data_groups: Dict[str, Any] = defaultdict()
+        data_groups: dict[str, Any] = defaultdict()
         for name, config in self.data_groups.items():
             new_config = {
                 key: value
@@ -387,7 +392,7 @@ class ActivationSparsifier:
         states = copy.deepcopy(states_dict)
         for state in states.values():
             if state["mask"] is not None:
-                if isinstance(state["mask"], List):
+                if isinstance(state["mask"], list):
                     for idx in range(len(state["mask"])):
                         if sparse_coo:
                             state["mask"][idx] = state["mask"][idx].to_sparse_coo()
@@ -400,7 +405,7 @@ class ActivationSparsifier:
                         state["mask"] = state["mask"].to_dense()
         return states
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         r"""Returns the state of the sparsifier as a :class:`dict`.
 
         It contains:
@@ -413,7 +418,7 @@ class ActivationSparsifier:
         state = self._convert_mask(self.state)
         return {"state": state, "data_groups": data_groups, "defaults": self.defaults}
 
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         r"""The load_state_dict() restores the state of the sparsifier based on the state_dict
 
         Args:
@@ -426,7 +431,7 @@ class ActivationSparsifier:
             {"state": state, "data_groups": data_groups, "defaults": defaults}
         )
 
-    def __get_state__(self) -> Dict[str, Any]:
+    def __get_state__(self) -> dict[str, Any]:
         data_groups = self._get_serializable_data_groups()
         state = self._convert_mask(self.state)
         return {
@@ -435,7 +440,7 @@ class ActivationSparsifier:
             "data_groups": data_groups,
         }
 
-    def __set_state__(self, state: Dict[str, Any]) -> None:
+    def __set_state__(self, state: dict[str, Any]) -> None:
         state["state"] = self._convert_mask(
             state["state"], sparse_coo=False
         )  # convert mask to dense tensor

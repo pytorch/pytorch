@@ -73,15 +73,15 @@ namespace functional {
 /// F::BatchNormFuncOptions().weight(weight).bias(bias).momentum(0.1).eps(1e-05).training(false));
 /// ```
 struct TORCH_API BatchNormFuncOptions {
-  TORCH_ARG(Tensor, weight) = Tensor();
+  TORCH_ARG(Tensor, weight);
 
-  TORCH_ARG(Tensor, bias) = Tensor();
+  TORCH_ARG(Tensor, bias);
 
   TORCH_ARG(bool, training) = false;
 
   /// A momentum multiplier for the mean and variance.
   /// Changing this parameter after construction __is effective__.
-  TORCH_ARG(std::optional<double>, momentum) = 0.1;
+  TORCH_ARG(double, momentum) = 0.1;
 
   /// The epsilon value added for numerical stability.
   /// Changing this parameter after construction __is effective__.

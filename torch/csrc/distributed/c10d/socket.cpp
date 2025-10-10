@@ -4,6 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/socket.h>
 
 #include <cstring>
@@ -28,9 +29,7 @@
 #include <unistd.h>
 #endif
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated")
 #include <fmt/chrono.h>
-C10_DIAGNOSTIC_POP()
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
@@ -38,8 +37,6 @@ C10_DIAGNOSTIC_POP()
 #include <torch/csrc/distributed/c10d/exception.h>
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/socket_fmt.h>
-
-#include <c10/util/CallOnce.h>
 
 namespace c10d::detail {
 namespace {
@@ -115,7 +112,7 @@ void delay(std::chrono::milliseconds d) {
     // We don't care about error conditions other than EINTR since a failure
     // here is not critical.
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
+      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
     }
   }
 #endif
@@ -196,38 +193,50 @@ class SocketImpl {
 };
 
 std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
+  // It can be be very slow to repeatedly hit DNS resolution failure, but its
+  // very helpful to have DNS names in logs by default. So we try to use DNS but
+  // if we hit a transient failure we just disable it for the remainder of the
+  // job, logging IP addresses instead. See
+  // https://github.com/pytorch/pytorch/issues/159007
+  static bool disable_getnameinfo = false;
+
   char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
 
-  if (int err = ::getnameinfo(
-          addr, len, host, NI_MAXHOST, port, NI_MAXSERV, NI_NUMERICSERV)) {
-    C10D_WARNING(
-        "The hostname of the client socket cannot be retrieved. err={}", err);
-
-    // if we can't resolve the hostname, display the IP address
-    if (addr->sa_family == AF_INET) {
-      struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
-      // NOLINTNEXTLINE(*array*)
-      char ip[INET_ADDRSTRLEN];
-      if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
-          nullptr) {
-        return fmt::format("{}:{}", ip, psai->sin_port);
-      }
-    } else if (addr->sa_family == AF_INET6) {
-      struct sockaddr_in6* psai = (struct sockaddr_in6*)&addr;
-      // NOLINTNEXTLINE(*array*)
-      char ip[INET6_ADDRSTRLEN];
-      if (inet_ntop(
-              addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
-          nullptr) {
-        return fmt::format("[{}]:{}", ip, psai->sin6_port);
-      }
+  if (!disable_getnameinfo) {
+    int err = ::getnameinfo(
+        addr, len, host, NI_MAXHOST, port, NI_MAXSERV, NI_NUMERICSERV);
+    if (err != 0) {
+      C10D_WARNING(
+          "The hostname of the client socket cannot be retrieved. err={}", err);
+      disable_getnameinfo = true;
     }
-    return "?UNKNOWN?";
   }
+  // if getnameinfo failed, disable would be set
+  if (!disable_getnameinfo) {
+    if (addr->sa_family == AF_INET) {
+      return fmt::format("{}:{}", host, port);
+    }
+    return fmt::format("[{}]:{}", host, port);
+  }
+  // if we can't resolve the hostname, display the IP address
   if (addr->sa_family == AF_INET) {
-    return fmt::format("{}:{}", host, port);
+    struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
+    // NOLINTNEXTLINE(*array*)
+    char ip[INET_ADDRSTRLEN];
+    if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
+        nullptr) {
+      return fmt::format("{}:{}", ip, psai->sin_port);
+    }
+  } else if (addr->sa_family == AF_INET6) {
+    struct sockaddr_in6* psai = (struct sockaddr_in6*)&addr;
+    // NOLINTNEXTLINE(*array*)
+    char ip[INET6_ADDRSTRLEN];
+    if (inet_ntop(addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
+        nullptr) {
+      return fmt::format("[{}]:{}", ip, psai->sin6_port);
+    }
   }
-  return fmt::format("[{}]:{}", host, port);
+  return "?UNKNOWN?";
 }
 } // namespace c10d::detail
 
@@ -315,7 +324,7 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   if (hnd == invalid_socket) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
+      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
     }
 
     std::string msg{};
@@ -523,8 +532,8 @@ class SocketListenOp {
 
   std::string port_;
   const SocketOptions* opts_;
-  std::vector<std::string> errors_{};
-  std::unique_ptr<SocketImpl> socket_{};
+  std::vector<std::string> errors_;
+  std::unique_ptr<SocketImpl> socket_;
 };
 
 SocketListenOp::SocketListenOp(std::uint16_t port, const SocketOptions& opts)
@@ -763,9 +772,9 @@ class SocketConnectOp {
   const char* host_;
   std::string port_;
   const SocketOptions* opts_;
-  TimePoint deadline_{};
-  std::vector<std::string> errors_{};
-  std::unique_ptr<SocketImpl> socket_{};
+  TimePoint deadline_;
+  std::vector<std::string> errors_;
+  std::unique_ptr<SocketImpl> socket_;
 };
 
 SocketConnectOp::SocketConnectOp(
@@ -916,7 +925,7 @@ SocketConnectOp::ConnectResult SocketConnectOp::tryConnect(
   if (cr == ConnectResult::Error) {
     std::error_code err = getSocketError();
     if (err == std::errc::interrupted) {
-      C10_THROW_ERROR(DistNetworkError, std::strerror(err.value()));
+      C10_THROW_ERROR(DistNetworkError, c10::utils::str_error(err.value()));
     }
 
     // Retry if the server is not yet listening or if its backlog is exhausted.
@@ -1028,17 +1037,16 @@ void SocketConnectOp::throwTimeoutError() const {
 
 void Socket::initialize() {
 #ifdef _WIN32
-  static c10::once_flag init_flag{};
-
   // All processes that call socket functions on Windows must first initialize
   // the Winsock library.
-  c10::call_once(init_flag, []() {
+  static bool init_flag [[maybe_unused]] = []() {
     WSADATA data{};
     if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) {
       C10D_THROW_ERROR(
           SocketError, "The initialization of Winsock has failed.");
     }
-  });
+    return true;
+  }();
 #endif
 }
 

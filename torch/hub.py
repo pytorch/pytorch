@@ -12,7 +12,7 @@ import uuid
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse  # noqa: F401
@@ -200,7 +200,12 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
         while True:
             page += 1
             url = f"{url_prefix}?per_page=100&page={page}"
-            response = json.loads(_read_url(Request(url, headers=headers)))
+            try:
+                response = json.loads(_read_url(Request(url, headers=headers)))
+            except HTTPError:
+                # Retry without token in case it had insufficient permissions.
+                del headers["Authorization"]
+                response = json.loads(_read_url(Request(url, headers=headers)))
             # Empty response means no more data to process
             if not response:
                 break
@@ -262,12 +267,12 @@ def _get_cache_or_reload(
 
         try:
             url = _git_archive_link(repo_owner, repo_name, ref)
-            sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
+            sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
             download_url_to_file(url, cached_file, progress=False)
         except HTTPError as err:
             if err.code == 300:
                 # Getting a 300 Multiple Choices error likely means that the ref is both a tag and a branch
-                # in the repo. This can be disambiguated by explicitely using refs/heads/ or refs/tags
+                # in the repo. This can be disambiguated by explicitly using refs/heads/ or refs/tags
                 # See https://git-scm.com/book/en/v2/Git-Internals-Git-References
                 # Here, we do the same as git: we throw a warning, and assume the user wanted the branch
                 warnings.warn(
@@ -329,7 +334,7 @@ def _check_repo_is_trusted(
         if not is_trusted:
             warnings.warn(
                 "You are about to download and run code from an untrusted repository. In a future release, this won't "
-                "be allowed. To add the repository to your trusted list, change the command to {calling_fn}(..., "
+                f"be allowed. To add the repository to your trusted list, change the command to {calling_fn}(..., "
                 "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
                 f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
                 f"'yes'. You can also use {calling_fn}(..., trust_repo='check') which will only prompt for "
@@ -416,7 +421,7 @@ def set_dir(d: Union[str, os.PathLike]) -> None:
         d (str): path to a local folder to save downloaded models & weights.
     """
     global _hub_dir
-    _hub_dir = os.path.expanduser(d)
+    _hub_dir = os.path.expanduser(d)  # pyrefly: ignore  # no-matching-overload
 
 
 def list(
@@ -666,7 +671,11 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
     Example:
         >>> # xdoctest: +SKIP("stub local path")
         >>> path = "/some/local/path/pytorch/vision"
-        >>> model = _load_local(path, "resnet50", weights="ResNet50_Weights.IMAGENET1K_V1")
+        >>> model = _load_local(
+        ...     path,
+        ...     "resnet50",
+        ...     weights="ResNet50_Weights.IMAGENET1K_V1",
+        ... )
     """
     with _add_to_sys_path(hubconf_dir):
         hubconf_path = os.path.join(hubconf_dir, MODULE_HUBCONF)
@@ -784,7 +793,7 @@ def _legacy_zip_load(
     model_dir: str,
     map_location: MAP_LOCATION,
     weights_only: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
     #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
     #       E.g. resnet18-5c106cde.pth which is widely used.
@@ -808,7 +817,7 @@ def load_state_dict_from_url(
     check_hash: bool = False,
     file_name: Optional[str] = None,
     weights_only: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     r"""Loads the Torch serialized object at the given URL.
 
     If downloaded file is a zip file, it will be automatically
@@ -859,7 +868,7 @@ def load_state_dict_from_url(
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
-        sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
+        sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
         if check_hash:
             r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]

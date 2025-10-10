@@ -3,9 +3,10 @@ import inspect
 import sys
 import typing
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 from types import CodeType
-from typing import Dict, Iterable, List, Optional
+from typing import Optional
 
 import torch
 
@@ -13,6 +14,8 @@ import torch
 _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
+
+    # pyrefly: ignore  # import-error
     from monkeytype import trace as monkeytype_trace
     from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.db.base import (  # type: ignore[import]
@@ -25,7 +28,7 @@ except ImportError:
     _IS_MONKEYTYPE_INSTALLED = False
 
 
-# Checks whether a class is defind in `torch.*` modules
+# Checks whether a class is defined in `torch.*` modules
 def is_torch_native_class(cls):
     if not hasattr(cls, "__module__"):
         return False
@@ -86,6 +89,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             super().__init__(store)
 
         def log(self, trace: CallTrace) -> None:
+            # pyrefly: ignore  # missing-attribute
             self.traces.append(trace)
 
     class JitTypeTraceStore(CallTraceStore):
@@ -94,7 +98,7 @@ if _IS_MONKEYTYPE_INSTALLED:
             # A dictionary keeping all collected CallTrace
             # key is fully qualified name of called function
             # value is list of all CallTrace
-            self.trace_records: Dict[str, list] = defaultdict(list)
+            self.trace_records: dict[str, list] = defaultdict(list)
 
         def add(self, traces: Iterable[CallTrace]):
             for t in traces:
@@ -106,10 +110,10 @@ if _IS_MONKEYTYPE_INSTALLED:
             qualified_name: str,
             qualname_prefix: Optional[str] = None,
             limit: int = 2000,
-        ) -> List[CallTraceThunk]:
+        ) -> list[CallTraceThunk]:
             return self.trace_records[qualified_name]
 
-        def analyze(self, qualified_name: str) -> Dict:
+        def analyze(self, qualified_name: str) -> dict:
             # Analyze the types for the given module
             # and create a dictionary of all the types
             # for arguments.
@@ -120,7 +124,7 @@ if _IS_MONKEYTYPE_INSTALLED:
                     all_args[arg].add(arg_type)
             return all_args
 
-        def consolidate_types(self, qualified_name: str) -> Dict:
+        def consolidate_types(self, qualified_name: str) -> dict:
             all_args = self.analyze(qualified_name)
             # If there are more types for an argument,
             # then consolidate the type to `Any` and replace the entry
@@ -129,7 +133,7 @@ if _IS_MONKEYTYPE_INSTALLED:
                 types = list(types)
                 type_length = len(types)
                 if type_length == 2 and type(None) in types:
-                    # TODO: To remove this check once Union suppport in TorchScript lands.
+                    # TODO: To remove this check once Union support in TorchScript lands.
                     all_args[arg] = get_optional_of_element_type(types)
                 elif type_length > 1:
                     all_args[arg] = "Any"
@@ -137,7 +141,7 @@ if _IS_MONKEYTYPE_INSTALLED:
                     all_args[arg] = get_type(types[0])
             return all_args
 
-        def get_args_types(self, qualified_name: str) -> Dict:
+        def get_args_types(self, qualified_name: str) -> dict:
             return self.consolidate_types(qualified_name)
 
     class JitTypeTraceConfig(monkeytype.config.Config):
@@ -147,6 +151,7 @@ if _IS_MONKEYTYPE_INSTALLED:
 
         def trace_logger(self) -> JitTypeTraceStoreLogger:
             """Return a JitCallTraceStoreLogger that logs to the configured trace store."""
+            # pyrefly: ignore  # bad-argument-count
             return JitTypeTraceStoreLogger(self.trace_store())
 
         def trace_store(self) -> CallTraceStore:

@@ -29,6 +29,10 @@ torch.backends.cuda.matmul.allow_tf32 = True
 if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
     torch._inductor.config.fx_graph_cache = True
 
+# Enable Autograd caching
+if "TORCHINDUCTOR_AUTOGRAD_CACHE" not in os.environ:
+    torch._functorch.config.enable_autograd_cache = True
+
 
 def _reassign_parameters(model):
     # torch_geometric models register parameter as tensors due to
@@ -71,28 +75,7 @@ def setup_torchbench_cwd():
     return original_dir
 
 
-def process_hf_reformer_output(out):
-    assert isinstance(out, list)
-    # second output is unstable
-    return [elem for i, elem in enumerate(out) if i != 1]
-
-
-def process_hf_whisper_output(out):
-    out_ret = []
-    for i, elem in enumerate(out):
-        if i == 0:
-            assert isinstance(elem, dict)
-            out_ret.append({k: v for k, v in elem.items() if k != "logits"})
-        elif i != 1:
-            out_ret.append(elem)
-
-    return out_ret
-
-
-process_train_model_output = {
-    "hf_Reformer": process_hf_reformer_output,
-    "hf_Whisper": process_hf_whisper_output,
-}
+process_train_model_output = {}
 
 
 class TorchBenchmarkRunner(BenchmarkRunner):
@@ -134,12 +117,20 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cpu"]
 
     @property
+    def skip_models_for_cpu_aarch64(self):
+        return self._skip["device"]["cpu_aarch64"]
+
+    @property
     def skip_models_for_cuda(self):
         return self._skip["device"]["cuda"]
 
     @property
     def skip_models_for_freezing_cuda(self):
         return self._skip["freezing"]["cuda"]
+
+    @property
+    def disable_cudagraph_models(self):
+        return self._config["disable_cudagraph"]
 
     @property
     def skip_models_for_freezing_cpu(self):
@@ -198,6 +189,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["control_flow"]
 
     @property
+    def skip_models_due_to_export_not_supported(self):
+        return self._skip["export_not_supported"]
+
+    @property
     def guard_on_nn_module_models(self):
         return {
             "vision_maskrcnn",
@@ -210,12 +205,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             "drq",
             "hf_Reformer",
             "DALLE2_pytorch",
-            "hf_BigBird",
             "detectron2_maskrcnn_r_50_fpn",
             "detectron2_maskrcnn_r_101_fpn",
             "vision_maskrcnn",
             "doctr_reco_predictor",
-            "hf_T5_generate",
         }
 
     def load_model(
@@ -232,7 +225,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
-        dynamic_shapes = self.args.dynamic_shapes
         candidates = [
             f"torchbenchmark.models.{model_name}",
             f"torchbenchmark.canary_models.{model_name}",
@@ -366,6 +358,20 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.trace_on_xla:
             # work around for: https://github.com/pytorch/xla/issues/4174
             import torch_xla  # noqa: F401
+
+        # Turning off kv cache for torchbench models. This is not the right
+        # thing to do, but the torchbench models are way outdated, and since we
+        # are using torchbench pt2 dashboard to track regressions (rather than
+        # improving performance), we are just setting the kv cache to false.
+        # Real transformers benchmarks will be added soon using a different
+        # infra.
+        if (
+            model_name.startswith("hf")
+            and hasattr(model, "config")
+            and hasattr(model.config, "use_cache")
+        ):
+            model.config.use_cache = False
+
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 
@@ -410,6 +416,13 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         cosine = self.args.cosine
         # Increase the tolerance for torch allclose
         if self.args.float16 or self.args.amp:
+            if self.args.freezing and (freezing := self._tolerance["freezing"]):
+                higher_fp16 = freezing.get("higher_fp16", None)
+                even_higher = freezing.get("even_higher", None)
+                if higher_fp16 and name in higher_fp16:
+                    return 1e-2, cosine
+                elif even_higher and name in even_higher:
+                    return 8 * 1e-2, cosine
             if name in self._tolerance["higher_fp16"]:
                 return 1e-2, cosine
             elif name in self._tolerance["even_higher"]:
@@ -419,6 +432,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.bfloat16:
             if name in self._tolerance["higher_bf16"]:
                 return 1e-2, cosine
+            elif current_device == "xpu" and name in self._tolerance["higher_bf16_xpu"]:
+                return 8 * 1e-2, cosine
 
         if is_training and (current_device == "cuda" or current_device == "xpu"):
             tolerance = 1e-3
@@ -452,7 +467,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()
         if collect_outputs:
-            return collect_results(mod, pred, loss, cloned_inputs)
+            return collect_results(mod, None, loss, cloned_inputs)
         return None
 
 

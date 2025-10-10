@@ -14,7 +14,7 @@ Not Yet Implemented
 - TODO- tracebacks aren't implemented
 
 Known Issues
-- Flight Recorder buffer sequence_id information is not sufficient to match collectives and coalseced collectives
+- Flight Recorder buffer sequence_id information is not sufficient to match collectives and coalesced collectives
   unless we have the trace data from the beginning of the program.  To enable confident analysis of trace buffers that
   do not start from zero (and to simplify the script's matching logic) we need to add more information to the recorder.
 - Currently, the script omits checking the 'status' of collectives.  We can look for the first 'non completed'
@@ -29,7 +29,8 @@ python fr_trace.py <dump dir containing trace files> [-o <output file>]
 """
 
 import pickle
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 from tools.flight_recorder.components.builder import build_db
 from tools.flight_recorder.components.config_manager import JobConfig
@@ -41,7 +42,7 @@ def main(args: Optional[Sequence[str]] = None) -> None:
     config = JobConfig()
     args = config.parse_args(args)
     assert args.trace_dir, "Trace directory trace_dir is required"
-    details, version = read_dir(args.prefix, args.trace_dir)
+    details, version = read_dir(args)
     db = build_db(details, args, version)
     if args.output:
         with open(args.output, "wb") as f:

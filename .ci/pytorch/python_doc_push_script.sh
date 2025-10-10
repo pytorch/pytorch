@@ -7,7 +7,7 @@ source "$pt_checkout/.ci/pytorch/common_utils.sh"
 
 echo "python_doc_push_script.sh: Invoked with $*"
 
-set -ex
+set -ex -o pipefail
 
 # for statements like ${1:-${DOCS_INSTALL_PATH:-docs/}}
 # the order of operations goes:
@@ -63,7 +63,7 @@ build_docs () {
     echo "(tried to echo the WARNINGS above the ==== line)"
     echo =========================
   fi
-  set -ex
+  set -ex -o pipefail
   return $code
 }
 
@@ -118,12 +118,6 @@ popd
 popd
 git rm -rf "$install_path" || true
 mv "$pt_checkout/docs/build/html" "$install_path"
-
-# Prevent Google from indexing $install_path/_modules. This folder contains
-# generated source files.
-# NB: the following only works on gnu sed. The sed shipped with mac os is different.
-# One can `brew install gnu-sed` on a mac and then use "gsed" instead of "sed".
-find "$install_path/_modules" -name "*.html" -print0 | xargs -0 sed -i '/<head>/a \ \ <meta name="robots" content="noindex">'
 
 git add "$install_path" || true
 git status

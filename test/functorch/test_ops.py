@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+# ruff: noqa: F841
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -45,8 +46,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
-    IS_MACOS,
-    IS_X86,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -400,6 +399,38 @@ skip_noncontig = {
     "as_strided_copy",
 }
 
+bool_unsupported_ordered_ops = {
+    "topk",
+    "argmin",
+    "ceil",
+    "argmax",
+    "floor",
+}
+bool_ordered_op_db = tuple(
+    filter(lambda op: op.name in bool_unsupported_ordered_ops, op_db)
+)
+
+complex_unsupported_ordered_ops = {
+    "sort",
+    "topk",
+    "lt",
+    "argmin",
+    "le",
+    "ge",
+    "amax",
+    "maximum",
+    "minimum",
+    "clamp",
+    "amin",
+    "gt",
+    "ceil",
+    "argmax",
+    "floor",
+}
+complex_ordered_op_db = tuple(
+    filter(lambda op: op.name in complex_unsupported_ordered_ops, op_db)
+)
+
 
 @unittest.skipIf(TEST_WITH_ASAN, "tests time out with asan, are probably redundant")
 @unMarkDynamoStrictTest
@@ -423,7 +454,6 @@ class TestOperators(TestCase):
                 # Non-contiguous Bugs
                 #
                 # AssertionError: Tensor-likes are not close!
-                xfail("_softmax_backward_data", device_type="cpu"),
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
                 # RuntimeError: !self.requires_grad() || self.is_contiguous()
@@ -438,13 +468,6 @@ class TestOperators(TestCase):
                 ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
-                # RuntimeError: Expected contiguous tensor, but got
-                # non-contiguous tensor for argument #2 'grad_output'
-                decorate(
-                    "_batch_norm_with_update",
-                    decorator=expectedFailureIf(TEST_WITH_ROCM),
-                    device_type="cuda",
-                ),
             }
         ),
     )
@@ -586,11 +609,6 @@ class TestOperators(TestCase):
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
                 xfail("as_strided_scatter"),
-                decorate(
-                    "linalg.det",
-                    "singular",
-                    decorator=expectedFailureIf(IS_MACOS and IS_X86),
-                ),
             }
         ),
     )
@@ -757,7 +775,6 @@ class TestOperators(TestCase):
                 # AssertionError: Tensor-likes are not close!
                 xfail("as_strided"),
                 xfail("as_strided_scatter"),
-                xfail("_softmax_backward_data", device_type="cpu"),
                 xfail("as_strided", "partial_views"),
             }
         ),
@@ -877,9 +894,6 @@ class TestOperators(TestCase):
             tol1("masked.cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("cumprod", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("linalg.vander", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
-            tol2(
-                "linalg.det", "singular", {torch.float32: tol(atol=2e-05, rtol=2e-05)}
-            ),
         ),
     )
     def test_vjpvjp(self, device, dtype, op):
@@ -1038,6 +1052,9 @@ class TestOperators(TestCase):
                 xfail("_native_batch_norm_legit"),
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
             }
         ),
     )
@@ -1177,6 +1194,9 @@ class TestOperators(TestCase):
             xfail("sparse.mm", "reduce"),
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
+            xfail(
+                "unbind_copy"
+            ),  # Batching rule not implemented for aten::unbind_copy.int.
             # ---------------------------------------------------------------------
         }
     )
@@ -1315,6 +1335,9 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
         # TODO: implement batching rule
         xfail("_batch_norm_with_update"),
+        xfail(
+            "unbind_copy"
+        ),  # Batching rule not implemented for aten::unbind_copy.int.
         # ----------------------------------------------------------------------
     }
 
@@ -1342,11 +1365,6 @@ class TestOperators(TestCase):
         vmapjvpall_fail.union(
             {
                 xfail("as_strided_copy"),
-                decorate(
-                    "linalg.det",
-                    "singular",
-                    decorator=expectedFailureIf(IS_MACOS and IS_X86),
-                ),
             }
         ),
     )
@@ -1542,7 +1560,6 @@ class TestOperators(TestCase):
                 xfail("_native_batch_norm_legit"),
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
-                xfail("native_dropout_backward"),
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
@@ -1628,6 +1645,9 @@ class TestOperators(TestCase):
                 xfail("__getitem__", ""),
                 xfail("index_put", ""),
                 xfail("view_as_complex"),
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("nn.functional.gaussian_nll_loss"),
                 xfail("masked_select"),
                 xfail(
@@ -1922,6 +1942,9 @@ class TestOperators(TestCase):
                 xfail(
                     "as_strided_scatter"
                 ),  # AssertionError: Tensor-likes are not close!
+                xfail(
+                    "unbind_copy"
+                ),  # Batching rule not implemented for aten::unbind_copy.int.
                 xfail("bernoulli"),  # calls random op
                 xfail("bfloat16"),  # required rank 4 tensor to use channels_last format
                 xfail("cdist"),  # Forward AD not implemented and no decomposition
@@ -2156,9 +2179,9 @@ class TestOperators(TestCase):
                 else:
                     weight = torch.randn(weight_shape, device=device)
                 target = torch.randint(0, C, target_shape, device=device)
-                target[
-                    0
-                ] = 1  # since we're ignoring index 0, at least one element must be non-zero
+                target[0] = (
+                    1  # since we're ignoring index 0, at least one element must be non-zero
+                )
 
                 fn = functools.partial(
                     torch.nn.functional.nll_loss, target=target, weight=weight, **kwargs
@@ -2370,13 +2393,6 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-            # RuntimeError: Expected contiguous tensor, but got
-            # non-contiguous tensor for argument #2 'grad_output'
-            decorate(
-                "_batch_norm_with_update",
-                decorator=expectedFailureIf(TEST_WITH_ROCM),
-                device_type="cuda",
-            ),
         },
     )
     @opsToleranceOverride(
@@ -2969,6 +2985,39 @@ class TestOperators(TestCase):
             expected_fn(torch.ones_like(expected_o)),
             actual_fn(torch.ones_like(actual_o)),
         )
+
+    @ops(bool_ordered_op_db, dtypes=[torch.bool])
+    def test_ordered_bool_raises(self, device, dtype, op):
+        # Generate sample inputs for the op
+        sample_inputs = op.sample_inputs(device, dtype)
+
+        for sample_input in sample_inputs:
+            # Check that the op raises NotImplementedError or appropriate failure
+            self.assertRaises(
+                RuntimeError,
+                op,
+                sample_input.input,
+                *sample_input.args,
+                **sample_input.kwargs,
+            )
+
+    @ops(
+        complex_ordered_op_db,
+        dtypes=[torch.complex32, torch.complex64, torch.complex128],
+    )
+    def test_ordered_complex_raises(self, device, dtype, op):
+        # Generate sample inputs for the op
+        sample_inputs = op.sample_inputs(device, dtype)
+
+        for sample_input in sample_inputs:
+            # Check that the op raises NotImplementedError or appropriate failure
+            self.assertRaises(
+                RuntimeError,
+                op,
+                sample_input.input,
+                *sample_input.args,
+                **sample_input.kwargs,
+            )
 
 
 only_for = ("cpu", "cuda")

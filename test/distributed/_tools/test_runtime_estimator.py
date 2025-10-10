@@ -1,7 +1,8 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["oncall: distributed"]
 import unittest
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Tuple, Union
+from typing import Any, cast, Union
 
 import torch
 from torch import nn, optim
@@ -73,7 +74,7 @@ class TestRuntimeEstimator(TestCase):
     def _measure_actual_cuda_time(
         self,
         func: Callable,
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
     ) -> float:
         warmup_iters, actual_iters = 2, 5
         start_event = torch.cuda.Event(enable_timing=True)
@@ -92,7 +93,7 @@ class TestRuntimeEstimator(TestCase):
         self,
         estimate_mode: str,
         func: Callable,
-        args: Tuple[Any, ...],
+        args: tuple[Any, ...],
     ) -> float:
         # Optimizer init step
         func(*args)
@@ -106,7 +107,7 @@ class TestRuntimeEstimator(TestCase):
         model_type: str,
         model_args: Union[ConvArgs, ModelArgs],
         bsz: int,
-    ) -> Tuple[nn.Module, optim.Optimizer, torch.Tensor]:
+    ) -> tuple[nn.Module, optim.Optimizer, torch.Tensor]:
         dev = torch.cuda.current_device()
         if model_type == "Transformer":
             model_args = cast(ModelArgs, model_args)

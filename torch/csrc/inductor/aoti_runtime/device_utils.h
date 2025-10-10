@@ -14,7 +14,7 @@
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 
-#define AOTI_RUNTIME_DEVICE_CHECK(EXPR)                    \
+#define AOTI_RUNTIME_CUDA_CHECK(EXPR)                      \
   do {                                                     \
     const cudaError_t code = EXPR;                         \
     const char* msg = cudaGetErrorString(code);            \
@@ -30,9 +30,29 @@ using DeviceStreamType = cudaStream_t;
 
 } // namespace torch::aot_inductor
 
-#else // !USE_CUDA
+#elif defined(USE_XPU)
+#include <level_zero/ze_api.h>
+#include <sycl/sycl.hpp>
+#include <sstream>
+#define AOTI_RUNTIME_XPU_CHECK(EXPR)                                      \
+  do {                                                                    \
+    const ze_result_t status = EXPR;                                      \
+    if (status != ZE_RESULT_SUCCESS) {                                    \
+      std::stringstream ss;                                               \
+      ss << "L0 runtime error: " << std::hex << std::uppercase << status; \
+      throw std::runtime_error(ss.str());                                 \
+    }                                                                     \
+  } while (0)
 
-#define AOTI_RUNTIME_DEVICE_CHECK(EXPR)            \
+namespace torch::aot_inductor {
+
+using DeviceStreamType = sycl::queue*;
+
+} // namespace torch::aot_inductor
+
+#else
+
+#define AOTI_RUNTIME_CPU_CHECK(EXPR)               \
   bool ok = EXPR;                                  \
   if (!ok) {                                       \
     throw std::runtime_error("CPU runtime error"); \

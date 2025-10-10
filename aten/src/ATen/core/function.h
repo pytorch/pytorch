@@ -42,8 +42,8 @@ struct TORCH_API Function {
   Function& operator=(const Function&) = default;
   Function(Function&&) noexcept = default;
   Function& operator=(Function&&) noexcept = default;
-  virtual c10::string_view doc_string() const {
-    static constexpr c10::string_view no_doc_string = "";
+  virtual std::string_view doc_string() const {
+    static constexpr std::string_view no_doc_string;
     return no_doc_string;
   }
 
@@ -96,15 +96,15 @@ struct TORCH_API Function {
   // Overload for server interpreter, a bailout size is needed for graph
   // executor.
   virtual bool call(
-      Stack&,
-      std::optional<size_t>,
-      c10::function_ref<void(const Code&)>) {
+      Stack& /*unused*/,
+      std::optional<size_t> /*unused*/,
+      c10::function_ref<void(const Code&)> /*unused*/) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return false;
   }
 
   // Overload for mobile interpreter.
-  virtual bool call(Stack&, c10::function_ref<void(const mobile::Code&)>) {
+  virtual bool call(Stack& /*unused*/, c10::function_ref<void(const mobile::Code&)> /*unused*/) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return false;
   }

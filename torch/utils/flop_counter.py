@@ -1,18 +1,21 @@
 # mypy: allow-untyped-defs
-# mypy: allow-untyped-decorators
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
+from typing import Any, Optional, Union, TypeVar
+from collections.abc import Callable
+from collections.abc import Iterator
+from typing_extensions import ParamSpec
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
 from math import prod
 from functools import wraps
 import warnings
 
-
-
 __all__ = ["FlopCounterMode", "register_flop_formula"]
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 aten = torch.ops.aten
 
@@ -21,7 +24,7 @@ def get_shape(i):
         return i.shape
     return i
 
-flop_registry: Dict[Any, Any] = {}
+flop_registry: dict[Any, Any] = {}
 
 def shape_wrapper(f):
     @wraps(f)
@@ -30,8 +33,8 @@ def shape_wrapper(f):
         return f(*args, out_shape=out_shape, **kwargs)
     return nf
 
-def register_flop_formula(targets, get_raw=False):
-    def register_fun(flop_formula):
+def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
 
@@ -88,11 +91,27 @@ def baddbmm_flop(self_shape, a_shape, b_shape, out_shape=None, **kwargs) -> int:
     # Inputs contains the shapes of three tensors.
     return bmm_flop(a_shape, b_shape)
 
+@register_flop_formula(aten._scaled_mm)
+def _scaled_mm_flop(
+    a_shape,
+    b_shape,
+    scale_a_shape,
+    scale_b_shape,
+    bias_shape=None,
+    scale_result_shape=None,
+    out_dtype=None,
+    use_fast_accum=False,
+    out_shape=None,
+    **kwargs,
+) -> int:
+    """Count flops for _scaled_mm."""
+    return mm_flop(a_shape, b_shape)
+
 
 def conv_flop_count(
-    x_shape: List[int],
-    w_shape: List[int],
-    out_shape: List[int],
+    x_shape: list[int],
+    w_shape: list[int],
+    out_shape: list[int],
     transposed: bool = False,
 ) -> int:
     """Count flops for convolution.
@@ -109,7 +128,6 @@ def conv_flop_count(
     Returns:
         int: the number of flops
     """
-
     batch_size = x_shape[0]
     conv_shape = (x_shape if transposed else out_shape)[2:]
     c_out, c_in, *filter_size = w_shape
@@ -128,9 +146,10 @@ def conv_flop_count(
     flop = prod(conv_shape) * prod(filter_size) * batch_size * c_out * c_in * 2
     return flop
 
-@register_flop_formula([aten.convolution, aten._convolution])
+@register_flop_formula([aten.convolution, aten._convolution, aten.cudnn_convolution, aten._slow_conv2d_forward])
 def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
     """Count flops for convolution."""
+    # pyrefly: ignore  # bad-argument-type
     return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
 
@@ -272,7 +291,7 @@ def _offsets_to_lengths(offsets, max_len):
     """
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import FunctionalTensor
-    if not isinstance(offsets, (FakeTensor, FunctionalTensor)):
+    if not isinstance(offsets, (FakeTensor, FunctionalTensor)) and offsets.device.type != "meta":
         return offsets.diff().tolist()
     return [max_len] * (offsets.size(0) - 1)
 
@@ -287,7 +306,7 @@ def _unpack_flash_attention_nested_shapes(
     cum_seq_k,
     max_q,
     max_k,
-) -> Iterator[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, ...]]]]:
+) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], Optional[tuple[int, ...]]]]:
     """
     Given inputs to a flash_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
@@ -333,7 +352,7 @@ def _unpack_efficient_attention_nested_shapes(
     cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
-) -> Iterator[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...], Optional[Tuple[int, ...]]]]:
+) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], Optional[tuple[int, ...]]]]:
     """
     Given inputs to a efficient_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
@@ -540,8 +559,11 @@ flop_registry = {
     aten.addmm: addmm_flop,
     aten.bmm: bmm_flop,
     aten.baddbmm: baddbmm_flop,
+    aten._scaled_mm: _scaled_mm_flop,
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
+    aten.cudnn_convolution: conv_flop,
+    aten._slow_conv2d_forward: conv_flop,
     aten.convolution_backward: conv_backward_flop,
     aten._scaled_dot_product_efficient_attention: sdpa_flop,
     aten._scaled_dot_product_flash_attention: sdpa_flop,
@@ -593,7 +615,7 @@ def _pytreeify_preserve_structure(f):
     return nf
 
 
-class FlopCounterMode(TorchDispatchMode):
+class FlopCounterMode:
     """
     ``FlopCounterMode`` is a context manager that counts the number of flops within its context.
 
@@ -615,14 +637,15 @@ class FlopCounterMode(TorchDispatchMode):
 
     def __init__(
             self,
-            mods: Optional[Union[torch.nn.Module, List[torch.nn.Module]]] = None,
+            mods: Optional[Union[torch.nn.Module, list[torch.nn.Module]]] = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: Optional[Dict[Any, Any]] = None):
+            custom_mapping: Optional[dict[Any, Any]] = None):
         super().__init__()
-        self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
+        self.flop_counts: dict[str, dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
+        self.mode: Optional[_FlopCounterMode] = None
         if custom_mapping is None:
             custom_mapping = {}
         if mods is not None:
@@ -636,7 +659,7 @@ class FlopCounterMode(TorchDispatchMode):
     def get_total_flops(self) -> int:
         return sum(self.flop_counts['Global'].values())
 
-    def get_flop_counts(self) -> Dict[str, Dict[Any, int]]:
+    def get_flop_counts(self) -> dict[str, dict[Any, int]]:
         """Return the flop counts as a dictionary of dictionaries.
 
         The outer
@@ -654,7 +677,9 @@ class FlopCounterMode(TorchDispatchMode):
         if depth is None:
             depth = 999999
 
+
         import tabulate
+
         tabulate.PRESERVE_WHITESPACE = True
         header = ["Module", "FLOP", "% Total"]
         values = []
@@ -708,22 +733,22 @@ class FlopCounterMode(TorchDispatchMode):
 
         return tabulate.tabulate(values, headers=header, colalign=("left", "right", "right"))
 
+    # NB: This context manager is NOT reentrant
     def __enter__(self):
         self.flop_counts.clear()
         self.mod_tracker.__enter__()
-        super().__enter__()
+        self.mode = _FlopCounterMode(self)
+        self.mode.__enter__()
         return self
 
     def __exit__(self, *args):
-        super().__exit__(*args)
+        assert self.mode is not None
+        b = self.mode.__exit__(*args)
+        self.mode = None  # break cycles
         self.mod_tracker.__exit__()
         if self.display:
             print(self.get_table(self.depth))
-
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs if kwargs else {}
-        out = func(*args, **kwargs)
-        return self._count_flops(func._overloadpacket, out, args, kwargs)
+        return b
 
     def _count_flops(self, func_packet, out, args, kwargs):
         if func_packet in self.flop_registry:
@@ -733,3 +758,114 @@ class FlopCounterMode(TorchDispatchMode):
                 self.flop_counts[par][func_packet] += flop_count
 
         return out
+
+class _FlopCounterMode(TorchDispatchMode):
+    supports_higher_order_operators = True
+
+    def __init__(self, counter: FlopCounterMode):
+        self.counter = counter
+
+    def _execute_with_isolated_flop_counting(self, branch_fn, operands):
+        """Execute a branch function and capture its FLOP counts without
+        affecting self.counter.flop_counts
+
+        Args:
+            branch_fn: The branch function to execute
+            operands: Arguments to pass to the branch function
+
+        Returns:
+            Tuple of (result, flop_counts) where result is the branch output
+            and flop_counts is a copy of the FLOP counts after execution
+        """
+        import copy
+        checkpointed_flop_counts = copy.copy(self.counter.flop_counts)
+        with self:
+            result = branch_fn(*operands)
+        flop_counts = copy.copy(self.counter.flop_counts)
+        self.counter.flop_counts = checkpointed_flop_counts
+        return result, flop_counts
+
+    def _handle_higher_order_ops(self, func, types, args, kwargs):
+        if func is not torch.ops.higher_order.cond:
+            return NotImplemented
+
+        # The flop counter for cond counts the upper bound of flops.
+        # For example, if a matmul is executed 2 times in true branch
+        # but only 1 time in the false branch, the flop counter will
+        # record the larger number of flops, i.e. 2 times.
+        if func is torch.ops.higher_order.cond:
+
+            pred, true_branch, false_branch, operands = args
+            # Step 1: Count flops for true branch and false branch separately
+            true_out, true_flop_counts = self._execute_with_isolated_flop_counting(
+                true_branch, operands
+            )
+            if true_out is NotImplemented:
+                return NotImplemented
+
+            false_out, false_flop_counts = self._execute_with_isolated_flop_counting(
+                false_branch, operands
+            )
+            if false_out is NotImplemented:
+                return NotImplemented
+
+            # Step 2: merge flop counts
+            all_mod_keys = set(true_flop_counts.keys()) | set(false_flop_counts.keys())
+            merged_flop_counts = {}
+            for outer_key in all_mod_keys:
+                true_func_counts = true_flop_counts[outer_key]
+                false_func_counts = false_flop_counts[outer_key]
+
+                merged_func_counts = {}
+                all_func_keys = set(true_func_counts.keys()) | set(false_func_counts.keys())
+
+                for func_key in all_func_keys:
+                    true_val = true_func_counts.get(func_key, 0)
+                    false_val = false_func_counts.get(func_key, 0)
+                    merged_func_counts[func_key] = max(true_val, false_val)
+
+                merged_flop_counts[outer_key] = merged_func_counts
+
+            # Step 3: update the counter with merged counts
+            for outer_key, inner_dict in merged_flop_counts.items():
+                self.counter.flop_counts[outer_key].update(inner_dict)
+
+            # It doesn't matter which one we return since true_fn and false_fn return
+            # output with the same structure.
+            return true_out
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs if kwargs else {}
+
+        # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
+        if func in {torch.ops.aten.sym_is_contiguous.default,
+                    torch.ops.aten.is_contiguous.default,
+                    torch.ops.aten.is_contiguous.memory_format,
+                    torch.ops.aten.is_strides_like_format.default,
+                    torch.ops.aten.is_non_overlapping_and_dense.default,
+                    torch.ops.aten.size.default,
+                    torch.ops.aten.sym_size.default,
+                    torch.ops.aten.stride.default,
+                    torch.ops.aten.sym_stride.default,
+                    torch.ops.aten.storage_offset.default,
+                    torch.ops.aten.sym_storage_offset.default,
+                    torch.ops.aten.numel.default,
+                    torch.ops.aten.sym_numel.default,
+                    torch.ops.aten.dim.default,
+                    torch.ops.prim.layout.default}:
+
+            return NotImplemented
+
+        if isinstance(func, torch._ops.HigherOrderOperator):
+            return self._handle_higher_order_ops(func, types, args, kwargs)
+
+        # If we don't have func in flop_registry, see if it can decompose
+        if func not in self.counter.flop_registry and func is not torch.ops.prim.device.default:
+            with self:
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
+
+        # no further decomposition; execute & count flops
+        out = func(*args, **kwargs)
+        return self.counter._count_flops(func._overloadpacket, out, args, kwargs)

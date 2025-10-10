@@ -6,15 +6,8 @@ from typing import Callable, List
 import torch
 from torch import nn
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import _inline_everything, JitTestCase, RUN_CUDA
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestPeephole(JitTestCase):
@@ -44,7 +37,7 @@ class TestPeephole(JitTestCase):
             return y + y
 
         a = torch.ones(4, 4)
-        j = self.checkScript(test_write, (a,))
+        self.checkScript(test_write, (a,))
 
     def test_peephole_no_output_aliasing(self):
         def test_peephole(x):
@@ -93,7 +86,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x, y, z):
             li = [x, y, z]
-            for i in range(len(x)):
+            for _ in range(len(x)):
                 li.append(x)
             return len([x, y, z])
 
@@ -120,7 +113,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x, y, z):
             li = [x, y, z]
-            for i in range(len(x)):
+            for _ in range(len(x)):
                 li.append(x)
             return li[-2]
 
@@ -890,3 +883,7 @@ class TestPeephole(JitTestCase):
 
         self.run_pass("peephole", foo.graph)
         FileCheck().check("aten::slice").run(foo.graph)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

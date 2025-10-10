@@ -18,6 +18,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
                 "scale": 1.0,
                 "zero_point": 0,
             }
+        # pyrefly: ignore  # bad-assignment
         self.weight_qscheme: torch.qscheme = weight_qparams["qscheme"]
         self.weight_dtype = weight_qparams["dtype"]
         assert self.weight_qscheme in [
@@ -25,7 +26,9 @@ class ReferenceQuantizedModule(torch.nn.Module):
             torch.per_tensor_affine,
             torch.per_channel_affine,
             torch.per_channel_affine_float_qparams,
-        ], f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}"
+        ], (
+            f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}"
+        )
         if self.weight_dtype in [
             torch.quint8,
             torch.qint8,
@@ -39,14 +42,14 @@ class ReferenceQuantizedModule(torch.nn.Module):
             )
             w_scale = weight_qparams["scale"]
             w_scale_tensor = (
-                w_scale.clone().detach()
+                w_scale.detach().clone()
                 if isinstance(w_scale, torch.Tensor)
                 else torch.tensor(w_scale, dtype=torch.float, device=device)
             )
             self.register_buffer("weight_scale", w_scale_tensor)
             w_zp = weight_qparams["zero_point"]
             w_zp_tensor = (
-                w_zp.clone().detach()
+                w_zp.detach().clone()
                 if isinstance(w_zp, torch.Tensor)
                 else torch.tensor(w_zp, dtype=zero_point_dtype, device=device)
             )
@@ -57,7 +60,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
             ]:
                 w_axis = weight_qparams["axis"]
                 w_axis_tensor = (
-                    w_axis.clone().detach()
+                    w_axis.detach().clone()
                     if isinstance(w_axis, torch.Tensor)
                     else torch.tensor(w_axis, dtype=torch.int, device=device)
                 )
@@ -78,13 +81,16 @@ class ReferenceQuantizedModule(torch.nn.Module):
             self.register_buffer(
                 "weight_axis", torch.tensor(0, dtype=torch.int, device=device)
             )
+        # pyrefly: ignore  # bad-assignment
         self.is_decomposed: bool = weight_qparams.get("is_decomposed", False)
         # store weight_axis as weight_axis_int due to some constraints of torchdynamo.export
         # for capturing `.item` operations
         self.weight_axis_int: int = self.weight_axis.item()  # type: ignore[operator, assignment]
+        # pyrefly: ignore  # bad-assignment
         self.weight_quant_min: typing.Optional[int] = weight_qparams.get(
             "quant_min", None
         )
+        # pyrefly: ignore  # bad-assignment
         self.weight_quant_max: typing.Optional[int] = weight_qparams.get(
             "quant_max", None
         )
@@ -103,6 +109,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
             return _quantize_and_dequantize_weight_decomposed(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
+                # pyrefly: ignore  # bad-argument-type
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -114,6 +121,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
             return _quantize_and_dequantize_weight(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
+                # pyrefly: ignore  # bad-argument-type
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -129,6 +137,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
             return _quantize_weight_decomposed(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
+                # pyrefly: ignore  # bad-argument-type
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -140,6 +149,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
             return _quantize_weight(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
+                # pyrefly: ignore  # bad-argument-type
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -193,11 +203,12 @@ def _quantize_weight_decomposed(
     weight_quant_min: typing.Optional[int],
     weight_quant_max: typing.Optional[int],
 ) -> torch.Tensor:
-    _DTYPE_TO_QVALUE_BOUNDS = {
+    _DTYPE_TO_QVALUE_BOUNDS: dict[torch.dtype, tuple[int, int]] = {
         torch.uint8: (0, 255),
         torch.int8: (-128, 127),
-        torch.int32: (-(2**31), 2**31 - 1),
+        torch.int32: ((-(2**31)), (2**31 - 1)),
     }
+
     # TODO: add an util function for converting qdtype to dtype
     _QDTYPE_TO_UNDERLYING_INT_REPR_DTYPE = {
         torch.quint8: torch.uint8,
@@ -255,10 +266,10 @@ def _dequantize_weight_decomposed(
     weight_quant_max: typing.Optional[int],
 ) -> torch.Tensor:
     # TODO: get the quant_min and quant_max from activation_post_process
-    _DTYPE_TO_QVALUE_BOUNDS = {
+    _DTYPE_TO_QVALUE_BOUNDS: dict[torch.dtype, tuple[int, int]] = {
         torch.uint8: (0, 255),
         torch.int8: (-128, 127),
-        torch.int32: (-(2**31), 2**31 - 1),
+        torch.int32: ((-(2**31)), (2**31 - 1)),
     }
     # TODO: add an util function for converting qdtype to dtype
     _QDTYPE_TO_UNDERLYING_INT_REPR_DTYPE = {
@@ -420,7 +431,7 @@ def _save_weight_qparams(
             destination[prefix + "weight_axis"] = weight_axis
 
 
-def _get_weight_qparam_keys(state_dict: typing.Dict[str, typing.Any], prefix: str):
+def _get_weight_qparam_keys(state_dict: dict[str, typing.Any], prefix: str):
     keys = ["weight_qscheme", "weight_dtype"]
     weight_qscheme = state_dict[prefix + "weight_qscheme"]
     if weight_qscheme is not None:

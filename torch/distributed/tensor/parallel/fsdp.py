@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, cast, List, Optional, Tuple
+from typing import Any, cast, Optional
 
 import torch
 import torch.distributed as dist
@@ -29,7 +29,7 @@ from torch.distributed.tensor.parallel._data_parallel_utils import (
 __all__ = ["DTensorExtensions"]
 
 
-def _get_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
+def _get_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
     assert device_mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
 
@@ -45,12 +45,12 @@ def _get_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
     return (torch.Size(offsets), tensor._local_tensor.size())
 
 
-def _get_box_for(tensor: DTensor, idx: int) -> Tuple[torch.Size, torch.Size]:
+def _get_box_for(tensor: DTensor, idx: int) -> tuple[torch.Size, torch.Size]:
     offsets, size = _get_box(tensor)
     return (torch.Size([val * idx for val in offsets]), size)
 
 
-def _get_local_box(tensor: DTensor) -> Tuple[torch.Size, torch.Size]:
+def _get_local_box(tensor: DTensor) -> tuple[torch.Size, torch.Size]:
     device_mesh = tensor.device_mesh
     coord = device_mesh.get_coordinate()
     assert coord is not None
@@ -135,9 +135,11 @@ def _rewrite_spec_if_needed(
             break
     if rewrite:
         spec = copy.deepcopy(spec)
+        # pyrefly: ignore  # missing-attribute
         for i, placement in enumerate(spec.placements):
             placement = cast(_remote_device, placement)
             if placement.rank() == rank and placement.device() != tensor.device:
+                # pyrefly: ignore  # missing-attribute
                 spec.placements[i] = _remote_device(f"rank:{rank}/{tensor.device}")
 
     return spec
@@ -163,7 +165,7 @@ def _chunk_tensor(
         )
 
         outer_local_shard = tensor.local_shards()[0]
-        shards: List[Shard] = [
+        shards: list[Shard] = [
             Shard(inner_st, copy.deepcopy(outer_local_shard.metadata))
         ]
         st_meta = copy.deepcopy(tensor.metadata())
@@ -186,7 +188,7 @@ def _chunk_tensor(
             inner_param,
             rank,
             world_size,
-            torch.cuda.device_count(),
+            torch.accelerator.device_count(),
             pg,
         )
 
@@ -237,7 +239,7 @@ def _chunk_dtensor(
         )
 
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
-    tensor = tensor.clone().detach()
+    tensor = tensor.detach().clone()
 
     # When a layer is not involved in TP, then the tensor will not be a DTensor.
     # e.g. When a layer is not sppecified in the parallelize_plan, TP will have no effect on the layer.
@@ -284,7 +286,7 @@ def _chunk_dtensor(
 
 def _pre_load_state_dict(
     tensor: torch.Tensor,
-) -> Tuple[torch.Tensor, List[Shard]]:
+) -> tuple[torch.Tensor, list[Shard]]:
     shards = cast(ShardedTensor, tensor).local_shards()
     if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
         inner_tensor = shards[0].tensor
@@ -326,14 +328,16 @@ class DTensorExtensions(FSDPExtensions):
         super().__init__()
         self.compute_stream = None
         self.device_handle = device_handle
-        # we have to use the dynamo disable this way to disable dynamo as the decorater way would
+        # we have to use the dynamo disable this way to disable dynamo as the decorator way would
         # trigger build failure with torch deploy...
-        self.post_unflatten_transform = torch._dynamo.disable(self.post_unflatten_transform)  # type: ignore[method-assign]
+        self.post_unflatten_transform = torch._dynamo.disable(  # type: ignore[method-assign]
+            self.post_unflatten_transform
+        )
 
     def pre_flatten_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, Optional[Any]]:
+    ) -> tuple[torch.Tensor, Optional[Any]]:
         return _flatten_tensor(tensor)
 
     def post_unflatten_transform(
@@ -377,7 +381,7 @@ class DTensorExtensions(FSDPExtensions):
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, List[Shard]]:
+    ) -> tuple[torch.Tensor, list[Shard]]:
         return _pre_load_state_dict(tensor)
 
     def all_gather_dtensor(

@@ -1,6 +1,6 @@
 """test_check_labels.py"""
 
-from typing import Any, List
+from typing import Any
 from unittest import main, mock, TestCase
 
 from check_labels import (
@@ -31,13 +31,14 @@ def mock_delete_all_label_err_comments(pr: "GitHubPR") -> None:
     pass
 
 
-def mock_get_comments() -> List[GitHubComment]:
+def mock_get_comments() -> list[GitHubComment]:
     return [
         # Case 1 - a non label err comment
         GitHubComment(
             body_text="mock_body_text",
             created_at="",
             author_login="",
+            author_url=None,
             author_association="",
             editor_login=None,
             database_id=1,
@@ -48,6 +49,7 @@ def mock_get_comments() -> List[GitHubComment]:
             body_text=" #" + LABEL_ERR_MSG_TITLE.replace("`", ""),
             created_at="",
             author_login=BOT_AUTHORS[1],
+            author_url=None,
             author_association="",
             editor_login=None,
             database_id=2,

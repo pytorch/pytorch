@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 
 
-REPO_ROOT = Path(__file__).parent.parent.parent
+REPO_ROOT = Path(__file__).parents[2]
 CONFIG_YML = REPO_ROOT / ".circleci" / "config.yml"
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 
@@ -43,7 +43,7 @@ def add_job(
     if workflow_name not in workflows:
         workflows[workflow_name] = {"when": "always", "jobs": []}
 
-    requires = job.get("requires", None)
+    requires = job.get("requires")
     if requires is not None:
         for requirement in requires:
             dependency = past_jobs[requirement]

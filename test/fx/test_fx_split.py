@@ -1,11 +1,26 @@
 # Owner(s): ["module: fx"]
 
+import dataclasses
 from collections import defaultdict
-from typing import Dict, List, Tuple
 
 import torch
+import torch.fx.passes.operator_support as op_support
+import torch.fx.passes.splitter_base as splitter_base
 from torch.fx.passes.split_utils import split_by_tags
 from torch.testing._internal.common_utils import TestCase
+
+
+@torch.jit.script
+@dataclasses.dataclass
+class DummyDataClass:
+    a: int
+    b: int
+    c: int
+
+
+@torch.fx.wrap
+def wrapped_add(_dataclass, y):
+    return _dataclass.c + y
 
 
 class TestFXSplit(TestCase):
@@ -39,6 +54,65 @@ class TestFXSplit(TestCase):
                 self.assertIn("name", node.meta)
                 self.assertEqual(node.meta["name"], node.name)
 
+    def test_dataclass_as_graph_entry(self):
+        """
+        Test that splitting works when the graph entry is a dataclass instance
+        and a wrapped function is called with it, resulting in a call_function
+        node with no input dependencies. This tests the edge case fixed in D81232435
+        where call_function nodes with no dependencies should be handled properly
+        in the starter_nodes() method.
+
+        Graph visualization:
+        y (input)    DummyDataClass(2,3,4) (no input deps, result as a call_function_node)
+            \              /
+             \            /
+              wrapped_add
+                  |
+              z (output)
+        """  # noqa: W605
+
+        class TestModuleWithFunctionEntry(torch.nn.Module):
+            def forward(self, y):
+                # This creates a call_function node with no input dependencies
+                dummy_data_class = DummyDataClass(2, 3, 4)
+                z = wrapped_add(dummy_data_class, y)
+                return z
+
+        mod = TestModuleWithFunctionEntry()
+        gm = torch.fx.symbolic_trace(mod)
+
+        # Create custom operator support to mark wrapped_add as supported
+        class CustomOpSupport(op_support.OperatorSupportBase):
+            def is_node_supported(self, submodules, node) -> bool:
+                return node.target == wrapped_add
+
+        # Create a simple splitter to test the edge case
+        class TestSplitter(splitter_base._SplitterBase):
+            def __init__(self, module, sample_input, operator_support):
+                settings = splitter_base._SplitterSettingBase()
+                super().__init__(module, sample_input, operator_support, settings)
+
+        # Create splitter instance - this tests the fix where call_function nodes
+        # with no input dependencies are properly handled in starter_nodes()
+        splitter = TestSplitter(
+            module=gm,
+            sample_input=[torch.randn(2, 3)],
+            operator_support=CustomOpSupport(),
+        )
+
+        # This should not raise an exception (tests the fix from D81232435)
+        # The fix allows call_function nodes with no dependencies as valid starter nodes
+        split_result = splitter()
+
+        # Verify the splitting worked correctly
+        self.assertIsNotNone(split_result)
+
+        # Test that the split module produces the same result as the original
+        test_input = torch.randn(2, 3)
+        original_result = mod(test_input)
+        split_module_result = split_result(test_input)
+        self.assertTrue(torch.equal(original_result, split_module_result))
+
 
 class TestSplitByTags(TestCase):
     class TestModule(torch.nn.Module):
@@ -63,8 +137,8 @@ class TestSplitByTags(TestCase):
 
     @staticmethod
     def trace_and_tag(
-        module: torch.nn.Module, tags: List[str]
-    ) -> Tuple[torch.fx.GraphModule, Dict[str, List[str]]]:
+        module: torch.nn.Module, tags: list[str]
+    ) -> tuple[torch.fx.GraphModule, dict[str, list[str]]]:
         """
         Test simple gm consists of nodes with tag (only show call_module nodes here):
             linear1 - tag: "red"
@@ -167,8 +241,8 @@ class TestSplitOutputType(TestCase):
 
     @staticmethod
     def trace_and_tag(
-        module: torch.nn.Module, inputs: torch.Tensor, tags: List[str]
-    ) -> Tuple[torch.fx.GraphModule, Dict[str, List[str]]]:
+        module: torch.nn.Module, inputs: torch.Tensor, tags: list[str]
+    ) -> tuple[torch.fx.GraphModule, dict[str, list[str]]]:
         """
         Test simple gm consists of nodes with tag (only show call_module nodes here):
             conv - tag: "red"
@@ -193,7 +267,9 @@ class TestSplitOutputType(TestCase):
                     relu
         """
         tag_node = defaultdict(list)
-        gm: torch.fx.GraphModule = torch.export.export(module, (inputs,)).module()
+        gm: torch.fx.GraphModule = torch.export.export(
+            module, (inputs,), strict=True
+        ).module()
         # Add tag to all nodes and build dictionary record tag to call_module nodes
         for node in gm.graph.nodes:
             if "conv" in node.name:
@@ -214,13 +290,18 @@ class TestSplitOutputType(TestCase):
 
         inputs = torch.randn((1, 3, 224, 224))
 
-        gm, tag_node = TestSplitOutputType.trace_and_tag(module, inputs, tags)
-        split_gm, orig_to_split_fqn_mapping = split_by_tags(
-            gm, tags, return_fqn_mapping=True
-        )
+        gm, _ = TestSplitOutputType.trace_and_tag(module, inputs, tags)
+        split_gm, _ = split_by_tags(gm, tags, return_fqn_mapping=True)
 
         gm_output = module(inputs)
         split_gm_output = split_gm(inputs)
 
         self.assertTrue(type(gm_output) == type(split_gm_output))
         self.assertTrue(torch.equal(gm_output, split_gm_output))
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

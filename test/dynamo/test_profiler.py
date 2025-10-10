@@ -42,7 +42,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         x, y = (torch.rand((2, 2)) for _ in range(2))
 
         with torch.profiler.profile(with_stack=False) as prof:
-            torch._dynamo.optimize("aot_eager")(fn)(x, y)
+            torch.compile(fn, backend="aot_eager")(x, y)
 
         self.assertTrue(
             any(f"{fn_name} (dynamo_timed)" in evt.name for evt in prof.events())
@@ -53,7 +53,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return x @ y + z
 
-        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True, fullgraph=True)
 
         inputs = [
             (torch.rand(a, b), torch.rand(b, c), torch.rand(a, c))
@@ -71,7 +71,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return x @ y + z
 
-        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True, fullgraph=True)
 
         inputs = (torch.rand(15, 16), torch.rand(16, 17), torch.rand(15, 17))
 
@@ -83,7 +83,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return torch.cat([x, y], dim=0) + z
 
-        opt_fn = torch._dynamo.optimize("aot_eager", dynamic=True, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager", dynamic=True, fullgraph=True)
 
         inputs = (torch.rand(4, 16), torch.rand(12, 16), torch.rand(16, 16))
 
@@ -101,7 +101,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         with TemporaryFileName() as fname:
             et.register_callback(fname)
             et.start()
-            out = opt_fn(*inputs)
+            opt_fn(*inputs)
             et.stop()
             et.unregister_callback()
 
@@ -142,7 +142,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         def fn(x, y, z):
             return torch.add(torch.sub(x, y), z)
 
-        opt_fn = torch._dynamo.optimize("aot_eager")(fn)
+        opt_fn = torch.compile(fn, backend="aot_eager")
 
         (
             x,
@@ -161,6 +161,34 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(
             any(e.name == "TorchDynamo Cache Lookup" for e in prof.events())
         )
+
+    def test_profiler_enabled_export(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = torch.sin(x)
+                if torch.autograd._profiler_enabled():
+                    return torch.cos(x)
+                else:
+                    return torch.sigmoid(x)
+
+        mod = Mod()
+
+        x = torch.randn(4)
+        opt_mod = torch._dynamo.export(mod, (x))
+
+        ref = mod(x)
+        res = opt_mod.graph_module(x)
+        self.assertEqual(ref, res)
+
+        with torch.autograd.profiler.profile():
+            ref = mod(x)
+            # Reexport because export skips guards
+            opt_mod = torch._dynamo.export(mod, (x))
+            res = opt_mod.graph_module(x)
+            self.assertEqual(ref, res)
 
     def test_profiler_dynamo_compiled_region(self):
         def fn(x, y):
@@ -181,7 +209,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
                 torch.randn(10, 15),
             )
 
-        annotations = [e.name for e in prof.events() if "Compiled" in e.name]
+        annotations = [e.name for e in prof.events() if "Torch-Compiled" in e.name]
         self.assertEqual(
             annotations,
             [

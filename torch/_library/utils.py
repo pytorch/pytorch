@@ -2,22 +2,14 @@
 import dataclasses
 import inspect
 import sys
-import warnings
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Tuple, Union
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, Literal, Optional, overload, Union
 
 import torch
 import torch.utils._pytree as pytree
+import torchgen
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
-
-
-def warn_deploy(stacklevel=3):
-    warnings.warn(
-        "Python torch.library APIs do nothing under torch::deploy (multipy). "
-        "Please instead use C++ custom operator registration APIs.",
-        RuntimeWarning,
-        stacklevel=stacklevel,
-    )
 
 
 @dataclasses.dataclass
@@ -55,7 +47,7 @@ def get_source(stacklevel: int) -> str:
     return source
 
 
-def parse_namespace(qualname: str) -> Tuple[str, str]:
+def parse_namespace(qualname: str) -> tuple[str, str]:
     splits = qualname.split("::")
     if len(splits) != 2:
         raise ValueError(
@@ -83,12 +75,15 @@ def is_builtin(op: OpOverload) -> bool:
     return op.namespace in {"aten", "prim", "prims"}
 
 
-def is_functional_schema(schema: Any) -> bool:
+def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool:
     """Check if the schema is functional.
 
     An operator is functional if:
     - it does not mutate any of its inputs
-    - it does not return a view on any of its inputs
+    - If no view are allowed
+        - it does not return a view on any of its inputs
+    - If valid views are allowed
+        - it is not a view or a view with a single input Tensor and single output Tensor
     - it has at least one return
     """
 
@@ -99,8 +94,31 @@ def is_functional_schema(schema: Any) -> bool:
         is_non_mutating_view = len(rets) > 0 and any(
             r.alias_info is not None and not r.alias_info.is_write for r in rets
         )
+        num_tensor_inputs = 0
+        num_tensor_outputs = 0
+
+        if isinstance(schema, torch.FunctionSchema):
+            for arg in schema.arguments:
+                if isinstance(arg.type, torch.TensorType):
+                    num_tensor_inputs += 1
+
+            for ret in schema.returns:
+                if isinstance(ret.type, torch.TensorType):
+                    num_tensor_outputs += 1
+
+        elif isinstance(schema, torchgen.model.FunctionSchema):
+            for argument in schema.arguments.flat_non_out:
+                if argument.type.is_tensor_like():
+                    num_tensor_inputs += 1
+
+            for ret_arg in schema.returns:
+                if ret_arg.type.is_tensor_like():
+                    num_tensor_outputs += 1
+
         if is_non_mutating_view:
-            return False
+            return allow_valid_view and (
+                num_tensor_inputs == 1 and num_tensor_outputs == 1
+            )
         if not schema.returns:
             return False
         return True
@@ -144,7 +162,7 @@ def mutates_and_returns_first_arg(op: OpOverload):
     if op.namespace != "aten":
         return False
     schema = op._schema
-    if not len(schema.returns) == 1:
+    if len(schema.returns) != 1:
         return False
     if schema.returns[0].alias_info is None:
         return False
@@ -189,8 +207,8 @@ def fill_defaults(schema, args, kwargs):
 
 
 def zip_schema(
-    schema: _C.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-) -> Iterable[Tuple[_C.Argument, Any]]:
+    schema: _C.FunctionSchema, args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> Iterable[tuple[_C.Argument, Any]]:
     """zips schema.arguments and (args, kwargs) together.
 
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
@@ -279,17 +297,17 @@ def requires_set_python_module() -> bool:
 
 def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
     assert isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode)
-    overload_types = []
     args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
-    for a in args_flattened:
-        # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
-        # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
-        # where in one case we only include tensors with the python key, and in another
-        # we include **all** tensors.
-        if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(a).has(
-            torch._C.DispatchKey.Python
-        ):
-            overload_types.append(type(a))
+    # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
+    # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
+    # where in one case we only include tensors with the python key, and in another
+    # we include **all** tensors.
+    overload_types = [
+        type(a)
+        for a in args_flattened
+        if isinstance(a, torch.Tensor)
+        and torch._C._dispatch_keys(a).has(torch._C.DispatchKey.Python)
+    ]
     # TODO: check that I got these args correct (in C++, we pass in "0000"??)
 
     return curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
@@ -332,7 +350,7 @@ def get_device_arg_index(schema: _C.FunctionSchema) -> Union[int, None]:
 
 
 def iter_tensors(
-    args: Tuple[Any], kwargs: Dict[str, Any], allowed_nesting: int = 1
+    args: tuple[Any], kwargs: dict[str, Any], allowed_nesting: int = 1
 ) -> Iterator[torch.Tensor]:
     def check(arg):
         if isinstance(arg, torch.Tensor):
@@ -350,13 +368,13 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
     """
     custom operators' outputs must not alias any inputs or other outputs.
     """
-    storages = {id(t.untyped_storage()) for t in prev if isinstance(t, torch.Tensor)}
+    storages = {t.untyped_storage()._cdata for t in prev if isinstance(t, torch.Tensor)}
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
     for tensor in iter_tensors(tuple_result, {}):
-        key = id(tensor.untyped_storage())
-        if id(tensor.untyped_storage()) in storages:
+        key = tensor.untyped_storage()._cdata
+        if tensor.untyped_storage()._cdata in storages:
             raise RuntimeError(
                 f"{name} (with implementation in {get_module()}): "
                 f"The output of this custom operator (1) must not "
@@ -370,6 +388,31 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
                 f"operator to not return y."
             )
         storages.add(key)
+
+
+def _c_check_aliasing_constraint(name, args, kwargs, result, get_module=lambda: "???"):
+    """
+    custom operators' outputs must not have any aliases
+    This version uses C++ implementation for perf.
+    Only List container is supported.
+    Tensors in Lists with not only Tensors are checked.
+    """
+    tuple_result = result
+    if not isinstance(result, tuple):
+        tuple_result = (result,)
+    if _C._any_output_is_alias_to_input_or_output(args, kwargs, tuple_result):
+        raise RuntimeError(
+            f"{name} (with implementation in {get_module()}): "
+            f"The output of this custom operator (1) must not "
+            f"also be an input to this custom operator and "
+            f"(2) may not alias any inputs to this custom operator "
+            f"or other returns. "
+            f"The most common way to trigger this error is if "
+            f"we have y = custom_op(x) and y and x are the same Tensor. "
+            f"Please instead return a clone of the offending output "
+            f"tensor(s) (e.g. return x.clone()) or refactor the custom "
+            f"operator to not return y."
+        )
 
 
 class MutationChecker:
@@ -416,7 +459,7 @@ class MutationChecker:
                     f"{self.op._name}: for argument '{info.name}': the operator's schema "
                     f"{self.op._schema} specified that "
                     f"the operator {'mutates' if info.is_write else 'does not mutate'} "
-                    f"the argument, but this seems to be emperically wrong. "
+                    f"the argument, but this seems to be empirically wrong. "
                     f"Please make the schema and operator behavior consistent. "
                     f"You can specify that an operator mutates a Tensor by "
                     f"e.g. changing its schema type from 'Tensor name' to 'Tensor(a!) name'"
@@ -465,7 +508,7 @@ def has_fake_kernel(op: torch._ops.OpOverload) -> bool:
     return False
 
 
-def mutated_args_kwargs(schema: _C.FunctionSchema) -> Tuple[List[int], List[str]]:
+def mutated_args_kwargs(schema: _C.FunctionSchema) -> tuple[list[int], list[str]]:
     idxs = []
     keys = []
     for i, info in enumerate(schema.arguments):
@@ -475,3 +518,39 @@ def mutated_args_kwargs(schema: _C.FunctionSchema) -> Tuple[List[int], List[str]
             else:
                 idxs.append(i)
     return idxs, keys
+
+
+tags_by_priority = [
+    _C.Tag.needs_exact_strides,
+    _C.Tag.needs_contiguous_strides,
+    _C.Tag.needs_fixed_stride_order,
+    _C.Tag.flexible_layout,
+]
+
+
+# Case 1: with_default=True (or omitted). Return type is guaranteed to be a Tag.
+@overload
+def get_layout_constraint_tag(
+    fn: Any, *, with_default: Literal[True] = True
+) -> _C.Tag: ...
+
+
+# Case 2: with_default=False. Return type can be a Tag or None.
+@overload
+def get_layout_constraint_tag(
+    fn: Any, *, with_default: Literal[False]
+) -> Optional[_C.Tag]: ...
+
+
+def get_layout_constraint_tag(fn, *, with_default=True):
+    for tag in tags_by_priority:
+        if tag in fn.tags:
+            return tag
+    if with_default:
+        if is_builtin(fn):
+            return _C.Tag.flexible_layout
+        import torch._functorch
+        from torch._functorch import config
+
+        return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
+    return None

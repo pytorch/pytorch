@@ -922,7 +922,6 @@ class TestTypePromotion(TestCase):
     def test_sparse_div_promotion(self, device, dtype):
         for op in (torch.div, torch.true_divide):
             dividend = torch.randn(5, device=device).to(dtype)
-            divisor = 2
             dividend_sparse = dividend.to_sparse()
             casting_result = dividend.to(torch.get_default_dtype()) / 2
             self.assertEqual(casting_result, op(dividend_sparse, 2).to_dense())
@@ -1047,13 +1046,13 @@ class TestTypePromotion(TestCase):
                     and not (out_dtype.is_floating_point or out_dtype.is_complex))
                     or ((x_dtype.is_complex or y_dtype.is_complex) and not out_dtype.is_complex)):
                 # This combinations do not support type conversion to a different class out type
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(TypeError):
                     torch.cat([x, y], out=out)
             else:
                 torch.cat([x, y], out=out)
                 self.assertEqual(out, expected_out, exact_dtype=True)
 
-    # Verfies that unary ops require matching out types
+    # Verifies that unary ops require matching out types
     @onlyNativeDeviceTypes
     @dtypes(*itertools.product((torch.int64,
                                 torch.float32, torch.float64,

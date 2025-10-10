@@ -6,7 +6,9 @@
 #include <c10/util/llvmMathExtras.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
+C10_DIAGNOSTIC_POP()
 #endif
 
 namespace at::native {
@@ -148,7 +150,7 @@ template <typename T>
 inline void transpose(int64_t M, int64_t N, const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
   for (int64_t j = 0; j < N; j++) {
     for (int64_t i = 0; i < M; i++) {
-      dst[j * ld_dst + i] = src[i * ld_src + j];
+      dst[j * ld_dst + i] = c10::load(&(src[i * ld_src + j]));
     }
   }
 }
@@ -164,6 +166,12 @@ template <>
 inline void transpose<uint16_t>(int64_t M, int64_t N, const uint16_t* src, int64_t ld_src, uint16_t* dst, int64_t ld_dst) {
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
   fbgemm::transpose_simd<uint16_t>(M, N, src, ld_src, dst, ld_dst);
+}
+
+template <>
+inline void transpose<uint8_t>(int64_t M, int64_t N, const uint8_t* src, int64_t ld_src, uint8_t* dst, int64_t ld_dst) {
+  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+  fbgemm::transpose_simd<uint8_t>(M, N, src, ld_src, dst, ld_dst);
 }
 #endif
 

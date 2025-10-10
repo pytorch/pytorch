@@ -1,4 +1,34 @@
-from typing import Any, Dict, List, Optional, Tuple
+"""trace_wrapped(*args, fn) is equivalent to fn(*args), but with a twist:
+if you make_fx trace through this call, we will not actually trace into fn; instead,
+we will directly insert it as a call_function to fn in the graph.
+(Unlike make_fx, Dynamo WILL inline into fn.)
+You can think of this as a one off allow_in_graph equivalent for proxy tensor tracing.
+
+Because proxy tensor tracing does not actually run the function, there are
+requirements on the behavior of fn. We are still figuring it out, but here is the current state:
+
+1) fn SHOULD only take a single argument, which must be a tensor
+2) fn MUST return a new tensor with the same metadata as the original tensor
+   (e.g., zeros_like(input) is a permissible implementation of fn).
+   This is verified via an extra assert that is inserted into the traced graph.
+3) fn MAY have side effects, but it MAY NOT perform metadata mutation on other tensors
+   participating in proxy tensor tracing (it MAY mutate other tensors, it MAY mutate Python state)
+These requirements stem from the requirement that we need to continue performing proxy tensor tracing,
+which assumes accurate fake tensor metadata, without actually running fn.
+In the future, we may allow for a "meta" function associated with fn to allow for more interesting input-output patterns.
+
+Note that tensors / Python state are allowed to be mutated.
+This is relaxed constraint is not always sound, but it is sound for backward tracing with fake
+tensors as it takes place in AOTAutograd, as the backward pass is guaranteed not to depend on concrete
+tensor values (via fake tensor) or Python state (because the autograd engine doesn't depend on Python).
+
+The intended use case for this function is to allow AOTAutograd to defer complex
+backward hooks to compiled autograd. AOTAutograd performs a make_fx trace which preserves
+the function call as is in the graph, and only when we Dynamo through the backward graph in
+compiled autograd do we inline into the function.
+"""
+
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -19,88 +49,58 @@ Tensor = torch.Tensor
 __all__ = ["trace_wrapped"]
 
 
-# trace_wrapped(*args, fn) is equivalent to fn(*args), but with a twist:
-# if you make_fx trace through this call, we will not actually trace into fn; instead,
-# we will directly insert it as a call_function to fn in the graph.
-# (Unlike make_fx, Dynamo WILL inline into fn.)
-# You can think of this as a one off allow_in_graph equivalent for proxy tensor tracing.
-#
-# Because proxy tensor tracing does not actually run the function, there are
-# requirements on the behavior of fn. We are still figuring it out, but here is the current state:
-#
-# 1) fn SHOULD only take a single argument, which must be a tensor
-# 2) fn MUST return a new tensor with the same metadata as the original tensor
-#    (e.g., zeros_like(input) is a permissible implementation of fn).
-#    This is verified via an extra assert that is inserted into the traced graph.
-# 3) fn MAY have side effects, but it MAY NOT perform metadata mutation on other tensors
-#    participating in proxy tensor tracing (it MAY mutate other tensors, it MAY mutate Python state)
-# These requirements stem from the requirement that we need to continue performing proxy tensor tracing,
-# which assumes accurate fake tensor metadata, without actually running fn.
-# In the future, we may allow for a "meta" function associated with fn to allow for more interesting input-output patterns.
-#
-# Note that tensors / Python state are allowed to be mutated.
-# This is relaxed constraint is not always sound, but it is sound for backward tracing with fake
-# tensors as it takes place in AOTAutograd, as the backward pass is guaranteed not to depend on concrete
-# tensor values (via fake tensor) or Python state (because the autograd engine doesn't depend on Python).
-#
-# The intended use case for this function is to allow AOTAutograd to defer complex
-# backward hooks to compiled autograd. AOTAutograd performs a make_fx trace which preserves
-# the function call as is in the graph, and only when we Dynamo through the backward graph in
-# compiled autograd do we inline into the function.
+@torch.library.custom_op("flex_lib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
+def zeros_and_scatter(
+    shape: list[int],
+    indices: list[Tensor],
+    vals: Tensor,
+) -> Tensor:
+    """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
+    grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
+    return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
 
-if not torch._running_with_deploy():
-    # torch.library.custom_op does not work with torch.deploy/multipy
+@zeros_and_scatter.register_fake  # type: ignore[misc]
+def _(
+    shape: list[int],
+    indices: list[Tensor],
+    vals: Tensor,
+) -> Tensor:
+    return vals.new_empty(shape)
 
-    @torch.library.custom_op("FlexAttentionLib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
-    def zeros_and_scatter(
-        shape: List[int],
-        indices: List[Tensor],
-        vals: Tensor,
-    ) -> Tensor:
-        """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
-        grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
-        return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
-    @zeros_and_scatter.register_fake  # type: ignore[misc]
-    def _(
-        shape: List[int],
-        indices: List[Tensor],
-        vals: Tensor,
-    ) -> Tensor:
-        return vals.new_empty(shape)
+@zeros_and_scatter.register_vmap  # type: ignore[misc]
+def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
+    """The batching rule is special in that it returns a tensor that is not batched"""
+    indices_indims = indims[1]
+    expanded_indices = []
+    for idx, idx_indim in zip(indices, indices_indims):
+        # The index is not a being batched, we should unsqueeze and expand to val
+        if idx_indim is None:
+            expanded_indices.append(idx.expand(value.shape))
+        else:
+            # the index is being part of the vmap batch, it should be the same size as val
+            assert idx.shape == value.shape
+            expanded_indices.append(idx)
 
-    @zeros_and_scatter.register_vmap  # type: ignore[misc]
-    def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
-        """The batching rule is special in that it returns a tensor that is not batched"""
-        indices_indims = indims[1]
-        expanded_indices = []
-        for idx, idx_indim in zip(indices, indices_indims):
-            # The index is not a being batched, we should unsqueeze and expand to val
-            if idx_indim is None:
-                expanded_indices.append(idx.expand(value.shape))
-            else:
-                # the index is being part of the vmap batch, it should be the same size as val
-                assert idx.shape == value.shape
-                expanded_indices.append(idx)
-
-        out = torch.ops.FlexAttentionLib.zeros_and_scatter(
-            shape,
-            expanded_indices,
-            value,
-        )
-        return out, None
+    out = torch.ops.flex_lib.zeros_and_scatter(
+        shape,
+        expanded_indices,
+        value,
+    )
+    return out, None
 
 
 class ModIndex(torch.autograd.Function):
     generate_vmap_rule = True
 
     @staticmethod
-    def forward(x: Tensor, indices: List[Tensor]) -> Tensor:
+    # pyrefly: ignore  # bad-override
+    def forward(x: Tensor, indices: list[Tensor]) -> Tensor:
         return torch.ops.aten.index(x, indices)
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
+    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         x, indices = inputs
         ctx.save_for_backward(*indices)
         ctx.input_shape = x.shape
@@ -109,13 +109,18 @@ class ModIndex(torch.autograd.Function):
     def backward(ctx, gradOut):  # type: ignore[no-untyped-def]
         indices = ctx.saved_tensors
         return (
-            torch.ops.FlexAttentionLib.zeros_and_scatter(
+            torch.ops.flex_lib.zeros_and_scatter(
                 ctx.input_shape,
                 indices,
                 gradOut,
             ),
             None,
         )
+
+    @classmethod
+    @torch._export.wrappers.allow_in_pre_dispatch_graph
+    def apply(cls, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return super().apply(*args, **kwargs)
 
 
 mod_index = ModIndex.apply
@@ -131,9 +136,9 @@ class TransformGetItemToIndex(TorchFunctionMode):
     def __torch_function__(
         self,
         func: OpOverload,
-        types: Tuple[torch._C._TensorMeta, ...],
-        args: Tuple[object, ...] = (),
-        kwargs: Optional[Dict[str, object]] = None,
+        types: tuple[torch._C._TensorMeta, ...],
+        args: tuple[object, ...] = (),
+        kwargs: Optional[dict[str, object]] = None,
     ) -> object:
         if func == torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])
@@ -161,8 +166,8 @@ _trace_wrapped_op = TraceWrapped()
 
 def _assert_meta(
     grad: torch.Tensor,
-    size: Tuple[int, ...],
-    stride: Tuple[int, ...],
+    size: tuple[int, ...],
+    stride: tuple[int, ...],
     dtype: torch.dtype,
 ) -> torch.Tensor:
     assert grad.size() == size, "size mismatch"
@@ -234,3 +239,12 @@ def _trace_wrapped_functionalized(ctx: Any, *args: Any, **kwargs: Any) -> Any:
     unwrapped_args = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
         return ctx.wrap_tensors(_trace_wrapped_op(*unwrapped_args, **kwargs))
+
+
+def autograd_function_backward_rewritten(original_backward: Any) -> Any:
+    def new_backward(ctx: Any, *grads: Any) -> Any:
+        # pyrefly: ignore  # bad-assignment
+        grads = [g.contiguous() for g in grads]
+        return original_backward(ctx, *grads)
+
+    return new_backward

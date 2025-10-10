@@ -11,8 +11,8 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from functools import wraps
-from typing import Callable, DefaultDict, Dict, List, Optional, Set
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -28,6 +28,14 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 
+from .descriptors import (
+    AOTInput,
+    AOTOutput,
+    InputMutationAOTOutput,
+    IntermediateBaseAOTOutput,
+    PlainAOTOutput,
+    TangentAOTInput,
+)
 from .functional_utils import (
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,
@@ -36,18 +44,19 @@ from .functional_utils import (
     has_metadata_mutation,
     MetadataKey,
     to_fun,
+    ViewMetaSequence,
     was_inductor_storage_resized,
 )
 from .schemas import (
-    FunctionalTensorMetadataEq,
     InputAliasInfo,
+    MemoryFormatMeta,
     MutationType,
     OutputAliasInfo,
     OutputType,
     ViewAndMutationMeta,
 )
 from .subclass_utils import create_subclass_meta
-from .utils import _get_autocast_states, KNOWN_TYPES, strict_zip
+from .utils import _get_autocast_states, KNOWN_TYPES, simple_wraps, strict_zip
 
 
 zip = strict_zip
@@ -60,7 +69,7 @@ static_input_logger = getArtifactLogger("torch._dynamo", "cudagraph_static_input
 # We assume tangents memory format to be similar to corresponding output's memory_format.
 # The idea is that we are technically making a guess about the strides of our tangents,
 # while we trace out the joint.
-# If runtime specfied tangents will not have the same memory format as predicted traced tangents,
+# If runtime specified tangents will not have the same memory format as predicted traced tangents,
 # we coerce them at runtime to traced tangents memory format.
 
 
@@ -73,16 +82,18 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
 
     out = x.detach()
 
-    suggest_memory_format = torch._prims_common.suggest_memory_format
     is_subclass = is_traceable_wrapper_subclass(out)
 
-    memory_format = suggest_memory_format(out)
+    memory_format = MemoryFormatMeta.from_tensor(out)
 
-    was = out
-    out = out.contiguous(memory_format=memory_format)
-    updated = out is not was
+    # pyrefly: ignore  # missing-attribute
+    if memory_format.memory_format is not None:
+        was = out
+        # pyrefly: ignore  # bad-argument-type
+        out = out.contiguous(memory_format=memory_format.memory_format)
+        updated = was is not out
 
-    # For subclass we keep memory format of outer strides at the beggining of the list
+    # For subclass we keep memory format of outer strides at the beginning of the list
     out_memory_format = [memory_format] if is_subclass else memory_format
 
     # Note [Tangents memory format, Part 2]
@@ -108,6 +119,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
         out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
 
     if is_subclass:
+        # pyrefly: ignore  # missing-attribute
         attrs = out.__tensor_flatten__()[0]
 
         for attr in attrs:
@@ -117,6 +129,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
                 new_elem_memory_format,
                 elem_updated,
             ) = coerce_tangent_and_suggest_memory_format(elem)
+            # pyrefly: ignore  # missing-attribute
             out_memory_format.append(new_elem_memory_format)
             if elem_updated:
                 setattr(out, attr, new_elem)
@@ -146,17 +159,18 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
 def run_functionalized_fw_and_collect_metadata(
     f,
     *,
+    flat_args_descs: list[AOTInput],
     keep_input_mutations: bool,
     # TODO: refactor to kill this flag
     is_train: bool = False,
     # Note: this is guaranteed to be set when running under dynamo
-    static_input_indices: Optional[List[int]] = None,
+    static_input_indices: Optional[list[int]] = None,
     pre_dispatch: bool = False,
     # is_export is technically only needed to avoid using functionalization V2
     # during analysis
     is_export: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
-    memo: Dict[Tensor, Tensor] = {}
+    memo: dict[Tensor, Tensor] = {}
 
     def _to_fun(t):
         if isinstance(t, Tensor):
@@ -168,13 +182,13 @@ def run_functionalized_fw_and_collect_metadata(
         else:
             return t
 
-    @wraps(f)
+    @simple_wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
 
-        input_info: List[InputAliasInfo] = []
-        output_info: List[OutputAliasInfo] = []
+        input_info: list[InputAliasInfo] = []
+        output_info: list[OutputAliasInfo] = []
 
         prior_grad_enabled = torch.is_grad_enabled()
         prior_autocast_states = _get_autocast_states()
@@ -190,11 +204,29 @@ def run_functionalized_fw_and_collect_metadata(
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
+            # pyrefly: ignore  # unbound-name
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         with disable_above, mode, suppress_pending:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
+            flat_f_args_descs = flat_args_descs
             flat_f_outs = f(*flat_f_args)
+
+            # Assert that f does NOT have an AOTOutputs in it, easy mistake to
+            # make!  You need to drop the second output before calling this
+            # function
+            assert not pytree.tree_any(
+                lambda x: isinstance(x, AOTOutput), flat_f_outs
+            ), (
+                f"{f} returned AOTOutput when it shouldn't. Did you remember to wrap the "
+                "function with without_output_descs before passing it here?"
+            )
+
+            # NB: this is just to setup the input descriptors, we will
+            # recreate these descriptors (with the same convention!) when we
+            # actually do the trace
+            flat_f_outs_descs = [PlainAOTOutput(i) for i in range(len(flat_f_outs))]
+
             # We didn't do any tracing, so we don't need to process the
             # unbacked symbols, they will just disappear into the ether.
             # Also, prevent memoization from applying.
@@ -218,16 +250,6 @@ def run_functionalized_fw_and_collect_metadata(
             # tensors. This is a problem as the inner tensor stride change may not be reflected
             # correctly in the outer tensor, so disallow this for now.
             mutates_data = has_data_mutation(f_arg)
-            if (
-                mutates_data
-                and not arg.is_contiguous()
-                and is_traceable_wrapper_subclass(arg)
-            ):
-                raise RuntimeError(
-                    "Mutations on non-contiguous inputs are currently not allowed on "
-                    "tensor subclasses"
-                )
-
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
@@ -285,15 +307,16 @@ def run_functionalized_fw_and_collect_metadata(
         out_tensor_ids = {id(o): i for i, o in enumerate(flat_f_outs)}
 
         # Keep track of which outputs alias other outputs
-        out_tensor_alias_counts: DefaultDict = collections.defaultdict(int)
+        out_tensor_alias_counts: collections.defaultdict = collections.defaultdict(int)
         # This tells us, for a given group of outputs that alias each other,
         # whether they e.g. all came from an unbind call
-        num_aliased_tensors_that_are_multi_output_views: DefaultDict = (
+        num_aliased_tensors_that_are_multi_output_views: collections.defaultdict = (
             collections.defaultdict(int)
         )
 
-        out_storage_to_metadata_key_to_tensors: DefaultDict[
-            Optional[StorageWeakRef], DefaultDict[MetadataKey, Set[torch.Tensor]]
+        out_storage_to_metadata_key_to_tensors: collections.defaultdict[
+            Optional[StorageWeakRef],
+            collections.defaultdict[MetadataKey, set[torch.Tensor]],
         ] = collections.defaultdict(lambda: collections.defaultdict(set))
 
         curr_storage = None
@@ -392,8 +415,9 @@ def run_functionalized_fw_and_collect_metadata(
                     ].add(o)
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
-        intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
-        intermediate_bases: List[torch.Tensor] = []
+        intermediate_base_tensor_id_to_output_idx: dict[int, int] = {}
+        intermediate_bases: list[torch.Tensor] = []
+        intermediate_bases_descs: list[AOTInput] = []
         # Why Do We Care If Storage Changed?
         # It's important to understand the implications of storage changes in complex scenarios. Take this example:
         #
@@ -418,7 +442,7 @@ def run_functionalized_fw_and_collect_metadata(
         # the autograd engine mistakenly assumes that 'x' and 'out' are aliased, treating 'x' as 'out._base'.
         # This misinterpretation leads to an 'alias_of_input' flag, causing an unnecessary as_strided() call to be generated,
         # which could lead to issues later in the code.
-        for o in flat_f_outs:
+        for o, desc in zip(flat_f_outs, flat_f_outs_descs):
             functional_tensor_storage_changed = isinstance(
                 o, FunctionalTensor
             ) and torch._functionalize_was_storage_changed(  # type: ignore[attr-defined]
@@ -473,6 +497,7 @@ def run_functionalized_fw_and_collect_metadata(
                 curr_storage in inp_storage_refs
                 and not functional_tensor_storage_changed
             ):
+                # pyrefly: ignore  # index-error
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 num_aliased_outs = out_tensor_alias_counts[curr_storage]
@@ -579,10 +604,18 @@ from a multi-output view call"
                             output_type = (
                                 OutputType.alias_of_intermediate_save_as_output
                             )
-                            intermediate_base_tensor_id_to_output_idx[
-                                id(o._base)
-                            ] = new_out_idx
+                            intermediate_base_tensor_id_to_output_idx[id(o._base)] = (
+                                new_out_idx
+                            )
                             intermediate_bases.append(o._base)
+                            # NB: The desc we picked here is guaranteed to be
+                            # synchronized with the one in
+                            # graph_capture_wrappers.py because we
+                            # SPECIFICALLY notated this output as
+                            # alias_of_intermediate_save_as_output
+                            intermediate_bases_descs.append(
+                                TangentAOTInput(IntermediateBaseAOTOutput(desc))
+                            )
             elif (
                 # See https://github.com/pytorch/pytorch/issues/100348 for this case.
                 # This protects against the specific case where a user fn returns (output, output.detach())
@@ -591,7 +624,7 @@ from a multi-output view call"
                 and not o.requires_grad
             ):
                 # In theory we could use any of these tensors to regenerate the aliased outputs from,
-                # since they all alias each other and have identical metatadata
+                # since they all alias each other and have identical metadata
                 out_alias = outs_with_identical_metadata_that_require_grad[0]
                 existing_out_idx = out_tensor_ids[id(out_alias)]
                 output_type = OutputType.alias_of_intermediate_base_is_user_output
@@ -614,7 +647,7 @@ from a multi-output view call"
             #
             # The FunctionalTensor will be saved if one of the 2 conditions below
             # is true:
-            functional_tensor = None
+            view_meta_sequence = None
             if (
                 # 1. If the output_type is either of:
                 #    (i) alias_of_intermediate;
@@ -646,7 +679,7 @@ from a multi-output view call"
                 and not input_info[base_idx].mutates_metadata
             ):
                 if isinstance(o, FunctionalTensor):
-                    functional_tensor = FunctionalTensorMetadataEq(o.elem)
+                    view_meta_sequence = ViewMetaSequence(o)
 
             out_info = OutputAliasInfo(
                 output_type=output_type,
@@ -654,7 +687,7 @@ from a multi-output view call"
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
-                functional_tensor=functional_tensor,
+                view_meta_sequence=view_meta_sequence,
             )
             output_info.append(out_info)
 
@@ -671,16 +704,70 @@ from a multi-output view call"
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.
         # Anything that aliases (inputs returned in the fw due to metadata mutations, or outputs that alias inputs/intermediates)
         # are *regenerated* later, and not used directly in the autograd graph
-        f_input_tangents = [
-            inp
-            for inp, info in zip(flat_f_args, input_info)
+        def _plain_fake_tensor_like_subclass(x):
+            # pyrefly: ignore  # bad-context-manager
+            with detect_fake_mode():
+                return torch.empty(
+                    x.shape, dtype=x.dtype, device=x.device, layout=x.layout
+                )
+
+        def _is_subclass_mutated_input_tangent_always_subclass(inp):
+            return (
+                isinstance(inp, torch.nested._internal.nested_tensor.NestedTensor)
+                or torch._functorch.config.disable_guess_zero_tangent_for_mutated_input_subclass
+            )
+
+        f_input_tangents_pairs = [
+            # Note: [AOTAutograd Tangent Subclassness for mutated inputs]
+            # Generally when creating tangents to trace with, we assume that tangents will have
+            # the same subclass-ness as their forward outs
+            # however: for tangents that correspond to input mutations, in practice it is more likely
+            # that these tangents will be plain tensors of zeros at runtime, so we tweak our guess
+            # to assume that these tangents should always be plaint tensors.
+            # Example:
+            #  def f(x):
+            #      x.mul_(2)
+            #      return x + 1
+            #  out = f(x)
+            #  out.sum().backward()
+            # In the above code, we will have a tangent "x_updated_tangent",
+            # which will be a plain tensor of zeros, *unless* x is used in some compute after executing f
+            #
+            # However, there are exceptions to this logic. If a view is created from mutated input and is used in backward,
+            # The tangent for this subclass input will be a subclass tensor.
+            # Example:
+            #  def f(a, b):
+            #      a.mul_(2)
+            #      b.mul_(3)
+            #      return b.view(b.shape), a + b
+            # a_out, b_out = f(..., Subclass)
+            # (a * b).sum().backward()
+            #
+            # We can not deduce it easily now, so introducing a debug config to be able to turn off this for specific cases.
+            # NJT guarantees to have its tangent as NJT, because it has dedicated integration in Autograd
+            # See torch/csrc/autograd/python_function.cpp, use_zeros_like.
+            (
+                (
+                    _plain_fake_tensor_like_subclass(inp)
+                    if is_traceable_wrapper_subclass(inp)
+                    and not _is_subclass_mutated_input_tangent_always_subclass(inp)
+                    else inp
+                ),
+                TangentAOTInput(InputMutationAOTOutput(inp_desc)),
+            )
+            for inp, inp_desc, info in zip(flat_f_args, flat_f_args_descs, input_info)
             if info.mutation_type == MutationType.MUTATED_OUT_GRAPH
             and info.mutates_data
             and info.requires_grad
         ]
-        f_output_tangents = [
-            o
-            for o, info in zip(flat_f_outs, output_info)
+        f_input_tangents, f_input_tangents_descs = (
+            [x[0] for x in f_input_tangents_pairs],
+            [x[1] for x in f_input_tangents_pairs],
+        )
+
+        f_output_tangents_pairs = [
+            (o, TangentAOTInput(desc))
+            for o, info, desc in zip(flat_f_outs, output_info, flat_f_outs_descs)
             if info.output_type
             in [
                 OutputType.non_alias,
@@ -690,19 +777,30 @@ from a multi-output view call"
             and issubclass(info.raw_type, torch.Tensor)
             and info.requires_grad
         ]
+        f_output_tangents, f_output_tangents_descs = (
+            [x[0] for x in f_output_tangents_pairs],
+            [x[1] for x in f_output_tangents_pairs],
+        )
+
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
+        f_tangents_descs = (
+            f_input_tangents_descs + f_output_tangents_descs + intermediate_bases_descs
+        )
+
+        # TODO: I'm pretty sure you don't need a tree_map here
         traced_tangents = pytree.tree_map(from_fun, f_tangents)
         traced_tangents = pytree.tree_map(
             view_avoid_dupes_with_primals, traced_tangents
         )
-
-        output_tangents_start_idx = len(f_input_tangents)
-        output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)
         traced_tangents = [
             coerce_tangent_and_suggest_memory_format(tt)[0]
             for i, tt in enumerate(traced_tangents)
         ]
+        # NB: update this if the maps above ever change structure.
+        # Also, it might be helpful to add coercion information to the tangent desc!
+        traced_tangents_descs = f_tangents_descs
+
         nonlocal static_input_indices
         static_input_indices = static_input_indices or []
         if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
@@ -763,6 +861,7 @@ from a multi-output view call"
             num_intermediate_bases=len(intermediate_bases),
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
+            traced_tangents_descs=traced_tangents_descs,
             subclass_inp_meta=create_subclass_meta(flat_args),
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(

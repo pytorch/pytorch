@@ -331,8 +331,7 @@ def gen_view_funcs(
             fname,
             lambda: {
                 "generated_comment": "@"
-                + f"generated from {fm.template_dir_for_comments()}/"
-                + fname,
+                + f"generated from {fm.template_dir_for_comments()}/{fname}",
                 "view_func_declarations": declarations,
                 "view_func_definitions": definitions,
                 "ops_headers": ops_headers,

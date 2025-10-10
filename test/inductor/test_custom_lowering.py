@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 from functools import partial
+from unittest import skipIf
 
 import torch
 from torch._inductor.ir import Pointwise
@@ -139,7 +140,26 @@ class TestCustomLowering(InductorTestCase):
             torch.ops.test_inductor_ops.add_custom, type_promotion_kind=None
         )(add_custom_lowering)
 
+    def test_register_lowering_custom_dict(self):
+        custom_lowering_dict = {}
+
+        from torch._inductor.lowering import register_lowering
+
+        @torch.library.custom_op("helion_test::foo", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x
+
+        @register_lowering(
+            torch.ops.helion_test.foo, lowering_dict=custom_lowering_dict
+        )
+        def foo_lowering(x):
+            return x
+
+        assert torch.ops.helion_test.foo in custom_lowering_dict
+        assert torch.ops.helion_test.foo not in torch._inductor.lowering.lowerings
+
     @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_jagged_to_padded_dense_sanity_cuda(self):
         def fn(inp, offsets, max_seq_len):
             return torch.ops.test_inductor_ops.jagged_to_padded_dense(
@@ -165,6 +185,7 @@ class TestCustomLowering(InductorTestCase):
         )
 
     @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_jagged_to_padded_dense_zero_size(self):
         # Previously, the masking was being completely stripped for the
         # masked load of the input value. That would lead to an IMA
@@ -188,6 +209,7 @@ class TestCustomLowering(InductorTestCase):
     @requires_gpu()
     @skipIfRocm
     @skipIfXpu
+    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_tanh_approx(self):
         def fn(inp):
             return torch.ops.test_inductor_ops.tanh_approx(inp)
@@ -202,6 +224,7 @@ class TestCustomLowering(InductorTestCase):
     @requires_gpu()
     @skipIfRocm
     @skipIfXpu
+    @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_multi_inp_asm(self):
         def fn(a, b):
             return torch.ops.test_inductor_ops.add_custom(a, b)

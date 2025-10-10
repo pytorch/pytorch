@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/Export.h>
 #include <memory>
 #include <ostream>

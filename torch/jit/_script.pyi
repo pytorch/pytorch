@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="type-arg"
-from typing import Any, Callable, NamedTuple, overload, TypeVar
-from typing_extensions import Never, TypeAlias
+from collections.abc import Callable
+from typing import Any, NamedTuple, overload, TypeAlias, TypeVar
+from typing_extensions import Never
 
 from _typeshed import Incomplete
 
@@ -195,7 +196,7 @@ def script(
     example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> Never: ...
 @overload
-def script(  # type: ignore[misc]
+def script(
     obj: dict,
     optimize: bool | None = None,
     _frames_up: int = 0,
@@ -203,7 +204,7 @@ def script(  # type: ignore[misc]
     example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> torch.ScriptDict: ...
 @overload
-def script(  # type: ignore[misc]
+def script(
     obj: list,
     optimize: bool | None = None,
     _frames_up: int = 0,
@@ -211,7 +212,7 @@ def script(  # type: ignore[misc]
     example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> torch.ScriptList: ...
 @overload
-def script(  # type: ignore[misc]
+def script(  # type: ignore[overload-overlap]
     obj: Module,
     optimize: bool | None = None,
     _frames_up: int = 0,
@@ -219,7 +220,7 @@ def script(  # type: ignore[misc]
     example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> RecursiveScriptModule: ...
 @overload
-def script(  # type: ignore[misc]
+def script(  # type: ignore[overload-overlap]
     obj: _ClassVar,
     optimize: bool | None = None,
     _frames_up: int = 0,
@@ -227,7 +228,7 @@ def script(  # type: ignore[misc]
     example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> _ClassVar: ...
 @overload
-def script(  # type: ignore[misc]
+def script(
     obj: Callable,
     optimize: bool | None = None,
     _frames_up: int = 0,

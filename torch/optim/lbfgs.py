@@ -4,7 +4,7 @@ from typing import Optional, Union
 import torch
 from torch import Tensor
 
-from .optimizer import Optimizer, ParamsT
+from .optimizer import _to_scalar, Optimizer, ParamsT
 
 
 __all__ = ["LBFGS"]
@@ -113,11 +113,16 @@ def _strong_wolfe(
 
         # compute new trial value
         t = _cubic_interpolate(
+            # pyrefly: ignore  # index-error
             bracket[0],
+            # pyrefly: ignore  # unbound-name
             bracket_f[0],
             bracket_gtd[0],  # type: ignore[possibly-undefined]
+            # pyrefly: ignore  # index-error
             bracket[1],
+            # pyrefly: ignore  # unbound-name
             bracket_f[1],
+            # pyrefly: ignore  # unbound-name
             bracket_gtd[1],
         )
 
@@ -128,14 +133,20 @@ def _strong_wolfe(
         #   + `t` is at one of the boundary,
         # we will move `t` to a position which is `0.1 * len(bracket)`
         # away from the nearest boundary point.
+        # pyrefly: ignore  # unbound-name
         eps = 0.1 * (max(bracket) - min(bracket))
+        # pyrefly: ignore  # unbound-name
         if min(max(bracket) - t, t - min(bracket)) < eps:
             # interpolation close to boundary
+            # pyrefly: ignore  # unbound-name
             if insuf_progress or t >= max(bracket) or t <= min(bracket):
                 # evaluate at 0.1 away from boundary
+                # pyrefly: ignore  # unbound-name
                 if abs(t - max(bracket)) < abs(t - min(bracket)):
+                    # pyrefly: ignore  # unbound-name
                     t = max(bracket) - eps
                 else:
+                    # pyrefly: ignore  # unbound-name
                     t = min(bracket) + eps
                 insuf_progress = False
             else:
@@ -149,32 +160,45 @@ def _strong_wolfe(
         gtd_new = g_new.dot(d)
         ls_iter += 1
 
+        # pyrefly: ignore  # unbound-name
         if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
+            # pyrefly: ignore  # unsupported-operation
             bracket[high_pos] = t
+            # pyrefly: ignore  # unbound-name
             bracket_f[high_pos] = f_new
             bracket_g[high_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
+            # pyrefly: ignore  # unbound-name
             bracket_gtd[high_pos] = gtd_new
+            # pyrefly: ignore  # unbound-name
             low_pos, high_pos = (0, 1) if bracket_f[0] <= bracket_f[1] else (1, 0)
         else:
             if abs(gtd_new) <= -c2 * gtd:
                 # Wolfe conditions satisfied
                 done = True
+            # pyrefly: ignore  # index-error
             elif gtd_new * (bracket[high_pos] - bracket[low_pos]) >= 0:
                 # old high becomes new low
+                # pyrefly: ignore  # unsupported-operation
                 bracket[high_pos] = bracket[low_pos]
+                # pyrefly: ignore  # unbound-name
                 bracket_f[high_pos] = bracket_f[low_pos]
                 bracket_g[high_pos] = bracket_g[low_pos]  # type: ignore[possibly-undefined]
+                # pyrefly: ignore  # unbound-name
                 bracket_gtd[high_pos] = bracket_gtd[low_pos]
 
             # new point becomes new low
+            # pyrefly: ignore  # unsupported-operation
             bracket[low_pos] = t
+            # pyrefly: ignore  # unbound-name
             bracket_f[low_pos] = f_new
             bracket_g[low_pos] = g_new.clone(memory_format=torch.contiguous_format)  # type: ignore[possibly-undefined]
+            # pyrefly: ignore  # unbound-name
             bracket_gtd[low_pos] = gtd_new
 
     # return stuff
     t = bracket[low_pos]  # type: ignore[possibly-undefined]
+    # pyrefly: ignore  # unbound-name
     f_new = bracket_f[low_pos]
     g_new = bracket_g[low_pos]  # type: ignore[possibly-undefined]
     return f_new, g_new, t, ls_func_evals
@@ -201,17 +225,17 @@ class LBFGS(Optimizer):
 
     Args:
         params (iterable): iterable of parameters to optimize. Parameters must be real.
-        lr (float): learning rate (default: 1)
-        max_iter (int): maximal number of iterations per optimization step
+        lr (float, optional): learning rate (default: 1)
+        max_iter (int, optional): maximal number of iterations per optimization step
             (default: 20)
-        max_eval (int): maximal number of function evaluations per optimization
+        max_eval (int, optional): maximal number of function evaluations per optimization
             step (default: max_iter * 1.25).
-        tolerance_grad (float): termination tolerance on first order optimality
+        tolerance_grad (float, optional): termination tolerance on first order optimality
             (default: 1e-7).
-        tolerance_change (float): termination tolerance on function
+        tolerance_change (float, optional): termination tolerance on function
             value/parameter changes (default: 1e-9).
-        history_size (int): update history size (default: 100).
-        line_search_fn (str): either 'strong_wolfe' or None (default: None).
+        history_size (int, optional): update history size (default: 100).
+        line_search_fn (str, optional): either 'strong_wolfe' or None (default: None).
     """
 
     def __init__(
@@ -231,20 +255,20 @@ class LBFGS(Optimizer):
             raise ValueError(f"Invalid learning rate: {lr}")
         if max_eval is None:
             max_eval = max_iter * 5 // 4
-        defaults = dict(
-            lr=lr,
-            max_iter=max_iter,
-            max_eval=max_eval,
-            tolerance_grad=tolerance_grad,
-            tolerance_change=tolerance_change,
-            history_size=history_size,
-            line_search_fn=line_search_fn,
-        )
+        defaults = {
+            "lr": lr,
+            "max_iter": max_iter,
+            "max_eval": max_eval,
+            "tolerance_grad": tolerance_grad,
+            "tolerance_change": tolerance_change,
+            "history_size": history_size,
+            "line_search_fn": line_search_fn,
+        }
         super().__init__(params, defaults)
 
         if len(self.param_groups) != 1:
             raise ValueError(
-                "LBFGS doesn't support per-parameter options " "(parameter groups)"
+                "LBFGS doesn't support per-parameter options (parameter groups)"
             )
 
         self._params = self.param_groups[0]["params"]
@@ -252,6 +276,7 @@ class LBFGS(Optimizer):
 
     def _numel(self):
         if self._numel_cache is None:
+            # pyrefly: ignore  # bad-assignment
             self._numel_cache = sum(
                 2 * p.numel() if torch.is_complex(p) else p.numel()
                 for p in self._params
@@ -299,7 +324,7 @@ class LBFGS(Optimizer):
         return loss, flat_grad
 
     @torch.no_grad()
-    def step(self, closure):
+    def step(self, closure):  # type: ignore[override]
         """Perform a single optimization step.
 
         Args:
@@ -312,7 +337,7 @@ class LBFGS(Optimizer):
         closure = torch.enable_grad()(closure)
 
         group = self.param_groups[0]
-        lr = group["lr"]
+        lr = _to_scalar(group["lr"])
         max_iter = group["max_iter"]
         max_eval = group["max_eval"]
         tolerance_grad = group["tolerance_grad"]
@@ -442,7 +467,14 @@ class LBFGS(Optimizer):
                         return self._directional_evaluate(closure, x, t, d)
 
                     loss, flat_grad, t, ls_func_evals = _strong_wolfe(
-                        obj_func, x_init, t, d, loss, flat_grad, gtd
+                        obj_func,
+                        x_init,
+                        t,
+                        d,
+                        loss,
+                        flat_grad,
+                        gtd,
+                        max_ls=max_eval - current_evals,
                     )
                 self._add_grad(t, d)
                 opt_cond = flat_grad.abs().max() <= tolerance_grad
@@ -454,7 +486,8 @@ class LBFGS(Optimizer):
                     # the reason we do this: in a stochastic setting,
                     # no use to re-evaluate that function here
                     with torch.enable_grad():
-                        loss = float(closure())
+                        loss = closure()
+                    loss = float(loss)
                     flat_grad = self._gather_flat_grad()
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
                     ls_func_evals = 1

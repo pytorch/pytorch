@@ -11,15 +11,16 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfMPS,
+    expectedFailureMPS,
     instantiate_device_type_tests,
     onlyCPU,
     onlyNativeDeviceTypes,
-    onlyNativeDeviceTypesAnd,
     skipLazy,
     skipMeta,
     skipXLA,
 )
 from torch.testing._internal.common_dtype import (
+    all_mps_types_and,
     all_types_and,
     all_types_and_complex_and,
     complex_types,
@@ -74,7 +75,7 @@ def _generate_input(shape, dtype, device, with_extremal):
 # TODO: replace this with make_tensor() in common_utils.py
 def _rand_shape(dim, min_size, max_size):
     shape = []
-    for i in range(dim):
+    for _ in range(dim):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
@@ -157,8 +158,11 @@ class TestViewOps(TestCase):
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
+    @dtypesIfMPS(*integral_types_and(torch.cfloat, torch.float, torch.half, torch.bool))
     def test_view_dtype_new(self, device, dtype):
         dtypes = {value: key for (key, value) in numpy_to_torch_dtype_dict.items()}
+        if device.startswith("mps"):
+            del dtypes[torch.float64]
         del dtypes[torch.bool]
 
         def generate_inputs():
@@ -271,6 +275,7 @@ class TestViewOps(TestCase):
     # has a greater element size than the original dtype
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_view_dtype_upsize_errors(self, device, dtype):
         dtype_size = torch._utils._element_size(dtype)
 
@@ -372,6 +377,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*complex_types(), torch.complex32)
+    @dtypesIfMPS(torch.cfloat, torch.chalf)
     def test_view_as_real(self, device, dtype):
         def fn(contiguous_input=True):
             t = torch.randn(3, 4, dtype=dtype, device=device)
@@ -398,9 +404,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
-    @dtypesIfMPS(
-        *integral_types_and(torch.half, torch.bfloat16, torch.bool, torch.float32)
-    )
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_view_tensor_split(self, device, dtype):
         a = make_tensor((40, 30), dtype=dtype, device=device, low=-9, high=9)
         a_split_dim0 = a.tensor_split(7, 0)
@@ -412,6 +416,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(*all_mps_types_and(torch.cfloat, torch.bool))
     def test_view_tensor_hsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
         t_hsplit = torch.hsplit(t, 2)
@@ -422,6 +427,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(*all_mps_types_and(torch.cfloat, torch.bool))
     def test_view_tensor_vsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
         t_vsplit = torch.vsplit(t, 2)
@@ -432,6 +438,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @dtypesIfMPS(*all_mps_types_and(torch.cfloat, torch.bool))
     def test_view_tensor_dsplit(self, device, dtype):
         t = make_tensor((4, 4, 4), dtype=dtype, device=device, low=-9, high=9)
         t_dsplit = torch.dsplit(t, 2)
@@ -440,9 +447,9 @@ class TestViewOps(TestCase):
         t[2, 2, 2] = 7
         self.assertEqual(t_dsplit[1][2, 2, 0], t[2, 2, 2])
 
-    @onlyNativeDeviceTypesAnd("mps")
+    @onlyNativeDeviceTypes
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
-    @dtypesIfMPS(*integral_types_and(torch.half, torch.bool, torch.float32))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))
     def test_imag_noncomplex(self, device, dtype):
         t = torch.ones((5, 5), dtype=dtype, device=device)
 
@@ -451,6 +458,7 @@ class TestViewOps(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(*complex_types())
+    @dtypesIfMPS(torch.cfloat)
     def test_real_imag_view(self, device, dtype):
         def compare_with_numpy(contiguous_input=True):
             t = torch.randn(3, 3, dtype=dtype, device=device)
@@ -481,6 +489,7 @@ class TestViewOps(TestCase):
         self.assertEqual(a[5:].imag, a.imag[5:])
 
     @onlyNativeDeviceTypes
+    @expectedFailureMPS
     @dtypes(*complex_types())
     def test_conj_imag_view(self, device, dtype) -> None:
         t = _make_tensor((4, 5), dtype, device)
@@ -510,6 +519,12 @@ class TestViewOps(TestCase):
         *product(
             complex_types(),
             all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
+        )
+    )
+    @dtypesIfMPS(
+        *product(
+            [torch.cfloat, torch.chalf],
+            all_mps_types_and(torch.cfloat, torch.chalf, torch.bool),
         )
     )
     @suppress_warnings
@@ -996,7 +1011,7 @@ class TestViewOps(TestCase):
     # Testing that the generated view_copy kernel and its derivative are implemented correctly
     def test_view_copy(self, device):
         a = torch.randn(4, device=device, requires_grad=True)
-        a_ref = a.clone().detach().requires_grad_()
+        a_ref = a.detach().clone().requires_grad_()
         a_view = a_ref.view(2, 2)
         a_view_copy = torch.view_copy(a, (2, 2))
 
@@ -1546,7 +1561,7 @@ class TestOldViewOps(TestCase):
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
         for ndims in range(0, 5):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
-            for n in range(ndims + 1):
+            for _ in range(ndims + 1):
                 for with_extremal in [False, True]:
                     for contiguous in [False, True]:
                         # Generate Input.
@@ -1641,7 +1656,7 @@ class TestOldViewOps(TestCase):
         inputs_with_neg_vals = [[1, 1, -12], [-1, 1], [-11]]
         for integral_inputs_with_neg_vals in inputs_with_neg_vals:
             with self.assertRaisesRegex(
-                RuntimeError, "Trying to create tensor with negative dimension"
+                ValueError, "Attempting to broadcast a dimension with negative length!"
             ):
                 torch.broadcast_shapes(*integral_inputs_with_neg_vals)
 
@@ -1649,20 +1664,21 @@ class TestOldViewOps(TestCase):
         for error_input in integral_inputs_error_case:
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Shape mismatch: objects cannot be broadcast to a single shape",
+                ".*expected shape should be broadcastable to*",
             ):
                 torch.broadcast_shapes(*error_input)
 
         negative_inputs = [(-1,), (1, -12), (4, -11), (-4, 1), (1, 1, -2)]
         for s0 in negative_inputs:
             with self.assertRaisesRegex(
-                RuntimeError, "Trying to create tensor with negative dimension"
+                ValueError, "Attempting to broadcast a dimension with negative length!"
             ):
                 torch.broadcast_shapes(s0)
 
             for s1 in negative_inputs:
                 with self.assertRaisesRegex(
-                    RuntimeError, "Trying to create tensor with negative dimension"
+                    ValueError,
+                    "Attempting to broadcast a dimension with negative length!",
                 ):
                     torch.broadcast_shapes(s0, s1)
 
@@ -1955,7 +1971,7 @@ class TestOldViewOps(TestCase):
             with self.assertRaises(numpy_err, msg=msg):
                 np.array_split(a.cpu().numpy(), sections_or_indices, dim)
 
-        # addtional tests for tensor_split with tensor_indices_or_sections
+        # additional tests for tensor_split with tensor_indices_or_sections
         with self.assertRaisesRegex(
             RuntimeError,
             r"tensor_split expected tensor_indices_or_sections to have dtype of long, but got Float",
@@ -1994,6 +2010,18 @@ class TestOldViewOps(TestCase):
             x.resize_([8, 8, 2**29, 2**29])
         with self.assertRaisesRegex(RuntimeError, "Stride calculation overflowed"):
             x.resize_([0, 4, 2305843009213693952])
+
+    @onlyNativeDeviceTypes
+    def test_as_strided_overflow_storage_offset(self, device):
+        t = torch.randn(2, 3, device=device)
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.as_strided(t, [1], [1], 2**63 - 1)
+        with self.assertRaisesRegex(
+            RuntimeError, "Storage size calculation overflowed"
+        ):
+            torch.as_strided(t, [1], [1], 2**61 - 1)
 
     def test_view_all_dtypes_and_devices(self, device):
         for dt in all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool):

@@ -78,17 +78,46 @@ function pip_install_whl() {
   fi
 }
 
+function pip_build_and_install() {
+  local build_target=$1
+  local wheel_dir=$2
+
+  local found_whl=0
+  for file in "${wheel_dir}"/*.whl
+  do
+    if [[ -f "${file}" ]]; then
+      found_whl=1
+      break
+    fi
+  done
+
+  # Build the wheel if it doesn't exist
+  if [ "${found_whl}" == "0" ]; then
+    python3 -m pip wheel \
+      --no-build-isolation \
+      --no-deps \
+      --no-use-pep517 \
+      -w "${wheel_dir}" \
+      "${build_target}"
+  fi
+
+  for file in "${wheel_dir}"/*.whl
+  do
+    pip_install_whl "${file}"
+  done
+}
 
 function pip_install() {
   # retry 3 times
-  # old versions of pip don't have the "--progress-bar" flag
-  pip install --progress-bar off "$@" || pip install --progress-bar off "$@" || pip install --progress-bar off "$@" ||\
-  pip install "$@" || pip install "$@" || pip install "$@"
+  pip_install_pkg="python3 -m pip install --progress-bar off"
+  ${pip_install_pkg} "$@" || \
+    ${pip_install_pkg} "$@" || \
+    ${pip_install_pkg} "$@"
 }
 
 function pip_uninstall() {
   # uninstall 2 times
-  pip uninstall -y "$@" || pip uninstall -y "$@"
+  pip3 uninstall -y "$@" || pip3 uninstall -y "$@"
 }
 
 function get_exit_code() {
@@ -104,30 +133,10 @@ function get_bazel() {
   # version of Bazelisk to fetch the platform specific version of
   # Bazel to use from .bazelversion.
   retry curl --location --output tools/bazel \
-    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.16.0/bazelisk.py
+    https://raw.githubusercontent.com/bazelbuild/bazelisk/v1.23.0/bazelisk.py
   shasum --algorithm=1 --check \
-    <(echo 'd4369c3d293814d3188019c9f7527a948972d9f8  tools/bazel')
+    <(echo '01df9cf7f08dd80d83979ed0d0666a99349ae93c  tools/bazel')
   chmod u+x tools/bazel
-}
-
-# This function is bazel specific because of the bug
-# in the bazel that requires some special paths massaging
-# as a workaround. See
-# https://github.com/bazelbuild/bazel/issues/10167
-function install_sccache_nvcc_for_bazel() {
-  sudo mv /usr/local/cuda/bin/nvcc /usr/local/cuda/bin/nvcc-real
-
-  # Write the `/usr/local/cuda/bin/nvcc`
-  cat << EOF | sudo tee /usr/local/cuda/bin/nvcc
-#!/bin/sh
-if [ \$(env -u LD_PRELOAD ps -p \$PPID -o comm=) != sccache ]; then
-  exec sccache /usr/local/cuda/bin/nvcc "\$@"
-else
-  exec external/local_cuda/cuda/bin/nvcc-real "\$@"
-fi
-EOF
-
-  sudo chmod +x /usr/local/cuda/bin/nvcc
 }
 
 function install_monkeytype {
@@ -140,17 +149,23 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function detect_cuda_arch() {
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    if command -v nvidia-smi; then
+      TORCH_CUDA_ARCH_LIST=$(nvidia-smi --query-gpu=compute_cap --format=csv | tail -n 1)
+    elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+      # There won't be nvidia-smi in nogpu tests, so just set TORCH_CUDA_ARCH_LIST to the default
+      # minimum supported value here
+      TORCH_CUDA_ARCH_LIST=8.0
+    fi
+    export TORCH_CUDA_ARCH_LIST
+  fi
+}
+
 function install_torchaudio() {
   local commit
   commit=$(get_pinned_commit audio)
-  if [[ "$1" == "cuda" ]]; then
-    # TODO: This is better to be passed as a parameter from _linux-test workflow
-    # so that it can be consistent with what is set in build
-    TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
-  else
-    pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
-  fi
-
+  pip_build_and_install "git+https://github.com/pytorch/audio.git@${commit}" dist/audio
 }
 
 function install_torchtext() {
@@ -158,8 +173,8 @@ function install_torchtext() {
   local text_commit
   data_commit=$(get_pinned_commit data)
   text_commit=$(get_pinned_commit text)
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/data.git@${data_commit}"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/text.git@${text_commit}"
+  pip_build_and_install "git+https://github.com/pytorch/data.git@${data_commit}" dist/data
+  pip_build_and_install "git+https://github.com/pytorch/text.git@${text_commit}" dist/text
 }
 
 function install_torchvision() {
@@ -172,15 +187,17 @@ function install_torchvision() {
     echo 'char* dlerror(void) { return "";}'|gcc -fpic -shared -o "${HOME}/dlerror.so" -x c -
     LD_PRELOAD=${orig_preload}:${HOME}/dlerror.so
   fi
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
+
+  if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+    # Not sure if both are needed, but why not
+    export FORCE_CUDA=1
+    export WITH_CUDA=1
+  fi
+  pip_build_and_install "git+https://github.com/pytorch/vision.git@${commit}" dist/vision
+
   if [ -n "${LD_PRELOAD}" ]; then
     LD_PRELOAD=${orig_preload}
   fi
-}
-
-function install_tlparse() {
-  pip_install --user "tlparse==0.3.25"
-  PATH="$(python -m site --user-base)/bin:$PATH"
 }
 
 function install_torchrec_and_fbgemm() {
@@ -188,24 +205,88 @@ function install_torchrec_and_fbgemm() {
   torchrec_commit=$(get_pinned_commit torchrec)
   local fbgemm_commit
   fbgemm_commit=$(get_pinned_commit fbgemm)
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+    fbgemm_commit=$(get_pinned_commit fbgemm_rocm)
+  fi
   pip_uninstall torchrec-nightly
   pip_uninstall fbgemm-gpu-nightly
   pip_install setuptools-git-versioning scikit-build pyre-extensions
 
-  # TODO (huydhn): I still have no clue on why sccache doesn't work with only fbgemm_gpu here, but it
-  # seems to be an sccache-related issue
-  if [[ "$IS_A100_RUNNER" == "1" ]]; then
-    unset CMAKE_CUDA_COMPILER_LAUNCHER
-    sudo mv /opt/cache/bin /opt/cache/bin-backup
-  fi
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]] ; then
+    # install torchrec first because it installs fbgemm nightly on top of rocm fbgemm
+    pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
+    pip_uninstall fbgemm-gpu-nightly
 
-  # See https://github.com/pytorch/pytorch/issues/106971
-  CUDA_PATH=/usr/local/cuda-12.1 pip_install --no-use-pep517 --user "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#egg=fbgemm-gpu&subdirectory=fbgemm_gpu"
-  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}"
+    # Set ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
+    ROCM_HOME="${ROCM_HOME:-${ROCM_PATH:-/opt/rocm}}"
 
-  if [[ "$IS_A100_RUNNER" == "1" ]]; then
-    export CMAKE_CUDA_COMPILER_LAUNCHER=/opt/cache/bin/sccache
-    sudo mv /opt/cache/bin-backup /opt/cache/bin
+    # Find rocm_version.h header file for ROCm version extract
+    rocm_version_h="${ROCM_HOME}/include/rocm-core/rocm_version.h"
+    if [ ! -f "$rocm_version_h" ]; then
+        rocm_version_h="${ROCM_HOME}/include/rocm_version.h"
+    fi
+
+    # Error out if rocm_version.h not found
+    if [ ! -f "$rocm_version_h" ]; then
+        echo "Error: rocm_version.h not found in expected locations." >&2
+        exit 1
+    fi
+
+    # Extract major, minor and patch ROCm version numbers
+    MAJOR_VERSION=$(grep 'ROCM_VERSION_MAJOR' "$rocm_version_h" | awk '{print $3}')
+    MINOR_VERSION=$(grep 'ROCM_VERSION_MINOR' "$rocm_version_h" | awk '{print $3}')
+    PATCH_VERSION=$(grep 'ROCM_VERSION_PATCH' "$rocm_version_h" | awk '{print $3}')
+    ROCM_INT=$((MAJOR_VERSION * 10000 + MINOR_VERSION * 100 + PATCH_VERSION))
+    echo "ROCm version: $ROCM_INT"
+    export BUILD_ROCM_VERSION="$MAJOR_VERSION.$MINOR_VERSION"
+
+    pip_install tabulate  # needed for newer fbgemm
+    pip_install patchelf  # needed for rocm fbgemm
+
+    local wheel_dir=dist/fbgemm_gpu
+    local found_whl=0
+    for file in "${wheel_dir}"/*.whl
+    do
+      if [[ -f "${file}" ]]; then
+        found_whl=1
+        break
+      fi
+    done
+
+    # Build the wheel if it doesn't exist
+    if [ "${found_whl}" == "0" ]; then
+      git clone --recursive https://github.com/pytorch/fbgemm
+      pushd fbgemm/fbgemm_gpu
+      git checkout "${fbgemm_commit}" --recurse-submodules
+      # until the fbgemm_commit includes the tbb patch
+      patch <<'EOF'
+--- a/FbgemmGpu.cmake
++++ b/FbgemmGpu.cmake
+@@ -184,5 +184,6 @@ gpu_cpp_library(
+     fbgemm_gpu_tbe_cache
+     fbgemm_gpu_tbe_optimizers
+     fbgemm_gpu_tbe_utils
++    tbb
+   DESTINATION
+     fbgemm_gpu)
+EOF
+      python setup.py bdist_wheel --build-variant=rocm
+      popd
+
+      # Save the wheel before cleaning up
+      mkdir -p dist/fbgemm_gpu
+      cp fbgemm/fbgemm_gpu/dist/*.whl dist/fbgemm_gpu
+    fi
+
+    for file in "${wheel_dir}"/*.whl
+    do
+      pip_install_whl "${file}"
+    done
+
+    rm -rf fbgemm
+  else
+    pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
+    pip_build_and_install "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#subdirectory=fbgemm_gpu" dist/fbgemm_gpu
   fi
 }
 
@@ -221,23 +302,10 @@ function clone_pytorch_xla() {
   fi
 }
 
-function checkout_install_torchbench() {
+function install_torchao() {
   local commit
-  commit=$(get_pinned_commit torchbench)
-  git clone https://github.com/pytorch/benchmark torchbench
-  pushd torchbench
-  git checkout "$commit"
-
-  if [ "$1" ]; then
-    python install.py --continue_on_fail models "$@"
-  else
-    # Occasionally the installation may fail on one model but it is ok to continue
-    # to install and test other models
-    python install.py --continue_on_fail
-  fi
-  echo "Print all dependencies after TorchBench is installed"
-  python -mpip freeze
-  popd
+  commit=$(get_pinned_commit torchao)
+  pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
 }
 
 function print_sccache_stats() {

@@ -6,7 +6,7 @@ import collections.abc
 import functools
 import math
 import warnings
-from typing import cast, List, Optional, Tuple, Union
+from typing import cast, Optional, Union
 
 import torch
 
@@ -43,7 +43,7 @@ def _uniform_random_(t: torch.Tensor, low: float, high: float) -> torch.Tensor:
 
 
 def make_tensor(
-    *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
+    *shape: Union[int, torch.Size, list[int], tuple[int, ...]],
     dtype: torch.dtype,
     device: Union[str, torch.device],
     low: Optional[float] = None,
@@ -115,11 +115,11 @@ def make_tensor(
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> from torch.testing import make_tensor
         >>> # Creates a float tensor with values in [-1, 1)
-        >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=-1, high=1)
+        >>> make_tensor((3,), device="cpu", dtype=torch.float32, low=-1, high=1)
         >>> # xdoctest: +SKIP
         tensor([ 0.1205, 0.2282, -0.6380])
         >>> # Creates a bool tensor on CUDA
-        >>> make_tensor((2, 2), device='cuda', dtype=torch.bool)
+        >>> make_tensor((2, 2), device="cuda", dtype=torch.bool)
         tensor([[False, False],
                 [False, True]], device='cuda:0')
     """
@@ -132,7 +132,7 @@ def make_tensor(
         highest_exclusive: float,
         default_low: float,
         default_high: float,
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """
         Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high)
         if required.
@@ -177,7 +177,7 @@ def make_tensor(
 
     if len(shape) == 1 and isinstance(shape[0], collections.abc.Sequence):
         shape = shape[0]  # type: ignore[assignment]
-    shape = cast(Tuple[int, ...], tuple(shape))
+    shape = cast(tuple[int, ...], tuple(shape))
 
     if noncontiguous and memory_format is not None:
         raise ValueError(
@@ -194,11 +194,11 @@ def make_tensor(
     if noncontiguous:
         # Double the size of the shape in the last dimension, so that we have
         # non-identical values when we make the non-contiguous operation.
-        shape = cast(Tuple[int, ...], (*shape[:-1], 2 * shape[-1]))
+        shape = cast(tuple[int, ...], (*shape[:-1], 2 * shape[-1]))
 
     if dtype is torch.bool:
         low, high = cast(
-            Tuple[int, int],
+            tuple[int, int],
             modify_low_high(
                 low,
                 high,
@@ -211,7 +211,7 @@ def make_tensor(
         result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _BOOLEAN_OR_INTEGRAL_TYPES:
         low, high = cast(
-            Tuple[int, int],
+            tuple[int, int],
             modify_low_high(
                 low,
                 high,

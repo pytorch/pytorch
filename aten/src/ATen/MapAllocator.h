@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
-#include <c10/util/string_view.h>
+#include <string_view>
 
 namespace at {
 
@@ -23,10 +23,10 @@ TORCH_API std::string NewProcessWideShmHandle();
 
 class TORCH_API MapAllocator {
  public:
-  MapAllocator(c10::string_view filename, int flags, size_t size);
+  MapAllocator(std::string_view filename, int flags, size_t size);
   MapAllocator(
-      WithFd,
-      c10::string_view filename,
+      WithFd /*unused*/,
+      std::string_view filename,
       int fd,
       int flags,
       size_t size);
@@ -59,14 +59,14 @@ class TORCH_API MapAllocator {
     return flags_;
   }
 
-  static MapAllocator* fromDataPtr(const at::DataPtr&);
+  static MapAllocator* fromDataPtr(const at::DataPtr& /*dptr*/);
   static at::DataPtr makeDataPtr(
-      c10::string_view filename,
+      std::string_view filename,
       int flags,
       size_t size,
       size_t* actual_size_out);
   static at::DataPtr makeDataPtr(
-      WithFd,
+      WithFd /*unused*/,
       const char* filename,
       int fd,
       int flags,
@@ -105,13 +105,13 @@ class TORCH_API RefcountedMapAllocator : private RefcountedMapAllocatorArgCheck,
  public:
   RefcountedMapAllocator(const char* filename, int flags, size_t size);
   RefcountedMapAllocator(
-      WithFd,
+      WithFd /*unused*/,
       const char* filename,
       int fd,
       int flags,
       size_t size);
 
-  static RefcountedMapAllocator* fromDataPtr(const at::DataPtr&);
+  static RefcountedMapAllocator* fromDataPtr(const at::DataPtr& /*dptr*/);
   RefcountedMapAllocator(const RefcountedMapAllocator&) = delete;
   RefcountedMapAllocator(RefcountedMapAllocator&&) = delete;
   RefcountedMapAllocator& operator=(const RefcountedMapAllocator&) = delete;
@@ -122,7 +122,7 @@ class TORCH_API RefcountedMapAllocator : private RefcountedMapAllocatorArgCheck,
       size_t size,
       size_t* actual_size_out);
   static at::DataPtr makeDataPtr(
-      WithFd,
+      WithFd /*unused*/,
       const char* filename,
       int fd,
       int flags,

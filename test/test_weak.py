@@ -7,15 +7,8 @@ import threading
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import IS_MACOS, run_tests, TestCase
+from torch.testing._internal.torchbind_impls import load_torchbind_test_lib
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary
 
 
@@ -36,8 +29,9 @@ class WeakTest(TestCase):
     def test_make_weak_keyed_dict_from_weak_keyed_dict(self):
         o = torch.randn(3)
         dict = WeakIdKeyDictionary({o: 364})
-        dict2 = WeakIdKeyDictionary(dict)
         self.assertEqual(dict[o], 364)
+        dict2 = WeakIdKeyDictionary(dict)
+        self.assertEqual(dict2[o], 364)
 
     def check_popitem(self, klass, key1, value1, key2, value2):
         weakdict = klass()
@@ -165,7 +159,7 @@ class WeakTest(TestCase):
         self.assertRaises(KeyError, d.__delitem__, o)
         self.assertRaises(KeyError, d.__getitem__, o)
 
-        # If a key isn't of a weakly referencable type, __getitem__ and
+        # If a key isn't of a weakly referenceable type, __getitem__ and
         # __setitem__ raise TypeError.  __delitem__ should too.
         self.assertRaises(TypeError, d.__delitem__, 13)
         self.assertRaises(TypeError, d.__getitem__, 13)
@@ -593,18 +587,10 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
 
     def __init__(self, *args, **kw):
         unittest.TestCase.__init__(self, *args, **kw)
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_MACOS:
-            # don't load the library, just skip the tests in setUp
-            return
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
+        try:
+            load_torchbind_test_lib()
+        except unittest.SkipTest:
+            return  # Skip in setup
 
         self.reference = self._reference().copy()
 

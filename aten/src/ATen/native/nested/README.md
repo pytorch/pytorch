@@ -16,7 +16,7 @@ When constructing a NestedTensor in C++ you will likely not be using the NestedT
 
 ##  Code Structure
 
-The NestedTensor code is split into two parts: the C++ code and the Python code. The C++ code is located in [aten/src/ATen/native/nested](.) and the Python code is located in [torch/nested/__init__.py](/torch/nested/__init__.py). The C++ code is split into the following files:
+The NestedTensor code is split into two parts: the C++ code and the Python code. The C++ code is located in [aten/src/ATen/native/nested](.) and the Python code is located in [torch/nested/__init__.py](../../../../../torch/nested/__init__.py). The C++ code is split into the following files:
 
 - `NestedTensorImpl.h | NestedTensorImpl.cpp`: The NestedTensor data structure and its methods.
 - `NestedTensorUtils.h | NestedTensorUtils.cpp`: Utility functions for working with NestedTensors. (This is where you will find  `map_nested_tensor` which is discussed below in the section on implementing new functions.)
@@ -60,4 +60,4 @@ If performance is not your main concern and you would like to enable coverage th
 ##  Best Practices
 
 ## Testing
-Unit tests for NestedTensors can be found at [test/test_nestedtensor.py](/test/test_nestedtensor.py). If a new operator is added to NestedTensors it is important to add a unit test for it. The unit tests are run on the CI and if they fail the PR will not be merged.
+Unit tests for NestedTensors can be found at [test/test_nestedtensor.py](../../../../../test/test_nestedtensor.py). If a new operator is added to NestedTensors it is important to add a unit test for it. The unit tests are run on the CI and if they fail the PR will not be merged.

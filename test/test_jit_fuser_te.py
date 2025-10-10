@@ -1,4 +1,5 @@
 # Owner(s): ["NNC"]
+# ruff: noqa: F841
 
 import contextlib
 import math
@@ -6,7 +7,6 @@ import operator
 import os
 import unittest
 import warnings
-from typing import List
 
 import torch
 import torch.nn.functional as F
@@ -21,6 +21,13 @@ from torch.testing import FileCheck
 # some tests
 torch._C._jit_set_profiling_executor(True)
 torch._C._get_graph_executor_optimize(True)
+
+if __name__ == "__main__":
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+
+    # The value of GRAPH_EXECUTOR depends on command line arguments so make sure they're parsed
+    # before instantiating tests.
+    parse_cmd_line_args()
 
 from itertools import combinations, permutations, product
 from textwrap import dedent
@@ -126,7 +133,7 @@ class TestTEFuser(JitTestCase):
         super().setUp()
         self.tensorexpr_options = TensorExprTestOptions()
 
-        # note: `self.dynamic_shapes` instatiated in specialization of class
+        # note: `self.dynamic_shapes` instantiated in specialization of class
         # defined below
 
         fusion_strategy = [("DYNAMIC", 20)] if self.dynamic_shapes else [("STATIC", 20)]
@@ -2325,7 +2332,7 @@ class TestTEFuser(JitTestCase):
 
             @torch.jit.script
             def repro(
-                xs: List[torch.Tensor], ys: List[torch.Tensor], zs: List[torch.Tensor]
+                xs: list[torch.Tensor], ys: list[torch.Tensor], zs: list[torch.Tensor]
             ):
                 return [
                     torch.cat([x, torch.cat([y, z], dim=-1)], dim=-1)
@@ -2499,7 +2506,7 @@ class TestTEFuser(JitTestCase):
 
                     for i, func in enumerate(funcs):
                         num_args = i + 1
-                        for j, gen in enumerate(gen_tensor):
+                        for gen in gen_tensor:
                             inps = (gen(n), gen(n), gen(n))
                             func_s = torch.jit.trace(func, inps, check_trace=False)
                             torch._C._jit_pass_erase_shape_information(func_s.graph)
@@ -2878,8 +2885,8 @@ class TestNNCOpInfo(TestNNCOpInfoParent):
                     fx_args.append(f"{k} = {repr(v)}")
 
             code = f"""
-def f({', '.join(param_names)}):
-    return op.op({', '.join(fx_args)})"""
+def f({", ".join(param_names)}):
+    return op.op({", ".join(fx_args)})"""
             g = {"torch": torch, "inf": math.inf, "op": op}
             exec(code, g)
             f = g["f"]
@@ -2939,7 +2946,10 @@ def f({', '.join(param_names)}):
 
     @slowTest
     @onlyCPU
-    @ops(op_db, dtypes=OpDTypes.supported)
+    @ops(
+        [op for op in op_db if get_name(op) not in known_failures],
+        dtypes=OpDTypes.supported,
+    )
     def test_nnc_correctness(self, device, dtype, op):
         if not op.supports_tracing:
             self.skipTest("Requires tracing support")

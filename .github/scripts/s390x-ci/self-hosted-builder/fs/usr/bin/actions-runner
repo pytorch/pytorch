@@ -11,6 +11,8 @@ fi
 
 token_file=registration-token.json
 
+ACCESS_TOKEN="$(cat /run/runner_secret)"
+
 # Generate registration token
 curl \
         -X POST \
@@ -24,6 +26,9 @@ unset ACCESS_TOKEN
 # register runner as ephemeral runner
 # it does one job, stops and unregisters
 registration_token=$(jq --raw-output .token "$token_file")
+
+# workaround for https://gitlab.com/qemu-project/qemu/-/issues/2600
+export DOTNET_EnableWriteXorExecute=0
 
 ./config.sh \
         --unattended \

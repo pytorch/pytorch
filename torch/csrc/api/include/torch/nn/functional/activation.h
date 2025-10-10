@@ -344,7 +344,7 @@ namespace detail {
 inline Tensor glu(const Tensor& input, int64_t dim) {
   TORCH_CHECK(
       input.dim() != 0,
-      "glu does not suppport scalars because halving size must be even");
+      "glu does not support scalars because halving size must be even");
   return torch::glu(input, dim);
 }
 } // namespace detail
@@ -370,7 +370,7 @@ inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor gelu(const Tensor& input, const string& approximate) {
+inline Tensor gelu(const Tensor& input, const std::string& approximate) {
   return torch::gelu(input, approximate);
 }
 } // namespace detail

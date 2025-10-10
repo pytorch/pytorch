@@ -6,7 +6,7 @@ import warnings
 import numpy as np
 
 import torch
-from torch.library import _scoped_library, Library
+from torch.library import _scoped_library
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -28,20 +28,24 @@ def autograd_fallback_mode(mode):
 class TestAutogradFallback(TestCase):
     test_ns = "_test_autograd_fallback"
 
+    def setUp(self):
+        super().setUp()
+        self.libraries = []
+
     def tearDown(self):
         if hasattr(torch.ops, self.test_ns):
             delattr(torch.ops, self.test_ns)
-        if hasattr(self, "lib"):
-            del self.lib.m
-            del self.lib
+        for lib in self.libraries:
+            lib._destroy()
+        del self.libraries
 
     def get_op(self, name):
         return getattr(getattr(torch.ops, self.test_ns), name).default
 
     def get_lib(self):
-        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
-        self.lib = lib
-        return lib
+        result = torch.library.Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        self.libraries.append(result)
+        return result
 
     @parametrize("mode", ("nothing", "warn"))
     def test_no_grad(self, mode):
@@ -137,7 +141,7 @@ class TestAutogradFallback(TestCase):
                 warnings.simplefilter("error")
                 x = torch.randn([], requires_grad=True)
                 y = x.clone()
-                z = op(y)
+                op(y)
                 y.backward()
                 self.assertEqual(x.grad, torch.ones_like(x))
 
@@ -317,10 +321,10 @@ class TestAutogradFallback(TestCase):
             op = self.get_op("foo")
 
             lib.impl(
-                "foo", lambda a: (a.clone(), a.clone().detach().requires_grad_()), "CPU"
+                "foo", lambda a: (a.clone(), a.detach().clone().requires_grad_()), "CPU"
             )
             x = torch.randn(3, requires_grad=True)
-            y, z = op(x)
+            _, z = op(x)
             with self._check_ctx(mode):
                 z.sum().backward()
 
@@ -338,7 +342,7 @@ class TestAutogradFallback(TestCase):
 
             x = torch.randn(3, requires_grad=True)
             # NB: PyTorch dispatcher treats "None" as undefined Tensor.
-            y, z = op(None, x)
+            _, z = op(None, x)
             with self._check_ctx(mode):
                 z.sum().backward()
 

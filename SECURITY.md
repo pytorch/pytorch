@@ -3,6 +3,7 @@
  - [**Reporting a Vulnerability**](#reporting-a-vulnerability)
  - [**Using Pytorch Securely**](#using-pytorch-securely)
    - [Untrusted models](#untrusted-models)
+   - [TorchScript models](#torchscript-models)
    - [Untrusted inputs](#untrusted-inputs)
    - [Data privacy](#data-privacy)
    - [Using distributed features](#using-distributed-features)
@@ -14,6 +15,8 @@ Beware that none of the topics under [Using Pytorch Securely](#using-pytorch-sec
 However, if you believe you have found a security vulnerability in PyTorch, we encourage you to let us know right away. We will investigate all legitimate reports and do our best to quickly fix the problem.
 
 Please report security issues using https://github.com/pytorch/pytorch/security/advisories/new
+
+All reports submitted thru the security advisories mechanism would **either be made public or dismissed by the team within 90 days of the submission**. If advisory has been closed on the grounds that it is not a security issue, please do not hesitate to create an [new issue](https://github.com/pytorch/pytorch/issues/new?template=bug-report.yml) as it is still likely a valid issue within the framework.
 
 Please refer to the following page for our responsible disclosure policy, reward guidelines, and those things that should not be reported:
 
@@ -37,6 +40,10 @@ Important Note: The trustworthiness of a model is not binary. You must always de
 [^data-poisoning-sources]: To understand risks of utilization of data from unknown sources, read the following Cornell papers on Data poisoning:
     https://arxiv.org/abs/2312.04748
     https://arxiv.org/abs/2401.05566
+
+### TorchScript models
+
+TorchScript models should treated the same way as locally executable code from an unknown source. Only run TorchScript models if you trust the provider. Please note, that tools for introspecting TorchScript models (such as `torch.utils.model_dump`) may also execute partial or full code stored in those models, therefore they should be used only if you trust the provider of the binary you are about to load.
 
 ### Untrusted inputs during training and prediction
 

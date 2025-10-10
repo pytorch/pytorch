@@ -6,10 +6,12 @@ Intel GPU optimization.
 This package is lazily initialized, so you can always import it, and use
 :func:`is_available()` to determine if your system supports XPU.
 """
+
 import threading
 import traceback
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._C
@@ -23,13 +25,13 @@ from .streams import Event, Stream
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+_queued_calls: list[
+    tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 _lazy_seed_tracker = _LazySeedTracker()
-default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
+default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
 def _is_compiled() -> bool:
@@ -62,13 +64,18 @@ def device_count() -> int:
 
 def is_available() -> bool:
     r"""Return a bool indicating if XPU is currently available."""
-    # This function nerver throws.
+    # This function never throws.
     return device_count() > 0
 
 
-def is_bf16_supported():
+def is_bf16_supported(including_emulation: bool = True) -> bool:
     r"""Return a bool indicating if the current XPU device supports dtype bfloat16."""
-    return True
+    if not is_available():
+        return False
+    return (
+        including_emulation
+        or torch.xpu.get_device_properties().has_bfloat16_conversions
+    )
 
 
 def is_initialized():
@@ -122,9 +129,7 @@ def _lazy_init():
         # just return without initializing in that case.
         _tls.is_initializing = True
 
-        for calls in _lazy_seed_tracker.get_calls():
-            if calls:
-                _queued_calls.append(calls)
+        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
@@ -218,7 +223,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 
 
 @lru_cache(None)
-def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
+def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     r"""Get the xpu capability of a device.
 
     Args:
@@ -232,19 +237,20 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
         Dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
-    # pybind service attributes are no longer needed and their presence breaks
-    # the further logic related to the serialization of the created dictionary.
-    # In particular it filters out `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
-    # to fix Triton tests.
-    # This field appears after updating pybind to 2.13.6.
+    # Only keep attributes that are safe for dictionary serialization.
+    serializable_types = (int, float, bool, str, type(None), list, tuple, dict)
     return {
-        prop: getattr(props, prop)
-        for prop in dir(props)
-        if not prop.startswith(("__", "_pybind11_"))
+        # pyrefly: ignore  # unbound-name
+        key: value
+        for key in dir(props)
+        if not key.startswith("__")
+        and isinstance((value := getattr(props, key)), serializable_types)
     }
 
 
-def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
+def get_device_properties(
+    device: Optional[_device_t] = None,
+) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
     r"""Get the properties of a device.
 
     Args:
@@ -256,8 +262,6 @@ def get_device_properties(device: Optional[_device_t] = None) -> _XpuDevicePrope
     """
     _lazy_init()
     device = _get_device_index(device, optional=True)
-    if device < 0 or device >= device_count():
-        raise AssertionError("Invalid device index")
     return _get_device_properties(device)  # type: ignore[name-defined]  # noqa: F821
 
 
@@ -280,6 +284,22 @@ def _get_device(device: Union[int, str, torch.device]) -> torch.device:
     return device
 
 
+def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
+    r"""Query whether a device can access a peer device's memory.
+
+    Args:
+        device (torch.device or int or str): selected device.
+        peer (torch.device or int or str): peer device to query access to.
+
+    Returns:
+        bool: ``True`` if ``device`` can access ``peer``, ``False`` otherwise.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    peer = _get_device_index(peer, optional=True)
+    return torch._C._xpu_canDeviceAccessPeer(device, peer)
+
+
 class StreamContext:
     r"""Context-manager that selects a given stream.
 
@@ -291,13 +311,14 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
+
     cur_stream: Optional["torch.xpu.Stream"]
 
     def __init__(self, stream: Optional["torch.xpu.Stream"]):
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
-            self.idx = -1
+            self.idx = -1  # pyrefly: ignore  # bad-assignment
 
     def __enter__(self):
         cur_stream = self.stream
@@ -382,6 +403,33 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     )
 
 
+def get_stream_from_external(
+    data_ptr: int, device: Optional[_device_t] = None
+) -> Stream:
+    r"""Return a :class:`Stream` from an external SYCL queue.
+
+    This function is used to wrap SYCL queue created in other libraries in order
+    to facilitate data exchange and multi-library interactions.
+
+    .. note:: This function doesn't manage the queue life-cycle, it is the user
+       responsibility to keep the referenced queue alive while this returned stream is
+       being used. The different SYCL queue pointers will result in distinct
+       :class:`Stream` objects, even if the SYCL queues they dereference are equivalent.
+
+    Args:
+        data_ptr(int): Integer representation of the `sycl::queue*` value passed externally.
+        device(torch.device or int, optional): the device where the queue was originally created.
+            It is the user responsibility to ensure the device is specified correctly.
+    """
+    _lazy_init()
+    streamdata = torch._C._xpu_getStreamFromExternal(
+        data_ptr, _get_device_index(device, optional=True)
+    )
+    return Stream(
+        stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2]
+    )
+
+
 def synchronize(device: _device_t = None) -> None:
     r"""Wait for all kernels in all streams on a XPU device to complete.
 
@@ -395,9 +443,9 @@ def synchronize(device: _device_t = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
-def get_arch_list() -> List[str]:
+def get_arch_list() -> list[str]:
     r"""Return list XPU architectures this library was compiled for."""
-    if not is_available():
+    if not _is_compiled():
         return []
     arch_flags = torch._C._xpu_getArchFlags()
     if arch_flags is None:
@@ -410,7 +458,7 @@ def get_gencode_flags() -> str:
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return ""
-    return f'-device {",".join(arch for arch in arch_list)}'
+    return f"-device {','.join(arch for arch in arch_list)}"
 
 
 def _get_generator(device: torch.device) -> torch._C.Generator:
@@ -465,6 +513,7 @@ from .memory import (
     empty_cache,
     max_memory_allocated,
     max_memory_reserved,
+    mem_get_info,
     memory_allocated,
     memory_reserved,
     memory_stats,
@@ -489,6 +538,7 @@ __all__ = [
     "Event",
     "Stream",
     "StreamContext",
+    "can_device_access_peer",
     "current_device",
     "current_stream",
     "default_generators",
@@ -503,7 +553,7 @@ __all__ = [
     "get_gencode_flags",
     "get_rng_state",
     "get_rng_state_all",
-    "get_stream",
+    "get_stream_from_external",
     "init",
     "initial_seed",
     "is_available",
@@ -513,6 +563,7 @@ __all__ = [
     "manual_seed_all",
     "max_memory_allocated",
     "max_memory_reserved",
+    "mem_get_info",
     "memory_allocated",
     "memory_reserved",
     "memory_stats",

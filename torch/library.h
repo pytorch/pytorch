@@ -89,7 +89,7 @@ struct NoInferSchemaTag {};
 
 #define HAS_PT2_COMPLIANT_TAG
 
-// For multipy/torchdeploy use case
+// For multipy/torchdeploy use case  // codespell:ignore multipy
 enum class _RegisterOrVerify { REGISTER, VERIFY };
 
 template <class CurClass>
@@ -115,12 +115,12 @@ class TORCH_API CppFunction final {
       Func* f,
       std::enable_if_t<
           c10::guts::is_function_type<Func>::value,
-          std::nullptr_t> = nullptr)
+          std::nullptr_t>  /*unused*/= nullptr)
       : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f)),
         cpp_signature_(c10::impl::CppSignature::make<Func>()),
         schema_(
-            c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Func>>()),
-        debug_() {}
+            c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Func>>())
+        {}
 
   /// This overload accepts compile time function pointers, e.g.,
   /// `CppFunction(TORCH_FN(add_impl))`
@@ -129,13 +129,13 @@ class TORCH_API CppFunction final {
       FuncPtr f,
       std::enable_if_t<
           c10::is_compile_time_function_pointer<FuncPtr>::value,
-          std::nullptr_t> = nullptr)
+          std::nullptr_t>  /*unused*/= nullptr)
       : func_(c10::KernelFunction::makeFromUnboxedFunction(f)),
         cpp_signature_(
             c10::impl::CppSignature::make<typename FuncPtr::FuncType>()),
         schema_(c10::detail::inferFunctionSchemaFromFunctor<
-                typename FuncPtr::FuncType>()),
-        debug_() {}
+                typename FuncPtr::FuncType>())
+        {}
 
   /// This overload accepts lambdas, e.g., `CppFunction([](const Tensor& self) {
   /// ... })`
@@ -144,13 +144,13 @@ class TORCH_API CppFunction final {
       Lambda&& f,
       std::enable_if_t<
           c10::guts::is_functor<std::decay_t<Lambda>>::value,
-          std::nullptr_t> = nullptr)
+          std::nullptr_t>  /*unused*/= nullptr)
       : func_(c10::KernelFunction::makeFromUnboxedLambda(
             std::forward<Lambda>(f))),
         cpp_signature_(c10::impl::CppSignature::make<Lambda>()),
         schema_(c10::detail::inferFunctionSchemaFromFunctor<
-                std::decay_t<Lambda>>()),
-        debug_() {}
+                std::decay_t<Lambda>>())
+        {}
 
 #if defined C10_MOBILE
   /// This overload accepts function pointers, e.g., `CppFunction(&add_impl,
@@ -310,7 +310,7 @@ class TORCH_API CppFunction final {
 
   // The "setter" for dispatch_key_
   template <typename Func>
-  friend CppFunction dispatch(c10::DispatchKey, Func&&);
+  friend CppFunction dispatch(c10::DispatchKey /*k*/, Func&& /*raw_f*/);
 
   // The only class which actually pulls out values from CppFunction (does so
   // destructively, felt too lazy to write accessors that I don't even
@@ -605,13 +605,18 @@ class TORCH_API Library final {
   /// }
   /// ```
 
-  template <typename Schema>
   Library& def(
-      Schema&& raw_schema,
+      c10::FunctionSchema&& s,
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
-    c10::FunctionSchema s = schema(std::forward<Schema>(raw_schema));
     return _def(std::move(s), nullptr, tags, rv);
+  }
+
+  Library& def(
+      const char* raw_schema,
+      const std::vector<at::Tag>& tags = {},
+      _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) & {
+    return _def(schema(raw_schema), nullptr, tags, rv);
   }
 
   /// Declares that for all operators that are subsequently def'ed, their
@@ -741,14 +746,14 @@ class TORCH_API Library final {
   // These overloads cover cases when a SelectiveStr (see Note [Selective
   // build]) has been disabled at compile time.  In that case, don't generate
   // any code referencing the passed in functions at all.
-  Library& def(detail::SelectiveStr<false>, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
+  Library& def(detail::SelectiveStr<false> /*unused*/, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
     return *this;
   }
   Library& def(detail::SelectiveStr<true> raw_schema, const std::vector<at::Tag>& tags = {}) & {
     return def(raw_schema.operator const char*(), tags);
   }
   template <typename Func>
-  Library& def(detail::SelectiveStr<false>, Func&& /*raw_f*/, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
+  Library& def(detail::SelectiveStr<false> /*unused*/, Func&& /*raw_f*/, const std::vector<at::Tag>& tags [[maybe_unused]] = {}) & {
     return *this;
   }
   template <typename Func>
@@ -759,12 +764,12 @@ class TORCH_API Library final {
 
   template <typename Func>
   // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
-  Library& impl(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
+  Library& impl(detail::SelectiveStr<false> /*unused*/, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Dispatch, typename Func>
   Library& impl(
-      detail::SelectiveStr<false>,
+      detail::SelectiveStr<false> /*unused*/,
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       Dispatch&& /*key*/,
       // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
@@ -872,7 +877,7 @@ class TORCH_API Library final {
       const std::vector<at::Tag>& tags = {},
       _RegisterOrVerify rv = _RegisterOrVerify::REGISTER) &;
   Library& _def(
-      std::variant<c10::OperatorName, c10::FunctionSchema>&&,
+      std::variant<c10::OperatorName, c10::FunctionSchema>&& /*name_or_schema*/,
       CppFunction&& f,
       const std::vector<at::Tag>& tags = {}) &;
   Library& _impl(
@@ -884,8 +889,48 @@ class TORCH_API Library final {
   at::OperatorName _parseNameForLib(const char* name_str) const;
 };
 
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+void initialize_torch_libraries();
+#endif
+
 namespace detail {
 
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+// This is an experimental feature to defer TorchLibraryInit cost to run either
+// at model load time, or when a client application explicitly calls
+// torch::initialize_torch_libraries().
+//
+// This is not thread safe, the client is required to ensure that libraries
+// containing TORCH_LIBRARY initializers are loaded in a thread safe manner.
+extern std::vector<TorchLibraryInit*> torch_library_initializers;
+class TorchLibraryInit final {
+    private:
+      using InitFn = void(Library&);
+      Library::Kind kind;
+      InitFn* init_function;
+      const char* ns;
+      std::optional<c10::DispatchKey> key;
+      const char* file;
+      uint32_t line;
+      std::unique_ptr<Library> lib = nullptr;
+
+    public:
+      TorchLibraryInit(
+            Library::Kind kind,
+            InitFn* fn,
+            const char* ns,
+            std::optional<c10::DispatchKey> k,
+            const char* file,
+            uint32_t line) : kind(kind), init_function(fn), ns(ns), key(k), file(file), line(line) {
+              torch_library_initializers.push_back(this);
+            }
+
+      void initialize() {
+        lib = std::make_unique<Library>(kind, ns, key, file, line);
+        init_function(*lib);
+      }
+};
+#else
 class TorchLibraryInit final {
  private:
   using InitFn = void(Library&);
@@ -903,6 +948,7 @@ class TorchLibraryInit final {
     fn(lib_);
   }
 };
+#endif
 
 } // namespace detail
 
@@ -976,7 +1022,7 @@ class TorchLibraryInit final {
 /// Macro for defining a function that will be run at static
 /// initialization time to define operator overrides for dispatch key
 /// `k` (must be an unqualified enum member of c10::DispatchKey) in
-/// namespace `ns` (must be a valid C++ identifer, no quotes).  Use this
+/// namespace `ns` (must be a valid C++ identifier, no quotes).  Use this
 /// macro when you want to implement a preexisting set of custom
 /// operators on a new dispatch key (e.g., you want to provide CUDA
 /// implementations of already existing operators).  One common usage
@@ -1027,9 +1073,7 @@ class TorchLibraryInit final {
   static const torch::detail::TorchLibraryInit C10_CONCATENATE(           \
       TORCH_LIBRARY_IMPL_static_init_##ns##_##k##_, uid)(                 \
       torch::Library::IMPL,                                               \
-      (c10::impl::dispatch_key_allowlist_check(c10::DispatchKey::k)       \
-           ? &C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid) \
-           : [](torch::Library&) -> void {}),                             \
+      &C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_##ns##_##k##_, uid),       \
       #ns,                                                                \
       std::make_optional(c10::DispatchKey::k),                            \
       __FILE__,                                                           \

@@ -16,7 +16,7 @@
 
 namespace torch::jit {
 
-static inline TypePtr unwrapOptional(TypePtr opt_type) {
+static TypePtr unwrapOptional(TypePtr opt_type) {
   if (auto dyn = opt_type->castRaw<c10::DynamicType>()) {
     return unwrapOptional(dyn->fallback());
   }
@@ -26,9 +26,7 @@ static inline TypePtr unwrapOptional(TypePtr opt_type) {
   return opt_type;
 }
 
-static inline bool isIntOrFloatUsedAsList(
-    const Value* value,
-    const Argument& arg) {
+static bool isIntOrFloatUsedAsList(const Value* value, const Argument& arg) {
   // Look for int[N] or float[N]
   const auto& v_type = value->type();
   if (v_type != FloatType::get() && v_type != IntType::get())
@@ -335,12 +333,12 @@ bool isBlockListedSchema(const FunctionSchema& schema) {
   // Currently JIT does not distinguish ScalarType vs int, so there is really
   // no way to distinguish x.view(1) vs x.view(torch.int8). So we have to
   // hardcode the aten::view.dtype here to block this overload. This blocklist
-  // should be removed when JIT fully suports ScalarType as its own type.
+  // should be removed when JIT fully supports ScalarType as its own type.
   if (schema.name() == "aten::view" && schema.overload_name() == "dtype") {
     return true;
   }
   // Note (@tugsbayasgalan)
-  // TorchScript doesn't suport kwargs so this op collides with aten.max.others
+  // TorchScript doesn't support kwargs so this op collides with aten.max.others
   // since both of them have 2 Tensor inputs. Since we don't expect users to
   // use this op in TS, we just skip it
   if (schema.name() == "aten::max" && schema.overload_name() == "unary_out") {

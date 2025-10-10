@@ -7,6 +7,7 @@ import torch
 
 import hypothesis
 from functools import reduce
+from importlib.metadata import version
 from hypothesis import assume
 from hypothesis import settings
 from hypothesis import strategies as st
@@ -316,13 +317,9 @@ def tensor_conv(
     if isinstance(spatial_dim, Iterable):
         spatial_dim = draw(st.sampled_from(spatial_dim))
 
-    feature_map_shape = []
-    for _ in range(spatial_dim):
-        feature_map_shape.append(draw(st.integers(*feature_map_range)))
+    feature_map_shape = [draw(st.integers(*feature_map_range)) for _ in range(spatial_dim)]
 
-    kernels = []
-    for _ in range(spatial_dim):
-        kernels.append(draw(st.integers(*kernel_range)))
+    kernels = [draw(st.integers(*kernel_range)) for _ in range(spatial_dim)]
 
     tr = False
     weight_shape = (output_channels, input_channels_per_group) + tuple(kernels)
@@ -350,22 +347,33 @@ def tensor_conv(
 
     return X, W, b, groups, tr
 
+
 # We set the deadline in the currently loaded profile.
 # Creating (and loading) a separate profile overrides any settings the user
 # already specified.
-hypothesis_version = hypothesis.version.__version_info__
-current_settings = settings._profiles[settings._current_profile].__dict__
-current_settings['deadline'] = None
-if hypothesis_version >= (3, 16, 0) and hypothesis_version < (5, 0, 0):
-    current_settings['timeout'] = hypothesis.unlimited
+hypothesis_version = tuple(map(int, version("hypothesis").split(".")[:3]))
+
+if (3, 16, 0) <= hypothesis_version < (3, 27, 0):
+    # Hypothesis 3.16 → 3.26: use `timeout` instead of `deadline`
+    settings.register_profile("no_deadline", timeout=hypothesis.unlimited)
+else:
+    # Hypothesis >=3.27: use `deadline=None`
+    settings.register_profile("no_deadline", deadline=None)
+
+# Activate the profile
+settings.load_profile("no_deadline")
+
+
 def assert_deadline_disabled():
+    """Check that deadlines are effectively disabled across Hypothesis versions."""
     if hypothesis_version < (3, 27, 0):
         import warnings
+
         warning_message = (
             "Your version of hypothesis is outdated. "
             "To avoid `DeadlineExceeded` errors, please update. "
             f"Current hypothesis version: {hypothesis.__version__}"
         )
-        warnings.warn(warning_message)
+        warnings.warn(warning_message, stacklevel=2)
     else:
         assert settings().deadline is None

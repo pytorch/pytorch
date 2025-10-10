@@ -107,11 +107,25 @@ Take the following steps:
 properly in order to ensure that the new :class:`Function` works properly with
 the autograd engine.
 
-- :meth:`~torch.autograd.function.FunctionCtx.save_for_backward` must be
-  used to save any tensors to be used in the backward pass. Non-tensors should
-  be stored directly on `ctx`. If tensors that are neither input nor output
-  are saved for backward your :class:`~Function` may not support double backward
-  (see step 3).
+- :meth:`~torch.autograd.function.FunctionCtx.save_for_backward` should be
+  used to save any tensors needed for the backward pass (as opposed to
+  directly on ``ctx``). You cannot use ``save_for_backward`` for non-tensors;
+  you should store those directly on ``ctx``.
+
+  Saving tensors via ``save_for_backward``:
+  1. Allows the autograd engine to clear
+  them as soon as the backward computation of the ``autograd.Function`` completes.
+  (If a tensor is stored directly on ``ctx``
+  it will unnecessarily remain alive for the lifetime of the autograd graph --
+  typically until the end of the iteration.)
+  2. Helps avoid certain reference cycles, (e.g., since the tensor
+  output of the ``autograd.Function`` itself keeps a reference to the ctx).
+  3. Is important for compatibility with
+  features like activation checkpointing and offloading that rely on
+  :class:`torch.autograd.graph.saved_tensors_hooks`.
+
+  If tensors that are neither inputs nor outputs are saved for backward your
+  :class:`~Function` may not support double backward (see step 3).
 - :meth:`~torch.autograd.function.FunctionCtx.mark_dirty` must be used to
   mark any input that is modified inplace by the forward function.
 - :meth:`~torch.autograd.function.FunctionCtx.mark_non_differentiable` must
@@ -905,7 +919,7 @@ Some important implications of this implementation are:
 - When calling back to Python and when wrapping the results, the same conversions are used as the regular PyTorch Python/C++ binding. In particular, some objects cannot be represented in Python and need special handling (undefined Tensors for example become None).
 - Our native functions are lazily populated as ``torch.ops.{namespace}.{func_name}.{overload_name}`` as callable Python objects to enable easily interacting with them from Python. The ``func`` object given to ``__torch_dispatch__`` is always an entry from this namespace. This namespace can be used to directly call native ops and bypass the usual Python API and binding code.
 
-In a similar way where ``__torch_function__`` is able to interpose on all of torch's Python API and Tensor methods, ``__torch_dispatch__`` is able intercepting all calls into the aten native API. Note that all methods on Tensors are converted into function calls before entering the dispatcher and thus will appear as function calls here: ``torch.add(a, 2)`` and ``a + 2`` will lead to exactly the same aten call.
+In a similar way where ``__torch_function__`` is able to interpose on all of torch's Python API and Tensor methods, ``__torch_dispatch__`` is able to intercept all calls into the aten native API. Note that all methods on Tensors are converted into function calls before entering the dispatcher and thus will appear as function calls here: ``torch.add(a, 2)`` and ``a + 2`` will lead to exactly the same aten call.
 Most of these functions are defined in ``native_functions.yaml`` which specifies the properties of these functions as well as their backend implementation. Their implementation alongside specified features are then automatically registered via codegen.
 Some more exotic functions or features are also registered in other places in the C++ codebase or in user-defined C++ extensions.
 

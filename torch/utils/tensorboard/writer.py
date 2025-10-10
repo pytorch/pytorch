@@ -3,7 +3,7 @@
 
 import os
 import time
-from typing import List, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -254,7 +254,9 @@ class SummaryWriter:
         buckets = []
         neg_buckets = []
         while v < 1e20:
+            # pyrefly: ignore  # bad-argument-type
             buckets.append(v)
+            # pyrefly: ignore  # bad-argument-type
             neg_buckets.append(-v)
             v *= 1.1
         self.default_bins = neg_buckets[::-1] + [0] + buckets
@@ -262,15 +264,19 @@ class SummaryWriter:
     def _get_file_writer(self):
         """Return the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
+            # pyrefly: ignore  # bad-assignment
             self.file_writer = FileWriter(
                 self.log_dir, self.max_queue, self.flush_secs, self.filename_suffix
             )
+            # pyrefly: ignore  # bad-assignment, missing-attribute
             self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
             if self.purge_step is not None:
                 most_recent_step = self.purge_step
+                # pyrefly: ignore  # missing-attribute
                 self.file_writer.add_event(
                     Event(step=most_recent_step, file_version="brain.Event:2")
                 )
+                # pyrefly: ignore  # missing-attribute
                 self.file_writer.add_event(
                     Event(
                         step=most_recent_step,
@@ -472,7 +478,7 @@ class SummaryWriter:
             values (torch.Tensor, numpy.ndarray, or string/blobname): Values to build histogram
             global_step (int): Global step value to record
             bins (str): One of {'tensorflow','auto', 'fd', ...}. This determines how the bins are made. You can find
-              other options in: https://docs.scipy.org/doc/numpy/reference/generated/numpy.histogram.html
+              other options in: https://numpy.org/doc/stable/reference/generated/numpy.histogram.html
             walltime (float): Optional override default walltime (time.time())
               seconds after epoch of event
 
@@ -723,7 +729,7 @@ class SummaryWriter:
     def add_figure(
         self,
         tag: str,
-        figure: Union["Figure", List["Figure"]],
+        figure: Union["Figure", list["Figure"]],
         global_step: Optional[int] = None,
         close: bool = True,
         walltime: Optional[float] = None,
@@ -949,6 +955,7 @@ class SummaryWriter:
             metadata, label_img, subdir, global_step, tag
         )
         self._projector_config.embeddings.extend([embedding_info])
+
 
         from google.protobuf import text_format
 
@@ -1199,6 +1206,7 @@ class SummaryWriter:
         for writer in self.all_writers.values():
             writer.flush()
             writer.close()
+        # pyrefly: ignore  # bad-assignment
         self.file_writer = self.all_writers = None
 
     def __enter__(self):

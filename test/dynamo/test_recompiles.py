@@ -4,9 +4,58 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo import config as dc
 
 
 class RecompileTests(torch._dynamo.test_case.TestCase):
+    def test_inline_inbuilt_nn_modules_candidate(self):
+        def hook_flag_on(guard_manager, f_locals, builder):
+            self.assertTrue(
+                "[inline-inbuilt-nn-modules-candidate]" not in str(guard_manager)
+            )
+
+        def hook_flag_off(guard_manager, f_locals, builder):
+            self.assertTrue(
+                "[inline-inbuilt-nn-modules-candidate]" in str(guard_manager)
+            )
+
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            @torch.compile(backend="eager")
+            def forward(self, x):
+                return self.linear(x)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sm1 = SubMod()
+                self.sm2 = SubMod()
+
+            def forward(self, x):
+                return self.sm1(x) + self.sm2(x)
+
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        with (
+            install_guard_manager_testing_hook(hook_flag_on),
+            dc.patch(inline_inbuilt_nn_modules=True),
+        ):
+            mod = Mod()
+            mod(torch.randn(2, 2))
+
+        with (
+            install_guard_manager_testing_hook(hook_flag_off),
+            dc.patch(inline_inbuilt_nn_modules=False),
+        ):
+            mod = Mod()
+            mod(torch.randn(2, 2))
+
     def test_automatic_dynamic_reduce_recompiles(self):
         # Test the counterfactual, lots of recompiles without this config
         def foo(x, y):
@@ -17,7 +66,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             x = torch.randn([2])
             y = torch.randn([2])
-            opt = torch._dynamo.optimize(cnt, dynamic=dynamic)(foo)
+            opt = torch.compile(foo, backend=cnt, dynamic=dynamic)
             opt(x, y)
             x = torch.randn([3])
             y = torch.randn([3])
@@ -78,7 +127,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         def run_foo_6_times_and_count_recompiles():
             cnt = torch._dynamo.testing.CompileCounter()
 
-            opt = torch._dynamo.optimize(cnt, nopython=True)(foo)
+            opt = torch.compile(foo, backend=cnt, fullgraph=True)
 
             x = True
             y = torch.randn([2])
@@ -126,7 +175,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
             x = torch.randn([2])
             y = torch.randn([2])
-            opt = torch._dynamo.optimize(cnt)(foo)
+            opt = torch.compile(foo, backend=cnt)
             opt(x, y)
             x = torch.randn([3])
             y = 3
@@ -169,30 +218,30 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             return c + 1
 
         cnt = torch._dynamo.testing.CompileCounter()
-        compiled_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+        compiled_foo = torch.compile(foo, backend=cnt, fullgraph=True)
 
         x = torch.randn([3])
         y = torch.randn([3])
         z = torch.randn([3])
         cmp_result = compiled_foo(
-            x.clone().detach(), y.clone().detach(), z.clone().detach()
+            x.detach().clone(), y.detach().clone(), z.detach().clone()
         )
-        eager_result = foo(x.clone().detach(), y.clone().detach(), z.clone().detach())
+        eager_result = foo(x.detach().clone(), y.detach().clone(), z.detach().clone())
         self.assertEqual(cmp_result, eager_result)
         self.assertEqual(cnt.frame_count, 1)
 
         cmp_result = compiled_foo(
-            z.clone().detach(), y.clone().detach(), x.clone().detach()
+            z.detach().clone(), y.detach().clone(), x.detach().clone()
         )
-        eager_result = foo(z.clone().detach(), y.clone().detach(), x.clone().detach())
+        eager_result = foo(z.detach().clone(), y.detach().clone(), x.detach().clone())
         self.assertEqual(cmp_result, eager_result)
         # No recompile, alias preserved
         self.assertEqual(cnt.frame_count, 1)
 
-        x_clone = x.clone().detach()
-        cmp_result = compiled_foo(x_clone, y.clone().detach(), x_clone)
-        x_clone = x.clone().detach()
-        eager_result = compiled_foo(x_clone, y.clone().detach(), x_clone)
+        x_clone = x.detach().clone()
+        cmp_result = compiled_foo(x_clone, y.detach().clone(), x_clone)
+        x_clone = x.detach().clone()
+        eager_result = compiled_foo(x_clone, y.detach().clone(), x_clone)
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
         self.assertEqual(cnt.frame_count, 2)
@@ -206,17 +255,17 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             return g2 + 1
 
         cnt = torch._dynamo.testing.CompileCounter()
-        compiled_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
+        compiled_foo = torch.compile(foo, backend=cnt, fullgraph=True)
 
         z = torch.randn([3])
-        cmp_result = compiled_foo(z.clone().detach())
-        eager_result = foo(z.clone().detach())
+        cmp_result = compiled_foo(z.detach().clone())
+        eager_result = foo(z.detach().clone())
         self.assertEqual(cmp_result, eager_result)
         self.assertEqual(cnt.frame_count, 1)
 
-        g1 = g1.clone().detach()
+        g1 = g1.detach().clone()
         cmp_result = compiled_foo(g1)
-        g1 = g1.clone().detach()
+        g1 = g1.detach().clone()
         eager_result = compiled_foo(g1)
         self.assertEqual(cmp_result, eager_result)
         # Recompile, alias changed
@@ -235,7 +284,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         def run_foo_6_times_and_count_recompiles():
             cnt = torch._dynamo.testing.CompileCounter()
 
-            opt = torch._dynamo.optimize(cnt, nopython=True)(foo)
+            opt = torch.compile(foo, backend=cnt, fullgraph=True)
 
             x = torch.nn.Parameter(torch.randn(1, 3))
             opt(x)
@@ -315,7 +364,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             model(x)
         self.assertEqual(counter.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "recompile_limit", 2)
     def test_no_recursive_compile_after_cache_limit_hit(self):
         def f(x, n):
             x = x + n
@@ -351,7 +400,7 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             h(torch.randn(5), f(i))
         self.assertEqual(counter.frame_count, 2)
 
-    @patch.object(torch._dynamo.config, "cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "recompile_limit", 2)
     def test_run_mode_after_cache_limit_hit(self):
         def f(x, n):
             x = x + n
@@ -377,6 +426,150 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_f(torch.ones(3), 0), torch.ones(3) + 3)
         self.assertEqual(opt_f(torch.ones(3), 1), torch.ones(3) + 5)
         self.assertEqual(counter.frame_count, 2)
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="unbacked")
+    def test_automatic_dynamic_shapes_mark_as_unbacked(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def f(x):
+            return x * x
+
+        f(torch.randn(3))
+        f(torch.randn(2))
+        f(torch.randn(1))
+        f(torch.randn(0))
+
+        self.assertEqual(counter.frame_count, 2)  # not three or four!
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
+    def test_automatic_dynamic_shapes_mark_as_oblivious(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            if x.size(0) < 10:
+                return x * 1
+            else:
+                return x + 10
+
+        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
+
+        for i in [3, 2, 1, 0]:
+            self.assertEqual(f(torch.zeros(i)), opt_f(torch.zeros(i)))
+
+        self.assertEqual(counter.frame_count, 2)  # not three or four!
+
+    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
+    def test_automatic_dynamic_shapes_mark_as_oblivious_fail_counterfactual(self):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def f(x):
+            if x.size(0) < 2:
+                return x * 1
+            else:
+                return x + 10
+
+        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
+
+        opt_f(torch.randn(1))
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            opt_f(torch.randn(0))
+
+    def test_ambient_autocast_recompile(self):
+        weights = torch.randn(10, 10)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.mm(x, weights)
+
+        x = torch.randn(1, 10)
+
+        self.assertEqual(fn(x).dtype, torch.float32)
+
+        with torch.autocast("cpu", torch.float16):
+            self.assertEqual(fn(x).dtype, torch.float16)
+
+        with torch.autocast("cpu", torch.bfloat16):
+            self.assertEqual(fn(x).dtype, torch.bfloat16)
+
+        # should recompile each time
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_autocast_constant_fold(self):
+        # test that constant-folded autocast functions
+        # work properly - it should work if the global autocast
+        # state is guarded.
+
+        weights = torch.randn(10, 10)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        def fn(x):
+            if torch.get_autocast_dtype("cpu") == torch.float16:
+                x = x + 1
+            else:
+                x = x - 1
+            return torch.mm(x, weights)
+
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+
+        x = torch.randn(1, 10)
+
+        with torch.autocast("cpu", torch.float16):
+            self.assertEqual(fn(x), opt_fn(x))
+
+        with torch.autocast("cpu", torch.bfloat16):
+            self.assertEqual(fn(x), opt_fn(x))
+
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_dunder_call_recompile(self):
+        class Foo:
+            def __call__(self, x):
+                return x + 1
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def f(x, foo):
+            return foo(x)
+
+        x = torch.ones(2)
+        foo1 = Foo()
+        foo2 = Foo()
+
+        # no recompilation
+        f(x, foo1)
+        f(x, foo2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # one recompilation
+        Foo.__call__ = lambda self, x: x + 2
+        f(x, foo1)
+        self.assertEqual(counter.frame_count, 2)
+
+    def test_no_recompile_over_unused_objects(self):
+        # This is a regression test case that imitates
+        # https://github.com/city96/ComfyUI-GGUF/blob/47bec6147569a138dd30ad3e14f190a36a3be456/ops.py#L169-L182
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def f(x, key, patches):
+            return x * x + 1
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def apply_patches(f, x, keys):
+            patches = []
+            for key, patch in keys:  # noqa: F402
+                patches.append(patch)
+            x = f(x, key, patches)
+            return x
+
+        # no recompilation
+        x = torch.rand(10)
+        apply_patches(f, x, [("a", 1), ("b", 2)])
+        self.assertEqual(counter.frame_count, 1)
+        apply_patches(f, x, [("c", 3), ("d", 4)])
+        self.assertEqual(counter.frame_count, 1)
 
 
 if __name__ == "__main__":

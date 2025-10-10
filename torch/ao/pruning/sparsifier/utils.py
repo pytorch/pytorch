@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from itertools import chain
-from typing import Any, Dict, Optional, Type
+from typing import Any, Optional
 
 from torch import nn
 from torch.nn.utils.parametrize import is_parametrized, type_before_parametrizations
@@ -16,7 +16,7 @@ __all__ = [
 ]
 
 
-def module_contains_param(module: nn.Module, parametrization: Type[nn.Module]) -> bool:
+def module_contains_param(module: nn.Module, parametrization: type[nn.Module]) -> bool:
     if is_parametrized(module):
         # see if any of the module tensors have a parametriztion attached that matches the one passed in
         return any(
@@ -27,7 +27,7 @@ def module_contains_param(module: nn.Module, parametrization: Type[nn.Module]) -
 
 
 def swap_module(
-    mod: nn.Module, mapping: Dict[Type[nn.Module], Type[nn.Module]]
+    mod: nn.Module, mapping: dict[type[nn.Module], type[nn.Module]]
 ) -> nn.Module:
     r"""Swaps the module using from_dense according to the mapping passed in.
     Args:
@@ -51,10 +51,11 @@ def swap_module(
             new_mod.register_forward_hook(hook_fn)
 
         # respect device affinity when swapping modules
+        # pyrefly: ignore  # bad-argument-type
         devices = {p.device for p in chain(mod.parameters(), mod.buffers())}
-        assert (
-            len(devices) <= 1
-        ), f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
+        assert len(devices) <= 1, (
+            f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
+        )
         device = next(iter(devices)) if len(devices) > 0 else None
         if device:
             new_mod.to(device)
@@ -91,14 +92,14 @@ def fqn_to_module(model: Optional[nn.Module], path: str) -> Optional[nn.Module]:
     return model
 
 
-def get_arg_info_from_tensor_fqn(model: nn.Module, tensor_fqn: str) -> Dict[str, Any]:
+def get_arg_info_from_tensor_fqn(model: nn.Module, tensor_fqn: str) -> dict[str, Any]:
     """
     Uses tensor_fqn to obtain a dict containing module_fqn, module and tensor_name
     """
     # string manip to split tensor_fqn into module_fqn and tensor_name
     # if tensor_fqn is 'weight' then module_fqn and tensor_name are '' and 'weight'
     # if tensor_fqn is 'linear.weight' then module_fqn and tensor_name are 'linear' and 'weight'
-    tensor_name = tensor_fqn.split(".")[-1]
+    tensor_name = tensor_fqn.rsplit(".", maxsplit=1)[-1]
     module_fqn = tensor_fqn[: -len(tensor_name) - ("." in tensor_fqn)]
 
     module = fqn_to_module(model, module_fqn)

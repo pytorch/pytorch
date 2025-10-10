@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-r""""Contains definitions of the methods used by the _BaseDataLoaderIter workers.
+r"""Contains definitions of the methods used by the _BaseDataLoaderIter workers.
 
 These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
@@ -94,9 +94,7 @@ class WorkerInfo:
         return super().__setattr__(key, val)
 
     def __repr__(self):
-        items = []
-        for k in self.__keys:
-            items.append(f"{k}={getattr(self, k)}")
+        items = [f"{k}={getattr(self, k)}" for k in self.__keys]
         return f"{self.__class__.__name__}({', '.join(items)})"
 
 

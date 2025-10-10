@@ -15,6 +15,7 @@ import uuid
 
 import torch.distributed.elastic.timer as timer
 from torch.testing._internal.common_utils import (
+    IS_ARM64,
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
@@ -23,8 +24,8 @@ from torch.testing._internal.common_utils import (
 )
 
 
-# timer is not supported on windows or macos
-if not (IS_WINDOWS or IS_MACOS):
+# timer is not supported on these platforms
+if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
     # func2 should time out
     def func2(n, file_path):
         if file_path is not None:
@@ -113,7 +114,7 @@ if not (IS_WINDOWS or IS_MACOS):
             num_clients = 10
             num_requests_per_client = 10
             processes = []
-            for i in range(num_clients):
+            for _ in range(num_clients):
                 p = mp.Process(
                     target=func, args=(num_requests_per_client, self.file_path)
                 )
@@ -190,7 +191,7 @@ if not (IS_WINDOWS or IS_MACOS):
         """
         client = timer.FileTimerClient(file_path)
         sem.release()
-        for i in range(0, n):
+        for _ in range(0, n):
             client.acquire("test_scope", 0)
             time.sleep(interval)
 

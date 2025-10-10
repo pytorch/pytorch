@@ -1,11 +1,10 @@
-import os
 import random
 import sys
+from pathlib import Path
+from typing import Any
 
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from typing import Any, Tuple
+sys.path.append(str(Path(__file__).absolute().parents[1]))
 
 from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
@@ -19,7 +18,7 @@ import torch
 from torch._inductor.fx_passes.pad_mm import (  # type: ignore[import-not-found]
     get_alignment_size_dtype,
 )
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimported]
@@ -30,7 +29,7 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
     def __init__(self) -> None:
         super().__init__("pad_mm")
 
-    def create_input(self) -> Tuple[Any, ...]:
+    def create_input(self) -> tuple[Any, ...]:
         dtype = self.get_dtype()
         set_precision(dtype)
         m, k, n = self.get_m_k_n(dtype)
@@ -75,7 +74,7 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
         print(f"transpose_left={transpose_left} transpose_right={transpose_right}")
         print(f"prepadded_left={prepadded_left} prepadded_right={prepadded_right}")
 
-        with fresh_inductor_cache():
+        with fresh_cache():
 
             def mm(a: Any, b: Any) -> Any:
                 return torch.mm(a, b)
@@ -113,7 +112,7 @@ class BenchmarkRunnerPadMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimpo
     def is_aligned(self, dim: int, align_size: int) -> bool:
         return dim % align_size == 0
 
-    def get_m_k_n(self, dtype: Any) -> Tuple[int, int, int]:
+    def get_m_k_n(self, dtype: Any) -> tuple[int, int, int]:
         uniform = random.choices([True, False])[0]
         align_size = get_alignment_size_dtype(dtype)
 

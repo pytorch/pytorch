@@ -15,6 +15,7 @@ from . import amp
 
 __all__ = [
     "is_available",
+    "is_initialized",
     "synchronize",
     "current_device",
     "current_stream",
@@ -25,8 +26,6 @@ __all__ = [
     "StreamContext",
     "Event",
 ]
-
-_device_t = Union[_device, str, int, None]
 
 
 def _is_avx2_supported() -> bool:
@@ -65,11 +64,6 @@ def _init_amx() -> bool:
     return torch._C._cpu._init_amx()
 
 
-def _is_arm_sve_supported() -> bool:
-    r"""Returns a bool indicating if CPU supports Arm SVE."""
-    return torch._C._cpu._is_arm_sve_supported()
-
-
 def is_available() -> bool:
     r"""Returns a bool indicating if CPU is currently available.
 
@@ -79,7 +73,7 @@ def is_available() -> bool:
     return True
 
 
-def synchronize(device: _device_t = None) -> None:
+def synchronize(device: torch.types.Device = None) -> None:
     r"""Waits for all kernels in all streams on the CPU device to complete.
 
     Args:
@@ -98,6 +92,12 @@ class Stream:
         pass
 
     def wait_stream(self, stream) -> None:
+        pass
+
+    def record_event(self) -> None:
+        pass
+
+    def wait_event(self, event) -> None:
         pass
 
 
@@ -119,7 +119,7 @@ _default_cpu_stream = Stream()
 _current_stream = _default_cpu_stream
 
 
-def current_stream(device: _device_t = None) -> Stream:
+def current_stream(device: torch.types.Device = None) -> Stream:
     r"""Returns the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -179,7 +179,7 @@ def device_count() -> int:
     return 1
 
 
-def set_device(device: _device_t) -> None:
+def set_device(device: torch.types.Device) -> None:
     r"""Sets the current device, in CPU we do nothing.
 
     N.B. This function only exists to facilitate device-agnostic code
@@ -192,3 +192,11 @@ def current_device() -> str:
     N.B. This function only exists to facilitate device-agnostic code
     """
     return "cpu"
+
+
+def is_initialized() -> bool:
+    r"""Returns True if the CPU is initialized. Always True.
+
+    N.B. This function only exists to facilitate device-agnostic code
+    """
+    return True

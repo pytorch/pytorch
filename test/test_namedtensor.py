@@ -1,5 +1,5 @@
 # Owner(s): ["module: named tensor"]
-
+# ruff: noqa: F841
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY
 from torch.testing._internal.common_utils import skipIfTorchDynamo
@@ -279,6 +279,11 @@ class TestNamedTensor(TestCase):
 
         self.assertEqual(named_tensor.diagonal(outdim='E', dim1='B', dim2='D').names,
                          ['A', 'C', 'E'])
+
+    def test_empty_names(self):
+        ref_tensor = torch.tensor([[1, 2, 3, 4], [4, 3, 2, 1]])
+        empty_named_tensor = torch.tensor([[1, 2, 3, 4], [4, 3, 2, 1]], names=[])
+        self.assertEqual(ref_tensor, empty_named_tensor)
 
     def test_max_pooling(self):
         def check_tuple_return(op, inputs, expected_names):

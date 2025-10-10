@@ -40,7 +40,7 @@ std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, DimnameList dim
   return result;
 }
 
-static void report_positional_error(
+[[noreturn]] static void report_positional_error(
     const Dimname& name,
     const Dimname& other_name,
     DimnameList names,
@@ -179,7 +179,7 @@ void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef
     return;
   }
   const auto src_names = src.names();
-  const auto result_dim = static_cast<int64_t>(result.dim());
+  const auto result_dim = result.dim();
   const auto src_dim = static_cast<int64_t>(src_names.size());
   const auto excluded_dim = static_cast<int64_t>(excluded_idxs.size());
   TORCH_INTERNAL_ASSERT(src_dim - excluded_dim == result_dim);
@@ -391,10 +391,8 @@ void propagate_names_for_expand(const Tensor& result, const Tensor& self) {
     return;
   }
   std::vector<Dimname> outnames(result_dim, Dimname::wildcard());
-  std::copy(
-      self.opt_names()->begin(),
-      self.opt_names()->end(),
-      outnames.begin() + result_dim - self.dim());
+  auto const names = self.names();
+  std::copy( names.begin(), names.end(), outnames.begin() + result_dim - self.dim());
   propagate_names(result, outnames);
 }
 
