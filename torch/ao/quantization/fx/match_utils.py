@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import sys
-from collections.abc import Iterable
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Iterable
+from typing import Any, Optional
 
 import torch
 from torch.ao.quantization.qconfig import QConfigAny
