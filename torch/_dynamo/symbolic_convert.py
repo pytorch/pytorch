@@ -2058,11 +2058,9 @@ class InstructionTranslatorBase(
             curr_exc = self.exn_vt_stack.get_current_exception()
             dynamo_exc = exc.get_dynamo_observed_exception(curr_exc.python_type())
             assert isinstance(raised_exception, dynamo_exc)  # sanity check
-            # Get args safely - UserDefinedExceptionClassVariable doesn't have args attribute
-            exc_args = getattr(curr_exc, "args", ())
             unimplemented_v2(
                 gb_type="Observed exception",
-                context=f"raised exception {curr_exc.python_type_name()}({exc_args})",
+                context=f"raised exception {curr_exc.python_type_name()}({curr_exc.args})",  # type: ignore[union-attr]
                 explanation=observed_exn_gb_explanation,
                 hints=[
                     *graph_break_hints.USER_ERROR,
