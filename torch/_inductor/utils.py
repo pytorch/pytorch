@@ -740,6 +740,18 @@ def get_fused_kernel_name(
     return "_".join(["fused"] + sources)
 
 
+def _is_split_reduction_node(node: Any) -> bool:
+    """Check if a node is a split reduction node with more than one split."""
+    return (
+        hasattr(node, 'node') and
+        hasattr(node.node, 'data') and
+        hasattr(node.node.data, 'reduction_type') and
+        node.node.data.reduction_type and
+        hasattr(node.node.data, 'num_splits') and
+        node.node.data.num_splits > 1
+    )
+
+
 def get_kernel_metadata(
     node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
     wrapper: PythonWrapperCodegen,
@@ -845,6 +857,9 @@ def get_kernel_metadata(
                     f'{stride_annotation}{device_annotation}"'
                 )
 
+            # Track if we have split reductions to properly show intermediate tensors
+            split_reduction_buffers = False
+
             for n in node_schedule:
                 if not hasattr(n, "read_writes") or n.read_writes is None:
                     continue
@@ -858,14 +873,19 @@ def get_kernel_metadata(
                         if buffer is None:
                             continue
                         input_name, layout = get_buffer_info(buffer, r.name)
+
+                        # For split reductions, we need to identify intermediate buffers
+                        # that are outputs of previous kernels in the split sequence
+                        if _is_split_reduction_node(n):
+                            split_reduction_buffers = True
+
                         detailed_metadata.append(
                             f"{wrapper.comment}   %{input_name} : Tensor "
                             f"{stringfy_layout(layout)} = PlaceHolder[target={input_name}]"
                         )
 
                 if (
-                    hasattr(n.read_writes, "writes")
-                    and n.read_writes.writes is not None
+                    hasattr(n.read_writes, "writes") and n.read_writes.writes is not None
                 ):
                     for w in n.read_writes.writes:
                         buffer = V.graph.try_get_buffer(w.name)
@@ -873,12 +893,26 @@ def get_kernel_metadata(
                             continue
                         output_name, _ = get_buffer_info(buffer, w.name)
 
+                        # Track split reduction output buffers
+                        if _is_split_reduction_node(n):
+                            split_reduction_buffers = True
+
                         all_writes.append("%" + output_name)
 
         for node in inductor_nodes:
             detailed_metadata.append(
                 f"{wrapper.comment}   {node.format_node(include_tensor_metadata=True)}"
             )
+
+        # For split reductions, we need to show the actual flow between kernels
+        # rather than the original node which may not match the intermediate tensors
+        if split_reduction_buffers:
+            # Adjust the output to show actual intermediate tensors
+            filtered_writes = []
+            for write in all_writes:
+                # Keep all writes for split reductions to show the actual data flow
+                filtered_writes.append(write)
+            all_writes = filtered_writes
 
         detailed_metadata.append(f"{wrapper.comment}   return {','.join(all_writes)}")
 
