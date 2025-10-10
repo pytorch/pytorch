@@ -404,17 +404,7 @@ def root_module_when_exporting_non_strict(flat_fn):
         return None
 
 
-def copy_fwd_metadata_to_bw_nodes(fx_g):
-    """
-    Input: `fx_g` which contains the joint fwd+bwd FX graph created by
-    aot_autograd.
-
-    This function walks the graph and copies over metadata from forward nodes
-    to backward nodes, using the `seq_nr` field as a one-to-many mapping
-    from forward node to backward node. This metadata is useful for performance
-    profiling and debugging.
-    """
-
+def _copy_fwd_metadata_to_bw_nodes(fx_g):
     def _is_forward_node_with_seq_nr(node):
         # For now, assume that if nn_module_stack_metadata is populated, this
         # node is from the forward. Ignore nodes without `seq_nr`.
@@ -457,6 +447,26 @@ def copy_fwd_metadata_to_bw_nodes(fx_g):
             node.meta["fwd_source_fn_stack"] = fwd_node.meta.get("source_fn_stack")
             # TODO: better to change to a specific field of custom?
             node.meta["custom"] = fwd_node.meta.get("custom")
+
+
+def copy_fwd_metadata_to_bw_nodes(fx_g):
+    """
+    Input: `fx_g` which contains the joint fwd+bwd FX graph created by
+    aot_autograd.
+
+    This function walks the graph and copies over metadata from forward nodes
+    to backward nodes, using the `seq_nr` field as a one-to-many mapping
+    from forward node to backward node. This metadata is useful for performance
+    profiling and debugging.
+    """
+
+    # Copy the metadata recursively - useful for HOPs
+    for node in fx_g.graph.nodes:
+        if node.op == "get_attr":
+            submod = getattr(fx_g, node.target)
+            if isinstance(submod, torch.fx.GraphModule):
+                copy_fwd_metadata_to_bw_nodes(submod)
+    _copy_fwd_metadata_to_bw_nodes(fx_g)
 
 
 def register_buffer_assignment_hook(mod, assigned_buffers):
