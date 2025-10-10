@@ -25,8 +25,8 @@ TEST(TestHOArrayRef, TestAPIs) {
   ASSERT_FALSE(arr.empty());
   EXPECT_EQ(arr.size(), 7);
   for (size_t i = 0; i < arr.size(); i++) {
-    EXPECT_EQ(arr[i], i+1);
-    EXPECT_EQ(arr.at(i), i+1);
+    EXPECT_EQ(arr[i], i + 1);
+    EXPECT_EQ(arr.at(i), i + 1);
   }
   EXPECT_EQ(arr.front(), 1);
   EXPECT_EQ(arr.back(), 7);

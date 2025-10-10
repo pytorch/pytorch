@@ -16,6 +16,19 @@ namespace c10 {
 /// HOArrayRef (HO = HeaderOnly) - A subset of ArrayRef that is implemented only
 /// in headers. This will be a base class from which ArrayRef inherits, so that
 /// we can keep much of the implementation shared.
+///
+/// [HOArrayRef vs ArrayRef note]
+/// As HOArrayRef is a subset of ArrayRef, it has slightly less functionality than
+/// ArrayRef. We document the differences below:
+/// 1. ArrayRef has a debug-only internal assert that prevents construction with a
+//     nullptr Data and nonzero length in the following constructors: from a pointer
+//     and length, from a range, from a templated Container with .data() and .size().
+//     HOArrayRef does not make that check for any constructor.
+/// 2. ArrayRef can be constructed from a SmallVector. HOArrayRef cannot.
+/// 3. ArrayRef uses TORCH_CHECK. HOArrayRef uses headeronly STD_TORCH_CHECK,
+///    which will output a std::runtime_error vs a c10::Error.
+/// In all other aspects, HOArrayRef is identical to ArrayRef, with the positive
+/// benefit of being header-only and thus independent of libtorch.so.
 template <typename T>
 class HOArrayRef {
  public:
@@ -33,13 +46,6 @@ class HOArrayRef {
   /// The number of elements.
   size_type Length;
 
-  // CHANGED void debugCheckNullptrInvariant() {
-  //   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-  //       Data != nullptr || Length == 0,
-  //       "created ArrayRef with nullptr and non-zero length! std::optional
-  //       relies on this being illegal");
-  // }
-
  public:
   /// @name Constructors
   /// @{
@@ -54,23 +60,12 @@ class HOArrayRef {
   /// Construct a HOArrayRef from a pointer and length.
   constexpr HOArrayRef(const T* data, size_t length)
       : Data(data), Length(length) {
-    // CHANGED debugCheckNullptrInvariant();
   }
 
   /// Construct a HOArrayRef from a range.
   constexpr HOArrayRef(const T* begin, const T* end)
       : Data(begin), Length(end - begin) {
-    // CHANGED debugCheckNullptrInvariant();
   }
-
-  /// CHANGED Construct an ArrayRef from a SmallVector. This is templated in
-  /// order to avoid instantiating SmallVectorTemplateCommon<T> whenever we
-  /// copy-construct an ArrayRef.
-  // template <typename U>
-  // /* implicit */ ArrayRef(const SmallVectorTemplateCommon<T, U>& Vec)
-  //     : Data(Vec.data()), Length(Vec.size()) {
-  //   debugCheckNullptrInvariant();
-  // }
 
   template <
       typename Container,
@@ -79,7 +74,6 @@ class HOArrayRef {
           (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
   /* implicit */ HOArrayRef(const Container& container)
       : Data(container.data()), Length(container.size()) {
-    // CHANGED debugCheckNullptrInvariant();
   }
 
   /// Construct a HOArrayRef from a std::vector.
@@ -160,7 +154,6 @@ class HOArrayRef {
 
   /// front - Get the first element.
   constexpr const T& front() const {
-    // CHANGED TO USE STD_TORCH_CHECK
     STD_TORCH_CHECK(
         !this->empty(),
         "HOArrayRef: attempted to access front() of empty list");
@@ -169,7 +162,6 @@ class HOArrayRef {
 
   /// back - Get the last element.
   constexpr const T& back() const {
-    // CHANGED TO USE STD_TORCH_CHECK
     STD_TORCH_CHECK(
         !this->empty(), "HOArrayRef: attempted to access back() of empty list");
     return this->Data[this->Length - 1];
@@ -183,7 +175,6 @@ class HOArrayRef {
 
   /// slice(n, m) - Take M elements of the array starting at element N
   constexpr HOArrayRef<T> slice(size_t N, size_t M) const {
-    // CHANGEDDDDD TO USE STD_TORCH_CHECK
     STD_TORCH_CHECK(
         N + M <= this->size(),
         "HOArrayRef: invalid slice, N = ",
@@ -197,8 +188,6 @@ class HOArrayRef {
 
   /// slice(n) - Chop off the first N elements of the array.
   constexpr HOArrayRef<T> slice(size_t N) const {
-    // CHANGED TO USE STD_TORCH_CHECK, slice may be the only op that needs a
-    // this->
     STD_TORCH_CHECK(
         N <= this->size(),
         "HOArrayRef: invalid slice, N = ",
@@ -217,7 +206,6 @@ class HOArrayRef {
 
   /// Vector compatibility
   constexpr const T& at(size_t Index) const {
-    // CHANGED TO USE STD_TORCH_CHECK
     STD_TORCH_CHECK(
         Index < this->Length,
         "HOArrayRef: invalid index Index = ",
