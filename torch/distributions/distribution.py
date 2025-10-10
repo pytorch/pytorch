@@ -10,10 +10,6 @@ from torch.distributions.utils import lazy_property
 from torch.types import _size
 
 
-def foo() -> int:
-    return ""
-
-
 __all__ = ["Distribution"]
 
 
