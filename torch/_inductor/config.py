@@ -407,6 +407,7 @@ reorder_iterative_debug_limit_to_reorder: Optional[int] = (
     else int(env_str)
 )
 sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    # pyrefly: ignore  # unbound-name
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
 
@@ -1259,7 +1260,7 @@ class triton:
     cudagraph_trees_history_recording = False
 
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
-    cudagraph_support_input_mutation = False if is_fbcode() else True
+    cudagraph_support_input_mutation = not is_fbcode()
 
     # Maximal number of allowed cudagraph re-record for a function and
     # a cudagraph node due to static input tensor address changes or
@@ -1582,10 +1583,22 @@ class aot_inductor:
     )
 
     # Experimental. Flag to control whether to include weight in .so
+    # Not supported for cross_target_platform="windows".
     package_constants_in_so: bool = True
 
-    # Experimental. Flag to control whether to package weight separately on disk
-    package_constants_on_disk: bool = False
+    # Experimental. Flag to control whether to package weight separately on disk and which
+    # format to package it in.
+    # Options:
+    # None:
+    #       Do not package weight separately on disk.
+    # "pickle_weights":
+    #       Each weight is pickled and stored separately in data/weights. We also store the
+    #       FQN names of each weight in a weights_config.json in each model's data/aot_inductor/model folder.
+    #       Can only be load back from python using torch._inductor.aoti_load_package API now.
+    # "binary_blob":
+    #       Stores all weights in a single binary blob in data/aot_inductor/model folder for each model.
+    #       This option and config.aot_inductor.force_mmap_weights cannot both be True
+    package_constants_on_disk_format: Optional[str] = None
 
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()

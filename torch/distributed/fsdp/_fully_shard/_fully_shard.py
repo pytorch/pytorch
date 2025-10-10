@@ -50,6 +50,7 @@ def get_cls_to_fsdp_cls() -> dict[type, type]:
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def fully_shard(
     module: nn.Module,
     *,
@@ -63,6 +64,7 @@ def fully_shard(
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def fully_shard(
     module: list[nn.Module],
     *,
@@ -239,7 +241,7 @@ def fully_shard(
     # Place FSDP leftmost for highest priority in the method resolution order
     for module in modules:
         cls = module.__class__
-        new_cls = cls_to_fsdp_cls.get(cls, None)
+        new_cls = cls_to_fsdp_cls.get(cls)
         if not new_cls:
             dct = {"__deepcopy__": _unimplemented_deepcopy}
             new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
