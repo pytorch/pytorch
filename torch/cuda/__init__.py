@@ -271,35 +271,57 @@ def _check_capability():
             major = capability[0]
             minor = capability[1]
             name = get_device_name(d)
+            current_arch = major * 10 + minor
             cur_arch_major = major * 10
+
+            # Special check for sm_87 and sm_110: on these devices
+            # We need the exact TORCH_CUDA_ARCH_LIST to be included
+            arch_list = torch.cuda.get_arch_list()
+            if (major == 8 and minor == 7) or (major == 11 and minor == 0):
+                required_arch = f"sm_{major}{minor}"
+                if required_arch not in arch_list:
+                    warnings.warn(
+                        f"Found GPU{d} {name} which is of cuda capability sm_{major}.{minor}. "
+                        f"The cuda capability supported by this version of PyTorch is {arch_list}"
+                    )
+                    matched_arches = ""
+                    for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
+                        if arch_info["min"] <= current_arch_ <= arch_info["max"]:
+                            matched_arches += f" {arch}"
+                    if matched_arches != "":
+                        warnings.warn(matched_cuda_warn.format(matched_arches))
+                    continue
+
             min_arch = min(
-                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
+                (_extract_arch_version(arch) for arch in arch_list),
                 default=50,
             )
             max_arch = max(
-                (_extract_arch_version(arch) for arch in torch.cuda.get_arch_list()),
+                (_extract_arch_version(arch) for arch in arch_list),
                 default=50,
             )
-            if cur_arch_major < min_arch or cur_arch_major > max_arch:
-                warnings.warn(
-                    incompatible_gpu_warn
-                    % (
-                        d,
-                        name,
-                        major,
-                        minor,
-                        min_arch // 10,
-                        min_arch % 10,
-                        max_arch // 10,
-                        max_arch % 10,
+            if current_arch < min_arch or current_arch > max_arch:
+                # Only issue compatibility warning if major version does not match
+                if current_arch > max_arch and cur_arch_major != max_arch / 10:
+                    warnings.warn(
+                        incompatible_gpu_warn
+                        % (
+                            d,
+                            name,
+                            major,
+                            minor,
+                            min_arch // 10,
+                            min_arch % 10,
+                            max_arch // 10,
+                            max_arch % 10,
+                        )
                     )
-                )
-                matched_arches = ""
-                for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
-                    if arch_info["min"] <= cur_arch_major <= arch_info["max"]:
-                        matched_arches += f" {arch}"
-                if matched_arches != "":
-                    warnings.warn(matched_cuda_warn.format(matched_arches))
+                    matched_arches = ""
+                    for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
+                        if arch_info["min"] <= current_arch <= arch_info["max"]:
+                            matched_arches += f" {arch}"
+                    if matched_arches != "":
+                        warnings.warn(matched_cuda_warn.format(matched_arches))
 
 
 def _check_cubins():
