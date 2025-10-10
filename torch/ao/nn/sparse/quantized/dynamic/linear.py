@@ -149,7 +149,7 @@ class Linear(torch.nn.Module):
         # TODO: Need to add options to qconfig to avoid the calibration.
         # TODO: Add calibration for the sparsity
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
-        if type(mod) == nni.LinearReLU:
+        if type(mod) is nni.LinearReLU:
             mod = mod[0]
         # pyrefly: ignore  # missing-attribute
         if mod.qconfig is not None and mod.qconfig.weight is not None:

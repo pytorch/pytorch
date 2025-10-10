@@ -280,7 +280,7 @@ class _ConvNd(WeightedQuantizedModule):
         if hasattr(mod, "weight_fake_quant"):
             # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__ + \
             # ".from_float only works for " + cls.__QAT_MODULE.__name__
-            if type(mod) == cls._NNIQAT_CONV_BN_MODULE:
+            if type(mod) is cls._NNIQAT_CONV_BN_MODULE:
                 mod.weight, mod.bias = fuse_conv_bn_weights(
                     mod.weight,
                     mod.bias,
