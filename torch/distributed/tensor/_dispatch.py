@@ -149,6 +149,7 @@ class OpDispatcher:
         if op_call in self._custom_op_handlers:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
+        print(f"rank: {torch.distributed.get_rank()} op: {op_call}", flush=True)
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
 
@@ -165,10 +166,10 @@ class OpDispatcher:
                 return out
             else:
                 raise
-        except Exception as e:
-            raise RuntimeError(
-                f"Sharding propagation failed for {op_info.schema}"
-            ) from e
+        # except Exception as e:
+        #     raise RuntimeError(
+        #         f"Sharding propagation failed for {op_info.schema}"
+        #     ) from e
 
         output_sharding = op_info.output_sharding
         assert output_sharding is not None, "output sharding should not be None"
@@ -229,7 +230,11 @@ class OpDispatcher:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
                 # normal case, run local sharded op computation
-                local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                try:
+                    local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
+                except:
+                    import fbvscode
+                    fbvscode.set_trace()
 
         else:
             # For a non-participating device (happens on rank that does not belong to
@@ -336,7 +341,6 @@ class OpDispatcher:
         use_val_from_redistribute_schema: bool,
     ) -> None:
         debug_mode = get_active_debug_mode()
-
         # NOTE: it's very rare that we need to reshard kwargs so we intentionally skip it
         if op_info.args_tree_spec is not None:
             flatten_args_schema_to_reshard = tuple(

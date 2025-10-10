@@ -82,15 +82,43 @@ def _mm_like_strategy(
         if is_tensor_shardable(self_strategy.shape, self_spec) and is_tensor_shardable(
             mat2_strategy.shape, mat2_spec
         ):
-            redistribute_cost = [
-                generate_redistribute_costs(self_strategy, self_spec),
-                generate_redistribute_costs(mat2_strategy, mat2_spec),
-            ]
-            strtg.redistribute_cost = redistribute_cost
-            filtered_strategies.append(strtg)
-
+            assert len(self_strategy.strategies) == 1
+            if (
+                self_strategy.strategies[0]
+                .output_spec.placements[0]
+                .is_partial_view_shard()
+            ):
+                partial_view_placement = (
+                    self_strategy.strategies[0]
+                    .output_spec.placements[0]
+                    .output_placement
+                )
+                if (
+                    len(self_spec.placements) == 1
+                    and self_spec.placements[0] == partial_view_placement
+                    and len(strtg.output_spec.placements) == 1
+                    and strtg.output_spec.placements[0] == partial_view_placement
+                ):
+                    strtg.input_specs[0].placements = (
+                        self_strategy.strategies[0].output_spec.placements[0],
+                    )
+                    strtg.output_spec.placements = (
+                        self_strategy.strategies[0].output_spec.placements[0],
+                    )
+                    redistribute_cost = [
+                        [0.0],
+                        generate_redistribute_costs(mat2_strategy, mat2_spec),
+                    ]
+                    strtg.redistribute_cost = redistribute_cost
+                    filtered_strategies.append(strtg)
+            else:
+                redistribute_cost = [
+                    generate_redistribute_costs(self_strategy, self_spec),
+                    generate_redistribute_costs(mat2_strategy, mat2_spec),
+                ]
+                strtg.redistribute_cost = redistribute_cost
+                filtered_strategies.append(strtg)
     mm_strategy.strategies = filtered_strategies
-
     return mm_strategy
 
 

@@ -276,6 +276,12 @@ class DTensorSpec:
         return True if the current DTensorSpec is sharded on any mesh dims (devices)
         """
         return any(placement.is_shard() for placement in self.placements)
+    
+    def is_partial_view_sharded(self) -> bool:
+        """
+        return True if the current DTensorSpec is sharded on any mesh dims (devices)
+        """
+        return any(placement.is_partial_view_shard() for placement in self.placements)
 
     def shallow_copy_with_tensor_meta(
         self, tensor_meta: Optional[TensorMeta]

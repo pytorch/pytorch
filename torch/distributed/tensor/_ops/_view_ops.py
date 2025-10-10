@@ -27,6 +27,7 @@ from torch.distributed.tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
+    PartialViewShard,
 )
 
 
@@ -496,6 +497,7 @@ def propagate_shape_and_sharding(
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     mesh_ndim = len(mesh_sizes)
     shardable_dims: dict[int, list[bool]] = {}
+    partial_view_dims: dict[int, list[bool]] = {}
 
     # in case an input dimension disappears (e.g. collapsing, reduction)
     # we cannot shard in that dimension (we need a replication fall-back rule)
@@ -532,6 +534,7 @@ def propagate_shape_and_sharding(
         if isinstance(cmd, InputDim):
             return cmd
         elif isinstance(cmd, Flatten):
+            partial_view_cmd_input_dim = None
             for i, dim in enumerate(cmd.input_dims):
                 # so far all Flatten is always composed of InputDims; revisit this if needed
                 assert isinstance(dim, InputDim)
@@ -539,14 +542,40 @@ def propagate_shape_and_sharding(
                 shard_mesh_dim, shard_placement = (
                     maybe_get_shard_mesh_dim_and_placement(dim)
                 )
+                # https://github.com/pytorch/pytorch/pull/161161
+                # if i > 0:
+                #     can_shard_dim = False
+                #     if strict_view and (shard_mesh_dim is not None):
+                #         assert shard_placement is not None
+                #         tensor_dim_size = global_input_shape[shard_placement.dim]
+                #         mesh_dim_size = mesh_sizes[shard_mesh_dim]
+                #         if tensor_dim_size % mesh_dim_size != 0:
+                #             raise RuntimeError(
+                #                 f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
+                #                 "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                #             )
+                # elif (shard_mesh_dim is not None):
+                #     assert shard_placement is not None
+                #     tensor_dim_size = global_input_shape[shard_placement.dim]
+                #     mesh_dim_size = mesh_sizes[shard_mesh_dim]
+                #     if tensor_dim_size % mesh_dim_size != 0:
+                #         can_shard_dim = False
+                #         if strict_view:
+                #             raise RuntimeError(
+                #                 f"Attempted to flatten unevenly sharded dimension {i}, "
+                #                 "which would require resharding the input. "
+                #                 "Please explicitly redistribute the tensor instead."
+                #             )
                 input_sharded = shard_mesh_dim is not None
                 if i > 0:
                     can_shard_dim = False
                     if strict_view and input_sharded:
-                        raise RuntimeError(
-                            f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
-                            "It cannot be performed without redistribution, which is disallowed by the current operator.",
-                        )
+                        partial_view_dims[dim.input_dim] = [True] * mesh_ndim
+                        partial_view_cmd_input_dim = dim
+                        # raise RuntimeError(
+                        #     f"Attempted to flatten multiple dimensions, with dimension {dim.input_dim} being sharded. ",
+                        #     "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                        # )
                 elif input_sharded:
                     assert shard_placement is not None and shard_mesh_dim is not None
                     tensor_dim_size = global_input_shape[shard_placement.dim]
@@ -562,7 +591,14 @@ def propagate_shape_and_sharding(
                 shardable_dims[dim.input_dim] = [can_shard_dim] * mesh_ndim
 
             assert isinstance(cmd.input_dims[0], InputDim)
-            return cmd.input_dims[0]
+            # import fbvscode
+            # fbvscode.set_trace()
+            if not partial_view_dims:
+                return cmd.input_dims[0]
+            else:
+                assert len(partial_view_dims.keys()) == 1
+                assert partial_view_cmd_input_dim is not None
+                return partial_view_cmd_input_dim
         elif isinstance(cmd, Split):
             in_dim = get_in_dim_to_shard(cmd.input_dim)
             out_size = cmd.group_shape[cmd.split_id]
@@ -609,20 +645,25 @@ def propagate_shape_and_sharding(
             return None
 
     # for each output dim, find the corresponding input dim in terms of sharding prop
+    # key: input dim -> value: output dim
     shard_dim_map = {}
     for dim, cmd in enumerate(rule):
         in_dim = get_in_dim_to_shard(cmd)
         if in_dim is not None:
             shard_dim_map[in_dim.input_dim] = dim
 
-    input_tgt_placements = [
-        (
-            Replicate()
-            if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
-            else p
-        )
-        for mesh_dim, p in enumerate(input_src_placements)
-    ]
+    input_tgt_placements = []
+    for mesh_dim, p in enumerate(input_src_placements):
+        if isinstance(p, Shard) and partial_view_dims and partial_view_dims[p.dim][mesh_dim]:
+            # import fbvscode
+            # fbvscode.set_trace()
+            input_tgt_placements.append(PartialViewShard(input_src_placement=p))
+        elif isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]:
+            input_tgt_placements.append(Replicate())
+        else:
+            # assert not p.is_partial_view_shard()
+            input_tgt_placements.append(p)
+
 
     def _rewrite_shard_dim(p: Shard):
         """
@@ -642,17 +683,34 @@ def propagate_shape_and_sharding(
         """
         if isinstance(p, _StridedShard):
             return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
+        elif isinstance(p, PartialViewShard):
+            if p.output_placement is None:
+                # flatten case
+                return PartialViewShard(input_src_placement=p.input_src_placement, output_placement=Shard(shard_dim_map[p.input_src_placement.dim]))
+            else:
+                # unflatten case
+                import fbvscode
+                fbvscode.set_trace()
+                return p.input_src_placement
         else:
             return Shard(shard_dim_map[p.dim])
 
-    output_placements = [
-        _rewrite_shard_dim(p) if isinstance(p, Shard) else p
-        for p in input_tgt_placements
-    ]
-
+    output_placements = []
+    for p in input_tgt_placements:
+        if isinstance(p, Shard) or isinstance(p, PartialViewShard):
+            output_placements.append(_rewrite_shard_dim(p))
+        else:
+            output_placements.append(p)
     return input_tgt_placements, output_placements
 
 
+
+# register_op_strategy_map(
+#     aten.view.default,
+#     Tensor.view,
+#     schema_info=RuntimeSchemaInfo(1),
+#     strict_view=True,
+# )
 def register_op_strategy_map(
     aten_op_overload: torch._ops.OpOverload,
     local_op_name: Callable[..., torch.Tensor],
@@ -668,6 +726,8 @@ def register_op_strategy_map(
        Currently, this should be set to 'true' for any "view" ops.
        We could diverge behavior for "reshape" ops which could perform a redistribute implicitly.
     """
+    # Tensor.view: lambda input, *shape: view_groups(input.shape, shape),
+    # dim[i]: i is output dim, value is how input dim gets mapped to output dim
     dim_map: Callable[..., DimMap] = dim_maps[local_op_name]
 
     @register_op_strategy(aten_op_overload, schema_info=schema_info)
@@ -683,6 +743,11 @@ def register_op_strategy_map(
         for input_placement_strategy in input_strategy.strategies:
             input_src_spec = input_placement_strategy.output_spec
 
+            # if op_schema.op == aten._unsafe_view.default:
+            #     import fbvscode
+            #     fbvscode.set_trace()
+            # import fbvscode
+            # fbvscode.set_trace()
             input_tgt_placements, output_placements = propagate_shape_and_sharding(
                 input_src_spec.placements,
                 tuple(global_in_shape),

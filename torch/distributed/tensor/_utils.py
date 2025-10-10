@@ -14,6 +14,7 @@ from torch.distributed.tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
+    PartialViewShard,
 )
 from torch.utils._typing_utils import not_none
 
@@ -163,6 +164,34 @@ def _compute_local_shape_and_global_offset(
                 f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
             )
             shard_size, shard_offset = placement._local_shard_size_and_offset(
+                local_shape[shard_dim],
+                mesh_dim_size,
+                my_coordinate[mesh_dim],
+            )
+
+            local_shape[shard_dim] = shard_size
+
+            global_offset[shard_dim] = torch.sym_ite(
+                shard_size == 0,
+                # Special case to fill in a standardized non-garbage value for
+                # the global_offset of zero-sized shards.  This value is out
+                # of bounds of the tensor, so it won't conflict with any real
+                # offsets.  DCP may rely on this value to de-duplicate shards.
+                # Note that you can end up with zero-size shards that are
+                # still otherwise in bounds for the tensor (TODO: give an
+                # example).
+                global_shape[shard_dim],
+                # As we successively shard the same dimension, we keep
+                # advancing our pointer beyond our original offset until we
+                # get to the final chunk start.
+                global_offset[shard_dim] + not_none(shard_offset),
+            )
+        elif isinstance(placement, PartialViewShard):
+            shard_dim = placement.output_placement.dim
+            assert shard_dim < len(local_shape), (
+                f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
+            )
+            shard_size, shard_offset = placement.output_placement._local_shard_size_and_offset(
                 local_shape[shard_dim],
                 mesh_dim_size,
                 my_coordinate[mesh_dim],

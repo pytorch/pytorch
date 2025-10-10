@@ -3,6 +3,7 @@
 #include <list>
 #include <utility>
 #include <c10/util/env.h>
+#include <cstdlib>
 
 #ifdef FBCODE_CAFFE2
 #include <c10/util/static_tracepoint.h>
@@ -16,6 +17,16 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 #endif
 
 bool show_dispatch_trace() {
+  return false;
+  const char* rank_env = std::getenv("RANK");
+  if (rank_env == nullptr) {
+    rank_env = std::getenv("LOCAL_RANK");
+  }
+  int rank = std::atoi(rank_env);
+  if (rank == 0) {
+    return true;
+  }
+  return false;
   static auto envar = c10::utils::get_env("TORCH_SHOW_DISPATCH_TRACE");
 
   if (envar.has_value()) {
@@ -69,6 +80,9 @@ private:
 
 void _print_dispatch_trace(const std::string& label, const std::string& op_name, const DispatchKeySet& dispatchKeySet) {
   auto nesting_value = dispatch_trace_nesting_value();
+  // if (nesting_value > 1) {
+  //   return;
+  // }
   for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
   std::cerr << label << " op=[" << op_name << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
 }

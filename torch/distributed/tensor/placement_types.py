@@ -17,7 +17,7 @@ from torch.distributed.tensor._collective_utils import (
 )
 
 
-__all__ = ["Placement", "Shard", "Replicate", "Partial"]
+__all__ = ["Placement", "Shard", "Replicate", "Partial", "PartialViewShard"]
 
 
 class Placement:
@@ -38,6 +38,9 @@ class Placement:
         return False
 
     def is_partial(self, reduce_op: Optional[str] = None) -> bool:
+        return False
+    
+    def is_partial_view_shard(self) -> bool:
         return False
 
 
@@ -722,6 +725,16 @@ class Partial(Placement):
         if reduce_op is None:
             return True
         return self.reduce_op == reduce_op
+
+
+
+@dataclass(frozen=True)
+class PartialViewShard(Placement):
+    input_src_placement: Placement = None
+    output_placement: Placement = None
+
+    def is_partial_view_shard(self) -> bool:
+        return True
 
 
 # We keep the old _Partial name for a while for BC reason
