@@ -29,7 +29,7 @@
 
 namespace at::cuda::tunable {
 
-using at::cuda::blas::ScalingType;
+using at::blas::ScalingType;
 
 enum class BlasOp {
   N = 0,
@@ -162,7 +162,7 @@ inline std::string ComputeTypeFor() {
 // ROCBLAS and hipBLASLt.
 template <>
 inline std::string ComputeTypeFor<float>() {
-  if (at::globalContext().float32Precision("cuda", "matmul") != "tf32") {
+  if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) != at::Float32Precision::TF32) {
     return "f32_r";
   } else {
     return "xf32_r";
