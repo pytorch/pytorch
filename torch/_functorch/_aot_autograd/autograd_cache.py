@@ -235,7 +235,7 @@ def check_node_safe(node: Node):
                 f"Unsupported call_method target {method_target}. \nMethod module: {module}, \nMethod name: {name}"
             )
         if (
-            type(method_name) != str
+            type(method_name) is not str
             and type(method_name).__name__ != "method_descriptor"
         ):
             raise BypassAOTAutogradCache(
