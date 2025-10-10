@@ -14,6 +14,7 @@ import logging
 import os
 import pickle
 import pkgutil
+import platform
 import re
 import shlex
 import shutil
@@ -49,6 +50,7 @@ from typing_extensions import override, Self
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
@@ -83,6 +85,8 @@ from torch._inductor.custom_graph_pass import (
     CustomGraphModulePass,
     CustomGraphPass,
     CustomGraphPassType,
+    CustomPartitionerFn,
+    CustomPartitionerFnType,
 )
 from torch._inductor.freezing_utils import has_frozen_params, is_frozen_param
 from torch._inductor.runtime.compile_tasks import _reload_python_module
@@ -170,6 +174,21 @@ def get_kernel_bin_format(device: str) -> str:
         return "spv"
     else:
         return ""
+
+
+def get_device_information(device_type: str) -> dict[str, str]:
+    """
+    Gets all the current device information used to compile the .so.
+    """
+    metadata: dict[str, str] = {
+        "AOTI_PLATFORM": sys.platform,
+        "AOTI_MACHINE": platform.machine(),
+        "AOTI_CPU_ISA": str(torch._inductor.cpu_vec_isa.pick_vec_isa()).upper(),
+        "AOTI_COMPUTE_CAPABILITY": str(
+            get_interface_for_device(device_type).get_compute_capability()
+        ),
+    }
+    return metadata
 
 
 class CacheBase:
@@ -388,7 +407,14 @@ class WritableTempFile:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.temp_file.close()
-        os.unlink(self.temp_file.name)
+        try:
+            os.unlink(self.temp_file.name)
+        except OSError as e:
+            if _IS_WINDOWS:
+                # On Windows, some case temp file is opened and fail to unlink. Need to ignore it.
+                pass
+            else:
+                raise e
 
 
 def write(
@@ -631,7 +657,8 @@ class FxGraphCachePickler(pickle.Pickler):
             if isinstance(obj, torch.Tensor):
                 return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
-                return "<bytes>"
+                val = obj.decode("utf-8", errors="replace")
+                return val if len(val) <= 1024 else val[:1024] + "..."
             elif type(obj) in self.dispatch_table:
                 # Run the reducer on the object
                 return str(self.dispatch_table[type(obj)](obj)[1])
@@ -895,6 +922,11 @@ class FxGraphHashDetails:
             if custom_config is not None
         }
 
+        # Register the custom partitioner function
+        self._custom_partitioner_fn = self._get_custom_partitioner_fn_detail(
+            config.custom_partitioner_fn
+        )
+
     # This is mainly added to handle these two inductor configs, which are (unfortunately)
     # sometimes cache safe:
     # - _pre_fusion_custom_pass
@@ -926,6 +958,14 @@ class FxGraphHashDetails:
             return None
         assert isinstance(custom_pass, (CustomGraphPass, CustomGraphModulePass))
         return custom_pass.uuid()
+
+    def _get_custom_partitioner_fn_detail(
+        self, custom_partitioner_fn: CustomPartitionerFnType
+    ) -> Optional[Any]:
+        if not custom_partitioner_fn:
+            return None
+        assert isinstance(custom_partitioner_fn, CustomPartitionerFn)
+        return custom_partitioner_fn.uuid()
 
 
 def compiled_fx_graph_hash(
@@ -1230,8 +1270,27 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         )
         trace_structured(
             "inductor_output_code",
-            lambda: {"filename": artifact_path},
+            lambda: {
+                "filename": artifact_path,
+                "file_path": os.path.abspath(artifact_path),
+            },
             payload_fn=lambda: code,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_node_mappings",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_mapping_str,
+        )
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_provenance_tracking_kernel_stack_traces",
+                "encoding": "json",
+            },
+            payload_fn=lambda: graph.inductor_provenance_stack_traces_str,
         )
         return graph, cache_info
 
@@ -1571,8 +1630,14 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
 
 @functools.cache
 def split_aot_inductor_output_path(path: str) -> tuple[str, str]:
+    def get_module_ext_type() -> str:
+        if _IS_WINDOWS:
+            return ".pyd"
+        else:
+            return ".so"
+
     """Returns the path where the AOT Inductor compiled kernels are stored."""
-    if path.endswith(".so"):
+    if path.endswith(get_module_ext_type()):
         return os.path.split(path)
     elif path.endswith(".pt2"):
         return os.path.split(path)
@@ -1733,7 +1798,7 @@ class AotCodeCompiler:
 
         header_code = ""
         header_path = ""
-        if config.aot_inductor.compile_standalone:
+        if not config.aot_inductor.dynamic_linkage:
             # to link statically, we also need a header file
             with open(
                 os.path.join(
@@ -1783,7 +1848,7 @@ class AotCodeCompiler:
             generated_files.append(wrapper_path)
             if not config.aot_inductor.package_cpp_only:
                 generated_files.append(kernel_path)
-            if config.aot_inductor.compile_standalone:
+            if not config.aot_inductor.dynamic_linkage:
                 generated_files.append(header_path)
 
         output_code_log.info("Wrapper code written to: %s", wrapper_path)
@@ -1806,7 +1871,7 @@ class AotCodeCompiler:
             },
             payload_fn=lambda: kernel_code,
         )
-        if config.aot_inductor.compile_standalone:
+        if not config.aot_inductor.dynamic_linkage:
             output_code_log.info("Header code written to: %s", header_path)
             trace_structured(
                 "graph_dump",
@@ -2039,6 +2104,9 @@ end
             metadata = config.aot_inductor.metadata
             metadata["AOTI_DEVICE_KEY"] = device_type
 
+            # Add environment information to ensure .so compatibility
+            metadata.update(get_device_information(device_type))
+
             # Save user provided metadata
             meta_json = str(
                 wrapper_path_operator.with_name(
@@ -2103,6 +2171,7 @@ end
                     data_ptr,
                     ctypes.POINTER(ctypes.c_ubyte * nbytes),
                 )
+                # pyrefly: ignore  # missing-attribute
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
@@ -2294,6 +2363,7 @@ end
                     ):
                         current_arch = _nvcc_arch_as_compile_option()
                         cmd = (
+                            # pyrefly: ignore  # unbound-name
                             f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
                             # Triton only allows generating PTX version as same as the current arch
                             f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
@@ -2448,16 +2518,16 @@ end
                 if config.aot_inductor.package:
                     generated_files.append(output_so)
 
-        if config.aot_inductor.package:
-            if config.trace.provenance_tracking_level != 0:
-                kernel_info = torch._inductor.debug.create_kernel_information_json()
-                kernel_info_json = os.path.join(
-                    wrapper_path_operator.parent, "kernel_information.json"
-                )
-                with open(kernel_info_json, "w") as f:
-                    f.write(json.dumps(kernel_info, indent=4))
-                generated_files.append(kernel_info_json)
+        if config.trace.provenance_tracking_level != 0:
+            kernel_info = torch._inductor.debug.create_kernel_information_json()
+            kernel_info_json = os.path.join(
+                wrapper_path_operator.parent, "kernel_information.json"
+            )
+            with open(kernel_info_json, "w") as f:
+                f.write(json.dumps(kernel_info, indent=4))
+            generated_files.append(kernel_info_json)
 
+        if config.aot_inductor.package:
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
             # return os.path.split(output_so)[0]
@@ -2496,6 +2566,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p, No
 
     # convert any kwarg-only arguments to kwargs
     kwargs = dict()
+    # pyrefly: ignore  # missing-attribute
     for func_arg, conv_arg in zip(func._schema.arguments, converted_args):
         if func_arg.kwarg_only:
             kwargs[func_arg.name] = conv_arg
@@ -2677,10 +2748,14 @@ class CppCodeCache:
         main_build_option = CppTorchDeviceOptions(
             compile_only=bool(optimized_code),
             min_optimize=optimized_code is not None,
+            # pyrefly: ignore  # bad-argument-type
             **compile_command,
         )
         optimized_build_option = CppTorchDeviceOptions(
-            compile_only=True, **compile_command
+            # pyrefly: ignore  # bad-argument-type
+            compile_only=True,
+            # pyrefly: ignore  # bad-argument-type
+            **compile_command,
         )
 
         def get_hashable_command_line(build_option: BuildOptionsBase) -> str:
@@ -2729,6 +2804,7 @@ class CppCodeCache:
                 # decision if that ever changes.
                 if optimized_code and (header := _get_cpp_prefix_header(device_type)):
                     optimized_build_option.precompiled_header = _precompile_header(
+                        # pyrefly: ignore  # unbound-name
                         header,
                         optimized_cmd_line,
                         **compile_command,
@@ -2759,6 +2835,7 @@ class CppCodeCache:
                         main_builder.get_target_file_path(),
                         optimized_builder.get_target_file_path(),
                     ],
+                    # pyrefly: ignore  # bad-argument-type
                     BuildOption=CppTorchDeviceOptions(**compile_command),
                     output_dir=output_dir,
                 )
@@ -2917,6 +2994,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     )
 
     @classmethod
+    # pyrefly: ignore  # bad-override
     def _load_library_inner(cls, path: str, key: str) -> ModuleType:
         os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
             torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
@@ -3188,10 +3266,12 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         buffer_names = []
         for i, arg in enumerate(meta.argtypes):
             if arg.is_buffer():
+                # pyrefly: ignore  # bad-argument-type
                 buffer_names.append(f"&hl_buf_{i}")
                 buffers.extend(cls._codegen_buffer(f"hl_buf_{i}", arg, is_cuda))
             else:
                 assert "*" not in arg.ctype
+                # pyrefly: ignore  # bad-argument-type
                 buffer_names.append(arg.name)
         buffers = "\n".join([f"    {line}" for line in buffers]).lstrip()
 
@@ -3446,6 +3526,7 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
 
                 ci = cmd.index("-o")
                 assert isinstance(ci, int)
+                # pyrefly: ignore  # unsupported-operation
                 cmd[ci + 1] = Out()
                 repl = textwrap.indent(
                     textwrap.dedent(

@@ -15,14 +15,12 @@ std::enable_if_t<
         std::is_base_of_v<Base, Child>,
     std::unique_ptr<Base>>
 make_unique_base(Args&&... args) {
-  return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
+  return std::make_unique<Child>(std::forward<Args>(args)...);
 }
 } // namespace detail
 
 inline KernelFunction::KernelFunction()
-    : boxed_kernel_func_(),
-      unboxed_kernel_func_(nullptr),
-      sym_unboxed_kernel_func_(nullptr) {}
+    : unboxed_kernel_func_(nullptr), sym_unboxed_kernel_func_(nullptr) {}
 
 inline KernelFunction::~KernelFunction() {
   if (tokens_) {

@@ -14,8 +14,9 @@ import sys
 import time
 import warnings
 from collections import namedtuple
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
@@ -350,10 +351,12 @@ class Backend(str):  # noqa: SLOT000
             # assume default devices "cpu" and "cuda", but warn
             warnings.warn(
                 f"Device capability of {name} unspecified, assuming `cpu` and "
-                "`cuda`. Please specify it via the `devices` argument of "
+                "`cuda` or `xpu`. Please specify it via the `devices` argument of "
                 "`register_backend`."
             )
-            Backend.backend_capability[name.lower()] = ["cpu", "cuda"]
+            Backend.backend_capability[name.lower()] = (
+                ["cpu", "cuda", "xpu"] if torch.xpu.is_available() else ["cpu", "cuda"]
+            )
         elif isinstance(devices, str):
             # Single device string specified. Simply convert to list.
             Backend.backend_capability[name.lower()] = [devices]
@@ -369,6 +372,7 @@ class BackendConfig:
     def __init__(self, backend: Backend):
         """Init."""
         self.device_backend_map: dict[str, Backend] = {}
+        # pyrefly: ignore  # bad-assignment
         backend = str(backend)
 
         if backend == Backend.UNDEFINED:
@@ -389,6 +393,7 @@ class BackendConfig:
             # e.g. "nccl", "gloo", "ucc", "mpi"
             supported_devices = Backend.backend_capability[backend.lower()]
             backend_val = Backend(backend)
+            # pyrefly: ignore  # bad-assignment
             self.device_backend_map = dict.fromkeys(supported_devices, backend_val)
         elif ":" in backend.lower():
             # Backend specified in "device:backend" format
@@ -407,6 +412,7 @@ class BackendConfig:
                         f"Invalid device:backend pairing: \
                                      {device_backend_pair_str}. {backend_str_error_message}"
                     )
+                # pyrefly: ignore  # bad-assignment
                 device, backend = device_backend_pair
                 if device in self.device_backend_map:
                     raise ValueError(
@@ -1179,6 +1185,7 @@ def _as_iterable(obj) -> collections.abc.Iterable:
 
 def _ensure_all_tensors_same_dtype(*tensors) -> None:
     last_dtype = None
+    # pyrefly: ignore  # bad-assignment
     for tensor in itertools.chain.from_iterable(map(_as_iterable, tensors)):
         tensor_dtype = tensor.dtype
         # Mixing complex and its element type is allowed
@@ -1747,15 +1754,19 @@ def init_process_group(
             timeout=timeout,
             group_desc="default_pg",
         )
-        _update_default_pg(default_pg)
     else:
         # backward compatible API
         if store is None:
-            rendezvous_iterator = rendezvous(
-                not_none(init_method), rank, world_size, timeout=timeout
-            )
-            store, rank, world_size = next(rendezvous_iterator)
-            store.set_timeout(timeout)
+            if backend == "fake":
+                from torch.testing._internal.distributed.fake_pg import FakeStore
+
+                store = FakeStore()
+            else:
+                rendezvous_iterator = rendezvous(
+                    not_none(init_method), rank, world_size, timeout=timeout
+                )
+                store, rank, world_size = next(rendezvous_iterator)
+                store.set_timeout(timeout)
 
             # Use a PrefixStore to avoid accidental overrides of keys used by
             # different systems (e.g. RPC) in case the store is multi-tenant.
@@ -1773,7 +1784,8 @@ def init_process_group(
             device_id=device_id,
             group_desc="default_pg",
         )
-        _update_default_pg(default_pg)
+
+    _update_default_pg(default_pg)
 
     _world.pg_group_ranks[GroupMember.WORLD] = {  # type: ignore[index]
         i: i
@@ -1829,6 +1841,7 @@ def _get_split_source(pg):
         split_from = pg._get_backend(pg.bound_device_id)
     elif pg is _world.default_pg:
         try:
+            # pyrefly: ignore  # missing-attribute
             split_from = pg._get_backend(torch.device("cuda"))
         except RuntimeError:
             # no cuda device associated with this backend
@@ -1934,9 +1947,9 @@ def _new_process_group_helper(
     if "," not in str(backend) and ":" not in str(backend):
         assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
         if backend == Backend.UNDEFINED:
-            # Currently when backend is UNDEFINED, both ``gloo`` and ``nccl`` backends
-            # will be created, we use nccl(if cuda is available) or gloo as default
-            # backend so we can correctly call getDefaultBackend which in ProcessGroup.
+            # Currently when backend is UNDEFINED, only one backend will be initialized
+            # we use nccl (if cuda is available) or gloo as default backend
+            # so we can correctly call getDefaultBackend which in ProcessGroup.
             if Backend.NCCL in backend_config.get_device_backend_map().values():
                 pg._set_default_backend(ProcessGroup.BackendType.NCCL)
             else:
@@ -1989,7 +2002,11 @@ def _new_process_group_helper(
             if not is_gloo_available():
                 raise RuntimeError("Distributed package doesn't have Gloo built in")
             backend_class = ProcessGroupGloo(
-                backend_prefix_store, group_rank, group_size, timeout=timeout
+                backend_prefix_store,
+                group_rank,
+                group_size,
+                # pyrefly: ignore  # bad-argument-type
+                timeout=timeout,
             )
             backend_class.options.global_ranks_in_group = global_ranks_in_group
             backend_class.options.group_name = group_name
@@ -2010,6 +2027,7 @@ def _new_process_group_helper(
                 # default backend_options for NCCL
                 backend_options = ProcessGroupNCCL.Options()
                 backend_options.is_high_priority_stream = False
+            # pyrefly: ignore  # bad-argument-type
             backend_options._timeout = timeout
 
             if split_from:
@@ -2029,7 +2047,11 @@ def _new_process_group_helper(
             # RuntimeError if is_ucc_available() returns false.
 
             backend_class = ProcessGroupUCC(
-                backend_prefix_store, group_rank, group_size, timeout=timeout
+                backend_prefix_store,
+                group_rank,
+                group_size,
+                # pyrefly: ignore  # bad-argument-type
+                timeout=timeout,
             )
             backend_type = ProcessGroup.BackendType.UCC
         elif backend_str == Backend.XCCL:
@@ -2038,6 +2060,7 @@ def _new_process_group_helper(
             backend_options = ProcessGroupXCCL.Options()
             backend_options.global_ranks_in_group = global_ranks_in_group
             backend_options.group_name = group_name
+            # pyrefly: ignore  # bad-argument-type
             backend_options._timeout = timeout
             backend_class = ProcessGroupXCCL(
                 backend_prefix_store, group_rank, group_size, backend_options
@@ -2062,6 +2085,7 @@ def _new_process_group_helper(
                 dist_backend_opts.store = backend_prefix_store
                 dist_backend_opts.group_rank = group_rank
                 dist_backend_opts.group_size = group_size
+                # pyrefly: ignore  # bad-argument-type
                 dist_backend_opts.timeout = timeout
                 dist_backend_opts.group_id = group_name
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
@@ -2105,6 +2129,7 @@ def _new_process_group_helper(
                         store=backend_prefix_store,
                         rank=group_rank,
                         world_size=group_size,
+                        # pyrefly: ignore  # bad-argument-type
                         timeout=timeout,
                     )
 
@@ -3314,6 +3339,7 @@ def gather_object(
         return
 
     assert object_gather_list is not None, "Must provide object_gather_list on dst rank"
+    # pyrefly: ignore  # unbound-name
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
@@ -3327,6 +3353,7 @@ def send_object_list(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
     group_dst: Optional[int] = None,
+    use_batch: bool = False,
 ):
     """
     Sends picklable objects in ``object_list`` synchronously.
@@ -3347,6 +3374,10 @@ def send_object_list(
             ``device`` before sending. Default is ``None``.
         group_dst (int, optional): Destination rank on ``group``.
             Must specify one of ``dst`` and ``group_dst`` but not both
+        use_batch (bool, optional): If True, use batch p2p operations instead of
+            regular send operations. This avoids initializing 2-rank communicators and
+            uses existing entire group communicators. See batch_isend_irecv for usage and
+            assumptions. Default is ``False``.
     Returns:
         ``None``.
 
@@ -3410,7 +3441,12 @@ def send_object_list(
     object_sizes_tensor = torch.cat(size_list)
 
     # Send object sizes
-    send(object_sizes_tensor, group_dst=group_dst, group=group)
+    if use_batch:
+        batch_isend_irecv(
+            [P2POp(isend, object_sizes_tensor, group_peer=group_dst, group=group)]
+        ).pop().wait()
+    else:
+        send(object_sizes_tensor, group_dst=group_dst, group=group)
 
     # Concatenate and send serialized object tensors
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
@@ -3420,7 +3456,12 @@ def send_object_list(
     else:
         object_tensor = torch.cat(tensor_list)
 
-    send(object_tensor, group_dst=group_dst, group=group)
+    if use_batch:
+        batch_isend_irecv(
+            [P2POp(isend, object_tensor, group_peer=group_dst, group=group)]
+        ).pop().wait()
+    else:
+        send(object_tensor, group_dst=group_dst, group=group)
 
 
 @_exception_logger
@@ -3430,6 +3471,7 @@ def recv_object_list(
     group: Optional[ProcessGroup] = None,
     device: Optional[torch.device] = None,
     group_src: Optional[int] = None,
+    use_batch: bool = False,
 ):
     """
     Receives picklable objects in ``object_list`` synchronously.
@@ -3447,6 +3489,10 @@ def recv_object_list(
         device (``torch.device``, optional): If not None, receives on this device.
             Default is ``None``.
         group_src (int, optional): Destination rank on ``group``.  Invalid to specify both ``src`` and ``group_src``.
+        use_batch (bool, optional): If True, use batch p2p operations instead of
+            regular send operations. This avoids initializing 2-rank communicators and
+            uses existing entire group communicators. See batch_isend_irecv for usage and
+            assumptions. Default is ``False``.
 
     Returns:
         Sender rank. -1 if rank is not part of the group. If rank is part of the group,
@@ -3490,6 +3536,10 @@ def recv_object_list(
         >>> objects
         ['foo', 12, {1: 2}]
     """
+    group = _group_or_default_group(group)
+    group_src = _canonicalize_group_rank(group, src, group_src)
+    _check_not_self_rank(group, group_src, "source")
+
     if _rank_not_in_group(group):
         _warn_not_in_group("recv_object_list")
         return -1
@@ -3506,7 +3556,21 @@ def recv_object_list(
     )
 
     # Receive object sizes
-    rank_sizes = recv(object_sizes_tensor, src=src, group=group, group_src=group_src)
+    if use_batch:
+        work = batch_isend_irecv(
+            [
+                P2POp(
+                    irecv,
+                    object_sizes_tensor,
+                    group_peer=group_src,
+                    group=group,
+                )
+            ]
+        ).pop()
+        work.wait()
+        rank_sizes = get_global_rank(group, group_src)
+    else:
+        rank_sizes = recv(object_sizes_tensor, group=group, group_src=group_src)
 
     # Tensor to receive serialized objects into.
     object_tensor = torch.empty(  # type: ignore[call-overload]
@@ -3515,7 +3579,21 @@ def recv_object_list(
         device=current_device,
     )
 
-    rank_objects = recv(object_tensor, src=src, group=group, group_src=group_src)
+    if use_batch:
+        work = batch_isend_irecv(
+            [
+                P2POp(
+                    irecv,
+                    object_tensor,
+                    group_peer=group_src,
+                    group=group,
+                )
+            ]
+        ).pop()
+        work.wait()
+        rank_objects = get_global_rank(group, group_src)
+    else:
+        rank_objects = recv(object_tensor, group=group, group_src=group_src)
     assert rank_sizes == rank_objects, (
         "Mismatch in return ranks for object sizes and objects."
     )
@@ -3638,8 +3716,10 @@ def broadcast_object_list(
     # has only one element, we can skip the copy.
     if my_group_rank == group_src:
         if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
+            # pyrefly: ignore  # unbound-name
             object_tensor = tensor_list[0]
         else:
+            # pyrefly: ignore  # unbound-name
             object_tensor = torch.cat(tensor_list)
     else:
         object_tensor = torch.empty(  # type: ignore[call-overload]
@@ -3768,6 +3848,7 @@ def scatter_object_list(
     broadcast(max_tensor_size, group_src=group_src, group=group)
 
     # Scatter actual serialized objects
+    # pyrefly: ignore  # no-matching-overload
     output_tensor = torch.empty(
         max_tensor_size.item(), dtype=torch.uint8, device=pg_device
     )
@@ -4804,20 +4885,25 @@ def barrier(
     if isinstance(device_ids, list):
         opts.device_ids = device_ids
         # use only the first device id
+        # pyrefly: ignore  # read-only
         opts.device = torch.device(device.type, device_ids[0])
     elif getattr(group, "bound_device_id", None) is not None:
         # Use device id from `init_process_group(device_id=...)`
         opts.device = group.bound_device_id  # type: ignore[assignment]
     elif device.type == "cpu" or _get_object_coll_device(group) == "cpu":
+        # pyrefly: ignore  # read-only
         opts.device = torch.device("cpu")
     else:
         # Use the current device set by the user. If user did not set any, this
         # may use default device 0, causing issues like hang or all processes
         # creating context on device 0.
+        # pyrefly: ignore  # read-only
         opts.device = device
-        warnings.warn(  # warn only once
-            "No device id is provided via `init_process_group` or `barrier `. Using the current device set by the user. "
-        )
+        if group.rank() == 0:
+            warnings.warn(  # warn only once
+                "barrier(): using the device under current context. "
+                "You can specify `device_id` in `init_process_group` to mute this warning."
+            )
 
     work = group.barrier(opts=opts)
 
@@ -4942,6 +5028,7 @@ def _hash_ranks_to_str(ranks: list[int]) -> str:
 # Takes a list of ranks and computes an integer color
 def _process_group_color(ranks: list[int]) -> int:
     # Convert list to tuple to make it hashable
+    # pyrefly: ignore  # bad-assignment
     ranks = tuple(ranks)
     hash_value = hash(ranks)
     # Split color must be:
@@ -5099,7 +5186,11 @@ def split_group(
             my_group = split_group
             break
 
-    group_name = _process_group_name(my_group, use_hashed_name=False)
+    # use_hashed_name is True to ensure that subgroups have unique names.
+    # This is needed as some backends (e.g. Gloo) use the group name as a
+    # PrefixStore prefix for initialization of splits. Thus, names have to be
+    # unique to avoid key collisions.
+    group_name = _process_group_name(my_group, use_hashed_name=True)
     split_pg = parent_pg.split_group(
         my_group,
         timeout=timeout,

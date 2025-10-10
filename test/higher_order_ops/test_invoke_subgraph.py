@@ -1498,7 +1498,7 @@ class GraphModule(torch.nn.Module):
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_);  subgraph_0 = l_x_ = None
         getitem: "f32[8, 8]" = invoke_subgraph[0]
-        getitem_1: "f32[8, 8]" = invoke_subgraph[2];  invoke_subgraph = None
+        getitem_1: "f32[8, 8]" = invoke_subgraph[1];  invoke_subgraph = None
 
         add: "f32[8, 8]" = getitem + getitem_1;  getitem = getitem_1 = None
         return (add,)
@@ -1507,7 +1507,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[8, 8]"):
             child: "f32[8, 8]" = l_x_ * 2
             child_1: "f32[8, 8]" = l_x_ * 3;  l_x_ = None
-            return (child, None, child_1)
+            return (child, child_1)
 """,
             )
 
@@ -1520,16 +1520,16 @@ class GraphModule(torch.nn.Module):
 
         invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', primals_1);  partitioned_fw_subgraph_0_0 = primals_1 = None
         getitem: "f32[8, 8]" = invoke_subgraph_2[0]
-        getitem_2: "f32[8, 8]" = invoke_subgraph_2[2];  invoke_subgraph_2 = None
+        getitem_1: "f32[8, 8]" = invoke_subgraph_2[1];  invoke_subgraph_2 = None
 
-        add: "f32[8, 8]" = torch.ops.aten.add.Tensor(getitem, getitem_2);  getitem = getitem_2 = None
+        add: "f32[8, 8]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return (add,)
 
     class partitioned_fw_subgraph_0_0(torch.nn.Module):
         def forward(self, primals_0: "f32[8, 8]"):
             mul: "f32[8, 8]" = torch.ops.aten.mul.Tensor(primals_0, 2)
             mul_1: "f32[8, 8]" = torch.ops.aten.mul.Tensor(primals_0, 3);  primals_0 = None
-            return (mul, None, mul_1)
+            return (mul, mul_1)
 """,
             )
 
@@ -1541,8 +1541,8 @@ class GraphModule(torch.nn.Module):
         partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
 
         invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', tangents_1, tangents_1);  partitioned_bw_subgraph_0_0 = tangents_1 = None
-        getitem_3: "f32[8, 8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
-        return (getitem_3,)
+        getitem_2: "f32[8, 8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
+        return (getitem_2,)
 
     class partitioned_bw_subgraph_0_0(torch.nn.Module):
         def forward(self, tangents_0: "f32[8, 8]", tangents_1: "f32[8, 8]"):
@@ -1604,11 +1604,30 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_unbacked(self):
+    def test_unbacked1(self):
         @nested_compile_region
         def gn(x, y):
             b = x.item()
-            torch._check_is_size(b)
+            return y[:b].clone()
+
+        def fn(x, y):
+            return gn(x, y)
+
+        x = torch.tensor(4)
+        y = torch.randn(8)
+        ref = fn(x, y)
+        opt_fn = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )  # Inductor fails with assertion error when lowering aten.sym_constrain_range_for_size.default
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked2(self):
+        @nested_compile_region
+        def gn(x, y):
+            b = x.item()
+            torch._check(b >= 0)
             torch._check(b < y.shape[0])
             return y[:b].clone()
 
@@ -1887,6 +1906,37 @@ class GraphModule(torch.nn.Module):
             return (sin,)
 """,
             )
+
+    def test_return_size(self):
+        def run(dynamic):
+            torch.compiler.reset()
+
+            @nested_compile_region
+            def gn(x):
+                y = x + 1
+                z = x.shape
+                return y, z
+
+            def fn(x):
+                z0 = gn(x)
+                z1 = gn(x)
+                return z0[0] + z1[0], z0[1]
+
+            x = torch.randn(8, 8, requires_grad=True)
+            x_clone = x.detach().clone().requires_grad_(True)
+            ref = fn(x)
+            opt_fn = torch.compile(
+                fn, backend="inductor", fullgraph=True, dynamic=dynamic
+            )
+            res = opt_fn(x_clone)
+            self.assertEqual(ref, res)
+
+            ref[0].sum().backward()
+            res[0].sum().backward()
+            self.assertEqual(x.grad, x_clone.grad)
+
+        run(dynamic=True)
+        run(dynamic=False)
 
     def test_different_symint(self):
         """

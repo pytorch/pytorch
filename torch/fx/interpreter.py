@@ -33,7 +33,7 @@ class Interpreter:
     transformations as well as analysis passes.
 
     Methods in the Interpreter class can be overridden to customize
-    the behavior of execution. The map of overrideable methods
+    the behavior of execution. The map of overridable methods
     in terms of call hierarchy::
 
         run()

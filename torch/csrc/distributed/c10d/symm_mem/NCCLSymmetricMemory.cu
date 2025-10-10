@@ -40,29 +40,17 @@ struct NCCLAllocation {
 class NCCLSymmetricMemory : public SymmetricMemory {
  public:
  NCCLSymmetricMemory(
-      void* ptr,
       std::shared_ptr<NCCLAllocation> allocation,
       const std::string& group_name,
       ncclWindow_t handle,
       ncclWindow_t signal_handle)
       : allocation_(allocation),
+        buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name),
         handle_(handle),
         signal_handle_(signal_handle) {
     c10::cuda::CUDAGuard guard(device_idx_);
-    // Buffer size is rest of space available after ptr (this field may not be
-    // important in future thus subject to removal)
-    buffer_size_ = allocation->buffer_size -
-        (reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(allocation->ptr));
-
-    GroupInfo& group_info = get_group_info(group_name_);
-    rank_ = group_info.rank;
-    world_size_ = group_info.world_size;
-
-    buffers_.reserve(world_size_);
-    buffers_[rank_] = ptr;
-    // TODO: Fill in `buffers_[peer]` once NCCL API is ready.
 
     // We need some API like nvshmem_extension::nvshmem_ptr()
     // put API to get the reference of remote memory.
@@ -87,7 +75,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     return signal_pads_dev_;
   }
 
-  // This API is subject to removal
   size_t get_buffer_size() override {
     return buffer_size_;
   }
@@ -104,82 +91,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   void* get_multicast_ptr() override {
     // TODO
     return nullptr;
-  }
-
-  // TODO: This is up for change.
-  at::Tensor get_buffer(
-      int rank,
-      c10::IntArrayRef sizes,
-      c10::ScalarType dtype,
-      int64_t storage_offset) override {
-    // TODO: deduplicate
-    const size_t numel = std::accumulate(
-        sizes.begin(),
-        sizes.end(),
-        static_cast<size_t>(1),
-        std::multiplies<size_t>());
-    const auto element_size = c10::elementSize(dtype);
-    const auto req_size = (numel + storage_offset) * element_size;
-    TORCH_CHECK(
-        req_size <= buffer_size_,
-        "NCCLSymmetricMemory::get_buffer: the requested size (",
-        req_size,
-        " bytes) exceeds the allocated size (",
-        buffer_size_,
-        " bytes)");
-    auto data_ptr = reinterpret_cast<uint8_t*>(buffers_[rank]) +
-        storage_offset * element_size;
-    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
-    auto options = at::TensorOptions().dtype(dtype).device(device);
-    return at::for_blob(data_ptr, sizes)
-        .options(options)
-        .target_device(device)
-        .make_tensor();
-  }
-
-  // TODO: This is up for change.
-  at::Tensor get_signal_pad(
-      int rank,
-      c10::IntArrayRef sizes,
-      std::optional<c10::ScalarType> dtype,
-      int64_t storage_offset) override {
-    // TODO: deduplicate
-    // If the dtype is unspecified, default it to UInt32, as it
-    // is the most common type for signaling purposes.
-    if (!dtype.has_value()) {
-      dtype = c10::ScalarType::UInt32;
-    }
-
-    // If the shape is unspecified, treat the signal pad as a 1d tensor.
-    const auto element_size = c10::elementSize(*dtype);
-    std::vector<int64_t> shape;
-    if (!sizes.empty()) {
-      shape = sizes.vec();
-    } else {
-      shape.push_back(signal_pad_size / element_size);
-    }
-
-    const size_t numel = std::accumulate(
-        shape.begin(),
-        shape.end(),
-        static_cast<size_t>(1),
-        std::multiplies<size_t>());
-    const auto req_size = (numel + storage_offset) * element_size;
-    TORCH_CHECK(
-        req_size <= signal_pad_size,
-        "NCCLSymmetricMemory::get_signal_pad: the requested size (",
-        req_size,
-        " bytes) exceeds the allocated size (",
-        signal_pad_size,
-        " bytes)");
-    auto data_ptr = reinterpret_cast<uint8_t*>(signal_pads_[rank]) +
-        storage_offset * element_size;
-    auto device = c10::Device(c10::DeviceType::CUDA, device_idx_);
-    auto options = at::TensorOptions().dtype(*dtype).device(device);
-    return at::for_blob(data_ptr, shape)
-        .options(options)
-        .target_device(device)
-        .make_tensor();
   }
 
   void barrier(int channel, size_t timeout_ms) override {
@@ -200,6 +111,10 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
   int get_world_size() override {
     return world_size_;
+  }
+
+  c10::Device get_device() override {
+    return c10::Device(c10::DeviceType::CUDA, device_idx_);
   }
 
   virtual std::vector<int>& get_rank_to_global_rank() override {
@@ -269,7 +184,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
-      void* ptr,  // data_ptr() of the tensor
+      void* ptr,
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
     {
@@ -278,12 +193,9 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         return it->second;
       }
     }
-    // Today this would still find the ptr in the map because one allocation
-    // matches one tensor. But will break once we enable MemPool.
-    // TODO: implement a customized `find` that searches for the allocation that
-    // contains ptr.
     auto it = allocations_.find(ptr);
     TORCH_CHECK(it != allocations_.end(), "memory needs to be first allocated before calling rendezvous.");
+
 
     auto group = resolve_process_group(group_name.value());
     auto alloc = it->second;
@@ -329,7 +241,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         comm));
 
     auto symm_mem =
-        c10::make_intrusive<NCCLSymmetricMemory>(ptr, alloc, *group_name, std::move(handle), std::move(signal_handle));
+        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle));
 
     symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
     return symm_mem;

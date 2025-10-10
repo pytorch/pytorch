@@ -40,7 +40,7 @@ from torch.distributed.pipelining.schedules import (
     W,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
-from torch.testing._internal.common_distributed import requires_nccl
+from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     check_leaked_tensors,
     instantiate_parametrized_tests,
@@ -53,6 +53,7 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 ARTIFACTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "artifacts")
 
+device = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 logger = logging.getLogger(__name__)
 torch.manual_seed(0)
 
@@ -200,6 +201,62 @@ class ScheduleTest(TestCase):
                 raise
 
         torch.distributed.destroy_process_group()
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            Schedule1F1B,
+            ScheduleGPipe,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleLoopedBFS,
+        ],
+    )
+    def test_schedule_eval_then_train(self, ScheduleClass):
+        """
+        Test that simply runs evaluation followed by training.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        d_hid, batch_size = 512, 256
+        n_stages = 1
+        device = "cpu"
+        full_mod = MultiMLP(d_hid, n_layers=n_stages)
+        full_mod.to(device)
+
+        x = torch.randn(batch_size, d_hid, device=device)
+        target = torch.randn(batch_size, d_hid, device=device)
+
+        def loss_fn(y, target):
+            return torch.nn.functional.cross_entropy(y, target)
+
+        submod_name = "layers.0"
+        stage_module = full_mod.get_submodule(submod_name)
+
+        # Create a pipeline stage to wrap that submodule
+        num_microbatches = 2
+        stages = [PipelineStage(stage_module, 0, n_stages, device)]
+
+        if issubclass(ScheduleClass, PipelineScheduleSingle):
+            stages = stages[0]
+
+        # Attach to a schedule
+        schedule = ScheduleClass(stages, num_microbatches, loss_fn=loss_fn)
+        # Run eval
+        for _ in range(2):
+            # Zero gradients
+            stage_module.zero_grad()
+            losses = []
+            schedule.eval(x, target=target, losses=losses)
+        # Run training
+        try:
+            for _ in range(2):
+                losses = []
+                schedule.step(x, target=target, losses=losses)
+        finally:
+            torch.distributed.destroy_process_group()
 
     def test_zero_bubble_schedule_errors_with_compile(self):
         """
@@ -740,7 +797,7 @@ class TestScheduleLowering(TestCase):
         # print(_format_pipeline_order(simulated_schedule))
         self.assertEqual(num_steps, 113)
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_grad_with_v_schedule(self):
         """
         We have a special case for V schedules where 2 adjacent stages are on the same rank.
@@ -760,7 +817,6 @@ class TestScheduleLowering(TestCase):
         d_hid = 512
         batch_size = 256
         n_stages = 2
-        device = "cuda"
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(device)
 
@@ -859,7 +915,7 @@ class TestScheduleLowering(TestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_grad_with_split_b_w(self):
         """
         Ensure that separate dInput and dWeight computations are correctly executed.
@@ -872,7 +928,6 @@ class TestScheduleLowering(TestCase):
         d_hid = 512
         batch_size = 256
         n_stages = 1
-        device = "cuda"
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(device)
 
@@ -914,6 +969,7 @@ class TestScheduleLowering(TestCase):
             stages,
             num_microbatches,
             loss_fn=loss_fn,
+            scale_grads=False,
         )
         schedule._prepare_schedule_with_comms(
             {

@@ -95,17 +95,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     assert ar.shape == example_inp.shape
                     assert ar.stride() == example_inp.stride()
 
-        if len(sym_inputs) == 0:
-            # Sanity check that args are same layout as example inputs
-            # Only do it if there are no symbolic inputs, otherwise
-            # the dynamic dim will be realized to the same size as args
-            for ar, example_inp in zip(args, self.example_inputs):
-                # Sanity check that args are same layout as example inputs
-                if isinstance(ar, torch.Tensor):
-                    assert isinstance(example_inp, torch.Tensor)
-                    assert ar.shape == example_inp.shape
-                    assert ar.stride() == example_inp.stride()
-
         with V.set_graph_handler(bm_graph_lowering):
             # Don't bother autotuning on Triton here
             with inductor_config.patch(
@@ -168,7 +157,6 @@ class SubgraphTemplate(KernelTemplate):
     def __init__(
         self,
         name: str,
-        make_fx_graph: Callable[..., Any],
     ):
         """
         Initialize a subgraph template.
@@ -177,13 +165,15 @@ class SubgraphTemplate(KernelTemplate):
             name: The name of this template
             graph: The FX graph
         """
-        self.name = f"{name}_{next(SubgraphTemplate.index_counter)}"
-        self.make_fx_graph = make_fx_graph
+        super().__init__(name=name)
 
     def generate(  # type: ignore[override]
         self,
+        name: str,
         input_nodes: list[Buffer],
         layout: Layout,
+        make_fx_graph: Callable[..., Any],
+        description: str = "",
         **kwargs: Any,
     ) -> SubgraphChoiceCaller:
         """
@@ -200,9 +190,9 @@ class SubgraphTemplate(KernelTemplate):
         """
 
         return SubgraphChoiceCaller(
-            name=self.name,
+            name=f"{name}_{next(SubgraphTemplate.index_counter)}",
             input_nodes=input_nodes,
             layout=layout,
-            description="",
-            make_fx_graph=self.make_fx_graph,
+            description=description,
+            make_fx_graph=make_fx_graph,
         )

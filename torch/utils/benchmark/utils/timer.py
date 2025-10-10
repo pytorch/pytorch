@@ -2,7 +2,8 @@
 import enum
 import timeit
 import textwrap
-from typing import overload, Any, Callable, NoReturn, Optional, Union
+from typing import overload, Any, NoReturn, Optional, Union
+from collections.abc import Callable
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
@@ -232,6 +233,7 @@ class Timer:
         setup = textwrap.dedent(setup)
         setup = (setup[1:] if setup and setup[0] == "\n" else setup).rstrip()
 
+        # pyrefly: ignore  # bad-instantiation
         self._timer = self._timer_cls(
             stmt=stmt,
             setup=setup,
@@ -484,7 +486,7 @@ class Timer:
         the fact that a small number of iterations is generally sufficient to
         obtain good measurements.
 
-        In order to to use this method `valgrind`, `callgrind_control`, and
+        In order to use this method `valgrind`, `callgrind_control`, and
         `callgrind_annotate` must be installed.
 
         Because there is a process boundary between the caller (this process)

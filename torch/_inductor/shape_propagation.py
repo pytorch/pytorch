@@ -83,9 +83,11 @@ class ShapePropagationOpsHandler:
     @staticmethod
     def constant(value: torch.types.Number, dtype: torch.dtype) -> BlockShapeType:
         # See implementation of constant for triton for the reason
-        from torch._inductor.codegen.triton import TritonKernel
+        from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
 
-        if isinstance(V.kernel, TritonKernel):
+        triton_type = triton_compute_type(dtype)
+
+        if isinstance(V.kernel, TritonKernel) and triton_type != "tl.float32":
             ndim = V.kernel.triton_tensor_ndim()
             return tuple([1] * ndim)
         else:
@@ -139,3 +141,7 @@ class ShapePropagationOpsHandler:
 
     def __getattr__(self, name: str) -> Callable[..., BlockShapeType]:
         return lambda *args, **kwargs: broadcast_shapes_for_args(args)
+
+    @staticmethod
+    def device_assert_async(cond: ShapeArg, msg: str) -> None:
+        return None

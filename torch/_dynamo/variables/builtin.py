@@ -28,7 +28,6 @@ import itertools
 import logging
 import math
 import operator
-import sys
 import types
 import typing
 import unittest
@@ -990,7 +989,7 @@ class BuiltinVariable(VariableTracker):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-                return variables.ExceptionVariable(fn, args, **kwargs)
+                return variables.ExceptionVariable(fn, args, kwargs)
 
             return create_exception_class_object
 
@@ -1029,6 +1028,7 @@ class BuiltinVariable(VariableTracker):
 
             def call_self_handler(tx: "InstructionTranslator", args, kwargs):
                 try:
+                    # pyrefly: ignore  # not-callable
                     result = self_handler(tx, *args, **kwargs)
                     if result is not None:
                         return result
@@ -1036,6 +1036,7 @@ class BuiltinVariable(VariableTracker):
                     # Check if binding is bad. inspect signature bind is expensive.
                     # So check only when handler call fails.
                     try:
+                        # pyrefly: ignore  # bad-argument-type
                         inspect.signature(self_handler).bind(tx, *args, **kwargs)
                     except TypeError as e:
                         has_constant_handler = obj.has_constant_handler(args, kwargs)
@@ -1088,6 +1089,7 @@ class BuiltinVariable(VariableTracker):
                             hints=[*graph_break_hints.DYNAMO_BUG],
                             from_exc=exc,
                         )
+                    # pyrefly: ignore  # unbound-name
                     return VariableTracker.build(tx, res)
 
             else:
@@ -1116,6 +1118,7 @@ class BuiltinVariable(VariableTracker):
                                 tx,
                                 args=list(map(ConstantVariable.create, exc.args)),
                             )
+                        # pyrefly: ignore  # unbound-name
                         return VariableTracker.build(tx, res)
 
             handlers.append(constant_fold_handler)
@@ -1157,6 +1160,21 @@ class BuiltinVariable(VariableTracker):
                 call_unimplemented_v2(args)
 
         return builtin_dispatch
+
+    def call_vars(self, tx: "InstructionTranslator", *args):
+        if len(args) == 0:
+            unimplemented_v2(
+                gb_type="unimplemented builtin op vars() with no arguments",
+                context=f"vars: {self} {args}",
+                explanation=f"Dynamo does not know how to trace builtin operator {self.fn} with no arguments",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        assert len(args) == 1
+        # vars(obj) is obj.__dict__ if __dict__ is present else TypeError
+        try:
+            return args[0].var_getattr(tx, "__dict__")
+        except ObservedAttributeError:
+            raise_observed_exception(TypeError, tx)
 
     def _handle_insert_op_in_graph(self, tx: "InstructionTranslator", args, kwargs):
         from .builder import wrap_fx_proxy, wrap_fx_proxy_cls
@@ -1423,6 +1441,7 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in dict_methods:
                 if isinstance(args[0], variables.UserDefinedDictVariable):
+                    # pyrefly: ignore  # missing-attribute
                     return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.ConstDictVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1431,6 +1450,7 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in set_methods:
                 if isinstance(args[0], variables.UserDefinedSetVariable):
+                    # pyrefly: ignore  # missing-attribute
                     return args[0]._set_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.SetVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1519,10 +1539,12 @@ class BuiltinVariable(VariableTracker):
             if type(arg.value).__str__ is object.__str__:
                 # Rely on the object str method
                 try:
+                    # pyrefly: ignore  # unbound-name
                     return variables.ConstantVariable.create(value=str_method())
                 except AttributeError:
                     # Graph break
                     return
+            # pyrefly: ignore  # unbound-name
             elif is_wrapper_or_member_descriptor(str_method):
                 unimplemented_v2(
                     gb_type="Attempted to a str() method implemented in C/C++",
@@ -1639,8 +1661,10 @@ class BuiltinVariable(VariableTracker):
                 else:
                     raw_b = b.raw_value
                 if self.fn is max:
+                    # pyrefly: ignore  # missing-attribute
                     raw_res = max(a.raw_value, raw_b)
                 else:
+                    # pyrefly: ignore  # missing-attribute
                     raw_res = min(a.raw_value, raw_b)
 
                 need_unwrap = any(
@@ -1805,6 +1829,8 @@ class BuiltinVariable(VariableTracker):
     def call_iter(self, tx: "InstructionTranslator", obj, *args, **kwargs):
         if isinstance(obj, variables.IteratorVariable):
             ret = obj
+        elif isinstance(obj, variables.RangeVariable):
+            ret = obj.call_method(tx, "__iter__", [], {})
         else:
             # Handle the case where we are iterating over a tuple, list or iterator
             ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
@@ -1881,6 +1907,17 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
+        args = list(args)
+        if (
+            len(args) == 1
+            and isinstance(args[0], variables.GetAttrVariable)
+            and isinstance(args[0].obj, variables.UserDefinedClassVariable)
+            and not tx.output.side_effects.has_pending_mutation(args[0].obj)
+        ):
+            # Forward the GetAttrVariable(foo, "__dict__") to a realized vt of
+            # VT(foo.__dict__). This simplifies the construction of the new
+            # dict.
+            args[0] = args[0].get_forwarded_dict(tx)
         return tx.inline_user_function_return(
             VariableTracker.build(tx, polyfills.construct_dict),
             [VariableTracker.build(tx, user_cls), *args],
@@ -2079,6 +2116,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if isinstance(arg, variables.UserDefinedExceptionClassVariable):
+            # pyrefly: ignore  # unbound-name
             return ConstantVariable.create(isinstance(arg_type, isinstance_type))
 
         isinstance_type_tuple: tuple[type, ...]
@@ -2087,9 +2125,7 @@ class BuiltinVariable(VariableTracker):
             getattr(isinstance_type, "__instancecheck__", None)
         ):
             isinstance_type_tuple = (isinstance_type,)
-        elif sys.version_info >= (3, 10) and isinstance(
-            isinstance_type, types.UnionType
-        ):
+        elif isinstance(isinstance_type, types.UnionType):
             isinstance_type_tuple = isinstance_type.__args__
         elif isinstance(isinstance_type, tuple) and all(
             isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
@@ -2113,8 +2149,10 @@ class BuiltinVariable(VariableTracker):
             # through it. This is a limitation of the current implementation.
             # Usually `__subclasscheck__` and `__instancecheck__` can be constant fold through, it
             # might not be a big issue and we trade off it for performance.
+            # pyrefly: ignore  # unbound-name
             val = issubclass(arg_type, isinstance_type_tuple)
         except TypeError:
+            # pyrefly: ignore  # unbound-name
             val = arg_type in isinstance_type_tuple
         return variables.ConstantVariable.create(val)
 
@@ -2136,6 +2174,7 @@ class BuiltinVariable(VariableTracker):
 
         # WARNING: This might run arbitrary user code `__subclasscheck__`.
         # See the comment in call_isinstance above.
+        # pyrefly: ignore  # unbound-name
         return variables.ConstantVariable(issubclass(left_ty_py, right_ty_py))
 
     def call_super(self, tx: "InstructionTranslator", a, b):
@@ -2172,6 +2211,20 @@ class BuiltinVariable(VariableTracker):
     def call_filter(self, tx: "InstructionTranslator", fn, seq):
         seq = seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
         return variables.FilterVariable(fn, seq, mutation_type=ValueMutationNew())
+
+    def var_getattr(self, tx: "InstructionTranslator", name):
+        source = self.source and AttrSource(self.source, name)
+        if self.fn is object:
+            # for object, we can just directly read the attribute
+            try:
+                value = getattr(self.fn, name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+            # pyrefly: ignore  # unbound-name
+            if not callable(value):
+                # pyrefly: ignore  # unbound-name
+                return VariableTracker.build(tx, value, source)
+        return variables.GetAttrVariable(self, name, source=source)
 
     def call_getattr(
         self,
@@ -2767,6 +2820,8 @@ class BuiltinVariable(VariableTracker):
                 UserDefinedObjectVariable,
             ),
         ):
+            # TODO(guilhermeleobas): forward the call to b.__ror__(a) if
+            # a.__ror__(b) returns NotImplemented
             return a.call_method(tx, "__or__", [b], {})
 
         # None no-ops this handler and lets the driving function proceed
