@@ -2161,9 +2161,30 @@ class CppBuilder:
             )
 
         if device_type == "cuda" and torch.version.hip is None:
-            from torch._inductor.codecache import _nvcc_arch_as_compile_option
+            from torch._inductor.codecache import (
+                _nvcc_arch_as_compile_option,
+                _get_multi_arch_target_list,
+            )
 
             current_arch = _nvcc_arch_as_compile_option()
+            target_archs = _get_multi_arch_target_list()
+
+            # PTX is forward-compatible but not backward-compatible.
+            # Only include architectures >= current arch.
+            current_arch_int = int(current_arch.replace("a", ""))
+            compatible_archs = [
+                arch for arch in target_archs
+                if int(arch) >= current_arch_int
+            ]
+            if not compatible_archs:
+                compatible_archs = [str(current_arch_int)]
+
+            # Build gencode flags for multi-arch support
+            highest_arch = max(compatible_archs, key=lambda x: int(x))
+            gencode_flags = f"-gencode arch=compute_{highest_arch},code=compute_{highest_arch}"
+            for arch in compatible_archs:
+                gencode_flags += f" -gencode arch=compute_{arch},code=sm_{arch}"
+
             contents += textwrap.dedent(
                 f"""
                 enable_language(CUDA)
@@ -2200,8 +2221,7 @@ class CppBuilder:
                     add_custom_command(
                         OUTPUT ${{FATBIN_FILE}}
                         COMMAND ${{CUDAToolkit_NVCC_EXECUTABLE}} --fatbin ${{PTX_FILE}} -o ${{FATBIN_FILE}} ${{NVCC_GENCODE_FLAGS}}
-                                -gencode arch=compute_{current_arch},code=compute_{current_arch}
-                                -gencode arch=compute_{current_arch},code=sm_{current_arch}
+                                {gencode_flags}
                         DEPENDS ${{PTX_FILE}}
                     )
 

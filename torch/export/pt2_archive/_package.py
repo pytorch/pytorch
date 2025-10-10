@@ -25,6 +25,7 @@ from torch._export.serde.serialize import (
     SerializedArtifact,
 )
 from torch._inductor.cpp_builder import normalize_path_separator
+from torch._inductor import codecache
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
@@ -928,7 +929,7 @@ def _load_aoti(
     )
 
     device = loaded_metadata["AOTI_DEVICE_KEY"]
-    current_device_info = torch._inductor.codecache.get_device_information(device)
+    current_device_info = codecache.get_device_information(device)
 
     for k, v in current_device_info.items():
         if k in loaded_metadata:
