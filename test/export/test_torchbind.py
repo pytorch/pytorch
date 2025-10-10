@@ -138,7 +138,7 @@ class TestExportTorchbind(TestCase):
         def export_wrapper(f, args, kwargs, strict, pre_dispatch):
             with enable_torchbind_tracing():
                 if pre_dispatch:
-                    exported_program = torch.export.export_for_training(
+                    exported_program = torch.export.export(
                         f, args, kwargs, strict=strict
                     ).run_decompositions({})
                 else:
@@ -411,7 +411,7 @@ def forward(self, token, x, cc):
             F1(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
         )
 
-    def test_torchbind_register_attr_at_runtime_error(self):
+    def test_torchbind_register_attr_at_runtime_get_restored(self):
         # alias as model attribute
         class F3(torch.nn.Module):
             def forward(self, x, foo):
@@ -419,10 +419,8 @@ def forward(self, token, x, cc):
                 return x + self.foo.add_tensor(x)
 
         foo = torch.classes._TorchScriptTesting._Foo(10, 20)
-        with self.assertRaisesRegex(
-            ValueError, "following attrs were created in the model"
-        ):
-            torch.export.export(F3(), (torch.ones(2, 3), foo))
+        torch.export.export(F3(), (torch.ones(2, 3), foo), strict=False)
+        self.assertFalse(hasattr(foo, "foo"))
 
     @parametrize("pre_dispatch", [True, False])
     def test_torchbind_input_and_alias(self, pre_dispatch):
@@ -755,7 +753,7 @@ def forward(self, arg0_1, arg1_1):
         b = torch.randn(2, 2)
         tq.push(a)
         tq.push(b)
-        ep = torch.export.export_for_training(
+        ep = torch.export.export(
             mod, (tq, torch.randn(2, 2)), strict=False
         ).run_decompositions({})
         self.assertExpectedInline(
@@ -809,9 +807,9 @@ def forward(self, L_safe_obj_ : torch.ScriptObject):
         )
 
         with enable_torchbind_tracing():
-            ep = torch.export.export_for_training(
-                mod, (safe_obj,), strict=False
-            ).run_decompositions({})
+            ep = torch.export.export(mod, (safe_obj,), strict=False).run_decompositions(
+                {}
+            )
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
                 """\
@@ -1407,9 +1405,9 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         x = torch.randn(3, 1)
         eager_out = mod(test_obj, x)
         compiled_out = torch.compile(mod, backend=backend, fullgraph=True)(test_obj, x)
-        ep = torch.export.export_for_training(
-            mod, (test_obj, x), strict=False
-        ).run_decompositions({})
+        ep = torch.export.export(mod, (test_obj, x), strict=False).run_decompositions(
+            {}
+        )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\

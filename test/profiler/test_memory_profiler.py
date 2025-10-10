@@ -4,8 +4,8 @@ import gc
 import itertools as it
 import textwrap
 import unittest
-from collections.abc import Iterator
-from typing import Callable, Optional
+from collections.abc import Callable, Iterator
+from typing import Optional
 
 import torch
 from torch._C._profiler import _EventType, _TensorMetadata
@@ -901,7 +901,7 @@ class TestMemoryProfilerE2E(TestCase):
                         ptr_pair_to_key[(t.impl_ptr, t.storage_data_ptr)] = key
 
         def format_categories(ptr_pair: int):
-            target_key = ptr_pair_to_key.get(ptr_pair, None)
+            target_key = ptr_pair_to_key.get(ptr_pair)
             if target_key is None:
                 return "???"
 
@@ -1451,7 +1451,7 @@ class TestMemoryProfilerE2E(TestCase):
         memory_profile = prof._memory_profile()
         timeline = memory_profile.timeline
         times = tuple(t for t, _, _, _ in timeline)
-        self.assertTrue(all(t1 >= t0 for t0, t1 in zip(times, times[1:])), times)
+        self.assertTrue(all(t1 >= t0 for t0, t1 in it.pairwise(times)), times)
         self.assertTrue(
             all(
                 (t == -1) if action == _memory_profiler.Action.PREEXISTING else (t > 0)
@@ -1492,7 +1492,7 @@ class TestMemoryProfilerE2E(TestCase):
             for _, action, (key, version), size in prof._memory_profile().timeline
             # We generally don't care about tiny allocations during memory
             # profiling and they add a lot of noise to the unit test.
-            if size > 1024
+            if size > 1024 and isinstance(key, _memory_profiler.TensorKey)
         ]
 
         self.assertExpectedInline(

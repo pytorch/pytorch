@@ -5,7 +5,6 @@ import pickle
 import random
 import signal
 import string
-import sys
 import traceback
 from collections.abc import KeysView, Sequence
 from enum import Enum
@@ -109,10 +108,12 @@ class TypeExemplars:
         """
         Return an example of a class.
         """
+        # pyrefly: ignore  # bad-argument-type, bad-argument-count
         return TypeExemplars.TYPE_EXEMPLARS.get(t.__name__, None)
 
     @staticmethod
     def contains(t: type[T]) -> bool:
+        # pyrefly: ignore  # bad-argument-type, bad-argument-count
         return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
 
 
@@ -384,7 +385,7 @@ class SamplingMethod(Enum):
         elif TypeExemplars.contains(type_hint):
             return TypeExemplars.example(type_hint)
         elif type_hint == Any:
-            return 1 if not default == 1 else 2
+            return 1 if default != 1 else 2
         else:
             raise ValueError(f"Unable to process type {type_hint}. PRs welcome :)")
 
@@ -610,9 +611,6 @@ class ConfigFuzzer:
             sm: How type value samples are generated, default TOGGLE.
             test_timeout: max time a test can take.
         """
-        if sys.version_info < (3, 10):
-            log.error("Only python 3.10 and later supported")
-            return
         self.seed = seed
         self.test_timeout = test_timeout
         self.detailed_results: dict[ComboType, dict[str, Any]] = {}

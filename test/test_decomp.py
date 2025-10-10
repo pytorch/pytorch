@@ -1255,11 +1255,10 @@ class DecompOneOffTests(TestCase):
         )
 
         # check RMSNorm was fused with sinh
+        self.assertTrue("triton_per_fused__fused_rms_norm_sinh" in generated_codes[0])
         self.assertTrue(
-            "triton_per_fused_add_mean_mul_pow_rsqrt_sinh" in generated_codes[0]
-        )
-        self.assertTrue(
-            "triton_per_fused__fused_rms_norm_backward_cosh_mul" in generated_codes[1]
+            "triton_per_fused__fused_rms_norm__fused_rms_norm_backward_cosh_mul"
+            in generated_codes[1]
         )
 
 
@@ -1342,6 +1341,55 @@ class HasDecompTest(TestCase):
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
+
+    def test_conv1d_decomposition(self):
+        from torch._inductor.decomposition import conv1d_to_conv2d
+
+        def check_case(
+            N=2,
+            C_in=3,
+            C_out=5,
+            L=37,
+            K=5,
+            stride=2,
+            padding=3,
+            dilation=1,
+            groups=1,
+            dtype=torch.float32,
+            device="cpu",
+        ):
+            torch.manual_seed(0)
+            x = torch.randn(N, C_in, L, dtype=dtype, device=device)
+            w = torch.randn(C_out, C_in // groups, K, dtype=dtype, device=device)
+            b = torch.randn(C_out, dtype=dtype, device=device)
+
+            ref = torch.ops.aten.conv1d.default(
+                x,
+                w,
+                b,
+                stride=[stride],
+                padding=[padding],
+                dilation=[dilation],
+                groups=groups,
+            )
+            got = conv1d_to_conv2d(
+                x,
+                w,
+                b,
+                stride=[stride],
+                padding=[padding],
+                dilation=[dilation],
+                groups=groups,
+            )
+            self.assertTrue(torch.allclose(ref, got, atol=1e-5, rtol=1e-5))
+
+        # A few cases
+        check_case()  # default
+        check_case(stride=1, padding=0, K=3)
+        check_case(stride=3, padding=4, K=7)
+        check_case(dilation=2, padding=6, K=5)  # dilation
+        check_case(groups=1, C_in=8, C_out=12)  # groups=1 bigger
+        check_case(groups=2, C_in=8, C_out=12)  # grouped conv
 
 
 if __name__ == "__main__":

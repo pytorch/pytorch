@@ -26,6 +26,7 @@
 #include <ATen/native/Normalization.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Logging.h>
@@ -55,6 +56,7 @@
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
+#include <torch/csrc/acc/Module.h>
 #include <torch/csrc/api/include/torch/python/init.h>
 #include <torch/csrc/autograd/generated/python_return_types.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
@@ -71,6 +73,7 @@
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
+#include <torch/csrc/functionalization/Module.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
@@ -110,6 +113,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/ROCmFABackend.h>
+#include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <torch/csrc/inductor/static_cuda_launcher.h>
@@ -120,11 +124,13 @@
 #endif
 #endif
 
+#ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
 #include <torch/csrc/distributed/c10d/c10d.h>
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
+#endif
 #endif
 
 #if defined(USE_VALGRIND)
@@ -489,7 +495,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
 
 static PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  Py_ssize_t num_args = args ? (Py_ssize_t)PyTuple_Size(args) : 0;
+  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
   TORCH_CHECK(num_args == 2, "expected exactly 2 arguments");
   PyObject* arg1 = PyTuple_GET_ITEM(args, 0);
   TORCH_CHECK(THPSize_Check(arg1), "expected a torch.Size as argument 1");
@@ -550,7 +556,11 @@ static PyObject* THPModule_getBackcompatKeepdimWarn(
 }
 
 static PyObject* THPModule_hasDistributed(PyObject* _unused, PyObject* noargs) {
+#ifdef USE_DISTRIBUTED
   Py_RETURN_TRUE;
+#else
+  Py_RETURN_FALSE;
+#endif
 }
 
 static PyObject* THPModule_showConfig(PyObject* module, PyObject* noargs) {
@@ -1215,14 +1225,30 @@ static PyObject* THPModule_allowTF32CuBLAS(
 
 static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
     PyObject* _unused,
-    PyObject* arg) {
+    PyObject* args) {
   HANDLE_TH_ERRORS
+  PyObject* allow_reduction_obj = nullptr;
+  PyObject* allow_splitk_obj = Py_None;
+  if (!PyArg_ParseTuple(args, "O|O", &allow_reduction_obj, &allow_splitk_obj)) {
+    return nullptr;
+  }
   TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_allow_fp16_reduction_cublas expects a bool, "
+      PyBool_Check(allow_reduction_obj),
+      "set_allow_fp16_reduction_cublas expects a bool for allow_reduced_precision, "
       "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setAllowFP16ReductionCuBLAS(arg == Py_True);
+      THPUtils_typename(allow_reduction_obj));
+  bool allow_reduction = allow_reduction_obj == Py_True;
+  bool allow_splitk = true;
+  if (allow_splitk_obj != Py_None) {
+    TORCH_CHECK(
+        PyBool_Check(allow_splitk_obj),
+        "set_allow_fp16_reduction_cublas expects a bool for allow_splitk, "
+        "but got ",
+        THPUtils_typename(allow_splitk_obj));
+    allow_splitk = allow_splitk_obj == Py_True;
+  }
+  at::globalContext().setAllowFP16ReductionCuBLAS(
+      allow_reduction, allow_splitk);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1230,22 +1256,43 @@ static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
 static PyObject* THPModule_allowFP16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().allowFP16ReductionCuBLAS()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  auto option = at::globalContext().allowFP16ReductionCuBLAS();
+  bool allow_reduced_precision =
+      option == at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  bool allow_splitk = option !=
+      at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK;
+  return PyTuple_Pack(
+      2,
+      allow_reduced_precision ? Py_True : Py_False,
+      allow_splitk ? Py_True : Py_False);
 }
 
 static PyObject* THPModule_setAllowBF16ReductionCuBLAS(
     PyObject* _unused,
-    PyObject* arg) {
+    PyObject* args) {
   HANDLE_TH_ERRORS
+  PyObject* allow_reduction_obj = nullptr;
+  PyObject* allow_splitk_obj = Py_None;
+  if (!PyArg_ParseTuple(args, "O|O", &allow_reduction_obj, &allow_splitk_obj)) {
+    return nullptr;
+  }
   TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_allow_bf16_reduction_cublas expects a bool, "
+      PyBool_Check(allow_reduction_obj),
+      "set_allow_bf16_reduction_cublas expects a bool for allow_reduced_precision, "
       "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setAllowBF16ReductionCuBLAS(arg == Py_True);
+      THPUtils_typename(allow_reduction_obj));
+  bool allow_reduction = allow_reduction_obj == Py_True;
+  bool allow_splitk = true;
+  if (allow_splitk_obj != Py_None) {
+    TORCH_CHECK(
+        PyBool_Check(allow_splitk_obj),
+        "set_allow_bf16_reduction_cublas expects a bool for allow_splitk, "
+        "but got ",
+        THPUtils_typename(allow_splitk_obj));
+    allow_splitk = allow_splitk_obj == Py_True;
+  }
+  at::globalContext().setAllowBF16ReductionCuBLAS(
+      allow_reduction, allow_splitk);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -1253,10 +1300,15 @@ static PyObject* THPModule_setAllowBF16ReductionCuBLAS(
 static PyObject* THPModule_allowBF16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* noargs) {
-  if (at::globalContext().allowBF16ReductionCuBLAS()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
+  auto option = at::globalContext().allowBF16ReductionCuBLAS();
+  bool allow_reduced_precision =
+      option == at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  bool allow_splitk = option !=
+      at::CuBLASReductionOption::DisallowReducedPrecisionDisallowSplitK;
+  return PyTuple_Pack(
+      2,
+      allow_reduced_precision ? Py_True : Py_False,
+      allow_splitk ? Py_True : Py_False);
 }
 
 static PyObject* THPModule_setAllowFP16AccumulationCuBLAS(
@@ -1552,6 +1604,15 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THCPModule_ensureCUDADeviceGuardSet(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::impl::ensureCUDADeviceGuardSet();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
@@ -1718,7 +1779,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_cublas_allow_fp16_reduced_precision_reduction",
      THPModule_setAllowFP16ReductionCuBLAS,
-     METH_O,
+     METH_VARARGS,
      nullptr},
     {"_get_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_allowBF16ReductionCuBLAS,
@@ -1726,7 +1787,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_set_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_setAllowBF16ReductionCuBLAS,
-     METH_O,
+     METH_VARARGS,
      nullptr},
     {"_get_cublas_allow_fp16_accumulation",
      THPModule_allowFP16AccumulationCuBLAS,
@@ -1847,7 +1908,13 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      (PyCFunction)(void (*)())THPModule_has_torch_function_variadic,
      METH_FASTCALL,
      nullptr},
-    {nullptr, nullptr, 0, nullptr}};
+    {"_ensureCUDADeviceGuardSet",
+     THCPModule_ensureCUDADeviceGuardSet,
+     METH_NOARGS,
+     nullptr},
+    {nullptr, nullptr, 0, nullptr}
+
+};
 
 #ifdef USE_CUDA
 // NOLINTBEGIN(misc-use-internal-linkage)
@@ -1915,7 +1982,7 @@ SigHandler* _getOldHandler(int signum) {
   SIG_CHECK(SIGSEGV);
   SIG_CHECK(SIGILL);
 
-  throw std::runtime_error("unexpected signal number");
+  TORCH_CHECK(false, "unexpected signal number");
 #undef SIG_CHECK
 }
 
@@ -1987,7 +2054,7 @@ PyObject* initModule() {
 #ifdef USE_XPU
   THPUtils_addPyMethodDefs(methods, THXPModule_methods());
 #endif
-#ifdef USE_C10D
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
   THPUtils_addPyMethodDefs(
       methods, torch::distributed::c10d::python_functions());
 #ifndef _WIN32
@@ -2068,8 +2135,10 @@ PyObject* initModule() {
   torch::cpu::initModule(module);
   torch::accelerator::initModule(module);
   torch::instruction_counter::initModule(module);
+  torch::acc::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
+  torch::functionalization::initModule(module);
 
 #ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
@@ -2436,6 +2505,39 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().blasPreferredBackend();
   });
 
+  py::enum_<at::blas::ScalingType>(
+      py_module, "_ScalingType", "Supported Tensor scaling types")
+      .value(
+          "TensorWise",
+          at::blas::ScalingType::TensorWise,
+          "Single scale per-tensor")
+      .value(
+          "RowWise", at::blas::ScalingType::RowWise, "Scale per-row of tensor")
+      .value(
+          "BlockWise1x16",
+          at::blas::ScalingType::BlockWise1x16,
+          "Scale per 16 contiguous values")
+      .value(
+          "BlockWise1x32",
+          at::blas::ScalingType::BlockWise1x32,
+          "Scale per 32 contiguous values")
+      .value(
+          "BlockWise1x128",
+          at::blas::ScalingType::BlockWise1x128,
+          "Scale per 128 contiguous values")
+      .value(
+          "BlockWise128x128",
+          at::blas::ScalingType::BlockWise128x128,
+          "Scale per 128x128 tile");
+
+  py::enum_<at::blas::SwizzleType>(
+      py_module, "_SwizzleType", "Supported scale swizzle types")
+      .value("NO_SWIZZLE", at::blas::SwizzleType::NO_SWIZZLE, "No swizzling")
+      .value(
+          "SWIZZLE_32_4_4",
+          at::blas::SwizzleType::SWIZZLE_32_4_4,
+          "Blackwell-stype 32x4x4 swizzle");
+
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)
       .value("AOTriton", at::ROCmFABackend::AOTriton)
@@ -2469,7 +2571,8 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_get_fp32_precision_getter",
       [](const std::string& backend, const std::string& op) {
-        return at::globalContext().float32Precision(backend, op);
+        return at::precision2str(at::globalContext().float32Precision(
+            at::str2backend(backend), at::str2op(op)));
       });
 
   py_module.def(
@@ -2477,7 +2580,10 @@ Call this whenever a new thread is created in order to propagate values from
       [](const std::string& backend,
          const std::string& op,
          const std::string& precision) {
-        at::globalContext().setFloat32Precision(backend, op, precision);
+        at::globalContext().setFloat32Precision(
+            at::str2backend(backend),
+            at::str2op(op),
+            at::str2precision(precision));
         return precision;
       });
 
