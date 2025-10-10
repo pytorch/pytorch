@@ -13642,7 +13642,7 @@ class TestAutogradStreamSynchronization(TestCase):
                     warnings.simplefilter("always")
 
                     with torch.Stream(0) as s0:
-                        a = torch.ones(8, 8, device="cuda", requires_grad=True)
+                        a = torch.ones(8, 8, device=_get_device_name(0), requires_grad=True)
                         if keep_grad_acc:
                             # create grad_acc under s1 and keep alive with b
                             b = a.clone()
