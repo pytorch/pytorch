@@ -5259,6 +5259,8 @@ class TestGradTrackingTensorToList(TestCase):
         result = grad_f(x)
         # should compute second derivate
         self.assertIsInstance(result, torch.Tensor)
+        # grad_f should return the derivate of g(y) which is (2*x).sum
+        self.assertEqual(result, [2., 2., 2.,])
 
     def test_tolist_multidimensional_grad(self):
         """Test tolist with multi-dimensional tensors in grad."""
@@ -5273,6 +5275,20 @@ class TestGradTrackingTensorToList(TestCase):
         grad_f = torch.func.grad(x)
         result = grad_f(x)
         self.assertEqual(result, [[1., 1., 1.,], [1., 1., 1.]])
+    
+    def test_tolist_conj_neg_grad(self):
+        """Test tolist method with conjugate/negative tensors in grad context."""
+        def f(x):
+            # test with the conjugate view
+            x_conj = x.conj()
+            result_conj = x_conj.tolist()
+            self.assertIsInstance(result_conj, list)
+            return (x * x.conj()).real.sum()
+
+        x = torch.tensor([1. + 2.j, 3. + 4.j], requires_grad=True)
+        grad_f = grad(f)
+        result = grad_f(x)
+        self.assertIsInstance(result, torch.Tensor)
 
 
 only_for = ("cpu", "cuda")
