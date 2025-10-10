@@ -2397,6 +2397,7 @@ def triton_config_reduction(
     num_warps=None,
     register_intensive=False,
     dynamic_scale_rblock=True,
+    reduction_hint=None,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2424,12 +2425,16 @@ def triton_config_reduction(
             rnumels[prefix] *= 2
 
     if num_warps is None:
-        num_warps = total_numel() // 128
+        if reduction_hint == ReductionHint.INNER and not is_fbcode():
+            # r is contiguous, so ensure that each thread has 8 elements for
+            # vectorized loads, assuming bf16/fp16
+            # xblock is usually 1-2, default to giving each thread more work
+            num_warps = r // 128
+        else:
+            num_warps = total_numel() // 128
 
     max_num_warps = 16 if r <= 8192 else 32
-    num_warps = _num_warps(
-        num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
-    )
+    num_warps = 16
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
 
@@ -2694,6 +2699,7 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
                 dynamic_scale_rblock=dynamic_scale_rblock,
+                reduction_hint=reduction_hint,
             )
 
     def outer_config_opt():
@@ -2702,50 +2708,44 @@ def _reduction_configs(
         load_factor = inductor_meta.get("num_load", 0)
         x = size_hints["x"]
         num_warps = None
+        outer_register_intensive = register_intensive
 
         # Try to use all SMs with small x
         if x <= 1024:
             x_block = max(min(x // 128, 8), 2)
-            outer_r_block = min(rnumel, 64)
         # Lower bound x = 1024, 1024 // 16 = 128 around # of SMs
         elif x // 4096 <= 8:
             x_block = 16
-            outer_r_block = 512 // x_block
-        elif num_dynamic > 1:
-            # Lots of compute with multiple dynamic shape per loop iteration
-            # Larger RBLOCK minimizes loop iteration
-            outer_r_block = max(min((rnumel // 64), 64), 8)
-        elif num_dynamic == 1:
-            # Dynamic shapes introduce a lot register pressure for indexing
-            outer_r_block = (
-                1
-                if load_factor >= 3
-                else min(next_power_of_2(max(rnumel, 128) // 128), 8)
-            )
         else:
-            x_block = max(min(max_x_block, next_power_of_2(x // 4096)), x_block)
-            if load_factor < 4 or rnumel <= 128:
-                outer_r_block = 512 // x_block
+            x_block = max(min(max_x_block, x // 4096), x_block)
+
+        if num_dynamic >= 1:
+            # Dynamic shapes introduce a lot register pressure for indexing
+            outer_r_block = 1 if load_factor >= 3 else min(max(rnumel // 128, 1), 8)
+            outer_register_intensive = True
+        else:
+            if rnumel <= 128:
+                outer_r_block = rnumel
             else:
-                # Heavier reductions contain a lot more overhead per loop iteration
-                # We minimize the overhead by enlarging r block
-                if rnumel >= 2048:
-                    outer_r_block = 64
-                else:
-                    outer_r_block = 32
-                x_block = min(x_block, 32)
-                num_warps = 4
+                # rnumel >= 256, rnumel // 4 is at least 8
+                outer_r_block = min(rnumel // 4, 128)
+                # Assume each warp takes a single column of x_block, vectorize the loads
+                # Force more work per thread, generally better for Hopper and Blackwell
+                num_warps = outer_r_block // 32
+
+            x_block = max(min(x_block, 2048 // outer_r_block), 8)
 
         # Set register intensive to true by default as we try to maximize tiles with heuristic
         return make_config(
             x_block,
             outer_r_block,
             num_warps=num_warps,
-            register_intensive=register_intensive,
+            register_intensive=outer_register_intensive,
+            dynamic_scale_rblock=False,
         )
 
     contiguous_config = make_config(
-        1,
+        2 if rnumel <= 2048 and not is_fbcode() else 1,  # 1024 or less is persistent
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
@@ -3115,7 +3115,13 @@ def _persistent_reduction_configs(
 
     if "y" not in size_hints:
         configs = [
-            triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
+            triton_config_reduction(
+                size_hints,
+                xblock,
+                rnumel,
+                register_intensive=True,
+                reduction_hint=reduction_hint,
+            )
             for xblock in (1, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
@@ -3166,6 +3172,7 @@ def _persistent_reduction_configs(
                 size_hints,
                 2 * (256 // rnumel) if rnumel <= 256 else 1,
                 rnumel,
+                reduction_hint=reduction_hint,
             )
         ]
     for c in configs:
