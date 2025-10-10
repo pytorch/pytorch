@@ -55,7 +55,7 @@ class TestActivationSparsifier(TestCase):
 
         for key, config in sparsifier_defaults.items():
             # all the keys in combined_defaults should be present in sparsifier defaults
-            assert config == combined_defaults.get(key, None)
+            assert config == combined_defaults.get(key)
 
     def _check_register_layer(
         self, activation_sparsifier, defaults, sparse_config, layer_args_list

@@ -416,11 +416,8 @@ class JsonProfile:
             # pyrefly: ignore  # bad-assignment
             self.dtype = dtype
         else:
-            if dtype in _dtype_map:
-                # pyrefly: ignore  # bad-assignment
-                self.dtype = _dtype_map[dtype]
-            else:
-                self.dtype = None
+            # pyrefly: ignore  # bad-assignment
+            self.dtype = _dtype_map.get(dtype)
         self._create_devices()
 
     def convert_dtype(self, event: dict[str, Any]) -> Optional[torch.dtype]:

@@ -2770,11 +2770,7 @@ class WorkHookTest(MultiProcessTestCase):
         # from rank0 to other ranks. However, this is DDP's internal implementation,
         # which is subject to change in future versions.
         self.assertTrue(num_hook_fired[OpType.BROADCAST] > 0)
-        ctor_allreduce = (
-            num_hook_fired[OpType.ALLREDUCE]
-            if OpType.ALLREDUCE in num_hook_fired
-            else 0
-        )
+        ctor_allreduce = num_hook_fired.get(OpType.ALLREDUCE, 0)
 
         x = torch.zeros(2, 1000).cuda(self.rank)
         ddp(x).sum().backward()

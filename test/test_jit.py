@@ -6723,7 +6723,7 @@ a")
         @torch.jit.script
         def testNoThrows(t):
             c1 = 1
-            if (False and bool(t[1])) or (True or bool(t[1])):
+            if (False and bool(t[1])) or (True or bool(t[1])):  # noqa: SIM222,SIM223
                 c1 = 0
             return c1
 
@@ -15758,7 +15758,7 @@ dedent """
         def fn(d):
             # type: (Dict[str, int]) -> List[int]
             out = [1]
-            for i in range(d["hi"] if "hi" in d else 6):
+            for i in range(d.get("hi", 6)):
                 out.append(i)  # noqa: PERF402
             return out
 
@@ -16104,7 +16104,7 @@ M = 10
 S = 5
 
 def add_nn_module_test(*args, **kwargs):
-    no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
+    no_grad = kwargs.get('no_grad', False)
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
         # eval() is not supported, so skip these tests

@@ -177,7 +177,7 @@ if HAS_CUDA_AND_TRITON:
 
         def get_manager(self, device_index=None):
             return torch._inductor.cudagraph_trees.get_container(
-                self.device_idx if not device_index else device_index
+                device_index if device_index else self.device_idx
             ).tree_manager
 
         def get_roots(self):

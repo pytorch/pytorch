@@ -286,7 +286,7 @@ class OptionalScaledTensor(torch.Tensor):
     def __tensor_unflatten__(inner_tensors, metadata, outer_size, outer_stride):
         return OptionalScaledTensor(
             inner_tensors["_data"],
-            inner_tensors["_scale"] if "_scale" in inner_tensors else None,
+            inner_tensors.get("_scale", None),
             constant=metadata["_constant"],
         )
 
