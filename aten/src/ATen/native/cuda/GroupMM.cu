@@ -346,8 +346,9 @@ void dispatch_bf16_grouped_kernel_on_tile_size(
   bool small = (M <= 128 || N <= 128);
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool sm10x = properties != nullptr && properties->major == 10;
+  const bool sm11x = properties != nullptr && properties->major == 11;
 
-  if (sm10x) {
+  if (sm10x || sm11x) {
     if (small){
       bf16bf16_grouped_gemm_impl_sm90_sm100<
         cutlass::arch::Sm100,
