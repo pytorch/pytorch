@@ -27,7 +27,7 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (
+from torch._prims_common import (  # pyrefly: ignore  # deprecated
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -6485,12 +6485,10 @@ def div_prim(a, b):
     # see https://github.com/pytorch/pytorch/issues/157959
     if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
         # Replace divide by constant with multiply by reciprocal
-        # pyrefly: ignore  # unbound-name
+
         if divisor.value == 0:
-            # pyrefly: ignore  # unbound-name
             reciprocal = math.copysign(float("inf"), divisor.value)
         else:
-            # pyrefly: ignore  # unbound-name
             reciprocal = 1.0 / divisor.value
         return mul(a, reciprocal)
 

@@ -921,6 +921,7 @@ def _pad_mm_init() -> None:
             pattern,
             replacement,
             args,
+            # pyrefly: ignore  # bad-argument-type
             joint_fwd_bwd,
             # pyrefly: ignore  # bad-argument-type
             patterns,
@@ -933,6 +934,7 @@ def _pad_mm_init() -> None:
             pattern,
             replacement,
             args,
+            # pyrefly: ignore  # bad-argument-type
             fwd_only,
             # pyrefly: ignore  # bad-argument-type
             patterns,

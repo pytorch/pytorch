@@ -88,6 +88,7 @@ class Benchmarker:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
         inferred_device = None
+        # pyrefly: ignore  # bad-assignment
         for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
             if not isinstance(arg_or_kwarg, torch.Tensor):
                 continue
@@ -160,6 +161,7 @@ class TritonBenchmarker(Benchmarker):
         return do_bench
 
     @time_and_count
+    # pyrefly: ignore  # bad-override
     def benchmark_gpu(
         self: Self,
         _callable: Callable[[], Any],
