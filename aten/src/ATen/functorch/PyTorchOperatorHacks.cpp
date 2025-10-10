@@ -6,6 +6,7 @@
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
+#include <c10/util/Exception.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
@@ -108,9 +109,7 @@ Tensor binary_cross_entropy_with_logits_hack(
 }
 
 Tensor trace_backward_decomp(const Tensor& grad, IntArrayRef sizes) {
-  if (sizes.size() != 2) {
-    throw std::runtime_error("expected matrix input");
-  }
+  TORCH_CHECK(sizes.size() == 2, "expected matrix input");
   auto grad_input = at::zeros(sizes[0] * sizes[1], grad.options());
   auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, grad.options().dtype(at::kLong));
   // Workaround using index_put instead of yet unsupported index_fill_
