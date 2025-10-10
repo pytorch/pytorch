@@ -261,7 +261,7 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     num_positional_args = sum(
         1
         for param in inspect.signature(fn).parameters.values()
-        if param.default == inspect.Parameter.empty
+        if param.default is inspect.Parameter.empty
     )
     assert num_positional_args == 5 or num_positional_args == 4
     if num_positional_args == 5:
