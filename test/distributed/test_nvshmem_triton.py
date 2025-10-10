@@ -12,6 +12,7 @@ import torch.distributed._symmetric_memory as symm_mem
 import torch.distributed._symmetric_memory._nvshmem_triton as nvshmem
 from torch._inductor.runtime.triton_compat import triton
 from torch.distributed._symmetric_memory._nvshmem_triton import requires_nvshmem
+from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -21,7 +22,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import IS_H100, requires_triton
-from torch.testing._internal.common_cuda import SM100OrLater
+
 
 if not symm_mem.is_nvshmem_available():
     print("NVSHMEM not available, skipping tests")
