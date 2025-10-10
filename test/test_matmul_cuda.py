@@ -16,6 +16,7 @@ from torch.quantization._quantized_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM53OrLater,
     SM80OrLater,
     SM90OrLater,
@@ -856,8 +857,7 @@ class TestMatmulCuda(InductorTestCase):
                     op(a, mismatch_batch_dim_b, out_dtype=torch.float32)
 
 
-    @unittest.skipIf(not _get_torch_cuda_version() >= (12, 8), "Green Context only tested on 12.8+")
-    @unittest.skipIf(not int(torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run).split('.')[0]) >= 570, "driver version too old for green context")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
     def test_greencontext_carveout(self):
         a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
         ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
