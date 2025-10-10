@@ -202,7 +202,7 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             if self.device == "mps":
-                FileCheck().check("getKernelFunction(").run(code)
+                FileCheck().check("aoti_torch_mps_get_kernel_function(").run(code)
             elif self.device == GPU_TYPE:
                 FileCheck().check("launchKernel(").run(code)
                 if config.aot_inductor.embed_kernel_binary:
@@ -611,9 +611,6 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(32, 64, device=self.device),)
         self.check_model(Model(), example_inputs)
 
-    @unittest.skip(
-        "install_free_tensors leads to OOM - https://github.com/pytorch/pytorch/issues/164062"
-    )
     def test_large_weight(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -2893,7 +2890,7 @@ class AOTInductorTestsTemplate:
 
         if self.device == "mps":
             self.code_check_count(
-                model, example_inputs, '.getKernelFunction("generated_kernel")', 1
+                model, example_inputs, "aoti_torch_mps_get_kernel_function(", 1
             )
         elif self.device == GPU_TYPE:
             self.code_check_count(
