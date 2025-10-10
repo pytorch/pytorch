@@ -11,7 +11,7 @@ from typing import Optional
 import torch
 
 
-from torch.nn.functional import scaled_mm, ScalingType, SwizzleType
+from torch.nn.functional import scaled_mm, scaled_grouped_mm, ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     _get_torch_cuda_version,
@@ -214,6 +214,49 @@ def scaled_mm_wrap(
             use_fast_accum=use_fast_accum,
         )
         return out
+
+def scaled_grouped_mm_wrap(
+    a,
+    b,
+    scale_a,
+    scale_b,
+    scale_recipe_a,
+    scale_recipe_b,
+    swizzle_a=SwizzleType.NO_SWIZZLE,
+    swizzle_b=SwizzleType.NO_SWIZZLE,
+    scale_result=None,
+    out_dtype=torch.bfloat16,
+    use_fast_accum=False,
+    offs=None,
+    bias=None,
+    wrap_v2=True,
+):
+    if not wrap_v2:
+        return torch._scaled_grouped_mm(
+            a,
+            b,
+            scale_a,
+            scale_b,
+            out_dtype=out_dtype,
+            bias=bias,
+            offs=offs,
+            use_fast_accum=use_fast_accum)
+    else:
+        return scaled_grouped_mm(
+            a,
+            b,
+            scale_a,
+            scale_recipe_a,
+            scale_b,
+            scale_recipe_b,
+            swizzle_a=swizzle_a,
+            swizzle_b=swizzle_b,
+            offs=offs,
+            bias=bias,
+            output_dtype=out_dtype,
+            use_fast_accum=use_fast_accum)
+
+
 
 def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype) -> torch.Tensor:
     # naive implementation: dq -> op -> q
@@ -444,7 +487,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("M", [2048, 2049])
     @parametrize("N", [8192])
     @parametrize("K", [16640])
-    def test_mxfp8_scaled_grouped_mm_2d_2d(self, G, M, N, K):
+    @parametrize("wrap_v2", [True, False])
+    def test_mxfp8_scaled_grouped_mm_2d_2d(self, G, M, N, K, wrap_v2):
         torch.manual_seed(42)
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
         input_group_end_offsets = generate_jagged_offs(
@@ -510,13 +554,18 @@ class TestFP8Matmul(TestCase):
         w_blocked_scales = w_blocked_scales.reshape(N_rounded, -1)
 
         # Compute mxfp8 grouped mm output
-        y_mxfp8 = torch._scaled_grouped_mm(
+        y_mxfp8 = scaled_grouped_mm_wrap(
             xq,  # (M, total_K)
             wq.transpose(-2, -1),  # (total_K, N)
             x_blocked_scales,  # to_blocked_per_group(M, total_K//32)
             w_blocked_scales,  # to_blocked_per_group(N, total_K//32)
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
             offs=input_group_end_offsets,  # (G,)
             out_dtype=torch.bfloat16,
+            wrap_v2=wrap_v2
         )
 
         # bf16 reference output
@@ -535,7 +584,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("M", [16640])
     @parametrize("N", [8192])
     @parametrize("K", [4096])
-    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K):
+    @parametrize("wrap_v2", [True, False])
+    def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, wrap_v2):
         torch.manual_seed(42)
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
@@ -579,14 +629,19 @@ class TestFP8Matmul(TestCase):
         xq = xq.view(-1, xq.shape[-1])
 
         # Compute mxfp8 grouped gemm.
-        y_mxfp8 = torch._scaled_grouped_mm(
+        y_mxfp8 = scaled_grouped_mm_wrap(
             xq,
             wq.transpose(-2, -1),
             x_scale,
             w_scale,
             offs=input_group_end_offsets,
             out_dtype=torch.bfloat16,
-        )
+            scale_recipe_a=ScalingType.BlockWise1x32,
+            scale_recipe_b=ScalingType.BlockWise1x32,
+            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+            wrap_v2=wrap_v2)
+
 
         # Compute reference bf16 grouped gemm.
         y_bf16 = torch._grouped_mm(
@@ -1490,7 +1545,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided):
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_grouped_gemm_2d_2d(self, fast_accum, strided, wrap_v2):
         device = "cuda"
         fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         m, n, k, n_groups = 16, 32, 64, 4
@@ -1499,9 +1555,16 @@ class TestFP8Matmul(TestCase):
         scale_a = torch.rand(m * n_groups, device=device, dtype=torch.float32)
         scale_b = torch.rand(n * n_groups, device=device, dtype=torch.float32)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
-        f = torch._scaled_grouped_mm
-        out = f(a, b.t(), scale_a, scale_b, offs=offs,
-                out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+        f = scaled_grouped_mm_wrap
+        out = f(a, b.t(),
+                scale_a,
+                scale_b,
+                scale_recipe_a=ScalingType.RowWise,
+                scale_recipe_b=ScalingType.RowWise,
+                offs=offs,
+                out_dtype=torch.bfloat16,
+                use_fast_accum=fast_accum,
+                wrap_v2=wrap_v2)
         offs_cpu = offs.cpu()
         alist, blist, ascalelist, bscalelist = [], [], [], []
         start = 0
@@ -1518,7 +1581,8 @@ class TestFP8Matmul(TestCase):
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
     @parametrize("strided", [False] + ([True] if torch.version.cuda else []))
-    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided):
+    @parametrize("wrap_v2", [True, False])
+    def test_scaled_grouped_gemm_2d_3d(self, fast_accum, strided, wrap_v2):
         device = "cuda"
         fp8_dtype = torch.float8_e4m3fnuz if torch.version.hip else torch.float8_e4m3fn
         m, n, k, n_groups = 16, 32, 64, 4
@@ -1536,9 +1600,16 @@ class TestFP8Matmul(TestCase):
                 offs[0] = offs[1]
             scale_a = torch.rand(n_groups * m, device="cuda", dtype=torch.float32)
             scale_b = torch.rand(n_groups * n, device="cuda", dtype=torch.float32).view(n_groups, n)
-            f = torch._scaled_grouped_mm
-            out = f(a, b.transpose(-2, -1), scale_a, scale_b, offs=offs,
-                    out_dtype=torch.bfloat16, use_fast_accum=fast_accum)
+            f = scaled_grouped_mm_wrap
+            out = f(a, b.transpose(-2, -1),
+                    scale_a,
+                    scale_b,
+                    scale_recipe_a=ScalingType.RowWise,
+                    scale_recipe_b=ScalingType.RowWise,
+                    offs=offs,
+                    out_dtype=torch.bfloat16,
+                    use_fast_accum=fast_accum,
+                    wrap_v2=wrap_v2)
 
             offs_cpu = offs.cpu()
             alist, ascalelist, outlist = [], [], []
