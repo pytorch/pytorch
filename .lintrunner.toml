@@ -214,6 +214,7 @@ command = [
 code = 'PYREFLY'
 include_patterns = [
     'torch/**/*.py',
+    'torch/**/*.pyi',
 ]
 exclude_patterns = []
 command = [
