@@ -2,7 +2,7 @@ name: inductor-perf-nightly-h100
 
 on:
   schedule:
-    - cron: 15 0,12 * * 1-6
+    - cron: 15 0 * * 1-6
     - cron: 0 7 * * 0
   # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
   # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs

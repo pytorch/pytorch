@@ -72,6 +72,7 @@ OPTIMUS_EXCLUDE_POST_GRAD = [
     "inductor_autotune_lookup_table",
 ]
 
+from torch._inductor.runtime.benchmarking import may_distort_benchmarking_result
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     free_unbacked_symbols,
@@ -271,8 +272,12 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
     return res
 
 
+@may_distort_benchmarking_result
 def do_bench_using_profiling(
-    fn: Callable[[], Any], warmup: int = 25, rep: int = 100
+    fn: Callable[[], Any],
+    warmup: int = 25,
+    rep: int = 100,
+    is_vetted_benchmarking: bool = False,
 ) -> float:
     """
     Returns benchmark results by examining torch profiler events.
@@ -281,6 +286,11 @@ def do_bench_using_profiling(
     vectorized_elementwise_kernel which is used to fill L2 cache,
     various CUDA events, etc, so could also be fragile.
     """
+
+    if not is_vetted_benchmarking:
+        from torch._inductor.runtime.benchmarking import may_ban_benchmarking
+
+        may_ban_benchmarking()
 
     fn()
     torch.cuda.synchronize()
@@ -504,7 +514,7 @@ def is_pointwise_use(
     Uses in views ops will follow the views uses
     """
 
-    if not use.op == "call_function":
+    if use.op != "call_function":
         return False
     if not (
         isinstance(use.target, torch._ops.OpOverload) or use.target is operator.getitem
@@ -670,6 +680,7 @@ def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
     """
     Variant of cache_on_self for properties. The only difference is the type signature.
     """
+    # pyrefly: ignore  # bad-argument-type
     return cache_on_self(fn)
 
 
@@ -682,6 +693,7 @@ def aggregate_origins(
         return functools.reduce(
             operator.or_,
             [
+                # pyrefly: ignore  # missing-attribute
                 node.node.origins
                 for node in node_schedule
                 if hasattr(node, "node") and node.node
@@ -1158,6 +1170,7 @@ def unload_xpu_triton_pyds() -> None:
                             result,
                             torch._inductor.runtime.triton_heuristics.TritonCompileResult,
                         ):
+                            # pyrefly: ignore  # missing-attribute
                             result.kernel.run.mod.__del__()
         del sys.modules[module_name]
 
@@ -1431,6 +1444,7 @@ class IndentedBuffer:
     ) -> None:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
+            # pyrefly: ignore  # bad-assignment
             for line in other_code._lines:
                 if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
@@ -1540,6 +1554,20 @@ class DelayReplaceLine(DeferredLineBase):
 
     def _new_line(self, line: str) -> DelayReplaceLine:
         return DelayReplaceLine(self.key, self.value_fn, line)
+
+
+class DelayMaybeLine(DeferredLineBase):
+    """At end of codegen return `line if `pred_fn() else None`"""
+
+    def __init__(self, pred_fn: Callable[[], bool], line: str):
+        super().__init__(line)
+        self.pred_fn = pred_fn
+
+    def __call__(self) -> str | None:
+        return self.line if self.pred_fn() else None
+
+    def _new_line(self, line: str) -> DelayMaybeLine:
+        return DelayMaybeLine(self.pred_fn, line)
 
 
 @functools.cache
@@ -2006,7 +2034,7 @@ def use_ck_template(layout: Layout) -> bool:
     if not torch.version.hip:
         return False
     # tensors must be on GPU
-    if not layout.device.type == "cuda":
+    if layout.device.type != "cuda":
         return False
     # hardware check
     # if config arch list is not specified, get the native arch from the device properties
@@ -2186,6 +2214,7 @@ def run_and_get_code(
 def run_and_get_kernels(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> tuple[_T, list[str]]:
+    # pyrefly: ignore  # bad-argument-type
     result, source_codes = run_and_get_code(fn, *args, **kwargs)
     kernels = []
     for code in source_codes:
@@ -2246,6 +2275,7 @@ def get_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> list[str
 
 
 def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> str:
+    # pyrefly: ignore  # bad-argument-type
     source_codes = get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -2257,6 +2287,7 @@ def get_triton_code(fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs) -> s
 def run_and_get_triton_code(
     fn: Callable[P, _T], *args: P.args, **kwargs: P.kwargs
 ) -> str:
+    # pyrefly: ignore  # bad-argument-type
     _, source_codes = run_and_get_code(fn, *args, **kwargs)
     # Can have two outputs if backwards was eagerly compiled
     assert 1 <= len(source_codes) <= 2, (
@@ -3533,7 +3564,7 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
     """
     Ensures the configuration is internally consistent for standalone AOTInductor.
 
-    If `aot_inductor.compile_standalone` is set to True in the provided
+    If `aot_inductor_mode.compile_standalone` is set to True in the provided
     `config_patches` (or falls back to the global config), this function ensures
     that the following configs are also enabled:
         - `aot_inductor.package_cpp_only`
@@ -3554,11 +3585,24 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
             config_patches[config_name] = config_value
         elif not value and value != config_value:
             raise RuntimeError(
-                f"Invalid config: {config_name}={config_value} when aot_inductor.compile_standalone is True."
+                f"Invalid config: {config_name}={config_value} when aot_inductor_mode.compile_standalone is True."
             )
 
+    def force_patch_config(
+        config_patches: dict[str, Any], config_name: str, config_value: Any
+    ) -> None:
+        value = config_patches.get(config_name, getattr(config, config_name))
+        if value != config_value:
+            log.warning(
+                "Overriding: %s=%s when aot_inductor_mode.compile_standalone is True.",
+                config_name,
+                config_value,
+            )
+        config_patches[config_name] = config_value
+
     compile_standalone = config_patches.get(
-        "aot_inductor.compile_standalone", config.aot_inductor.compile_standalone
+        "aot_inductor_mode.compile_standalone",
+        config.aot_inductor_mode.compile_standalone,
     )
     # Make a copy of the config_patches to avoid modifying the original dictionary, needed for testing
     config_patches = config_patches.copy()
@@ -3574,6 +3618,13 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
         patch_config(
             config_patches, "aot_inductor.model_name_for_generated_files", "aoti_model"
         )
+        # TODO: change these two configs to default to None and use patch_config
+        force_patch_config(
+            config_patches,
+            "aot_inductor.link_libtorch",
+            config.test_configs.use_libtorch,
+        )
+        force_patch_config(config_patches, "aot_inductor.dynamic_linkage", False)
 
     return config_patches
 
@@ -3632,6 +3683,7 @@ def maybe_log_cudagraph_partition(
         and (fx_node := ir_node.get_origin_node())
         and (stack_trace := fx_node.meta.get("stack_trace", None))
     ):
+        # pyrefly: ignore  # unbound-name
         warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
 
     perf_hint_log.warning(warning_msg)

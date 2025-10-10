@@ -13,11 +13,11 @@ import importlib
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 import torch
 import torch.distributed as dist
@@ -114,6 +114,7 @@ def broadcast(
             error_msg += f": stage {sync_obj.stage_name}"
         if sync_obj.exception is not None:
             error_msg += f": exception {sync_obj.exception}"
+        # pyrefly: ignore  # invalid-inheritance
         raise RuntimeError(error_msg) from sync_obj.exception
 
     return cast(T, sync_obj.payload)
@@ -183,13 +184,16 @@ def all_gather(
 
         if len(exception_list) > 0:
             raise RuntimeError(  # type: ignore[misc]
-                error_msg, exception_list
+                error_msg,
+                exception_list,
+                # pyrefly: ignore  # invalid-inheritance
             ) from exception_list[0]
         return ret_list
     else:
         if not sync_obj.success:
             raise RuntimeError(
                 f"all_gather failed with exception {sync_obj.exception}",
+                # pyrefly: ignore  # invalid-inheritance
             ) from sync_obj.exception
         return [sync_obj.payload]  # type: ignore[list-item]
 
@@ -266,10 +270,13 @@ def _summarize_ranks(ranks: Iterable[int]) -> str:
     result = []
     for r in ranges:
         if len(r) == 1:
+            # pyrefly: ignore  # bad-argument-type
             result.append(f"{r.start}")
         elif r.step == 1:
+            # pyrefly: ignore  # bad-argument-type
             result.append(f"{r.start}:{r.stop}")
         else:
+            # pyrefly: ignore  # bad-argument-type
             result.append(f"{r.start}:{r.stop}:{r.step}")
     return ",".join(result)
 

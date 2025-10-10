@@ -142,6 +142,7 @@ def grouped_gemm_lowering(
     num_gemm = len(w)
 
     assert config.max_autotune or config.max_autotune_gemm
+    # pyrefly: ignore  # bad-assignment
     b = [bias if bias is None else ir.ExternKernel.realize_input(bias) for bias in b]
 
     choices: list[ChoiceCaller] = []
@@ -176,6 +177,7 @@ def grouped_gemm_lowering(
         ir.MultiOutput(layout, template_buf, [(list, gemm_idx)])
         for gemm_idx in range(num_gemm)
     ]
+    # pyrefly: ignore  # bad-argument-type
     template_buf.layout = ir.MultiOutputLayout(device=input_nodes[0].get_device())
     template_buf.outputs = return_bufs
     return_tensors = [
@@ -424,6 +426,7 @@ def register_onednn_fusion_ops():
                         "epilogue_creator": epilogue_creator,
                     }
 
+                    # pyrefly: ignore  # unsupported-operation
                     kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
                     CppGemmTemplate.add_choices(
                         choices,
@@ -721,6 +724,7 @@ def register_onednn_fusion_ops():
                 # If w_zp is None, then it's a dummy tensor created to denote the
                 # absence of a zero point, and thus w is int8 symmetrically quantized.
                 # Moreover, oneDNN qlinear API doesn't accept None value for zp
+                # pyrefly: ignore  # bad-assignment
                 w_zp = V.graph.add_tensor_constant(
                     torch.tensor(0, dtype=torch.int32), name="w_zp"
                 )
@@ -764,7 +768,9 @@ def register_onednn_fusion_ops():
                     ) = create_int8_compensation(
                         W_tensor,
                         packed_weight,
+                        # pyrefly: ignore  # bad-argument-type
                         x_scale,
+                        # pyrefly: ignore  # bad-argument-type
                         x_zp,
                         w_scale,
                     )
@@ -823,6 +829,7 @@ def register_onednn_fusion_ops():
                             )
                             # Step 2: add Bias if applicable
                             if bias is not None:
+                                # pyrefly: ignore  # not-callable
                                 _bias = bias_loader(weight_compens_index)
                                 nonlocal bias_dtype
                                 assert bias_dtype in [torch.float32, torch.bfloat16]
@@ -1013,6 +1020,7 @@ def register_onednn_fusion_ops():
                 )
 
             if w_zp is None:
+                # pyrefly: ignore  # bad-assignment
                 w_zp = V.graph.add_tensor_constant(
                     torch.tensor(0, dtype=torch.int32), name="w_zp"
                 )
@@ -1087,7 +1095,9 @@ def register_onednn_fusion_ops():
                     ) = create_int8_compensation(
                         W_tensor,
                         packed_weight,
+                        # pyrefly: ignore  # bad-argument-type
                         x_scale,
+                        # pyrefly: ignore  # bad-argument-type
                         x_zp,
                         w_scale,
                     )
@@ -1147,6 +1157,7 @@ def register_onednn_fusion_ops():
                             )
                             # Step 2: add Bias if applicable
                             if bias is not None:
+                                # pyrefly: ignore  # not-callable
                                 _bias = bias_loader(weight_compens_index)
                                 nonlocal bias_dtype
                                 assert bias_dtype in [torch.float32, torch.bfloat16]
@@ -1348,5 +1359,3 @@ def register_onednn_fusion_ops():
                 return result
 
         add_needs_realized_inputs(cpu_needs_realized_inputs)
-    else:
-        pass
