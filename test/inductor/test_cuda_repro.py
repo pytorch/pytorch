@@ -1538,7 +1538,7 @@ class CudaReproTests(TestCase):
                 t2 = a0.view(379, 165, 2).mean(dim=2)
                 t7 = ((((a1) - a2) - a3) - a2) - a4
                 t8 = t7.view(379, 165)
-                t11 = torch.nn.functional.gelu(a5).mean(dim=0)
+                t11 = torch.nn.functional.relu(a5).mean(dim=0)
                 t12 = t2 - t11
                 t13 = (((t2) / t8) / t11) / t12
                 return t13
@@ -2540,6 +2540,31 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         correct = forward(*example_inputs)
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
+
+    def test_truediv_numerics_with_eager(self):
+        from decimal import Decimal
+
+        y, x = 7.0, 11.0
+
+        @torch.compile
+        def compiled_divide(x, y):
+            return x / y
+
+        for y_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
+            for x_dtype in [
+                torch.float16,
+                torch.bfloat16,
+                torch.float32,
+                torch.float64,
+            ]:
+                y_ten = torch.tensor([y], dtype=y_dtype, device="cuda")
+                x_ten = torch.tensor([x], dtype=x_dtype, device="cuda")
+
+                torch._dynamo.reset()
+                compiled_div = Decimal(compiled_divide(x, y_ten).item())
+                eager_div = Decimal((x / y_ten).item())
+
+                self.assertEqual(eager_div, compiled_div)
 
 
 if __name__ == "__main__":

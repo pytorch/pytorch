@@ -202,6 +202,7 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
         Args:
             device (int, optional): if specified, all parameters will be copied to that device
         """
+        # pyrefly: ignore  # missing-attribute
         return self._apply(lambda t: getattr(t, custom_backend_name)(device))
 
     _check_register_once(torch.nn.Module, custom_backend_name)

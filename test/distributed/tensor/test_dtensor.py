@@ -27,6 +27,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing import make_tensor
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -917,6 +918,27 @@ class DTensorMeshTest(DTensorTestBase):
         numel_1_tensor = torch.tensor([1], device=self.device_type)
         self.assertEqual(
             (numel_1_tensor + sharded_dtensor).to_local(), numel_1_tensor + local_tensor
+        )
+
+    @unittest.expectedFailure
+    @with_comms
+    def test_dtensor_cond(self):
+        mesh = self.build_device_mesh()
+
+        def make_dtensor(*shape, dtype, device):
+            return distribute_tensor(
+                make_tensor(*shape, dtype=dtype, device=device),
+                device_mesh=mesh,
+                placements=None,
+            )
+
+        x = make_dtensor(1, 1, dtype=torch.bfloat16, device="cuda")
+
+        # Fails with AssertionError: P1972527564
+        torch.cond(
+            x > 0,
+            lambda: 1.0 / x,
+            lambda: torch.zeros_like(x),
         )
 
     @with_comms

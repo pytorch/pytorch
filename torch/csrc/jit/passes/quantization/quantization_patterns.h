@@ -16,7 +16,7 @@ struct QuantFusionInfo {
   std::string quantized_op_name;
   std::string pattern;
   std::string replacement;
-  std::vector<MatchFilter> filters = {};
+  std::vector<MatchFilter> filters;
 };
 
 namespace {

@@ -137,6 +137,7 @@ ignores = [
     "third_party/nvfuser/runtime/helpers.cu",
     "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
+    "torch/csrc/jit/ir/ir.h",
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
     "torch/include/*",
