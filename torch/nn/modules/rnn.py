@@ -484,33 +484,25 @@ class RNN(RNNBase):
 
     .. code-block:: python
 
-        # Efficient implementation equivalent to the following with bidirectional=False
-        rnn = nn.RNN(input_size, hidden_size, num_layers)
-        params = dict(rnn.named_parameters())
-        def forward(x, hx=None, batch_first=False):
-            if batch_first:
-                x = x.transpose(0, 1)
-            seq_len, batch_size, _ = x.size()
-            if hx is None:
-                hx = torch.zeros(rnn.num_layers, batch_size, rnn.hidden_size)
-            h_t_minus_1 = hx.clone()
-            h_t = hx.clone()
-            output = []
-            for t in range(seq_len):
-                for layer in range(rnn.num_layers):
-                    input_t = x[t] if layer == 0 else h_t[layer - 1]
-                    h_t[layer] = torch.tanh(
-                        input_t @ params[f"weight_ih_l{layer}"].T
-                        + h_t_minus_1[layer] @ params[f"weight_hh_l{layer}"].T
-                        + params[f"bias_hh_l{layer}"]
-                        + params[f"bias_ih_l{layer}"]
-                    )
-                output.append(h_t[-1].clone())
-                h_t_minus_1 = h_t.clone()
-            output = torch.stack(output)
-            if batch_first:
-                output = output.transpose(0, 1)
-            return output, h_t
+        # Simplified example of how an Elman RNN updates hidden states over time.
+        h_t = h_0
+        outputs = []
+        for x_t in sequence:           # iterate over each time step
+            # Compute new hidden state using input and previous hidden state
+            h_t = torch.tanh(
+                x_t @ W_ih.T + b_ih +  # input-to-hidden
+                h_t @ W_hh.T + b_hh    # hidden-to-hidden
+            )
+            outputs.append(h_t)
+
+        # Stack outputs from all time steps
+        y = torch.stack(outputs)  # shape: (seq_len, batch, hidden_size)
+
+    Note:
+        This pseudocode illustrates the core RNN computation for a single layer.
+        The actual implementation supports multiple layers, bidirectionality,
+        batch-first input, and various optimizations implemented in C++ for speed.
+
 
     Args:
         input_size: The number of expected features in the input `x`
