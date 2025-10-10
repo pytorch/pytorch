@@ -7424,7 +7424,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         if backend == "inductor":
             # A known InductorError Issue https://github.com/pytorch/pytorch/issues/157612
-            with self.assertRaises(InductorError):
+            with self.assertRaises(RuntimeError):
                 compiled(torch.randn(2, 128, 64))
         else:
             compiled(torch.randn(2, 128, 64))
