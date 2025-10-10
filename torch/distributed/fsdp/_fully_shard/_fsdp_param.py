@@ -232,6 +232,7 @@ class FSDPParam:
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
+        # pyrefly: ignore  # read-only
         self.device = device
         self.mp_policy = mp_policy
         self.offload_to_cpu: bool = isinstance(offload_policy, CPUOffloadPolicy)
@@ -554,6 +555,7 @@ class FSDPParam:
                 f"world size ({shard_world_size})"
             )
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
+        # pyrefly: ignore  # unbound-name
         sharded_numel = numel // shard_world_size
         self._sharded_post_forward_param_data = (
             self.all_gather_outputs[0].narrow(
@@ -684,6 +686,7 @@ class FSDPParam:
                         self.device, non_blocking=True
                     )
                 pre_all_gather_signature = inspect.signature(
+                    # pyrefly: ignore  # missing-attribute
                     sharded_local_tensor.fsdp_pre_all_gather
                 )
                 num_fn_params = len(pre_all_gather_signature.parameters)
@@ -701,6 +704,7 @@ class FSDPParam:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
+                        # pyrefly: ignore  # missing-attribute
                     ) = sharded_local_tensor.fsdp_pre_all_gather(
                         self.shard_mesh_from_root
                     )
@@ -708,6 +712,7 @@ class FSDPParam:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
+                        # pyrefly: ignore  # missing-attribute
                     ) = sharded_local_tensor.fsdp_pre_all_gather(
                         self.shard_mesh_from_root,
                         self._orig_size,
@@ -829,6 +834,7 @@ class FSDPParam:
                     f"instead of {self.sharded_param}"
                 )
             self.sharded_param = new_param
+        # pyrefly: ignore  # missing-attribute
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return

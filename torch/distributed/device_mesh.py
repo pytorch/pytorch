@@ -239,7 +239,9 @@ else:
                 )
             return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
 
-        def _get_slice_mesh_layout(self, device_mesh, mesh_dim_names) -> _MeshLayout:
+        def _get_slice_mesh_layout(
+            self, device_mesh: "DeviceMesh", mesh_dim_names: tuple[str, ...]
+        ) -> _MeshLayout:
             """
             Validate whether the mesh_dim_names is valid for slicing the given device_mesh.
             If valid, return dim indexes of the slice mesh in the device mesh.
@@ -266,7 +268,7 @@ else:
                 else {}
             )
             valid_mesh_dim_names = [
-                *device_mesh.mesh_dim_names,
+                *not_none(device_mesh.mesh_dim_names),
                 *flatten_name_to_root_layout,
             ]
 
@@ -281,11 +283,17 @@ else:
 
             layout_sliced = []
             for name in mesh_dim_names:
-                if name in device_mesh.mesh_dim_names:
+                if name in not_none(device_mesh.mesh_dim_names):
                     layout_sliced.append(
-                        device_mesh._layout[device_mesh.mesh_dim_names.index(name)]
+                        device_mesh._layout[
+                            not_none(device_mesh.mesh_dim_names).index(name)
+                        ]
                     )
                 elif name in flatten_name_to_root_layout:
+                    warnings.warn(
+                        "Slicing a flattened dim from root mesh will be deprecated in PT 2.11. "
+                        "Users need to bookkeep the flattened mesh directly. "
+                    )
                     layout_sliced.append(flatten_name_to_root_layout[name])
 
             sliced_sizes = tuple(l.sizes for l in layout_sliced)
@@ -474,6 +482,7 @@ else:
                     self._init_process_groups(backend_override)
 
                 if is_initialized() and get_backend() == "threaded":
+                    # pyrefly: ignore  # bad-assignment
                     self._thread_id = threading.get_ident()
 
                 if _rank is None:
@@ -642,6 +651,7 @@ else:
                         # We temporarily revert the reuse subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
+                        # pyrefly: ignore  # unbound-name
                         if bound_device_id is None or not has_split_group:
                             dim_group = new_group(
                                 ranks=subgroup_ranks,
@@ -676,7 +686,7 @@ else:
                 if self._mesh_dim_names
                 else f"{tuple(self._mesh.shape)}"
             )
-            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, device: '{self._device_type}', stride: {self._mesh.stride()}"
+            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, '{self.device_type}', stride={self._mesh.stride()}"
             # We only print the mesh tensor if the debug mode is turned on.
             if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
                 device_mesh_repr += f", Mesh: {self._mesh.tolist()}"
