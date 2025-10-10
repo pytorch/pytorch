@@ -249,3 +249,14 @@ jobs:
       docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
     secrets: inherit
+
+  linux-jammy-py3_10-gcc11-full-debug-build-only:
+    name: linux-jammy-py3.10-gcc11-full-debug-build-only
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.2xlarge.memory
+      build-environment: linux-jammy-py3.10-gcc11-full-debug-build-only
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
+    secrets: inherit
