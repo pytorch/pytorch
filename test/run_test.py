@@ -778,6 +778,8 @@ def run_test_retries(
                 print_to_file("Stopping at first consistent failure")
                 break
             sc_command = f"--scs={stepcurrent_key}"
+            # This is for log classifier
+            print_to_file(f"[FAILED CONSISTENTLY] {current_failure}")
             print_to_file(
                 "Test failed consistently, "
                 "continuing with the rest of the tests due to continue-through-error being set"
@@ -799,10 +801,6 @@ def run_test_retries(
         )
     if len(consistent_failures) > 0:
         print_to_file(f"The following tests failed consistently: {consistent_failures}")
-        # TODO: print stdout/error
-        print_to_file(
-            "Please ctrl-f for the tests, they might be much earlier in the log"
-        )
         for x in consistent_failures:
             print_to_file(f"[FAILED CONSISTENTLY] {x}")
         return 1, True
