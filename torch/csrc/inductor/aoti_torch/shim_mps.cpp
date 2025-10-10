@@ -10,9 +10,7 @@ AOTITorchError aoti_torch_mps_set_arg_tensor(
     AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     auto t = tensor_handle_to_tensor_pointer(tensor);
-    if (t == nullptr) {
-      throw std::runtime_error("Tensor is null.");
-    }
+    TORCH_CHECK(t != nullptr, "Tensor is null.");
     auto func = reinterpret_cast<at::native::mps::MetalKernelFunction*>(handle);
     func->setArg(idx, *t);
   });
