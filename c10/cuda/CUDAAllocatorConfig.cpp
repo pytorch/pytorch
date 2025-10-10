@@ -184,7 +184,7 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
           keys.find(config[i]) != keys.end(),
           "Unrecognized key '",
           config_item_view,
-          "' in Accelerator allocator config.");
+          "' in CUDA allocator config.");
       // Skip the key and its value
       consumeToken(config, ++i, ':');
       i++;
