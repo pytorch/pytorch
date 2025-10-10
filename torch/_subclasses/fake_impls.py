@@ -1282,12 +1282,13 @@ def infer_size(a, b):
         # If either size is unbacked, we need to be careful not to call
         # guard_or_false on it (which would try to create a guard), so we
         # check that first and skip directly to the equality check.
-        has_unbacked = not has_hint(sizeA) or not has_hint(sizeB)
+        has_hint_a = has_hint(sizeA)
+        has_hint_b = has_hint(sizeB)
         torch._check(
             has_zero_dim
             or (
-                (guard_or_false(sizeA == 1) if not has_unbacked else False)
-                or (guard_or_false(sizeB == 1) if not has_unbacked else False)
+                (guard_or_false(sizeA == 1) if has_hint_a else False)
+                or (guard_or_false(sizeB == 1) if has_hint_b else False)
                 or sizeA == sizeB
             ),
             lambda: f"The size of tensor a ({sizeA}) "
