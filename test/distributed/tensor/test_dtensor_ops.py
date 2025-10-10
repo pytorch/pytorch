@@ -1,13 +1,20 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+import re
 import unittest
 import warnings
 
 import torch
 import torch.distributed as dist
 import torch.testing._internal.common_methods_invocations as common_ops
-from torch.distributed.tensor import distribute_tensor, DTensor, init_device_mesh, Shard
+from torch.distributed.tensor import (
+    distribute_tensor,
+    DTensor,
+    init_device_mesh,
+    Replicate,
+    Shard,
+)
 from torch.overrides import resolve_name
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -690,6 +697,28 @@ class TestDTensorOps(DTensorOpTestBase):
                 self.assertTrue("[P] -> [R]" in debug_mode.debug_string())
             else:
                 self.assertTrue("[S(0)] -> [R])" in debug_mode.debug_string())
+
+    def test_embedding_error_msg(self):
+        self.mesh_2d = init_device_mesh(
+            DEVICE_TYPE, (2, self.world_size // 2), mesh_dim_names=("dp", "tp")
+        )
+        self.mesh_1d = self.mesh_2d["tp"]
+
+        weight_global = torch.randn(2048, 256, device=DEVICE_TYPE)
+        weight_dtensor = distribute_tensor(weight_global, self.mesh_1d, [Shard(0)])
+
+        input_global = torch.randint(0, 2048, (16, 2048), device=DEVICE_TYPE)
+        input_dtensor = distribute_tensor(
+            input_global, self.mesh_2d, [Shard(0), Replicate()]
+        )
+
+        expected_error_msg = (
+            "Sharding propagation failed for aten.embedding.default"
+            "(Spec(f32[2048, 256](S(0))), Spec(i64[16, 2048](S(0)R))) "
+            "on DeviceMesh((dp=2, tp=2), "
+        )
+        with self.assertRaisesRegex(RuntimeError, re.escape(expected_error_msg)):
+            _ = torch.ops.aten.embedding.default(weight_dtensor, input_dtensor)
 
 
 # only instantiate tests for DEVICE_TYPE alone (i.e. either CPU or GPU)
