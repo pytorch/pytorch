@@ -13,20 +13,22 @@ constexpr size_t kRoundUpPowerOfTwoEnd = 64 * 1024ul * kMB; // 64GB
 
 AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
   static AcceleratorAllocatorConfig instance;
-#define C10_ALLOCATOR_CONFIG_PARSE_ENV(env, deprecated)                       \
-  auto env##_name = c10::utils::get_env(#env);                                \
-  if (env##_name.has_value()) {                                               \
-    if (deprecated) {                                                         \
-      TORCH_WARN_ONCE(#env " is deprecated, use PYTORCH_ALLOC_CONF instead"); \
-    }                                                                         \
-    instance.parseArgs(env##_name.value());                                   \
-    return true;                                                              \
+#define C10_ALLOCATOR_CONFIG_PARSE_ENV(env)    \
+  auto env##_name = c10::utils::get_env(#env); \
+  if (env##_name.has_value()) {                \
+    instance.parseArgs(env##_name.value());    \
+    return true;                               \
   }
   static bool env_flag [[maybe_unused]] = []() {
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_ALLOC_CONF, false)
-    // Keep this for backwards compatibility
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_CUDA_ALLOC_CONF, /*deprecated=*/true)
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_HIP_ALLOC_CONF, /*deprecated=*/true)
+    // Parse allocator configuration from environment variables.
+    // The first two entries are kept for backward compatibility with legacy
+    // CUDA and HIP environment variable names. The new unified variable
+    // (PYTORCH_ALLOC_CONF) should be used going forward.
+    // Note: keep the parsing order and logic stable to avoid potential
+    // performance regressions in internal tests.
+    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_CUDA_ALLOC_CONF)
+    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_HIP_ALLOC_CONF)
+    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_ALLOC_CONF)
     return false;
   }();
 #undef C10_ALLOCATOR_CONFIG_PARSE_ENV
@@ -127,8 +129,7 @@ size_t AcceleratorAllocatorConfig::parseRoundUpPower2Divisions(
         std::fill(
             std::next(
                 roundup_power2_divisions_.begin(),
-                static_cast<std::vector<size_t>::difference_type>(
-                    last_index + 1)),
+                static_cast<std::vector<size_t>::difference_type>(last_index)),
             roundup_power2_divisions_.end(),
             value);
       } else {
