@@ -5050,7 +5050,6 @@ Running aten.expand.default from within SumBackward0
 Running aten.div.Tensor from within DivBackward0
 Running aten.mul.Tensor from within MulBackward0
 Running aten.detach.default from within AccumulateGrad
-Running aten.detach.default from within AccumulateGrad
 Done""",
         )
 
@@ -7323,9 +7322,7 @@ for shape in [(1,), ()]:
             lambda x: x.exp(), x, use_reentrant=False, context_fn=context_fn
         )
         out.backward()
-        self.assertEqual(
-            verbose_mode.operators, ["exp.default", "detach.default", "detach.default"]
-        )
+        self.assertEqual(verbose_mode.operators, ["exp.default", "detach.default"])
 
         with self.assertRaisesRegex(
             Exception, "only supported when use_reentrant=False"
