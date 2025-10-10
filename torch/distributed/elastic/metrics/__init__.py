@@ -142,7 +142,7 @@ Now all metrics in the group ``my_app`` will be printed to stdout as:
 
 from typing import Optional
 
-from .api import (  # noqa: F401; pyrefly: ignore  # deprecated; pyrefly: ignore  # deprecated
+from .api import (  # noqa: F401
     configure,
     ConsoleMetricHandler,
     get_elapsed_time_ms,

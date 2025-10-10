@@ -11337,12 +11337,12 @@ fn
             fn(x, y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_guard_size_oblivious(self):
+    def test_infer_unbacked_size_gt_zero(self):
         # This code, in fact, does NOT work in eager
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             y = torch.zeros(x.item())
-            if guard_size_oblivious(y.size(0) == 0):
+            if y.size(0) < 0:
                 assert False
             return y
 

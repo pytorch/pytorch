@@ -891,7 +891,7 @@ class TypedStorage:
     def _new_wrapped_storage(self, untyped_storage) -> Self:
         assert type(untyped_storage) == torch.UntypedStorage
 
-        if type(self) == TypedStorage:
+        if type(self) is TypedStorage:
             return cast(
                 Self,
                 TypedStorage(
@@ -913,7 +913,7 @@ class TypedStorage:
                 return 0
 
         else:
-            if type(idx) != int:
+            if type(idx) is not int:
                 raise TypeError(f"can't index a {type(self)} with {type(idx)}")
             if is_stop:
                 if (idx > self._size()) or (idx < -self._size()):
@@ -1513,7 +1513,7 @@ class _LegacyStorageMeta(type):
     dtype: torch.dtype
 
     def __instancecheck__(cls, instance):
-        if type(instance) == TypedStorage:
+        if type(instance) is TypedStorage:
             cls_device = _get_device_from_module(cls.__module__)
             return (cls_device == instance.device.type) and (
                 cls.dtype == instance.dtype
