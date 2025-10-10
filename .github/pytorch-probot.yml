@@ -3,6 +3,7 @@ ciflow_tracking_issue: 64124
 ciflow_push_tags:
 - ciflow/b200
 - ciflow/b200-symm-mem
+- ciflow/b200-distributed
 - ciflow/binaries
 - ciflow/binaries_libtorch
 - ciflow/binaries_wheel
