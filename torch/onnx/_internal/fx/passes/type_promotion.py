@@ -6,7 +6,7 @@ import abc
 import dataclasses
 import inspect
 import logging
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch._dispatch.python
@@ -26,7 +26,7 @@ from torch.utils import _python_dispatch, _pytree
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from types import ModuleType
 
     from torch._subclasses import fake_tensor
@@ -149,6 +149,7 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
             f"{self.promote_args_positions}, {self.promote_kwargs_names}, {self.promotion_kind})"
         )
 
+    # pyrefly: ignore  # bad-override
     def __eq__(self, other: object, /) -> bool:
         if not isinstance(other, ElementwiseTypePromotionRule):
             return False
@@ -265,6 +266,7 @@ class ReductionTypePromotionRule(TypePromotionRule):
     def __repr__(self):
         return f"ReductionTypePromotionRule('{self.namespace}', '{self.op_name}', {self.promotion_kind})"
 
+    # pyrefly: ignore  # bad-override
     def __eq__(self, other: object, /) -> bool:
         if not isinstance(other, ElementwiseTypePromotionRule):
             return False

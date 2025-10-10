@@ -340,8 +340,6 @@ struct GuardElimination {
       case aten::reciprocal:
       case aten::addcmul:
       case aten::where:
-      case aten::_cast_Float:
-      case aten::_cast_Long:
       case aten::__and__:
       case aten::__or__:
       case aten::__xor__:
