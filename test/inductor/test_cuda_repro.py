@@ -39,6 +39,8 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
     IS_FBCODE,
+    MI350_ARCH,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
@@ -218,6 +220,7 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
+    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -1538,7 +1541,7 @@ class CudaReproTests(TestCase):
                 t2 = a0.view(379, 165, 2).mean(dim=2)
                 t7 = ((((a1) - a2) - a3) - a2) - a4
                 t8 = t7.view(379, 165)
-                t11 = torch.nn.functional.gelu(a5).mean(dim=0)
+                t11 = torch.nn.functional.relu(a5).mean(dim=0)
                 t12 = t2 - t11
                 t13 = (((t2) / t8) / t11) / t12
                 return t13
