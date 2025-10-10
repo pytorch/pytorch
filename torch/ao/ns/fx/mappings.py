@@ -1,5 +1,5 @@
 import operator
-from typing import Callable, Optional
+from typing import Optional, TYPE_CHECKING
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -17,6 +17,10 @@ import torch.nn.functional as F
 from torch.ao.quantization.backend_config import get_native_backend_config
 
 from .ns_types import NSNodeTargetType
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 toq = torch.ops.quantized

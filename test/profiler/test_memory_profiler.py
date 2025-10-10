@@ -901,7 +901,7 @@ class TestMemoryProfilerE2E(TestCase):
                         ptr_pair_to_key[(t.impl_ptr, t.storage_data_ptr)] = key
 
         def format_categories(ptr_pair: int):
-            target_key = ptr_pair_to_key.get(ptr_pair, None)
+            target_key = ptr_pair_to_key.get(ptr_pair)
             if target_key is None:
                 return "???"
 
