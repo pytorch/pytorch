@@ -1287,7 +1287,7 @@ class QuantizationTestCase(TestCase):
                 prepare_custom_config=prepare_custom_config,
                 backend_config=backend_config,
             )
-            if not quant_type == QuantType.DYNAMIC:
+            if quant_type != QuantType.DYNAMIC:
                 prepared(*inputs)
 
             if print_debug_info:

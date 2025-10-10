@@ -13,9 +13,7 @@ import torch
 
 log = logging.getLogger(__name__)
 
-__all__ = [
-    "varlen_attn",
-]
+__all__ = ["varlen_attn", "AuxRequest"]
 
 
 @lru_cache(maxsize=8)

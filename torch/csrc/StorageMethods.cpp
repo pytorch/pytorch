@@ -482,7 +482,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
       return nullptr;
     }
     Py_INCREF(self);
-    return (PyObject*)self;
+    return self;
   }
 
   // file is backed by a fd

@@ -951,10 +951,7 @@ def test_openreg(test_module, test_directory, options):
 
 
 def test_distributed(test_module, test_directory, options):
-    # MPI tests are broken with Python-3.9
-    mpi_available = subprocess.call(
-        "command -v mpiexec", shell=True
-    ) == 0 and sys.version_info < (3, 9)
+    mpi_available = subprocess.call(["command", "-v", "mpiexec"]) == 0
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
 
