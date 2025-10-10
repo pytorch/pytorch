@@ -91,7 +91,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
   }
 
   static size_t max_non_split_rounding_size() {
-    return instance().m_max_non_split_rounding_size;
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
+        max_non_split_rounding_size();
   }
 
   static std::string last_allocator_settings() {
