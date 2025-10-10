@@ -84,7 +84,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1" },
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1.b" },
         ]}
     secrets: inherit
 
