@@ -203,7 +203,7 @@ class PrecompileContext:
                 if result is not None:
                     precompile_cache_entries[key] = result
             except Exception as e:
-                logger.warning("Failed to create cache entry %s: %s", key, str(e))
+                logger.warning("Failed to create cache entry %s", key, exc_info=True)
 
                 error = e
                 data = json.dumps(

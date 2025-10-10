@@ -204,7 +204,7 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
             torch.ops._c10d_functional.wait_tensor.default(w)
     except Exception as e:
         # NCCL estimator can fail
-        log.info(e)
+        log.info(e)  # noqa: G200
         return None
 
     est_time_us = time_estimator.estimated_time

@@ -972,7 +972,7 @@ def _store_based_barrier(
         except RuntimeError as e:
             worker_count = store.add(store_key, 0)
             # Print status periodically to keep track.
-            logger.debug(
+            logger.debug(  # noqa: G200
                 "Waiting in store based barrier to initialize process group for %s seconds"
                 "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s error=%s)",
                 time.time() - start,

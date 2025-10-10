@@ -1204,7 +1204,7 @@ def compile_frame(  # type: ignore[return]
         except exc.SkipFrame as e:
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
-            log.debug(
+            log.debug(  # noqa: G200
                 "Skipping frame %s %s \
                 %s %s",
                 e,

@@ -1092,8 +1092,10 @@ class DiskDynamoCache(DiskDynamoStore):
             try:
                 result = super().load_cache_entry(key)
                 return result
-            except Exception as e:
-                logger.warning("Failed to load package from path %s: %s", path, str(e))
+            except Exception:
+                logger.warning(
+                    "Failed to load package from path %s", path, exc_info=True
+                )
                 return None
         logger.info("No package found for %s", key)
         return None

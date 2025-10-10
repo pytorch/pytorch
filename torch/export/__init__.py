@@ -448,8 +448,8 @@ def load(
             f,
             expected_opset_version=expected_opset_version,
         )
-    except RuntimeError as e:
-        log.warning("Ran into the following error when deserializing: %s", e)
+    except RuntimeError:
+        log.warning("Ran into the following error when deserializing", exc_info=True)
         pt2_contents = PT2ArchiveContents({}, {}, {})
 
     if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
