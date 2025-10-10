@@ -2171,6 +2171,7 @@ end
                     data_ptr,
                     ctypes.POINTER(ctypes.c_ubyte * nbytes),
                 )
+                # pyrefly: ignore  # missing-attribute
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
@@ -2362,6 +2363,7 @@ end
                     ):
                         current_arch = _nvcc_arch_as_compile_option()
                         cmd = (
+                            # pyrefly: ignore  # unbound-name
                             f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
                             # Triton only allows generating PTX version as same as the current arch
                             f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
@@ -2564,6 +2566,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p, No
 
     # convert any kwarg-only arguments to kwargs
     kwargs = dict()
+    # pyrefly: ignore  # missing-attribute
     for func_arg, conv_arg in zip(func._schema.arguments, converted_args):
         if func_arg.kwarg_only:
             kwargs[func_arg.name] = conv_arg
@@ -2745,10 +2748,14 @@ class CppCodeCache:
         main_build_option = CppTorchDeviceOptions(
             compile_only=bool(optimized_code),
             min_optimize=optimized_code is not None,
+            # pyrefly: ignore  # bad-argument-type
             **compile_command,
         )
         optimized_build_option = CppTorchDeviceOptions(
-            compile_only=True, **compile_command
+            # pyrefly: ignore  # bad-argument-type
+            compile_only=True,
+            # pyrefly: ignore  # bad-argument-type
+            **compile_command,
         )
 
         def get_hashable_command_line(build_option: BuildOptionsBase) -> str:
@@ -2797,6 +2804,7 @@ class CppCodeCache:
                 # decision if that ever changes.
                 if optimized_code and (header := _get_cpp_prefix_header(device_type)):
                     optimized_build_option.precompiled_header = _precompile_header(
+                        # pyrefly: ignore  # unbound-name
                         header,
                         optimized_cmd_line,
                         **compile_command,
@@ -2827,6 +2835,7 @@ class CppCodeCache:
                         main_builder.get_target_file_path(),
                         optimized_builder.get_target_file_path(),
                     ],
+                    # pyrefly: ignore  # bad-argument-type
                     BuildOption=CppTorchDeviceOptions(**compile_command),
                     output_dir=output_dir,
                 )
@@ -2985,6 +2994,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     )
 
     @classmethod
+    # pyrefly: ignore  # bad-override
     def _load_library_inner(cls, path: str, key: str) -> ModuleType:
         os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
             torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
@@ -3256,10 +3266,12 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         buffer_names = []
         for i, arg in enumerate(meta.argtypes):
             if arg.is_buffer():
+                # pyrefly: ignore  # bad-argument-type
                 buffer_names.append(f"&hl_buf_{i}")
                 buffers.extend(cls._codegen_buffer(f"hl_buf_{i}", arg, is_cuda))
             else:
                 assert "*" not in arg.ctype
+                # pyrefly: ignore  # bad-argument-type
                 buffer_names.append(arg.name)
         buffers = "\n".join([f"    {line}" for line in buffers]).lstrip()
 
@@ -3514,6 +3526,7 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
 
                 ci = cmd.index("-o")
                 assert isinstance(ci, int)
+                # pyrefly: ignore  # unsupported-operation
                 cmd[ci + 1] = Out()
                 repl = textwrap.indent(
                     textwrap.dedent(

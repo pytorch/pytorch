@@ -135,9 +135,11 @@ def _rewrite_spec_if_needed(
             break
     if rewrite:
         spec = copy.deepcopy(spec)
+        # pyrefly: ignore  # missing-attribute
         for i, placement in enumerate(spec.placements):
             placement = cast(_remote_device, placement)
             if placement.rank() == rank and placement.device() != tensor.device:
+                # pyrefly: ignore  # missing-attribute
                 spec.placements[i] = _remote_device(f"rank:{rank}/{tensor.device}")
 
     return spec

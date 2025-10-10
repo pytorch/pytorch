@@ -202,7 +202,7 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             if self.device == "mps":
-                FileCheck().check("getKernelFunction(").run(code)
+                FileCheck().check("aoti_torch_mps_get_kernel_function(").run(code)
             elif self.device == GPU_TYPE:
                 FileCheck().check("launchKernel(").run(code)
                 if config.aot_inductor.embed_kernel_binary:
@@ -1732,7 +1732,6 @@ class AOTInductorTestsTemplate:
 
                 backed = z.size(0)
                 unbacked = scalar.item()
-                torch._check_is_size(unbacked)
 
                 unbacked_add_expr = backed + unbacked
                 repeated = x.repeat(unbacked_add_expr, 1)
@@ -1771,8 +1770,6 @@ class AOTInductorTestsTemplate:
                 index_select = torch.index_select(embeddings, 0, index)
 
                 u0, u1 = lst.tolist()
-                torch._check_is_size(u0)
-                torch._check_is_size(u1)
                 backed0, backed1 = z.size(0), z.size(1)
 
                 repeated0 = y.repeat(backed0 + u0, 1)
@@ -1822,9 +1819,6 @@ class AOTInductorTestsTemplate:
         class Repro(torch.nn.Module):
             def forward(self, values, repeats, mask, embeddings, x, y, z, lst):
                 u0, u1, u2 = lst.tolist()
-                torch._check_is_size(u0)
-                torch._check_is_size(u1)
-                torch._check_is_size(u2)
                 backed = z.size(0)
                 backed1 = z.size(1)
 
@@ -2896,7 +2890,7 @@ class AOTInductorTestsTemplate:
 
         if self.device == "mps":
             self.code_check_count(
-                model, example_inputs, '.getKernelFunction("generated_kernel")', 1
+                model, example_inputs, "aoti_torch_mps_get_kernel_function(", 1
             )
         elif self.device == GPU_TYPE:
             self.code_check_count(

@@ -61,13 +61,13 @@ class TopModel(nn.Module):
 class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
     @property
     def world_size(self) -> int:
-        return min(8, torch.cuda.device_count())
+        return min(8, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(8)
     @with_temp_dir
     def test_e2e(self):
-        model = TopModel(self.rank).cuda()
+        model = TopModel(self.rank).to(self.device_type)
 
         mesh_fsdp_tp = init_device_mesh(
             self.device_type, (2, 4), mesh_dim_names=("dp", "tp")
