@@ -5237,6 +5237,7 @@ class TestGradTrackingTensorToList(TestCase):
         x = torch.tensor([1., 2., 3.], requires_grad=True)
         grad_f = torch.func.grad(f)
         result = grad_f(x)
+        self.assertIsInstance(result, torch.Tensor)
         # gradients should still be computed correctly
         self.assertEqual(result, [2., 4., 6.])
     
@@ -5272,8 +5273,9 @@ class TestGradTrackingTensorToList(TestCase):
             return x.sum()
         
         x = torch.tensor([[1., 2., 3.], [4., 5., 6.]], requires_grad=True)
-        grad_f = torch.func.grad(x)
+        grad_f = torch.func.grad(f)
         result = grad_f(x)
+        self.assertIsInstance(result, torch.Tensor)
         self.assertEqual(result, [[1., 1., 1.,], [1., 1., 1.]])
     
     def test_tolist_conj_neg_grad(self):
@@ -5286,9 +5288,10 @@ class TestGradTrackingTensorToList(TestCase):
             return (x * x.conj()).real.sum()
 
         x = torch.tensor([1. + 2.j, 3. + 4.j], requires_grad=True)
-        grad_f = grad(f)
+        grad_f = torch.func.grad(f)
         result = grad_f(x)
         self.assertIsInstance(result, torch.Tensor)
+        self.assertEqual(result, [2. + 4.j, 6. + 8.j])
 
 
 only_for = ("cpu", "cuda")
@@ -5369,6 +5372,11 @@ instantiate_device_type_tests(
     TestCompileTransforms,
     globals(),
     only_for=only_for,
+)
+instantiate_device_type_tests(
+    TestGradTrackingTensorToList,
+    globals(),
+    only_for=only_for
 )
 
 if __name__ == "__main__":
