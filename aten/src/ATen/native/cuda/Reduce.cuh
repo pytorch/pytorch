@@ -412,13 +412,24 @@ struct ReduceOp {
       const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets1);
       value = thread_reduce<output_vec_size>(input_slice);
     }
-
-    if (config.should_block_y_reduce()) {
-      value = block_y_reduce<output_vec_size>(value, shared_memory);
-    }
-    __syncthreads();
-    if (config.should_block_x_reduce()) {
-      value = block_x_reduce<output_vec_size>(value, shared_memory);
+    if (config.vectorize_input) {
+      if (config.should_block_x_reduce()) {
+        value = block_x_reduce<output_vec_size>(value, shared_memory);
+      }
+      __syncthreads();
+    
+      if (config.should_block_y_reduce()) {
+        value = block_y_reduce<output_vec_size>(value, shared_memory);
+      } 
+    } else {
+      if (config.should_block_y_reduce()) {
+        value = block_y_reduce<output_vec_size>(value, shared_memory);
+      }
+      __syncthreads();
+    
+      if (config.should_block_x_reduce()) {
+        value = block_x_reduce<output_vec_size>(value, shared_memory);
+      }
     }
 
     using out_ptr_vec_t = std::array<out_scalar_t*, output_vec_size>;
@@ -536,7 +547,7 @@ struct ReduceOp {
       const auto values_vec = memory::load_vector<input_vec_size>(data, idx);
       #pragma unroll
       for (index_t i = 0; i < input_vec_size; i++) {
-        value_list[i] = ops.reduce(value_list[i], values_vec.val[i], shift + idx * input_vec_size + i);
+        value_list[input_vec_size] = ops.reduce(value_list[0], values_vec.val[i], shift + idx * input_vec_size + i);
       }
       idx += stride;
     }
