@@ -9,6 +9,8 @@ from torch.fx._compatibility import compatibility
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["compile_fx_annotated_nodes_with_inductor"]
+
 
 # standalone_inductor returns a callable class object - this does not sit well
 # with Fx graph node op call_function which expects a function. So this is just
