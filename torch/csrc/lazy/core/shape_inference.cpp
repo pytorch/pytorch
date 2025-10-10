@@ -253,18 +253,31 @@ std::vector<Shape> compute_shape_convolution_backward(
     at::IntArrayRef output_padding,
     int64_t groups,
     ::std::array<bool, 3> output_mask) {
-  if (bias_sizes.has_value()) {
-    return {
-        Shape(input.scalar_type(), input.sizes().vec()),
-        Shape(weight.scalar_type(), weight.sizes().vec()),
-        Shape(grad_output.scalar_type(), bias_sizes.value().vec())};
-  } else {
-    // TODO(whc) not sure whether to return 2 shapes here, or a 3rd one that is
-    // empty
-    return {
-        Shape(input.scalar_type(), input.sizes().vec()),
-        Shape(weight.scalar_type(), weight.sizes().vec())};
+  Shape s0, s1, s2;
+  if (output_mask[0]){
+    s0 = Shape(input.scalar_type(), input.sizes().vec());
+  } else{
+    s0 = Shape();
   }
+  if (output_mask[1]){
+    s1 = Shape(weight.scalar_type(), weight.sizes().vec());
+  } else{
+    s1 = Shape();
+  }
+  if (output_mask[2]){
+    if (bias_sizes.has_value()) {
+      s2 = Shape(grad_output.scalar_type(), bias_sizes.value().vec());
+    } else{
+      if (transposed){
+        s2 = Shape(grad_output.scalar_type(), weight.size(1) * groups);
+      } else{
+        s2 = Shape(grad_output.scalar_type(), weight.size(0));
+      }
+    }
+  } else{
+    s2 = Shape();
+  }
+  return {s0, s1, s2};
 }
 
 std::vector<Shape> compute_shape_convolution(
