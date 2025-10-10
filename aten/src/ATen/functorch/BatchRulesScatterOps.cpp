@@ -12,6 +12,7 @@
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <torch/library.h>
+#include <c10/util/Exception.h>
 
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -94,9 +95,10 @@ static std::vector<std::optional<Tensor>> batchIndices(
     if (index.has_value() && index->sym_numel() != 0) {
       const auto idx_bdim = indices_bdims[i];
       indices_.emplace_back(maybePadToLogicalRank(moveBatchDimToFront(index.value(), idx_bdim), idx_bdim, maxLogicalRank));
-      if (index.value().dtype() == kBool && indices_bdims[i].has_value()) {
-        throw std::runtime_error("vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask.");
-      }
+      TORCH_CHECK(
+        !(index.value().dtype() == kBool) || !indices_bdims[i].has_value(),
+        "vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask."
+      );
     } else {
       indices_.push_back(index);
     }
