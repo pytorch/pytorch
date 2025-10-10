@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
