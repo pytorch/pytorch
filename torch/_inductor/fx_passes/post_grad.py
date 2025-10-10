@@ -181,6 +181,26 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
         )
 
+    if post_grad_mutable_custom_post_pass := config.post_grad_mutable_custom_post_pass:
+        from torch._inductor.pattern_matcher import (
+            add_implict_edges,
+            check_mutable_custom_op,
+            remove_implict_edges,
+        )
+
+        mutable_custom_op_pass = False
+        if check_mutable_custom_op(gm.graph):
+            decompose_auto_functionalized(gm.graph, preserve_meta=True)
+            add_implict_edges(gm)
+            gm.graph.lint()
+            mutable_custom_op_pass = True
+        GraphTransformObserver(
+            gm, "post_grad_mutable_custom_post_pass"
+        ).apply_graph_pass(post_grad_mutable_custom_post_pass)
+        if mutable_custom_op_pass:
+            remove_implict_edges(gm.graph)
+            gm = make_autofunctionalize(gm)
+
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
         GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
             post_grad_custom_post_pass
@@ -1246,7 +1266,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
         raise AssertionError("triton_kernel_wrapper_functional was not removed")
 
 
-def decompose_auto_functionalized(graph):
+def decompose_auto_functionalized(graph, preserve_meta=False):
     """Decomposes auto_functionalized nodes into clones and the underlying
     mutation node.
 
@@ -1254,6 +1274,7 @@ def decompose_auto_functionalized(graph):
     tells us (via rewriting the arguments or .meta to those nodes) which
     Tensors we should clone and which Tensors are safe to reinplace.
     """
+
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
@@ -1279,8 +1300,27 @@ def decompose_auto_functionalized(graph):
             mode = args[0]
             return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
-        # pyrefly: ignore  # bad-argument-type
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        if preserve_meta:
+            from torch._inductor.pattern_matcher import is_mutation_op
+
+            original_metadata = match.nodes[0].meta.copy()
+            nodes_before = OrderedSet([node.name for node in graph.nodes])
+
+            match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+            for node in graph.nodes:
+                if (
+                    node.name not in nodes_before
+                    and node.op == "call_function"
+                    and hasattr(node.target, "_schema")
+                    and is_mutation_op(node)
+                ):
+                    if "mutation_region_id" in original_metadata:
+                        node.meta["mutation_region_id"] = original_metadata[
+                            "mutation_region_id"
+                        ]
+        else:
+            match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
@@ -1325,8 +1365,27 @@ def decompose_auto_functionalized(graph):
                 mutable_op, only_clone_these_bases, **kwargs
             )
 
-        # pyrefly: ignore  # bad-argument-type
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+        if preserve_meta:
+            from torch._inductor.pattern_matcher import is_mutation_op
+
+            original_metadata = match.nodes[0].meta.copy()
+            nodes_before = OrderedSet([node.name for node in graph.nodes])
+
+            match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+            for node in graph.nodes:
+                if (
+                    node.name not in nodes_before
+                    and node.op == "call_function"
+                    and hasattr(node.target, "_schema")
+                    and is_mutation_op(node)
+                ):
+                    if "mutation_region_id" in original_metadata:
+                        node.meta["mutation_region_id"] = original_metadata[
+                            "mutation_region_id"
+                        ]
+        else:
+            match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
 
@@ -1380,6 +1439,28 @@ def decompose_auto_functionalized(graph):
         op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
     ):
         raise AssertionError("auto_functionalized_v2 was not removed")
+
+
+def make_autofunctionalize(gm: torch.fx.GraphModule):
+    from torch._subclasses.functional_tensor import (
+        dispatch_functionalize,
+        FunctionalTensorMode,
+    )
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    fake_inputs = []
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            fake_val = node.meta.get("val")
+            if fake_val is not None:
+                fake_inputs.append(fake_val)
+
+    def wrapper(*inputs):
+        return gm(*inputs)
+
+    mode = FunctionalTensorMode()
+    functionalized_fn = dispatch_functionalize(wrapper, mode)
+    return make_fx(functionalized_fn, tracing_mode="fake")(*fake_inputs)
 
 
 @register_lowering_pattern(

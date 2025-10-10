@@ -1799,6 +1799,208 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
 
+    def test_mutable_op_nonview_inputs_register_replacement(self):
+        import functools
+
+        @torch.library.custom_op("mylib::foo_inplace", mutates_args={"x"})
+        def foo_inplace(x: torch.Tensor) -> None:
+            x.add_(1)
+
+        @torch.library.custom_op("mylib::bar_out", mutates_args={"out"})
+        def bar_out(x: torch.Tensor, out: torch.Tensor) -> None:
+            out.copy_(x + 2)
+
+        @torch.library.custom_op("mylib::foobar_out", mutates_args={"x", "out"})
+        def foobar_out(x: torch.Tensor, out: torch.Tensor) -> None:
+            x.add_(1)
+            out.copy_(x + 2)
+
+        def mutable_ops_pattern(x, out):
+            foo_inplace(x)
+            bar_out(x, out)
+            return x, out
+
+        def mutable_ops_replacement(x, out):
+            foobar_out(x, out)
+            return x, out
+
+        inp = torch.ones(3, device=GPU_TYPE)
+
+        my_patterns = PatternMatcherPass()
+        register_replacement(
+            search_fn=mutable_ops_pattern,
+            replace_fn=mutable_ops_replacement,
+            example_inputs=[inp.clone().detach(), inp.clone().detach()],
+            trace_fn=functools.partial(fwd_only),
+            pass_dicts=my_patterns,
+        )
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = my_patterns.apply(graph)
+
+        def custom_backend(graph: torch.fx.GraphModule, example_inputs):
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_mutable_custom_post_pass"] = custom_pass
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        # Case 1: mutates a clone of graph input
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f1(x, out):
+            x = x.clone()
+            out = out.clone()
+            foo_inplace(x)
+            bar_out(x, out)
+            return out
+
+        def f1_replaced(x, out):
+            x = x.clone()
+            out = out.clone()
+            foobar_out(x, out)
+            return out
+
+        x = torch.rand(3, device=GPU_TYPE)
+        f1_inp = x.clone()
+        f1_replaced_inp = x.clone()
+        out = torch.zeros(3, device=GPU_TYPE)
+        replaced_out = out.clone()
+
+        f1_result = f1(f1_inp, out)
+        f1_replaced_result = f1_replaced(f1_replaced_inp, replaced_out)
+
+        self.assertEqual(count, 1)
+        self.assertEqual(f1_result, f1_replaced_result)
+
+        # Case 2: mutates graph input
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f2(x):
+            out = torch.zeros_like(x)
+            foo_inplace(x)
+            bar_out(x, out)
+            return out
+
+        def f2_replaced(x):
+            out = torch.zeros_like(x)
+            foobar_out(x, out)
+            return out
+
+        inp = torch.rand(3, device=GPU_TYPE)
+        f2_inp = inp.clone()
+        f2_replaced_inp = inp.clone()
+        f2_out = f2(f2_inp)
+        f2_replaced_out = f2_replaced(f2_replaced_inp)
+        self.assertEqual(count, 1)
+        self.assertEqual(f2_inp, f2_replaced_inp)
+        self.assertEqual(f2_out, f2_replaced_out)
+
+        # Case 3: mutates a view of graph input
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f3(x):
+            x_view = x.view(-1)
+            out = torch.zeros_like(x)
+            foo_inplace(x_view)
+            bar_out(x_view, out)
+            return out
+
+        def f3_replaced(x):
+            x_view = x.view(-1)
+            out = torch.zeros_like(x)
+            foobar_out(x_view, out)
+            return out
+
+        inp = torch.rand(3, device=GPU_TYPE)
+        f3_inp = inp.clone()
+        f3_replaced_inp = inp.clone()
+        f3_replaced_out = f3_replaced(f3_replaced_inp)
+        f3_out = f3(f3_inp)
+        self.assertEqual(count, 1)
+        self.assertEqual(f3_inp, f3_replaced_inp)
+        self.assertEqual(f3_out, f3_replaced_out)
+
+        # Case 4: multiple views with mutations
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f4(x):
+            x_reshaped = x.view(3, 1)
+            x_view1 = x_reshaped.view(-1)
+            x_view2 = x.view(-1)
+
+            out = torch.zeros_like(x)
+            out_reshaped = out.view(3, 1)
+            out_view = out_reshaped.view(-1)
+
+            foo_inplace(x_view1)
+            bar_out(x_view2, out_view)
+            return out
+
+        def f4_replaced(x):
+            x_reshaped = x.view(3, 1)
+            x_view1 = x_reshaped.view(-1)
+
+            out = torch.zeros_like(x)
+            out_reshaped = out.view(3, 1)
+            out_view = out_reshaped.view(-1)
+
+            foobar_out(x_view1, out_view)
+            return out
+
+        inp = torch.rand(3, device=GPU_TYPE)
+        f4_inp = inp.clone()
+        f4_replaced_inp = inp.clone()
+        f4_out = f4(f4_inp)
+        f4_replaced_out = f4_replaced(f4_replaced_inp)
+        self.assertEqual(count, 1)
+        self.assertEqual(f4_inp, f4_replaced_inp)
+        self.assertEqual(f4_out, f4_replaced_out)
+
+        # Case 5: multiple writers and readers
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def f5(
+            x: torch.Tensor, y: torch.Tensor, outx: torch.Tensor, outy: torch.Tensor
+        ):
+            foo_inplace(x.view(-1))
+            foo_inplace(y.view(-1))
+            bar_out(x, outx)
+            bar_out(y, outy)
+            return outx, outy
+
+        def f5_replaced(
+            x: torch.Tensor, y: torch.Tensor, outx: torch.Tensor, outy: torch.Tensor
+        ):
+            foo_inplace(x.view(-1))
+            foo_inplace(y.view(-1))
+            bar_out(x, outx)
+            bar_out(y, outy)
+            return outx, outy
+
+        inp = torch.rand(3, device=GPU_TYPE)
+        inp1 = torch.rand(3, device=GPU_TYPE)
+        f5_inp = inp.clone()
+        f5_inp1 = inp1.clone()
+        f5_replaced_inp = inp.clone()
+        f5_replaced_inp1 = inp1.clone()
+
+        out = torch.zeros(3, device=GPU_TYPE)
+        out1 = torch.zeros(3, device=GPU_TYPE)
+        out_inp = out.clone()
+        out_inp1 = out1.clone()
+        out_replaced = out.clone()
+        out_replaced1 = out1.clone()
+
+        f5_out = f5(f5_inp, f5_inp1, out_inp, out_inp1)
+        f5_replaced_out = f5_replaced(
+            f5_replaced_inp, f5_replaced_inp1, out_replaced, out_replaced1
+        )
+        self.assertEqual(count, 2)
+        self.assertEqual(f5_inp, f5_replaced_inp)
+        self.assertEqual(f5_inp1, f5_replaced_inp1)
+        self.assertEqual(f5_out, f5_replaced_out)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
