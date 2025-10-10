@@ -23,10 +23,12 @@ AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
     return true;                                                              \
   }
   static bool env_flag [[maybe_unused]] = []() {
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_ALLOC_CONF, false)
     // Keep this for backwards compatibility
-    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_CUDA_ALLOC_CONF, /*deprecated=*/true)
+    C10_ALLOCATOR_CONFIG_PARSE_ENV(
+        PYTORCH_CUDA_ALLOC_CONF, /*deprecated=*/false)
     C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_HIP_ALLOC_CONF, /*deprecated=*/true)
+
+    C10_ALLOCATOR_CONFIG_PARSE_ENV(PYTORCH_ALLOC_CONF, false)
     return false;
   }();
 #undef C10_ALLOCATOR_CONFIG_PARSE_ENV
