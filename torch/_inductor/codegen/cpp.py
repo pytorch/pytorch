@@ -158,19 +158,6 @@ VECTORIZABLE_DTYPES: list[torch.dtype] = [
     torch.float8_e5m2,
 ]
 
-MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
-    torch.float64,
-    torch.float,
-    torch.bfloat16,
-    torch.float16,
-    torch.uint8,
-    torch.int8,
-    torch.int32,
-    torch.int64,
-    torch.float8_e4m3fn,
-    torch.float8_e5m2,
-]
-
 
 def reduction_init(reduction_type, dtype):
     if dtype in DTYPE_LOWP_FP:
@@ -1870,8 +1857,7 @@ class CppVecOverrides(CppOverrides):
                 with code.indent():
                     code.writeline(f"tmpbuf_out[i] = {res};")
                 if output_mask:
-                    assert not kernel.tail_size
-                    load_args = "tmpbuf_out.data()"
+                    load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
                     load_fn = f"at::vec::VecMask<{cdtype},{n_vec}>::from"
                 else:
                     load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
@@ -2729,7 +2715,7 @@ class CppVecKernel(CppKernel):
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
         if dtype == torch.bool:
             # TODO: should we consider load mask here?
-            line = f"{self._get_mask_type()}::from({loadbuf})"
+            line = f"{self._get_mask_type()}::from({loadbuf}, {cexpr_index(self.num_elems)})"
         else:
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
@@ -3443,7 +3429,10 @@ class CppVecKernel(CppKernel):
             if isinstance(next_value, CppCSEVariable):
                 assert next_value.dtype == torch.bool
                 (next_value,) = unify_mask_base_type(V.kernel.compute, (next_value,))
-            return f"{var} | {next_value}"
+            if self.tail_size:
+                return f"any_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
+            else:
+                return f"{var} | {next_value}"
         else:
             raise NotImplementedError
 
@@ -4345,13 +4334,6 @@ class CppKernelProxy(CppKernel):
                 fn_list, var_sizes_list
             )
             assert len(tiling_factors) == len(tiling_indices)
-            # <TODO> This should be removed after full support for vectorization is implemented.
-            could_masked_vec = True
-            all_dtypes = _get_dtype_from_loopbodies(_get_loop_body(fn_list))
-            if any(dtype not in MASKED_VECTORIZABLE_DTYPES for dtype in all_dtypes):
-                # can be removed after masked vectorizable dtype are same with vectorizable dtype
-                could_masked_vec = False
-
             _inner_loop_reduction_outer_not = False
             _outer_loop = None
             if tiling_indices:
@@ -4377,7 +4359,7 @@ class CppKernelProxy(CppKernel):
                 )
                 tail_size = loop.size - loop.tiled_size
                 vec_kernel.active_ranges = {loop.var: (0, loop.tiled_size)}
-                if config.cpp.enable_loop_tail_vec and could_masked_vec:
+                if config.cpp.enable_loop_tail_vec:
                     tail_kernel = codegen_kernel(
                         self.vec_kernel_cls,
                         tiling_factors[0],
@@ -4423,7 +4405,7 @@ class CppKernelProxy(CppKernel):
                     inner_loop.var: inner_ranges["main"],
                 }
                 tail_kernel = []
-                if config.cpp.enable_loop_tail_vec and could_masked_vec:
+                if config.cpp.enable_loop_tail_vec:
                     for outer_r, inner_r in (
                         ("main", "tail"),
                         ("tail", "main"),

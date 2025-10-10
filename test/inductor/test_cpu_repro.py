@@ -4661,6 +4661,18 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+        # Tail vectorization case
+        x = torch.rand(37)
+        torch._dynamo.reset()
+        metrics.reset()
+        with torch.no_grad():
+            compiled_fn = torch.compile(fn)
+            _, code = run_and_get_cpp_code(compiled_fn, x)
+            # Check that both main and tail loops are vectorized
+            FileCheck().check_count(
+                "at::vec::VecMask<float,1>::from", 2, exactly=True
+            ).run(code)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_symbolic_shape_scalar_value_reduction(self):
@@ -5399,7 +5411,7 @@ class CPUReproTests(TestCase):
         _, code = run_and_get_cpp_code(opt_fn, x)
         FileCheck().check_count(
             "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
-            4,
+            8,
             exactly=True,
         ).run(code)
 
