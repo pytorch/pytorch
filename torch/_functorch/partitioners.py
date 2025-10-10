@@ -993,13 +993,6 @@ def default_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-    if has_recomputable_ops(joint_module):
-        return min_cut_rematerialization_partition(
-            joint_module,
-            _joint_inputs,
-            num_fwd_outputs=num_fwd_outputs,
-            static_lifetime_input_indices=static_lifetime_input_indices,
-        )
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     inputs = primal_inputs + fwd_seed_offset_inputs
@@ -1026,7 +1019,9 @@ def default_partition(
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
             assert all(user.target == operator.getitem for user in users)
-            saved_values.extend(users)
+
+            if not must_recompute(node):
+                saved_values.extend(users)
         else:
             backward_usages = [
                 n for n in node.users if n.name not in forward_node_names
@@ -1044,17 +1039,21 @@ def default_partition(
                 # (This is how we originally found this bug).
                 saved_sym_nodes.extend(backward_usages)
             else:
-                saved_values.append(node)
+                if not must_recompute(node):
+                    saved_values.append(node)
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
 
-    return _extract_fwd_bwd_modules(
+    fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=static_lifetime_input_nodes,
     )
+    bw_module = reordering_to_mimic_autograd_engine(bw_module)
+    return fw_module, bw_module
+
 
 
 INT_INF = int(1e6)
