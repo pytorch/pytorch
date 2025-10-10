@@ -1075,7 +1075,6 @@ class CommonTemplate:
 
         def foo(x, length):
             unbacked = length.item()
-            torch._check_is_size(unbacked)
 
             repeated = x.repeat(1, unbacked, NUM_REPEAT)
             # permute creates split in middle with unbacked symint is the first range
