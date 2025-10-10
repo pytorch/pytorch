@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 from torch.distributed.checkpoint.state_dict import get_state_dict
-from torch.distributed.device_mesh import _mesh_resources, init_device_mesh
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_utils import run_tests
