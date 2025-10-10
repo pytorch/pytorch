@@ -241,7 +241,7 @@ def fully_shard(
     # Place FSDP leftmost for highest priority in the method resolution order
     for module in modules:
         cls = module.__class__
-        new_cls = cls_to_fsdp_cls.get(cls)
+        new_cls = cls_to_fsdp_cls.get(cls, None)
         if not new_cls:
             dct = {"__deepcopy__": _unimplemented_deepcopy}
             new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
