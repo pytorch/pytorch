@@ -100,8 +100,12 @@
 #define TORCH_API C10_IMPORT
 #endif
 
-// You may be wondering: Whose brilliant idea was it to split torch_cuda into
-// two pieces with confusing names?
+// You may be wondering why we have TORCH_CUDA_CPP_API and TORCH_CUDA_CU_API
+// belonging to the same library instead of just one TORCH_CUDA_API. Well, it
+// can indeed just be one TORCH_CUDA_API (and used to be)! TORCH_CUDA_CPP_API
+// and TORCH_CUDA_CU_API are artifacts of when we needed a split build to
+// avoid relocation marker linking errors. The context is as follows:
+//
 // Once upon a time, there _was_ only TORCH_CUDA_API. All was happy until we
 // tried to compile PyTorch for CUDA 11.1, which ran into relocation marker
 // issues when linking big binaries.
@@ -116,26 +120,12 @@
 // relocation marker issues, we could link our static libraries to a smaller
 // part of torch_cuda (torch_cuda_cpp) and avoid the issues.
 
-// libtorch_cuda_cu.so
-#ifdef TORCH_CUDA_CU_BUILD_MAIN_LIB
-#define TORCH_CUDA_CU_API C10_EXPORT
-#elif defined(BUILD_SPLIT_CUDA)
-#define TORCH_CUDA_CU_API C10_IMPORT
-#endif
-
-// libtorch_cuda_cpp.so
-#ifdef TORCH_CUDA_CPP_BUILD_MAIN_LIB
-#define TORCH_CUDA_CPP_API C10_EXPORT
-#elif defined(BUILD_SPLIT_CUDA)
-#define TORCH_CUDA_CPP_API C10_IMPORT
-#endif
-
 // libtorch_cuda.so (where torch_cuda_cu and torch_cuda_cpp are a part of the
 // same api)
 #ifdef TORCH_CUDA_BUILD_MAIN_LIB
 #define TORCH_CUDA_CPP_API C10_EXPORT
 #define TORCH_CUDA_CU_API C10_EXPORT
-#elif !defined(BUILD_SPLIT_CUDA)
+#else
 #define TORCH_CUDA_CPP_API C10_IMPORT
 #define TORCH_CUDA_CU_API C10_IMPORT
 #endif

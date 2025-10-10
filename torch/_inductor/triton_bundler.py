@@ -183,14 +183,9 @@ class TritonBundler:
                     new_kernel,
                 )
             )
+
             # Put the values back since we need it to use now
-            (
-                kernel.fn.fn,
-                kernel.fn.__globals__,
-                kernel.fn.used_global_vals,
-                kernel.fn.repr,
-                kernel.launchers,
-            ) = old_values
+            kernel.restore_after_unpickle(old_values)
 
     @classmethod
     def collect_static_autotuners(

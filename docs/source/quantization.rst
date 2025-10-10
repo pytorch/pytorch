@@ -35,7 +35,6 @@ and supported quantized modules and functions.
 
     quantization-support
 
-
 .. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
 .. They are here for tracking purposes until they are more permanently fixed.
 .. py:module:: torch.ao
@@ -110,7 +109,6 @@ and supported quantized modules and functions.
 .. py:module:: torch.ao.quantization.backend_config.executorch
 .. py:module:: torch.ao.quantization.backend_config.fbgemm
 .. py:module:: torch.ao.quantization.backend_config.native
-.. py:module:: torch.ao.quantization.backend_config.observation_type
 .. py:module:: torch.ao.quantization.backend_config.onednn
 .. py:module:: torch.ao.quantization.backend_config.qnnpack
 .. py:module:: torch.ao.quantization.backend_config.tensorrt

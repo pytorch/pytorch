@@ -131,7 +131,7 @@ class TestPassManager(TestCase):
 
     def test_topological_sort(self):
         """
-        Tests that passes are correctly ordered based on contraints.
+        Tests that passes are correctly ordered based on constraints.
         """
 
         def pass0(x):

@@ -4,16 +4,8 @@
 from __future__ import annotations
 
 import functools
-from typing import (
-    Any,
-    Callable,
-    cast,
-    NoReturn,
-    Optional,
-    overload,
-    TYPE_CHECKING,
-    Union,
-)
+from contextlib import contextmanager
+from typing import Any, cast, NoReturn, Optional, overload, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
@@ -36,7 +28,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Iterator
 
     from torch.distributed.tensor import DeviceMesh, Shard
 
@@ -45,13 +37,20 @@ __all__ = [
     "FSDPModule",
     "UnshardHandle",
     "register_fsdp_forward_method",
+    "get_cls_to_fsdp_cls",
+    "disable_fsdp_module_new_init",
 ]
 
 
 cls_to_fsdp_cls: dict[type, type] = {}
 
 
+def get_cls_to_fsdp_cls() -> dict[type, type]:
+    return cls_to_fsdp_cls
+
+
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def fully_shard(
     module: nn.Module,
     *,
@@ -65,6 +64,7 @@ def fully_shard(
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def fully_shard(
     module: list[nn.Module],
     *,
@@ -256,6 +256,19 @@ def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     )
 
 
+_enable_fsdp_module_new_init: bool = True
+
+
+@contextmanager
+def disable_fsdp_module_new_init() -> Iterator[None]:
+    global _enable_fsdp_module_new_init
+    prev, _enable_fsdp_module_new_init = _enable_fsdp_module_new_init, False
+    try:
+        yield
+    finally:
+        _enable_fsdp_module_new_init = prev
+
+
 class FSDPModule:
     def __new__(cls, *args, **kwargs):
         """
@@ -266,7 +279,8 @@ class FSDPModule:
         # and index 1 is the `FSDPModule` class itself
         orig_cls = cls.__mro__[2]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
-        self.__init__(*args, **kwargs)
+        if _enable_fsdp_module_new_init:
+            self.__init__(*args, **kwargs)
         return self
 
     def reshard(self) -> None:

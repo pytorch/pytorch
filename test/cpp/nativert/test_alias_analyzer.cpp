@@ -43,8 +43,8 @@ class AliasAnalyzerTests : public testing::Test {
     cfg.enableStaticCPUKernels = true;
 
     auto graph = stringToGraph(model);
-    auto kernels = KernelFactory().initializeNodeKernels(
-        *graph, nullptr, cfg, {}, nullptr);
+    auto kernels =
+        KernelFactory().initializeNodeKernels(*graph, nullptr, cfg, nullptr);
     auto kernelSchemas = Executor::getKernelSchemas(kernels.nodeKernels);
 
     AliasAnalyzer analyzer(*graph, kernelSchemas);

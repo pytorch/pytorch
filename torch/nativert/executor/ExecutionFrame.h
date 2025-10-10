@@ -2,7 +2,6 @@
 
 #include <unordered_map>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
 #include <torch/nativert/executor/ExecutorConfig.h>
 #include <torch/nativert/executor/Weights.h>
 #include <torch/nativert/executor/memory/LayoutManager.h>
@@ -119,18 +118,6 @@ class ExecutionFrame {
     borrowedValueIds_.clear();
   }
 
-  void setWork(int64_t workId, const c10::intrusive_ptr<c10d::Work>& work) {
-    work_[workId] = work;
-  }
-
-  c10::intrusive_ptr<c10d::Work> getWork(int64_t workId) const {
-    TORCH_CHECK(
-        work_.find(workId) != work_.end(),
-        "Couldn't find work with Id: ",
-        workId);
-    return work_.at(workId);
-  }
-
   WeightVersion weightVersion() const {
     return weightVersion_;
   }
@@ -171,8 +158,6 @@ class ExecutionFrame {
   std::vector<c10::IValue> allValues_;
   // a class-local version of getPersistentValueMask
   std::vector<bool> persistent_;
-
-  std::unordered_map<int64_t, c10::intrusive_ptr<c10d::Work>> work_;
 
   std::vector<ValueId> borrowedValueIds_;
 

@@ -65,7 +65,7 @@ void _csrmm2(
     csrvala,                    /* values of the sparse matrix, size = nnz */
     CUSPARSE_INDEX_32I,         /* data type of row offsets index */
     CUSPARSE_INDEX_32I,         /* data type of col indices */
-    CUSPARSE_INDEX_BASE_ZERO,   /* base index of row offset and col indes */
+    CUSPARSE_INDEX_BASE_ZERO,   /* base index of row offset and col index */
     cusparse_value_type         /* data type of values */
   ));
 

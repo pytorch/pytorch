@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 
 import sys
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -23,6 +24,8 @@ from .pt2e.export_utils import (
     _move_exported_model_to_eval as move_exported_model_to_eval,
     _move_exported_model_to_train as move_exported_model_to_train,
 )
+
+# pyrefly: ignore  # deprecated
 from .qconfig import *  # noqa: F403
 from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
@@ -33,9 +36,15 @@ from .stubs import *  # noqa: F403
 
 
 # ensure __module__ is set correctly for public APIs
-ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
-if sys.version_info < (3, 14):
+if sys.version_info < (3, 12):
+    ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
     ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
+else:
+    from typing import TypeAliasType
+
+    ObserverOrFakeQuantize = TypeAliasType(
+        "ObserverOrFakeQuantize", Union[ObserverBase, FakeQuantizeBase]
+    )
 
 for _f in [
     compare_results,

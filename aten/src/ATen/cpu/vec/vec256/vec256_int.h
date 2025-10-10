@@ -23,7 +23,9 @@ struct Vectorizedi {
   }
 
  public:
-  Vectorizedi() {}
+  Vectorizedi() {
+    values = _mm256_setzero_si256();
+  }
   Vectorizedi(__m256i v) : values(v) {}
   operator __m256i() const {
     return values;
@@ -53,7 +55,9 @@ class Vectorized<int64_t> : public Vectorizedi {
     return 4;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
+  Vectorized() {
+    values = _mm256_setzero_si256();
+  }
   Vectorized(int64_t v) {
     values = _mm256_set1_epi64x(v);
   }
@@ -901,7 +905,7 @@ class Vectorized8 : public Vectorizedi {
     // Because loadu(const void* ptr, T count) requires zero initialization for
     // upper 128 bits. However, by using _mm256_castsi128_si256, the upper 128
     // bits of the result are undefined.
-    // TODO<leslie> We can use _mm256_zextsi128_si256 in the furture,
+    // TODO<leslie> We can use _mm256_zextsi128_si256 in the future,
     // since gcc 9.3 doesn't support it now.
     __m128i input_128 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ptr));
     return _mm256_castsi128_si256(input_128);
@@ -1840,7 +1844,7 @@ Vectorized<int16_t> inline shift_256_16(
     c0 = _mm256_srav_epi32(a0, b0);
   c0 = _mm256_shuffle_epi8(c0, ctl_1_0);
 
-  // Peform shifting the same way for input array elements with
+  // Perform shifting the same way for input array elements with
   // idx%2==1.
   __m256i a1 = _mm256_and_si256(a, keep_1);
   __m256i b1 = _mm256_shuffle_epi8(b, ctl_1_0);
@@ -2176,7 +2180,7 @@ Vectorized<T> inline shift_256_8(
     c0 = _mm256_srlv_epi32(a0, b0);
   c0 = _mm256_shuffle_epi8(c0, ctl_3_0);
 
-  // Peform shifting the same way for input array elements with
+  // Perform shifting the same way for input array elements with
   // idx%4==1.
   __m256i a1 = _mm256_shuffle_epi8(a, ctl_1_3);
   __m256i b1 = _mm256_shuffle_epi8(b, ctl_1_0);
@@ -2189,7 +2193,7 @@ Vectorized<T> inline shift_256_8(
     c1 = _mm256_srlv_epi32(a1, b1);
   c1 = _mm256_shuffle_epi8(c1, ctl_3_1);
 
-  // Peform shifting the same way for input array elements with
+  // Perform shifting the same way for input array elements with
   // idx%4==2.
   __m256i a2 = _mm256_shuffle_epi8(a, ctl_2_3);
   __m256i b2 = _mm256_shuffle_epi8(b, ctl_2_0);
@@ -2202,7 +2206,7 @@ Vectorized<T> inline shift_256_8(
     c2 = _mm256_srlv_epi32(a2, b2);
   c2 = _mm256_shuffle_epi8(c2, ctl_3_2);
 
-  // Peform shifting the same way for input array elements with
+  // Perform shifting the same way for input array elements with
   // idx%4==3.
   __m256i a3 = _mm256_and_si256(a, keep_3);
   __m256i b3 = _mm256_shuffle_epi8(b, ctl_3_0);

@@ -105,7 +105,7 @@ def load_package(
     run_single_threaded: bool = False,
     num_runners: int = 1,
     device_index: int = -1,
-) -> AOTICompiledModel:  # type: ignore[type-arg]
+) -> AOTICompiledModel:
     try:
         pt2_contents = load_pt2(
             path,
@@ -131,6 +131,7 @@ def load_package(
             )
             return AOTICompiledModel(loader)
 
+    # pyrefly: ignore  # no-matching-overload
     path = os.fspath(path)  # AOTIModelPackageLoader expects (str, str)
     loader = torch._C._aoti.AOTIModelPackageLoader(
         path, model_name, run_single_threaded, num_runners, device_index

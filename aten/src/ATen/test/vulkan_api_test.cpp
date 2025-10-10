@@ -1232,7 +1232,7 @@ void test_matmul(
 }
 
 TEST_F(VulkanAPITest, DISABLED_matmul_3d_weight_vulkan) {
-  // This will call at::bmm. Will crash for unknow reason.
+  // This will call at::bmm. Will crash for unknown reason.
   const auto m1_cpu =
       at::rand({13, 23, 45}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m2_cpu =
@@ -1241,7 +1241,7 @@ TEST_F(VulkanAPITest, DISABLED_matmul_3d_weight_vulkan) {
 }
 
 TEST_F(VulkanAPITest, DISABLED_matmul_3d_weight_cpu) {
-  // This will call at::bmm. Will crash for unknow reason.
+  // This will call at::bmm. Will crash for unknown reason.
   const auto m1_cpu =
       at::rand({13, 23, 45}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m2_cpu =
@@ -2004,7 +2004,7 @@ TEST_F(VulkanAPITest, conv2d_pw_prepack_bc_medium) {
     1);                 // groups
 }
 
-// The followin 2 tests failed on Meta's CI when all tests are executed.  Output
+// The following 2 tests failed on Meta's CI when all tests are executed.  Output
 // has lots of nan. Cause unknown.
 // When this test is run alone (with gtest_filter), it passes.
 // The test also passes with smaller planes, see "conv2d_pw_prepack_medium".
@@ -5664,7 +5664,7 @@ TEST_F(VulkanAPITest, var_2d_unbiased) {
   test_var({3, 5}, {1}, true, true);
   test_var({3, 5}, {1}, true, false);
 
-  // inpu.dim() == dim_list.size(), only keepdim == true is supported
+  // input.dim() == dim_list.size(), only keepdim == true is supported
   test_var({3, 5}, {0, 1}, true, true);
 }
 
@@ -5672,7 +5672,7 @@ TEST_F(VulkanAPITest, var_2d_biased) {
   test_var({3, 5}, {1}, false, true);
   test_var({3, 5}, {1}, false, false);
 
-  // inpu.dim() == dim_list.size(), only keepdim == true is supported
+  // input.dim() == dim_list.size(), only keepdim == true is supported
   test_var({3, 5}, {0, 1}, false, true);
 }
 
@@ -7142,12 +7142,12 @@ TEST_F(VulkanAPITest, clone_success) {
 }
 
 TEST_F(VulkanAPITest, clone_invalidinputs_exceptions) {
-  // Act: Vulkan supports Preserve and Contiguous memory foramts
+  // Act: Vulkan supports Preserve and Contiguous memory formats
   EXPECT_THROW({
     clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast);
   }, ::std::exception);
 
-  // Act: Vulkan supports Preserve and Contiguous memory foramts
+  // Act: Vulkan supports Preserve and Contiguous memory formats
   EXPECT_THROW({
     clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast3d);
   }, ::std::exception);

@@ -5,11 +5,11 @@ import io
 import itertools
 import os
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, cast, Optional, TypeVar, Union
 
 import torch
 import torch.distributed as dist
@@ -190,7 +190,7 @@ class _DistWrapper:
         local_data: Union[WRAPPED_EXCEPTION, T]
         try:
             local_data = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
@@ -206,7 +206,7 @@ class _DistWrapper:
                         list[Union[R, CheckpointException]],
                         reduce_fun(cast(list[T], all_data)),
                     )
-                except BaseException as e:
+                except BaseException as e:  # noqa: B036
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
@@ -237,7 +237,7 @@ class _DistWrapper:
         local_data: Union[T, WRAPPED_EXCEPTION]
         try:
             local_data = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
@@ -248,12 +248,13 @@ class _DistWrapper:
             if len(node_failures) == 0:
                 try:
                     result = reduce_fun(cast(list[T], all_data))
-                except BaseException as e:
+                except BaseException as e:  # noqa: B036
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
                 result = CheckpointException(step, node_failures)
 
+        # pyrefly: ignore  # bad-argument-type
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
@@ -274,7 +275,7 @@ class _DistWrapper:
         result: Union[T, WRAPPED_EXCEPTION]
         try:
             result = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             result = _wrap_exception(e)
 
         all_results = self.all_gather_object(result)
@@ -300,8 +301,9 @@ class _DistWrapper:
         if self.is_coordinator:
             try:
                 result = map_fun()
-            except BaseException as e:
+            except BaseException as e:  # noqa: B036
                 result = CheckpointException(step, {self.rank: _wrap_exception(e)})
+        # pyrefly: ignore  # bad-argument-type
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result

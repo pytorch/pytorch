@@ -38,7 +38,6 @@ REGISTER_NO_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub)
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
-#include <ATen/native/ConvUtils.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
@@ -105,7 +104,7 @@ static void check_shape_forward(const Tensor& input,
     // If kernel size is incorrect
     std::ostringstream input_ss;
     std::ostringstream kernel_ss;
-    std::string separator = "";
+    std::string separator;
 
     for (int i = 0, len = input_shape.size(); i < len; ++i) {
       input_ss << separator << input_shape[i];
@@ -156,10 +155,14 @@ static void check_shape_forward(const Tensor& input,
 //
 
 static bool mkldnn_conv_enabled_fpmath_mode_bf16(){
-  return at::globalContext().float32Precision("mkldnn", "conv") == "bf16" &&
+  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::BF16 &&
       mkldnn_bf16_device_check();
 }
 
+static bool mkldnn_conv_enabled_fpmath_mode_tf32(){
+  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::TF32 &&
+      cpuinfo_has_x86_amx_fp16();
+}
 
 static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bool is_channels_last) {
    auto memory_format =  at::MemoryFormat::Contiguous;
@@ -270,6 +273,10 @@ static Tensor _mkldnn_convolution(
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       input_t.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
+  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+      input_t.scalar_type() == at::kFloat) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
   _mkldnn_convolution_out(
       input_t,
@@ -455,6 +462,9 @@ Tensor mkldnn_convolution_pointwise_binary(
     if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
     }
+    if (mkldnn_conv_enabled_fpmath_mode_tf32() && input_t.scalar_type() ==at::kFloat){
+      op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
+    }
 
     if (bias.defined()) {
       const ideep::tensor b = itensor_from_tensor(bias);
@@ -597,6 +607,10 @@ Tensor& mkldnn_convolution_pointwise_binary_(
         input_t.scalar_type() == at::kFloat) {
       op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
     }
+    if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+        input_t.scalar_type() == at::kFloat) {
+      op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
+    }
     _mkldnn_convolution_out(
         input_t,
         weight_t,
@@ -718,6 +732,9 @@ Tensor _mkldnn_convolution_transpose(
   if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
+  if (mkldnn_conv_enabled_fpmath_mode_tf32() && input_t.scalar_type() ==at::kFloat){
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
+  }
 
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
@@ -808,6 +825,10 @@ Tensor mkldnn_convolution_backward_input(
       weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
+  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+      weight.scalar_type() == at::kFloat) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
+  }
   ideep::convolution_backward_data::compute_v2(
       grad_y,
       w,
@@ -827,6 +848,11 @@ Tensor mkldnn_convolution_backward_input(
       weight.scalar_type() == at::kFloat) {
     TORCH_WARN_ONCE(
         "Unexpected ideep version to support fpmath_mode_bf16, please update ideep version to align with pytorch main branch");
+      }
+  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+      weight.scalar_type() == at::kFloat) {
+    TORCH_WARN_ONCE(
+        "Unexpected ideep version to support fpmath_mode_tf32, please update ideep version to align with pytorch main branch");
       }
 #endif
 
@@ -857,6 +883,10 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       input.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
+  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+      input.scalar_type() == at::kFloat) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
   if (bias_defined) {
     ideep::convolution_backward_weights::compute_v2(
@@ -1011,6 +1041,10 @@ Tensor mkldnn_convolution_transpose_backward_input(
       weight.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
+  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+      weight.scalar_type() == at::kFloat) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
+  }
   ideep::convolution_transpose_backward_data::compute_v3(
       grad_y,
       w,
@@ -1052,6 +1086,10 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       input.scalar_type() == at::kFloat) {
     op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
+  }
+  if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
+      input.scalar_type() == at::kFloat) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32);
   }
   if (bias_defined) {
     ideep::convolution_transpose_backward_weights::compute_v3(

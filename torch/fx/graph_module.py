@@ -18,6 +18,7 @@ from torch.package import Importer, PackageExporter, PackageImporter, sys_import
 
 from ._compatibility import compatibility
 from .graph import (
+    _BoxedCodeGen,
     _custom_builtins,
     _is_from_torch,
     _override_sym_repr,
@@ -192,7 +193,7 @@ def _deserialize_graph_module(
     graph = KeepModules().trace(com, **tracer_extras)
 
     # Recover node.meta["stack_trace"] after re-tracing
-    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace", None)
+    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace")
     if node_meta_stack_trace is not None:
         del body["_graphmodule_graph_node_meta_stack_trace"]
         for node in graph.nodes:
@@ -309,6 +310,7 @@ def _print_readable(
     include_stride=False,
     include_device=False,
     colored=False,
+    expanded_def=False,
 ):
     graph = module.graph
     assert graph is not None and isinstance(graph, torch.fx.Graph), (
@@ -321,6 +323,7 @@ def _print_readable(
         include_stride=include_stride,
         include_device=include_device,
         colored=colored,
+        expanded_def=expanded_def,
     )
     module_code = verbose_python_code.src
     module_code = module_code.lstrip("\n")
@@ -531,6 +534,7 @@ class GraphModule(torch.nn.Module):
             self.graph._tracer_cls
             and "<locals>" not in self.graph._tracer_cls.__qualname__
         ):
+            # pyrefly: ignore  # bad-assignment
             self._tracer_cls = self.graph._tracer_cls
 
         self._tracer_extras = {}
@@ -544,12 +548,17 @@ class GraphModule(torch.nn.Module):
         self._erase_node_hooks: list[Callable] = []
         # Used to remove hooks from deepcopied graph modules within a context manager.
         self._deepcopy_hooks: list[Callable] = []
+        self.shape_env = None  # optional not always set even when dynamic shapes exist.
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
     #
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
-    __jit_unused_properties__ = ["graph"]
+    __jit_unused_properties__ = ["graph", "_boxed_call"]
+
+    @property
+    def _boxed_call(self) -> bool:
+        return isinstance(self._graph._codegen, _BoxedCodeGen)
 
     @property
     def graph(self) -> Graph:
@@ -935,6 +944,7 @@ class {module_name}(torch.nn.Module):
         # If `fast_sympy_print` is True then we use a sympy printer which is faster
         # but may result in less-readable output.
         fast_sympy_print: bool = False,
+        expanded_def: bool = False,
     ):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
@@ -956,6 +966,7 @@ class {module_name}(torch.nn.Module):
                 include_stride,
                 include_device,
                 colored,
+                expanded_def,
             )
             return r
 

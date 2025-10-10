@@ -42,7 +42,7 @@ from ..pattern_matcher import (
     Match,
     MultiOutputPattern,
     MULTIPLE,
-    PatternMatcherPass,
+    PatternMatcherPass as PatternMatcherPassBase,
     register_graph_pattern,
     register_replacement,
     stable_topological_sort,
@@ -67,6 +67,10 @@ from .split_cat import POST_GRAD_PATTERNS
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+PatternMatcherPass = functools.partial(
+    PatternMatcherPassBase, subsystem="post_grad_passes"
+)
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -197,7 +201,80 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pass_name = "custom_backend_passes_" + device
                 GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
 
-    # Keep these last, since they introduces mutation. Look at
+    collectives_bucketing: bool = False
+
+    if config.bucket_reduce_scatters_fx != "none":
+        from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
+        from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
+
+        p = (
+            bucket_fsdp_reduce_scatter
+            if "fsdp" in config.bucket_reduce_scatters_fx
+            else bucket_reduce_scatter
+        )
+        GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
+            lambda graph: p(
+                graph.owning_module,
+                config.bucket_reduce_scatters_fx_bucket_size_determinator,
+                config.bucket_reduce_scatters_fx,
+            )
+        )
+        collectives_bucketing = True
+
+    # Fx all_gather bucketing introduces mutation op
+    # Keeping it in the end to keep invariant of functional graph for previous passes.
+    if config.bucket_all_gathers_fx != "none":
+        from torch._inductor.fx_passes.bucketing import bucket_all_gather
+        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
+
+        p = (
+            bucket_fsdp_all_gather  # type: ignore[assignment]
+            if "fsdp" in config.bucket_all_gathers_fx
+            else bucket_all_gather
+        )
+        GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
+            lambda graph: p(
+                graph.owning_module,
+                config.bucket_all_gathers_fx_bucket_size_determinator,
+                config.bucket_all_gathers_fx,
+            )
+        )
+        collectives_bucketing = True
+
+    if collectives_bucketing:
+        # Fx collectives bucketing passes require topological sort for the cases:
+        # when bucketed collectives have users before the last collective in the bucket
+        # AND when inputs of bucketed collective have ancestors after the first collective in the bucket.
+        #
+        # In this case we can not manually pick the place for bucketed collective insertion.
+        # But we are guaranteed by the bucketing (independent collectives in the bucket),
+        # that it is possible to reorder nodes to satisfy all ordering requirements.
+        #
+        # --- before bucketing ---
+        # in0 = ...
+        # wait_ag0 = ag(in0)
+        # user0(wait_ag0)
+        # ...
+        # pre_in1 = ...
+        # in1 = transform(pre_in1)
+        # wait_ag1 = ag(in1)
+        # user1(wait_ag1)
+        #
+        # --- after bucketing ---
+        #
+        # in0 = ...
+        # user(wait_ag0) <--- wait_ag0 is defined only after bucketed collective.
+        #
+        # pre_in1 = ...
+        # in1 = transform(pre_in1)
+        # ag_bucket(in0+in1)
+        # wait_bucket
+        # wait_ag0 = wait_bucket[0]
+        # wait_ag1 = wait_bucket[1]
+        # user1(wait_ag1)
+        stable_topological_sort(gm.graph)
+
+    # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
         functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
@@ -218,42 +295,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_map_to_while_loop").apply_gm_pass(
         decompose_map_to_while_loop
     )
-
-    if config.bucket_reduce_scatters_fx != "none":
-        from torch._inductor.fx_passes.bucketing import (
-            bucket_reduce_scatter,
-            bucket_size_determinator,
-        )
-
-        d = (
-            config.bucket_reduce_scatters_fx_bucket_size_determinator
-            or bucket_size_determinator
-        )
-        GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
-            lambda graph: bucket_reduce_scatter(graph.owning_module, d)
-        )
-
-    # Fx all_gather bucketing introduces mutation op
-    # Keeping it in the end to keep invariant of functional graph for previous passes.
-    if config.bucket_all_gathers_fx != "none":
-        from torch._inductor.fx_passes.bucketing import (
-            bucket_all_gather,
-            bucket_size_determinator,
-        )
-        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
-
-        p = (
-            bucket_fsdp_all_gather
-            if config.bucket_all_gathers_fx == "fsdp"
-            else bucket_all_gather
-        )
-        d = (
-            config.bucket_all_gathers_fx_bucket_size_determinator
-            or bucket_size_determinator
-        )
-        GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
-            lambda graph: p(graph.owning_module, d)
-        )
 
     gm.recompile()
     gm.graph.lint()
@@ -297,6 +338,7 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.map_impl),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -484,6 +526,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.scan),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -617,11 +660,14 @@ def lazy_init():
     # pass since otherwise there will be perf/peak-memory regression:
     # https://github.com/pytorch/pytorch/issues/148141
     register_replacement(
+        # pyrefly: ignore  # bad-argument-type
         prepare_softmax_pattern,
+        # pyrefly: ignore  # bad-argument-type
         prepare_softmax_replacement,
         [torch.empty(4, 8)],
         scalar_workaround=dict(dim=-1),
         trace_fn=fwd_only,
+        # pyrefly: ignore  # bad-argument-type
         pass_dicts=pass_patterns[1],
         extra_check=prepare_softmax_extra_check,
     )
@@ -664,7 +710,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
         iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
     )
-    past_mutating_epilogue = True if first_copy is None else False
+    past_mutating_epilogue = first_copy is None
 
     for node in reversed(graph.nodes):
         seen_nodes.add(node)
@@ -682,7 +728,9 @@ def register_lowering_pattern(
     Register an aten to inductor IR replacement pattern
     """
     return pattern_matcher.register_lowering_pattern(
-        pattern, extra_check, pass_dict=pass_patterns[pass_number]
+        pattern,
+        extra_check,
+        pass_dict=pass_patterns[pass_number],
     )
 
 
@@ -773,6 +821,13 @@ def scatter_upon_const_tensor(
     """
     from torch._inductor import metrics
 
+    # Check if inputs are tensors instead of inductor IR nodes
+    if isinstance(selector, torch.Tensor):
+        # Return a fake tensor with the proper shape that this operator is intended to return
+        device = selector.device if hasattr(selector, "device") else torch.device("cpu")
+        return torch.empty(shape, dtype=dtype, device=device)
+
+    # pyrefly: ignore  # bad-assignment
     metrics.num_matches_for_scatter_upon_const_tensor += 1
 
     selector_loader = selector.make_loader()
@@ -824,6 +879,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
         KeywordArg("dim"),
         _users=MULTIPLE,
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=pass_patterns[1],
 )
 def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype, dim):
@@ -843,6 +899,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
+    # pyrefly: ignore  # bad-argument-type
     match.replace_by_example(repl, list(shape))
 
 
@@ -1160,6 +1217,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -1176,6 +1234,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
 
+        # pyrefly: ignore  # bad-argument-type
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
@@ -1199,6 +1258,7 @@ def decompose_auto_functionalized(graph):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -1219,10 +1279,12 @@ def decompose_auto_functionalized(graph):
             mode = args[0]
             return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
+        # pyrefly: ignore  # bad-argument-type
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -1263,6 +1325,7 @@ def decompose_auto_functionalized(graph):
                 mutable_op, only_clone_these_bases, **kwargs
             )
 
+        # pyrefly: ignore  # bad-argument-type
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
@@ -1427,6 +1490,7 @@ def should_prefer_unfused_addmm(match):
 
 @register_graph_pattern(
     CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=pass_patterns[2],
     extra_check=should_prefer_unfused_addmm,
 )
@@ -1434,6 +1498,7 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
+    # pyrefly: ignore  # bad-argument-type
     match.replace_by_example(repl, [inp, mat1, mat2])
 
 
@@ -1452,6 +1517,12 @@ def is_valid_addmm_fusion(match):
     if not matched:
         return False  # Shape mismatch
 
+    inp_dtype = inp.meta["val"].dtype
+
+    # aten cublas integration assumes equal dtypes
+    if inp_dtype != mat1.meta["val"].dtype or inp_dtype != mat2.meta["val"].dtype:
+        return False
+
     return not should_prefer_unfused_addmm(match)
 
 
@@ -1461,6 +1532,7 @@ def is_valid_addmm_fusion(match):
         CallFunction(aten.mm, Arg(), Arg()),
         KeywordArg("inp"),
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=pass_patterns[2],
     extra_check=is_valid_addmm_fusion,
 )
@@ -1470,6 +1542,7 @@ def is_valid_addmm_fusion(match):
         KeywordArg("inp"),
         CallFunction(aten.mm, Arg(), Arg()),
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=pass_patterns[2],
     extra_check=is_valid_addmm_fusion,
 )
@@ -1499,7 +1572,8 @@ def register_partial_reduction_pattern():
         full_reduc = CallFunction([red_op, equiv_red[red_op]], inp)
 
         @register_graph_pattern(
-            MultiOutputPattern([partial_reduc, full_reduc]), pass_dict=pass_patterns[2]
+            MultiOutputPattern([partial_reduc, full_reduc]),
+            pass_dict=pass_patterns[2],
         )
         def reuse_partial(match, input, reduced_dims, keepdim):
             partial_red, full_red = match.output_nodes()
@@ -1675,6 +1749,7 @@ class ConstructorMoverPass:
 
             pytree.tree_map_only(fx.Node, add_cpu_inp, (node.args, node.kwargs))
 
+            # pyrefly: ignore  # redundant-condition
             if cpu_count:
                 cpu_indeg[node] = cpu_count
 
@@ -1708,7 +1783,7 @@ class ConstructorMoverPass:
             if not torch._subclasses.fake_tensor._is_tensor_constructor(node.target):
                 continue
 
-            if not node.kwargs.get("device") == torch.device("cpu"):
+            if node.kwargs.get("device") != torch.device("cpu"):
                 continue
 
             constructors.append(node)
@@ -1720,17 +1795,44 @@ class ConstructorMoverPass:
         movable_constructors = self.find_movable_constructors(graph, constructors)
 
         target_device = next(iter(target_devices))
-        for node in movable_constructors:
-            if node in cpu_placeholders:
-                with graph.inserting_after(node):
-                    gpu_node = graph.call_function(
-                        torch.ops.prims.device_put.default, (node, target_device)
+        movable_cpu_placeholders = movable_constructors & cpu_placeholders
+        if movable_cpu_placeholders:
+            node = next(iter(reversed(movable_cpu_placeholders)))
+            last_node = node
+            unsqueezed_nodes = []
+            for elem in movable_cpu_placeholders:
+                with graph.inserting_after(last_node):
+                    unsqueezed_nodes.append(
+                        graph.call_function(torch.ops.aten.unsqueeze.default, (elem, 0))
                     )
-                node.replace_all_uses_with(
-                    gpu_node,
-                    lambda x: x != gpu_node
-                    and x.target != torch.ops.aten.copy_.default,
+                    last_node = unsqueezed_nodes[-1]
+            with graph.inserting_after(last_node):
+                cpu_concat = graph.call_function(
+                    torch.ops.aten.cat.default, (unsqueezed_nodes,)
                 )
+                last_node = cpu_concat
+            with graph.inserting_after(last_node):
+                gpu_concat = graph.call_function(
+                    torch.ops.prims.device_put.default,
+                    (cpu_concat, target_device, True),
+                )
+                last_node = gpu_concat
+            with graph.inserting_after(last_node):
+                gpu_split = graph.call_function(
+                    torch.ops.aten.unbind.int, (gpu_concat,)
+                )
+                last_node = gpu_split
+            for idx, node in enumerate(movable_cpu_placeholders):
+                with graph.inserting_after(last_node):
+                    gpu_node = graph.call_function(operator.getitem, (gpu_split, idx))
+                    node.replace_all_uses_with(
+                        gpu_node,
+                        lambda x: x
+                        not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
+                        + unsqueezed_nodes
+                        and x.target != torch.ops.aten.copy_.default,
+                    )
+                    last_node = gpu_node
 
                 # noop elimination if there are other device_put for gpu_node to
                 # target device. Alternatively, we could just move the other device_put
@@ -1744,10 +1846,12 @@ class ConstructorMoverPass:
                 for noop in noop_device_puts:
                     noop.replace_all_uses_with(gpu_node)
                     graph.erase_node(noop)
-            else:
-                kwargs = node.kwargs.copy()
-                kwargs["device"] = target_device
-                node.kwargs = kwargs
+
+        movable_constructors -= movable_cpu_placeholders
+        for node in movable_constructors:
+            kwargs = node.kwargs.copy()
+            kwargs["device"] = target_device
+            node.kwargs = kwargs
 
     def find_movable_constructors(
         self, graph: fx.Graph, constructors: list[fx.Node]
@@ -1840,13 +1944,9 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
     # by explicitly moving cpu scalar tensors to gpu when profitable, relying on
     # graph partition to split off this data copy, and cudagraphifying
     # the remaining gpu ops.
-    allow_inputs_outputs = (
-        True
-        if (
-            torch._inductor.config.triton.cudagraphs
-            and torch._inductor.config.graph_partition
-        )
-        else False
+    allow_inputs_outputs = bool(
+        torch._inductor.config.triton.cudagraphs
+        and torch._inductor.config.graph_partition
     )
     ConstructorMoverPass(
         get_gpu_type(),

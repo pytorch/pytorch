@@ -3,8 +3,8 @@
 import functools
 import itertools
 import operator
-from collections.abc import Iterable, Sequence
-from typing import Callable, cast, Optional, TypeVar, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import cast, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -19,6 +19,7 @@ from torch.distributed.tensor._op_schema import (
     OutputSharding,
     PlacementList,
     RuntimeSchemaInfo,
+    StrategyType,
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
@@ -95,6 +96,36 @@ def register_op_strategy(
     return wrapper
 
 
+def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Fallback strategy all use Replication()
+    """
+    inputs_strategy = op_schema.args_strategy
+    # TODO(zpcore): handle kwarg_inputs_strategy
+    # kwarg_inputs_strategy = op_schema.kwargs_schema
+    output_type = [str(ret.type) for ret in op_schema.op._schema.returns]
+    output_len = output_type.count("Tensor")
+    # TODO(zpcore): Confirm if view op can be handle properly or not. Prevent
+    # handling view ops until confirmed.
+    if op_schema.op.is_view:
+        raise RuntimeError(
+            "fallback strategy is unable to handle view ops until confirmed"
+        )
+    if "List[Tensor]" in output_type:
+        raise RuntimeError(
+            "fallback strategy is unable to handle ops with List[Tensor] output "
+            "because size of the list may depend on the op's input value"
+        )
+
+    mesh = inputs_strategy[0].mesh
+
+    dim_sharding: PlacementList = [Replicate()] * (output_len + len(inputs_strategy))
+    single_dim_placement = [dim_sharding]
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_dim_placement, input_index=output_len
+    )
+
+
 def as_list(
     x: Union[list[object], object],
     # pyre-fixme[11]: Annotation `immutable_list` is not defined as a type.
@@ -119,7 +150,7 @@ def normalize_dims(dims: DimsType, ndim: int) -> DimsSequenceType:
     elif isinstance(dims, list):
         dims = [normalize_dim(dim, ndim) for dim in dims]
     elif isinstance(dims, tuple):
-        dims = tuple([normalize_dim(dim, ndim) for dim in dims])
+        dims = tuple(normalize_dim(dim, ndim) for dim in dims)
     return dims
 
 
@@ -134,6 +165,8 @@ def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
     for i, placement in enumerate(spec.placements):
         if placement.is_shard():
             shard_dim = cast(Shard, placement).dim
+            if shard_dim >= len(shape):
+                return False
             shards_map[shard_dim] *= spec.mesh.size(i)
 
     for i, dim_size in enumerate(shape):
@@ -159,6 +192,22 @@ def is_tensor_evenly_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
             return False
 
     return True
+
+
+def is_tensor_evenly_shardable_on_dim(
+    shape: Sequence[int], spec: DTensorSpec, dim: int
+) -> bool:
+    """Check if the shape is evenly shardable according to the spec on dim."""
+    dim = normalize_dim(dim, len(shape))
+
+    num_shards = 1
+    for i, placement in enumerate(spec.placements):
+        if placement.is_shard():
+            shard_dim = cast(Shard, placement).dim
+            if shard_dim == dim:
+                num_shards *= spec.mesh.size(i)
+
+    return shape[dim] % num_shards == 0
 
 
 def is_tensor_dim_sharded(spec: DTensorSpec, dim: int) -> bool:
@@ -216,7 +265,7 @@ def map_placements_after_broadcast(
                 # the input shape shard dim before broadcasting,
                 # in this case it means implicit broadcasting happen
                 # in this dim, so we can just mark it as replicate
-                # and implict broadcast will broadcast automatically
+                # and implicit broadcast will broadcast automatically
                 # to the sharded shape
                 new_placements.append(Replicate())
 
@@ -226,6 +275,11 @@ def map_placements_after_broadcast(
 def generate_redistribute_costs(
     src_strategy: OpStrategy, dst_spec: DTensorSpec
 ) -> list[float]:
+    """Generates one row in the 'redistribute_costs' matrix in an OpSpec
+    The length of the returned list will match the number of strategies in 'src_strategy'.
+
+    Each value in the row is the cost of redistributing from a particular src_strategy to dst_spec.
+    """
     redistribute_costs: list[float] = [
         redistribute_cost(strat.output_spec, dst_spec)
         for strat in src_strategy.strategies
@@ -282,6 +336,7 @@ def expand_to_full_mesh_op_strategy(
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
                 # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
+                # pyrefly: ignore  # bad-argument-type
                 spec_list.append(DTensorSpec(mesh, specs))
             else:
                 spec_list.append(None)
@@ -332,3 +387,27 @@ def expand_to_full_mesh_op_strategy(
         )
         all_strategies.append(strategy)
     return OpStrategy(all_strategies)
+
+
+def shift_shard_dims_after_insert(
+    placements: Sequence[Placement], insert_dim: int = 0
+) -> Sequence[Placement]:
+    normalized_placements: list[Placement] = []
+    for placement in placements:
+        if isinstance(placement, Shard) and placement.dim >= insert_dim:
+            normalized_placements.append(Shard(placement.dim + 1))
+        else:
+            normalized_placements.append(placement)
+    return normalized_placements
+
+
+def shift_shard_dims_after_remove(
+    placements: Sequence[Placement], remove_dim: int = 0
+) -> Sequence[Placement]:
+    normalized_placements: list[Placement] = []
+    for placement in placements:
+        if isinstance(placement, Shard) and placement.dim > remove_dim:
+            normalized_placements.append(Shard(placement.dim - 1))
+        else:
+            normalized_placements.append(placement)
+    return normalized_placements

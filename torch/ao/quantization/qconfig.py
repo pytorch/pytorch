@@ -83,6 +83,7 @@ __all__ = [
 ]
 
 
+# pyrefly: ignore  # invalid-inheritance
 class QConfig(namedtuple("QConfig", ["activation", "weight"])):
     """
     Describes how to quantize a layer or a part of the network by providing
@@ -120,6 +121,7 @@ class QConfig(namedtuple("QConfig", ["activation", "weight"])):
     "`QConfigDynamic` is going to be deprecated in PyTorch 1.12, please use `QConfig` instead",
     category=FutureWarning,
 )
+# pyrefly: ignore  # invalid-inheritance
 class QConfigDynamic(namedtuple("QConfigDynamic", ["activation", "weight"])):
     """
     Describes how to dynamically quantize a layer or a part of the network by providing
@@ -568,9 +570,13 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig], mod: torch.nn.Module) -> N
         )
 
 
-QConfigAny = Optional[QConfig]
-if sys.version_info < (3, 14):
+if sys.version_info < (3, 12):
+    QConfigAny = Optional[QConfig]
     QConfigAny.__module__ = "torch.ao.quantization.qconfig"
+else:
+    from typing import TypeAliasType
+
+    QConfigAny = TypeAliasType("QConfigAny", Optional[QConfig])
 
 
 def _add_module_to_qconfig_obs_ctr(

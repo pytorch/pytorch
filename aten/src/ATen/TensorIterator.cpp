@@ -208,7 +208,7 @@ bool TensorIteratorConfig::is_tensor_const(size_t idx) {
 // same strides are increasing. If dimensions are non-increasing, we move on to the next input to break the tie.
 //
 // Instead of applying rule 4 for tie breaking, we could move on to the next tensor directly. This would result in possibly
-// losing the correct permuation of the first tensor if there are permuted trivial dimensions, but could potentially
+// losing the correct permutation of the first tensor if there are permuted trivial dimensions, but could potentially
 // improve traversal order of the second tensor. We chose the former option to better propagate channels last layout
 // for example for a tensor with the sizes N1H1
 // These rules result in the intuitive behavior that in most cases recovers permutation of either the first argument (if all
@@ -244,7 +244,7 @@ void TensorIteratorBase::reorder_dimensions() {
   // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm_.rbegin(), perm_.rend(), 0);
 
-  // Reordering dimensions changes iteraton order
+  // Reordering dimensions changes iteration order
   if (enforce_linear_iteration_) {
     permute_dimensions(perm_);
     return;
@@ -765,7 +765,8 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   if (numel == 0) {
     return;
   } else if (numel < grain_size || at::get_num_threads() == 1) {
-    return serial_for_each(loop, {0, numel});
+    serial_for_each(loop, {0, numel});
+    return;
   } else {
     at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
       serial_for_each(loop, {begin, end});

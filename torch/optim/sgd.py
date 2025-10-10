@@ -347,6 +347,7 @@ def _single_tensor_sgd(
                     # usually this is the differentiable path, which is why the param.clone() is needed
                     grad = grad.addcmul_(param.clone(), weight_decay)
                 else:
+                    # pyrefly: ignore  # bad-argument-type
                     grad = grad.add(param, alpha=weight_decay)
             else:
                 grad = grad.add(param, alpha=weight_decay)
@@ -355,7 +356,7 @@ def _single_tensor_sgd(
             buf = momentum_buffer_list[i]
 
             if buf is None:
-                buf = torch.clone(grad).detach()
+                buf = grad.detach().clone()
                 momentum_buffer_list[i] = buf
             else:
                 buf.mul_(momentum).add_(grad, alpha=1 - dampening)
@@ -370,6 +371,7 @@ def _single_tensor_sgd(
             if lr.requires_grad:
                 param.addcmul_(grad, lr, value=-1)
             else:
+                # pyrefly: ignore  # bad-argument-type
                 param.add_(grad, alpha=-lr)
         else:
             param.add_(grad, alpha=-lr)
@@ -441,11 +443,12 @@ def _multi_tensor_sgd(
                 torch._foreach_add_(bufs, device_grads, alpha=1 - dampening)
             else:
                 bufs = []
+
                 for i in range(len(device_momentum_buffer_list)):
                     if device_momentum_buffer_list[i] is None:
                         buf = device_momentum_buffer_list[i] = momentum_buffer_list[
                             indices[i]
-                        ] = torch.clone(device_grads[i]).detach()
+                        ] = device_grads[i].detach().clone()
                     else:
                         buf = cast(Tensor, device_momentum_buffer_list[i])
                         buf.mul_(momentum).add_(device_grads[i], alpha=1 - dampening)

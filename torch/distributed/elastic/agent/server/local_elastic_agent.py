@@ -333,8 +333,10 @@ class LocalElasticAgent(SimpleElasticAgent):
                     rank=worker.global_rank,
                     local_rank=local_rank,
                 )
+                # pyrefly: ignore  # unsupported-operation
                 log_line_prefixes[local_rank] = log_line_prefix
 
+            # pyrefly: ignore  # unsupported-operation
             envs[local_rank] = worker_env
             worker_args = list(spec.args)
             worker_args = macros.substitute(worker_args, str(local_rank))
@@ -353,6 +355,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             logs_specs=self._logs_specs,
             log_line_prefixes=log_line_prefixes,
             start_method=self._start_method,
+            numa_options=spec.numa_options,
         )
 
         return self._pcontext.pids()

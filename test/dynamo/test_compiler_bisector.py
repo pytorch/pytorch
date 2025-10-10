@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
 from contextlib import contextmanager
 from importlib import import_module
 
@@ -11,19 +10,18 @@ from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 aten = torch.ops.aten
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
 
 
-@requires_cuda
+@requires_cuda_and_triton
 class TestCompilerBisector(TestCase):
     test_ns = "_test_bisector"
 
@@ -96,6 +94,40 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "decomposition")
         self.assertEqual(out.bisect_number, 1)
         self.assertTrue("aten.exponential" in out.debug_info)
+
+    def test_pre_grad(self):
+        import operator
+
+        from torch._inductor import config
+
+        # similar setup to test_joint_graph (see below)
+        def pass_fn(graph: torch.fx.Graph):
+            nodes = graph.find_nodes(op="call_function", target=operator.add)
+            assert len(nodes) == 1
+            args = list(nodes[0].args)
+            args[1] = 2
+            nodes[0].args = tuple(args)
+
+        config.pre_grad_custom_pass = pass_fn
+
+        def foo(x):
+            return x + 1
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            inp = torch.rand([10])
+
+            out = foo(inp)
+            out_c = torch.compile(foo)(inp)
+
+            return torch.allclose(out, out_c)
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "pre_grad_passes")
+        self.assertEqual(out.bisect_number, 0)
+        self.assertTrue("pre_grad_custom_pass" in out.debug_info)
 
     def test_joint_graph(self):
         from torch._inductor import config
@@ -186,7 +218,7 @@ class TestCompilerBisector(TestCase):
                 torch._dynamo.reset()
 
                 try:
-                    torch.testing.assert_allclose(torch.compile(op)(x), op(x))
+                    torch.testing.assert_close(torch.compile(op)(x), op(x))
                 except Exception:
                     return False
                 return True

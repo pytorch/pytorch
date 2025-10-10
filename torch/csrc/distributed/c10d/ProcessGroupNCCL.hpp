@@ -23,6 +23,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/cuda/CUDAEventCache.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
 
@@ -124,6 +125,11 @@ static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
 // Whether to log C++ stack traces on unclean shutdown (default true)
 static std::vector<std::string> TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN = {
     "TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN"};
+
+// Whether to include only active collectives in the Flight Recorder trace
+// (default false)
+static std::vector<std::string> TORCH_NCCL_EXTRA_DUMP_ON_EXEC = {
+    "TORCH_NCCL_EXTRA_DUMP_ON_EXEC"};
 
 // Control whether to use CudaEventCache for the collective in watchdog thread.
 // We noticed in the past when cuda global lock is held, destroying CudaEvent
@@ -503,23 +509,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     friend class ProcessGroupNCCL;
   };
 
-  class CUDAEventCache
-      : public std::enable_shared_from_this<ProcessGroupNCCL::CUDAEventCache> {
-   public:
-    CUDAEventCache();
-    std::shared_ptr<at::cuda::CUDAEvent> create(bool timing);
-    static std::shared_ptr<ProcessGroupNCCL::CUDAEventCache> get(
-        at::DeviceIndex device);
-
-   private:
-    std::mutex cacheMutex_;
-    // NOTE: We intentionally store raw pointers so that
-    // we do not attempt to destroy the event objects on process exit,
-    // because cuda may be gone.
-    std::array<std::deque<at::cuda::CUDAEvent*>, 2>
-        eventsArray_; // 0 for timing=false, 1 for timing=true
-  };
-
   struct Options : Backend::Options {
     // NOTE: timeout in ProcessGroupNCCL::Options denote the timeout for
     // operations. This is only used when blockingWait_ is enabled.
@@ -561,7 +550,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
     int split_color{-2};
 #endif
-    std::vector<uint64_t> global_ranks_in_group;
   };
 
   // Helper class related to TORCH_NCCL_DESYNC_DEBUG
@@ -749,7 +737,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::condition_variable workMetaListCV_;
 
     // Heartbeat of watchdog thread.
-    std::atomic_uint64_t heartbeat_{};
+    std::atomic_uint64_t heartbeat_;
 
     // Whether or not to propagate detected errors to all ranks in the same PG
     // through TCPStore.
@@ -976,12 +964,13 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void enableCollectivesTiming() override;
 
   c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
       const std::vector<int>& ranks,
-      const c10::intrusive_ptr<Backend::Options> opts) override;
+      const c10::intrusive_ptr<Backend::Options>& opts) override;
 
   c10::intrusive_ptr<Backend> merge(
       const c10::intrusive_ptr<Store>& store,
-      const c10::intrusive_ptr<Backend::Options> opts,
+      const c10::intrusive_ptr<Backend::Options>& opts,
       const int& rank,
       const int& size) override;
 
@@ -1018,7 +1007,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Performs NCCL user buffer registration for all buffers in
   // the given MemPool
-  void registerMemPool(c10::cuda::MemPool* pool);
+  void registerMemPool(c10::cuda::MemPool* pool, bool symm = false);
 
   // Performs NCCL user buffer de-registration for all buffers in
   // the given MemPool
@@ -1095,7 +1084,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // In the timeout case and we will dump debug info such as the NCCL flight
   // recorder to storage. Down the road, if we have more complicated or blocking
   // operations, we might need to use a side thread to do it.
-  bool dumpDebuggingInfo(bool includeStackTrace = true);
+  bool dumpDebuggingInfo(
+      bool includeStackTrace = true,
+      bool onlyActive = false);
+
+  void dumpExtraDebuggingInfo();
 
   // Abort all communicators on this rank.
   bool abortComms(const std::optional<std::string>& abortReason = std::nullopt);
@@ -1105,8 +1098,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool useNonblocking();
 
  protected:
-  int globalRankStart_;
-  int globalRankStride_;
+  int globalRankStart_{};
+  int globalRankStride_{};
 
  private:
   bool eagerInit_{false};
@@ -1217,7 +1210,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Returns the global rank of the device. This function assumes that users
   // always create a default global process group(PG) which includes all
   // devices. It is called in the constructor of ProcessGroupNCCL, so it always
-  // return the rank_ of the the very first PG created, aka, default global PG.
+  // return the rank_ of the very first PG created, aka, default global PG.
   const int& globalRank() const;
 
   const c10::intrusive_ptr<Store>& globalStore() const;
@@ -1335,7 +1328,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int traceBufferSize_;
 
   // We gate the cudaEventCache so that we can roll it out gradually.
-  std::atomic<bool> cudaEventCacheEnabled_{};
+  std::atomic<bool> cudaEventCacheEnabled_;
 
   std::thread onCompletionHookThread_;
 
@@ -1343,7 +1336,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::atomic<bool> terminateProcessGroup_;
 
   // Whether there are hooks pending to be fired
-  std::atomic<bool> hasPendingHooks_{};
+  std::atomic<bool> hasPendingHooks_;
 
   // This is the signal from watchdog threads to indicate whether the monitor
   // thread should dump. Making it static so that it is accessible from all the
@@ -1396,7 +1389,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
 
   // Whether the coalesced calls are sync or async.
-  bool coalescedAsync_;
+  bool coalescedAsync_{};
 
   // keeps track of input and output tensors when coalescing is in flight.  Will
   // hand over these tensors to WorkNCCL's stash when coalescing is ended.
@@ -1432,11 +1425,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
   // is set to true.
-  std::atomic<bool> enableTiming_{};
+  std::atomic<bool> enableTiming_;
 
   // Flag to enable the print of hash value of input/output of collectives for
   // verification.
-  std::atomic<bool> enableCollectiveHashDebug_{};
+  std::atomic<bool> enableCollectiveHashDebug_;
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
@@ -1478,6 +1471,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Communication-optimized memory pool associated with this PG
   std::unique_ptr<c10::cuda::MemPool> memPool_ = nullptr;
 };
+
+// Reset the flighrecorder recordings for the current rank.
+TORCH_API void reset_nccl_trace();
 
 // Dumps the NCCL comm traces and additional information about the Process
 // Group.

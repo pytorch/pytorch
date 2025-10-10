@@ -1,7 +1,4 @@
 """
-Experimental Object Oriented Distributed API - torch.distributed._dist2
-=======================================================================
-
 This is an experimental new API for PyTorch Distributed. This is actively in development and subject to change or deletion entirely.
 
 This is intended as a proving ground for more flexible and object oriented distributed APIs.

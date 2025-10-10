@@ -2,7 +2,7 @@
 r"""Dynamically quantized convolution modules."""
 
 import warnings
-from typing import ClassVar, Optional
+from typing import ClassVar, Literal, Optional
 
 import torch
 import torch.ao.nn.quantized as nnq
@@ -62,7 +62,7 @@ class Conv1d(nnq.Conv1d):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
         reduce_range=True,
@@ -73,6 +73,7 @@ class Conv1d(nnq.Conv1d):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _single(kernel_size)
         stride = _single(stride)
+        # pyrefly: ignore  # bad-assignment
         padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
 

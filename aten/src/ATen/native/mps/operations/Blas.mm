@@ -51,9 +51,6 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 } // namespace mps
 
 Tensor dot_mps(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) || self.scalar_type() != ScalarType::Long,
-              "MPS: dot op doesn't support int64 input on MacOS13")
-
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
 

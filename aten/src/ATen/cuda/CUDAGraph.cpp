@@ -252,6 +252,13 @@ cudaGraph_t CUDAGraph::raw_cuda_graph() {
   return graph_;
 }
 
+cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
+  TORCH_CHECK(
+      has_graph_exec_,
+      "You cannot access the raw cudaGraphExec_t instance until instantiate() has been called");
+  return graph_exec_;
+}
+
 void CUDAGraph::reset() {
   // I'd prefer these checks throw exceptions, not print warnings,
   // but the destructor calls reset(), and at least one CI build

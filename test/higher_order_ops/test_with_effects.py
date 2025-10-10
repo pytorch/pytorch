@@ -328,7 +328,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 return
 
             # Meta function of the custom op
-            @torch.library.impl_abstract(
+            @torch.library.register_fake(
                 "mylib::record_scalar_tensor",
                 lib=lib,
             )

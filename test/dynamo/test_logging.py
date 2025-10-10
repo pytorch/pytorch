@@ -21,21 +21,29 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     find_free_port,
+    IS_WINDOWS,
     munge_exc,
     skipIfTorchDynamo,
+    skipIfWindows,
     TEST_XPU,
     xfailIf,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_XPU
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_XPU_AND_TRITON,
+)
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
     make_logging_test,
     make_settings_test,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
-requires_gpu = unittest.skipUnless(HAS_CUDA or HAS_XPU, "requires cuda or xpu")
+requires_gpu = unittest.skipUnless(
+    HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON, "requires cuda or xpu with triton"
+)
+
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
@@ -129,9 +137,13 @@ class LoggingTests(LoggingTestCase):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
         fn_opt(torch.ones(1000, 1000, device=device_type))
         self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 8)
 
-    @requires_cuda
+        # LOAF will add an extra round of fusion and result in more logs
+        self.assertLess(
+            len(records), 8 * (1 + torch._inductor.config.loop_ordering_after_fusion)
+        )
+
+    @requires_cuda_and_triton
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
@@ -244,7 +256,7 @@ LoweringException: AssertionError:
         exitstack.close()
 
     @requires_distributed()
-    @requires_cuda
+    @requires_cuda_and_triton
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
@@ -522,7 +534,7 @@ LoweringException: AssertionError:
             "import torch",
             env=env,
         )
-        lines = stderr.decode().split("\n")
+        lines = stderr.decode().split("\r\n" if IS_WINDOWS else "\n")
         # This is a sanity assert that our error is not spammy.
         # As of this test creation this was 18.
         # See this issue for the purpose o this test:
@@ -538,6 +550,7 @@ LoweringException: AssertionError:
         self.assertEqual(lines[-4], "Valid settings:")
 
     @requires_distributed()
+    @skipIfWindows(msg="TODO: (xuhancn), Can't reproduce locally")
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "dynamo"
@@ -717,10 +730,10 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertExpectedInline(
             munge_shape_guards(record.getMessage()),
             """\
-+- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
-+- __SHAPE_GUARD__: L['y'].size()[0] == L['z'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
-+- __SHAPE_GUARD__: ((2*L['z'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
-+- __SHAPE_GUARD__: 2 <= L['z'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # #:# in #
++- __SHAPE_GUARD__: L['z'].size()[0] == L['y'].size()[0]  # duck sizing added this equality because these variables had the same size 3 (to avoid this specialization, set torch.fx.experimental._config.use_duck_shape = False)
++- __SHAPE_GUARD__: ((2*L['y'].size()[0]) % 3) == 0  # if x.size(0) % 3 == 0:  # #:# in # #:# in #
++- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return x + torch.cat([y, z])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
 
     @make_logging_test(guards=True)
@@ -736,7 +749,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             munge_shape_guards(record.getMessage()),
             """\
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # #:# in #
-+- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.mark_unbacked(tensor, dim))""",  # noqa: B950
++- __SHAPE_GUARD__: 2 <= L['y'].size()[0]  # return any([x.size(0) == y.size(0) * 2])  # #:# in # (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))""",  # noqa: B950
         )
 
     @make_logging_test(guards=True)
@@ -933,6 +946,7 @@ exclusions = {
     "aot_graphs",
     "aot_graphs_effects",
     "pre_grad_graphs",
+    "joint_graph_passes",
     "post_grad_graphs",
     "inductor_metrics",
     "ir_pre_fusion",
