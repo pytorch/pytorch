@@ -80,7 +80,6 @@ from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     compare_equal_outs_and_grads,
     instantiate_parametrized_tests,
-    IS_ARM64,
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
@@ -7980,8 +7979,6 @@ aot_autograd_failures = {
     skip("nn.functional.binary_cross_entropy_with_logits"),  # seems to fail sometimes?
     skip("nn.functional.margin_ranking_loss"),  # seems flaky
     skip("linalg.lu_solve"),  # flaky
-    decorate("matmul", decorator=unittest.skipIf(IS_ARM64, "flaky")),
-    decorate("__rmatmul__", decorator=unittest.skipIf(IS_ARM64, "flaky")),
     # overrides atol=1e-4, rtol=1e-5 would do as well
     decorate(
         "svd_lowrank",
@@ -8001,8 +7998,6 @@ aot_autograd_failures = {
         "bicubic",
         decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)}),
     ),
-    # conv2d sometimes nondeterministic in this config?
-    decorate("nn.functional.conv2d", decorator=unittest.skipIf(IS_ARM64, "flaky")),
 }
 
 if not TEST_MKL:
@@ -8016,6 +8011,12 @@ if not TEST_MKL:
             ),
             decorate(
                 "__rmatmul__",
+                decorator=toleranceOverride(
+                    {torch.float32: tol(atol=6e-05, rtol=4e-06)}
+                ),
+            ),
+            decorate(
+                "nn.functional.conv2d",
                 decorator=toleranceOverride(
                     {torch.float32: tol(atol=6e-05, rtol=4e-06)}
                 ),
