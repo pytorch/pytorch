@@ -33,7 +33,7 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
 
 size_t CUDAAllocatorConfig::roundup_power2_divisions(size_t size) {
   return c10::CachingAllocator::AcceleratorAllocatorConfig::
-        roundup_power2_divisions(size);
+      roundup_power2_divisions(size);
 }
 
 void CUDAAllocatorConfig::lexArgs(
