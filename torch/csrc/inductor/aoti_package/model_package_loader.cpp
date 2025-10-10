@@ -784,6 +784,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     }
 
     TORCH_CHECK(
+        false,
         "Failed to find a generated cpp file or so file for model '",
         model_name,
         "' in the zip archive.\n\nAvailable models in the archive:\n",

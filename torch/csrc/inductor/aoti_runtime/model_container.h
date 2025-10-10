@@ -123,7 +123,7 @@ class AOTInductorModelContainer {
       constants_folding_lk.unlock();
       model_lk.lock();
     } else if (const_folded != ConstantState::FOLDED) {
-      AOTI_TORCH_CHECK(
+      STD_TORCH_CHECK(
           false,
           "Unknown constant state: ",
           toStringConstantState(constant_folded_));
@@ -169,7 +169,7 @@ class AOTInductorModelContainer {
           /* validate_full_update = */ false);
       const_folded = ConstantState::FOLDED;
     } else if (constant_folded_ != ConstantState::FOLDED) {
-      AOTI_TORCH_CHECK(
+      STD_TORCH_CHECK(
           false,
           "Unknown constant state: ",
           toStringConstantState(constant_folded_));
@@ -206,7 +206,7 @@ class AOTInductorModelContainer {
   }
 
   size_t num_constants() const {
-    AOTI_TORCH_CHECK(
+    STD_TORCH_CHECK(
         this->num_models() != 0, "No available models in container!");
 
     return models_[0]->num_constants();
@@ -214,7 +214,7 @@ class AOTInductorModelContainer {
 
   // retrieve the constant name of constants_info_[idx]
   const char* constant_name(size_t idx) const {
-    AOTI_TORCH_CHECK(
+    STD_TORCH_CHECK(
         this->num_models() != 0, "No available models in container!");
 
     return models_[0]->constant_name(static_cast<int64_t>(idx));
@@ -222,7 +222,7 @@ class AOTInductorModelContainer {
 
   // retrieve original FQN of constants_info_[idx]
   const char* constant_original_fqn(size_t idx) const {
-    AOTI_TORCH_CHECK(
+    STD_TORCH_CHECK(
         this->num_models() != 0, "No available models in container!");
 
     return models_[0]->constant_original_fqn(static_cast<int64_t>(idx));
@@ -230,14 +230,14 @@ class AOTInductorModelContainer {
 
   // retrieve whether constant is from folded of constants_info_[idx]
   bool constant_from_folded(size_t idx) const {
-    AOTI_TORCH_CHECK(
+    STD_TORCH_CHECK(
         this->num_models() != 0, "No available models in container!");
 
     return models_[0]->constant_from_folded(static_cast<int64_t>(idx));
   }
 
   size_t constant_data_size(size_t idx) const {
-    AOTI_TORCH_CHECK(
+    STD_TORCH_CHECK(
         this->num_models() != 0, "No available models in container!");
 
     return models_[0]->constant_data_size(static_cast<int64_t>(idx));
@@ -245,7 +245,7 @@ class AOTInductorModelContainer {
 
   // retrieve type of constants_info_[idx]
   int32_t constant_type(size_t idx) const {
-    AOTI_TORCH_CHECK(
+    STD_TORCH_CHECK(
         this->num_models() != 0, "No available models in container!");
 
     return models_[0]->constant_type(static_cast<int64_t>(idx));
@@ -253,7 +253,7 @@ class AOTInductorModelContainer {
 
   // retrieve dtype of constants_info_[idx]
   int32_t constant_dtype(size_t idx) const {
-    AOTI_TORCH_CHECK(
+    STD_TORCH_CHECK(
         this->num_models() != 0, "No available models in container!");
 
     return models_[0]->constant_dtype(static_cast<int64_t>(idx));
@@ -363,7 +363,7 @@ class AOTInductorModelContainer {
           continue;
         }
 
-        AOTI_TORCH_CHECK(
+        STD_TORCH_CHECK(
             false,
             "Cannot find constants ",
             constant_name,
@@ -377,7 +377,7 @@ class AOTInductorModelContainer {
       std::unordered_map<std::string, AtenTensorHandle>&& constants_map,
       bool use_inactive,
       bool validate_full_update) {
-    AOTI_TORCH_CHECK(
+    STD_TORCH_CHECK(
         this->num_models() != 0, "No available models in container!");
     if (validate_full_update) {
       assert_all_constants(constants_map);
@@ -424,7 +424,7 @@ class AOTInductorModelContainer {
       bool use_inactive,
       bool validate_full_update,
       bool user_managed = false) {
-    AOTI_TORCH_CHECK(
+    STD_TORCH_CHECK(
         this->num_models() != 0, "No available models in container!");
 
     if (validate_full_update) {
