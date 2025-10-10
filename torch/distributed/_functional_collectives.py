@@ -135,6 +135,41 @@ def wait_tensor(tensor):
     return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
+def isend(
+    tensor: torch.Tensor, dst: int, group: RANK_TYPES, tag: int = 0, group_dst: int = -1
+):
+    group_name = _resolve_group_name(group)
+    if group_dst != -1:
+        if dst is not None:
+            raise ValueError(
+                "Cannot specify both 'dst' and 'group_dst' args as per eager impl"
+            )
+        global_dst = c10d.get_global_rank(group, group_dst)
+    else:
+        global_dst = dst
+    return torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
+
+
+def irecv(
+    tensor: torch.Tensor,
+    src: int,
+    group: RANK_TYPES,
+    tag: int = 0,
+    group_src: int = -1,
+    group_rcv: int = -1,
+):
+    group_name = _resolve_group_name(group)
+    if group_src != -1:
+        if src is not None:
+            raise ValueError(
+                "Cannot specify both 'src' and 'group_src' args as per eager impl"
+            )
+        global_src = c10d.get_global_rank(group, group_src)
+    else:
+        global_src = src
+    return torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
+
+
 def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     """
     Broadcasts the tensor to all processes in the given process group.
@@ -898,6 +933,18 @@ def _wait_tensor_meta(self, *args):
     return torch.empty_like(self)
 
 
+def _isend_meta(self, *args):
+    return torch.empty_like(self)
+
+
+def _irecv_meta(self, *args):
+    return torch.empty_like(self)
+
+
+def _batch_p2p_ops_meta(op_list, peer_list, tag_list, tensors, group_name):
+    return [torch.empty_like(t) for t in tensors]
+
+
 def _all_gather_into_tensor_meta(shard, tag, rankset, group_size):
     return _make_all_gather_out_tensor(shard, group_size)
 
@@ -989,6 +1036,10 @@ lib_impl.impl("all_reduce_", _all_reduce__meta, "Meta")
 lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
 lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
 lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+lib_impl.impl("isend", _isend_meta, "Meta")
+lib_impl.impl("irecv", _irecv_meta, "Meta")
+lib_impl.impl("batch_p2p_ops", _batch_p2p_ops_meta, "Meta")
+
 lib_impl.impl(
     "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
 )
@@ -1012,6 +1063,15 @@ lib_impl.impl("broadcast_", _broadcast__meta, "Meta")
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor.default)
 torch.fx.node.has_side_effect(torch.ops._c10d_functional.wait_tensor)
 
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend.default)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv.default)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops.default)
+
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.isend)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.irecv)
+torch.fx.node.has_side_effect(torch.ops._c10d_functional.batch_p2p_ops)
+
+
 # Register legacy ops for backward compatibility
 # TODO(yifu): remove these in functional collective beta release
 legacy_lib = torch.library.Library("c10d_functional", "DEF")
@@ -1021,6 +1081,9 @@ ops_defs = [
     "all_reduce(Tensor self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
     "all_reduce_coalesced(Tensor[] self, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor[]",
     "wait_tensor(Tensor self) -> Tensor",
+    "isend(Tensor self, int dst, int tag, str group_name) -> Tensor",
+    "irecv(Tensor self, int src, int tag, str group_name) -> Tensor",
+    "batch_p2p_ops(str[] op_list, int[] peer_list, int[] tag_list, Tensor[] tensors, str group_name) -> Tensor[]",
     "all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor",
     "all_gather_into_tensor_coalesced(Tensor[] input, str tag, int[] ranks, int group_size) -> Tensor[]",
     "reduce_scatter_tensor(Tensor input, str reduceOp, str tag, int[] ranks, int group_size) -> Tensor",
@@ -1176,6 +1239,66 @@ def all_gather_inplace(
     return tensor_list
 
 
+def isend_inplace(
+    tensor: torch.Tensor,
+    dst: int,
+    tag: int,
+    group: RANK_TYPES = "",
+    group_dst: int = -1,
+):
+    group = group or dist.group.WORLD
+    assert group is not None
+    if group_dst != -1:
+        if dst is not None:
+            raise ValueError(
+                "Cannot specify both 'dst' and 'group_dst' args as per eager impl"
+            )
+        global_dst = c10d.get_global_rank(group, group_dst)
+    else:
+        global_dst = dst
+
+    group_name = _resolve_group_name(group)
+    return torch.ops._c10d_functional.isend(tensor, global_dst, tag, group_name)
+
+
+def irecv_inplace(
+    tensor: torch.Tensor,
+    src: int,
+    tag: int,
+    group: RANK_TYPES = "",
+    group_src: int = -1,
+):
+    group = group or dist.group.WORLD
+    assert group is not None
+    if group_src != -1:
+        if src is not None:
+            raise ValueError(
+                "Cannot specify both 'src' and 'group_src' args as per eager impl"
+            )
+        global_src = c10d.get_global_rank(group, group_src)
+    else:
+        global_src = src
+    group_name = _resolve_group_name(group)
+    return torch.ops._c10d_functional.irecv(tensor, global_src, tag, group_name)
+
+
+def batch_p2p_ops_inplace(
+    op_list: list[str],
+    peer_list: list[int],
+    tag_list: list[int],
+    tensors: list[torch.Tensor],
+    group_name: RANK_TYPES,
+):
+    assert dist.is_initialized()
+    if group_name is None or group_name == "":
+        group_name = c10d._get_default_group()
+    group_name = _resolve_group_name(group_name)
+    device = tensors[0].device
+    return torch.ops._c10d_functional.batch_p2p_ops(
+        op_list, peer_list, tag_list, tensors, group_name
+    )
+
+
 from torch.distributed.distributed_c10d import (
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
@@ -1183,6 +1306,9 @@ from torch.distributed.distributed_c10d import (
     all_gather_into_tensor as legacy_allgather,
     all_reduce as legacy_allreduce,
     all_to_all_single as legacy_all_to_all_single,
+    batch_isend_irecv as legacy_batch_p2p_ops,
+    irecv as legacy_irecv,
+    isend as legacy_isend,
     reduce_scatter_tensor as legacy_reducescatter,
 )
 
@@ -1197,4 +1323,7 @@ traceable_collective_remaps = {
     legacy_all_gather: all_gather_inplace,
     legacy_reduce_scatter_base: reduce_scatter_tensor_inplace,
     legacy_all_gather_base: all_gather_tensor_inplace,
+    legacy_isend: isend_inplace,
+    legacy_irecv: irecv_inplace,
+    legacy_batch_p2p_ops: batch_p2p_ops_inplace,
 }
