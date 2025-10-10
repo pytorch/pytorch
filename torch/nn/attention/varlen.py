@@ -6,7 +6,7 @@ that calls into the optimized Flash Attention kernels.
 
 import logging
 from functools import lru_cache
-from typing import Union, NamedTuple, Optional
+from typing import NamedTuple, Optional, Union
 
 import torch
 
@@ -21,8 +21,10 @@ def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
     return False
 
+
 class AuxRequest(NamedTuple):
     lse: bool = False
+
 
 @torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
 def _varlen_attn(
@@ -157,9 +159,15 @@ def varlen_attn(
         >>> total_tokens = seq_lengths.sum().item()
 
         >>> # Create packed query, key, value tensors
-        >>> query = torch.randn(total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda")
-        >>> key = torch.randn(total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda")
-        >>> value = torch.randn(total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda")
+        >>> query = torch.randn(
+        ...     total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda"
+        ... )
+        >>> key = torch.randn(
+        ...     total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda"
+        ... )
+        >>> value = torch.randn(
+        ...     total_tokens, num_heads, head_dim, dtype=torch.float16, device="cuda"
+        ... )
 
         >>> # Build cumulative sequence tensor
         >>> cu_seq = torch.zeros(shape.batch_size + 1, device=device, dtype=torch.int32)
@@ -167,7 +175,9 @@ def varlen_attn(
         >>> max_len = seq_lengths.max().item()
 
         >>> # Call varlen_attn
-        >>> output = varlen_attn(query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False)
+        >>> output = varlen_attn(
+        ...     query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False
+        ... )
 
     """
     out, lse, _ = torch.ops.torch_nn_attention._varlen_attn(
