@@ -38,7 +38,7 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
 fi
 
 # TODO: Move this to .ci/docker/requirements-ci.txt
-python -m pip install "psutil==5.9.1" "pynvml==11.4.1" "pytest-shard==0.1.2"
+python -m pip install "psutil==5.9.1" nvidia-ml-py "pytest-shard==0.1.2"
 
 run_tests() {
     # Run nvidia-smi if available
