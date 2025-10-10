@@ -153,9 +153,20 @@ pool2d_shape_check(
       input.sizes());
   }
 
-  TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
-              "pad should be smaller than or equal to half of kernel size, but got ",
-              "padW = ", padW, ", padH = ", padH, ", kW = ", kW, ", kH = ", kH);
+  int effectiveKW = (kW - 1) * dilationW + 1;
+  int effectiveKH = (kH - 1) * dilationH + 1;
+
+  TORCH_CHECK(
+      effectiveKW / 2 >= padW && effectiveKH / 2 >= padH,
+      "pad should be smaller than or equal to half of effective kernel size, but got ",
+      "padW = ",
+      padW,
+      ", padH = ",
+      padH,
+      ", effectiveKW = ",
+      effectiveKW,
+      ", effectiveKH = ",
+      effectiveKH);
 
   TORCH_CHECK(outputWidth >= 1 && outputHeight >= 1,
               "Given input size: (",
@@ -276,9 +287,25 @@ pool3d_shape_check(
                 "kernel size ", "(kT: ", kT, " kH: ", kH, " kW: ", kW, ")");
   }
 
-  TORCH_CHECK(kT/2 >= pT && kW/2 >= pW && kH/2 >= pH,
-              "pad should be smaller than or equal to half of kernel size, but got "
-              "kT: ", kT, " kW: ", kW, " kH: ", kH, " padT: ", pT, " padW: ", pW, " padH: ", pH);
+  int effectiveKT = (kT - 1) * dilationT + 1;
+  int effectiveKW = (kW - 1) * dilationW + 1;
+  int effectiveKH = (kH - 1) * dilationH + 1;
+
+  TORCH_CHECK(
+      effectiveKT / 2 >= pT && effectiveKW / 2 >= pW && effectiveKH / 2 >= pH,
+      "pad should be smaller than or equal to half of effective kernel size, but got "
+      "padT: ",
+      pT,
+      " padW: ",
+      pW,
+      " padH: ",
+      pH,
+      " effectiveKT: ",
+      effectiveKT,
+      " effectiveKW: ",
+      effectiveKW,
+      " effectiveKH: ",
+      effectiveKH);
 
   TORCH_CHECK(otime >= 1 && owidth >= 1 && oheight >= 1,
               "Given input size: (",
