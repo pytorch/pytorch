@@ -547,7 +547,7 @@ class CKGemmTemplate(CKTemplate):
         # Define the mapping of versions to stages
         version_to_stages = {1: 1, 3: 2, 4: 4, 5: 3}
         # Get the stages for the given version
-        stages = version_to_stages.get(version, None)
+        stages = version_to_stages.get(version)
         if stages is None:
             # This means we're at stage 2, and this requires computation
             # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143 # noqa: B950
@@ -612,9 +612,9 @@ class CKGemmTemplate(CKTemplate):
         """
         The primary entry point for the code rendering process used in this template.
         """
-        epilogue_nodes = kwargs.get("epilogue_nodes", None)
+        epilogue_nodes = kwargs.get("epilogue_nodes")
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
-        template_buffer_node = kwargs.get("template_buffer_node", None)
+        template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         # input nodes:

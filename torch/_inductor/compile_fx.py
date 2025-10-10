@@ -271,8 +271,10 @@ def record_original_output_strides(gm: GraphModule) -> None:
             and (val := output.meta.get("val")) is not None
             and isinstance(val, torch.Tensor)
         ):
+            # pyrefly: ignore  # unbound-name
             output_strides.append(val.stride())
         else:
+            # pyrefly: ignore  # bad-argument-type
             output_strides.append(None)
     output_node.meta["original_output_strides"] = output_strides
 
@@ -1546,6 +1548,7 @@ class _InProcessFxCompile(FxCompile):
                     node_runtimes = None
                     if inductor_metrics_log.isEnabledFor(logging.INFO):
                         num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
+                        # pyrefly: ignore  # bad-assignment
                         metrics.num_bytes_accessed += num_bytes
                         metrics.node_runtimes += node_runtimes
                         metrics.nodes_num_elem += nodes_num_elem
@@ -1589,8 +1592,10 @@ class _InProcessFxCompile(FxCompile):
                             disable = f"{disable} Found from {stack_trace}\n"
                         else:
                             disable = f"{disable}\n"
+                        # pyrefly: ignore  # unbound-name
                         V.graph.disable_cudagraphs_reason = disable
 
+                    # pyrefly: ignore  # unbound-name
                     if cudagraphs and not V.graph.disable_cudagraphs_reason:
                         maybe_incompat_node = get_first_incompatible_cudagraph_node(gm)
                         if maybe_incompat_node:
@@ -1599,22 +1604,29 @@ class _InProcessFxCompile(FxCompile):
                                 "stack_trace", None
                             ):
                                 disable = f"{disable} Found from {stack_trace}\n"
+                            # pyrefly: ignore  # unbound-name
                             V.graph.disable_cudagraphs_reason = disable
 
+                    # pyrefly: ignore  # unbound-name
                     if V.aot_compilation:
                         assert isinstance(
-                            compiled_fn, (str, list, torch.fx.GraphModule)
+                            compiled_fn,
+                            # pyrefly: ignore  # unbound-name
+                            (str, list, torch.fx.GraphModule),
                         ), type(compiled_fn)
                         return CompiledAOTI(compiled_fn)
 
                     # TODO: Hoist this above V.aot_compilation
+                    # pyrefly: ignore  # unbound-name
                     if cudagraphs and not V.graph.disable_cudagraphs_reason:
                         from torch._inductor.cudagraph_utils import (
                             check_lowering_disable_cudagraph,
                         )
 
+                        # pyrefly: ignore  # unbound-name
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
+                                # pyrefly: ignore  # unbound-name
                                 V.graph.device_node_mapping
                             )
                         )
@@ -1622,23 +1634,29 @@ class _InProcessFxCompile(FxCompile):
                     self._compile_stats[type(self)].codegen_and_compile += 1
 
                     if (
+                        # pyrefly: ignore  # unbound-name
                         torch._inductor.debug.RECORD_GRAPH_EXECUTION
+                        # pyrefly: ignore  # unbound-name
                         and torch._inductor.debug.GRAPH_COMPILE_IDS is not None
                     ):
                         compile_id = str(
+                            # pyrefly: ignore  # unbound-name
                             torch._guards.CompileContext.current_compile_id()
                         )
                         graph_id = graph_kwargs.get("graph_id")
                         if graph_id is not None:
+                            # pyrefly: ignore  # unbound-name
                             torch._inductor.debug.GRAPH_COMPILE_IDS[graph_id] = (
                                 compile_id
                             )
 
                     return CompiledFxGraph(
+                        # pyrefly: ignore  # bad-argument-type
                         compiled_fn,
                         graph,
                         gm,
                         output_strides,
+                        # pyrefly: ignore  # unbound-name
                         V.graph.disable_cudagraphs_reason,
                         metrics_helper.get_deltas(),
                         counters["inductor"] - inductor_counters,
@@ -1680,15 +1698,18 @@ def fx_codegen_and_compile(
         from .compile_fx_async import _AsyncFxCompile
         from .compile_fx_ext import _OutOfProcessFxCompile
 
+        # pyrefly: ignore  # unbound-name
         assert isinstance(scheme, _OutOfProcessFxCompile), (
             "async is only valid with an out-of-process compile mode"
         )
+        # pyrefly: ignore  # unbound-name
         scheme = _AsyncFxCompile(scheme)
 
     if fx_compile_progressive:
         from .compile_fx_async import _ProgressiveFxCompile
         from .compile_fx_ext import _OutOfProcessFxCompile
 
+        # pyrefly: ignore  # unbound-name
         assert isinstance(scheme, _OutOfProcessFxCompile), (
             "progressive is only valid with an out-of-process compile mode"
         )
@@ -1698,8 +1719,10 @@ def fx_codegen_and_compile(
         # Use in-process compile for the fast version
         fast_scheme = _InProcessFxCompile()
 
+        # pyrefly: ignore  # unbound-name
         scheme = _ProgressiveFxCompile(fast_scheme, scheme, progression_configs)
 
+    # pyrefly: ignore  # unbound-name
     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
 
 
@@ -1809,6 +1832,7 @@ def cudagraphify_impl(
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     check_input_idxs = get_input_idxs_to_check(inputs, static_input_idxs)  # type: ignore[arg-type]
+    # pyrefly: ignore  # annotation-mismatch
     static_input_idxs: OrderedSet[int] = OrderedSet(
         remove_unaligned_input_idxs(inputs, static_input_idxs)  # type: ignore[arg-type]
     )
@@ -1875,6 +1899,7 @@ def cudagraphify_impl(
                     index_expanded_dims_and_copy_(dst, src, expanded_dims)
             new_inputs.clear()
             graph.replay()
+            # pyrefly: ignore  # bad-return
             return static_outputs
 
     else:
@@ -1890,6 +1915,7 @@ def cudagraphify_impl(
                 index_expanded_dims_and_copy_(static_inputs[idx], src, expanded_dims)
             new_inputs.clear()
             graph.replay()
+            # pyrefly: ignore  # bad-return
             return static_outputs
 
     return align_inputs_from_check_idxs(run, check_input_idxs, OrderedSet())
@@ -1906,6 +1932,7 @@ def compile_fx_aot(
     # [See NOTE] Unwrapping subclasses AOT
     unwrap_tensor_subclass_parameters(model_)
 
+    # pyrefly: ignore  # annotation-mismatch
     config_patches: dict[str, Any] = copy.deepcopy(config_patches or {})
 
     if not (config_patches.get("fx_wrapper", False) or config.fx_wrapper):
@@ -2848,6 +2875,7 @@ def _aoti_flatten_inputs(
     Flatten the inputs to the graph module and return the flat inputs and options.
     Add "aot_inductor.serialized_in_spec" and "aot_inductor.serialized_out_spec" to the options.
     """
+    # pyrefly: ignore  # missing-module-attribute
     from .compile_fx import graph_returns_tuple
 
     assert graph_returns_tuple(gm), (
