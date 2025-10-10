@@ -1021,8 +1021,10 @@ def _load_aoti(
         file, model_name
     )
 
+    from torch._inductor.codecache import get_device_information
+    
     device = loaded_metadata["AOTI_DEVICE_KEY"]
-    current_device_info = torch._inductor.codecache.get_device_information(device)
+    current_device_info = get_device_information(device)
 
     for k, v in current_device_info.items():
         if k in loaded_metadata:
