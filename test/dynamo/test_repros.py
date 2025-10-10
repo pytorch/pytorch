@@ -53,7 +53,6 @@ from torch._dynamo.testing import (
     skipIfNotPy312,
     skipIfPy312,
 )
-from torch._inductor.exc import InductorError
 from torch._inductor.utils import fresh_cache
 from torch.nn import functional as F
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
