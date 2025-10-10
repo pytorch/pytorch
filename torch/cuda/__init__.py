@@ -1243,6 +1243,30 @@ def _get_amdsmi_handler(device: "Device" = None):
     return handle
 
 
+_cached_hip_to_amdsmi: Optional[dict[int, int]] = None
+
+
+def _get_amdsmi_device_index_from_hip_index(device: int) -> int:
+    global _cached_hip_to_amdsmi
+    if _cached_hip_to_amdsmi is None:
+        amdsmi_handles = amdsmi.amdsmi_get_processor_handles()
+
+        def gen():
+            for amdsmi_idx, handle in enumerate(amdsmi_handles):
+                info = amdsmi.amdsmi_get_gpu_enumeration_info(handle)
+                yield info["hip_id"], amdsmi_idx
+
+        _cached_hip_to_amdsmi = dict(gen())
+        if not _cached_hip_to_amdsmi and len(amdsmi_handles) > 1:
+            warnings.warn(
+                "Cannot translate HIP ID to AMD SMI ID due to"
+                " lack of translation information prior to ROCM 6.4."
+                " Functions that rely on amdsmi"
+                " (e.g. temperature()) may operate on wrong devices."
+            )
+    return _cached_hip_to_amdsmi[device]
+
+
 def _get_amdsmi_device_index(device: "Device") -> int:
     r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
@@ -1260,7 +1284,7 @@ def _get_amdsmi_device_index(device: "Device") -> int:
         raise RuntimeError(
             f"device {idx} is not visible (HIP_VISIBLE_DEVICES={visible_devices})"
         )
-    return idx_map[idx]
+    return _get_amdsmi_device_index_from_hip_index(idx_map[idx])
 
 
 def _get_amdsmi_device_memory_used(device: "Device" = None) -> int:
