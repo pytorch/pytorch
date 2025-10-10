@@ -1070,8 +1070,9 @@ class TestCustomOp(CustomOpTestCaseBase):
             del foo
 
         # Define a named tuple for a Point with x and y coordinates
-        Point = collections.namedtuple('Point', ['x', 'y'])
+        Point = collections.namedtuple("Point", ["x", "y"])
         with self.assertRaisesRegex(ValueError, "unsupported type"):
+
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: Point) -> Tensor:
                 raise NotImplementedError
