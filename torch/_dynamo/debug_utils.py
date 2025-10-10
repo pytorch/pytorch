@@ -264,7 +264,7 @@ def _cuda_system_info_comment() -> str:
     try:
         cuda_version_out = subprocess.check_output(["nvcc", "--version"])
         cuda_version_lines = cuda_version_out.decode().split("\n")
-        comment = "".join([f"# {s} \n" for s in cuda_version_lines if s not in [""]])
+        comment = "".join([f"# {s} \n" for s in cuda_version_lines if s != ""])
         model_str += f"{comment}\n"
     except (FileNotFoundError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
@@ -879,6 +879,7 @@ def aot_graph_input_parser(
             data_type, shape_str = match.groups()
             shape = tuple(shape_str.split(","))
             dtype = dtype_map[data_type]
+            # pyrefly: ignore  # bad-argument-type
             kwargs[param] = gen_tensor(shape, dtype)
 
         match = re.search(sym_shape_regex, annotation)
@@ -892,6 +893,7 @@ def aot_graph_input_parser(
             attr_name, data_type, shape_str, _ = match.groups()
             shape = tuple(shape_str.split(","))
             dtype = dtype_map[data_type]
+            # pyrefly: ignore  # bad-argument-type
             setattr(container, attr_name, gen_tensor(shape, dtype))
 
     return kwargs
