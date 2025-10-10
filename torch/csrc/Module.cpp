@@ -1981,7 +1981,7 @@ SigHandler* _getOldHandler(int signum) {
   SIG_CHECK(SIGSEGV);
   SIG_CHECK(SIGILL);
 
-  throw std::runtime_error("unexpected signal number");
+  TORCH_CHECK(false, "unexpected signal number");
 #undef SIG_CHECK
 }
 

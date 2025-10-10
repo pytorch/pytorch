@@ -16,15 +16,13 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
     const std::string& cubin_dir,
     const bool run_single_threaded) {
   if (run_single_threaded) {
-    if (num_models != 1) {
-      throw std::runtime_error(
-          "num_models must be 1 when run_single_threaded is true");
-    }
+    TORCH_CHECK(
+        num_models == 1,
+        "num_models must be 1 when run_single_threaded is true");
   } else {
-    if (num_models < 1) {
-      throw std::runtime_error(
-          "num_models must be >=1 when run_single_threaded is false");
-    }
+    TORCH_CHECK(
+        num_models >= 1,
+        "num_models must be >=1 when run_single_threaded is false");
   }
   model_so_ = std::make_unique<at::DynamicLibrary>(model_so_path.c_str());
   TORCH_CHECK(model_so_, "Failed to load model: ", model_so_path);
@@ -73,11 +71,10 @@ AOTIModelContainerRunner::AOTIModelContainerRunner(
       ? "AOTInductorModelContainerRunSingleThreaded"
       : "AOTInductorModelContainerRun";
   TRY_LOAD_SYMBOL(run_func_, run_func_name)
-  if (run_func_ == nullptr && run_single_threaded) {
-    throw std::runtime_error(
-        "No AOTInductorModelContainerRunSingleThreaded function in .so! To use AOTInductor-compiled model in the single-threaded mode,\
+  TORCH_CHECK(
+      run_func_ != nullptr || !run_single_threaded,
+      "No AOTInductorModelContainerRunSingleThreaded function in .so! To use AOTInductor-compiled model in the single-threaded mode,\
 consider rebuild your model with the latest AOTInductor.");
-  }
 
   TRY_LOAD_SYMBOL(
       free_inactive_constant_buffer_func_,
@@ -272,10 +269,9 @@ void AOTIModelContainerRunner::swap_constant_buffer() {
 }
 
 void AOTIModelContainerRunner::free_inactive_constant_buffer() {
-  if (!free_inactive_constant_buffer_func_) {
-    throw std::runtime_error(
-        "No free_inactive_constant_buffer in .so! Consider rebuild your model with the latest AOTInductor.");
-  }
+  TORCH_CHECK(
+      free_inactive_constant_buffer_func_ != nullptr,
+      "No free_inactive_constant_buffer in .so! Consider rebuild your model with the latest AOTInductor.");
   AOTI_RUNTIME_ERROR_CODE_CHECK(
       free_inactive_constant_buffer_func_(container_handle_));
 }
