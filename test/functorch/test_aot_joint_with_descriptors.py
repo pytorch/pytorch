@@ -6,6 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from torch.testing._internal.common_utils import requires_cuda
 from contextlib import ExitStack
 
 import torch
@@ -37,7 +38,43 @@ from torch._functorch.aot_autograd import (
     aot_export_joint_with_descriptors,
 )
 from torch._guards import tracing, TracingContext
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+
+def _export_joint_with_optional_export(model, inputs, with_export):
+    """
+    Helper function to export joint graph with or without dynamo export.
+
+    Args:
+        stack: ExitStack context manager
+        model: nn.Module or exported model
+        inputs: tuple of input tensors
+        with_export: bool, whether to use dynamo export
+
+    Returns:
+        joint_with_descriptors from aot_export_joint_with_descriptors
+    """
+    fake_mode = None
+
+    with ExitStack() as stack:
+
+        stack.enter_context(fx_traceback.preserve_node_meta())
+
+        if with_export:
+            stack.enter_context(
+                torch._dynamo.config.patch(install_free_tensors=True)
+            )
+            # TODO: switch to use the official graph_capture API once it is ready
+            model = _dynamo_graph_capture_for_export(model)(*inputs)
+            fake_mode = model.meta.get("fake_mode", None)
+
+        stack.enter_context(tracing(TracingContext(fake_mode)))
+        joint_with_descriptors = aot_export_joint_with_descriptors(
+            stack, model, inputs, decompositions={}
+        )
+
+        return joint_with_descriptors
 
 
 class TestAOTJointWithDescriptors(TestCase):
@@ -779,39 +816,87 @@ class inner_f(torch.nn.Module):
 
         inputs = (torch.randn(4, 3),)
 
-        for with_export in [False]:  # TODO: make dynamo work for annotation
-            with ExitStack() as stack:
-                model = SimpleLinear()
-                fake_mode = None
+        for with_export in [True, False]:
+            model = SimpleLinear()
 
-                stack.enter_context(fx_traceback.preserve_node_meta())
+            joint_with_descriptors = _export_joint_with_optional_export(
+                model, inputs, with_export
+            )
 
-                if with_export:
-                    stack.enter_context(
-                        torch._dynamo.config.patch(install_free_tensors=True)
+            for node in joint_with_descriptors.graph_module.graph.nodes:
+                if node.op in ("placeholder", "output"):
+                    continue
+                if node.target != torch.ops.aten.sub.Tensor and node.op not in (
+                    "placeholder",
+                    "output",
+                ):
+                    self.assertTrue(node.meta["custom"], {"pp_stage": 0})
+                elif node.target == torch.ops.aten.sub.Tensor:
+                    if "custom" in node.meta:
+                        self.assertTrue(node.meta.get("custom", {}), {})
+                else:
+                    raise AssertionError(f"Node not checked: {node}, {node.target}")
+
+    @requires_cuda
+    def test_preserve_annotate_flex_attention(self):
+        """Test flex_attention with annotate and aot_export_joint_with_descriptors"""
+
+        def _squared(score, b, h, m, n):
+            return score * score
+
+        def mask_mod(b, h, q, k):
+            return q >= 0
+
+        a = 12
+        b = 64
+        block_mask = create_block_mask(mask_mod, None, None, a * b, a * b)
+
+        class FlexAttentionModule(nn.Module):
+            def forward(self, x):
+                x = torch.sin(x)
+                with fx_traceback.annotate({"compile_inductor": 0}):
+                    x = flex_attention(
+                        x, x, x, block_mask=block_mask, score_mod=_squared
                     )
-                    # TODO: switch to use the official graph_capture API once it is ready
-                    model = _dynamo_graph_capture_for_export(model)(*inputs)
-                    fake_mode = model.meta.get("fake_mode", None)
+                return torch.cos(x)
 
-                stack.enter_context(tracing(TracingContext(fake_mode)))
-                joint_with_descriptors = aot_export_joint_with_descriptors(
-                    stack, model, inputs, decompositions={}
-                )
+        inputs = (torch.randn(1, 4, a * b, 16, requires_grad=True, device="cuda"),)
+        model = FlexAttentionModule().to("cuda")
 
-                for node in joint_with_descriptors.graph_module.graph.nodes:
-                    if node.op in ("placeholder", "output"):
-                        continue
-                    if node.target != torch.ops.aten.sub.Tensor and node.op not in (
-                        "placeholder",
-                        "output",
-                    ):
-                        self.assertTrue(node.meta["custom"], {"pp_stage": 0})
-                    elif node.target == torch.ops.aten.sub.Tensor:
-                        if "custom" in node.meta:
-                            self.assertTrue(node.meta.get("custom", {}), {})
-                    else:
-                        raise AssertionError(f"Node not checked: {node}, {node.target}")
+        for with_export in [False]: # , True
+            joint_with_descriptors = _export_joint_with_optional_export(
+                model, inputs, with_export
+            )
+
+            # Check that flex_attention_backward node has the correct annotation
+            found_flex_attention_backward = False
+            for node in joint_with_descriptors.graph_module.graph.nodes:
+                if node.op in ("placeholder", "output"):
+                    continue
+                # Check for flex_attention operations
+                if (
+                    hasattr(node.target, "__module__")
+                    and "flex_attention" in str(node.target)
+                ):
+                    found_flex_attention_backward = True
+                    # These nodes should have the compile_inductor annotation
+                    self.assertEqual(
+                        node.meta.get("custom", {}), {"compile_inductor": 0}
+                    )
+                elif node.target == torch.ops.aten.cos.default:
+                    # cos is outside the annotated region
+                    if "custom" in node.meta:
+                        self.assertEqual(node.meta.get("custom", None), None)
+                elif node.target == torch.ops.aten.sin.default:
+                    # sin is outside the annotated region
+                    if "custom" in node.meta:
+                        self.assertEqual(node.meta.get("custom", None), None)
+
+            # Ensure we actually found and checked flex_attention operations
+            self.assertTrue(
+                found_flex_attention_backward,
+                "Expected to find flex_attention operations in the graph",
+            )
 
 
 if __name__ == "__main__":

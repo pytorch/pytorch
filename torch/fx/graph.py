@@ -616,6 +616,11 @@ class CodeGen:
             nonlocal prev_stacktrace
 
             if node.op not in {"placeholder", "output"}:
+                annotation_str = ""
+                annotation = node.meta.get("custom", {})
+                if annotation:
+                    annotation_str = f" Annotation: {annotation}"
+
                 stack_trace = node.stack_trace
                 if stack_trace:
                     if stack_trace != prev_stacktrace:
@@ -624,7 +629,7 @@ class CodeGen:
                             summary_str = parsed_stack_trace.get_summary_str()
                         else:
                             summary_str = ""
-                        body.append(f"\n {dim(f'# {summary_str}')}\n")
+                        body.append(f"\n{dim(f'#{annotation_str} {summary_str}')}\n")
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     no_stacktrace_msg = "# No stacktrace found for following nodes"
