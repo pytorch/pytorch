@@ -10,6 +10,7 @@
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/ssize.h>
@@ -301,9 +302,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         auto hi = p_node->Input(1).toInt();
         auto step = p_node->Input(2).toInt();
         // error handling when step_val == 0 during runtime
-        if (step == 0) {
-          throw std::runtime_error("range() arg 3 must not be zero");
-        }
+        TORCH_CHECK(step != 0, "range() arg 3 must not be zero");
         if (step > 0 && lo < hi) {
           p_node->Output(0) = 1 + (hi - 1 - lo) / step;
         } else if (step < 0 && lo > hi) {
@@ -1272,8 +1271,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         return nullptr;
       }
       return [](ProcessedNode* pnode) {
-        const auto& message = pnode->Input(0).toStringRef();
-        throw std::runtime_error(message);
+        TORCH_CHECK(false, pnode->Input(0).toStringRef());
       };
     })
 
@@ -1488,16 +1486,14 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto& tensor = pnode->Input(0).toTensor();
         // JIT does a check for requires_grad, but we skip it here since SR is
         // inference only
-        if (!tensor.sizes().empty()) {
-          throw std::runtime_error(
-              "Cannot convert a tensor of dimension > 0 to scalar");
-        }
-        if (!isIntegralType(tensor.scalar_type(), /*includeBool=*/false)) {
-          std::stringstream ss;
-          ss << "Cannot input a tensor of type " << tensor.scalar_type()
-             << " as an integral argument";
-          throw std::runtime_error(ss.str());
-        }
+        TORCH_CHECK(
+            tensor.sizes().empty(),
+            "Cannot convert a tensor of dimension > 0 to scalar");
+        TORCH_CHECK(
+            isIntegralType(tensor.scalar_type(), /*includeBool=*/false),
+            "Cannot input a tensor of type ",
+            tensor.scalar_type(),
+            " as an integral argument");
         pnode->Output(0) = at::native::item(tensor).toInt();
       };
     })
