@@ -877,7 +877,10 @@ def log_softmax(
 def logsumexp(
     self: TensorLikeType, dim: DimsType, keepdim: bool = False
 ) -> TensorLikeType:
-    if not isinstance(dim, Iterable):
+    # Handle None (reduce over all dimensions)
+    if dim is None:
+        dim = tuple(range(self.ndim))
+    elif not isinstance(dim, Iterable):
         dim = (dim,)
     if self.numel() == 0:
         # pyrefly: ignore  # no-matching-overload

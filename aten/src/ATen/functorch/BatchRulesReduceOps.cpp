@@ -38,6 +38,10 @@ static Tensor mean_decomp(
   return at::mean(self, range(0, self.dim()), false, dtype);
 }
 
+static Tensor logsumexp_decomp(const Tensor& self) {
+  return at::logsumexp(self, range(0, self.dim()), false);
+}
+
 static Tensor prod_decomp(
     const Tensor& self, std::optional<ScalarType> dtype) {
   return at::prod(self.flatten(), 0, false, dtype);
@@ -474,7 +478,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_BOXED_ARGS(kthvalue, 2, KEEPDIM_CASE_VARIABLE, 3);
   REDUCTION_BOXED_ARGS(linalg_vector_norm, 2, KEEPDIM_CASE_VARIABLE, 3);
   REDUCTION_NO_KEEPDIM_ARG(logcumsumexp);
-  REDUCTION_WITH_KEEPDIM_ARG(logsumexp);
+  m.impl("logsumexp", logsumexp_decomp);
+  REDUCTION_WITH_KEEPDIM_ARG(logsumexp.dim_IntList);
   m.impl("max", max_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(max.dim);
   m.impl("mean", mean_decomp);

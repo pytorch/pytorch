@@ -77,6 +77,7 @@ inductor_decompositions = get_decompositions(
         aten.leaky_relu,
         aten.linalg_vector_norm,
         aten._log_softmax,
+        aten.logsumexp.dim_IntList,
         aten.max_pool2d_with_indices_backward,
         aten._native_batch_norm_legit,
         aten._native_batch_norm_legit_functional,
