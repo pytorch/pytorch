@@ -277,7 +277,7 @@ def create_graph(objects, *, context=None, filter=None):
         references = annotated_references(obj)
         for referrent in gc.get_referents(obj):
             rid = id(referrent)
-            tidx = id_to_node.get(rid, None)
+            tidx = id_to_node.get(rid)
             if tidx is None:
                 continue
             labels = references.get(rid, ["?"])

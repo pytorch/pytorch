@@ -611,8 +611,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     # Use position-based lookup for building output
     # only update the return node args, and remain all other users unchanged
     output_updated_args = [
-        position_to_quant[i] if i in position_to_quant else node
-        for i, node in enumerate(fwd_outputs)
+        position_to_quant.get(i, node) for i, node in enumerate(fwd_outputs)
     ]
     # add the scale nodes to the output find the first sym_node in the output
     idx = find_first_sym_node(output_updated_args)

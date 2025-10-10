@@ -228,7 +228,7 @@ def replicate_impl(
     # Place Replicate leftmost for highest priority in the method resolution order
     for module in modules:
         cls = module.__class__
-        new_cls = cls_to_replicate_cls.get(cls, None)
+        new_cls = cls_to_replicate_cls.get(cls)
         if not new_cls:
             dct = {"__deepcopy__": _unimplemented_deepcopy}
             new_cls = type(f"Replicate{cls.__name__}", (ReplicateModule, cls), dct)

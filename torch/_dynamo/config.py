@@ -401,7 +401,7 @@ allow_rnn = False
 # exported FX graph. This flag should become the default eventually
 # and be removed, but currently provides a way to fall back to old
 # graph breaking behavior.
-capture_sparse_compute = False if is_fbcode() else True
+capture_sparse_compute = not is_fbcode()
 
 # If true, error if we try to compile a function that has
 # been seen before.

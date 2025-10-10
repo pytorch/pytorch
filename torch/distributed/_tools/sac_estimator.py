@@ -711,7 +711,7 @@ class SACEstimator(TorchDispatchMode):
                 str(i in sac_stats.view_like_ops),
                 str(i in sac_stats.rand_ops),
                 str(i in sac_stats.saved_autograd_ops),
-                str(op_parent.get(i, None)),
+                str(op_parent.get(i)),
             ]
             table_data.append(row)
         # Define headers

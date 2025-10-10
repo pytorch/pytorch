@@ -326,8 +326,7 @@ def _insert_copy_for_mutations(
             return_nodes_to_copy[return_node] = copy_node
 
     output_args = tuple(
-        return_nodes_to_copy[node] if node in return_nodes_to_copy else node
-        for node in user_output_nodes
+        return_nodes_to_copy.get(node, node) for node in user_output_nodes
     )
     with gm.graph.inserting_before(output_node):
         # Only return user outputs

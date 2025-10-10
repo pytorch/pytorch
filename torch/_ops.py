@@ -1409,7 +1409,7 @@ class _HigherOrderNamespace(types.ModuleType):
 
     def __getattr__(self, name: str) -> HigherOrderOperator:
         # Following _OpNamespace.__getattr__, we cache the op on this object.
-        op = _higher_order_ops.get(name, None)
+        op = _higher_order_ops.get(name)
         if op is None:
             raise AttributeError(
                 f"'_HigherOrderNamespace' 'torch.ops.higher_order' object has no attribute '{name}'"
