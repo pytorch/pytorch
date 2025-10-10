@@ -633,7 +633,9 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                 )
 
     @onlyCUDA
-    @dtypes(torch.bfloat16,)
+    @dtypes(
+        torch.bfloat16,
+    )
     @largeTensorTest
     def test_embedding_backward_large_batch_overflow(self, device, dtype):
         """
@@ -655,14 +657,19 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         min_partial_for_overflow = (2**31) // 4096
         required_indices = (min_partial_for_overflow - max_segments) * NROWS_PER_THREAD
 
-        assert num_indices > required_indices, \
+        assert num_indices > required_indices, (
             f"Test bug: num_indices={num_indices:,} too small! Need >{required_indices:,}"
+        )
 
         # Generate indices that create many partial segments
         # Strategy: ~950 unique indices, each appearing many times
         num_unique = 954
-        unique_indices = torch.randint(2, 1276, (num_unique,), dtype=torch.int64, device=device)
-        counts = torch.randint(5000, 12000, (num_unique,), dtype=torch.int64, device=device)
+        unique_indices = torch.randint(
+            2, 1276, (num_unique,), dtype=torch.int64, device=device
+        )
+        counts = torch.randint(
+            5000, 12000, (num_unique,), dtype=torch.int64, device=device
+        )
 
         # Normalize to exactly num_indices
         counts = (counts.float() / counts.float().sum() * num_indices).long()
@@ -676,11 +683,14 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         stride_warped = ((embedding_dim + 31) // 32) * 32
         total_threads = approx_partial_segments * stride_warped
 
-        assert total_threads > 2**31 - 1, \
+        assert total_threads > 2**31 - 1, (
             f"Test bug: threads={total_threads:,} <= INT32_MAX, won't trigger overflow!"
+        )
 
         # Create gradient output
-        grad_output = torch.randn(num_indices, embedding_dim, dtype=dtype, device=device)
+        grad_output = torch.randn(
+            num_indices, embedding_dim, dtype=dtype, device=device
+        )
 
         # This should complete without error (after fix)
         # Before fix: RuntimeError with "illegal memory access"
@@ -691,7 +701,6 @@ class TestEmbeddingNNDeviceType(NNTestCase):
         # Verify output shape
         assert grad_weight.shape == (num_weights, embedding_dim)
         assert grad_weight.dtype == torch.bfloat16
-
 
     # Check correctness of torch.nn.functional.embedding_bag forward and
     # backward functions with padding_idx, given a 2D indices input. Compare
