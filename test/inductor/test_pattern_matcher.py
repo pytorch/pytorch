@@ -1923,7 +1923,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(f3_inp, f3_replaced_inp)
         self.assertEqual(f3_out, f3_replaced_out)
 
-        # Casex 4: multiple views with mutations
+        # Case 4: multiple views with mutations
         @torch.compile(fullgraph=True, backend=custom_backend)
         def f4(x):
             x_reshaped = x.view(3, 1)
@@ -1958,6 +1958,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(f4_inp, f4_replaced_inp)
         self.assertEqual(f4_out, f4_replaced_out)
 
+        # Case 5: multiple writers and readers
         @torch.compile(fullgraph=True, backend=custom_backend)
         def f5(
             x: torch.Tensor, y: torch.Tensor, outx: torch.Tensor, outy: torch.Tensor

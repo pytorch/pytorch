@@ -181,10 +181,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
         )
 
-    if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
-        GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
-            post_grad_custom_post_pass
-        )
     if post_grad_mutable_custom_post_pass := config.post_grad_mutable_custom_post_pass:
         from torch._inductor.pattern_matcher import (
             add_implict_edges,
@@ -204,6 +200,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         if mutable_custom_op_pass:
             remove_implict_edges(gm.graph)
             gm = make_autofunctionalize(gm)
+
+    if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
+        GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
+            post_grad_custom_post_pass
+        )
 
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
 
@@ -1301,7 +1302,10 @@ def decompose_auto_functionalized(graph, preserve_meta=False):
                     and hasattr(node.target, "_schema")
                     and is_mutation_op(node)
                 ):
-                    node.meta.update(original_metadata)
+                    if "mutation_region_id" in original_metadata:
+                        node.meta["mutation_region_id"] = original_metadata[
+                            "mutation_region_id"
+                        ]
         else:
             match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
@@ -1362,7 +1366,10 @@ def decompose_auto_functionalized(graph, preserve_meta=False):
                     and hasattr(node.target, "_schema")
                     and is_mutation_op(node)
                 ):
-                    node.meta.update(original_metadata)
+                    if "mutation_region_id" in original_metadata:
+                        node.meta["mutation_region_id"] = original_metadata[
+                            "mutation_region_id"
+                        ]
         else:
             match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
