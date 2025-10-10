@@ -13713,7 +13713,7 @@ class TestAutogradStreamSynchronization(TestCase):
         check_ordering()
 
     # Fails on MPS
-    @skipIfMPS
+    @expectedFailureMPS
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_warn_on_accumulate_grad_stream_mismatch_flag(self):
         def do_test(suppress_warn, keep_grad_acc):
