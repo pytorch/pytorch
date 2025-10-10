@@ -178,3 +178,9 @@ def reset_code_caches() -> None:
             if code:
                 reset_code(code)
         code_context.clear()
+
+
+from torch._dynamo.einops_patch import _patch_einops
+
+
+_patch_einops()
