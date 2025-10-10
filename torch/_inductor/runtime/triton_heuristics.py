@@ -185,6 +185,14 @@ def autotune_hints_to_configs(
     return configs
 
 
+def disable_pointwise_autotuning(inductor_meta):
+    # Autotuning can give different benchmarking results from run to run, and
+    # therefore we disable autotuning when use_deterministic flag is on.
+    if inductor_meta.get("are_deterministic_algorithms_enabled"):
+        return True
+    return not inductor_meta.get("autotune_pointwise", True)
+
+
 def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
     call_args = []
     call_kwargs = {}
@@ -2575,7 +2583,7 @@ def pointwise(
 
     configs = None
     if len(size_hints) == 1:
-        if not inductor_meta.get("autotune_pointwise", True) and not (
+        if disable_pointwise_autotuning(inductor_meta) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
@@ -2590,8 +2598,7 @@ def pointwise(
             ]
     if len(size_hints) == 2:
         if (
-            not inductor_meta.get("autotune_pointwise", True)
-            or tile_hint == TileHint.SQUARE
+            disable_pointwise_autotuning(inductor_meta) or tile_hint == TileHint.SQUARE
         ) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -2608,7 +2615,7 @@ def pointwise(
                 *hinted_configs,
             ]
     if len(size_hints) == 3:
-        if not inductor_meta.get("autotune_pointwise", True):
+        if disable_pointwise_autotuning(inductor_meta):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
@@ -2789,6 +2796,8 @@ def _reduction_configs(
         return configs + [outer_config]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return configs + [tiny_config]
+    if disable_pointwise_autotuning(inductor_meta):
+        return configs + [make_config(32, 128)]
 
     return configs + [
         contiguous_config,
@@ -2899,7 +2908,7 @@ def filter_reduction_configs_for_determinism(
         return (
             inductor_meta.get("deterministic", False)
             or torch._inductor.config.test_configs.force_filter_reduction_configs
-        ) or inductor_meta.get("are_deterministic_algorithms_enabled")
+        )
 
     if not _do_filter_due_to_inductor_config() or len(configs) == 1:
         # no filtering happening if NOT in deterministic mode
@@ -3151,6 +3160,9 @@ def _persistent_reduction_configs(
         for prefix in size_hints:
             if prefix_is_reduction(prefix):
                 c.kwargs.pop(f"{prefix.upper()}BLOCK")
+
+    if disable_pointwise_autotuning(inductor_meta):
+        configs = configs[:1]
 
     return configs
 
