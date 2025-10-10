@@ -3532,7 +3532,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         from torch.distributed.tensor.experimental._func_map import _local_map_wrapped
 
         # check is important to avoid subclass dispatch
-        if type(value) != type(_local_map_wrapped):
+        if type(value) is not type(_local_map_wrapped):
             return False
 
         return value == _local_map_wrapped and cls._enabled
