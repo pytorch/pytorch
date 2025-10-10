@@ -154,7 +154,13 @@ class Benchmarker:
                 " in `fn_args` or `fn_kwargs` and `device` not explicitly provided!"
                 " You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."
             )
-        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+
+        # No need to wrap if the callable takes no arguments
+        if len(fn_args) == 0 and len(fn_kwargs) == 0:
+            _callable = fn
+        else:
+            _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+
         if inferred_device == torch.device("cpu"):
             return self.benchmark_cpu(_callable, **kwargs)
         # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking

@@ -373,24 +373,20 @@ class MultiKernelCall:
         be picked.
         """
 
-        def wrap_fn(kernel, index):
-            def inner():
-                filtered_args = self._get_filtered_args(args, index)
-                args_clone, kwargs_clone = kernel.clone_args(*filtered_args, **kwargs)
-                return kernel.run(*args_clone, **kwargs_clone)
-
-            return inner
+        def get_args_kwargs(kernel, index) -> tuple[tuple, dict[str, Any]]:
+            filtered_args = self._get_filtered_args(args, index)
+            args_clone, kwargs_clone = kernel.clone_args(*filtered_args, **kwargs)
+            return args_clone, kwargs_clone
 
         return [
             benchmarker.benchmark(
-                wrap_fn(kernel, index),
-                fn_args=tuple(),
-                fn_kwargs=dict(),
-                device=kernel.device_props.type,
+                kernel.run,
+                *get_args_kwargs(kernel, index),
+                device=kernel.device_props.type
+                if isinstance(kernel, CachingAutotuner)
+                else None,
                 rep=40,
             )
-            if isinstance(kernel, CachingAutotuner)
-            else benchmarker.benchmark_gpu(wrap_fn(kernel, index), rep=40)
             for index, kernel in enumerate(self.kernels)
         ]
 

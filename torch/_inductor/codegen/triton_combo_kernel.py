@@ -933,7 +933,7 @@ class ComboKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                f"ms = benchmarker.benchmark(lambda: call(args), fn_args=tuple(), fn_kwargs=dict(), device={device.type},rep=40)"
+                f"ms = benchmarker.benchmark(call, fn_args=(args,), fn_kwargs=dict(), device={device.type},rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")

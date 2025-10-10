@@ -139,8 +139,8 @@ def benchmark_all_kernels(
                 )
         else:
             ms = benchmarker.benchmark(
-                lambda: kernel_mod.call(args),
-                fn_args=tuple(),
+                kernel_mod.call,
+                fn_args=(args,),
                 fn_kwargs=dict(),
                 device=device_type,
                 rep=40,
