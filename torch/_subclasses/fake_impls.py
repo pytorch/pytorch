@@ -1082,6 +1082,14 @@ def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
     )
 
 
+@register_op_impl(aten._to_sparse.default)
+@register_op_impl(aten._to_sparse.sparse_dim)
+@register_op_impl(aten.to_sparse.default)
+@register_op_impl(aten.to_sparse.sparse_dim)
+def sparse_tensors_unsupported(fake_mode, func, *args, **kwargs):
+    raise UnsupportedOperatorException("torch.compile does not support sparse tensors")
+
+
 @register_op_impl(
     [
         x
