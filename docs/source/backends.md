@@ -34,6 +34,7 @@ These backends include:
 
 ```{eval-rst}
 .. autofunction::  torch.backends.cpu.get_cpu_capability
+.. autofunction::  torch.backends.cpu.get_sve_len
 ```
 
 ## torch.backends.cuda

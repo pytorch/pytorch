@@ -528,10 +528,10 @@ class Vectorized<int16_t> : public Vectorizedi {
         val2,
         val1);
   }
-  template <int64_t mask>
   static Vectorized<int16_t> blend(
       Vectorized<int16_t> a,
-      Vectorized<int16_t> b) {
+      Vectorized<int16_t> b,
+      int64_t mask) {
     return _mm512_mask_blend_epi16(mask, a.values, b.values);
   }
   static Vectorized<int16_t> blendv(
