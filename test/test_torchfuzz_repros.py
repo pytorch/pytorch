@@ -3,6 +3,10 @@
 Fuzzer-discovered eager/compile divergence test cases.
 
 All tests are marked as xfail since they represent known compilation bugs.
+
+IF YOU ARE HERE YOU LIKELY DIDN'T DO ANYTHING WRONG. In fact, you probably did something right!
+All of these tests are associated with bugs the fuzzer found. If one of these tests starts failing due to your PR,
+it actually means your PR fixed the bug! Feel free to delete the test and close out the issue linked from the test.
 """
 
 import pytest
