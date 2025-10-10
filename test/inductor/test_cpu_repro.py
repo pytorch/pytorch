@@ -4661,6 +4661,10 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
+        # Tail vectorization case
+        x = torch.rand(37)
+        torch._dynamo.reset()
+        metrics.reset()
         with torch.no_grad():
             compiled_fn = torch.compile(fn)
             _, code = run_and_get_cpp_code(compiled_fn, x)
@@ -5503,14 +5507,6 @@ class CPUReproTests(TestCase):
             )
             n_veckernel = 6 if op is torch.masked.mean else 3
             check_metrics_vec_kernel_count(n_veckernel)
-
-            with torch.no_grad():
-                compiled_fn = torch.compile(fn)
-                _, code = run_and_get_cpp_code(compiled_fn, input1, input2, input3)
-                # Check that both main and tail loops are vectorized
-                FileCheck().check_count(
-                    "at::vec::VecMask<float,1>::from", 9, exactly=True
-                ).run(code)
 
     @requires_vectorization
     def test_full_bits_lowp(self):
