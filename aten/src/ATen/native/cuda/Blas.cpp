@@ -2566,79 +2566,27 @@ _scaled_mm_cuda_v2(
                       out);
 }
 
-Tensor
-_scaled_grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
-const Tensor& scale_a, const Tensor& scale_b,
-const std::optional<at::Tensor>& offs,
-const std::optional<at::Tensor>& bias,
-const std::optional<at::Tensor>& scale_result,
-std::optional<c10::ScalarType> out_dtype,
-bool use_fast_accum) {
-  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
-  TORCH_CHECK(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
-
-  TORCH_CHECK(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
-  TORCH_CHECK(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
-  TORCH_CHECK(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
-  TORCH_CHECK(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
-  const bool a_is_2d = mat_a.dim() == 2;
-  const bool b_is_2d = mat_b.dim() == 2;
-  if (!a_is_2d || !b_is_2d) {
-    TORCH_CHECK(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
-  }
-  TORCH_CHECK(
-    mat_a.size(-1) % 16 == 0,
-    "Expected trailing dimension of mat_a to be divisible by 16 ",
-    "but got mat1 shape: (",
-    mat_a.sizes(),
-    ").");
-  TORCH_CHECK(mat_b.size(-2) % 16 == 0 && mat_b.size(-1) % 16 == 0,
-    "Expected mat_b shape to be divisible by 16 ",
-    "but got mat_b shape: (",
-    mat_b.sizes(),
-    ").");
-
-
-  TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
-  TORCH_CHECK(!scale_result.has_value(), "Scale result not supported yet");
-  TORCH_CHECK(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
-
-  if (offs.has_value()) {
-    TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
-    TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
-  }
-
-  // FP8 per-tensor and per-row scaling expect fp32 scales.
-  // MXFP8 expects float8_e8m0fnu scales.
-  TORCH_CHECK(
-      (scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat) ||
-      (scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu),
-      "For FP8 tensorwise and rowwise, both scales must both be float32 tensors. For MXFP8, scales must both be float8_e8m0fnu tensors.");
-
-  const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
-  check_scale(mat_a, scale_a, 0 ,0, scale_multiplier);
-  check_scale(mat_b, scale_b, 1, 1, scale_multiplier);
-
-  const auto out_dtype_ = out_dtype.value_or(kBFloat16);
-  TORCH_CHECK(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
-
-  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
-
-#if defined(USE_FBGEMM_GENAI) && defined(USE_CUDA) && !defined(USE_ROCM)
-  // MXFP8 grouped GEMM dispatching
-  bool is_mx8mx8bf16 = (
-    mat_a.scalar_type() == at::kFloat8_e4m3fn && mat_b.scalar_type() == at::kFloat8_e4m3fn &&
-    scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu
-  );
-  TORCH_CHECK(out_dtype == at::kBFloat16, "Only bf16 out_dtype is supported for MXFP8 grouped gemm");
-
-  if (is_mx8mx8bf16) {
+// 2d-2d and 2d-3d
+// scaling=MXFP8
+// CUDA-only
+Tensor&
+_mx8_mx8_bf16_grouped_mm_fbgemm(
+        const Tensor& mat_a,
+        const Tensor& mat_b,
+        const Tensor& scale_a,
+        const Tensor& scale_b,
+        const std::optional<at::Tensor>& offs,
+        Tensor& out) {
+    const bool a_is_2d = mat_a.dim() == 2;
+    const bool b_is_2d = mat_b.dim() == 2;
     bool b_is_3d = mat_b.dim() == 3;
     bool is_2d_2d = a_is_2d && b_is_2d;
     bool is_2d_3d = a_is_2d && b_is_3d;
-    TORCH_CHECK(is_2d_2d || is_2d_3d, "MXFP8 grouped GEMM currently only supports 2d-2d and 2d-3d cases");
-    TORCH_CHECK(offs.has_value(), "MXFP8 2d-2d and 2d-3d grouped GEMMs requires offsets");
+    TORCH_CHECK_VALUE(is_2d_2d || is_2d_3d, "MXFP8 grouped GEMM currently only supports 2d-2d and 2d-3d cases");
+    TORCH_CHECK_VALUE(offs.has_value(), "MXFP8 2d-2d and 2d-3d grouped GEMMs requires offsets");
+    TORCH_CHECK_VALUE(out.scalar_type() == at::kBFloat16, "Only bf16 out_dtype is supported for MXFP8 grouped gemm");
 
+#if defined(USE_FBGEMM_GENAI) and !defined(USE_ROCM)
     fbgemm_gpu::mx8mx8bf16_grouped_mm(
         mat_a,
         mat_b,
@@ -2646,13 +2594,27 @@ bool use_fast_accum) {
         scale_b,
         offs.value(),
         out);
-    return out;
-  }
+#else
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "mxfp8_mxfp8 grouped gemm requires compile with USE_FBGEMM_GENAI");
 #endif
+    return out;
+}
 
-#ifndef USE_ROCM
-  TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
-  TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
+// 2d-2d and 2d-3d cases
+// scaling=rowwise
+// CUDA-only
+Tensor&
+_f8_f8_bf16_rowwise_grouped_mm_cuda(
+          const Tensor& mat_a,
+          const Tensor& mat_b,
+          const Tensor& scale_a,
+          const Tensor& scale_b,
+          const std::optional<Tensor>& offs,
+          const std::optional<Tensor>& bias,
+          const bool use_fast_accum,
+          Tensor& out) {
+  TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_a.scalar_type());
+  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fn, "Expected mat_a to be Float8_e4m3 matrix got ", mat_b.scalar_type());
 
   at::cuda::detail::f8f8bf16_grouped_mm(
       mat_a,
@@ -2664,11 +2626,23 @@ bool use_fast_accum) {
       use_fast_accum,
       out);
     return out;
-#else
-#ifdef USE_FBGEMM_GENAI
-  TORCH_CHECK(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
-  TORCH_CHECK(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+}
 
+// 2d-2d and 2d-3d cases
+// scaling=rowwise
+// only being called for rocm
+Tensor&
+_f8_f8_bf16_rowwise_grouped_mm_rocm(
+      const Tensor& mat_a,
+      const Tensor& mat_b,
+      const Tensor& scale_a,
+      const Tensor& scale_b,
+      const std::optional<Tensor>& offs,
+      Tensor& out) {
+  TORCH_CHECK_VALUE(mat_a.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_a.scalar_type());
+  TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
+
+#if defined(USE_FBGEMM_GENAI) && defined(USE_ROCM)
   fbgemm_gpu::f8f8bf16_rowwise_grouped_mm(
       mat_a,
       // FBGEMM expects B matrix shape to be (.., N, K)
@@ -2677,13 +2651,142 @@ bool use_fast_accum) {
       scale_b,
       offs,
       out);
-  return out;
 #else
-  TORCH_CHECK(false, "grouped gemm is not supported without USE_FBGEMM_GENAI on ROCM")
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "grouped gemm is not supported without USE_FBGEMM_GENAI on ROCM")
+#endif
+  return out;
+
+}
+
+// Dispatch f8 x f8 -> bf16 row-wise scaled to rocm/cuda
+Tensor&
+_f8_f8_bf16_rowwise_grouped_mm(
+      const Tensor& mat_a,
+      const Tensor& mat_b,
+      const Tensor& scale_a,
+      const Tensor& scale_b,
+      const std::optional<Tensor>& offs,
+      const std::optional<Tensor>& bias,
+      bool use_fast_accum,
+      Tensor& out) {
+#ifndef USE_ROCM
+  return _f8_f8_bf16_rowwise_grouped_mm_cuda(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      offs,
+      bias,
+      use_fast_accum,
+      out);
+#else
+  // NOTE: ignore use_fast_accum
+  TORCH_CHECK_VALUE(!bias.has_value(), "ROCM grouped gemm does not support bias")
+  return _f8_f8_bf16_rowwise_grouped_mm_rocm(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      offs,
+      out);
+#endif
+}
+
+Tensor
+_scaled_grouped_mm_cuda(
+        const Tensor& mat_a,
+        const Tensor& mat_b,
+        const Tensor& scale_a,
+        const Tensor& scale_b,
+        const std::optional<at::Tensor>& offs,
+        const std::optional<at::Tensor>& bias,
+        const std::optional<at::Tensor>& scale_result,
+        std::optional<c10::ScalarType> out_dtype,
+        bool use_fast_accum) {
+  bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
+  TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
+
+  TORCH_CHECK_VALUE(!check_valid_strides_and_return_transposed(mat_a), "Expected mat1 to not be transposed");
+  TORCH_CHECK_VALUE(check_valid_strides_and_return_transposed(mat_b), "Expected mat2 to be transposed");
+  TORCH_CHECK_VALUE(mat_a.dim() == 2 || mat_a.dim() == 3, "mat_a has to be 2 or 3d");
+  TORCH_CHECK_VALUE(mat_b.dim() == 2 || mat_b.dim() == 3, "mat_b has to be 2 or 3d");
+  const bool a_is_2d = mat_a.dim() == 2;
+  const bool b_is_2d = mat_b.dim() == 2;
+
+  // NOTE(slayton): For sub-1B formats want contraction_dim argument?
+  if (!a_is_2d || !b_is_2d) {
+    TORCH_CHECK_VALUE(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
+  }
+  TORCH_CHECK_VALUE(
+    mat_a.size(-1) % 16 == 0,
+    "Expected trailing dimension of mat_a to be divisible by 16 ",
+    "but got mat1 shape: (",
+    mat_a.sizes(),
+    ").");
+  TORCH_CHECK_VALUE(mat_b.size(-2) % 16 == 0 && mat_b.size(-1) % 16 == 0,
+    "Expected mat_b shape to be divisible by 16 ",
+    "but got mat_b shape: (",
+    mat_b.sizes(),
+    ").");
+
+
+  TORCH_CHECK_VALUE(!bias.has_value(), "Bias not supported yet");
+  TORCH_CHECK_VALUE(!scale_result.has_value(), "Scale result not supported yet");
+  TORCH_CHECK_VALUE(offs.has_value() ==  (a_is_2d || b_is_2d), "Have to provide offsets if there is a 2d matrix");
+
+  // NOTE: mxfp8 x mxfp8 requires (and asserts later) that offsets is present.
+  //       for rowwise, no offsets implies 3d-3d and is handled by lower-level
+  //       routines
+  if (offs.has_value()) {
+    TORCH_CHECK_VALUE(offs->dim() == 1, "offs has to be 1D");
+    TORCH_CHECK_VALUE(offs->dtype() == at::kInt, "Offsets have to be int32");
+  }
+  // FP8 per-tensor and per-row scaling expect fp32 scales.
+  // MXFP8 expects float8_e8m0fnu scales.
+  TORCH_CHECK_VALUE(
+      (scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat) ||
+      (scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu),
+      "For FP8 tensorwise and rowwise, both scales must both be float32 tensors. For MXFP8, scales must both be float8_e8m0fnu tensors.");
+
+  const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
+  check_scale(mat_a, scale_a, 0 ,0, scale_multiplier);
+  check_scale(mat_b, scale_b, 1, 1, scale_multiplier);
+
+  const auto out_dtype_ = out_dtype.value_or(kBFloat16);
+  TORCH_CHECK_VALUE(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
+
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+
+#if defined(USE_FBGEMM_GENAI) && defined(USE_CUDA) && !defined(USE_ROCM)
+  // MXFP8 grouped GEMM dispatching
+  bool is_mx8mx8bf16 = (
+    mat_a.scalar_type() == at::kFloat8_e4m3fn && mat_b.scalar_type() == at::kFloat8_e4m3fn &&
+    scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu
+  );
+#else
+  bool is_mx8mx8bf16 = false;
 #endif
 
-#endif
+  if (is_mx8mx8bf16) {
+    return _mx8_mx8_bf16_grouped_mm_fbgemm(
+        mat_a,
+        mat_b,
+        scale_a,
+        scale_b,
+        offs.value(),
+        out);
+  }
 
+  // If we're not MXFP8, then we're row-wise scaling.
+  return _f8_f8_bf16_rowwise_grouped_mm(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      offs,
+      bias,
+      use_fast_accum,
+      out);
 }
 
 Tensor _grouped_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
