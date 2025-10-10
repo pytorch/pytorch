@@ -1068,8 +1068,6 @@ class TestAOTInductorPackage(TestCase):
         ep = torch.export.export(model, example_inputs)
         package_path = torch._inductor.aoti_compile_and_package(ep)
 
-        print("*" * 1000)
-
         with self.assertRaisesRegex(
             RuntimeError,
             "Failed to find a generated cpp file or so file for model 'forward' in the zip archive.",
