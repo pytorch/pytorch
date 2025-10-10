@@ -96,16 +96,35 @@ def set_printoptions(
 
 
 def get_printoptions() -> dict[str, Any]:
-    r"""Gets the current options for printing, as a dictionary that
-    can be passed as ``**kwargs`` to set_printoptions().
+    r"""Gets the current options for printing.
+
+    Returns:
+        dict: A dictionary that can be passed as ``**kwargs`` to :func:`set_printoptions`.
+
+    Example::
+
+        >>> torch.get_printoptions()
+        {'precision': 4, 'threshold': 1000, 'edgeitems': 3, 'linewidth': 80, 'sci_mode': None}
+
     """
     return dataclasses.asdict(PRINT_OPTS)
 
 
 @contextlib.contextmanager
 def printoptions(**kwargs):
-    r"""Context manager that temporarily changes the print options.  Accepted
-    arguments are same as :func:`set_printoptions`."""
+    r"""Context manager that temporarily changes the print options.
+
+    Accepted arguments are same as :func:`set_printoptions`.
+
+    Example:
+
+        >>> with printoptions(precision=2):
+        ...     print(torch.tensor([1.12345]))
+        tensor([1.12])
+        >>> print(torch.tensor([1.12345]))
+        tensor([1.1235])
+
+    """
     old_kwargs = get_printoptions()
     set_printoptions(**kwargs)
     try:
