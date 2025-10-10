@@ -3494,7 +3494,7 @@ def stft(
     )
     torch._check(
         not center or align_to_window is None,
-        "stft only supports align_to_window for center = False.",
+        lambda: "stft only supports align_to_window for center = False.",
     )
 
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
@@ -3506,7 +3506,7 @@ def stft(
         )
         torch._check(
             return_complex_,
-            (
+            lambda: (
                 "stft requires the return_complex parameter be given for real inputs, "
                 + "and will further require that return_complex=True in a future PyTorch release."
             ),
@@ -3951,7 +3951,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     shape_numel = reduce(operator.mul, shape, 1)
     torch._check(
         a.numel() == shape_numel,
-        f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+        lambda: f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
     )
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape

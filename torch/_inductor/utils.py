@@ -2637,7 +2637,7 @@ def is_collective(
         # TODO: this is a temporary solution to ensure that we can identify torchrec's
         # communication ops. But in order to allow better communication and computation
         # overlap, torchrec's communication ops should be not used.
-        type(node) == ir.FallbackKernel
+        type(node) is ir.FallbackKernel
         and (
             # NOTE: the `hasattr()` check is to bypass errors such as the following:
             # AttributeError: '_OpNamespace' 'torchrec' object has no attribute 'all_to_all_single'
@@ -2661,7 +2661,7 @@ def is_collective(
 def is_wait(node: Optional[Union[IRNode, Operation]]) -> bool:
     from . import ir
 
-    return type(node) == ir._WaitKernel
+    return type(node) is ir._WaitKernel
 
 
 def contains_collective(snode: BaseSchedulerNode) -> bool:
