@@ -302,7 +302,7 @@ def _check_capability():
             )
             if current_arch < min_arch or current_arch > max_arch:
                 # Only issue compatibility warning if major version does not match
-                if current_arch > max_arch and cur_arch_major != max_arch / 10:
+                if current_arch > max_arch and cur_arch_major != max_arch // 10:
                     warnings.warn(
                         incompatible_gpu_warn
                         % (
