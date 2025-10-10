@@ -1460,24 +1460,22 @@ if torch._C._has_mkldnn:
             )
             if linear_node.target == aten.mm.default:
                 weight = args[1]
+                weight_dtype = weight.meta.get("val").dtype
             elif linear_node.target == aten.addmm.default:
                 weight = args[2]
+                weight_dtype = weight.meta.get("val").dtype
             else:
                 assert linear_node.target == aten.bmm.default
                 wgt_expand_node = args[1]
                 weight = graph.create_node(
                     "call_function", aten.select.int, (wgt_expand_node, 0, 0)
                 )
+                weight_dtype = wgt_expand_node.meta.get("val").dtype
             device_type = input.meta.get("val").device.type
             mkldnn_device_op = _get_mkldnn_device_op(device_type)
             with graph.inserting_before(linear_node):
                 transpose_weight_node = graph.create_node(
                     "call_function", aten.permute.default, (weight, (1, 0))
-                )
-                weight_dtype = (
-                    wgt_expand_node.meta.get("val").dtype
-                    if linear_node.target == aten.bmm.default
-                    else weight.meta.get("val").dtype
                 )
                 is_lp_weight = weight_dtype in (
                     torch.bfloat16,
