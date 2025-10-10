@@ -477,7 +477,6 @@ static void upsample_bilinear2d_backward_out_cuda_template(
   // threads are not covering the whole input tensor.
   grad_input.zero_();
 
-  const size_t num_kernels = nbatch * channels * output_height * output_width;
   const int num_threads = std::min(
       at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -503,6 +502,8 @@ static void upsample_bilinear2d_backward_out_cuda_template(
           input_height, output_height, align_corners, scales_h);
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
+
+      const size_t num_kernels = nbatch * channels * output_height * output_width;
 
       upsample_bilinear2d_backward_nhwc_out_frame<scalar_t, accscalar_t>
           <<<ceil_div(num_kernels, static_cast<size_t>(num_threads)), num_threads, 0, stream>>>(
@@ -535,15 +536,13 @@ static void upsample_bilinear2d_backward_out_cuda_template(
           input_width, output_width, align_corners, scales_w);
 
 #ifdef USE_ROCM
-      const size_t i_numel = nbatch * channels * input_height * input_width;
+      const size_t num_kernels = nbatch * channels * input_height * input_width;
+#else
+      const size_t num_kernels = nbatch * channels * output_height * output_width;
 #endif
 
       upsample_bilinear2d_backward_out_frame<scalar_t, accscalar_t>
-#ifdef USE_ROCM
-          <<<ceil_div(i_numel, static_cast<size_t>(num_threads)),
-#else
           <<<ceil_div(num_kernels, static_cast<size_t>(num_threads)),
-#endif
              num_threads,
              0,
              stream>>>(
