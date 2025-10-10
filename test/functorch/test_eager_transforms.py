@@ -5224,62 +5224,85 @@ class TestCompileTransforms(TestCase):
 
 class TestGradTrackingTensorToList(TestCase):
     """Tests for tolist() method with GradTrackingTensor (functorch tensors)."""
+
     def test_tolist_with_grad(self):
         """Test to see if tolist works inside grad transformation."""
+
         def f(x):
             # inside grad, x is a GradTrackingTensor
             result = x.tolist()
             # tolist should return a python list and not fail
             self.assertIsInstance(result, list)
-            self.assertEqual(result, [1., 2., 3.])
-            return (x ** 2).sum()
-        
-        x = torch.tensor([1., 2., 3.], requires_grad=True)
+            self.assertEqual(result, [1.0, 2.0, 3.0])
+            return (x**2).sum()
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
         grad_f = torch.func.grad(f)
         result = grad_f(x)
         self.assertIsInstance(result, torch.Tensor)
         # gradients should still be computed correctly
-        self.assertEqual(result, [2., 4., 6.])
-    
+        self.assertEqual(result, [2.0, 4.0, 6.0])
+
     def test_tolist_nested_grad(self):
         """Test `tolist` with nested grad transformations."""
+
         def f(x):
             def g(y):
                 # y is gradTrackingTensor(lvl=1)
                 inner_list = y.tolist()
                 self.assertIsInstance(inner_list, list)
-                return (y ** 2).sum()
+                return (y**2).sum()
+
             # x is a gradTrackingTensor(lvl=0)
             outer_list = x.tolist()
             self.assertIsInstance(outer_list, list)
             grad_g = torch.func.grad(g)
             return grad_g(x).sum()
-        
-        x = torch.tensor([1., 2., 3.], requires_grad=True)
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
         grad_f = torch.func.grad(f)
         result = grad_f(x)
         # should compute second derivate
         self.assertIsInstance(result, torch.Tensor)
         # grad_f should return the derivate of g(y) which is (2*x).sum
-        self.assertEqual(result, [2., 2., 2.,])
+        self.assertEqual(
+            result,
+            [
+                2.0,
+                2.0,
+                2.0,
+            ],
+        )
 
     def test_tolist_multidimensional_grad(self):
         """Test tolist with multi-dimensional tensors in grad."""
+
         def f(x):
             result = x.tolist()
             self.assertIsInstance(result, list)
             self.assertEqual(len(result), 2)
-            self.assertEqual(result, [[1., 2., 3.], [4., 5., 6.]])
+            self.assertEqual(result, [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
             return x.sum()
-        
-        x = torch.tensor([[1., 2., 3.], [4., 5., 6.]], requires_grad=True)
+
+        x = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], requires_grad=True)
         grad_f = torch.func.grad(f)
         result = grad_f(x)
         self.assertIsInstance(result, torch.Tensor)
-        self.assertEqual(result, [[1., 1., 1.,], [1., 1., 1.]])
-    
+        self.assertEqual(
+            result,
+            [
+                [
+                    1.0,
+                    1.0,
+                    1.0,
+                ],
+                [1.0, 1.0, 1.0],
+            ],
+        )
+
     def test_tolist_conj_neg_grad(self):
         """Test tolist method with conjugate/negative tensors in grad context."""
+
         def f(x):
             # test with the conjugate view
             x_conj = x.conj()
@@ -5287,11 +5310,11 @@ class TestGradTrackingTensorToList(TestCase):
             self.assertIsInstance(result_conj, list)
             return (x * x.conj()).real.sum()
 
-        x = torch.tensor([1. + 2.j, 3. + 4.j], requires_grad=True)
+        x = torch.tensor([1.0 + 2.0j, 3.0 + 4.0j], requires_grad=True)
         grad_f = torch.func.grad(f)
         result = grad_f(x)
         self.assertIsInstance(result, torch.Tensor)
-        self.assertEqual(result, [2. + 4.j, 6. + 8.j])
+        self.assertEqual(result, [2.0 + 4.0j, 6.0 + 8.0j])
 
 
 only_for = ("cpu", "cuda")
@@ -5374,9 +5397,7 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(
-    TestGradTrackingTensorToList,
-    globals(),
-    only_for=only_for
+    TestGradTrackingTensorToList, globals(), only_for=only_for
 )
 
 if __name__ == "__main__":
