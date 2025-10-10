@@ -10147,12 +10147,14 @@
     CPU, CUDA: min
     MPS: min_mps
     QuantizedCPU: min_quantized_cpu
+  tags: [reduction]
 
 - func: min.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: min_unary_out
     QuantizedCPU: min_quantized_unary_out
+  tags: [reduction]
 
 - func: fmin(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmin.out
@@ -10175,6 +10177,7 @@
     CPU, CUDA: max
     MPS: max_mps
     QuantizedCPU: max_quantized_cpu
+  tags: [reduction]
 
 - func: fmax(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmax.out
@@ -10221,6 +10224,7 @@
   dispatch:
     CPU, CUDA: max_unary_out
     QuantizedCPU: max_quantized_unary_out
+  tags: [reduction]
 
 - func: minimum(Tensor self, Tensor other) -> Tensor
   structured_delegate: minimum.out
