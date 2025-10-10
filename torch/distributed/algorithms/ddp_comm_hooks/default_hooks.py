@@ -80,7 +80,6 @@ def _compress_hook(
 
     if torch.compiler.is_compiling():
         grad = dist._functional_collectives.all_reduce(
-            # pyrefly: ignore  # bad-argument-type
             compressed_tensor,
             "sum",
             # pyrefly: ignore  # bad-argument-type

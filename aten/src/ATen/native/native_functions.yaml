@@ -5,6 +5,38 @@
 # representing ScalarType's. They are now superseded by usage of
 # `aten::to()`. The ops remain here for backward compatibility purposes.
 
+# DEPRECATED. DO NOT USE
+- func: _cast_Byte(Tensor self, bool non_blocking=False) -> Tensor
+  variants: function
+
+# DEPRECATED. DO NOT USE
+- func: _cast_Char(Tensor self, bool non_blocking=False) -> Tensor
+  variants: function
+
+# DEPRECATED. DO NOT USE
+- func: _cast_Double(Tensor self, bool non_blocking=False) -> Tensor
+  variants: function
+
+# DEPRECATED. DO NOT USE
+- func: _cast_Float(Tensor self, bool non_blocking=False) -> Tensor
+  variants: function
+
+# DEPRECATED. DO NOT USE
+- func: _cast_Int(Tensor self, bool non_blocking=False) -> Tensor
+  variants: function
+
+# DEPRECATED. DO NOT USE
+- func: _cast_Long(Tensor self, bool non_blocking=False) -> Tensor
+  variants: function
+
+# DEPRECATED. DO NOT USE
+- func: _cast_Short(Tensor self, bool non_blocking=False) -> Tensor
+  variants: function
+
+# DEPRECATED. DO NOT USE
+- func: _cast_Half(Tensor self, bool non_blocking=False) -> Tensor
+  variants: function
+
 # Computes the gradient of current tensor w.r.t. graph leaves.
 - func: _backward(Tensor self, Tensor[] inputs, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()
   manual_cpp_binding: True
