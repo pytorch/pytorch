@@ -2220,9 +2220,6 @@ coverage_ignore_classes = [
     "ConvBnReLU1d",
     "ConvBnReLU2d",
     "ConvBnReLU3d",
-    "ConvReLU1d",
-    "ConvReLU2d",
-    "ConvReLU3d",
     # torch.ao.nn.intrinsic.qat.modules.linear_fused
     "LinearBn1d",
     # torch.ao.nn.intrinsic.qat.modules.linear_relu
@@ -2235,10 +2232,6 @@ coverage_ignore_classes = [
     # torch.ao.nn.intrinsic.quantized.modules.conv_add
     "ConvAdd2d",
     "ConvAddReLU2d",
-    # torch.ao.nn.intrinsic.quantized.modules.conv_relu
-    "ConvReLU1d",
-    "ConvReLU2d",
-    "ConvReLU3d",
     # torch.ao.nn.intrinsic.quantized.modules.linear_relu
     "LinearLeakyReLU",
     "LinearReLU",
