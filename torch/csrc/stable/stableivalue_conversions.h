@@ -9,10 +9,6 @@
 
 #include <optional>
 
-// use anonymous namespace to avoid collisions between differing
-// versions of this file that may be included by different sources
-namespace {
-
 // forward declare so that the from/to() implementations in the detail
 // namespace of library.h where the real work is done can compile.
 template <typename T>
@@ -322,28 +318,26 @@ struct ToImpl<torch::stable::Tensor> {
 
 // Expose the partially templated class functions through single functions
 template <typename T>
-StableIValue from(T val) {
+inline StableIValue from(T val) {
   return detail::FromImpl<T>::call(val);
 }
 
 template <typename T>
-StableIValue from(const std::optional<T>& val) {
+inline StableIValue from(const std::optional<T>& val) {
   return detail::FromImpl<std::optional<T>>::call(val);
 }
 
 // The below overload is used! See https://godbolt.org/z/859cshxrW
 // We are suppressing the warning for versions clang12- and gcc11-
-[[maybe_unused]] StableIValue from(const torch::stable::Tensor& val) {
+[[maybe_unused]] inline StableIValue from(const torch::stable::Tensor& val) {
   return detail::FromImpl<torch::stable::Tensor>::call(val);
 }
 
 template <typename T>
-T to(StableIValue val) {
+inline T to(StableIValue val) {
   return detail::ToImpl<T>::call(val);
 }
 
 // =============================================================================
 //  end to helpers for converting between StableIValue and T
 // =============================================================================
-
-} // namespace
