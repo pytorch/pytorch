@@ -965,7 +965,7 @@ class TestFP8Matmul(TestCase):
     )
     @parametrize("output_dtype", [torch.bfloat16, torch.float32])
     @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
-    @parametrize("M,N,K", [(256, 768, 512), ])
+    @parametrize("M,N,K", [(256, 768, 512)])
     def test_scaled_mm_vs_emulated_block_wise(self, output_dtype, lhs_block, rhs_block, M, N, K):
         torch.manual_seed(42)
 
@@ -1017,6 +1017,44 @@ class TestFP8Matmul(TestCase):
             out_scaled_mm.flatten().float(), (x @ y.t()).flatten().float(), dim=0
         )
         self.assertGreaterEqual(float(cosine_sim), 0.999)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
+    @unittest.skipIf(
+        _get_torch_cuda_version() < (12, 9),
+        "cuBLAS blockwise scaling added in CUDA 12.9",
+    )
+    @parametrize("output_dtype", [torch.bfloat16, torch.float32])
+    @parametrize("lhs_block,rhs_block", [(1, 1), (128, 1), (1, 128)])
+    @parametrize("M,N,K", [(256, 128, 256), (256, 256, 128)])
+    def test_scaled_mm_vs_emulated_block_wise_verify_small_shapes(
+        self, output_dtype, lhs_block, rhs_block, M, N, K
+    ):
+        torch.manual_seed(42)
+
+        x = torch.randn(M, K, device="cuda", dtype=output_dtype).pow(3)
+        y = torch.randn(N, K, device="cuda", dtype=output_dtype).pow(3)
+
+        x_fp8, x_scales = tensor_to_scale_block(x, e4m3_type, lhs_block, 128)
+        y_fp8, y_scales = tensor_to_scale_block(y, e4m3_type, rhs_block, 128)
+
+        # 1x128 blocks need scales to be outer-dim-major
+        if lhs_block == 1:
+            x_scales = x_scales.t().contiguous().t()
+        if rhs_block == 1:
+            y_scales = y_scales.t().contiguous().t()
+
+        # Verify that actual F8 mm doesn't error
+        mm_float8(
+            x_fp8,
+            y_fp8.t(),
+            a_scale=x_scales,
+            b_scale=y_scales.t(),
+            output_dtype=output_dtype,
+        )
+
+        # Verify that emulated F8 mm doesn't error
+        mm_float8_emulated_block(x_fp8, x_scales, y_fp8.t(), y_scales.t(), output_dtype)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(torch.version.hip is not None, "Float8_e4m3fn not supported on current ROCm CI setup (MI325X)")

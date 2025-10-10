@@ -102,6 +102,7 @@ except ImportError:
 
 
 SEED = 1234
+MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a")
 NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
@@ -4242,7 +4243,7 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
     def assertEqualTypeString(self, x, y) -> None:
-        # This API is used simulate deprecated x.type() == y.type()
+        # This API is used simulate deprecated x.type() is y.type()
         self.assertEqual(x.device, y.device)
         self.assertEqual(x.dtype, y.dtype)
         self.assertEqual(x.is_sparse, y.is_sparse)

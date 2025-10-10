@@ -2002,7 +2002,6 @@ def _new_process_group_helper(
             if not is_gloo_available():
                 raise RuntimeError("Distributed package doesn't have Gloo built in")
             backend_class = ProcessGroupGloo(
-                # pyrefly: ignore  # bad-argument-type
                 backend_prefix_store,
                 group_rank,
                 group_size,
@@ -2048,7 +2047,6 @@ def _new_process_group_helper(
             # RuntimeError if is_ucc_available() returns false.
 
             backend_class = ProcessGroupUCC(
-                # pyrefly: ignore  # bad-argument-type
                 backend_prefix_store,
                 group_rank,
                 group_size,
@@ -2205,7 +2203,7 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
     # alive until all works and hooks are done. The current implementation does the
     # latter. Therefore, we explicitly call _wait_for_pending_works() here to wait
     # for the pending hooks to finish.
-    if type(pg) == ProcessGroup and pg._has_hooks():
+    if type(pg) is ProcessGroup and pg._has_hooks():
         pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
@@ -2785,7 +2783,7 @@ def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
         key = "group_dst" if op.op == isend else "group_src"
         return {key: op.group_peer}
 
-    if type(group) == ProcessGroup and group._get_backend(device).supports_coalescing:
+    if type(group) is ProcessGroup and group._get_backend(device).supports_coalescing:
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
