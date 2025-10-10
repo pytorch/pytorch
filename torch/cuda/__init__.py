@@ -300,28 +300,26 @@ def _check_capability():
                 (_extract_arch_version(arch) for arch in arch_list),
                 default=50,
             )
-            if current_arch < min_arch or current_arch > max_arch:
-                # Only issue compatibility warning if major version does not match
-                if current_arch > max_arch and cur_arch_major != max_arch // 10:
-                    warnings.warn(
-                        incompatible_gpu_warn
-                        % (
-                            d,
-                            name,
-                            major,
-                            minor,
-                            min_arch // 10,
-                            min_arch % 10,
-                            max_arch // 10,
-                            max_arch % 10,
-                        )
-                    )
-                    matched_arches = ""
-                    for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
-                        if arch_info["min"] <= current_arch <= arch_info["max"]:
-                            matched_arches += f" {arch}"
-                    if matched_arches != "":
-                        warnings.warn(matched_cuda_warn.format(matched_arches))
+            if current_arch < min_arch or (current_arch > max_arch and cur_arch_major != max_arch // 10):
+               warnings.warn(
+                   incompatible_gpu_warn
+                   % (
+                       d,
+                       name,
+                       major,
+                       minor,
+                       min_arch // 10,
+                       min_arch % 10,
+                       max_arch // 10,
+                       max_arch % 10,
+                   )
+               )
+               matched_arches = ""
+               for arch, arch_info in CUDA_ARCHES_SUPPORTED.items():
+                   if arch_info["min"] <= current_arch <= arch_info["max"]:
+                       matched_arches += f" {arch}"
+               if matched_arches != "":
+                   warnings.warn(matched_cuda_warn.format(matched_arches))
 
 
 def _check_cubins():
