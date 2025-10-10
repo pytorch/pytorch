@@ -2,13 +2,15 @@
 import collections
 import functools
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from itertools import product
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 from typing_extensions import deprecated
 
 import torch
 import torch.testing
+
+# pyrefly: ignore  # deprecated
 from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrTensors
@@ -453,7 +455,7 @@ def _prepare_input(
 def _check_outputs_same_dtype_and_shape(output1, output2, eps, idx=None) -> None:
     # Check that the returned outputs don't have different dtype or shape when you
     # perturb the input
-    on_index = "on index {idx} " if idx is not None else ""
+    on_index = f"on index {idx} " if idx is not None else ""
     assert output1.shape == output2.shape, (
         f"Expected `func` to return outputs with the same shape"
         f" when inputs are perturbed {on_index}by {eps}, but got:"
@@ -731,9 +733,7 @@ def _stack_and_check_tensors(
             if tensor is None:
                 out_jacobian[:, j].zero_()
             else:
-                dense = (
-                    tensor.to_dense() if not tensor.layout == torch.strided else tensor
-                )
+                dense = tensor.to_dense() if tensor.layout != torch.strided else tensor
                 assert out_jacobian[:, j].numel() == dense.numel()
                 out_jacobian[:, j] = dense.reshape(-1)
     return out_jacobians, correct_grad_sizes, correct_grad_types

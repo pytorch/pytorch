@@ -7,8 +7,9 @@ import sys
 import traceback
 import warnings
 from collections import defaultdict
+from collections.abc import Callable
 from types import ModuleType
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING
+from typing import Any, Generic, Optional, TYPE_CHECKING
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -685,8 +686,8 @@ def _take_tensors(tensors, size_limit):
         if buf_and_size[1] + size > size_limit and buf_and_size[1] > 0:
             yield buf_and_size[0]
             buf_and_size = buf_dict[t] = [[], 0]
-        buf_and_size[0].append(tensor)
-        buf_and_size[1] += size
+        buf_and_size[0].append(tensor)  # pyrefly: ignore  # missing-attribute
+        buf_and_size[1] += size  # pyrefly: ignore  # unsupported-operation
     for buf, _ in buf_dict.values():
         if len(buf) > 0:
             yield buf
@@ -743,14 +744,17 @@ class ExceptionWrapper:
         if exc_info is None:
             exc_info = sys.exc_info()
         self.exc_type = exc_info[0]
-        self.exc_msg = "".join(traceback.format_exception(*exc_info))
+        self.exc_msg = "".join(
+            # pyrefly: ignore  # no-matching-overload
+            traceback.format_exception(*exc_info)
+        )
         self.where = where
 
     def reraise(self):
         r"""Reraises the wrapped exception in the current thread"""
         # Format a message such as: "Caught ValueError in DataLoader worker
         # process 2. Original Traceback:", followed by the traceback.
-        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"
+        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"  # pyrefly: ignore  # missing-attribute
         if self.exc_type == KeyError:
             # KeyError calls repr() on its argument (usually a dict key). This
             # makes stack traces unreadable. It will not be changed in Python
@@ -759,9 +763,13 @@ class ExceptionWrapper:
         elif getattr(self.exc_type, "message", None):
             # Some exceptions have first argument as non-str but explicitly
             # have message field
-            raise self.exc_type(message=msg)
+            # pyrefly: ignore  # not-callable
+            raise self.exc_type(
+                # pyrefly: ignore  # unexpected-keyword
+                message=msg
+            )
         try:
-            exception = self.exc_type(msg)
+            exception = self.exc_type(msg)  # pyrefly: ignore  # not-callable
         except Exception:
             # If the exception takes multiple arguments or otherwise can't
             # be constructed, don't try to instantiate since we don't know how to
@@ -1013,12 +1021,12 @@ class _LazySeedTracker:
         self.call_order = []
 
     def queue_seed_all(self, cb, traceback):
-        self.manual_seed_all_cb = (cb, traceback)
+        self.manual_seed_all_cb = (cb, traceback)  # pyrefly: ignore  # bad-assignment
         # update seed_all to be latest
         self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
 
     def queue_seed(self, cb, traceback):
-        self.manual_seed_cb = (cb, traceback)
+        self.manual_seed_cb = (cb, traceback)  # pyrefly: ignore  # bad-assignment
         # update seed to be latest
         self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
 
