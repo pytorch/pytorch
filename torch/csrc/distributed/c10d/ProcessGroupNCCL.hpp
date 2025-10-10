@@ -1032,6 +1032,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::chrono::milliseconds& timeout);
 
   void setEnableNanCheck(bool enableNanCheck);
+#ifdef NCCL_HAS_COMM_SHRINK
+  // Declaration only exists if NCCL supports shrink
+  c10::intrusive_ptr<ProcessGroupNCCL> shrink(
+      const std::vector<int64_t>& ranks_to_exclude,
+      int shrink_flags = 0x00 /* NCCL_SHRINK_DEFAULT */ );
+#endif // NCCL_HAS_COMM_SHRINK
 
  protected:
   uint64_t getWatchdogHeartbt() const;
@@ -1064,6 +1070,12 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       OpType opType,
       int p2pRank = 0,
       bool isSendRecvSelf = false);
+
+  // Initialize device-specific state (comm, stream, event, bookkeeping) for a
+  // given communicator on this process group instance.
+  void initializeDeviceStateForComm(
+      const at::Device& device,
+      std::shared_ptr<NCCLComm> comm);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(

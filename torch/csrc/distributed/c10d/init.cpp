@@ -3349,6 +3349,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               },
               py::arg("enable_nan_check"),
               py::call_guard<py::gil_scoped_release>())
+#ifdef NCCL_HAS_COMM_SHRINK
+          .def(
+              "shrink",
+              &::c10d::ProcessGroupNCCL::shrink,
+              py::arg("ranks_to_exclude"),
+              py::arg("shrink_flags") = 0,
+              py::call_guard<py::gil_scoped_release>())
+#endif // NCCL_HAS_COMM_SHRINK
           .def_static(
               "get_build_nccl_version",
               [] {
