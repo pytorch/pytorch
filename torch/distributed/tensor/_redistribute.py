@@ -353,8 +353,38 @@ class Redistribute(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output: "dtensor.DTensor"):  # type: ignore[override]
         previous_spec = ctx.current_spec
-        async_op = ctx.async_op
-        backward_dtype = ctx.backward_dtype or ctx.original_dtype
+        output_dtensor = RedistributeBackward.apply(
+            grad_output,
+            previous_spec,
+            ctx.async_op,
+            ctx.backward_dtype,
+            ctx.original_dtype,
+        )
+        return (
+            output_dtensor,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+
+
+class RedistributeBackward(torch.autograd.Function):
+    @staticmethod
+    def forward(  # type: ignore[override]
+        # pyre-fixme[2]: Parameter must be annotated.
+        ctx,
+        grad_output: "dtensor.DTensor",
+        previous_spec,
+        async_op: bool = False,
+        backward_dtype: Optional[torch.dtype] = None,
+        original_dtype: Optional[torch.dtype] = None,
+    ):
+        ctx.original_dtype = original_dtype
+        ctx.async_op = async_op
+        ctx.backward_dtype = backward_dtype
+        ctx.original_dtype = grad_output._local_tensor.dtype
 
         if backward_dtype != grad_output._local_tensor.dtype:
             local_tensor = grad_output._local_tensor.to(dtype=backward_dtype)
@@ -405,10 +435,73 @@ class Redistribute(torch.autograd.Function):
                 dtype=output.dtype,
             ),
         )
-        output_dtensor = dtensor.DTensor(
+        ctx.current_spec = spec
+
+        return dtensor.DTensor(
             output,
             spec,
             requires_grad=grad_output.requires_grad,
+        )
+
+    @staticmethod
+    def backward(ctx, grad2_output: "dtensor.DTensor"):  # type: ignore[override]
+        previous_spec = ctx.current_spec
+        async_op = ctx.async_op
+        backward_dtype = ctx.backward_dtype or ctx.original_dtype
+
+        if backward_dtype != grad2_output._local_tensor.dtype:
+            local_tensor = grad2_output._local_tensor.to(dtype=backward_dtype)
+            current_spec = DTensorSpec(
+                mesh=grad2_output._spec.device_mesh,
+                placements=grad2_output._spec.placements,
+                tensor_meta=TensorMeta(
+                    shape=grad2_output.shape,
+                    stride=grad2_output.stride(),
+                    dtype=backward_dtype,
+                ),
+            )
+            previous_spec = DTensorSpec(
+                mesh=previous_spec.device_mesh,
+                placements=previous_spec.placements,
+                tensor_meta=current_spec.tensor_meta,
+            )
+        else:
+            local_tensor = grad2_output._local_tensor
+            current_spec = grad2_output._spec
+
+        output = redistribute_local_tensor(
+            local_tensor,
+            current_spec,
+            previous_spec,
+            async_op=async_op,
+            is_backward=True,
+        )
+
+        if output.dtype != ctx.original_dtype:
+            output = output.to(ctx.original_dtype)
+
+        # normalize the target placement to replicate if it is partial
+        normalized_placements: list[Placement] = []
+        for previous_placement in previous_spec.placements:
+            if previous_placement.is_partial():
+                # keep target placement to replicate instead of partial in this case
+                normalized_placements.append(Replicate())
+            else:
+                normalized_placements.append(previous_placement)
+
+        spec = DTensorSpec(
+            previous_spec.device_mesh,
+            tuple(normalized_placements),
+            tensor_meta=TensorMeta(
+                shape=grad2_output.shape,
+                stride=grad2_output.stride(),
+                dtype=output.dtype,
+            ),
+        )
+        output_dtensor = dtensor.DTensor(
+            output,
+            spec,
+            requires_grad=grad2_output.requires_grad,
         )
 
         return (
