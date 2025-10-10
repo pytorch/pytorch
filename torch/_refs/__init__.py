@@ -3379,7 +3379,6 @@ def native_layer_norm(
     torch._check(
         input.ndim >= normalized_ndim
         and sym_eq(
-            # pyrefly: ignore  # bad-argument-type
             input.shape[(input.ndim - normalized_ndim) :],
             # pyrefly: ignore  # bad-argument-type
             tuple(normalized_shape),
@@ -4316,8 +4315,8 @@ def split_with_sizes(
     # NB: Perform the check_is_size tests first so that the
     # sum test does not try to do a replacement
     for i in range(len(split_sizes)):
-        torch._check_is_size(
-            split_sizes[i],
+        torch._check(
+            split_sizes[i] >= 0,
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
     torch._check_with(
@@ -6683,7 +6682,7 @@ def _infer_scalar_type(obj):
         # double.
         if length == 0:
             return torch.get_default_dtype()
-        # pyrefly: ignore  # bad-assignment
+
         for i in range(length):
             cur_item = obj[i]
             # TODO: test this

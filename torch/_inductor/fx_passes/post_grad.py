@@ -358,6 +358,7 @@ def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.map_impl),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -545,6 +546,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.scan),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -678,11 +680,14 @@ def lazy_init():
     # pass since otherwise there will be perf/peak-memory regression:
     # https://github.com/pytorch/pytorch/issues/148141
     register_replacement(
+        # pyrefly: ignore  # bad-argument-type
         prepare_softmax_pattern,
+        # pyrefly: ignore  # bad-argument-type
         prepare_softmax_replacement,
         [torch.empty(4, 8)],
         scalar_workaround=dict(dim=-1),
         trace_fn=fwd_only,
+        # pyrefly: ignore  # bad-argument-type
         pass_dicts=pass_patterns[1],
         extra_check=prepare_softmax_extra_check,
     )
@@ -743,7 +748,9 @@ def register_lowering_pattern(
     Register an aten to inductor IR replacement pattern
     """
     return pattern_matcher.register_lowering_pattern(
-        pattern, extra_check, pass_dict=pass_patterns[pass_number]
+        pattern,
+        extra_check,
+        pass_dict=pass_patterns[pass_number],
     )
 
 
@@ -840,6 +847,7 @@ def scatter_upon_const_tensor(
         device = selector.device if hasattr(selector, "device") else torch.device("cpu")
         return torch.empty(shape, dtype=dtype, device=device)
 
+    # pyrefly: ignore  # bad-assignment
     metrics.num_matches_for_scatter_upon_const_tensor += 1
 
     selector_loader = selector.make_loader()
@@ -891,6 +899,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
         KeywordArg("dim"),
         _users=MULTIPLE,
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=pass_patterns[1],
 )
 def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype, dim):
@@ -910,6 +919,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
+    # pyrefly: ignore  # bad-argument-type
     match.replace_by_example(repl, list(shape))
 
 
@@ -1227,6 +1237,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -1243,6 +1254,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
 
+        # pyrefly: ignore  # bad-argument-type
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
@@ -1267,6 +1279,7 @@ def decompose_auto_functionalized(graph, preserve_meta=False):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -1311,6 +1324,7 @@ def decompose_auto_functionalized(graph, preserve_meta=False):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -1557,6 +1571,7 @@ def should_prefer_unfused_addmm(match):
 
 @register_graph_pattern(
     CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=pass_patterns[2],
     extra_check=should_prefer_unfused_addmm,
 )
@@ -1564,6 +1579,7 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
+    # pyrefly: ignore  # bad-argument-type
     match.replace_by_example(repl, [inp, mat1, mat2])
 
 
@@ -1597,6 +1613,7 @@ def is_valid_addmm_fusion(match):
         CallFunction(aten.mm, Arg(), Arg()),
         KeywordArg("inp"),
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=pass_patterns[2],
     extra_check=is_valid_addmm_fusion,
 )
@@ -1606,6 +1623,7 @@ def is_valid_addmm_fusion(match):
         KeywordArg("inp"),
         CallFunction(aten.mm, Arg(), Arg()),
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=pass_patterns[2],
     extra_check=is_valid_addmm_fusion,
 )
@@ -1635,7 +1653,8 @@ def register_partial_reduction_pattern():
         full_reduc = CallFunction([red_op, equiv_red[red_op]], inp)
 
         @register_graph_pattern(
-            MultiOutputPattern([partial_reduc, full_reduc]), pass_dict=pass_patterns[2]
+            MultiOutputPattern([partial_reduc, full_reduc]),
+            pass_dict=pass_patterns[2],
         )
         def reuse_partial(match, input, reduced_dims, keepdim):
             partial_red, full_red = match.output_nodes()
@@ -1811,6 +1830,7 @@ class ConstructorMoverPass:
 
             pytree.tree_map_only(fx.Node, add_cpu_inp, (node.args, node.kwargs))
 
+            # pyrefly: ignore  # redundant-condition
             if cpu_count:
                 cpu_indeg[node] = cpu_count
 

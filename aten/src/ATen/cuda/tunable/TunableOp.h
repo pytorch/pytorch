@@ -29,7 +29,7 @@ template <typename ParamsT>
 class Callable {
   public:
     virtual ~Callable() = default;
-    virtual TuningStatus Call(const ParamsT*) {
+    virtual TuningStatus Call(const ParamsT* /*unused*/) {
       return FAIL;
     }
     virtual TuningStatus IsSupported(const ParamsT* params) {

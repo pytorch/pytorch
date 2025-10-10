@@ -121,6 +121,18 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
 
 
+def is_sympy_integer_like(expr: object):
+    """ "
+    Is this expression a Sympy Integer or is it an integer sympy Expr
+    containing no free symbols. The latter case can happen with Identity expr.
+    """
+    if not isinstance(expr, sympy.Expr):
+        return False
+    return isinstance(expr, sympy.Integer) or (
+        expr.is_integer and len(expr.free_symbols) == 0
+    )
+
+
 class OpDtypeSupport:
     """
     Some Triton ops such as libdevice and tl.math only support float32 and float64.
@@ -1063,7 +1075,15 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def truediv(x, y):
-        out = f"({x} / {y})"
+        x_dtype = getattr(x, "dtype", None)
+        y_dtype = getattr(y, "dtype", None)
+
+        if x_dtype == torch.float32 and y_dtype == torch.float32:
+            # x / y in Triton is lowered to div.full which is approx
+            # we want div_rn to adhere with eager
+            out = f"triton.language.div_rn({x}, {y})"
+        else:
+            out = f"({x} / {y})"
         if low_precision_fp_var(x) or low_precision_fp_var(y):
             out_dtype = get_dtype_handler().truediv(x, y)
             if out_dtype in (torch.float16, torch.float32):
@@ -2279,7 +2299,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
                 num_dims = max(
                     2,
-                    len(self.range_tree_nodes),
+                    # range_tree.nodes only includes the entries for the range tree
+                    # len(range_tree.nodes) <= self.range_tree_nodes
+                    len(range_tree.nodes),
                     (
                         index.count(FloorDiv(index_var, denom))
                         + index.count(ModularIndexing(index_var, denom, modulo))
@@ -2453,7 +2475,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 return self.dense_size_str(), tuple(self.dense_size_list())
 
-        if isinstance(index, sympy.Integer):
+        if is_sympy_integer_like(index):
             expand_str, expand_shape = _get_expand_str()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
@@ -2804,7 +2826,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     line, indexing.block_shape, indexing.final_shape, True
                 )
                 shape = indexing.final_shape
-            elif isinstance(original_index, sympy.Integer):
+            elif is_sympy_integer_like(original_index):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
                 shape = ()
