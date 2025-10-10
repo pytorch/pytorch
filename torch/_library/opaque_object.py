@@ -1,4 +1,4 @@
-from typing import Any, NewType
+from typing import Any, NewType, Optional
 
 import torch
 
@@ -155,28 +155,31 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
 _OPAQUE_TYPES: dict[Any, str] = {}
 
 
-def register_opaque_type(type_: Any, fqn: str) -> None:
+def register_opaque_type(cls: Any, name: Optional[str] = None) -> None:
     """
     Registers the given type as an opaque type which allows this to be consumed
     by a custom operator.
 
     Args:
-        type_ (type): The type to register as an opaque type.
-        fqn (str): A unique qualified name of the type.
+        cls (type): The class to register as an opaque type.
+        name (str): A unique qualified name of the type.
     """
-    if "." in fqn:
+    if name is None:
+        name = cls.__name__
+
+    if "." in name:
         # The schema_type_parser will break up types with periods
         raise ValueError(
-            f"Unable to accept fqn, {fqn}, for this opaque type as it contains a '.'"
+            f"Unable to accept name, {name}, for this opaque type as it contains a '.'"
         )
-    _OPAQUE_TYPES[type_] = fqn
-    torch._C._register_opaque_type(fqn)
+    _OPAQUE_TYPES[cls] = name
+    torch._C._register_opaque_type(name)
 
 
-def is_opaque_type(type_: Any) -> bool:
+def is_opaque_type(cls: Any) -> bool:
     """
     Checks if the given type is an opaque type.
     """
-    if type_ not in _OPAQUE_TYPES:
+    if cls not in _OPAQUE_TYPES:
         return False
-    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[type_])
+    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls])
