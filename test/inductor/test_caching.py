@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from torch.testing._internal.inductor_utils import HAS_GPU
 
 
 if TYPE_CHECKING:
@@ -825,4 +826,5 @@ class UtilsTest(TestMixin, TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if HAS_GPU:
+        run_tests()
