@@ -2359,7 +2359,7 @@ def op_for_dependencies(t: torch.Tensor) -> torch.Tensor:
     """
     A no-op function that serves to create dependencies in the FX graph.
     """
-    return t
+    return t.clone()
 
 
 DEP_OP = torch.ops.pattern_matcher.op_for_dependencies
