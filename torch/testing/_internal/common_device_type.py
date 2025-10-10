@@ -390,8 +390,8 @@ class DeviceTypeTestBase(TestCase):
         return test.tolerance_overrides.get(dtype, tol(self.precision, self.rel_tol))
 
     def _apply_precision_override_for_test(self, test, param_kwargs):
-        dtype = param_kwargs.get("dtype")
-        dtype = param_kwargs.get("dtypes", dtype)
+        dtype = param_kwargs["dtype"] if "dtype" in param_kwargs else None
+        dtype = param_kwargs["dtypes"] if "dtypes" in param_kwargs else dtype
         if dtype:
             self.precision = self._get_precision_override(test, dtype)
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)

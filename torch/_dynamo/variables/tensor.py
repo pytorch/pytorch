@@ -516,7 +516,7 @@ class TensorVariable(VariableTracker):
                 # these attributes are implemented under tp_getset, which appear
                 # as `getset_descriptor`s, (compared to, say, methods which appear
                 # as `method_descriptor`s)
-                if type(static_attr) != types.GetSetDescriptorType:
+                if type(static_attr) is not types.GetSetDescriptorType:
                     return None
 
                 proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)

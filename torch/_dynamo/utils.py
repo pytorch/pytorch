@@ -2912,15 +2912,6 @@ def rmse(ref: torch.Tensor, res: torch.Tensor) -> torch.Tensor:
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
 
-def bitwise_same(ref: Any, res: Any, equal_nan: bool = False) -> bool:
-    return same(
-        ref,
-        res,
-        tol=0.0,
-        equal_nan=equal_nan,
-    )
-
-
 def same(
     ref: Any,
     res: Any,

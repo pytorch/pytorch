@@ -130,7 +130,7 @@ def _get_qspec_for_arg(
 ) -> Optional[QuantizationSpecBase]:
     while _is_activation_post_process_node(arg, named_modules):
         arg = arg.args[0]  # type: ignore[assignment]
-    return input_qspec_map.get(arg)
+    return input_qspec_map.get(arg, None)
 
 
 def _create_obs_or_fq_from_qspec(
@@ -939,7 +939,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
             if maybe_obs_node.op == "call_module":
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
-                    type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq)
+                    type(maybe_obs_mod) is type(arg_as_input_act_obs_or_fq)
                     and maybe_obs_mod.dtype == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
                 ):
                     arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]

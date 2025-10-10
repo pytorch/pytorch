@@ -2278,7 +2278,7 @@ class GuardBuilder(GuardBuilderBase):
         # don't support this in serialization because it uses unsupported FUNCTION_MATCH
         val = self.get(guard.name)
         # Strictly only want user-defined functions
-        if type(val) == types.FunctionType and hasattr(val, "__code__"):
+        if type(val) is types.FunctionType and hasattr(val, "__code__"):
             self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)  # type: ignore[arg-type]
             self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)  # type: ignore[arg-type]
         else:
@@ -3559,7 +3559,7 @@ class CheckFunctionManager:
                 [make_guard_filter_entry(guard) for guard in sorted_guards]
             )
             assert len(filter_results) == len(sorted_guards)
-            assert all(type(x) == bool for x in filter_results)
+            assert all(type(x) is bool for x in filter_results)
             sorted_guards = [
                 guard for i, guard in enumerate(sorted_guards) if filter_results[i]
             ]
