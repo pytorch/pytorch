@@ -215,6 +215,29 @@ class TestDTensorDebugMode(TestCase):
       aten::_unsafe_view(ft: f32[64, 8], [8, 8, 8])""",
         )
 
+    def test_tensor_attributes(self):
+        x = torch.randn(8, 8)
+        x.a1 = "x1"
+        x.a2 = "x2"
+        y = torch.randn(8, 8, 8)
+        y.a1 = "y"
+
+        with DebugMode(
+            record_torchfunction=True,
+            record_faketensor=True,
+            record_tensor_attributes=["a1", "a2"],
+        ) as debug_mode:
+            torch.matmul(y, x)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  torch.matmul(t: f32[8, 8, 8]{a1=y}, t: f32[8, 8]{a1=x1, a2=x2})
+      aten::view(t: f32[8, 8, 8]{a1=y}, [64, 8])
+      aten::mm(t: f32[64, 8], t: f32[8, 8]{a1=x1, a2=x2})
+      aten::_unsafe_view(t: f32[64, 8], [8, 8, 8])""",
+        )
+
     @parametrize("has_inner_mode", [True, False])
     @parametrize("has_outer_mode", [True, False])
     def test_nested_debug_mode(self, has_inner_mode, has_outer_mode):
