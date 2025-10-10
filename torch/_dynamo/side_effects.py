@@ -947,6 +947,7 @@ class SideEffects:
             elif isinstance(
                 var, variables.torch_function.TorchFunctionModeStackVariable
             ):
+                breakpoint()
                 # Needed in the finally block for stack restoration
                 cg.add_push_null(
                     lambda: cg.load_import_from(
@@ -969,6 +970,10 @@ class SideEffects:
                 )
                 cg.call_function(1, False)
                 cg.append_output(create_instruction("POP_TOP"))
+
+            # elif var.value_type == torch.utils._debug_mode.DebugMode:
+            #     breakpoint()
+            #     print("a")
 
             elif isinstance(var, variables.CellVariable) and var.local_name is not None:
                 # Emit more readable and performant bytecode.
