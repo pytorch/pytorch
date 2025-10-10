@@ -475,6 +475,7 @@ def _templated_ring_attention(
         )
         sdpa_merger.step(out, logsumexp, partial)
 
+    # pyrefly: ignore  # unbound-name
     return *sdpa_merger.results(), *rest
 
 
@@ -641,6 +642,7 @@ def _templated_ring_attention_backward(
         grad_query,
         grad_key,
         grad_value,
+        # pyrefly: ignore  # unbound-name
         *rest,
     )
 
@@ -988,7 +990,9 @@ def _distribute_function(
 
 def _restore_function(fn: Callable, fn_module: types.ModuleType) -> None:
     """Restore the function that is replaced by _distribute_function."""
+    # pyrefly: ignore  # unknown-name
     global _original_functions
+    # pyrefly: ignore  # unknown-name
     global _wrapper_functions
 
     if fn not in _replaced_functions:
@@ -1021,6 +1025,7 @@ def _context_parallel_dispatcher(
         placement = [Shard(seq_dim)]
         all_args = []
 
+        # pyrefly: ignore  # bad-assignment, bad-argument-type
         for arg in itertools.chain(args, kwargs.values()):
             if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
                 arg = DTensor.from_local(arg, mesh, placement, run_check=False)

@@ -4091,6 +4091,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Stringified pickle work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
+  module.def(
+      "_reset_fr_recording_nccl",
+      []() { ::c10d::reset_nccl_trace(); },
+      "API to reset Flight recorder recording when it comes fault tolerance.");
 #endif
 
   module.def(

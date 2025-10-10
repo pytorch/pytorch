@@ -55,17 +55,17 @@ std::vector<int64_t> THPUtils_unpackLongs(PyObject* arg) {
     for (int i = 0; i != nDim; ++i) {
       PyObject* item =
           tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
-      if (!THPUtils_checkLong(item)) {
-        std::ostringstream oss;
-        oss << "expected int at position " << i
-            << ", but got: " << THPUtils_typename(item);
-        throw std::runtime_error(oss.str());
-      }
+      TORCH_CHECK(
+          THPUtils_checkLong(item),
+          "expected int at position ",
+          i,
+          ", but got: ",
+          THPUtils_typename(item));
       sizes[i] = THPUtils_unpackLong(item);
     }
     return sizes;
   }
-  throw std::runtime_error("Expected tuple or list");
+  TORCH_CHECK(false, "Expected tuple or list");
 }
 
 bool THPUtils_checkIntTuple(PyObject* arg) {
@@ -81,9 +81,7 @@ bool THPUtils_checkIntTuple(PyObject* arg) {
 }
 
 std::vector<int> THPUtils_unpackIntTuple(PyObject* arg) {
-  if (!THPUtils_checkIntTuple(arg)) {
-    throw std::runtime_error("Couldn't unpack int tuple");
-  }
+  TORCH_CHECK(THPUtils_checkIntTuple(arg), "Couldn't unpack int tuple");
   std::vector<int> values(PyTuple_GET_SIZE(arg));
   for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(arg); ++i) {
     values[i] = (int)THPUtils_unpackLong(PyTuple_GET_ITEM(arg, i));
