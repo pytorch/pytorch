@@ -47,20 +47,10 @@ Tensor sgd_out_of_place(
   STD_TORCH_CHECK(param.get_device() == -1, "CPU device index = -1");
   STD_TORCH_CHECK(param.get_device_index() == -1, "CPU device index = -1");
 
-  int64_t *param_sizes;
-  int64_t *param_strides;
-  aoti_torch_get_sizes(param.get(), &param_sizes);
-  aoti_torch_get_strides(param.get(), &param_strides);
+  // testing Tensor strides + stride
+  STD_TORCH_CHECK(param.strides()[0] == param.stride(0));
 
-  int32_t param_dtype;
-  aoti_torch_get_dtype(param.get(), &param_dtype);
-
-  int32_t param_device_type;
-  aoti_torch_get_device_type(param.get(), &param_device_type);
-
-  AtenTensorHandle out_ath;
-  aoti_torch_empty_strided(param.dim(), param_sizes, param_strides, param_dtype, param_device_type, param.get_device(), &out_ath);
-  auto out = Tensor(out_ath);
+  auto out = new_empty(param, param.sizes());
 
   sgd_math(
     reinterpret_cast<float*>(param.data_ptr()),
@@ -344,6 +334,8 @@ Tensor my_new_empty_dtype_variant(Tensor t) {
   // Still using a std::vector below even though people can just pass in an
   // initializer list (which will be implicitly converted to an HOArrayRef)
   // directly.
+  // This is to test that passing in a std::vector works for BC. (It gets
+  // implicitly converted to HOArrayRef too!)
   std::vector<int64_t> sizes = {2, 5};
   auto dtype = std::make_optional(torch::headeronly::ScalarType::BFloat16);
   return new_empty(t, sizes, dtype);
