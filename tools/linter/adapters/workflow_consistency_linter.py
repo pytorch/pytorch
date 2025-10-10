@@ -116,7 +116,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Go through the provided files, aggregating jobs with the same sync tag
+    # Go through all files, aggregating jobs with the same sync tag
     tag_to_jobs = defaultdict(list)
     for path in REPO_ROOT.glob(".github/workflows/*"):
         if not path.is_file() or path.suffix not in {".yml", ".yaml"}:
@@ -130,6 +130,7 @@ if __name__ == "__main__":
                     sync_tag, path, job_dict = res
                     tag_to_jobs[sync_tag].append((path, {job_id: job}))
 
+    # Check the files passed as arguments
     for path in args.filenames:
         workflow = load_yaml(Path(path))
         jobs = workflow["jobs"]
