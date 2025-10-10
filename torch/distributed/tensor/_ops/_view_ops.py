@@ -661,7 +661,7 @@ def propagate_shape_and_sharding(
         elif isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]:
             input_tgt_placements.append(Replicate())
         else:
-            assert not p.is_partial_view_shard()
+            # assert not p.is_partial_view_shard()
             input_tgt_placements.append(p)
 
 
@@ -684,7 +684,14 @@ def propagate_shape_and_sharding(
         if isinstance(p, _StridedShard):
             return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
         elif isinstance(p, PartialViewShard):
-            return PartialViewShard(input_src_placement=p.input_src_placement, output_placement=Shard(shard_dim_map[p.input_src_placement.dim]))
+            if p.output_placement is None:
+                # flatten case
+                return PartialViewShard(input_src_placement=p.input_src_placement, output_placement=Shard(shard_dim_map[p.input_src_placement.dim]))
+            else:
+                # unflatten case
+                import fbvscode
+                fbvscode.set_trace()
+                return p.input_src_placement
         else:
             return Shard(shard_dim_map[p.dim])
 
@@ -736,6 +743,11 @@ def register_op_strategy_map(
         for input_placement_strategy in input_strategy.strategies:
             input_src_spec = input_placement_strategy.output_spec
 
+            # if op_schema.op == aten._unsafe_view.default:
+            #     import fbvscode
+            #     fbvscode.set_trace()
+            # import fbvscode
+            # fbvscode.set_trace()
             input_tgt_placements, output_placements = propagate_shape_and_sharding(
                 input_src_spec.placements,
                 tuple(global_in_shape),
