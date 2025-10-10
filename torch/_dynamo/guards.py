@@ -3559,7 +3559,7 @@ class CheckFunctionManager:
                 [make_guard_filter_entry(guard) for guard in sorted_guards]
             )
             assert len(filter_results) == len(sorted_guards)
-            assert all(type(x) == bool for x in filter_results)
+            assert all(type(x) is bool for x in filter_results)
             sorted_guards = [
                 guard for i, guard in enumerate(sorted_guards) if filter_results[i]
             ]

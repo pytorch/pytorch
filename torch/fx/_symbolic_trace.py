@@ -927,7 +927,11 @@ class Tracer(TracerBase):
 
                     return out
                 # Union[int, bool] == bool in Python <= 3.6
-                if type(x) is bool or type(x) in base_types and type(x) != torch.Tensor:
+                if (
+                    type(x) is bool
+                    or type(x) in base_types
+                    and type(x) is not torch.Tensor
+                ):
                     torch._assert(
                         out == x,
                         f"{name} has been specialized to have value {x} but got another value",
