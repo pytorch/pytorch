@@ -243,6 +243,7 @@ def derived_types(
 
 
 def get_supported_param_types():
+    # pyrefly: ignore  # bad-assignment
     data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),

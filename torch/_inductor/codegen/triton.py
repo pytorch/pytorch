@@ -4274,7 +4274,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def inductor_meta_common():
         inductor_meta = {
             "backend_hash": torch.utils._triton.triton_hash_with_backend(),
-            "are_deterministic_algorithms_enabled": torch.are_deterministic_algorithms_enabled(),
             "assert_indirect_indexing": config.assert_indirect_indexing,
             "autotune_local_cache": config.autotune_local_cache,
             "autotune_pointwise": config.triton.autotune_pointwise,
@@ -4288,6 +4287,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "store_cubin": config.triton.store_cubin,
             "deterministic": config.deterministic,
         }
+
+        if config.write_are_deterministic_algorithms_enabled:
+            inductor_meta["are_deterministic_algorithms_enabled"] = (
+                torch.are_deterministic_algorithms_enabled()
+            )
+
         if torch.version.hip is not None:
             inductor_meta["is_hip"] = True
         if config.is_fbcode():

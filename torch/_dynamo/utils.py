@@ -1111,14 +1111,6 @@ def is_lru_cache_wrapped_function(
     )
 
 
-def is_annotate_wrapped_function(
-    value: Any,
-) -> bool:
-    return value == torch.fx.traceback.annotate and is_function(
-        inspect.getattr_static(value, "__wrapped__")
-    )
-
-
 _FuncTypes: TypeAlias = Union[
     types.FunctionType,
     types.BuiltinFunctionType,
@@ -2918,6 +2910,15 @@ def rmse(ref: torch.Tensor, res: torch.Tensor) -> torch.Tensor:
     Calculate root mean squared error
     """
     return torch.sqrt(torch.mean(torch.square(ref - res)))
+
+
+def bitwise_same(ref: Any, res: Any, equal_nan: bool = False) -> bool:
+    return same(
+        ref,
+        res,
+        tol=0.0,
+        equal_nan=equal_nan,
+    )
 
 
 def same(
