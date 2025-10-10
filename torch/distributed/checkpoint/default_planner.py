@@ -87,7 +87,7 @@ class DefaultSavePlanner(SavePlanner):
                 "deprecated, and no longer has any effect. Please remove this argument "
                 "from your call."
             )
-        self._cached_plans_key: str = self.__class__.__name__
+        self._cached_plans_key: str = f"{self.__class__.__name__}-{id(self)}"
         self._enable_plan_caching = enable_plan_caching
 
     def set_up_planner(
