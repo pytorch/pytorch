@@ -113,6 +113,7 @@
 
 #ifdef USE_CUDA
 #include <ATen/ROCmFABackend.h>
+#include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #include <torch/csrc/inductor/static_cuda_launcher.h>
@@ -2503,6 +2504,39 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_get_blas_preferred_backend", []() {
     return at::globalContext().blasPreferredBackend();
   });
+
+  py::enum_<at::blas::ScalingType>(
+      py_module, "_ScalingType", "Supported Tensor scaling types")
+      .value(
+          "TensorWise",
+          at::blas::ScalingType::TensorWise,
+          "Single scale per-tensor")
+      .value(
+          "RowWise", at::blas::ScalingType::RowWise, "Scale per-row of tensor")
+      .value(
+          "BlockWise1x16",
+          at::blas::ScalingType::BlockWise1x16,
+          "Scale per 16 contiguous values")
+      .value(
+          "BlockWise1x32",
+          at::blas::ScalingType::BlockWise1x32,
+          "Scale per 32 contiguous values")
+      .value(
+          "BlockWise1x128",
+          at::blas::ScalingType::BlockWise1x128,
+          "Scale per 128 contiguous values")
+      .value(
+          "BlockWise128x128",
+          at::blas::ScalingType::BlockWise128x128,
+          "Scale per 128x128 tile");
+
+  py::enum_<at::blas::SwizzleType>(
+      py_module, "_SwizzleType", "Supported scale swizzle types")
+      .value("NO_SWIZZLE", at::blas::SwizzleType::NO_SWIZZLE, "No swizzling")
+      .value(
+          "SWIZZLE_32_4_4",
+          at::blas::SwizzleType::SWIZZLE_32_4_4,
+          "Blackwell-stype 32x4x4 swizzle");
 
   py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
       .value("Default", at::ROCmFABackend::Default)

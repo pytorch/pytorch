@@ -2002,7 +2002,6 @@ def _new_process_group_helper(
             if not is_gloo_available():
                 raise RuntimeError("Distributed package doesn't have Gloo built in")
             backend_class = ProcessGroupGloo(
-                # pyrefly: ignore  # bad-argument-type
                 backend_prefix_store,
                 group_rank,
                 group_size,
@@ -2048,7 +2047,6 @@ def _new_process_group_helper(
             # RuntimeError if is_ucc_available() returns false.
 
             backend_class = ProcessGroupUCC(
-                # pyrefly: ignore  # bad-argument-type
                 backend_prefix_store,
                 group_rank,
                 group_size,
