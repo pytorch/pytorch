@@ -19,6 +19,7 @@
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
+#include <cstdint>
 
 #include <torch/csrc/dynamo/debug_macros.h>
 
@@ -622,7 +623,7 @@ struct AutocastState {
 struct GlobalStateGuard {
   PyObject_HEAD
 
-  inline void init() {
+  void init() {
     auto& ctx = at::globalContext();
     _grad_mode = at::GradMode::is_enabled();
     _autocast_state = AutocastState();
@@ -634,14 +635,16 @@ struct GlobalStateGuard {
     _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
-    _allow_tf32 = ctx.float32Precision("cuda", "matmul") == "tf32";
+    _allow_tf32 =
+        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+        at::Float32Precision::TF32;
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
     _default_dtype = at::get_default_dtype();
   }
 
-  inline bool check() const {
+  bool check() const {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
             _autocast_state == AutocastState() &&
@@ -651,14 +654,17 @@ struct GlobalStateGuard {
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
             _deterministic_algorithms_warn_only ==
                 ctx.deterministicAlgorithmsWarnOnly() &&
-            _allow_tf32 == (ctx.float32Precision("cuda", "matmul") == "tf32") &&
+            _allow_tf32 ==
+                (ctx.float32Precision(
+                     at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+                 at::Float32Precision::TF32) &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
         _default_dtype == at::get_default_dtype();
   }
 
-  inline std::string reason() const {
+  std::string reason() const {
     std::ostringstream os;
     auto& ctx = at::globalContext();
     if (_grad_mode != at::GradMode::is_enabled())
@@ -672,7 +678,10 @@ struct GlobalStateGuard {
     if (_deterministic_algorithms_warn_only !=
         ctx.deterministicAlgorithmsWarnOnly())
       os << "deterministic_algorithms_warn_only ";
-    if (_allow_tf32 != (ctx.float32Precision("cuda", "matmul") == "tf32"))
+    if (_allow_tf32 !=
+        (ctx.float32Precision(
+             at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+         at::Float32Precision::TF32))
       os << "allow_tf32 ";
     if (_allow_fp16_reduce != ctx.allowFP16ReductionCuBLAS())
       os << "allow_fp16_reduce ";
@@ -695,8 +704,10 @@ struct GlobalStateGuard {
     json_j["deterministic_algorithms_warn_only"] =
         json_t._deterministic_algorithms_warn_only;
     json_j["allow_tf32"] = json_t._allow_tf32;
-    json_j["allow_fp16_reduce"] = json_t._allow_fp16_reduce;
-    json_j["allow_bf16_reduce"] = json_t._allow_bf16_reduce;
+    json_j["allow_fp16_reduce"] =
+        static_cast<int64_t>(json_t._allow_fp16_reduce);
+    json_j["allow_bf16_reduce"] =
+        static_cast<int64_t>(json_t._allow_bf16_reduce);
     json_j["num_threads"] = json_t._num_threads;
     json_j["default_dtype"] = json_t._default_dtype.toScalarType();
   }
@@ -712,8 +723,10 @@ struct GlobalStateGuard {
     json_t._deterministic_algorithms_warn_only =
         json_j.at("deterministic_algorithms_warn_only");
     json_t._allow_tf32 = json_j.at("allow_tf32");
-    json_t._allow_fp16_reduce = json_j.at("allow_fp16_reduce");
-    json_t._allow_bf16_reduce = json_j.at("allow_bf16_reduce");
+    json_t._allow_fp16_reduce = static_cast<at::CuBLASReductionOption>(
+        static_cast<int64_t>(json_j.at("allow_fp16_reduce")));
+    json_t._allow_bf16_reduce = static_cast<at::CuBLASReductionOption>(
+        static_cast<int64_t>(json_j.at("allow_bf16_reduce")));
     json_t._num_threads = json_j.at("num_threads");
     json_t._default_dtype =
         caffe2::TypeMeta::fromScalarType(json_j.at("default_dtype"));
@@ -726,8 +739,8 @@ struct GlobalStateGuard {
   bool _deterministic_algorithms;
   bool _deterministic_algorithms_warn_only;
   bool _allow_tf32;
-  bool _allow_fp16_reduce;
-  bool _allow_bf16_reduce;
+  at::CuBLASReductionOption _allow_fp16_reduce;
+  at::CuBLASReductionOption _allow_bf16_reduce;
   int _num_threads;
   caffe2::TypeMeta _default_dtype;
   // TODO(jansel): we should guard on more state as inductor starts using it
@@ -1698,95 +1711,6 @@ class LAMBDA_GUARD : public LeafGuard {
  private:
   // The user provided lambda function for check_fn.
   py::function _guard_check_fn;
-};
-
-/*
-Similar to LAMBDA_GUARD but where lambda does not take any arguments. This
-ensures that we don't need to construct a dictionary from framelocals even if
-the guard is at the root. These guards are for root guards like GlobalState.
-*/
-class LAMBDA_GUARD_NO_ARGS : public LeafGuard {
- public:
-  LAMBDA_GUARD_NO_ARGS(
-      RootGuardManager* root_guard_manager,
-      py::object guard_check_fn,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
-    if (py::isinstance<py::function>(guard_check_fn)) {
-      _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
-    } else {
-      throw py::type_error("LAMBDA_GUARD_NO_ARGS expects (callable, str)");
-    }
-  }
-
-  bool _check() {
-    PyObject* x = PyObject_CallNoArgs(_guard_check_fn.ptr()); // new ref
-    if (x == nullptr) {
-      // An exception is caught in the lambda function.
-      PyErr_Clear();
-      return false;
-    }
-    bool result = PyObject_IsTrue(x);
-    Py_DECREF(x);
-    return result;
-  }
-
-  bool check_nopybind(PyObject* value) override { // borrowed ref
-    return _check();
-  }
-
-  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
-    PyObject* x = PyObject_CallNoArgs(_guard_check_fn.ptr()); // new ref
-    if (x == nullptr) {
-      // An exception is caught in the lambda function.
-      std::string exc_message = get_exception_message();
-      PyErr_Clear();
-      return GuardDebugInfo(false, exc_message, 0);
-    }
-    bool result = PyObject_IsTrue(x);
-    Py_DECREF(x);
-    if (result) {
-      return GuardDebugInfo(true, 0);
-    }
-    return GuardDebugInfo(false, verbose_code_parts(), 0);
-  }
-
-  // Ensure that framelocals dict is not constructed.
-  bool check_nopybind(FrameLocalsMapping* map) override {
-    return _check();
-  }
-
- private:
-  // The user provided lambda function for check_fn.
-  py::function _guard_check_fn;
-};
-
-/*
-Similar to LAMBDA_GUARD but disallows running on a FrameLocalsMapping input.
-These guards are at trunk or leaf, and not at the root.
-*/
-class LAMBDA_GUARD_NO_FRAMELOCALS : public LAMBDA_GUARD {
- public:
-  LAMBDA_GUARD_NO_FRAMELOCALS(
-      RootGuardManager* root_guard_manager,
-      py::object guard_check_fn,
-      py::object verbose_code_parts)
-      : LAMBDA_GUARD(root_guard_manager, guard_check_fn, verbose_code_parts) {}
-
-  bool check_nopybind(PyObject* value) override { // borrowed ref
-    return LAMBDA_GUARD::check_nopybind(value);
-  }
-
-  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
-    return LAMBDA_GUARD::check_verbose_nopybind(value);
-  }
-
-  bool check_nopybind(FrameLocalsMapping* map) override {
-    TORCH_CHECK(
-        false,
-        "FramelocalsMapping input to LAMBDA_GUARD_NO_FRAMELOCALS,"
-        "use LAMBDA_GUARD instead");
-  }
 };
 
 class TYPE_MATCH : public LeafGuard {
@@ -6768,19 +6692,6 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "LAMBDA_GUARD")
       .def(py::init<RootGuardManager*, py::function, py::list>())
       .def("__call__", &LAMBDA_GUARD::check);
-  py::class_<
-      LAMBDA_GUARD_NO_ARGS,
-      LeafGuard,
-      std::shared_ptr<LAMBDA_GUARD_NO_ARGS>>(py_m, "LAMBDA_GUARD_NO_ARGS")
-      .def(py::init<RootGuardManager*, py::function, py::list>())
-      .def("__call__", &LAMBDA_GUARD_NO_ARGS::check);
-  py::class_<
-      LAMBDA_GUARD_NO_FRAMELOCALS,
-      LeafGuard,
-      std::shared_ptr<LAMBDA_GUARD_NO_FRAMELOCALS>>(
-      py_m, "LAMBDA_GUARD_NO_FRAMELOCALS")
-      .def(py::init<RootGuardManager*, py::function, py::list>())
-      .def("__call__", &LAMBDA_GUARD_NO_FRAMELOCALS::check);
   py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
       py_m, "TYPE_MATCH")
       .def(py::init<RootGuardManager*, py::object, py::list>())
@@ -7091,26 +7002,6 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object lambda,
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<LAMBDA_GUARD>(
-                self.get_root(),
-                std::move(lambda),
-                std::move(verbose_code_parts)));
-          })
-      .def(
-          "add_lambda_guard_no_args",
-          [](GuardManager& self,
-             py::object lambda,
-             py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(std::make_shared<LAMBDA_GUARD_NO_ARGS>(
-                self.get_root(),
-                std::move(lambda),
-                std::move(verbose_code_parts)));
-          })
-      .def(
-          "add_lambda_guard_no_framelocals",
-          [](GuardManager& self,
-             py::object lambda,
-             py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(std::make_shared<LAMBDA_GUARD_NO_FRAMELOCALS>(
                 self.get_root(),
                 std::move(lambda),
                 std::move(verbose_code_parts)));

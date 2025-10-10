@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Callable, Union
+from collections.abc import Callable
+from typing import Union
 from typing_extensions import TypeVarTuple
 
 import torch
@@ -124,6 +125,7 @@ def map(
 
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, f, num_mapped_args, *flat_args):
         ctx._f = f
         ctx._num_mapped_args = num_mapped_args
