@@ -1555,12 +1555,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # Run microbatches
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)
 
-        # This is only applicable in the FSDP case, any outstanding events need to be waited on
+        # Stage post processing
+        # TODO: remove this section and include as part of the schedule IR
         for stage in self._stages:
-            for event in stage.reduce_scatter_events:
-                if event is not None:
-                    torch.accelerator.current_stream(event.device).wait_event(event)
-            stage.reduce_scatter_events.clear()
+            stage._post_backward()
 
         # Return merged results per original format
         for stage in self._stages:
