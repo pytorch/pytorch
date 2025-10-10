@@ -413,14 +413,24 @@ struct ReduceOp {
       value = thread_reduce<output_vec_size>(input_slice);
     }
 
-    if (config.should_block_y_reduce()) {
-      value = block_y_reduce<output_vec_size>(value, shared_memory);
-    }
-    __syncthreads();
-    if (config.should_block_x_reduce()) {
-      value = block_x_reduce<output_vec_size>(value, shared_memory);
-    }
+    if (config.vectorize_input) {
+      __syncthreads();
+      if (config.should_block_x_reduce()) {
+        value = block_x_reduce<output_vec_size>(value, shared_memory);
+      }
+      if (config.should_block_y_reduce()) {
+        value = block_y_reduce<output_vec_size>(value, shared_memory);
+      }
+    } else {
+      if (config.should_block_y_reduce()) {
+        value = block_y_reduce<output_vec_size>(value, shared_memory);
+      }
+      __syncthreads();
 
+      if (config.should_block_x_reduce()) {
+        value = block_x_reduce<output_vec_size>(value, shared_memory);
+      }
+    }
     using out_ptr_vec_t = std::array<out_scalar_t*, output_vec_size>;
     using offset_vec_t = std::array<index_t, output_vec_size>;
     offset_vec_t base_offsets;
