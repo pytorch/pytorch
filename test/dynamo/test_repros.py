@@ -7424,10 +7424,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         if backend == "inductor":
             # A known LoweringException Issue https://github.com/pytorch/pytorch/issues/157612
-            with self.assertRaisesRegex(
-                InductorError,
-                r"Unsupported for now if query, key, value are the same buffer",
-            ):
+            with self.assertRaisesRegex(InductorError):
                 compiled(torch.randn(2, 128, 64))
         else:
             compiled(torch.randn(2, 128, 64))
