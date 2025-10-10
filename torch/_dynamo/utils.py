@@ -1375,6 +1375,7 @@ class CompilationMetrics:
     param_count: Optional[int] = None
     recompile_user_contexts: Optional[set[str]] = None
     inline_inbuilt_nn_modules_candidate: Optional[bool] = False
+    inductor_provenance: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
