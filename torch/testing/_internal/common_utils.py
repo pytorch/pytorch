@@ -102,6 +102,7 @@ except ImportError:
 
 
 SEED = 1234
+MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a")
 NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
@@ -5124,7 +5125,7 @@ def gradcheck(fn, inputs, **kwargs):
 
     for key, value in default_values.items():
         # default value override values explicitly set to None
-        k = kwargs.get(key, None)
+        k = kwargs.get(key)
         kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
@@ -5144,7 +5145,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
 
     for key, value in default_values.items():
         # default value override values explicitly set to None
-        k = kwargs.get(key, None)
+        k = kwargs.get(key)
         kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)

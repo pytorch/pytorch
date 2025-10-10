@@ -841,7 +841,7 @@ def sym_constrain_range_for_size(size, min=None, max=None):
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
     if min is None and max is None:
-        torch._check_is_size(size)
+        torch._check(size >= 0)
         return
 
     if isinstance(size, (SymFloat, SymBool)):
@@ -6835,7 +6835,7 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     # From aten/src/ATen/native/Sorting.cpp
     dim = maybe_wrap_dim(dim, self.dim(), wrap_scalar=True)
     sliceSize = 1 if self.dim() == 0 else self.size(dim)
-    torch._check_is_size(k)
+    torch._check(k >= 0)
     torch._check(k <= sliceSize, lambda: "k not in range for dimension")
 
     topKSize = list(self.shape)
