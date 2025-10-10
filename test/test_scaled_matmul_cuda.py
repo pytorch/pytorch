@@ -897,9 +897,11 @@ class TestFP8Matmul(TestCase):
             if torch.version.hip:
                 # Note re.compile is used, not re.escape. This is to accommodate fn vs fnuz type message.
                 msg = r"expected mat_b\.dtype\(\) to be at::kFloat8_e4m3fn(uz)?, but got c10::Float8_e5m2(fnuz)?"
+                exception = ValueError
             else:
                 msg = "Expected b.dtype() == at::kFloat8_e4m3fn to be true, but got false."
-            with self.assertRaisesRegex(ValueError, msg):
+                exception = RuntimeError
+            with self.assertRaisesRegex(exception, msg):
                 e5m2()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
