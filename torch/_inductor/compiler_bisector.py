@@ -243,6 +243,7 @@ class CompilerBisector:
         lines = cls.read_lines_from_file(file_path)
         low = None
         high = None
+        # pyrefly: ignore  # bad-assignment
         for line in reversed(lines):
             if line.startswith("low="):
                 low = int(line.strip().split("=")[1])
