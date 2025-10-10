@@ -1049,7 +1049,7 @@ class Module:
             >>> @torch.no_grad()
             >>> def init_weights(m):
             >>>     print(m)
-            >>>     if type(m) == nn.Linear:
+            >>>     if type(m) is nn.Linear:
             >>>         m.weight.fill_(1.0)
             >>>         print(m.weight)
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
