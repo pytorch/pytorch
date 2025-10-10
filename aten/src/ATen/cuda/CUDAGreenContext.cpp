@@ -1,5 +1,9 @@
 #include <ATen/cuda/CUDAGreenContext.h>
 
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#include <c10/cuda/driver_api.h>
+#endif
+
 namespace at::cuda {
   GreenContext::GreenContext(int device_id, unsigned int num_sms) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
