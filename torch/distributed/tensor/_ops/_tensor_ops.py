@@ -1073,10 +1073,8 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
                     DTensorSpec(
                         mesh=values_spec.mesh,
                         placements=tuple(
-                            [
-                                Replicate() if need_reshard_on_values[i] else v
-                                for i, v in enumerate(values_spec.placements)
-                            ]
+                            Replicate() if need_reshard_on_values[i] else v
+                            for i, v in enumerate(values_spec.placements)
                         ),
                         tensor_meta=values_spec.tensor_meta,
                     ),
