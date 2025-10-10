@@ -22,8 +22,8 @@ from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
 
 
-BATCH_SIZES = [2, 8, 32]
-SEQ_LENS = [256, 1024, 2048]
+BATCH_SIZES = [2, 32]
+SEQ_LENS = [256, 2048]
 
 
 # We are primarily interested in tf32 datatype

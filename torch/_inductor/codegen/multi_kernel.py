@@ -576,6 +576,8 @@ class SizeHintMultiKernelCall(MultiKernelCall):
             )
         else:
             self._select_kernel_by_shape(*args, **kwargs)
+        print("runtime shape key", cache_key)
+        print("picked kernel", self.picked_kernel, " : ", self._kernel_hints[self.picked_kernel], "for shape", cache_key)
 
         if not self._recorded:
             self._recorded = True
@@ -600,4 +602,7 @@ class SizeHintMultiKernelCall(MultiKernelCall):
             for key in self._kernel_hints
         ]
         self.picked_kernel = dists.index(min(dists))
+        print("picked kernel", self.picked_kernel, " : ", self._kernel_hints[self.picked_kernel], "for shape", shape_key)
+        for i, (dist, hint) in enumerate(zip(dists, self._kernel_hints)):
+            print(i, dist, hint)
         self._cache_shape_choice(shape_key, self.picked_kernel)

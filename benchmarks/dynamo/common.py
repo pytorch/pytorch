@@ -1121,6 +1121,8 @@ def speedup_experiment(args, model_iter_fn, optimize_ctx, model, example_inputs,
             # inputs will incur high penalty then the next one.
             maybe_mark_step(args)
 
+            print("runtime input shapes", [x.shape for x in inputs])
+
             # interleave the runs to handle frequency scaling and load changes
             with (
                 maybe_mark_profile(p=p, mark="expected"),
@@ -2679,8 +2681,8 @@ class BenchmarkRunner:
             dynamo_stats.subtract(start_stats)
             return latency, peak_mem, dynamo_stats
 
-        BATCH_SIZES = [2, 8, 32]
-        SEQ_LENS = [256, 1024, 2048]
+        BATCH_SIZES = [2, 32]
+        SEQ_LENS = [256, 2048]
         SIZES = list(itertools.product(BATCH_SIZES, SEQ_LENS))
 
         results = []
@@ -2690,7 +2692,7 @@ class BenchmarkRunner:
 
             torch._inductor.config.autotune_remote_cache = False
             torch._dynamo.config.error_on_recompile = True
-            torch._inductor.config.multi_kernel_hints = [2, 32, 256]
+            torch._inductor.config.multi_kernel_hints = [2, 16, 32, 64, 128, 256]
             torch._inductor.config.triton.multi_kernel = True
 
             from torch._functorch._aot_autograd.autograd_cache import (
@@ -2764,7 +2766,7 @@ class BenchmarkRunner:
                     print("HINT_SIZE", hint_sizes, "RUNTIME_SIZE", runtime_sizes, results[-1])
 
                 iteration += 1
-                exit()
+                break
         return " ".join(map(str, results))
 
     def run_performance_test(

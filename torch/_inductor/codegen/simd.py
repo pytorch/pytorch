@@ -1696,7 +1696,11 @@ class SIMDScheduling(BaseScheduling):
         from ..ir import IRNode
 
         def get_size(arg):
-            if not isinstance(arg, IRNode) or (size := arg.maybe_get_size()) is None:
+            if not isinstance(arg, IRNode):
+                return None
+            if isinstance(arg, ir.BaseView):
+                arg = arg.unwrap_view()
+            if (size := arg.maybe_get_size()) is None:
                 return None
             return tuple(s for s in size)
 
@@ -1724,16 +1728,21 @@ class SIMDScheduling(BaseScheduling):
         """
         Returns cache key for hint-based multi-graph; key is tuple of shapes with hint filled in.
         """
+        def _size_hint(shape, hint):
+            if isinstance(shape, sympy.Expr):
+                subs = {sym: hint for sym in shape.free_symbols}
+                return int(shape.subs(subs))
+            return shape
+
         shapes = self._get_multikernel_shapes(node)
-        return tuple(
+        out = tuple(
             tuple(
-                hint
-                if isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer)
-                else s
+                _size_hint(s, hint)
                 for s in shape
             )
             for shape in shapes
         )
+        return out
 
     def codegen_template(
         self,

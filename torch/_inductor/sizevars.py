@@ -562,6 +562,9 @@ class SizeVarAllocator:
         if not isinstance(expr, Expr):
             assert isinstance(expr, int)
             return expr
+
+        expr = self.remove_precomputed_replacements(expr)
+
         free_symbols = expr.free_symbols
         if not free_symbols:
             try:
@@ -570,9 +573,10 @@ class SizeVarAllocator:
                 return expr  # inf/nan/I
 
         if hint_override:
-            return hint_override
-
-        expr = self.remove_precomputed_replacements(expr)
+            subs = {s: hint_override for s in free_symbols}
+            out = expr.subs(subs)
+            assert isinstance(out, sympy.Integer)
+            return int(out)
 
         if use_user_provided_hint_override:
             expr = sympy_subs(expr, self.var_to_hint_override)

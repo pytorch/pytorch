@@ -1322,12 +1322,18 @@ class ValueWithLineMap:
     line_map: list[tuple[int, LineContext]]
 
 
+# _BUFFER_COUNT = 0
+
 class IndentedBuffer:
     tabwidth = 4
 
     def __init__(self, initial_indent: int = 0) -> None:
         self._lines: list[Union[DeferredLineBase, LineContext, str]] = []
         self._indent = initial_indent
+        # global _BUFFER_COUNT
+        # self.buffer_count = _BUFFER_COUNT
+        # print("_BUFFER_COUNT", _BUFFER_COUNT)
+        # _BUFFER_COUNT += 1
 
     @contextlib.contextmanager
     def set_tabwidth(self, tabwidth: int) -> Iterator[None]:
@@ -1394,6 +1400,9 @@ class IndentedBuffer:
         self.writeline("\n")
 
     def writeline(self, line: Union[LineContext, DeferredLineBase, str]) -> None:
+        # if self.buffer_count == 78808:
+        #     print(line)
+        #     breakpoint()
         if isinstance(line, LineContext):
             self._lines.append(line)
         elif isinstance(line, DeferredLineBase):
@@ -2998,6 +3007,7 @@ def align_inputs_from_check_idxs(
         old_tensors, new_tensors = copy_misaligned_inputs(
             new_inputs, inputs_to_check, mutated_input_idxs
         )
+        print("model run with shapes", [x.shape if isinstance(x, torch.Tensor) else "" for x in new_inputs])
         out = model(new_inputs)
 
         # If a mutated tensor was cloned to be aligned, we need to reflect back the mutation to the
