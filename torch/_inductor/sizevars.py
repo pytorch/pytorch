@@ -113,7 +113,7 @@ class SizeVarAllocator:
                 cache.clear()
                 replacement_count = len(self.replacements)
             key = (expr, *var_ranges.items())
-            result = cache.get(key, None)
+            result = cache.get(key)
             if result is None:
                 result = self._simplify_with_ranges(expr, var_ranges)
                 cache[key] = result
@@ -137,7 +137,7 @@ class SizeVarAllocator:
                 cache.clear()
                 replacement_count = len(self.replacements)
             key = (*index_vars, *sizes, *index_formulas)
-            result = cache.get(key, None)
+            result = cache.get(key)
             if result is None:
                 result = self._simplify_loops_impl(index_vars, sizes, index_formulas)
                 cache[key] = result
@@ -181,6 +181,7 @@ class SizeVarAllocator:
         def statically_known(expr):
             evaluated = self.shape_env._maybe_evaluate_static(
                 expr,
+                # pyrefly: ignore  # bad-argument-type
                 axioms=axioms,
                 var_to_range=var_to_range_tuple,
             )
@@ -454,9 +455,23 @@ class SizeVarAllocator:
     # Similar to the functions guard_or_false/guard_or_true in symbolic_shapes.py
     # but operates on sympy expressions instead of symnodes. see Note [guard_or_].
     def guard_or_false(self, left):
+        import torch.fx.experimental._config as exp_config
+
+        if exp_config.backed_size_oblivious:
+            static_val = self.shape_env._maybe_evaluate_static(left)
+            if static_val is not None:
+                return static_val
+            return False
         return self.evaluate_expr(left, fallback_value=False)
 
     def guard_or_true(self, left):
+        import torch.fx.experimental._config as exp_config
+
+        if exp_config.backed_size_oblivious:
+            static_val = self.shape_env._maybe_evaluate_static(left)
+            if static_val is not None:
+                return static_val
+            return True
         return self.evaluate_expr(left, fallback_value=True)
 
     # The evaluate functions evaluate some symbolic sympy expression
@@ -730,7 +745,7 @@ class SizeVarAllocator:
             return self.unbacked_replacements
 
         class UnionFind:
-            def __init__(self, equality_graph: dict[Expr, OrderedSet[Expr]]):
+            def __init__(self, equality_graph: dict[Expr, Set[Expr]]):
                 self.eq_graph = equality_graph
                 self.expressions = list(equality_graph.keys())
                 self.reverse_expressions = {
@@ -738,15 +753,15 @@ class SizeVarAllocator:
                 }
 
                 # Each node is its own parent initially
-                self.parent = [i for i in range(len(self.expressions))]
+                self.parent = list(range(len(self.expressions)))
                 # Track rank for union-by-rank
                 self.rank = [1] * len(self.expressions)
 
-            def find_expr(self, expr):
+            def find_expr(self, expr: Expr):
                 parent = self.find(self.reverse_expressions[expr])
                 return self.expressions[parent]
 
-            def find(self, x):
+            def find(self, x: int):
                 # Path compression
                 if self.parent[x] != x:
                     self.parent[x] = self.find(self.parent[x])
@@ -754,7 +769,7 @@ class SizeVarAllocator:
 
             def choose_leader(self, x: int, y: int):
                 def _choose(x: int, y: int) -> bool:
-                    # Choose leader x over y?
+                    # Do I choose leader x over y?
                     this, that = self.expressions[x], self.expressions[y]
 
                     # Prefer replacing unbacked exprs with backed expressions/constants.
@@ -789,12 +804,12 @@ class SizeVarAllocator:
                     return x, y
                 return y, x
 
-            def union_expr(self, a, b):
+            def union_expr(self, a: Expr, b: Expr):
                 return self.union(
                     self.reverse_expressions[a], self.reverse_expressions[b]
                 )
 
-            def union(self, a, b):
+            def union(self, a: int, b: int):
                 rootA = self.find(a)
                 rootB = self.find(b)
                 if rootA == rootB:
@@ -804,8 +819,7 @@ class SizeVarAllocator:
                 self.rank[leader] += self.rank[other]
                 return True
 
-        self.unbacked_replacements = {}
-        self.equality_graph = defaultdict(OrderedSet)
+        self.equality_graph: dict[Expr, Set] = defaultdict(Set)
         for assertions in self.shape_env.deferred_runtime_asserts.values():
             for assertion in assertions:
                 if not isinstance(assertion.expr, sympy.Equality):
@@ -824,6 +838,7 @@ class SizeVarAllocator:
             for adj in edges:
                 uf.union_expr(expr, adj)
 
+        self.unbacked_replacements: dict[Expr, Expr] = {}
         for expr in self.equality_graph.keys():
             canonical_expr = uf.find_expr(expr)
             if expr != canonical_expr:

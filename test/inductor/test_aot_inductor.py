@@ -202,7 +202,7 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.compile, model, example_inputs
             )
             if self.device == "mps":
-                FileCheck().check("getKernelFunction(").run(code)
+                FileCheck().check("aoti_torch_mps_get_kernel_function(").run(code)
             elif self.device == GPU_TYPE:
                 FileCheck().check("launchKernel(").run(code)
                 if config.aot_inductor.embed_kernel_binary:
@@ -696,6 +696,24 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 512, device=self.device),
         )
         with config.patch({"aot_inductor.force_mmap_weights": True}):
+            self.check_model(Model(), example_inputs)
+
+    def test_large_mmaped_weights_on_disk(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(512, 250112)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(1, 250112, device=self.device),
+            torch.randn(1, 512, device=self.device),
+        )
+        with config.patch(
+            {"aot_inductor.package_constants_on_disk_format": "binary_blob"}
+        ):
             self.check_model(Model(), example_inputs)
 
     def test_with_offset(self):
@@ -1642,17 +1660,26 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    @skipIfMPS
     @parametrize("shift_k", [0, 1, 2, 3])
+    @parametrize("use_static_size", [True, False])
     @config.patch({"unbacked_symint_fallback": 12})
     @config.patch({"triton.autotune_at_compile_time": None})
-    def test_colin(self, shift_k):
+    def test_unbacked_expr_replacements(self, shift_k, use_static_size):
+        """
+        Test parameters
+        - shift_k: Validates that torch._check assertion order doesn't affect
+        results by shifting the order of torch._checks
+        - use_static_size: Tests torch._check compatibility between unbacked
+        symbolic expressions and static shapes
+        """
+
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Need triton for user-defined triton kernel")
 
-        INNER_DIM = 256
-
         def realize_out_tensor_with_size(size):
-            tensor = torch.ones((size, INNER_DIM), device=self.device)
+            STATIC_DIM = 256  # large enough to hit IMA w/o compute-sanitizer
+            tensor = torch.ones((size, STATIC_DIM), device=self.device)
             # Realize the tensor as an intermediate buffer
             nrows, ncols = tensor.shape
             numel = tensor.numel()
@@ -1667,6 +1694,7 @@ class AOTInductorTestsTemplate:
 
         class Repro(torch.nn.Module):
             def forward(self, x, y, lst):
+                STATIC_SIZE = 300
                 s0, s1 = x.shape
                 s2, s3 = y.shape
                 u0, u1, u2, u3, u100 = lst.tolist()
@@ -1674,7 +1702,7 @@ class AOTInductorTestsTemplate:
                 expr1 = s0 + u0
                 expr2 = s1 + u1
                 expr3 = (s2 * s3) + (u2 // u3)  # make this one a lil complicated
-                expr4 = 300
+                expr4 = STATIC_SIZE if use_static_size else u100
 
                 t1 = realize_out_tensor_with_size(expr1)
                 t2 = realize_out_tensor_with_size(expr2)
@@ -1798,7 +1826,6 @@ class AOTInductorTestsTemplate:
 
                 backed = z.size(0)
                 unbacked = scalar.item()
-                torch._check_is_size(unbacked)
 
                 unbacked_add_expr = backed + unbacked
                 repeated = x.repeat(unbacked_add_expr, 1)
@@ -1837,8 +1864,6 @@ class AOTInductorTestsTemplate:
                 index_select = torch.index_select(embeddings, 0, index)
 
                 u0, u1 = lst.tolist()
-                torch._check_is_size(u0)
-                torch._check_is_size(u1)
                 backed0, backed1 = z.size(0), z.size(1)
 
                 repeated0 = y.repeat(backed0 + u0, 1)
@@ -1888,9 +1913,6 @@ class AOTInductorTestsTemplate:
         class Repro(torch.nn.Module):
             def forward(self, values, repeats, mask, embeddings, x, y, z, lst):
                 u0, u1, u2 = lst.tolist()
-                torch._check_is_size(u0)
-                torch._check_is_size(u1)
-                torch._check_is_size(u2)
                 backed = z.size(0)
                 backed1 = z.size(1)
 
@@ -2962,7 +2984,7 @@ class AOTInductorTestsTemplate:
 
         if self.device == "mps":
             self.code_check_count(
-                model, example_inputs, '.getKernelFunction("generated_kernel")', 1
+                model, example_inputs, "aoti_torch_mps_get_kernel_function(", 1
             )
         elif self.device == GPU_TYPE:
             self.code_check_count(
@@ -5960,7 +5982,7 @@ class AOTInductorTestsTemplate:
                 {
                     "always_keep_tensor_constants": True,
                     "aot_inductor.package_constants_in_so": False,
-                    "aot_inductor.package_constants_on_disk": True,
+                    "aot_inductor.package_constants_on_disk_format": "pickle_weights",
                     "aot_inductor.package": True,
                 }
             ),
@@ -7453,14 +7475,16 @@ class AOTInductorLoggingTest(LoggingTestCase):
 
 class TestAOTInductorConfig(TestCase):
     def test_no_compile_standalone(self):
-        with config.patch({"aot_inductor.compile_standalone": False}):
+        with config.patch({"aot_inductor_mode.compile_standalone": False}):
             result = maybe_aoti_standalone_config({})
             self.assertEqual(result, {})
 
     def test_compile_standalone_sets_package_cpp(self):
-        result = maybe_aoti_standalone_config({"aot_inductor.compile_standalone": True})
+        result = maybe_aoti_standalone_config(
+            {"aot_inductor_mode.compile_standalone": True}
+        )
         self.assertEqual(result["aot_inductor.package_cpp_only"], True)
-        self.assertEqual(result["aot_inductor.compile_standalone"], True)
+        self.assertEqual(result["aot_inductor_mode.compile_standalone"], True)
         self.assertEqual(result["aot_inductor.embed_kernel_binary"], True)
         self.assertEqual(
             result["aot_inductor.emit_multi_arch_kernel"], not torch.version.hip
@@ -7468,12 +7492,15 @@ class TestAOTInductorConfig(TestCase):
         self.assertEqual(
             result["aot_inductor.model_name_for_generated_files"], "aoti_model"
         )
+        self.assertEqual(result["aot_inductor.dynamic_linkage"], False)
 
     def test_compile_standalone_explicit_set(self):
         patches = {
-            "aot_inductor.compile_standalone": True,
+            "aot_inductor_mode.compile_standalone": True,
             "aot_inductor.package_cpp_only": True,
             "aot_inductor.embed_kernel_binary": True,
+            "aot_inductor.dynamic_linkage": False,
+            "aot_inductor.link_libtorch": False,
             "aot_inductor.emit_multi_arch_kernel": not torch.version.hip,
             "aot_inductor.model_name_for_generated_files": "aoti_model",
         }
@@ -7482,7 +7509,7 @@ class TestAOTInductorConfig(TestCase):
 
     def test_compile_standalone_package_cpp_false_raises(self):
         patches = {
-            "aot_inductor.compile_standalone": True,
+            "aot_inductor_mode.compile_standalone": True,
             "aot_inductor.package_cpp_only": False,
         }
         with self.assertRaises(RuntimeError):
@@ -7490,10 +7517,18 @@ class TestAOTInductorConfig(TestCase):
 
         with config.patch({"aot_inductor.package_cpp_only": False}):
             patches = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
             }
             with self.assertRaises(RuntimeError):
                 maybe_aoti_standalone_config(patches)
+
+    def test_compile_standalone_cross_compile_windows_package_format(self):
+        patches = {
+            "aot_inductor.cross_target_platform": "windows",
+            "aot_inductor.package_constants_in_so": True,
+        }
+        with self.assertRaises(RuntimeError):
+            maybe_aoti_standalone_config(patches)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)

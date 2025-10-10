@@ -5,14 +5,14 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from typing_extensions import assert_never
 
 from torchgen.utils import NamespaceHelper, OrderedSet
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -60,7 +60,23 @@ class Variant(Enum):
 DEFAULT_KERNEL_NAMESPACE = "at::native"
 
 # NOTE: Keep the list in sync with `DispatchKey` in c10/core/DispatchKey.h
-BACKEND_COMPONENTS = "CPU CUDA HIP XLA MTIA MPS IPU XPU HPU VE Lazy Meta PrivateUse1 PrivateUse2 PrivateUse3".split()
+BACKEND_COMPONENTS = [
+    "CPU",
+    "CUDA",
+    "HIP",
+    "XLA",
+    "MTIA",
+    "MPS",
+    "IPU",
+    "XPU",
+    "HPU",
+    "VE",
+    "Lazy",
+    "Meta",
+    "PrivateUse1",
+    "PrivateUse2",
+    "PrivateUse3",
+]
 FUNCTIONALITY_KEYS = [
     "",
     "Quantized",
