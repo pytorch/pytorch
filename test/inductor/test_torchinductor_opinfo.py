@@ -271,7 +271,7 @@ inductor_expected_failures_single_sample["cuda"] = {
         f32,
         f64,
         i32,
-        i64
+        i64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCUDA
 }
 
