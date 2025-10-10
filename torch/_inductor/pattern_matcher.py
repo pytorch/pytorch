@@ -2358,7 +2358,6 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
 def op_for_dependencies(t: torch.Tensor) -> torch.Tensor:
     """
     A no-op function that serves to create dependencies in the FX graph.
-    This function is used to serialize effects after mutations to preserve ordering.
     """
     return t
 
@@ -2382,10 +2381,15 @@ def check_mutable_custom_op(graph: torch.fx.Graph) -> bool:
 
 
 def add_implict_edges(gm: torch.fx.GraphModule) -> None:
-    """Add implicit edges to preserve ordering of mutations."""
+    """
+    Add implicit edges to preserve ordering of mutations.
+    """
     from torch._higher_order_ops.auto_functionalize import get_mutable_args_from_schema
     from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
+    from .fx_passes.memory_estimator import GraphAliasTracker, StorageKey
+
+    # Ensure FakeTensor metadata exists for placeholders so alias tracking works
     if not any(
         node.meta.get("val") is not None
         for node in gm.graph.nodes
@@ -2393,44 +2397,24 @@ def add_implict_edges(gm: torch.fx.GraphModule) -> None:
     ):
         FakeTensorProp(gm).propagate()
 
-    node_to_storages: dict[torch.fx.Node, OrderedSet[int]] = {}
-    storage_to_nodes: dict[int, OrderedSet[torch.fx.Node]] = {}
-    latest_dep_for_storage: dict[int, torch.fx.Node] = {}
+    nodes = list(gm.graph.nodes)
+    alias_info = GraphAliasTracker(nodes)
 
-    def ensure_storage_tracking(node: torch.fx.Node) -> OrderedSet[int]:
-        storages = node_to_storages.get(node)
-        if storages is None:
-            storages = OrderedSet()
-            meta_val = node.meta.get("val")
-
-            if isinstance(meta_val, (torch.Tensor, FakeTensor)):
-                storages.add(meta_val.untyped_storage()._cdata)
-            elif isinstance(meta_val, (tuple, list)):
-                for item in meta_val:
-                    if isinstance(item, (torch.Tensor, FakeTensor)):
-                        storages.add(item.untyped_storage()._cdata)
-
-            if storages:
-                node_to_storages[node] = storages
-                for sid in storages:
-                    storage_to_nodes.setdefault(sid, OrderedSet()).add(node)
-
-        return storages
-
-    for node in gm.graph.nodes:
-        ensure_storage_tracking(node)
+    # Build mapping from storage -> nodes that produce that storage as outputs
+    storage_to_nodes: dict[StorageKey, OrderedSet[torch.fx.Node]] = {}
+    for n in nodes:
+        for sk in alias_info.node_to_output_storages.get(n, OrderedSet()):
+            storage_to_nodes.setdefault(sk, OrderedSet()).add(n)
 
     def mutated_arg_nodes(node: torch.fx.Node) -> list[torch.fx.Node]:
-        if not is_mutation_op(node):
-            return []
-        if not hasattr(node.target, "_schema"):
+        if not is_mutation_op(node) or not hasattr(node.target, "_schema"):
             return []
 
         mutable_names, _ = get_mutable_args_from_schema(node.target._schema)
         if not mutable_names:
             return []
 
-        mutated = []
+        mutated: list[torch.fx.Node] = []
         for idx, arg in enumerate(node.target._schema.arguments):
             if arg.name in mutable_names:
                 val = (
@@ -2452,47 +2436,32 @@ def add_implict_edges(gm: torch.fx.GraphModule) -> None:
         if not mutated_nodes:
             continue
 
-        storage_to_mutated: dict[int, torch.fx.Node] = {}
+        # For each mutated arg node, collect all storages it outputs
+        storage_to_mutated: dict[StorageKey, torch.fx.Node] = {}
         for mutated in mutated_nodes:
-            for sid in ensure_storage_tracking(mutated):
-                storage_to_mutated.setdefault(sid, mutated)
+            for sk in alias_info.node_to_output_storages.get(mutated, OrderedSet()):
+                storage_to_mutated.setdefault(sk, mutated)
         if not storage_to_mutated:
             continue
 
         order = topo_index()
         insert_after: torch.fx.Node = node
-        for storage_id, mutated_tensor in storage_to_mutated.items():
-            existing_dep: Optional[torch.fx.Node] = None
-            for alias in storage_to_nodes.get(storage_id, ()):
-                if alias.op == "call_function" and alias.target == DEP_OP:
-                    if order.get(alias, -1) > order[node]:
-                        if existing_dep is None or order[alias] < order[existing_dep]:
-                            existing_dep = alias
-            if existing_dep is not None:
-                latest_dep_for_storage[storage_id] = existing_dep
-                insert_after = existing_dep
-                continue
-            prev_dep = latest_dep_for_storage.get(storage_id)
+        for storage_key, mutated_tensor in storage_to_mutated.items():
             dep_kwargs = {"writer_token": node}
-            if prev_dep is not None:
-                dep_kwargs["token"] = prev_dep
             with gm.graph.inserting_after(insert_after):
                 dep_node = gm.graph.call_function(
                     DEP_OP, args=(mutated_tensor,), kwargs=dep_kwargs
                 )
-
             insert_after = dep_node
             if "val" in mutated_tensor.meta:
                 dep_node.meta["val"] = mutated_tensor.meta["val"]
             dep_node.meta["mutated_of"] = node
-            dep_node.meta["alias_set"] = storage_id
 
-            node_to_storages[dep_node] = OrderedSet([storage_id])
-            storage_to_nodes.setdefault(storage_id, OrderedSet()).add(dep_node)
-            latest_dep_for_storage[storage_id] = dep_node
+            storage_to_nodes.setdefault(storage_key, OrderedSet()).add(dep_node)
 
+            # Redirect later users of any alias of this storage to depend on dep_node
             order = topo_index()
-            for alias in list(storage_to_nodes.get(storage_id, ())):
+            for alias in list(storage_to_nodes.get(storage_key, OrderedSet())):
                 if alias is dep_node:
                     continue
                 for user in list(alias.users):
