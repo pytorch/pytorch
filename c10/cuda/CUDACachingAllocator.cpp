@@ -64,10 +64,6 @@ namespace cuda::CUDACachingAllocator {
 using namespace c10::CachingAllocator;
 using namespace c10::CachingDeviceAllocator;
 
-// Included here as this is externally used in CUDAAllocatorConfig
-const size_t kLargeBuffer =
-    20971520; // "large" allocations may be packed in 20 MiB blocks
-
 namespace Native {
 
 //

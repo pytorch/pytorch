@@ -297,7 +297,7 @@ size_t CUDAAllocatorConfig::parseAllocatorConfig(
 #endif // USE_ROCM
 }
 
-void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
+void CUDAAllocatorConfig::parseArgs(const std::string& env) {
   // If empty, set the default values
   m_max_split_size = std::numeric_limits<size_t>::max();
   m_roundup_power2_divisions.assign(kRoundUpPowerOfTwoIntervals, 0);
@@ -305,16 +305,13 @@ void CUDAAllocatorConfig::parseArgs(const std::optional<std::string>& env) {
   bool used_cudaMallocAsync = false;
   bool used_native_specific_option = false;
 
-  if (!env.has_value()) {
-    return;
-  }
   {
     std::lock_guard<std::mutex> lock(m_last_allocator_settings_mutex);
-    m_last_allocator_settings = env.value();
+    m_last_allocator_settings = env;
   }
 
   std::vector<std::string> config;
-  lexArgs(env.value(), config);
+  lexArgs(env, config);
 
   for (size_t i = 0; i < config.size(); i++) {
     std::string_view config_item_view(config[i]);
@@ -487,9 +484,6 @@ size_t CUDAAllocatorConfig::parsePinnedUseBackgroundThreads(
   return i;
 }
 
-// General caching allocator utilities
-void setAllocatorSettings(const std::string& env) {
-  CUDACachingAllocator::CUDAAllocatorConfig::instance().parseArgs(env.c_str());
-}
+REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(CUDAAllocatorConfig)
 
 } // namespace c10::cuda::CUDACachingAllocator
