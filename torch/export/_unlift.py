@@ -356,10 +356,10 @@ def _get_codegen(
     if forward_arg_names:
         names = forward_arg_names
     elif (
-        in_spec.type == tuple
+        in_spec.type is tuple
         and in_spec.num_children == 2
-        and in_spec.children_specs[0].type == tuple
-        and in_spec.children_specs[1].type == dict
+        and in_spec.children_specs[0].type is tuple
+        and in_spec.children_specs[1].type is dict
     ):
         # if in_spec contains the args (tuple) and kwargs (dict)
         names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
