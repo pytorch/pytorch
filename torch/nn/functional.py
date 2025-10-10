@@ -6731,7 +6731,7 @@ def scaled_grouped_mm(
     scaled_grouped_mm(mat_a, mat_b, scale_a, scale_recipe_a, scale_b, scale_recipe_b, swizzle_a, swizzle_b, bias, offs,
               output_dtype, use_fast_accum)
 
-    Applies a grouped scaled matrix-multiply, grouped_ mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
+    Applies a grouped scaled matrix-multiply, grouped_mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
     Args:
