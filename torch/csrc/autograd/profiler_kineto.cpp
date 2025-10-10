@@ -840,17 +840,17 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 
   auto state_ptr = ProfilerStateBase::pop();
   const auto& config = state_ptr->config();
-  TORCH_CHECK(
-      state_ptr &&
-          (config.state == ProfilerState::KINETO ||
-           config.state == ProfilerState::KINETO_GPU_FALLBACK ||
-           config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
-           config.state == ProfilerState::KINETO_ONDEMAND ||
-           config.state == ProfilerState::NVTX ||
-           config.state == ProfilerState::ITT ||
-           config.state == ProfilerState::PRIVATEUSE1),
-      "Can't disable Kineto profiler when it's not running");
-
+  if (!(state_ptr &&
+        (config.state == ProfilerState::KINETO ||
+         config.state == ProfilerState::KINETO_GPU_FALLBACK ||
+         config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
+         config.state == ProfilerState::KINETO_ONDEMAND ||
+         config.state == ProfilerState::NVTX ||
+         config.state == ProfilerState::ITT ||
+         config.state == ProfilerState::PRIVATEUSE1))) {
+    LOG(WARNING) << "Can't disable Kineto profiler when it's not running";
+    return std::make_unique<ProfilerResult>();
+  }
   state_ptr->removeCallback();
 
   // Traces are converged via libkineto automatically for ondemand flow
