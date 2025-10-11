@@ -321,7 +321,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
     def _test_serialization(self, guard_type, fn, *args, **kwargs):
         # kwargs might contain a callable that generates kwargs
         torch._dynamo.reset()
-        kwarg_gen_fn = kwargs.get("_gen_fn", None)
+        kwarg_gen_fn = kwargs.get("_gen_fn")
         if kwarg_gen_fn is not None:
             kwargs = kwarg_gen_fn()
 

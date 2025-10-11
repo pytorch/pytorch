@@ -131,6 +131,7 @@ class _NormPartial(Partial):
         if self.reduce_op == "sum":
             assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
             if self.norm_type != 0 and self.norm_type != 1:
+                # pyrefly: ignore  # unsupported-operation
                 return tensor**self.norm_type
         return tensor
 
@@ -138,6 +139,7 @@ class _NormPartial(Partial):
         if self.reduce_op == "sum":
             assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
             if self.norm_type != 0 and self.norm_type != 1:
+                # pyrefly: ignore  # unsupported-operation
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 

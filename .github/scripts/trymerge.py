@@ -234,6 +234,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
           createdAt
           author {
             login
+            url
           }
           authorAssociation
           editor {
@@ -1093,6 +1094,7 @@ class GitHubPR:
             body_text=node["bodyText"],
             created_at=node["createdAt"] if "createdAt" in node else "",
             author_login=node["author"]["login"],
+            author_url=node["author"].get("url", None),
             author_association=node["authorAssociation"],
             editor_login=editor["login"] if editor else None,
             database_id=node["databaseId"],
@@ -2029,6 +2031,11 @@ def validate_revert(
     # For some reason, one can not be a member of private repo, only CONTRIBUTOR
     if pr.is_base_repo_private():
         allowed_reverters.append("CONTRIBUTOR")
+    # Special case the pytorch-auto-revert app, whose does not have association
+    # But should be able to issue revert command
+    if comment.author_url == "https://github.com/apps/pytorch-auto-revert":
+        allowed_reverters.append("NONE")
+
     if author_association not in allowed_reverters:
         raise PostCommentError(
             f"Will not revert as @{author_login} is not one of "
