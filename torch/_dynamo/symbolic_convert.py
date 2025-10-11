@@ -3260,6 +3260,7 @@ class InstructionTranslatorBase(
 
         self.push(
             NestedUserFunctionVariable(
+                self,
                 fn_name,
                 code,
                 self.f_globals,

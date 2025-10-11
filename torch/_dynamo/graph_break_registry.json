@@ -1852,6 +1852,14 @@
   ],
   "GB0187": [
     {
+      "Gb_type": "functools.wraps on wrapper function defined outside `torch.compile`",
+      "Context": "args: {args}",
+      "Explanation": "`torch.compile` can't trace `functools.update_wrapper/wraps` when the wrapper function is defined outside the compile region. i.e. the `wrapper` in `functools.wraps(fn)(wrapper)` and functools.update_wrapper(wrapper, ...) must be defined in the compiled region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
       "Gb_type": "functools.wraps",
       "Context": "{fn}",
       "Explanation": "`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",

@@ -49,7 +49,6 @@ from ..utils import (
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
 
 
@@ -1334,14 +1333,14 @@ class NamedTupleVariable(TupleVariable):
             method = inspect.getattr_static(self.tuple_cls, name, None)
             if isinstance(method, classmethod):
                 # We need the unbounded cls method to avoid the inline __self__
-                return UserMethodVariable(
+                return variables.UserMethodVariable(
                     method.__func__,
                     variables.UserDefinedClassVariable(self.tuple_cls),
                 )
             elif isinstance(method, staticmethod):
-                return UserFunctionVariable(method.__func__)
+                return variables.UserFunctionVariable(method.__func__)
             elif inspect.isfunction(method):
-                return UserMethodVariable(method, self)
+                return variables.UserMethodVariable(method, self)
             else:
                 return None
 

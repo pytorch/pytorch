@@ -3612,24 +3612,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(fn(torch.ones([]), normalize), torch.ones([]).sin().cos())
 
-    def test_functools_wraps(self):
-        def cool_name(x):
-            return x.sin()
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(x):
-            y = x.cos()
-
-            @functools.wraps(cool_name)
-            def uncool_name():
-                return cool_name(y)
-
-            return uncool_name
-
-        result = fn(torch.ones([]))
-        self.assertEqual(result.__name__, "cool_name")
-        self.assertEqual(result(), torch.ones([]).cos().sin())
-
     def test_dynamic_shapes_float_guard(self):
         def f(x):
             return torch.nn.functional.dropout(x, x.shape[0] / 6)

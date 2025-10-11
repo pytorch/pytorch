@@ -1193,6 +1193,14 @@ class GetAttrVariable(VariableTracker):
                 # This matches how `setattr` is handled for NNModuleVariable
                 self.obj.convert_to_unspecialized(tx)
 
+        # hacky way to iterate through __dict__.keys() - probably breaks if mutations happen during iteration.
+        elif (
+            name == "keys"
+            and self.name == "__dict__"
+            and isinstance(self.obj, variables.NestedUserFunctionVariable)
+        ):
+            return variables.ListVariable(self.obj.get_generic_dict_keys(tx))
+
         return super().call_method(tx, name, args, kwargs)
 
     def get_forwarded_dict(self, tx):

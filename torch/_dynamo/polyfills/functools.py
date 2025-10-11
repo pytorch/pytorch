@@ -6,6 +6,8 @@ import functools
 from collections.abc import Iterable
 from typing import Callable, TypeVar
 
+import torch
+
 from ..decorators import substitute_in_graph
 
 
@@ -45,3 +47,28 @@ def reduce(
         value = function(value, element)
 
     return value
+
+
+# Reference: https://github.com/python/cpython/blob/56072f9c050b8dd960bb5630eb924eb02a889f9b/Lib/functools.py#L35
+# NOTE: DOES NOT support updated != functools.WRAPPER_UPDATES
+# NOTE: do not add to __all__ since we do not use substitute_in_graph (dynamo does some additional checks)
+def update_wrapper(
+    wrapper: Callable[[_U, _T], _U],
+    wrapped: Callable[[_U, _T], _U],
+    assigned: tuple[str, ...] = functools.WRAPPER_ASSIGNMENTS,
+    updated: tuple[str, ...] = functools.WRAPPER_UPDATES,
+) -> Callable[[_U, _T], _U]:
+    for attr in assigned:
+        try:
+            value = getattr(wrapped, attr)
+        except AttributeError:
+            pass
+        else:
+            setattr(wrapper, attr, value)
+    if updated != functools.WRAPPER_UPDATES:
+        torch._dynamo.graph_break(
+            "functools.update_wrapper/wraps does not support `updated` != functools.WRAPPER_UPDATES, i.e. ('__dict__',)"
+        )
+    for attr in wrapped.__dict__.keys():
+        setattr(wrapper, attr, getattr(wrapped, attr))
+    return wrapper

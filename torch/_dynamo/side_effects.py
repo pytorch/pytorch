@@ -26,7 +26,7 @@ import contextlib
 import inspect
 import warnings
 import weakref
-from collections.abc import Generator, MutableMapping
+from collections.abc import Generator, KeysView, MutableMapping
 from types import CellType
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -355,6 +355,11 @@ class SideEffects:
         return self.is_attribute_mutation(
             item
         ) and name in self.store_attr_mutations.get(item, ())
+
+    def get_pending_mutation_keys(self, item: VariableTracker) -> KeysView[str]:
+        if self.is_attribute_mutation(item):
+            return self.store_attr_mutations.get(item, {}).keys()
+        return {}.keys()
 
     def is_modified(self, item: VariableTracker) -> bool:
         if item.is_immutable():
@@ -727,6 +732,11 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
+            elif isinstance(var, variables.NestedUserFunctionVariable):
+                # directly call reconstruct
+                var.reconstruct(cg)
+                cg.add_cache(var)
+                var.source = LocalSource(cg.tempvars[var])
             else:
                 # Reconstruct the bytecode for
                 # base_cls.__new__(user_cls, *args)

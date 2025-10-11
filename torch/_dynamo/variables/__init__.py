@@ -60,7 +60,7 @@ from .functions import (
     CreateTMADescriptorStableVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
-    FunctoolsWrapsVariable,
+    FunctoolsUpdateWrapperVariable,
     LocalGeneratorFunctionVariable,
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
