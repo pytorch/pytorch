@@ -10495,13 +10495,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_no_cuda_monkeypatch(self):
         # Note that this is not in test_cuda.py as this whole file is skipped when cuda
         # is not available.
-        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Stream"):
+        with self.assertRaisesRegex(RuntimeError, "CUDA is not available"):
             torch.cuda.Stream()
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class Event"):
+        with self.assertRaisesRegex(RuntimeError, "CUDA is not available"):
             torch.cuda.Event()
 
-        with self.assertRaisesRegex(RuntimeError, "Tried to instantiate dummy base class CUDAGraph"):
+        with self.assertRaisesRegex(RuntimeError, "CUDA is not available"):
             torch.cuda.graphs.CUDAGraph()
 
     def test_tensor_where_scalar(self):
