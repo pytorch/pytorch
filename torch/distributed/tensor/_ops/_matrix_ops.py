@@ -1091,3 +1091,278 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
         input_index=1,
         is_valid_strategy_cb=valid_grouped_mm_strides,
     )
+
+@register_op_strategy(
+    aten._scaled_dot_product_fused_attention_overrideable.default,
+    schema_info=RuntimeSchemaInfo(4),
+)
+def scaled_dot_product_fused_attention_overrideable_strategy(
+    op_schema: OpSchema,
+) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+
+    (
+        query_strategy,  # query
+        key_strategy,  # key
+        value_strategy,  # value
+        *rest_args,  # optional args: attn_bias, dropout_p, is_causal, return_debug_mask, scale
+    ) = op_schema.args_schema
+    attn_bias_strategy = rest_args[0] if len(rest_args) > 0 else None
+    return_debug_mask = len(op_schema.args_schema) >= 7 and rest_args[3]
+    has_attn_bias = attn_bias_strategy is not None
+    debug_attn_mask_sharding: Optional[Placement] = (
+        Replicate() if return_debug_mask else None
+    )
+
+    assert isinstance(query_strategy, OpStrategy)
+    # assuming q/k/v have the same shape
+
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [outputs, inputs]
+    # first we can always accept full replication for both inputs and outputs
+    all_replicate: PlacementList = [
+        Replicate(),  # output
+        Replicate(),  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+        debug_attn_mask_sharding,  # debug_attn_mask
+        Replicate(),  # q
+        Replicate(),  # k
+        Replicate(),  # v
+    ]
+    if has_attn_bias:
+        all_replicate.append(Replicate())  # attn bias
+
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # Shard on the num of head dim for tensor parallelism
+    tp_sharding = Shard(1)  # num head dim
+    qkv_sharding = tp_sharding
+    output_sharding = tp_sharding
+    logsumexp_sharding = tp_sharding
+    debug_attn_mask_sharding = tp_sharding if return_debug_mask else None
+
+    num_heads_dim_sharding: PlacementList = [
+        output_sharding,
+        logsumexp_sharding,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+        debug_attn_mask_sharding,
+        qkv_sharding,
+        qkv_sharding,
+        qkv_sharding,
+    ]
+    single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # batch parallelism
+    logsumexp_sharding = Shard(0)
+    debug_attn_mask_sharding = Shard(0) if return_debug_mask else None
+    batch_dim_sharding: PlacementList = [
+        Shard(0),  # output
+        logsumexp_sharding,
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+        debug_attn_mask_sharding,
+        Shard(0),  # q
+        Shard(0),  # k
+        Shard(0),  # v
+    ]
+    single_mesh_dim_strategies.append(batch_dim_sharding)
+
+    # Context Parallelism: shards on the sequence dim
+    cp_sharding = Shard(2)  # seq dim
+    logsumexp_sharding = cp_sharding
+    debug_attn_mask_sharding = cp_sharding if return_debug_mask else None
+
+    single_mesh_dim_strategies.append(
+        [
+            cp_sharding,  # output
+            logsumexp_sharding,  # logsumexp
+            None,  # cum_seq_q
+            None,  # cum_seq_k
+            None,  # max_q
+            None,  # max_k
+            Replicate(),  # philox_seed
+            Replicate(),  # philox_offset
+            debug_attn_mask_sharding,  # debug_attn_mask
+            cp_sharding,  # q
+            cp_sharding,  # k
+            cp_sharding,  # v
+        ]
+    )
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=9
+    )
+
+
+@register_op_strategy(
+    aten._scaled_dot_product_fused_attention_overrideable_backward.default
+)
+def scaled_dot_product_fused_attention_overrideable_backward_strategy(
+    op_schema: OpSchema,
+) -> OpStrategy:
+    # This strategy is based on scaled_dot_product_flash_attention_backward_strategy
+    mesh = op_schema.get_mesh_from_args(validate=False)
+
+    assert len(op_schema.args_schema) >= 16
+    has_attn_bias = op_schema.args_schema[4] is not None
+    has_scale = len(op_schema.args_schema) >= 17 and op_schema.args_schema[16] is not None
+
+    query_strategy = op_schema.args_schema[1]
+    assert isinstance(query_strategy, OpStrategy)
+    # assuming q/k/v have the same shape
+
+    single_mesh_dim_strategies = []
+
+    # case 1: we can always accept full replication for both inputs and outputs
+    all_replicate_out: PlacementList = [
+        Replicate(),  # grad_query
+        Replicate(),  # grad_key
+        Replicate(),  # grad_value
+        Replicate() if has_attn_bias else None,  # grad_attn_bias
+    ]
+    all_replicate_inp: PlacementList = [
+        Replicate(),  # grad_out
+        Replicate(),  # query
+        Replicate(),  # key
+        Replicate(),  # value
+        Replicate() if has_attn_bias else None,  # attn_bias
+        None,  # grad_input_mask
+        Replicate(),  # out
+        Replicate(),  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # dropout_p
+        None,  # is_causal
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+    ]
+    if has_scale:
+        all_replicate_inp.append(None)  # scale
+
+    all_replicate: PlacementList = all_replicate_out + all_replicate_inp
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # case 2: we can accept the sharding pattern of tensor parallelism, which
+    #   shards on the num of head dim
+    qkv_sharding = Shard(1)  # num head dim
+    output_sharding = Shard(1)  # num head dim
+    logsumexp_sharding = Shard(1)  # num head dim
+
+    num_heads_dim_sharding_out: PlacementList = [
+        qkv_sharding,  # grad_query
+        qkv_sharding,  # grad_key
+        qkv_sharding,  # grad_value
+        Shard(1) if has_attn_bias else None,  # grad_attn_bias
+    ]
+    num_heads_dim_sharding_inp: PlacementList = [
+        qkv_sharding,  # grad_out
+        qkv_sharding,  # query
+        qkv_sharding,  # key
+        qkv_sharding,  # value
+        Shard(1) if has_attn_bias else None,  # attn_bias
+        None,  # grad_input_mask
+        output_sharding,  # out
+        logsumexp_sharding,  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # dropout_p
+        None,  # is_causal
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+    ]
+    if has_scale:
+        num_heads_dim_sharding_inp.append(None)  # scale
+
+    num_heads_dim_sharding = num_heads_dim_sharding_out + num_heads_dim_sharding_inp
+    single_mesh_dim_strategies.append(num_heads_dim_sharding)
+
+    # case 3: Context Parallelism which shards on the sequence dim
+    context_parallel_sharding_out: PlacementList = [
+        Shard(2),  # grad_query
+        Shard(2),  # grad_key
+        Shard(2),  # grad_value
+        Shard(1) if has_attn_bias else None,  # grad_attn_bias - note: heads dim for bias
+    ]
+    context_parallel_sharding_inp: PlacementList = [
+        Shard(2),  # grad_out
+        Shard(2),  # query
+        Shard(2),  # key
+        Shard(2),  # value
+        Shard(1) if has_attn_bias else None,  # attn_bias - note: heads dim for bias
+        None,  # grad_input_mask
+        Shard(2),  # out
+        Shard(2),  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # dropout_p
+        None,  # is_causal
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+    ]
+    if has_scale:
+        context_parallel_sharding_inp.append(None)  # scale
+
+    context_parallel_sharding = (
+        context_parallel_sharding_out + context_parallel_sharding_inp
+    )
+    single_mesh_dim_strategies.append(context_parallel_sharding)
+
+    # case 4: we can accept the sharding pattern of batch parallelism, which
+    #   shards on the batch dimension
+    qkv_sharding = Shard(0)
+    output_sharding = Shard(0)
+    logsumexp_sharding = Shard(0)
+
+    batch_dim_sharding_out: PlacementList = [
+        qkv_sharding,  # grad_query
+        qkv_sharding,  # grad_key
+        qkv_sharding,  # grad_value
+        Shard(0) if has_attn_bias else None,  # grad_attn_bias
+    ]
+    batch_dim_sharding_inp: PlacementList = [
+        qkv_sharding,  # grad_out
+        qkv_sharding,  # query
+        qkv_sharding,  # key
+        qkv_sharding,  # value
+        Shard(0) if has_attn_bias else None,  # attn_bias
+        None,  # grad_input_mask
+        output_sharding,  # out
+        logsumexp_sharding,  # logsumexp
+        None,  # cum_seq_q
+        None,  # cum_seq_k
+        None,  # max_q
+        None,  # max_k
+        None,  # dropout_p
+        None,  # is_causal
+        Replicate(),  # philox_seed
+        Replicate(),  # philox_offset
+    ]
+    if has_scale:
+        batch_dim_sharding_inp.append(None)  # scale
+
+    batch_dim_sharding = batch_dim_sharding_out + batch_dim_sharding_inp
+    single_mesh_dim_strategies.append(batch_dim_sharding)
+
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=4
+    )
