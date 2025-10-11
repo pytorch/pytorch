@@ -1182,7 +1182,7 @@ if "optree" in sys.modules:
             ),
         )
 
-        serialized_spec = python_pytree.treespec_dumps(complicated_spec)
+        serialized_spec = python_pytree.treespec_dumps(complicated_spec, 1)
         saved_spec = (
             '[1, {"type": "collections.OrderedDict", "context": "[1, 2, 3]", '
             '"children_spec": [{"type": "builtins.tuple", "context": "null", '
@@ -1196,6 +1196,17 @@ if "optree" in sys.modules:
         )
         self.assertEqual(serialized_spec, saved_spec)
         self.assertEqual(complicated_spec, python_pytree.treespec_loads(saved_spec))
+
+        serialized_spec2 = python_pytree.treespec_dumps(complicated_spec, 2)
+        saved_spec2 = (
+            "[2, ["
+            'null, null, ["builtins.tuple", "null", 2, 2, 3], '
+            'null, null, null, null, ["builtins.dict", "[4, 5, 6]", 3, 3, 4], '
+            '["collections.OrderedDict", "[1, 2, 3]", 3, 6, 9]'
+            "]]"
+        )
+        self.assertEqual(serialized_spec2, saved_spec2)
+        self.assertEqual(complicated_spec, python_pytree.treespec_loads(saved_spec2))
 
     def test_tree_map_with_path(self):
         tree = [{i: i for i in range(10)}]

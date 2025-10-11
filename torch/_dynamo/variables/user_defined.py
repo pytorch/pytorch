@@ -1711,7 +1711,8 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
         import torch.utils._pytree as pytree
 
         if not istype(
-            self.value, (pytree.TreeSpec, pytree.LeafSpec, pytree.ConstantNode)
+            self.value,
+            (pytree.TreeSpec, pytree.LeafSpec, pytree._Node, pytree.ConstantNode),
         ):
             # TODO loosen this restriction and fix `as_proxy`.
             raise NotImplementedError(
