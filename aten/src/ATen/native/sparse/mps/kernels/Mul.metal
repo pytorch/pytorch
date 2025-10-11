@@ -3,6 +3,9 @@
 using namespace metal;
 
 
+template <typename T> struct MulAccum { using type = float; };
+template <> struct MulAccum<float2> { using type = float2; };
+
 template <typename T>
 kernel void dense_sparse_mul_kernel(
     device const T* dense         [[buffer(0)]],
@@ -29,8 +32,9 @@ kernel void dense_sparse_mul_kernel(
   ulong dense_idx = (ulong)key * (ulong)view_cols + (ulong)col;
   ulong val_idx = (ulong)i * (ulong)view_cols + (ulong)col;
 
-  const auto a = static_cast<float>(values[val_idx]);
-  const auto b = static_cast<float>(dense[dense_idx]);
+  using accum_t = typename MulAccum<T>::type;
+  const accum_t a = static_cast<accum_t>(values[val_idx]);
+  const accum_t b = static_cast<accum_t>(dense[dense_idx]);
   out_values[val_idx] = static_cast<T>(a * b);
 }
 
@@ -130,6 +134,8 @@ kernel void fused_gather_mul_kernel(
 INSTANTIATE_DENSE_SPARSE_MUL(float);
 INSTANTIATE_DENSE_SPARSE_MUL(half);
 INSTANTIATE_DENSE_SPARSE_MUL(bfloat);
+INSTANTIATE_DENSE_SPARSE_MUL(long);
+INSTANTIATE_DENSE_SPARSE_MUL(float2);
 
 #define INSTANTIATE_FUSED_GATHER_MUL(DTYPE)                                  \
   template [[host_name("fused_gather_mul_kernel_" #DTYPE)]] kernel void      \

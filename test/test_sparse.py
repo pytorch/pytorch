@@ -2099,7 +2099,6 @@ class TestSparse(TestSparseBase):
         self.assertEqual(self.safeToDense(y2), expected)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_sparse_mask(self, device, dtype, coalesced):
