@@ -137,7 +137,7 @@ kernel void index_put_serial(
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
     uint thread_index [[thread_position_in_grid]]) {
-  (void)thread_index; // Suppress unused vairable varning
+  (void)thread_index; // Suppress unused variable warning
   for (uint idx = 0; idx < ndim_nindices_numel.z; ++idx) {
     index_put_impl(
         output,

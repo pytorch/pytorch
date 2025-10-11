@@ -545,7 +545,7 @@ kernel void reshape(texture2d_array<half, access::read> in_arr[[texture(0), func
     const ushort slices2 = divRoundUp(C2, 4);
     const ushort slices1 = divRoundUp(C1, 4);
     const ushort n2 = gid.z / slices2; //image index
-    const ushort s2 = gid.z - n2 * slices2; // slice offest
+    const ushort s2 = gid.z - n2 * slices2; // slice offset
     half4 value;
     for (int idx = 0; idx < 4; ++idx){
         // we compute the "linear index" of the output element,

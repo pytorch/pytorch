@@ -301,7 +301,7 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor) {
       return false;
   }
 
-  // the overlaped cases are not supported
+  // the overlapped cases are not supported
   dnnl::memory::dims strides = get_onednn_strides(tensor);
   int64_t storage_size = 1;
   for (size_t dim = 0; dim < tensor_dim; ++dim)
