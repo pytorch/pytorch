@@ -1243,12 +1243,21 @@ def register_fast_op_impl(func: OpOverload):
 
 # infer_size_impl in ExpandUtils
 def infer_size(a, b):
-    from torch.fx.experimental.symbolic_shapes import guard_or_false
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, has_hint
 
     dimsA = len(a)
     dimsB = len(b)
     ndim = max(dimsA, dimsB)
     expandedSizes = [0] * ndim
+
+    # Check if either tensor has a zero-sized dimension, which makes the result empty
+    # and allows relaxed broadcasting rules
+    has_zero_dim = False
+    for dim_size in itertools.chain(a, b):
+        if guard_or_false(dim_size == 0):
+            has_zero_dim = True
+            break
+
     for i in range(ndim - 1, -1, -1):
         offset = ndim - 1 - i
         dimA = dimsA - 1 - offset
@@ -1267,8 +1276,19 @@ def infer_size(a, b):
         # expression of an or statement as-is, without bool()'ing it; if this
         # were not the case, we'd need to write this using torch.sym_or() or
         # something like that).
+        # Additionally, if either tensor has a zero-sized dimension anywhere,
+        # the result will be empty regardless of dimension mismatch, so we can
+        # skip the strict equality check.
+        # If either size is unbacked, we need to be careful not to call
+        # guard_or_false on it (which would try to create a guard), so we
+        # check that first and skip directly to the equality check.
         torch._check(
-            guard_or_false(sizeA == 1) or guard_or_false(sizeB == 1) or sizeA == sizeB,
+            has_zero_dim
+            or (
+                (guard_or_false(sizeA == 1) if has_hint(sizeA) else False)
+                or (guard_or_false(sizeB == 1) if has_hint(sizeB) else False)
+                or sizeA == sizeB
+            ),
             lambda: f"The size of tensor a ({sizeA}) "
             f"must match the size of tensor b ({sizeB}) "
             f"at non-singleton dimension {i})",
