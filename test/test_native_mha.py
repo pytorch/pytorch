@@ -9,7 +9,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyOn,
     skipMeta,
-    #skipXPU,
 )
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_WITH_ROCM
 from torch.nn.attention import SDPBackend
@@ -188,8 +187,6 @@ class TestMHADeviceType(TestCase):
         ).to(dtype)
 
         if device == "cuda" or device == "xpu":
-            #pt = pt.cuda()
-            #npt = npt.cuda()
             pt = pt.to(device)
             npt = npt.to(device)
 
@@ -293,10 +290,10 @@ class TestMHADeviceType(TestCase):
                               average_attn_weights=average_attn_weights):
                 if device == "cuda":
                     with torch.backends.cuda.sdp_kernel(
-                        enable_flash=False, enable_mem_efficient=False
-                        ) if not fused else torch.backends.cuda.sdp_kernel(
-                                enable_flash=True, enable_mem_efficient=True
-                                ):
+                            enable_flash=False, enable_mem_efficient=False
+                    ) if not fused else torch.backends.cuda.sdp_kernel(
+                            enable_flash=True, enable_mem_efficient=True
+                    ):
                         self._test_multihead_attention_impl(
                             device,
                             dtype,
@@ -306,9 +303,13 @@ class TestMHADeviceType(TestCase):
                             pad_all=pad_all,
                             need_weights=need_weights,
                             average_attn_weights=average_attn_weights,
-                            )
+                        )
                 elif "xpu" in device:
-                    with torch.nn.attention.sdpa_kernel([SDPBackend.MATH]) if not fused else torch.nn.attention.sdpa_kernel([SDPBackend.OVERRIDEABLE]):
+                    with torch.nn.attention.sdpa_kernel(
+                            SDPBackend.MATH
+                    ) if not fused else torch.nn.attention.sdpa_kernel(
+                            [SDPBackend.OVERRIDEABLE, SDPBackend.MATH]
+                    ):
                         self._test_multihead_attention_impl(
                             device,
                             dtype,
@@ -318,7 +319,7 @@ class TestMHADeviceType(TestCase):
                             pad_all=pad_all,
                             need_weights=need_weights,
                             average_attn_weights=average_attn_weights,
-                            )
+                        )
 
     @dtypesIfCUDA(torch.float, torch.half)
     @dtypes(torch.float)
