@@ -58,7 +58,8 @@ ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
 
 # Install some system dependencies and double check python version
 RUN if command -v apt-get >/dev/null; then \
-        apt-get install -y ccache software-properties-common git curl wget sudo vim; \
+        apt-get update -y \
+        && apt-get install -y ccache software-properties-common git wget sudo vim; \
     fi \
     && python3 --version && python3 -m pip --version
 
@@ -222,9 +223,10 @@ WORKDIR /workspace
 
 # Install Python and other dependencies
 RUN if command -v apt-get >/dev/null; then \
-        apt-get install -y ccache software-properties-common git curl sudo vim python3-pip; \
+        apt-get update -y \
+        && apt-get install -y ccache software-properties-common git sudo vim python3-pip; \
     else \
-        dnf install -y git curl wget sudo; \
+        dnf install -y git wget sudo; \
     fi \
     && curl -LsSf https://astral.sh/uv/install.sh | sh \
     && $HOME/.local/bin/uv venv /opt/venv --python ${PYTHON_VERSION} \
