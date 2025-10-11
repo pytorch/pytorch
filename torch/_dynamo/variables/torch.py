@@ -77,7 +77,10 @@ from .ctx_manager import (
 )
 from .dicts import ConstDictVariable
 from .distributed import DistributedVariable, ProcessGroupVariable
-from .functions import bind_args_cached
+from .functions import (
+    bind_args_cached,
+    NestedUserFunctionVariable,
+)
 from .lists import ListVariable, TupleVariable
 from .torch_function import (
     can_dispatch_torch_function,
@@ -1254,6 +1257,45 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
+            return ConstantVariable.create(None)
+
+        @register(torch._check)
+        def handle_check(self, tx: "InstructionTranslator", *args, **kwargs):
+            # both args are variable trackers
+            # first arg is a predicate vt, second is optional message vt
+            assert args
+
+            # emit missing proxy that was impossible to implement inside NestedUserFunctionVariable
+            # but needed to fix the issue https://github.com/pytorch/pytorch/issues/163668
+            message_eager = None
+            message_graph = None
+            if len(args) >= 2:
+                message_vt = args[1]
+
+                if message_vt.is_python_constant():
+                    message_eager = message_vt.as_python_constant()
+                    message_graph = message_eager
+                else:
+                    assert isinstance(message_vt, NestedUserFunctionVariable)
+                    assert not message_vt.has_closure()
+                    message_eager = message_vt.get_function()
+                    attr_prefix = f"_check_msg_{tx.output.graph.nodes.__len__()}"
+                    message_graph = tx.output.register_static_attr_and_return_proxy(
+                        attr_prefix, message_eager
+                    )
+            predicate_vt = args[0]
+
+            if predicate_vt.is_python_constant():
+                self.value(predicate_vt.as_python_constant(), message_eager)
+                return ConstantVariable.create(None)
+
+            predicate_proxy = predicate_vt.as_proxy()
+            tx.output.create_proxy(
+                "call_function",
+                self.value,
+                (predicate_proxy, message_graph),
+                {},
+            )
             return ConstantVariable.create(None)
 
         return handlers
