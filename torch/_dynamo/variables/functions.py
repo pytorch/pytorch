@@ -1233,6 +1233,101 @@ def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kw
     )
 
 
+def _signature_from_code(
+    code: types.CodeType, *, fn: Optional[types.FunctionType] = None
+) -> inspect.Signature:
+    positional_only_arg_count: int = code.co_posonlyargcount
+    positional_or_kw_arg_count: int = code.co_argcount - positional_only_arg_count
+    kw_only_arg_count: int = code.co_kwonlyargcount
+    flags: int = code.co_flags
+
+    names = list(code.co_varnames)
+    parameters_count = 0
+    parameters: list[inspect.Parameter] = []
+
+    for _ in range(positional_only_arg_count):
+        parameters.append(
+            inspect.Parameter(
+                names[parameters_count], kind=inspect.Parameter.POSITIONAL_ONLY
+            )
+        )
+        parameters_count += 1
+
+    for _ in range(positional_or_kw_arg_count):
+        parameters.append(
+            inspect.Parameter(
+                names[parameters_count], kind=inspect.Parameter.POSITIONAL_OR_KEYWORD
+            )
+        )
+        parameters_count += 1
+
+    if flags & inspect.CO_VARARGS:
+        parameters.append(
+            inspect.Parameter(
+                names[parameters_count], kind=inspect.Parameter.VAR_POSITIONAL
+            )
+        )
+        parameters_count += 1
+
+    for _ in range(kw_only_arg_count):
+        parameters.append(
+            inspect.Parameter(
+                names[parameters_count], kind=inspect.Parameter.KEYWORD_ONLY
+            )
+        )
+        parameters_count += 1
+
+    if flags & inspect.CO_VARKEYWORDS:
+        parameters.append(
+            inspect.Parameter(
+                names[parameters_count], kind=inspect.Parameter.VAR_KEYWORD
+            )
+        )
+        parameters_count += 1
+
+    assert parameters_count <= len(names), (
+        f"Too few co_varnames or too many parameters: {parameters_count} parameters, {len(names)} co_varnames"
+    )
+
+    if fn is not None:
+        annotations = getattr(fn, "__annotations__", {}) or {}
+        defaults = getattr(fn, "__defaults__", None) or ()
+        kw_defaults = getattr(fn, "__kwdefaults__", None) or {}
+
+        if annotations:
+            for idx, parameter in enumerate(parameters):
+                if parameter.name in annotations:
+                    parameters[idx] = parameter.replace(
+                        annotation=annotations[parameter.name]
+                    )
+
+        if defaults:
+            positional_indices = [
+                idx
+                for idx, parameter in enumerate(parameters)
+                if parameter.kind
+                in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                )
+            ]
+            defaults_count = len(defaults)
+            for default, idx in zip(defaults, positional_indices[-defaults_count:]):
+                parameters[idx] = parameters[idx].replace(default=default)
+
+        if kw_defaults:
+            for idx, parameter in enumerate(parameters):
+                if (
+                    parameter.kind is inspect.Parameter.KEYWORD_ONLY
+                    and parameter.name in kw_defaults
+                ):
+                    parameters[idx] = parameter.replace(
+                        default=kw_defaults[parameter.name]
+                    )
+
+    return inspect.Signature(parameters=parameters)
+
+
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
         "f_globals",
@@ -1410,6 +1505,16 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 codegen(value)
                 codegen.extend_output(create_rot_n(2))
                 codegen.store_attr(name)
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        if name == "__signature__":
+            code = self.get_code()
+            fn = self.get_function()
+            sig = _signature_from_code(code, fn=fn)
+            return VariableTracker.build(tx, sig, source=self.source)
+        if name == "__wrapped__":
+            return VariableTracker.build(tx, self.get_function(), source=self.source)
+        return super().var_getattr(tx, name)
 
 
 class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
