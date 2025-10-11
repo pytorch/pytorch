@@ -175,6 +175,25 @@ static void build_row_ptr_per_batch_mps(
     int64_t I,
     Tensor& row_ptr
 ) {
+  // Build per-batch CSR-style row pointer arrays from row indices sorted by batch
+  // Given:
+  //   rows: 1-D array of length nnz with row ids in [0, I), sorted within each batch
+  //   batch_ptr: length B+1, where [batch_ptr[b], batch_ptr[b+1]) is the subrange for batch b
+  // Produces:
+  //   - row_ptr: shape [B, I+1]
+  //
+  // Example (B = 2, I = 4):
+  // rows       = [0,   0,   1,  3,  0,   2,    2]   // 7 non-zero elements
+  //               └─── batch 0 ──┘  └─ batch 1 ─┘
+  // batch_ptr  = [0, 4, 7]
+  //               │  │  └─ end of batch 1 (total nnz)
+  //               │  └──── end of batch 0/start of batch 1
+  //               └─────── start of batch 0
+  //
+  // per-batch row pointers (I+1 entries each):
+  //   row_ptr[0] = [0, 2, 3, 3, 4]
+  //   row_ptr[1] = [0, 1, 1, 3, 3]
+  // laid out in memory: [0, 2, 3, 3, 4,  0, 1, 1, 3, 3]
   TORCH_CHECK(rows.is_mps() && batch_ptr.is_mps() && row_ptr.is_mps(), "MPS device expected");
   auto stream = getCurrentMPSStream();
 
@@ -275,7 +294,6 @@ Tensor& bmm_out_sparse_mps(const SparseTensor& self_, const Tensor& mat2_, Tenso
                   out_contig,
                   row_ptr,
                   std::array<uint32_t, 4>{(uint32_t)B, (uint32_t)I, (uint32_t)J, (uint32_t)K});
-      // one threadgroup per (batch b, row i), lanes stride across K
       [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
     }
   });
