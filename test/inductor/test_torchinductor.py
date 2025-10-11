@@ -5251,6 +5251,7 @@ class CommonTemplate:
         )
 
     # From https://github.com/pytorch/pytorch/issues/93384
+    @skip_if_halide
     def test_max_pool2d8(self):
         # dilation is not 1
         def fn(x):
