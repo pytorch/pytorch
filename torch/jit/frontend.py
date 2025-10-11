@@ -714,7 +714,7 @@ class StmtBuilder(Builder):
 
         # Disallow type annotations on instance attributes outside of __init__
         if (
-            type(stmt.target) == ast.Attribute
+            type(stmt.target) is ast.Attribute
             and stmt.target.value.id == "self"  # type: ignore[attr-defined]
             and ctx.funcname != "__init__"
         ):
