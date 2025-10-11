@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import (
+    _quantize_blockwise,
     _quantize_rowwise,
     _quantize_tensorwise,
     _to_fp8_saturated,
@@ -623,7 +624,8 @@ class TestFP8Lowering(TestCase):
                 bias,
             )
 
-            FileCheck().check("SCALING_ROWWISE : tl.constexpr = False").run(code[0])
+            FileCheck().check("SCALE_RECIPE_A : tl.constexpr = 0").run(code[0])
+            FileCheck().check("SCALE_RECIPE_B : tl.constexpr = 0").run(code[0])
             self.assertEqual(y_eager.dtype, dtype)
             self.assertEqual(y_compiled.dtype, dtype)
             # depending on the kernel config (BLOCK_M size, etc) selected during Inductor
@@ -768,7 +770,87 @@ class TestFP8Lowering(TestCase):
                 bias,
             )
 
-        FileCheck().check("SCALING_ROWWISE : tl.constexpr = True").run(code[0])
+        FileCheck().check("SCALE_RECIPE_A : tl.constexpr = 1").run(code[0])
+        FileCheck().check("SCALE_RECIPE_B : tl.constexpr = 1").run(code[0])
+        self.assertEqual(y_eager.dtype, dtype)
+        self.assertEqual(y_compiled.dtype, dtype)
+        torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("shape", ((16,32,32), (1024,1024,512)))
+    @parametrize("use_fast_accum", (False, True))
+    def test_blockwise1x128_blockwise128x128_scaling(
+        self,
+        shape: str,
+        use_fast_accum: bool,
+    ):
+        # Only bf16 output type is supported for non-tensorwise scaling, not fp32
+        dtype: torch.dtype = torch.bfloat16
+        device = "cuda"
+        dtype_float8 = torch.float8_e4m3fn
+        dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
+
+        M, K, N = shape  # Matmul Y = X [M, K] x W [N, K]
+        x = torch.randn(M, K, dtype=dtype, device=device)
+        w = torch.randn(N, K, dtype=dtype, device=device)
+        bias = None
+
+        # quantize weight (prior to inference)
+        w_fp8, w_inverse_scale = _quantize_blockwise(
+            w, dtype_float8, block_outer=128, block_inner=128
+        )
+        w_t_fp8 = w_fp8.t()
+        w_inverse_scale = w_inverse_scale.t()  # scale_b should be (1, N)
+
+        # quantize input x
+        x_fp8, x_inverse_scale = _quantize_blockwise(
+            x, dtype_float8, block_outer=1, block_inner=128
+        )
+
+        def linear(x_fp8, x_inverse_scale, w_t_fp8, w_inverse_scale, bias):
+            y = torch._scaled_mm(
+                x_fp8,
+                w_t_fp8,
+                x_inverse_scale,
+                w_inverse_scale,
+                bias,
+                out_dtype=dtype,
+                use_fast_accum=use_fast_accum,
+            )
+            return y
+
+        y_eager = linear(
+            x_fp8,
+            x_inverse_scale,
+            w_t_fp8,
+            w_inverse_scale,
+            bias,
+        )
+        with config.patch(
+            {
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": "triton_scaled_mm_device_tma",
+                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune": True,
+            }
+        ):
+            linear_compiled = torch.compile(
+                linear, backend="inductor", mode="max-autotune"
+            )
+            y_compiled, code = run_and_get_code(
+                linear_compiled,
+                x_fp8,
+                x_inverse_scale,
+                w_t_fp8,
+                w_inverse_scale,
+                bias,
+            )
+
+        FileCheck().check("SCALE_RECIPE_A : tl.constexpr = 2").run(code[0])
+        FileCheck().check("SCALE_RECIPE_B : tl.constexpr = 3").run(code[0])
         self.assertEqual(y_eager.dtype, dtype)
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)

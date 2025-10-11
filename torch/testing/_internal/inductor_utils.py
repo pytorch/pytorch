@@ -307,6 +307,16 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 
+def _quantize_blockwise(x: Tensor, float8_dtype: torch.dtype, block_outer: int, block_inner: int):
+    x = x.unflatten(1, (-1, block_inner)).unflatten(0, (-1, block_outer))
+    amax = x.abs().amax(dim=[1, 3], keepdim=True).float()
+    scale = _amax_to_scale(amax, float8_dtype, x.dtype)
+    x = x.flatten(2, 3).flatten(0, 1)
+    scale = scale.flatten(2, 3).flatten(0, 1)
+    x_fp8 = _to_fp8_saturated(x * scale, float8_dtype)
+    inverse_scale = scale.reciprocal()
+    return x_fp8, inverse_scale
+
 class MockGraphHandler(GraphLowering):
     """Minimal mock graph handler for testing virtualized context."""
 
