@@ -675,7 +675,13 @@ struct Vectorized {
     return map([](T x) { return (T)(1) / x; });
   }
   Vectorized<T> rsqrt() const {
-    return map([](T x) { return (T)1 / std::sqrt(x); });
+    return map([](T x) {
+      if constexpr (c10::is_reduced_floating_point_v<T>) {
+        return std::rsqrt(x);
+      } else {
+        return (static_cast<T>(1)) / std::sqrt(x);
+      }
+    });
   }
   Vectorized<T> pow(const Vectorized<T>& exp) const {
     Vectorized<T> ret;
