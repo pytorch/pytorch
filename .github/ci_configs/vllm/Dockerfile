@@ -60,6 +60,8 @@ ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
 RUN if command -v apt-get >/dev/null; then \
         apt-get update -y \
         && apt-get install -y ccache software-properties-common git wget sudo vim; \
+    else \
+        dnf install -y git wget sudo; \
     fi \
     && python3 --version && python3 -m pip --version
 
@@ -247,7 +249,7 @@ RUN echo "[INFO] Listing current directory before torch install step:" && \
 
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
-    python3 -m pip install uv==0.8.4; \
+    python3 -m pip install uv==0.8.4
 
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
