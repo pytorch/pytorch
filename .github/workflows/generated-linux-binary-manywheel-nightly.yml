@@ -347,6 +347,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.10"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -459,6 +462,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.10"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -941,6 +947,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.11"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -1053,6 +1062,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.11"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -1535,6 +1547,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.12"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -1647,6 +1662,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.12"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -2129,6 +2147,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.13"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -2241,6 +2262,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.13"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -2723,6 +2747,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.13t"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -2835,6 +2862,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.13t"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -3317,6 +3347,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.14"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -3429,6 +3462,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.14"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -3911,6 +3947,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       DESIRED_PYTHON: "3.14t"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -4023,6 +4062,9 @@ jobs:
       DOCKER_IMAGE: manylinux2_28-builder
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       DESIRED_PYTHON: "3.14t"
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm

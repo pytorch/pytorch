@@ -228,7 +228,7 @@ class DivElementwiseTypePromotionRule(ElementwiseTypePromotionRule):
     def preview_type_promotion(
         self, args: tuple, kwargs: dict
     ) -> TypePromotionSnapshot:
-        rounding_mode = kwargs.get("rounding_mode", None)
+        rounding_mode = kwargs.get("rounding_mode")
         if rounding_mode is None:
             # true_divide
             self.promotion_kind = (
@@ -287,7 +287,7 @@ class ReductionTypePromotionRule(TypePromotionRule):
         )
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
-        dtype: torch.dtype | None = kwargs.get("dtype", None)
+        dtype: torch.dtype | None = kwargs.get("dtype")
 
         computation_dtype, result_dtype = _prims_common.reduction_dtypes(
             arg, self.promotion_kind, dtype
@@ -351,7 +351,7 @@ class SumLikeReductionTypePromotionRule(ReductionTypePromotionRule):
         )
         arg = args[0]
         assert isinstance(arg, torch.Tensor), f"{type(arg)=} is not torch.Tensor"
-        dtype: torch.dtype | None = kwargs.get("dtype", None)
+        dtype: torch.dtype | None = kwargs.get("dtype")
         # The below logic is copied from `torch/_refs/__init__.py` reduction ops impl.
         if dtype is None:
             if _prims_common.is_boolean_dtype(
