@@ -219,6 +219,58 @@ C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace(scalar_t a, scalar_t 
         : a));
 }
 
+// used to calulate complex values
+// Note that z = a + bi with a = c1 + c2i and b = d1 + d2i,
+//  z = (c1+c2i) + (d1+d2i)i = (c1-d2) + (c2+d1)i 
+template <typename scalar_t>
+C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace_real(
+    scalar_t a_real,
+    scalar_t a_imag, 
+    scalar_t nan_replacement_real,
+    scalar_t nan_replacement_imag,
+    scalar_t pos_inf_replacement_real,
+    scalar_t pos_inf_replacement_imag,
+    scalar_t neg_inf_replacement_real,
+    scalar_t neg_inf_replacement_imag) {
+  scalar_t a_real_new = at::_isnan(a_real)
+    ? nan_replacement_real
+    : (a_real == std::numeric_limits<scalar_t>::infinity()
+      ? pos_inf_replacement_real
+      : (a_real == -std::numeric_limits<scalar_t>::infinity()
+        ? neg_inf_replacement_real
+        : a_real));
+  if (at::_isnan(a_imag)) {
+    a_real_new -= nan_replacement_imag;
+  } else if (a_imag == std::numeric_limits<scalar_t>::infinity()) {
+    a_real_new -= pos_inf_replacement_imag;
+  } else if (a_imag == -std::numeric_limits<scalar_t>::infinity()) {
+    a_real_new -= neg_inf_replacement_imag;
+  } 
+  return a_real_new;
+}
+
+template <typename scalar_t>
+C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace_imag(
+    scalar_t a_real,
+    scalar_t a_imag, 
+    scalar_t nan_replacement_real,
+    scalar_t nan_replacement_imag,
+    scalar_t pos_inf_replacement_real,
+    scalar_t pos_inf_replacement_imag,
+    scalar_t neg_inf_replacement_real,
+    scalar_t neg_inf_replacement_imag) {
+  // the imaginary part can be computed similar to the real part, 
+  // but values need to be permuted and some signs changed.
+  return _nan_to_num_replace_real(a_imag, 
+    a_real, 
+    nan_replacement_imag, 
+    -nan_replacement_real, 
+    pos_inf_replacement_imag, 
+    -pos_inf_replacement_real, 
+    neg_inf_replacement_imag, 
+    -neg_inf_replacement_real);
+}
+
 void nan_to_num_kernel_cuda(
     TensorIteratorBase& iter,
     std::optional<double> nan,
@@ -261,6 +313,35 @@ void nan_to_num_kernel_cuda(
   }
 }
 
+void nan_to_num_complex_kernel_cuda(
+    TensorIteratorBase& iter,
+    std::optional<complex<double>> nan,
+    std::optional<complex<double>> pos_inf,
+    std::optional<complex<double>> neg_inf) {
+  if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
+      using value_t = scalar_t::value_type;
+      auto nan_replacement = static_cast<c10::complex<value_t>>(nan.value_or(c10::complex<double>(0.0, 0.0)));
+      auto pos_inf_replacement = static_cast<c10::complex<value_t>>(pos_inf.has_value()
+          ? pos_inf.value()
+          : c10::complex<double>(std::numeric_limits<double>::max(), 0.0));
+      auto neg_inf_replacement = static_cast<c10::complex<value_t>>(neg_inf.has_value()
+          ? neg_inf.value()
+          : c10::complex<double>(std::numeric_limits<double>::lowest(), 0.0));
+      std::cout << "neg_inf_replacement = " << neg_inf_replacement << std::endl;
+      gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
+        value_t res_real = _nan_to_num_replace_real(
+          a.real(), a.imag(), nan_replacement.real(), nan_replacement.imag(), pos_inf_replacement.real(), pos_inf_replacement.imag(), neg_inf_replacement.real(), neg_inf_replacement.imag());
+        value_t res_imag = _nan_to_num_replace_imag(
+          a.real(), a.imag(), nan_replacement.real(), nan_replacement.imag(), pos_inf_replacement.real(), pos_inf_replacement.imag(), neg_inf_replacement.real(), neg_inf_replacement.imag());
+        return scalar_t(res_real, res_imag);
+      });
+    });
+  } else {
+    TORCH_CHECK(false, "nan_to_num does not work with complex nan, pos_inf, or neg_inf and non-complex tensors. Expected complex tensor, but got ", iter.dtype());
+  }
+}
+
 void frexp_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
     // The iter.dtype() here is the dtype of mantissa output.
@@ -281,6 +362,7 @@ REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda)
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda)
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda)
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda)
+REGISTER_DISPATCH(nan_to_num_complex_stub, &nan_to_num_complex_kernel_cuda)
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda)
 
 } // namespace at::native
