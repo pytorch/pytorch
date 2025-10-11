@@ -265,6 +265,15 @@ struct FlightRecorder {
       bool onlyActive);
 };
 
+// Whether to include stack trace in the Flight Recorder trace (default true)
+static std::vector<std::string> TORCH_INCLUDE_STACK_TRACE = {
+    "TORCH_INCLUDE_STACK_TRACE"};
+
+// Whether to include only active collectives in the Flight Recorder trace
+// (default false)
+static std::vector<std::string> TORCH_INCLUDE_ONLY_ACTIVE = {
+    "TORCH_INCLUDE_ONLY_ACTIVE"};
+
 // Dumps the fr traces and additional information about the Process
 // Group.
 TORCH_API std::string dump_fr_trace(
