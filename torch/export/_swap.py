@@ -195,17 +195,16 @@ def _construct_inputs(
     unflatten_node = _generate_unflatten(gm, tree_unflatten_args, signature.in_spec)
 
     assert signature.in_spec.num_children == 2
+    assert signature.in_spec.type is tuple
+    args_spec, kwargs_spec = signature.in_spec.children()
+    assert args_spec.type is tuple
+    assert kwargs_spec.type is dict
 
-    args_spec = signature.in_spec.children_specs[0]
-    assert args_spec.context is None
     args_node = gm.graph.call_function(operator.getitem, (unflatten_node, 0))
     args_nodes = [
         gm.graph.call_function(operator.getitem, (args_node, i))
         for i in range(args_spec.num_children)
     ]
-
-    kwargs_spec = signature.in_spec.children_specs[1]
-    assert kwargs_spec.context is not None
     kwargs_node = gm.graph.call_function(operator.getitem, (unflatten_node, 1))
     kwargs_nodes = {
         k: gm.graph.call_function(operator.getitem, (kwargs_node, k))
@@ -372,8 +371,8 @@ def _fix_input_output_signature(
     if forward_arg_names is None:
         forward_arg_names = []
         assert signature.in_spec.num_children == 2
-        arg_spec = signature.in_spec.children_specs[0]
-        kwarg_spec = signature.in_spec.children_specs[1]
+        arg_spec = signature.in_spec.child(0)
+        kwarg_spec = signature.in_spec.child(1)
         assert arg_spec.type is tuple
         assert kwarg_spec.type is dict
         for i in range(arg_spec.num_children):
