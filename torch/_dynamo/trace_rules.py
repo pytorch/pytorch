@@ -51,7 +51,6 @@ from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import (
     getfile,
     hashable,
-    is_annotate_wrapped_function,
     is_lru_cache_wrapped_function,
     NP_SUPPORTED_MODULES,
     unwrap_if_wrapper,
@@ -155,7 +154,6 @@ manual_torch_name_rule_map: dict[
         type[UserFunctionVariable],
     ],
 ] = {
-    "torch.fx.traceback.annotate": UserFunctionVariable,
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
     "torch.overrides.is_tensor_like": TorchInGraphFunctionVariable,
@@ -1416,6 +1414,14 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C.unify_type_list",
         "torch._C.vitals_enabled",
         "torch._C.wait",
+        "torch._cast_Byte",
+        "torch._cast_Char",
+        "torch._cast_Double",
+        "torch._cast_Float",
+        "torch._cast_Half",
+        "torch._cast_Int",
+        "torch._cast_Long",
+        "torch._cast_Short",
         "torch._choose_qparams_per_tensor",
         "torch._chunk_cat",
         "torch._coalesce",
@@ -2996,9 +3002,6 @@ def get_torch_obj_rule_map() -> dict[Any, type["VariableTracker"]]:
                     continue
                 obj = torch_dir + k[len("torch/") :]
             if obj is not None:
-                if is_annotate_wrapped_function(obj):
-                    # pyrefly: ignore  # missing-attribute
-                    obj = obj.__wrapped__
                 if is_lru_cache_wrapped_function(obj):
                     obj = obj.__wrapped__
                 if obj in d and d[obj] != v:
@@ -3364,6 +3367,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._functorch.apis",
     "torch._functorch.deprecated",
     "torch.nn.attention.flex_attention",
+    "torch.ao.quantization.stubs",
     "torch.ao.quantization.pt2e.export_utils",
     "torch.ao.quantization.pt2e.qat_utils",
     "torch.ao.quantization.pt2e.representation.rewrite",
@@ -3430,6 +3434,7 @@ MOD_INLINELIST = [
     "torch.fx._symbolic_trace",
     "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
+    "torch.fx.traceback",
     "torch.nn",
     "torch.overrides",
     "torch.random",

@@ -75,29 +75,7 @@ def setup_torchbench_cwd():
     return original_dir
 
 
-def process_hf_reformer_output(out):
-    assert isinstance(out, list)
-    # second output is unstable
-    return [elem for i, elem in enumerate(out) if i != 1]
-
-
-def process_hf_whisper_output(out):
-    out_ret = []
-    for i, elem in enumerate(out):
-        if i == 0:
-            if elem is not None:
-                assert isinstance(elem, dict)
-                out_ret.append({k: v for k, v in elem.items() if k != "logits"})
-        elif i != 1:
-            out_ret.append(elem)
-
-    return out_ret
-
-
-process_train_model_output = {
-    "hf_Reformer": process_hf_reformer_output,
-    "hf_Whisper": process_hf_whisper_output,
-}
+process_train_model_output = {}
 
 
 class TorchBenchmarkRunner(BenchmarkRunner):
@@ -227,12 +205,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             "drq",
             "hf_Reformer",
             "DALLE2_pytorch",
-            "hf_BigBird",
             "detectron2_maskrcnn_r_50_fpn",
             "detectron2_maskrcnn_r_101_fpn",
             "vision_maskrcnn",
             "doctr_reco_predictor",
-            "hf_T5_generate",
         }
 
     def load_model(
@@ -395,8 +371,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             and hasattr(model.config, "use_cache")
         ):
             model.config.use_cache = False
-        if model_name == "hf_T5_generate":
-            model.model.config.use_cache = False
 
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
