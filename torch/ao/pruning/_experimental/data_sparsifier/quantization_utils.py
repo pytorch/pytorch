@@ -66,17 +66,20 @@ def post_training_sparse_quantize(
 
     else:
         embedding_modules = []
-        assert isinstance(select_embeddings, list), (
-            "the embedding_modules must be a list of embedding modules"
-        )
+        if not isinstance(select_embeddings, list):
+            raise AssertionError(
+                "the embedding_modules must be a list of embedding modules"
+            )
         for emb in select_embeddings:
-            assert type(emb) in SUPPORTED_MODULES, (
-                "the embedding_modules list must be an embedding or embedding bags"
-            )
+            if type(emb) not in SUPPORTED_MODULES:
+                raise AssertionError(
+                    "the embedding_modules list must be an embedding or embedding bags"
+                )
             fqn_name = module_to_fqn(model, emb)
-            assert fqn_name is not None, (
-                "the embedding modules must be part of input model"
-            )
+            if fqn_name is None:
+                raise AssertionError(
+                    "the embedding modules must be part of input model"
+                )
             embedding_modules.append((fqn_name, emb))
 
     if sparsify_first:
@@ -114,7 +117,8 @@ def post_training_sparse_quantize(
 
         for name, _ in embedding_modules:
             quantized_emb = fqn_to_module(model, name)
-            assert quantized_emb is not None  # satisfy mypy
+            if quantized_emb is None:
+                raise AssertionError(f"quantized embedding {name} not found in model")
 
             quantized_weight = quantized_emb.weight()  # type: ignore[operator]
             quantize_params["scales"][name] = quantized_weight.q_per_channel_scales()
@@ -138,7 +142,8 @@ def post_training_sparse_quantize(
 
         for name, _ in embedding_modules:
             quantized_emb = fqn_to_module(model, name)
-            assert quantized_emb is not None  # satisfy mypy
+            if quantized_emb is None:
+                raise AssertionError(f"quantized embedding {name} not found in model")
             requantized_vector = torch.quantize_per_channel(
                 quantize_params["dequant_weights"][name],
                 scales=quantize_params["scales"][name],

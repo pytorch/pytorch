@@ -333,7 +333,7 @@ def prune_conv2d_pool_flatten_linear(
 
     conv2d_oc = len(mask)
     if linear_ic % conv2d_oc != 0:
-        raise ValueError(
+        raise AssertionError(
             f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
         )
 
