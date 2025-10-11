@@ -116,10 +116,13 @@ class Wishart(ExponentialFamily):
             )
 
         if scale_tril is not None:
+            # pyrefly: ignore  # read-only
             self.scale_tril = param.expand(batch_shape + (-1, -1))
         elif covariance_matrix is not None:
+            # pyrefly: ignore  # read-only
             self.covariance_matrix = param.expand(batch_shape + (-1, -1))
         elif precision_matrix is not None:
+            # pyrefly: ignore  # read-only
             self.precision_matrix = param.expand(batch_shape + (-1, -1))
 
         if self.df.lt(event_shape[-1]).any():
@@ -335,6 +338,7 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         return -self.precision_matrix / 2, (nu - p - 1) / 2
 
+    # pyrefly: ignore  # bad-override
     def _log_normalizer(self, x, y):
         p = self._event_shape[-1]
         return (y + (p + 1) / 2) * (
