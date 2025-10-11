@@ -135,7 +135,10 @@ def infer_schema(
                     "as it is a ScriptObject. Please manually specify the schema "
                     "using the `schema=` kwarg with the actual type of the ScriptObject."
                 )
-            elif annotation_type.__origin__ is tuple:
+            elif (
+                hasattr(annotation_type, "__origin__")
+                and annotation_type.__origin__ is tuple
+            ):
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
