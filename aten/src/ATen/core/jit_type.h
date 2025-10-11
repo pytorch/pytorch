@@ -8,6 +8,7 @@
 #include <ATen/core/type_factory.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
+#include <c10/util/Exception.h>
 #include <optional>
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymBool.h>
@@ -116,10 +117,8 @@ struct SingleElementType : public SharedType {
 
  protected:
   SingleElementType(TypePtr elem) : SharedType(Kind), elem(std::move(elem)) {
-    if (!this->elem) {
-      throw std::runtime_error(c10::str(
+    TORCH_CHECK(this->elem, c10::str(
             "Can not create ", typeKindToString(Kind), " with None type"));
-    }
   }
 
  private:
@@ -416,16 +415,12 @@ struct TORCH_API SymbolicShape {
   }
 
   ShapeSymbol operator[](size_t i) const {
-    if (!dims_) {
-      throw std::runtime_error("Rank isn't fixed");
-    }
+    TORCH_CHECK(dims_, "Rank isn't fixed");
     return (*dims_).at(i);
   }
 
   ShapeSymbol at(size_t i) const {
-    if (!dims_) {
-      throw std::runtime_error("Rank isn't fixed");
-    }
+    TORCH_CHECK(dims_, "Rank isn't fixed");
     return (*dims_).at(i);
   }
 
@@ -520,9 +515,7 @@ struct VaryingShape {
   }
 
   const std::optional<T> &operator[](size_t i) const {
-    if (!dims_) {
-      throw std::runtime_error("Rank isn't fixed");
-    }
+    TORCH_CHECK(dims_, "Rank isn't fixed");
     return (*dims_).at(i);
   }
 
@@ -957,9 +950,7 @@ struct TORCH_API DictType : public SharedType {
 
   TypePtr createWithContained(
       std::vector<TypePtr> contained_types) const override {
-    if (contained_types.size() != 2) {
-      throw std::runtime_error("Expected 2 contained types");
-    }
+    TORCH_CHECK(contained_types.size() == 2, "Expected 2 contained types");
     return create(std::move(contained_types.at(0)), std::move(contained_types.at(1)));
   }
 
