@@ -9,7 +9,7 @@ from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils._ordered_set import OrderedSet
 
-from .. import ir
+from .. import ir, mkldnn_ir
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     Arg,
@@ -760,6 +760,28 @@ if torch._C._has_mkldnn:
             isinstance(_other.data, ir.BaseView)
             or len(_other.get_inputs_that_alias_output()) > 0
         )
+
+    def _can_be_linear_binary_inplace(_other):
+        if isinstance(_other.data, ir.BaseView):
+            try:
+                # it can be inplace when _other is the 2D to 3D view of a CppTemplateBuffer/QLinearPointwiseBinaryPT2E
+                # because if there is a view of CppTemplateBuffer/QLinearPointwiseBinaryPT2E,
+                # the CppTemplateBuffer will not be used directly but the view.
+                if isinstance(_other.data.data.data, (ir.CppTemplateBuffer)):
+                    return True
+                else:
+                    # use V.graph.operations to check if _other is a view of QLinearPointwiseBinaryPT2E as
+                    # the inplace QLinearPointwiseBinaryPT2E(binary_attr is sum) just reture the inputs[6].
+                    for op in V.graph.operations:
+                        if isinstance(op, mkldnn_ir.QLinearPointwiseBinaryPT2E) and _other.data.data.data == op.inputs[6]:
+                            return True
+                return False
+            except AttributeError:
+                return False
+        elif len(_other.get_inputs_that_alias_output()) > 0:
+            return False
+        else:
+            return True
 
     def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
