@@ -237,51 +237,6 @@ kernel void build_batch_ptr_from_sorted_batches(
   batch_ptr[b] = (long)lo;
 }
 
-kernel void spmm_bmm_coo(
-    device const long*   rows         [[buffer(0)]],
-    device const long*   cols         [[buffer(1)]],
-    device const float*  vals         [[buffer(2)]],
-    device const float*  dense        [[buffer(3)]],
-    device float*        out          [[buffer(4)]],
-    device const long*   batch_ptr    [[buffer(5)]],
-    constant uint4&      dims         [[buffer(6)]],
-    constant float&      alpha        [[buffer(7)]],
-    constant float&      beta         [[buffer(8)]],
-    uint3                tid          [[thread_position_in_grid]])
-{
-  const uint K = dims.w;
-  const uint J = dims.z;
-  const uint I = dims.y;
-  const uint B = dims.x;
-
-  const uint k = tid.x;
-  const uint b = tid.y;
-  const uint i = tid.z;
-
-  const uint base = (uint)batch_ptr[b];
-  const uint lim = (uint)batch_ptr[b + 1];
-
-  // find row segment [start, end) for row i within this batch
-  const uint start = lower_bound_i64(rows, base, lim, (long)i);
-  const uint end = upper_bound_i64(rows, base, lim, (long)i);
-
-  float acc = 0.0f;
-  for (uint p = start; p < end; ++p) {
-    const uint c = (uint)cols[p];
-    const float v = vals[p];
-    const uint dense_off = ((b * J) + c) * K + k;
-    acc += v * dense[dense_off];
-  }
-
-  const uint out_off = ((b * I) + i) * K + k;
-  float y = 0.0f;
-  if (beta != 0.0f) {
-    y = out[out_off] * beta;
-  }
-  out[out_off] = y + alpha * acc;
-}
-
-
 // have to do this to support both float and float2
 template <typename T>
 inline float to_compute_dtype(T x) { return static_cast<float>(x); }
