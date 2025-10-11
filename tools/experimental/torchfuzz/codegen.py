@@ -104,47 +104,6 @@ class FuzzTemplate:
 
         return ScalarSpec(dtype=dtype)
 
-
-class DefaultFuzzTemplate(FuzzTemplate):
-    def __init__(self):
-        from torchfuzz.checks import EagerVsFullGraphDynamicCompileCheck
-
-        super().__init__(
-            supported_ops=[
-                "torch.add",
-                "torch.sub",
-                "torch.mul",
-                "torch.div",
-                "torch.Tensor.view",
-                "torch.reshape",
-                "torch.flatten",
-                "torch.squeeze",
-                "torch.unsqueeze",
-                "torch.mm",
-                "torch.addmm",
-                "torch.bmm",
-                "torch.matmul",
-            ],
-            check=EagerVsFullGraphDynamicCompileCheck(),
-        )
-
-    def spec_distribution(self):
-        """Default template: tensor-only (no scalars)."""
-        return {
-            "tensor_prob": 1.0,
-            "scalar_prob": 0.0,
-            "allow_tensors": True,
-            "allow_scalars": False,
-        }
-
-    def imports_codegen(self):
-        return [
-            "import torch",
-        ]
-
-    def flags_codegen(self):
-        return ["torch._dynamo.config.capture_scalar_outputs = True"]
-
     def args_codegen(self, arg_operations):
         """Generate argument creation code for default template."""
         code_lines = []
@@ -164,9 +123,26 @@ class DefaultFuzzTemplate(FuzzTemplate):
 
                 if isinstance(spec, ScalarSpec):
                     dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-                    code_lines.append(
-                        f"{arg_name} = torch.tensor(torch.randn(()), dtype={dtype_str}).item()"
-                    )
+                    if spec.dtype in [
+                        torch.int8,
+                        torch.int16,
+                        torch.int32,
+                        torch.int64,
+                    ]:
+                        # For integer scalars, use randint to avoid always getting 0
+                        code_lines.append(
+                            f"{arg_name} = int(torch.randint(5, 30, ()).item())"
+                        )
+                    elif spec.dtype == torch.bool:
+                        # For boolean scalars, use randint and cast to bool
+                        code_lines.append(
+                            f"{arg_name} = bool(torch.randint(0, 2, ()).item())"
+                        )
+                    else:
+                        # For float scalars, use randn
+                        code_lines.append(
+                            f"{arg_name} = float(torch.randn((), dtype={dtype_str}).item())"
+                        )
 
                 elif isinstance(spec, TensorSpec):
                     size_str = str(spec.size)
@@ -184,11 +160,101 @@ class DefaultFuzzTemplate(FuzzTemplate):
                         storage_size = 1
 
                     stride_str = str(spec.stride)
-                    code_lines.append(
-                        f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
-                    )
+
+                    # Special handling for integer tensors which might be used as indices
+                    if spec.dtype in [
+                        torch.int8,
+                        torch.int16,
+                        torch.int32,
+                        torch.int64,
+                    ]:
+                        # For integer tensors, generate valid indices with headroom for arithmetic
+                        # Use smaller range [5, 30] to allow for multiplication and other operations
+                        # This prevents indices from becoming too large after arithmetic
+                        min_val = (
+                            5  # Minimum to avoid negative results after subtraction
+                        )
+                        max_val = (
+                            30  # Maximum to avoid out-of-bounds after multiplication
+                        )
+                        code_lines.append(
+                            f"{arg_name} = torch.as_strided(torch.randint({min_val}, {max_val}, ({storage_size},)).to({dtype_str}), {size_str}, {stride_str})"
+                        )
+                    elif spec.dtype == torch.bool:
+                        # For boolean tensors, use randint to generate True/False values
+                        # Using randn().to(bool) would yield almost all True due to non-zero floats
+                        code_lines.append(
+                            f"{arg_name} = torch.as_strided(torch.randint(0, 2, ({storage_size},), dtype=torch.int8).bool(), {size_str}, {stride_str})"
+                        )
+                    else:
+                        code_lines.append(
+                            f"{arg_name} = torch.as_strided(torch.randn({storage_size}).to({dtype_str}), {size_str}, {stride_str})"
+                        )
 
         return code_lines
+
+
+class DefaultFuzzTemplate(FuzzTemplate):
+    def __init__(self):
+        from torchfuzz.checks import EagerVsFullGraphDynamicCompileWithNumericsCheck
+
+        super().__init__(
+            supported_ops=[
+                # Basic arithmetic operations
+                "torch.add",
+                "torch.sub",
+                "torch.mul",
+                "torch.div",
+                # Tensor shape operations
+                "torch.Tensor.view",
+                "torch.reshape",
+                "torch.flatten",
+                "torch.squeeze",
+                "torch.unsqueeze",
+                # Matrix operations
+                "torch.mm",
+                "torch.addmm",
+                "torch.bmm",
+                "torch.matmul",
+                # Neural network operations
+                "torch.nn.functional.embedding",
+                "torch.nn.functional.linear",
+                # Activation functions
+                "torch.nn.functional.relu",
+                "torch.nn.functional.leaky_relu",
+                "torch.nn.functional.elu",
+                "torch.nn.functional.gelu",
+                "torch.nn.functional.silu",
+                "torch.sigmoid",
+                "torch.tanh",
+                "torch.nn.functional.softmax",
+                # Normalization layers
+                "torch.nn.functional.layer_norm",
+                "torch.nn.functional.rms_norm",
+                "torch.nn.functional.batch_norm",
+                "torch.nn.functional.group_norm",
+                # Regularization
+                "torch.nn.functional.dropout",
+            ],
+            check=EagerVsFullGraphDynamicCompileWithNumericsCheck(),
+        )
+
+    def spec_distribution(self):
+        """Default template: tensor-only (no scalars)."""
+        return {
+            "tensor_prob": 1.0,
+            "scalar_prob": 0.0,
+            "allow_tensors": True,
+            "allow_scalars": False,
+        }
+
+    def imports_codegen(self):
+        return [
+            "import torch",
+        ]
+
+    def flags_codegen(self):
+        return ["torch._dynamo.config.capture_scalar_outputs = True"]
 
     def epilogue_codegen(self):
         return []
@@ -345,11 +411,41 @@ class UnbackedFuzzTemplate(FuzzTemplate):
                 "torch.ops.aten.nonzero",
                 "torch.ops.aten.masked_select",
                 "torch.ops.aten.unique",
-                # Include basic operations for building up data
+                # Basic arithmetic operations
                 "torch.add",
                 "torch.sub",
                 "torch.mul",
                 "torch.div",
+                # Tensor shape operations
+                "torch.Tensor.view",
+                "torch.reshape",
+                "torch.flatten",
+                "torch.squeeze",
+                "torch.unsqueeze",
+                # Matrix operations
+                "torch.mm",
+                "torch.addmm",
+                "torch.bmm",
+                "torch.matmul",
+                # Neural network operations
+                "torch.nn.functional.embedding",
+                "torch.nn.functional.linear",
+                # Activation functions
+                "torch.nn.functional.relu",
+                "torch.nn.functional.leaky_relu",
+                "torch.nn.functional.elu",
+                "torch.nn.functional.gelu",
+                "torch.nn.functional.silu",
+                "torch.sigmoid",
+                "torch.tanh",
+                "torch.nn.functional.softmax",
+                # Normalization layers
+                "torch.nn.functional.layer_norm",
+                "torch.nn.functional.rms_norm",
+                "torch.nn.functional.batch_norm",
+                "torch.nn.functional.group_norm",
+                # Regularization
+                "torch.nn.functional.dropout",
             ],
             check=EagerVsFullGraphDynamicCompileCheck(),
         )
@@ -384,56 +480,6 @@ class UnbackedFuzzTemplate(FuzzTemplate):
             "torch._dynamo.config.capture_scalar_outputs = True",
             "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
         ]
-
-    def args_codegen(self, arg_operations):
-        """Generate argument creation code for unbacked template."""
-        code_lines = []
-
-        # Add sentinel tensor that ensures gradient computation
-        code_lines.extend(
-            [
-                "# Sentinel tensor to ensure gradient computation",
-                "sentinel = torch.tensor(1.0, requires_grad=True)",
-                "",
-            ]
-        )
-
-        if arg_operations:
-            for i, (node_id, spec) in enumerate(arg_operations):
-                arg_name = f"arg_{i}"
-
-                if isinstance(spec, ScalarSpec):
-                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-                    code_lines.append(
-                        f"{arg_name} = torch.tensor(torch.randn(()), dtype={dtype_str}).item()"
-                    )
-
-                elif isinstance(spec, TensorSpec):
-                    size_str = str(spec.size)
-                    dtype_str = f"torch.{spec.dtype}".replace("torch.torch.", "torch.")
-
-                    # For unbacked operations, create tensors with specific patterns
-                    # that are likely to produce meaningful results
-                    if spec.dtype == torch.bool:
-                        # For boolean tensors, create a mix of True/False values
-                        code_lines.append(
-                            f"{arg_name} = torch.randint(0, 2, {size_str}, dtype={dtype_str}) > 0"
-                        )
-                    elif spec.dtype in [torch.int32, torch.int64]:
-                        # For integer tensors, create values that will have some duplicates
-                        # and some unique values for operations like unique()
-                        code_lines.append(
-                            f"{arg_name} = torch.randint(0, 3, {size_str}, dtype={dtype_str})"
-                        )
-                    else:
-                        # For float tensors, create values with some zeros and non-zeros
-                        code_lines.append(
-                            f"{arg_name} = (torch.randn({size_str}) * 2).to({dtype_str})"
-                        )
-                        # Zero out some values to make nonzero operations meaningful
-                        code_lines.append(f"{arg_name}[{arg_name}.abs() < 0.5] = 0")
-
-        return code_lines
 
     def epilogue_codegen(self):
         return []
@@ -639,10 +685,19 @@ def generate_simple_operation_code(
 
     if operator is not None:
         # Use the class-based operator to generate code
-        code_line = operator.codegen(output_var, input_vars, output_spec)
-        # Add tensor descriptor comment
+        code = operator.codegen(output_var, input_vars, output_spec)
+        # Add tensor descriptor comment to the last emitted line
         descriptor_comment = f"# {format_tensor_descriptor(output_spec)}"
-        return [code_line + " " + descriptor_comment]
+        if "\n" in code:
+            lines = code.split("\n")
+            # Attach comment to the last non-empty line
+            for i in range(len(lines) - 1, -1, -1):
+                if lines[i].strip():
+                    lines[i] = lines[i] + " " + descriptor_comment
+                    break
+            return lines
+        else:
+            return [code + " " + descriptor_comment]
     else:
         # Fallback for unknown operations
         return [f"# Unknown operation: {op_name}"]

@@ -387,6 +387,12 @@ class DTensor(torch.Tensor):
         .. note:: ``from_local`` is differentiable, the `requires_grad` of the created
             `DTensor` object will depend on if `local_tensor` requires_grad or not.
         """
+        # `local_tensor` argument cannot be DTensor
+        if isinstance(local_tensor, DTensor):
+            raise RuntimeError(
+                f"the local_tensor argument only accepts torch.Tensor but got {type(local_tensor)} value."
+            )
+
         # if same shape/dtype, no need to run_check, if not, must allgather
         # the metadatas to check the size/dtype across ranks
         # There should be no data communication unless there's replication
@@ -650,6 +656,17 @@ class DTensor(torch.Tensor):
             return self.to_local()
         else:
             raise RuntimeError("Unsupported tensor type!")
+
+    @classmethod
+    def __metadata_guard__(
+        cls, orig: tuple[DTensorSpec, bool], other: tuple[DTensorSpec, bool]
+    ) -> bool:
+        orig_spec, orig_requires_grad = orig
+        other_spec, other_requires_grad = other
+        return (
+            orig_spec._check_equals(other_spec, skip_shapes=True)
+            and orig_requires_grad == other_requires_grad
+        )
 
 
 def distribute_tensor(

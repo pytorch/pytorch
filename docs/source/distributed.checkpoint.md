@@ -64,6 +64,16 @@ The entrypoints to load and save a checkpoint are the following:
 .. autofunction::  load_state_dict
 ```
 
+Following APIs can be used for inspecting the metadata of a checkpoint/stored state-dict.
+
+```{eval-rst}
+.. automodule:: torch.distributed.checkpoint.metadata_utils
+```
+
+```{eval-rst}
+.. autofunction::  list_stored_state_dict
+```
+
 The following module is also useful for additional customization of the staging mechanisms used for asynchronous checkpointing (`torch.distributed.checkpoint.async_save`):
 
 ```{eval-rst}
