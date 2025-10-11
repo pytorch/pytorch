@@ -203,7 +203,7 @@ class LSTMCell(torch.nn.Module):
 
     @classmethod
     def from_float(cls, other, use_precomputed_fake_quant=False, split_gates=False):
-        assert type(other) == cls._FLOAT_MODULE
+        assert type(other) is cls._FLOAT_MODULE
         assert hasattr(other, "qconfig"), "The float module must have 'qconfig'"
         observed = cls.from_params(
             other.weight_ih,
