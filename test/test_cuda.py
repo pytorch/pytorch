@@ -4473,6 +4473,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             orig = torch.cuda.get_per_process_memory_fraction(0)
 
+    @serialTest()
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
             pow2 = 1
@@ -4560,7 +4561,7 @@ class TestCudaMallocAsync(TestCase):
         # allocate 514 MiB, should round to 1 GiB
         nelems_514mb = 514 * 1024 * 1024 // 4
         t = torch.rand(nelems_514mb, device="cuda")
-        
+
         mem_514mb = torch.cuda.memory_stats()[key_allocated]
         if not TEST_CUDAMALLOCASYNC:
             # should round to next power of 2 (1 GiB)
@@ -4573,7 +4574,7 @@ class TestCudaMallocAsync(TestCase):
         start_mem = torch.cuda.memory_stats()[key_allocated]
         nelems_1gb = 1024 * 1024 * 1024 // 4
         t_1gb = torch.rand(nelems_1gb, device="cuda")
-        
+
         mem_1gb = torch.cuda.memory_stats()[key_allocated]
         if not TEST_CUDAMALLOCASYNC:
             # already power of 2, should not round up
@@ -4585,7 +4586,7 @@ class TestCudaMallocAsync(TestCase):
         torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:[>:0]")
         start_mem = torch.cuda.memory_stats()[key_allocated]
         t = torch.rand(nelems_514mb, device="cuda")
-        
+
         mem_no_round = torch.cuda.memory_stats()[key_allocated]
         if not TEST_CUDAMALLOCASYNC:
             # should not round up to 1 GiB
