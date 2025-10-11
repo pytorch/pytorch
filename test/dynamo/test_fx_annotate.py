@@ -29,20 +29,6 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         super().tearDown()
         self.cm.__exit__(None, None, None)
 
-    def get_custom_metadata(self, gm):
-        def helper(gm):
-            custom_metadata = []
-            for node in gm.graph.nodes:
-                if hasattr(node, "meta") and node.meta.get("custom", None):
-                    custom_metadata.append((node.op, node.name, node.meta["custom"]))
-                if node.op == "get_attr" and isinstance(
-                    getattr(gm, node.target), torch.fx.GraphModule
-                ):
-                    custom_metadata.append(helper(getattr(gm, node.target)))
-            return custom_metadata
-
-        return "\n".join(str(x) for x in helper(gm))
-
     def test_annotations(self):
         class Mod(torch.nn.Module):
             def forward(self, x):
@@ -64,9 +50,9 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(backend.fw_graphs), 1)
         self.assertEqual(len(backend.bw_graphs), 1)
 
-        dynamo_metadata = self.get_custom_metadata(backend.graphs[0])
-        fw_metadata = self.get_custom_metadata(backend.fw_graphs[0])
-        bw_metadata = self.get_custom_metadata(backend.bw_graphs[0])
+        dynamo_metadata = fx_traceback.get_custom_metadata(backend.graphs[0])
+        fw_metadata = fx_traceback.get_custom_metadata(backend.fw_graphs[0])
+        bw_metadata = fx_traceback.get_custom_metadata(backend.bw_graphs[0])
         self.assertExpectedInline(
             str(dynamo_metadata),
             """\
@@ -108,9 +94,9 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(backend.fw_graphs), 1)
         self.assertEqual(len(backend.bw_graphs), 1)
 
-        dynamo_metadata = self.get_custom_metadata(backend.graphs[0])
-        fw_metadata = self.get_custom_metadata(backend.fw_graphs[0])
-        bw_metadata = self.get_custom_metadata(backend.bw_graphs[0])
+        dynamo_metadata = fx_traceback.get_custom_metadata(backend.graphs[0])
+        fw_metadata = fx_traceback.get_custom_metadata(backend.fw_graphs[0])
+        bw_metadata = fx_traceback.get_custom_metadata(backend.bw_graphs[0])
         self.assertExpectedInline(
             str(dynamo_metadata),
             """\
@@ -151,9 +137,9 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(backend.fw_graphs), 1)
         self.assertEqual(len(backend.bw_graphs), 1)
 
-        dynamo_metadata = self.get_custom_metadata(backend.graphs[0])
-        fw_metadata = self.get_custom_metadata(backend.fw_graphs[0])
-        bw_metadata = self.get_custom_metadata(backend.bw_graphs[0])
+        dynamo_metadata = fx_traceback.get_custom_metadata(backend.graphs[0])
+        fw_metadata = fx_traceback.get_custom_metadata(backend.fw_graphs[0])
+        bw_metadata = fx_traceback.get_custom_metadata(backend.bw_graphs[0])
         self.assertExpectedInline(
             str(dynamo_metadata),
             """[('call_function', 'p', {'stage': 0})]""",  # noqa: B950
@@ -209,9 +195,9 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(backend.fw_graphs), 1)
         self.assertEqual(len(backend.bw_graphs), 1)
 
-        dynamo_metadata = self.get_custom_metadata(backend.graphs[0])
-        fw_metadata = self.get_custom_metadata(backend.fw_graphs[0])
-        bw_metadata = self.get_custom_metadata(backend.bw_graphs[0])
+        dynamo_metadata = fx_traceback.get_custom_metadata(backend.graphs[0])
+        fw_metadata = fx_traceback.get_custom_metadata(backend.fw_graphs[0])
+        bw_metadata = fx_traceback.get_custom_metadata(backend.bw_graphs[0])
         self.assertExpectedInline(
             str(dynamo_metadata),
             """\
@@ -254,11 +240,11 @@ class AnnotateTests(torch._dynamo.test_case.TestCase):
 ('call_function', 'detach_2', {'compile_inductor': 0})
 ('call_function', 'detach_3', {'compile_inductor': 0})
 ('get_attr', 'fw_graph0', {'compile_inductor': 0})
-[]
+[('placeholder', 'arg0_1', {'compile_inductor': 0}), ('placeholder', 'arg1_1', {'compile_inductor': 0}), ('placeholder', 'arg2_1', {'compile_inductor': 0}), ('placeholder', 'arg3_1', {'compile_inductor': 0}), ('placeholder', 'arg4_1', {'compile_inductor': 0}), ('call_function', 'mul', {'compile_inductor': 0}), ('output', 'output', {'compile_inductor': 0})]
 ('get_attr', 'joint_graph0', {'compile_inductor': 0})
-[]
+[('placeholder', 'arg0_1', {'compile_inductor': 0}), ('placeholder', 'arg1_1', {'compile_inductor': 0}), ('placeholder', 'arg2_1', {'compile_inductor': 0}), ('placeholder', 'arg3_1', {'compile_inductor': 0}), ('placeholder', 'arg4_1', {'compile_inductor': 0}), ('placeholder', 'arg5_1', {'compile_inductor': 0}), ('call_function', 'mul_1', {'compile_inductor': 0}), ('call_function', 'mul_2', {'compile_inductor': 0}), ('call_function', 'add', {'compile_inductor': 0}), ('output', 'output', {'compile_inductor': 0})]
 ('get_attr', 'mask_graph0', {'compile_inductor': 0})
-[('call_function', 'ge', {'compile_inductor': 0})]
+[('placeholder', 'arg0_1', {'compile_inductor': 0}), ('placeholder', 'arg1_1', {'compile_inductor': 0}), ('placeholder', 'arg2_1', {'compile_inductor': 0}), ('placeholder', 'arg3_1', {'compile_inductor': 0}), ('call_function', 'ge', {'compile_inductor': 0}), ('output', 'output', {'compile_inductor': 0})]
 ('call_function', 'flex_attention_backward', {'compile_inductor': 0})
 ('call_function', 'getitem_3', {'compile_inductor': 0})
 ('call_function', 'getitem_4', {'compile_inductor': 0})
