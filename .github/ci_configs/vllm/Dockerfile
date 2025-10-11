@@ -303,10 +303,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --branch ${FLASHINFER_GIT_REF} \
         ${FLASHINFER_GIT_REPO} flashinfer \
     && echo "Building FlashInfer with AOT for arches: ${torch_cuda_arch_list}" \
-    && pushd flashinfer \
+    && cd flashinfer \
     && python3 -m flashinfer.aot \
     && python3 -m build --no-isolation --wheel --outdir ../wheels/flashinfer \
-    && popd \
+    && cd .. \
     && rm -rf flashinfer
 
 # Install FlashInfer
