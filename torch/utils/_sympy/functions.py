@@ -1328,6 +1328,10 @@ class Identity(sympy.Function):
         # pyrefly: ignore  # missing-attribute
         return f"Identity({self.args[0]})"
 
+    def _sympystr(self, printer):
+        """Controls how sympy's StrPrinter prints this"""
+        return f"({printer.doprint(self.args[0])})"
+
     def _eval_is_real(self):
         # pyrefly: ignore  # missing-attribute
         return self.args[0].is_real
