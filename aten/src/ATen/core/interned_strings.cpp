@@ -71,7 +71,7 @@ Symbol InternedStrings::_symbol(const std::string& s) {
   if (pos == std::string::npos) {
     std::stringstream ss;
     ss << "all symbols must have a namespace, <namespace>::<string>, but found: " << s;
-    throw std::runtime_error(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   Symbol ns = _symbol("namespaces::" + s.substr(0, pos));
 
@@ -125,7 +125,7 @@ Symbol Symbol::fromDomainAndUnqualString(const std::string & d, const std::strin
     std::ostringstream ss;
     ss << "Symbol: domain string is expected to be prefixed with '"
        << domain_prefix() << "', e.g. 'org.pytorch.aten'";
-    throw std::runtime_error(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   std::string qualString = d.substr(domain_prefix().size()) + "::" + s;
   return fromQualString(qualString);
