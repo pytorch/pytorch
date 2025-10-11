@@ -1955,7 +1955,7 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     bool use_fast_accum) {
-  // Note: see `cublasCommonArgs` for various non-intuitive manupulations
+  // Note: see `cublasCommonArgs` for various non-intuitive manipulations
   // of input arguments to this function.
   const auto computeType = CUBLAS_COMPUTE_32F;
   const auto scaleType = CUDA_R_32F;
