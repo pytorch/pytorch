@@ -3190,7 +3190,7 @@ def _dict_to_dataclass(cls, data):
     elif isinstance(data, dict):
         v_type = typing.get_args(cls)[1]
         return {k: _dict_to_dataclass(v_type, v) for k, v in data.items()}
-    elif cls == float:
+    elif cls is float:
         return float(data)
     return data
 
