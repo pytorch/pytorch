@@ -12098,6 +12098,23 @@ class TestNNDeviceType(NNTestCase):
         for reduction in ['mean', 'none']:
             F.nll_loss(x, t, ignore_index=255, reduction=reduction).sum().backward()
 
+    @onlyCUDA
+    def test_nll_loss2d_out_of_bounds_target(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/49882
+        input = torch.randn(1, 19, 32, 64, requires_grad=True, device=device)
+        target = torch.randint(22, size=(1, 32, 64), device=device)
+
+        # Forward with reduction='none' should error on out-of-bounds
+        with self.assertRaises(RuntimeError):
+            F.cross_entropy(input, target, reduction='none')
+
+        # Backward with reduction='none' should also error
+        with self.assertRaises(RuntimeError):
+            output = F.cross_entropy(input, target.clamp(0, 18), reduction='none')
+            output.sum().backward()
+            input2 = torch.randn(1, 19, 32, 64, requires_grad=True, device=device)
+            output2 = F.cross_entropy(input2, target, reduction='none')
+
     def test_nll_loss_invalid_target_dim(self, device):
         x = torch.randn((10, 3), device=device)
         t = torch.zeros((10, 2), dtype=torch.int64, device=device)
