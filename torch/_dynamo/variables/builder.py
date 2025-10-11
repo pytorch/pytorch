@@ -200,7 +200,7 @@ from .functions import (
     CreateTMADescriptorExperimentalVariable,
     CreateTMADescriptorStableVariable,
     FunctoolsPartialVariable,
-    FunctoolsWrapsVariable,
+    FunctoolsUpdateWrapperVariable,
     SysFunctionVariable,
     TracebackVariable,
     TritonKernelVariable,
@@ -1274,9 +1274,9 @@ class VariableBuilder:
             return WrapperUserFunctionVariable(
                 value, "_torchdynamo_inline", source=self.source
             )
-        elif value is functools.wraps:
+        elif value is functools.update_wrapper:
             self.install_guards(GuardBuilder.ID_MATCH)
-            return FunctoolsWrapsVariable(value, source=self.source)
+            return FunctoolsUpdateWrapperVariable(value, source=self.source)
         elif value is collections.namedtuple:
             self.install_guards(GuardBuilder.ID_MATCH)
             return CollectionsNamedTupleFunction(value, source=self.source)
@@ -3709,8 +3709,8 @@ class SourcelessBuilder:
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
-        elif value is functools.wraps:
-            return FunctoolsWrapsVariable(value)
+        elif value is functools.update_wrapper:
+            return FunctoolsUpdateWrapperVariable(value)
         elif isinstance(value, re.Pattern):
             return RegexPatternVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):

@@ -1293,6 +1293,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
+    def get_generic_dict_keys(self, tx: "InstructionTranslator"):
+        return list(self.value.__dict__.keys()) + list(
+            tx.output.side_effects.get_pending_mutation_keys(self)
+        )
+
     def get_source_by_walking_mro(self, name):
         assert self.cls_source is not None
 
@@ -1638,6 +1643,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             subobj_from_class, src_from_class
                         )
 
+                if istype(subobj, dict):
+
+                    def create(obj):
+                        try:
+                            return variables.LazyVariableTracker.create(obj, None)
+                        except Exception:
+                            return VariableTracker.build(tx, obj)
+
+                    return variables.ConstDictVariable(
+                        {create(k): create(v) for k, v in subobj.items()},
+                        dict,
+                    )
                 return VariableTracker.build(tx, subobj)
 
         # Earlier we were returning GetAttrVariable but its incorrect. In absence of attr, Python raises AttributeError.

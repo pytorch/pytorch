@@ -42,7 +42,7 @@ import torch
 from torch._dynamo.exc import get_stack_above_dynamo
 
 from .. import config, graph_break_hints, polyfills, variables
-from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
+from ..bytecode_transformation import create_call_function, is_generator
 from ..exc import (
     get_dynamo_observed_exception,
     handle_observed_exception,
@@ -83,6 +83,7 @@ from .base import (
     VariableTracker,
 )
 from .constant import ConstantVariable
+from .user_defined import UserDefinedObjectVariable
 
 
 try:
@@ -319,6 +320,10 @@ def fn_var_getattr(tx, fn, source, name):
         # so we can safely assume that this attribute is absent
         raise_observed_exception(AttributeError, tx)
 
+    # special handling for __dict__ - return fn's __dict__, but do not allow mutations
+    if name == "__dict__":
+        return variables.ConstDictVariable(fn.__dict__, dict, source=source)
+
     # Special handling for known dunder attributes
     if name in fn_known_dunder_attrs:
         subobj = getattr(fn, name)
@@ -346,12 +351,10 @@ class BaseUserFunctionVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> VariableTracker:
         result = False
-
         try:
             result = hasattr(self.get_function(), name)
         except NotImplementedError:
-            if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
-                result = True
+            pass
         return variables.ConstantVariable.create(result)
 
     def inspect_parameter_names(self):
@@ -1233,14 +1236,16 @@ def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kw
     )
 
 
-class NestedUserFunctionVariable(BaseUserFunctionVariable):
+class NestedUserFunctionVariable(BaseUserFunctionVariable, UserDefinedObjectVariable):
     _nonvar_fields = {
         "f_globals",
         *BaseUserFunctionVariable._nonvar_fields,
+        *UserDefinedObjectVariable._nonvar_fields,
     }
 
     def __init__(
         self,
+        tx,
         fn_name,
         code,
         f_globals,
@@ -1248,14 +1253,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwdefaults,
         annotations,
         closure,
-        # This is present when this function is created by
-        # `functools.wrap(wrapped_fn)(this_fn)`.
-        wrapped_fn=None,
-        **kwargs,
     ) -> None:
-        if kwargs.get("mutation_type") is None:
-            kwargs.update(mutation_type=AttributeMutationNew())
-        super().__init__(**kwargs)
+        UserDefinedObjectVariable.__init__(self, lambda: None)
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
         assert isinstance(f_globals, dict)
@@ -1266,7 +1265,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.kwdefaults = kwdefaults
         self.annotations = annotations
         self.closure = closure
-        self.wrapped_fn: Optional[VariableTracker] = wrapped_fn
+        tx.output.side_effects.track_mutable(self, self, AttributeMutationNew)
+        variables.BuiltinVariable(setattr).call_function(
+            tx,  # type: ignore[arg-type]
+            [self, ConstantVariable.create("__name__"), fn_name],
+            {},
+        )
 
     def self_args(self):
         return []
@@ -1301,27 +1305,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             func.__annotations__ = annotations
         return func
 
-    def call_setattr(
-        self,
-        tx: "InstructionTranslator",
-        name_var: VariableTracker,
-        val: VariableTracker,
-    ):
-        tx.output.side_effects.store_attr(self, name_var.value, val)
-        return ConstantVariable(None)
-
-    def call_method(self, tx, name, args, kwargs):
-        if name == "__setattr__":
-            return self.call_setattr(tx, *args)
-        return super().call_method(tx, name, args, kwargs)
-
     def has_closure(self):
         return self.closure is not None
-
-    def const_getattr(self, tx, name):
-        if name == "__name__":
-            return self.fn_name.as_python_constant()
-        return super().const_getattr(tx, name)
 
     def has_self(self):
         return False
@@ -1388,28 +1373,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output([codegen.create_load_const(None)])
 
         codegen.extend_output(create_call_function(7, False))
-
-        if self.wrapped_fn:
-            codegen.add_push_null(
-                lambda: codegen.load_import_from("functools", "wraps")
-            )
-            codegen(self.wrapped_fn)
-            codegen.extend_output(create_call_function(1, False))
-            codegen.extend_output(create_rot_n(2))
-            codegen.extend_output(create_call_function(1, True))
-
-        # codegen attributes
-        from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
-        if tx.output.side_effects.has_pending_mutation(self):
-            for name, value in tx.output.side_effects.store_attr_mutations[
-                self
-            ].items():
-                codegen.dup_top()
-                codegen(value)
-                codegen.extend_output(create_rot_n(2))
-                codegen.store_attr(name)
 
 
 class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
@@ -1833,30 +1796,29 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         return self.replacement_var.call_function(tx, args, kwargs)
 
 
-class FunctoolsWrapsVariable(UserFunctionVariable):
+class FunctoolsUpdateWrapperVariable(UserFunctionVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if not kwargs and len(args) == 1:
-
-            def wraps(fn):
-                if isinstance(fn, variables.NestedUserFunctionVariable):
-                    return fn.clone(wrapped_fn=args[0])
-                unimplemented_v2(
-                    gb_type="functools.wraps",
-                    context=f"{fn}",
-                    explanation="`torch.compile` can't trace `functools.wraps` on functions defined outside the compile region",
-                    hints=[
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-            return variables.LambdaVariable(wraps)
-
-        return super().call_function(tx, args, kwargs)
+        if not isinstance(args[0], variables.NestedUserFunctionVariable):
+            # NOTE this graph break is necessary since we cannot setattr on UserFunctionVariable today
+            unimplemented_v2(
+                gb_type="functools.wraps on wrapper function defined outside `torch.compile`",
+                context=f"args: {args}",
+                explanation="`torch.compile` can't trace `functools.update_wrapper/wraps` when"
+                " the wrapper function is defined outside the compile region. i.e. the `wrapper` in "
+                "`functools.wraps(fn)(wrapper)` and functools.update_wrapper(wrapper, ...) must be "
+                "defined in the compiled region.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        return variables.UserFunctionVariable(
+            polyfills.functools.update_wrapper
+        ).call_function(tx, args, kwargs)
 
 
 class CollectionsNamedTupleFunction(UserFunctionVariable):
