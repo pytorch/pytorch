@@ -1,4 +1,3 @@
-#include <metal_stdlib>
 #include <c10/metal/indexing.h>
 using namespace metal;
 
@@ -116,6 +115,222 @@ kernel void fused_gather_mul_kernel(
   }
 }
 
+inline uint lower_bound_i64(device const long* arr, uint lo, uint hi, long key) {
+  uint l = lo, r = hi;
+  while (l < r) {
+    uint m = (l + r) >> 1;
+    long v = arr[m];
+    if (v < key) {
+      l = m + 1;
+    } else {
+      r = m;
+    }
+  }
+  return l;
+}
+
+inline uint upper_bound_i64(device const long* arr, uint lo, uint hi, long key) {
+  uint l = lo, r = hi;
+  while (l < r) {
+    uint m = (l + r) >> 1;
+    long v = arr[m];
+    if (v <= key) {
+      l = m + 1;
+    } else {
+      r = m;
+    }
+  }
+  return l;
+}
+
+kernel void build_batch_ptr_from_sorted_batches(
+    device const long* batches       [[buffer(0)]],
+    device long*       batch_ptr     [[buffer(1)]],
+    constant uint&     nnz           [[buffer(2)]],
+    constant uint&     B             [[buffer(3)]],
+    uint3              tid           [[thread_position_in_grid]])
+{
+  uint b = tid.x;
+
+  if (b == B) {
+    batch_ptr[b] = (long)nnz;
+    return;
+  }
+
+  uint lo = 0;
+  uint hi = nnz;
+  long key = (long)b;
+  while (lo < hi) {
+    uint mid = (lo + hi) >> 1;
+    long v = batches[mid];
+    if (v < key) lo = mid + 1;
+    else         hi = mid;
+  }
+  batch_ptr[b] = (long)lo;
+}
+
+kernel void spmm_bmm_coo(
+    device const long*   rows         [[buffer(0)]],
+    device const long*   cols         [[buffer(1)]],
+    device const float*  vals         [[buffer(2)]],
+    device const float*  dense        [[buffer(3)]],
+    device float*        out          [[buffer(4)]],
+    device const long*   batch_ptr    [[buffer(5)]],
+    constant uint4&      dims         [[buffer(6)]],
+    constant float&      alpha        [[buffer(7)]],
+    constant float&      beta         [[buffer(8)]],
+    uint3                tid          [[thread_position_in_grid]])
+{
+  const uint K = dims.w;
+  const uint J = dims.z;
+  const uint I = dims.y;
+  const uint B = dims.x;
+
+  const uint k = tid.x;
+  const uint b = tid.y;
+  const uint i = tid.z;
+
+  const uint base = (uint)batch_ptr[b];
+  const uint lim = (uint)batch_ptr[b + 1];
+
+  // find row segment [start, end) for row i within this batch
+  const uint start = lower_bound_i64(rows, base, lim, (long)i);
+  const uint end = upper_bound_i64(rows, base, lim, (long)i);
+
+  float acc = 0.0f;
+  for (uint p = start; p < end; ++p) {
+    const uint c = (uint)cols[p];
+    const float v = vals[p];
+    const uint dense_off = ((b * J) + c) * K + k;
+    acc += v * dense[dense_off];
+  }
+
+  const uint out_off = ((b * I) + i) * K + k;
+  float y = 0.0f;
+  if (beta != 0.0f) {
+    y = out[out_off] * beta;
+  }
+  out[out_off] = y + alpha * acc;
+}
+
+
+
+kernel void spmm_bmm_coo_grouped(
+    device const long*   rows         [[buffer(0)]],
+    device const long*   cols         [[buffer(1)]],
+    device const float*  vals         [[buffer(2)]],
+    device const float*  dense        [[buffer(3)]],
+    device float*        out          [[buffer(4)]],
+    device const long*   batch_ptr    [[buffer(5)]],
+    constant uint4&      dims         [[buffer(6)]],
+    uint3                tid          [[thread_position_in_grid]],
+    uint3                ltid         [[thread_position_in_threadgroup]],
+    uint3                tptg         [[threads_per_threadgroup]]
+)
+{
+  const uint K = dims.w;
+  const uint J = dims.z;
+  const uint I = dims.y;
+  const uint B = dims.x;
+
+  const uint lane = ltid.x;
+  const uint tgW = tptg.x;
+
+  // we launch exactly one threadgroup per batch along Y, with 1 row-group on Z,
+  // because threadsPerThreadgroup.y == 1, tid.y directly encodes the batch
+  const uint b = tid.y;
+
+  const uint base = (uint)batch_ptr[b];
+  const uint lim  = (uint)batch_ptr[b + 1];
+  if (base >= lim) {
+    return; // no nnz in this batch
+  }
+
+  uint p = base;
+  while (p < lim) {
+    const long rowL = rows[p];
+
+    // find end of this row segment
+    uint q = p + 1;
+    while (q < lim && rows[q] == rowL) {
+      ++q;
+    }
+
+    // Compute y[b, rowL, 0..K) in parallel across the threadgroup lanes
+    for (uint k = lane; k < K; k += tgW) {
+      float acc = 0.0f;
+
+      for (uint t = p; t < q; ++t) {
+        const uint c = (uint)cols[t];
+        const uint dense_off = ((b * J) + c) * K + k;
+        acc = fma(vals[t], dense[dense_off], acc);
+      }
+
+      const uint out_off = ((b * I) + (uint)rowL) * K + k;
+      out[out_off] = acc;
+    }
+
+    p = q; // next row segment
+  }
+}
+
+// have to do this to support both float and float2
+template <typename T>
+inline float to_compute_dtype(T x) { return static_cast<float>(x); }
+inline float2 to_compute_dtype(float2 x){ return x; }
+
+inline float cmadd(float acc, float a, float b) {
+  return fma(a, b, acc);
+}
+inline float2 cmadd(float2 acc, float2 a, float2 b) {
+  float real = a.x * b.x - a.y * b.y;
+  float imag = a.x * b.y + a.y * b.x;
+  return acc + float2(real, imag);
+}
+
+
+template <typename T>
+kernel void spmm_addmm_coo(
+    device const long*   indices2d   [[buffer(0)]],
+    device const T*      vals        [[buffer(1)]],
+    device const T*      dense       [[buffer(2)]],
+    device const T*      t_in        [[buffer(3)]],
+    device T*            out         [[buffer(4)]],
+    constant uint3&      dims        [[buffer(5)]],
+    constant float2&     alpha_beta  [[buffer(6)]],
+    constant uint&       nnz         [[buffer(7)]],
+    uint3                tid         [[thread_position_in_grid]])
+{
+  const uint K = dims.z;
+  const uint k = tid.x;
+  const uint i = tid.z;
+  const float alpha = alpha_beta.x;
+  const float beta = alpha_beta.y;
+
+  device const long* rows = indices2d;
+  device const long* cols = indices2d + nnz;
+
+  const uint start = lower_bound_i64(rows, 0u, nnz, (long)i);
+  const uint end = upper_bound_i64(rows, 0u, nnz, (long)i);
+
+  // accumulator is float for scalar/half/bfloat and float2 for float2
+  auto acc = to_compute_dtype(T(0));
+
+  for (uint p = start; p < end; ++p) {
+    const uint c = (uint)cols[p];
+    const auto v = to_compute_dtype(vals[p]);
+    const uint dense_off = c * K + k;
+    const auto d = to_compute_dtype(dense[dense_off]);
+    acc = cmadd(acc, v, d);
+  }
+
+  const uint off = i * K + k;
+  const auto base = (beta != 0.0f) ? (to_compute_dtype(t_in[off]) * beta) : to_compute_dtype(T(0));
+  const auto y = base + alpha * acc;
+  out[off] = static_cast<T>(y);
+}
+
+
 #define INSTANTIATE_DENSE_SPARSE_MUL(DTYPE)                                 \
   template [[host_name("dense_sparse_mul_kernel_" #DTYPE)]] kernel void     \
   dense_sparse_mul_kernel<DTYPE>(                                           \
@@ -148,3 +363,22 @@ INSTANTIATE_DENSE_SPARSE_MUL(bfloat);
 INSTANTIATE_FUSED_GATHER_MUL(float);
 INSTANTIATE_FUSED_GATHER_MUL(half);
 INSTANTIATE_FUSED_GATHER_MUL(bfloat);
+
+
+#define INSTANTIATE_SPMM_ADDMM_COO(DTYPE) \
+  template [[host_name("spmm_addmm_coo_" #DTYPE)]] kernel void  \
+  spmm_addmm_coo<DTYPE>(                                        \
+    device const long*   indices2d   [[buffer(0)]],             \
+    device const DTYPE*  vals        [[buffer(1)]],             \
+    device const DTYPE*  dense       [[buffer(2)]],             \
+    device const DTYPE*  t_in        [[buffer(3)]],             \
+    device DTYPE*        out         [[buffer(4)]],             \
+    constant uint3&      dims        [[buffer(5)]],             \
+    constant float2&     alpha_beta  [[buffer(6)]],             \
+    constant uint&       nnz         [[buffer(7)]],             \
+    uint3                tid         [[thread_position_in_grid]]);
+
+INSTANTIATE_SPMM_ADDMM_COO(float);
+INSTANTIATE_SPMM_ADDMM_COO(half);
+INSTANTIATE_SPMM_ADDMM_COO(bfloat);
+INSTANTIATE_SPMM_ADDMM_COO(float2);
