@@ -61,6 +61,7 @@ class MMOperator(MatrixMultiplyOperator):
 
     def __init__(self):
         super().__init__("mm", "torch.mm")
+        self.weight = 5.0
 
     def can_produce(self, output_spec: Spec) -> bool:
         """MM requires exactly 2D tensors."""
@@ -141,6 +142,7 @@ class AddmmOperator(MatrixMultiplyOperator):
 
     def __init__(self):
         super().__init__("addmm", "torch.addmm")
+        self.weight = 5.0
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Addmm requires exactly 2D tensors."""
@@ -229,6 +231,7 @@ class BmmOperator(MatrixMultiplyOperator):
 
     def __init__(self):
         super().__init__("bmm", "torch.bmm")
+        self.weight = 5.0
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Batch matrix multiply requires 3D tensors."""
@@ -309,6 +312,7 @@ class MatmulOperator(MatrixMultiplyOperator):
 
     def __init__(self):
         super().__init__("matmul", "torch.matmul")
+        self.weight = 500.0
 
     def can_produce(self, output_spec: Spec) -> bool:
         """Matmul can handle various tensor dimensions >= 1."""

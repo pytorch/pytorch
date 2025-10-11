@@ -17,7 +17,6 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
-#include <ATen/OpMathType.h>
 
 // [Note AVX-SSE transitions] In general we avoid calls into cmath for code
 // compiled with AVX/AVX2 This is because of SSE-AVX transitions and a bug in
