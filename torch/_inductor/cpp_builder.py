@@ -579,9 +579,7 @@ def _create_if_dir_not_exist(path_dir: str) -> None:
             Path(path_dir).mkdir(parents=True, exist_ok=True)
         except OSError as exc:  # Guard against race condition
             if exc.errno != errno.EEXIST:
-                raise RuntimeError(  # noqa: TRY200 (Use `raise from`)
-                    f"Fail to create path {path_dir}"
-                )
+                raise RuntimeError(f"Fail to create path {path_dir}") from exc
 
 
 def _remove_dir(path_dir: str) -> None:
@@ -1385,10 +1383,19 @@ def _get_libstdcxx_args() -> tuple[list[str], list[str]]:
     return lib_dir_paths, libs
 
 
-def get_mmap_self_macro(use_mmap_weights: bool) -> list[str]:
+def get_mmap_self_macro(
+    use_mmap_weights: bool, use_mmap_weights_external: bool
+) -> list[str]:
     macros = []
+
+    if use_mmap_weights and use_mmap_weights_external:
+        raise RuntimeError(
+            "Only one of use_mmap_weights and use_mmap_weights_external should be true"
+        )
     if use_mmap_weights:
         macros.append(" USE_MMAP_SELF")
+    elif use_mmap_weights_external:
+        macros.append(" USE_MMAP_EXTERNAL")
     return macros
 
 
@@ -1408,6 +1415,7 @@ def get_cpp_torch_options(
     aot_mode: bool,
     use_relative_path: bool,
     use_mmap_weights: bool,
+    use_mmap_weights_external: bool,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], list[str], list[str]]:
     """
     This function is used to get the build args of torch related build options.
@@ -1456,7 +1464,7 @@ def get_cpp_torch_options(
 
     fb_macro_passthrough_args = _use_fb_internal_macros()
 
-    mmap_self_macros = get_mmap_self_macro(use_mmap_weights)
+    mmap_self_macros = get_mmap_self_macro(use_mmap_weights, use_mmap_weights_external)
     caching_allocator_macros = get_caching_allocator_macro()
 
     definitions = (
@@ -1513,6 +1521,7 @@ class CppTorchOptions(CppOptions):
         compile_only: bool = False,
         use_relative_path: bool = False,
         use_mmap_weights: bool = False,
+        use_mmap_weights_external: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         compiler: str = "",
@@ -1548,6 +1557,7 @@ class CppTorchOptions(CppOptions):
             aot_mode=aot_mode,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
+            use_mmap_weights_external=use_mmap_weights_external,
         )
 
         _append_list(self._definitions, torch_definitions)
@@ -1725,6 +1735,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         compile_only: bool = False,
         use_relative_path: bool = False,
         use_mmap_weights: bool = False,
+        use_mmap_weights_external: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         min_optimize: bool = False,
@@ -1738,6 +1749,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             compile_only=compile_only,
             use_relative_path=use_relative_path,
             use_mmap_weights=use_mmap_weights,
+            use_mmap_weights_external=use_mmap_weights_external,
             extra_flags=extra_flags,
             min_optimize=min_optimize,
             precompiling=precompiling,

@@ -44,9 +44,6 @@
 using torch::impl::py_context_manager;
 using torch::impl::py_context_manager_DEPRECATED;
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(torch::autograd::CreationMeta)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10::DeviceType)
-
 namespace {
 
 struct DisableFuncTorch {
@@ -1116,7 +1113,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!t.storage()) {
       return false;
     }
-    auto* cp = t.storage().data_ptr().get_context();
+    auto* cp = t.storage().unsafeGetStorageImpl();
     if (cp) {
       s.insert(cp);
     }
@@ -1127,7 +1124,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
     if (!t.storage()) {
       return false;
     }
-    auto* cp = t.storage().data_ptr().get_context();
+    auto* cp = t.storage().unsafeGetStorageImpl();
     if (!cp) {
       return false;
     }
