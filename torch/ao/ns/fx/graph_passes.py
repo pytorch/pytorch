@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 from torch.ao.ns.fx.mappings import get_node_type_to_io_type_map
@@ -127,7 +128,7 @@ def add_loggers_to_model(
                 arg_indices_to_log = get_arg_indices_of_inputs_to_log(node)
                 for node_arg_idx in arg_indices_to_log:
                     node_arg = get_normalized_nth_input(node, gm, node_arg_idx)
-                    if type(node_arg) == Node:
+                    if type(node_arg) is Node:
                         # create a single input logger
                         prev_node = env[node_arg.name]
                         env[node_arg.name] = _insert_logger_after_node(
@@ -145,7 +146,7 @@ def add_loggers_to_model(
                             fqn=fqn,
                         )
                     elif (
-                        type(node_arg) == torch.fx.immutable_collections.immutable_list
+                        type(node_arg) is torch.fx.immutable_collections.immutable_list
                     ):
                         # create N input loggers, one for each node
                         for arg_idx, arg in enumerate(node_arg):  # type: ignore[var-annotated, arg-type]
