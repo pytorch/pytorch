@@ -87,7 +87,7 @@ class Registry {
         if (terminate_) {
           std::exit(1);
         } else {
-          throw std::runtime_error(err_msg);
+          TORCH_CHECK(false, err_msg);
         }
       } else if (warning_) {
         std::string warn_msg =
