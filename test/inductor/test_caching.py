@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from filelock import FileLock
 
+import torch
 from torch._inductor.runtime.caching import (
     config,
     context,
@@ -825,4 +826,7 @@ class UtilsTest(TestMixin, TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if torch.version.cuda is not None and not torch.cuda.is_available():
+        print("Skipping because binary was built with CUDA but no GPU is available")
+    else:
+        run_tests()
