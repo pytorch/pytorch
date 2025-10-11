@@ -45,17 +45,6 @@ def aot_eager_regional_inductor():
 
 @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class RegionalInductorTests(torch._inductor.test_case.TestCase):
-    # TODO - should not need this because we should turn this on in Dynamo but
-    # for some reasons, test fail.
-    def setUp(self):
-        super().setUp()
-        self.cm = torch.fx.traceback.preserve_node_meta()
-        self.cm.__enter__()
-
-    def tearDown(self):
-        super().tearDown()
-        self.cm.__exit__(None, None, None)
-
     def test_simple(self):
         def fn(x, y):
             sin = torch.sin(x)
