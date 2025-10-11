@@ -96,11 +96,14 @@ static void pow_tensor_scalar_kernel(
       dtype == kBFloat16 || isComplexType(dtype)) {
     // Dispatch to fast specialization for sqrt, rsqrt and reciprocal
     if (exp_scalar.equal(.5)) {
-      return sqrt_kernel(iter);
+      sqrt_kernel(iter);
+      return;
     } else if (exp_scalar.equal(-0.5)) {
-      return rsqrt_kernel(iter);
+      rsqrt_kernel(iter);
+      return;
     } else if (exp_scalar.equal(-1.0)) {
-      return reciprocal_kernel(iter);
+      reciprocal_kernel(iter);
+      return;
     }
   }
 
