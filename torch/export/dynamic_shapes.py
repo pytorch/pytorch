@@ -49,11 +49,13 @@ class _DimHintType(Enum):
     - AUTO means automatic inference of shape (static or dynamic).
     - STATIC means static shape (always specialized).
     - DYNAMIC means dynamic, will error out if specialized.
+    - UNBACKED means unbacked/data-dependent dimension.
     """
 
     AUTO = auto()
     STATIC = auto()
     DYNAMIC = auto()
+    UNBACKED = auto()
 
 
 @dataclasses.dataclass
@@ -84,6 +86,10 @@ class _DimHint:
     def STATIC():
         return _DimHint(_DimHintType.STATIC)
 
+    @staticmethod
+    def UNBACKED():
+        return _DimHint(_DimHintType.UNBACKED)
+
     def __call__(self, min=None, max=None) -> "_DimHint":
         if not self._factory:
             raise TypeError(f"'{type(self)}' object is not callable")
@@ -108,7 +114,7 @@ class Dim:
     dimension with a symbolic integer containing a dynamic range.
 
     The API can be used in 2 ways: Dim hints (i.e. automatic dynamic shapes:
-    ``Dim.AUTO``, ``Dim.DYNAMIC``, ``Dim.STATIC``), or named Dims (i.e.
+    ``Dim.AUTO``, ``Dim.DYNAMIC``, ``Dim.STATIC``, ``Dim.UNBACKED``), or named Dims (i.e.
     ``Dim("name", min=1, max=2)``).
 
     Dim hints provide the lowest barrier to exportability, with the user only
@@ -168,6 +174,7 @@ class Dim:
     AUTO = _DimHint.AUTO()
     DYNAMIC = _DimHint.DYNAMIC()
     STATIC = _DimHint.STATIC()
+    UNBACKED = _DimHint.UNBACKED()
 
     def __init__(
         self, name: str, *, min: Optional[int] = None, max: Optional[int] = None
@@ -490,7 +497,7 @@ class _DerivedConstraint(_ConstraintTarget):
 @dataclasses.dataclass
 class _RelaxedConstraint(_ConstraintTarget):
     """
-    This represents a dim marked with Dim.AUTO/DYNAMIC (i.e. mark_dynamic() or maybe_mark_dynamic()),
+    This represents a dim marked with Dim.AUTO/DYNAMIC/UNBACKED (i.e. mark_dynamic(), maybe_mark_dynamic(), or mark_unbacked()),
     which leaves relations & min/max ranges for inference, instead of requiring explicit specification.
     The intention is for constraint violations to not be raised if produce_guards() finds equalities or
     relations between a _RelaxedConstraint and another type of _Constraint.
@@ -962,7 +969,7 @@ def _check_dynamic_shapes(
                         UserErrorType.INVALID_INPUT,
                         f"Unexpected dimension mapped to index {i} in input tensor shape {shape} "
                         f"specified at `dynamic_shapes{keystr(path)}` "
-                        f"(expected None, an int, a Dim, Dim.AUTO, Dim.STATIC, or Dim.DYNAMIC, "
+                        f"(expected None, an int, a Dim, Dim.AUTO, Dim.STATIC, Dim.DYNAMIC, or Dim.UNBACKED, "
                         f" but got {dim!r} instead)",
                         case_name="dynamic_shapes_validation",
                     )
@@ -985,7 +992,7 @@ def _check_dynamic_shapes(
                         UserErrorType.INVALID_INPUT,
                         f"Unexpected dimension #{i} in input tensor shape {shape} "
                         f"specified at `dynamic_shapes{keystr(path)}` "
-                        f"(expected None, an int, a Dim, Dim.AUTO, Dim.STATIC, or Dim.DYNAMIC, "
+                        f"(expected None, an int, a Dim, Dim.AUTO, Dim.STATIC, Dim.DYNAMIC, or Dim.UNBACKED, "
                         f"but got {dim!r} instead)",
                         case_name="dynamic_shapes_validation",
                     )
@@ -994,7 +1001,7 @@ def _check_dynamic_shapes(
                 UserErrorType.INVALID_INPUT,
                 f"Unexpected input tensor shape {shape} specified at `dynamic_shapes{keystr(path)}` "
                 f"(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                f" where each dimension is an int, a Dim, Dim.AUTO, Dim.STATIC, or Dim.DYNAMIC)",
+                f" where each dimension is an int, a Dim, Dim.AUTO, Dim.STATIC, Dim.DYNAMIC, or Dim.UNBACKED)",
                 case_name="dynamic_shapes_validation",
             )
 
@@ -1033,7 +1040,7 @@ def _check_dynamic_shapes(
             if isinstance(dynamic_shape, _Dim):
                 raise ValueError(
                     "Unable to specify input integers as dynamic through named "
-                    "Dims. Please use Dim.AUTO/DYNAMIC instead."
+                    "Dims. Please use Dim.AUTO/DYNAMIC/UNBACKED instead."
                 )
             assert dynamic_shape is None or isinstance(dynamic_shape, (int, _DimHint))
         else:
@@ -1173,6 +1180,8 @@ def _process_dynamic_shapes(
                 torch._dynamo.mark_static(tensor, idx)
             elif dim.type == _DimHintType.DYNAMIC:
                 torch._dynamo.mark_dynamic(tensor, idx)
+            elif dim.type == _DimHintType.UNBACKED:
+                torch._dynamo.mark_unbacked(tensor, idx)
             constraints.append(_RelaxedConstraint(id(tensor), idx))
         elif dim is None:
             torch._dynamo.mark_static(tensor, idx)
