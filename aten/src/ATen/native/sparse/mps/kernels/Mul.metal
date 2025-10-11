@@ -282,66 +282,6 @@ kernel void spmm_bmm_coo(
 }
 
 
-
-kernel void spmm_bmm_coo_grouped(
-    device const long*   rows         [[buffer(0)]],
-    device const long*   cols         [[buffer(1)]],
-    device const float*  vals         [[buffer(2)]],
-    device const float*  dense        [[buffer(3)]],
-    device float*        out          [[buffer(4)]],
-    device const long*   batch_ptr    [[buffer(5)]],
-    constant uint4&      dims         [[buffer(6)]],
-    uint3                tid          [[thread_position_in_grid]],
-    uint3                ltid         [[thread_position_in_threadgroup]],
-    uint3                tptg         [[threads_per_threadgroup]]
-)
-{
-  const uint K = dims.w;
-  const uint J = dims.z;
-  const uint I = dims.y;
-  const uint B = dims.x;
-
-  const uint lane = ltid.x;
-  const uint tgW = tptg.x;
-
-  // we launch exactly one threadgroup per batch along Y, with 1 row-group on Z,
-  // because threadsPerThreadgroup.y == 1, tid.y directly encodes the batch
-  const uint b = tid.y;
-
-  const uint base = (uint)batch_ptr[b];
-  const uint lim  = (uint)batch_ptr[b + 1];
-  if (base >= lim) {
-    return; // no nnz in this batch
-  }
-
-  uint p = base;
-  while (p < lim) {
-    const long rowL = rows[p];
-
-    // find end of this row segment
-    uint q = p + 1;
-    while (q < lim && rows[q] == rowL) {
-      ++q;
-    }
-
-    // Compute y[b, rowL, 0..K) in parallel across the threadgroup lanes
-    for (uint k = lane; k < K; k += tgW) {
-      float acc = 0.0f;
-
-      for (uint t = p; t < q; ++t) {
-        const uint c = (uint)cols[t];
-        const uint dense_off = ((b * J) + c) * K + k;
-        acc = fma(vals[t], dense[dense_off], acc);
-      }
-
-      const uint out_off = ((b * I) + (uint)rowL) * K + k;
-      out[out_off] = acc;
-    }
-
-    p = q; // next row segment
-  }
-}
-
 // have to do this to support both float and float2
 template <typename T>
 inline float to_compute_dtype(T x) { return static_cast<float>(x); }
