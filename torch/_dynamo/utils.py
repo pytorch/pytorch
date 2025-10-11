@@ -4646,6 +4646,12 @@ def clear_torch_function_mode_stack() -> None:
         _pop_torch_function_stack()
 
 
+def get_current_stream(device: torch.device) -> torch.Stream:
+    from .device_interface import get_interface_for_device
+
+    return get_interface_for_device(device).current_stream()
+
+
 # call from C dynamo in order to inspect values in pdb
 def _breakpoint_for_c_dynamo(*args: Any) -> None:
     breakpoint()
