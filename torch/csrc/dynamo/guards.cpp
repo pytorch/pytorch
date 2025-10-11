@@ -4278,31 +4278,52 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
       py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
+
+    // Designate custom torch function modes to ignore for guard comparisons
+    py::object avoid_module = py::module_::import("torch.utils._debug_mode");
+    PyTypeObject* avoid_type =
+        (PyTypeObject*)avoid_module.attr("DebugMode").ptr();
     for (Py_ssize_t idx = 0; idx < len; idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
       auto type = Py_TYPE(mode);
-      this->_ref_stack.push_back(type);
+      if (type != avoid_type) {
+        this->_ref_stack.push_back(type);
+      }
     }
   }
 
   template <typename T>
   bool check_nopybind_template(T* value) {
     // Ignore value arg, only used to satisfy the interface
-    const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
+    const size_t real_len =
+        (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
     const size_t ref_stack_size = this->_ref_stack.size();
 
-    if (len != ref_stack_size) {
-      return false;
-    }
-
-    for (int64_t idx = 0; (size_t)idx < len; idx++) {
+    // Avoid this custom torch function mode for guard comparisons
+    py::object avoid_module = py::module_::import("torch.utils._debug_mode");
+    PyTypeObject* avoid_type =
+        (PyTypeObject*)avoid_module.attr("DebugMode").ptr();
+    size_t compare_len = 0;
+    size_t skip = 0;
+    for (int64_t idx = 0; (size_t)idx < real_len; idx++) {
       std::shared_ptr<c10::SafePyObject> mode =
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
-      if (mode_type != _ref_stack.at(idx)) {
-        return false;
+
+      if (mode_type == avoid_type) {
+        skip += 1;
+      } else {
+        if (_ref_stack.size() <= idx - skip ||
+            mode_type != _ref_stack.at(idx - skip)) {
+          return false;
+        }
+        compare_len += 1;
       }
+    }
+
+    if (compare_len != ref_stack_size) {
+      return false;
     }
 
     return true;
