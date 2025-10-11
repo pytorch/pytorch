@@ -8,6 +8,7 @@ import operator
 import unittest
 
 import numpy as np
+import pytest
 import sympy
 
 import torch
@@ -870,7 +871,6 @@ def forward(self, x_1):
     def test_non_overlapping_and_dense_unbacked(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
-        torch._check_is_size(u0)
         cf = torch.ops.aten.is_non_overlapping_and_dense.default
 
         self.assertEqual(IsNonOverlappingAndDenseIndicator(u0.node.expr, 2, 2, 1), 1)
@@ -906,7 +906,6 @@ def forward(self, x_1):
 
         # unbacked
         u0 = shape_env.create_unbacked_symint()
-        torch._check_is_size(u0)
         self.assertTrue(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")))
         self.assertTrue(cf(torch.empty_strided((2, u0), (1, 2), device="meta")))
         self.assertTrue(cf(torch.empty_strided((u0,), (1,), device="meta")))
@@ -934,7 +933,6 @@ def forward(self, x_1):
 
         # return False on arbitrary strides
         u1 = shape_env.create_unbacked_symint()
-        torch._check_is_size(u1)
         self.assertFalse(
             cf(
                 torch.empty_strided(
@@ -1130,7 +1128,6 @@ def forward(self, x_1):
     def test_debug_has_internal_overlap_unbacked(self):
         shape_env = ShapeEnv()
         u0 = shape_env.create_unbacked_symint()
-        torch._check_is_size(u0)
         cf = torch._debug_has_internal_overlap
         self.assertEqual(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")), 0)
         self.assertEqual(cf(torch.empty_strided((2, u0), (1, 2), device="meta")), 0)
@@ -1429,6 +1426,15 @@ class f(torch.nn.Module):
             self.assertEqual(
                 f(torch.tensor([1]), torch.tensor([1])), torch.tensor([20])
             )
+
+    @fresh_cache()
+    def test_slice_backed_size_oblivious(self):
+        @torch.compile(backend="inductor", fullgraph=True, dynamic=True)
+        def f(x):
+            return x[:5]
+
+        with torch.fx.experimental._config.patch(backed_size_oblivious=True):
+            f(torch.randn(10, 10))
 
     def test_baddbmm_symint(self):
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1948,6 +1954,19 @@ class TestFloorDiv(TestCase):
             self.assertEqual(
                 TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y)
             )
+
+    def test_floordiv_div_does_not_generate_non_int_rational(self):
+        s14 = sympy.Symbol("s14", integer=True, positive=True)
+        s37 = sympy.Symbol("s37", integer=True, positive=True)
+
+        inner_expr = FloorDiv(s14, 2016)
+        middle_expr = (24 * s37 + 672) * inner_expr
+        numerator = middle_expr + 21
+        denominator = 22
+        result = FloorDiv(numerator, denominator)
+        rationals = result.atoms(sympy.Rational)
+        all_rationals_ints = all(r.q == 1 for r in rationals)
+        self.assertTrue(all_rationals_ints)
 
     def test_floordiv_simplify(self):
         # Tests how we simplify or evaluate FloorDiv without free variables
@@ -3318,8 +3337,108 @@ class TestUnbacked(TestCase):
         torch._dynamo.decorators.mark_unbacked(b, 0)
         func(a, b)
 
-        with self.assertRaises(RuntimeError):
+        # inductor adds the check sometimes itself so it will be reflected
+        # as AssertionError.
+        with self.assertRaises((AssertionError, RuntimeError)):
             func(a, torch.rand(2, 1))
+
+    @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_do_not_guard_unbacked_inputs(self):
+        @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
+        def func(a, b):
+            a.expand(b.shape)
+            return a * 10
+
+        a = torch.rand(1, 1)
+        b = torch.rand(1, 1)
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 1)
+
+        log_stream, ctx = logs_to_string("torch._dynamo.guards", "guards")
+        with ctx():
+            func(a, b)
+            func(torch.rand(4, 5), torch.rand(4, 5))
+
+        guards = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertFalse("SYMBOLIC_SHAPE_GUARD" in guards)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_div_unabacked_eq_input_tensors(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            x = a.size()[0]
+            y = b.size()[0]
+            torch._check(x == y)
+            if x // y == 1:
+                a = a * 10
+            if 2 * x // y == 2:
+                a = a * 20
+            return a
+
+        a = torch.randn(10, 10)
+        b = torch.randn(10, 20)
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        func(a, b)
+
+    @torch.compiler.config.patch(unbacked_sources="L['x'],L['y']")
+    def test_div_unabacked_eq_input_ints(self):
+        @torch.compile(fullgraph=True)
+        def func(x, y):
+            a = torch.rand(1)
+            torch._check(x == y)
+            if x // y == 1:
+                a = a * 10
+            if 2 * x // y == 2:
+                a = a * 20
+            return a
+
+        func(10, 10)
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    @torch.compiler.config.patch(unbacked_sources="L['y']")
+    def test_div_unabacked_eq_globals(self):
+        tensor = torch.rand(10, 44)
+        y = 10
+
+        @torch.compile(fullgraph=True, dynamic=True)
+        def func():
+            a = torch.rand(1)
+            x = tensor.size()[0]
+            torch._check(x == y)
+            if x // y == 1:
+                a = a * 10
+            if 2 * x // y == 2:
+                a = a * 20
+            return a
+
+        torch._dynamo.decorators.mark_unbacked(tensor, 0)
+        func()
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_div_unabacked_eq_item(self):
+        @torch.compile(fullgraph=True)
+        def func(a, b):
+            x = a.item()
+            y = b.item()
+            torch._check(x == y)
+            # TODO we should not need those torch checks.
+            torch._check(x // y == 1)
+            torch._check(2 * x // y == 2)
+            if x // y == 1:
+                a = a * 10
+            if 2 * x // y == 2:
+                a = a * 20
+            return a
+
+        a = torch.tensor([1])
+        b = torch.tensor([1])
+        func(a, b)
 
 
 class TestUbackedOps(TestCase):
@@ -3336,8 +3455,6 @@ class TestUbackedOps(TestCase):
             t1 = x.view((f, f))
             t2 = x.reshape((f, f))
             t3 = torch._ops.ops.aten.view_copy(x, (f, f))
-            # TODO avoid _check_is_size here.
-            torch._check_is_size(f)
             return t1 * 10, t2 * 10, t3
 
         compiled_func = torch.compile(
@@ -3372,8 +3489,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", 
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_3: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
@@ -3413,8 +3530,8 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
         _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
-        ge_3: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
         pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
         eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
         _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
@@ -3443,8 +3560,6 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         # reshape (u2, u3) -> (u0, u1)
         def func(x, y):
             u0, u1 = y.tolist()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
 
             result1 = torch.reshape(x, (u0, u1))
             return result1 * 10
@@ -3477,16 +3592,22 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
         select: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
         _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(select);  select = None
-        ge_5: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_5 = _assert_scalar_2 = None
+        ge_4: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_4, "Runtime assertion failed for expression u0 >= 0 on node 'ge_2'");  ge_4 = _assert_scalar_2 = None
+        sym_sum: "Sym(u0 + 1)" = torch.sym_sum((1, _local_scalar_dense))
+        gt: "Sym(u0 + 1 > 0)" = sym_sum > 0;  sym_sum = None
+        _assert_scalar_3 = torch.ops.aten._assert_scalar.default(gt, "Runtime assertion failed for expression 0 < u0 + 1 on node 'gt'");  gt = _assert_scalar_3 = None
         select_1: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1);  arg0_1 = None
         _local_scalar_dense_1: "Sym(u1)" = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
-        ge_7: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
-        _assert_scalar_3 = torch.ops.aten._assert_scalar.default(ge_7, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_7 = _assert_scalar_3 = None
+        ge_5: "Sym(u1 >= 0)" = _local_scalar_dense_1 >= 0
+        _assert_scalar_4 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u1 >= 0 on node 'ge_3'");  ge_5 = _assert_scalar_4 = None
+        sym_sum_1: "Sym(u1 + 1)" = torch.sym_sum((1, _local_scalar_dense_1))
+        gt_1: "Sym(u1 + 1 > 0)" = sym_sum_1 > 0;  sym_sum_1 = None
+        _assert_scalar_5 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u1 + 1 on node 'gt_1'");  gt_1 = _assert_scalar_5 = None
         mul: "Sym(u2*u3)" = arg1_1 * arg2_1;  arg1_1 = arg2_1 = None
         mul_1: "Sym(u0*u1)" = _local_scalar_dense * _local_scalar_dense_1
         eq: "Sym(Eq(u2*u3, u0*u1))" = mul == mul_1;  mul = mul_1 = None
-        _assert_scalar_4 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_4 = None
+        _assert_scalar_6 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u2*u3, u0*u1) on node 'eq'");  eq = _assert_scalar_6 = None
         clone: "f32[u2, u3][Max(1, u3), 1]cpu" = torch.ops.aten.clone.default(arg3_1, memory_format = torch.contiguous_format);  arg3_1 = None
         view: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.view.default(clone, [_local_scalar_dense, _local_scalar_dense_1]);  clone = _local_scalar_dense = _local_scalar_dense_1 = None
         mul_21: "f32[u0, u1][Max(1, u1), 1]cpu" = torch.ops.aten.mul.Tensor(view, 10);  view = None
@@ -3539,6 +3660,200 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(result_compiled, result_eager)
         self.assertEqual(cnt.frame_count, 2)
 
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_slice(self):
+        from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+        # standard slice
+        def f1(x, xs):
+            u0, u1 = xs.tolist()
+            # in this test we add the torch checks not to avoid DDE but to ensure
+            # that we pick specific path during compilation.
+            torch._check(u0 >= 0)
+            torch._check(u0 <= x.size(0))
+            torch._check(u1 >= 0)
+            torch._check(u1 <= x.size(0))
+            torch._check(u0 <= u1)
+            out = x[u0:u1]
+            assert statically_known_true(out.size(0) == (u1 - u0))
+            return out
+
+        x, xs = torch.randn(10), torch.tensor([3, 6])
+        fn1 = torch.compile(f1, fullgraph=True, backend="inductor")
+        self.assertEqual(fn1(x, xs).size(0), 3)
+        self.assertTrue(torch.allclose(fn1(x, xs), f1(x, xs)))
+        with self.assertRaises(RuntimeError):
+            fn1(x, torch.tensor([-1, 5]))
+
+        # known negative slice
+        def f2(x, n):
+            u0 = n.item()
+            torch._check(u0 > 1)
+            torch._check(u0 <= x.size(0))
+            out = x[-u0:]
+            assert statically_known_true(out.size(0) == u0)
+            return out
+
+        x, n = torch.randn(10), torch.tensor([5])
+        fn2 = torch.compile(f2, fullgraph=True, backend="inductor")
+        self.assertEqual(fn2(x, n).size(0), 5)
+        self.assertTrue(torch.allclose(fn2(x, n), f2(x, n)))
+        with self.assertRaises(RuntimeError):
+            fn2(x, torch.tensor([-5]))
+
+        # general case: no known info
+        def f3(x, xs):
+            u0, u1 = xs.tolist()
+            return x[u0:u1]
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        cnts = CompileCounterWithBackend("inductor")
+        x, xs = torch.randn(10), torch.tensor([3, 6])
+        with ctx():
+            fn3 = torch.compile(f3, fullgraph=True, backend=cnts)
+            xs = torch.tensor([-9, -1])  # negative case
+            self.assertTrue(torch.allclose(fn3(x, xs), f3(x, xs)))
+            xs = torch.tensor([-1000, 1000])  # out of bounds
+            self.assertTrue(torch.allclose(fn3(x, xs), f3(x, xs)))
+            xs = torch.tensor([2, -2])  # mixed
+            self.assertTrue(torch.allclose(fn3(x, xs), f3(x, xs)))
+            self.assertEqual(cnts.frame_count, 1)
+
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            aot_graphs,
+            """\
+        select: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 0)
+        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(select);  select = None
+        select_1: "i64[][]cpu" = torch.ops.aten.select.int(arg0_1, 0, 1);  arg0_1 = None
+        _local_scalar_dense_1: "Sym(u1)" = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
+        slice_1: "f32[u2][1]cpu" = torch.ops.aten.slice.Tensor(arg1_1, 0, _local_scalar_dense, _local_scalar_dense_1);  arg1_1 = _local_scalar_dense = _local_scalar_dense_1 = None
+        sym_size_int: "Sym(u2)" = torch.ops.aten.sym_size.int(slice_1, 0)
+        ge_1: "Sym(u2 >= 0)" = sym_size_int >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        le: "Sym(u2 <= 10)" = sym_size_int <= 10;  sym_size_int = None
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u2 <= 10 on node 'le'");  le = _assert_scalar_1 = None
+        sym_storage_offset_default: "Sym(u3)" = torch.ops.aten.sym_storage_offset.default(slice_1)
+        ge_2: "Sym(u3 >= 0)" = sym_storage_offset_default >= 0;  sym_storage_offset_default = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u3 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_2 = None
+        return (slice_1,)""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_unbacked_slice_cpp_wrapper(self):
+        self.test_unbacked_slice()
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_slice_with_step(self):
+        def f1(x, xs):
+            u0, u1 = xs.tolist()
+            out = x[u0:u1:5]
+            return out
+
+        x, xs = torch.randn(10), torch.tensor([2, -2])
+        fn1 = torch.compile(f1, fullgraph=True, backend="inductor")
+        self.assertTrue(torch.allclose(fn1(x, xs), f1(x, xs)))
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_unbacked_slice_with_step_cpp_wrapper(self):
+        self.test_unbacked_slice_with_step()
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_tensor_split(self):
+        def f1(x, xs):
+            xs = torch.tensor(xs.tolist())
+            return torch.tensor_split(x, xs)
+
+        x = torch.randn(20)
+        xs = torch.tensor([5, 10, 15])
+        fn = torch.compile(f1, fullgraph=True, backend="inductor")
+
+        def compare(x, xs):
+            for i, j in zip(f1(x, xs), fn(x, xs)):
+                self.assertTrue(torch.allclose(i, j))
+
+        compare(x, xs)
+        xs = torch.tensor([-15, 9, 10, 11])
+        compare(x, xs)
+        xs = torch.tensor([-15, -10, -5, -2])
+        compare(x, xs)
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_tensor_split_cpp_wrapper(self):
+        self.test_tensor_split()
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    def test_nonzero_slice(self):
+        def f(x):
+            nz = x.nonzero()
+            return nz[:-1]
+
+        x = torch.randn(3, 4)
+        fn = torch.compile(f, fullgraph=True, backend="inductor")
+        self.assertTrue(torch.allclose(f(x), fn(x)))
+        y = torch.zeros(3, 4)
+        self.assertTrue(torch.allclose(f(y), fn(y)))
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_nonzero_slice_cpp_wrapper(self):
+        self.test_nonzero_slice()
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    def test_nonzero_select(self):
+        def f(x):
+            nz = x.nonzero()
+            return nz[-1] + nz[0]
+
+        x = torch.randn(3, 4)
+        fn = torch.compile(f, fullgraph=True, backend="inductor")
+        self.assertTrue(torch.allclose(f(x), fn(x)))
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_nonzero_select_cpp_wrapper(self):
+        self.test_nonzero_select()
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    def test_padnd(self):
+        import torch.nn.functional as F
+
+        def f(x, xs, y):
+            u0, u1 = xs.tolist()
+            for u in [u0, u1]:
+                torch._check(u >= 0)
+            z = F.pad(x, (u0, u1, u0, u1))
+            return z @ y
+
+        x = torch.randn(8, 8)
+        xs = torch.tensor([2, 2])
+        y = torch.randn(12, 4)
+        fn = torch.compile(f, fullgraph=True, backend="inductor")
+        fn(x, xs, y)
+
     @unittest.skip("this test fails due to inductor/autograd issue #153041")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_non_contigious_reshape_failing(self):
@@ -3578,9 +3893,6 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         # hints to to compute strides.
         def func(x, y):
             u0, u1 = y.tolist()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
-
             result2 = x.view(u0, u1) * 10
             return result2
 
@@ -3740,6 +4052,17 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_select_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                nz = x.nonzero()
+                return nz[-1]
+
+        mod = M()
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(mod)(x), mod(x))
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_unbacked_select_index_with_check(self):
         def func3(x, y):
             u0 = y.item()
@@ -3789,6 +4112,132 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         # ensure we compile this with no errors.
         x = torch.rand(10)
         f(x, 4, 4096, 3920)
+
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_reshape3(self):
+        def func(x):
+            x = x.as_strided([x.size()[0], 1536], [2048, 1])
+            result1 = x.view(x.size()[0], -1, 128)
+            return result1 * 10
+
+        compiled = torch.compile(fullgraph=True, backend="inductor")(func)
+        x = torch.randn(10, 2048)
+
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        self.assertEqual(func(x), compiled(x))
+
+    @fresh_cache()
+    @skipIfTorchDynamo("not allowed to trace mark_unbacked")
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_reshape_copy(self):
+        cnt = CompileCounterWithBackend("inductor")
+
+        # Reshape happens in place reshape (no-clone)
+        # reshape u1 -> (u0*u0)
+        def func(x, y):
+            f = y.item()
+            t3 = torch._ops.ops.aten._reshape_copy(x, (f, f))
+            return t3
+
+        compiled_func = torch.compile(
+            fullgraph=True,
+            backend=cnt,
+            dynamic=True,
+        )(func)
+
+        # create a non-contiguous with data being even numbers in [0:cnt-1]
+        # and reshape it into sqrt(cnt)*sqrt(cnt)
+        def make_non_contiguous_tensor_and_test(cnt):
+            # create a non-contiguous tensor x that is skipping odd indices.
+            x = torch.arange(cnt * 2)
+            x = x.as_strided((x.size()[0] // 2,), (2,))
+
+            torch._dynamo.decorators.mark_unbacked(x, 0)
+            sz = torch.tensor([int(math.sqrt(cnt))])
+            compiled_result = compiled_func(x, sz)
+            eager_result = func(x, sz)
+            self.assertEqual(compiled_result, eager_result)
+
+        log_stream, ctx = logs_to_string(
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
+        )
+        with ctx():
+            make_non_contiguous_tensor_and_test(4)
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            aot_graphs,
+            """\
+def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "Sym(s7)", arg3_1: "i64[u1][s7]cpu"):
+        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
+        pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
+        eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg3_1, [_local_scalar_dense, _local_scalar_dense]);  arg3_1 = _local_scalar_dense = None
+        return (_reshape_copy,)""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+        make_non_contiguous_tensor_and_test(49)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Pass in a contiguous tensor, it will recompile due to stride being 1 (0/1 specialization).
+        # marking strides unbacked would have avoided the recompilation here.
+        x = torch.arange(100)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+
+        log_stream, ctx = logs_to_string(
+            "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
+        )
+        with ctx():
+            compiled_result = compiled_func(x, torch.tensor([10]))
+            eager_result = func(x, torch.tensor([10]))
+            self.assertEqual(compiled_result, eager_result)
+            self.assertEqual(cnt.frame_count, 2)
+
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            aot_graphs,
+            """\
+def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]cpu"):
+        ge_1: "Sym(u1 >= 0)" = arg1_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
+        _local_scalar_dense: "Sym(u0)" = torch.ops.aten._local_scalar_dense.default(arg0_1);  arg0_1 = None
+        ge_2: "Sym(u0 >= 0)" = _local_scalar_dense >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u0 >= 0 on node 'ge_1'");  ge_2 = _assert_scalar_1 = None
+        pow_1: "Sym(u0**2)" = _local_scalar_dense ** 2
+        eq: "Sym(Eq(u1, u0**2))" = arg1_1 == pow_1;  arg1_1 = pow_1 = None
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u1, u0**2) on node 'eq'");  eq = _assert_scalar_2 = None
+        _reshape_copy: "i64[u0, u0][Max(1, u0), 1]cpu" = torch.ops.aten._reshape_copy.default(arg2_1, [_local_scalar_dense, _local_scalar_dense]);  arg2_1 = _local_scalar_dense = None
+        return (_reshape_copy,)""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
+        x = torch.arange(25)
+        compiled_result = compiled_func(x, torch.tensor([5]))
+        eager_result = func(x, torch.tensor([5]))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_unbacked_item(self):
+        def func():
+            _x_ms = torch.tensor([True, False], dtype=torch.int64)
+            _mask_ms = torch.zeros_like(_x_ms, dtype=torch.bool)
+            _mask_ms[:1] = True
+            var_node_2 = torch.masked_select(_x_ms, _mask_ms)
+            var_node_0 = var_node_2.item()
+            return var_node_0
+
+        result_original = func()
+        compiled_program = torch.compile(func, fullgraph=True, dynamic=True)
+        result_compiled = compiled_program()
+        self.assertEqual(result_original, result_compiled)
 
 
 instantiate_parametrized_tests(TestUnbacked)

@@ -105,7 +105,9 @@ DEBUG = False
 if TYPE_CHECKING:
     import concurrent
 
-    from torch._inductor.codegen.simd import IterationRangesRoot
+    from torch._inductor.codegen.simd import IterationRangesEntry, IterationRangesRoot
+
+    from .codegen.common import CSE
 
 
 class KernelNamespace:
@@ -261,13 +263,20 @@ class SubgraphInfo:
     loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     stores: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
+    cse: Optional["CSE[Any]"] = None
 
     # only copied over if not None
     range_trees: Optional[list["IterationRangesRoot"]] = None
+    range_tree_nodes: Optional[dict[sympy.Symbol, "IterationRangesEntry"]] = None
     numels: Optional[dict[str, sympy.Expr]] = None
 
     def __post_init__(self):
-        self.only_copy_if_non_none_fields = ("range_trees", "numels")
+        self.only_copy_if_non_none_fields = (
+            "range_trees",
+            "range_tree_nodes",
+            "numels",
+            "cse",
+        )
 
     def to_dict(self):
         return {
@@ -323,6 +332,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
 
+    # pyrefly: ignore  # bad-override
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> str:
@@ -426,6 +436,7 @@ class TritonTemplateKernel(TritonKernel):
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
+        # pyrefly: ignore  # invalid-type-var
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: Optional[dict[str, object]] = None
@@ -543,6 +554,7 @@ class TritonTemplateKernel(TritonKernel):
         context = (
             contextlib.nullcontext
             if not self.ops_handler
+            # pyrefly: ignore  # not-callable
             else lambda: V.set_ops_handler(self.ops_handler(V.get_ops_handler()))
         )
         with context():  # type: ignore[operator]
@@ -557,12 +569,10 @@ class TritonTemplateKernel(TritonKernel):
             setattr(self, key, value)
 
     @contextlib.contextmanager
-    def create_subgraph_body(self, body_name: str):
+    def create_subgraph_body(self, body_name: str, clear_cse: bool = False):
         assert body_name not in self.subgraph_bodies
         self.subgraph_bodies[body_name] = SubgraphInfo(
-            IndentedBuffer(),
-            None,
-            None,
+            IndentedBuffer(), None, None, cse=self.cse.clone() if clear_cse else None
         )
         with self.set_subgraph_body(body_name):
             yield
@@ -983,6 +993,7 @@ class TritonTemplateKernel(TritonKernel):
                             f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
                         )
 
+            # pyrefly: ignore  # bad-assignment
             self.ops_handler = StoreOutputSubstitution
 
             input_node = self.named_input_nodes[input_name]
@@ -1071,7 +1082,13 @@ class TritonTemplateKernel(TritonKernel):
             # XBLOCK/YBLOCK and xoffset/yoffset. We append XBLOCK/YBLOCK
             # to the top of the kernel so we can safely extract the tensor
             # descriptor construction to the top of the kernel.
-            self.defines += f"{block_name}: tl.constexpr = {block_size}\n"
+            if block_name in self.prologue_cache:
+                assert self.prologue_cache[block_name] == block_size, (
+                    f"Constant {block_name} must be used for all stores"
+                )
+            else:
+                self.prologue_cache[block_name] = block_size
+                self.prologue.writeline(f"{block_name}: tl.constexpr = {block_size}")
         else:
             block_name = block_size
         line0 = f"{offset_name} = {texpr(tma_index)}"
@@ -1124,7 +1141,10 @@ class TritonTemplateKernel(TritonKernel):
             block_indexing (bool): Are the input indices presented as offsets for creating the block (e.g.
                 inputs to TMA) or are they tensors that should be passed in directly.
         """
-        with self.create_subgraph_body("<STORE_OUTPUT>"):
+        subgraph_name = self._get_store_output_subgraph_name(
+            next(self.store_output_ctr)
+        )
+        with self.create_subgraph_body(subgraph_name, clear_cse=True):
             assert isinstance(indices, (list, tuple))
             assert isinstance(val, str)
             assert isinstance(mask, (str, type(None)))
@@ -1177,6 +1197,7 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(index_order),
+                                # pyrefly: ignore  # missing-argument
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1190,6 +1211,7 @@ class TritonTemplateKernel(TritonKernel):
                         )
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
+                        # pyrefly: ignore  # missing-argument
                         val_shape_copy[i] = range_tree.symt.name
                     # Reverse the index symbols because TMA is indexed
                     # as (x, y) whereas the variables will naturally be indexed
@@ -1267,6 +1289,7 @@ class TritonTemplateKernel(TritonKernel):
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
 
+            # pyrefly: ignore  # bad-assignment
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -1300,13 +1323,14 @@ class TritonTemplateKernel(TritonKernel):
             self.codegen_body()
 
         def hook():
-            # more stuff might have been added since the codegen_body above
-            self.codegen_body()
-            self.cse.invalidate(OrderedSet())
+            with self.set_subgraph_body(subgraph_name):
+                # more stuff might have been added since the codegen_body above
+                self.codegen_body()
+                self.cse.invalidate(OrderedSet())
 
-            return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
+                return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
-        return self._register_hook("<STORE_OUTPUT>", hook)
+        return self._register_hook(subgraph_name, hook)
 
     def _register_hook(
         self,
@@ -1356,9 +1380,11 @@ class TritonTemplateKernel(TritonKernel):
             self.cached_replay_events = []
 
         template_env = {
-            fn.__name__: self.record_input_dependent_tracked_event()(fn)
-            if record_input_dependent_tracked_event
-            else fn
+            fn.__name__: (
+                self.record_input_dependent_tracked_event()(fn)
+                if record_input_dependent_tracked_event
+                else fn
+            )
             for fn in [
                 self.def_kernel,
                 self.size,
@@ -1810,8 +1836,7 @@ class TritonTemplate(KernelTemplate):
 
             try:
                 template = kernel.render(self.template, kwargs, caching_enabled)
-                with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                    code = template.finalize_all()
+                code = template.finalize_all()
             except ZeroDivisionError:
                 # TODO(nmacchioni): fix sympy division by zero
                 return None
@@ -1881,6 +1906,7 @@ class TritonTemplate(KernelTemplate):
             extra,
             input_call_args,
             prologue_supported_inputs,
+            # pyrefly: ignore  # bad-argument-type
             kernel_args_sizevars_keys,
             kernel_options,
         )
@@ -1965,8 +1991,17 @@ class TritonTemplate(KernelTemplate):
             expected_input_args,
         )
 
-        full_input_nodes = tuple(
+        # `kernel_input_nodes` are the actual inputs that will be passed to the kernel,
+        # so e.g. views of the same input are not included. `codegen_input_nodes`
+        # includes views of inputs to preserve the kernel semantics. The shape and
+        # strides of `codegen_input_nodes` will be used to infer read/writes in
+        # TemplateBuffer.extract_read_writes
+        kernel_input_nodes = tuple(
             [V.graph.get_buffer(k) for k in result.input_call_args]
+        )
+        # Here we have (*input_nodes, *captured_buffers)
+        codegen_input_nodes = (
+            tuple(input_nodes) + kernel_input_nodes[len(expected_input_args) :]
         )
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, result.kernel_args_sizevars_keys),
@@ -2040,13 +2075,13 @@ class TritonTemplate(KernelTemplate):
             matrix_instr_nonkdim=kwargs.get("matrix_instr_nonkdim", 0),
             waves_per_eu=kwargs.get("waves_per_eu", 0),
             kpack=kwargs.get("kpack", 2),
-            input_tensor_meta=TensorMeta.from_irnodes(full_input_nodes),  # type: ignore[arg-type]
+            input_tensor_meta=TensorMeta.from_irnodes(kernel_input_nodes),  # type: ignore[arg-type]
             output_tensor_meta=TensorMeta.from_irnodes(layout),
         )
 
         return TritonTemplateCaller(
             kernel_hash_name,
-            full_input_nodes,
+            codegen_input_nodes,
             layout,
             make_kernel_render,
             result.extra.strip("-").replace("-", ", "),
@@ -2062,8 +2097,8 @@ class TritonTemplate(KernelTemplate):
                 "num_stages": num_stages,
                 "num_warps": num_warps,
                 "GROUP_M": kwargs.get("GROUP_M", -1),
-                "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
-                "acc_type": str(kwargs.get("ACC_TYPE", None)),
+                "allow_tf32": str(kwargs.get("ALLOW_TF32")),
+                "acc_type": str(kwargs.get("ACC_TYPE")),
                 "matrix_instr_nonkdim": kwargs.get("matrix_instr_nonkdim", 0),
                 "waves_per_eu": kwargs.get("waves_per_eu", 0),
                 "kpack": kwargs.get("kpack", 2),
@@ -2435,6 +2470,7 @@ class DataProcessorTemplateWrapper:
             self._postprocessor = lambda x: x
         assert "input_nodes" in kwargs
         assert "layout" in kwargs
+        # pyrefly: ignore  # not-callable
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(
             kwargs["input_nodes"], kwargs["layout"]
         )
@@ -2600,6 +2636,17 @@ class AlgorithmSelectorCache(PersistentCache):
         self.precompile_cache.clear()
         self.prescreening_cache.clear()
 
+    def pick_deterministic_choice(self, choices: list[ChoiceCaller]) -> ChoiceCaller:
+        assert len(choices) >= 2
+        externs = [
+            choice for choice in choices if isinstance(choice, ExternKernelChoice)
+        ]
+        if len(externs) > 0:
+            # pyrefly: ignore  # bad-return
+            return externs[0]
+        else:
+            return choices[0]
+
     def __call__(
         self,
         name,
@@ -2655,6 +2702,9 @@ class AlgorithmSelectorCache(PersistentCache):
             if not isinstance(choices[0], CUDATemplateCaller):
                 # CUDATemplateCaller still needs to go through autotuning process to retrieve workspace size.
                 return choices[0].output_node()
+
+        if config.deterministic:
+            return self.pick_deterministic_choice(choices).output_node()
 
         inputs_key = create_inputs_key(input_nodes)
 
@@ -3090,7 +3140,9 @@ class AlgorithmSelectorCache(PersistentCache):
         # de-duplicate args
         unique_example_inputs = {
             x.get_name(): input_gen_fns.get(
-                i, lambda x: cls.benchmark_example_value(x, hint_override=hint_override)
+                i,
+                lambda x: cls.benchmark_example_value(x, hint_override=hint_override),
+                # pyrefly: ignore  # bad-argument-type
             )(x)
             for i, x in enumerate(input_nodes)
         }
@@ -3137,12 +3189,15 @@ class AlgorithmSelectorCache(PersistentCache):
             expected,
         )
 
+    @staticmethod
+    def _is_extern(choice: ChoiceCaller) -> bool:
+        return isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
+
     @classmethod
     def benchmark_choice(
         cls, choice: ChoiceCaller, autotune_args: AutotuneArgs
     ) -> float:
-        is_extern = isinstance(choice, (ExternKernelCaller, SubgraphChoiceCaller))
-        benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
+        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
         result = choice.benchmark(*inputs, out=output)
@@ -3249,8 +3304,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # only benchmark triton kernel in sub process for now.
         # ATen/Extern kernel are still benchmarked in the current process.
-        extern = [c for c in choices if isinstance(c, ExternKernelCaller)]
-        triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
+        extern = [c for c in choices if cls._is_extern(c)]
+        triton = [c for c in choices if not cls._is_extern(c)]
 
         timings = cls.benchmark_in_current_process(
             extern, input_nodes, layout, input_gen_fns, hint_override=hint_override
@@ -3574,8 +3629,10 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
             node.get_device(),
             node.get_dtype(),
+            # pyrefly: ignore  # missing-attribute
             node.layout.offset,
             V.graph.sizevars.size_hints(
+                # pyrefly: ignore  # bad-argument-type
                 V.graph.get_allocation_size(node),
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,

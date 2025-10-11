@@ -460,6 +460,12 @@ def add(
     if not x_is_complex_tensor or not y_is_complex_tensor:
         return NotImplemented
 
+    def _requires_fallback(tensor: torch.Tensor) -> bool:
+        if tensor.ndim == 0:
+            return False
+        # Viewing complex tensors as their real dtype requires the last stride to be 1.
+        return tensor.stride()[-1] != 1
+
     output_size_zero = False
     if x.ndim == 0 and y.ndim == 0:
         output_size_zero = True
@@ -473,6 +479,9 @@ def add(
     if alpha is not None:
         z = alpha * y
     complex_type = torch.promote_types(x.dtype, y.dtype)
+
+    if _requires_fallback(x) or _requires_fallback(z):
+        return NotImplemented
 
     # For complex typed `x`, `x.view(x.real.dtype)` doubles the last dimension and can cause problem
     # when broadcasting the add.
@@ -535,6 +544,7 @@ def amax(
     keepdim: bool = False,
 ) -> torch.Tensor:
     if self.dtype == torch.bool:
+        # pyrefly: ignore  # no-matching-overload
         return torch.any(self, dim=dim, keepdim=keepdim)
     return NotImplemented
 
@@ -546,6 +556,7 @@ def amin(
     keepdim: bool = False,
 ) -> torch.Tensor:
     if self.dtype == torch.bool:
+        # pyrefly: ignore  # no-matching-overload
         return torch.all(self, dim=dim, keepdim=keepdim)
     return NotImplemented
 
@@ -876,6 +887,10 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     """decomps can change based on config"""
     if config.fallback_random:
         return decompositions
+    if config.fallback_embedding_bag_byte_unpack:
+        # remove q_embedding_bag_byte_unpack_decomp from decompositions
+        decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
+        return decompositions
     return fast_random_decomps()
 
 
@@ -1032,9 +1047,13 @@ def _max_pool_with_indices(
     if not stride:
         stride = kernel_size
 
+    # pyrefly: ignore  # bad-assignment
     kernel_size = pad_listlike(kernel_size, dim)
+    # pyrefly: ignore  # bad-assignment
     dilation = pad_listlike(dilation, dim)
+    # pyrefly: ignore  # bad-assignment
     padding = pad_listlike(padding, dim)
+    # pyrefly: ignore  # bad-assignment
     stride = pad_listlike(stride, dim)
 
     window_size = functools.reduce(operator.mul, kernel_size)
@@ -1192,8 +1211,11 @@ def conv1d_to_conv2d(
         "Expect (N,C_in,L) and (C_out,C_in//groups,K)"
     )
 
+    # pyrefly: ignore  # bad-assignment
     stride = stride[0]
+    # pyrefly: ignore  # bad-assignment
     padding = padding[0]
+    # pyrefly: ignore  # bad-assignment
     dilation = dilation[0]
 
     # Unsqueeze to make input 2D: (N,C,L) -> (N,C,L,1)
