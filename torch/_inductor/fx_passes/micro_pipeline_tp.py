@@ -802,7 +802,7 @@ def _insert_fused_matmul_reduce_scatter(
     scatter_dim_after_reshape: int,  # only used for reshape -> scaled_mm -> reshape pattern
     output_shape: list[int],  # only used for reshape -> scaled_mm -> reshape pattern
 ) -> torch.fx.Node:
-    if type(matmul) == _Matmul:
+    if type(matmul) is _Matmul:
         return graph.call_function(
             torch.ops.symm_mem.fused_matmul_reduce_scatter.default,
             args=(
@@ -813,7 +813,7 @@ def _insert_fused_matmul_reduce_scatter(
                 group_name,
             ),
         )
-    elif type(matmul) == _ScaledMatmul:
+    elif type(matmul) is _ScaledMatmul:
         return graph.call_function(
             torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter.default,
             args=(
