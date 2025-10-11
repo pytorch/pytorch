@@ -218,6 +218,20 @@ class MiscTests(torch._inductor.test_case.TestCase):
         entries = _debug_get_cache_entry_list(torch._dynamo.graph_break)
         self.assertEqual(len(entries), 0)
 
+    def test_parameter_and_tensor_same_shape_do_not_force_recompile(self):
+        def f(x):
+            return (x + 1).sum()
+
+        counter = CompileCounter()
+        compiled = torch.compile(f, dynamic=True, backend=counter)
+
+        tensor_input = torch.zeros((1, 1), requires_grad=True)
+        compiled(tensor_input)
+        param_input = torch.nn.Parameter(torch.zeros((1, 1), requires_grad=True))
+        compiled(param_input)
+        compiled(tensor_input)
+        self.assertEqual(counter.frame_count, 1)
+
     def test_boolarg(self):
         def boolarg(aa, bb, flag):
             if flag:
