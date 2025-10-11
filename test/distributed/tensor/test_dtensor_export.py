@@ -11,7 +11,8 @@ from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch._guards import tracing, TracingContext
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import distribute_tensor, Replicate
+from torch.distributed.tensor import distribute_tensor, Partial, Replicate, Shard
+from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -37,6 +38,21 @@ class SimpleModel(torch.nn.Module):
 
     def forward(self, input):
         return self.mlp_1(self.mlp_0(input))
+
+
+class EinsumModel(torch.nn.Module):
+    """Simple model that uses einsum with DTensor inputs and returns DTensor."""
+
+    def __init__(self):
+        super().__init__()
+        self.placement = None
+
+    def forward(self, x, y, z):
+        result = torch.einsum("bsh,hd->bsd", x, y)
+        self.placement = result.placements[0]
+        self.placement_2 = y.placements[0]
+        self.placement_3 = z.placements[0]
+        return result
 
 
 class SimpleModelDynamicShapes(torch.nn.Module):
@@ -333,6 +349,32 @@ class DTensorExportTest(TestCase):
             str(res),
             """[[4, 10], [4], [10, 4], [10], [s22, 10], [s22, 10]]""",
         )
+
+    def test_einsum_dtensor_export(self):
+        """Test exporting a model with einsum that has DTensor inputs/outputs with side effects"""
+        world_size = 4
+        # Create device mesh
+        device_mesh = init_device_mesh(self.device_type, mesh_shape=(world_size,))
+        model = EinsumModel()
+
+        x = torch.randn(4, 8, 16)
+        x_dtensor = distribute_tensor(x, device_mesh, placements=[Shard(0)])
+
+        # y: [16, 16] replicated
+        y = torch.randn(16, 16)
+        z = torch.randn(16, 16)
+        y_dtensor = distribute_tensor(y, device_mesh, placements=[Replicate()])
+        z_dtensor = DTensor.from_local(z, device_mesh, placements=[Partial()])
+
+        # Run model to verify it works
+        output = model(x_dtensor, y_dtensor, z_dtensor)
+        with torch._dynamo.config.patch(install_free_tensors=True):
+            # TODO: switch to use the official graph_capture API once it is ready
+            gm = _dynamo_graph_capture_for_export(model)(
+                x_dtensor, y_dtensor, z_dtensor
+            )
+        output_gm = gm(x_dtensor, y_dtensor, z_dtensor)
+        self.assertEqual(output, output_gm)
 
 
 instantiate_parametrized_tests(DTensorExportTest)

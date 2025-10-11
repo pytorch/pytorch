@@ -121,6 +121,18 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
 
 
+def is_sympy_integer_like(expr: object):
+    """ "
+    Is this expression a Sympy Integer or is it an integer sympy Expr
+    containing no free symbols. The latter case can happen with Identity expr.
+    """
+    if not isinstance(expr, sympy.Expr):
+        return False
+    return isinstance(expr, sympy.Integer) or (
+        expr.is_integer and len(expr.free_symbols) == 0
+    )
+
+
 class OpDtypeSupport:
     """
     Some Triton ops such as libdevice and tl.math only support float32 and float64.
@@ -2455,7 +2467,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             else:
                 return self.dense_size_str(), tuple(self.dense_size_list())
 
-        if isinstance(index, sympy.Integer):
+        if is_sympy_integer_like(index):
             expand_str, expand_shape = _get_expand_str()
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if self.fixed_config and not self._has_constant_xmask():
@@ -2806,7 +2818,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     line, indexing.block_shape, indexing.final_shape, True
                 )
                 shape = indexing.final_shape
-            elif isinstance(original_index, sympy.Integer):
+            elif is_sympy_integer_like(original_index):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
                 shape = ()
