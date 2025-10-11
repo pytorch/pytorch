@@ -122,7 +122,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-python@main
         with:
           python-version: ${{ inputs.python-version }}
-          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
+          pip-requirements-file: .ci/docker/requirements-ci.txt
 
       - name: Start monitoring script
         id: monitor-script

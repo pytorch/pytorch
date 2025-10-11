@@ -110,6 +110,7 @@ _StrideExprStr: TypeAlias = str
 # to achieve writing to all values of that dimension of the input tensor
 def get_expanded_dims(t: torch.Tensor) -> list[int]:
     if not isinstance(t, torch.Tensor):
+        # pyrefly: ignore  # bad-return
         return None
     return [i for i in range(t.ndim) if t.stride(i) == 0 and t.size(i) != 1]
 
@@ -607,9 +608,13 @@ class CompiledFxGraph(OutputCode):
                 }
             )
         try:
-            with record_function(
-                f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
-            ):
+            # Checking the profiler directly is faster than nullcontext
+            if torch.autograd.profiler._is_profiler_enabled:
+                with record_function(
+                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
+                ):
+                    return self.current_callable(inputs)
+            else:
                 return self.current_callable(inputs)
         finally:
             get_runtime_metrics_context().finish()

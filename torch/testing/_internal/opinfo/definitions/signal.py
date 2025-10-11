@@ -1,9 +1,9 @@
 # mypy: ignore-errors
 
 import unittest
+from collections.abc import Callable
 from functools import partial
 from itertools import product
-from typing import Callable
 
 import numpy
 

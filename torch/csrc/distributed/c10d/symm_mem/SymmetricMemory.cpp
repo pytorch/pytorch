@@ -152,8 +152,7 @@ static at::Tensor empty_strided_p2p_persistent(
   auto allocated = at::from_blob(dev_ptr, size, stride, options);
 
   // Track the allocation's activeness
-  alloc_id_to_storage.erase(alloc_id);
-  alloc_id_to_storage.emplace(
+  alloc_id_to_storage.insert_or_assign(
       alloc_id, allocated.storage().getWeakStorageImpl());
   return allocated;
 }
@@ -458,6 +457,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
   m.def(
+      "multimem_one_shot_reduce_out(Tensor input, str reduce_op, int root, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.def(
       "multimem_all_gather_out(Tensor input, str group_name, Tensor(a!) out) -> Tensor(a!)");
   m.def(
       "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
@@ -499,14 +500,21 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def("nvshmem_get(Tensor(a!) tensor, int peer) -> ()");
   m.def(
       "nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
+  m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
+  m.def(
+      "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
-      "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name) -> Tensor(a!)");
+      "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name) -> ()");
   m.def(
       "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name, int? major_align=None) -> ()");
   m.def(
       "all_to_all_vdev_2d_offset(Tensor input, Tensor(a!) out, Tensor in_splits_offsets, Tensor(a!) out_splits_offsets, str group_name) -> ()");
+  m.def(
+      "tile_reduce(Tensor in_tile, Tensor(a!) out_tile, int root, str group_name, str reduce_op='sum') -> ()");
+  m.def(
+      "multi_root_tile_reduce(Tensor[] in_tiles, Tensor(a!) out_tile, int[] roots, str group_name, str reduce_op='sum') -> ()");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

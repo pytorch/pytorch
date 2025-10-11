@@ -149,6 +149,7 @@ def _patch_loop(loop: AbstractEventLoop) -> OrderedSet[Future]:  # type: ignore[
         task_factory = task_factories[0]
         if task_factory is None:
             if sys.version_info >= (3, 11):
+                # pyrefly: ignore  # bad-argument-type
                 task = asyncio.Task(coro, loop=loop, context=context)
             else:
                 task = asyncio.Task(coro, loop=loop)
