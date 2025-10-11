@@ -12,6 +12,7 @@ import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.fx_passes.bucketing import is_wait_tensor
+from torch.distributed import _functional_collectives as funcol
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 
@@ -332,14 +333,16 @@ class OverlapScheduler:
         world_size = dist.get_world_size()
         pg = _get_default_group()
         with no_dispatch():
-            gathered_runtime_estimations: list[list[float]] = [
-                [] for _ in range(world_size)
-            ]
-            dist.all_gather_object(
-                gathered_runtime_estimations, runtime_estimations, pg
+            gathered_runtime_estimations = funcol.all_gather_tensor(
+                torch.tensor(runtime_estimations).to("cuda"), 0, group=pg
+            )
+            if isinstance(gathered_runtime_estimations, funcol.AsyncCollectiveTensor):
+                gathered_runtime_estimations = gathered_runtime_estimations.wait()
+            gathered_runtime_estimations = gathered_runtime_estimations.reshape(
+                world_size, -1
             )
             median_runtime_estimations = torch.median(
-                torch.tensor(gathered_runtime_estimations), dim=0
+                gathered_runtime_estimations, dim=0
             ).values.tolist()
         for key, median_runtime_estimation in zip(
             runtime_estimations_keys, median_runtime_estimations
