@@ -171,7 +171,7 @@ init_command = [
     'junitparser==2.1.1',
     'rich==14.1.0',
     'pyyaml==6.0.2',
-    'optree==0.13.0',
+    'optree==0.17.0',
     'dataclasses-json==0.6.7',
     'pandas==2.2.3',
 ]
