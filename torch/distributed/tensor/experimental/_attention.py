@@ -1173,19 +1173,26 @@ def _context_parallel_buffers(
     new_buffers = []
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if load_balance_indices is not None:
-            if load_balance_indices.size(0) == 1:  # identical load-balance in batch
-                buffer = torch.index_select(
-                    buffer, dim=seq_dim, index=load_balance_indices[0]
-                )
-            else:
-                # load_balance_indices has shape (batch_size, seq_length)
-                # TODO: this for-looop can be done in a smarter way
-                for i in range(load_balance_indices.size(dim=0)):
-                    # NOTE: assuming batch dim is 0
+            # NOTE: assuming batch dim is 0
+            idx_batch_size = load_balance_indices.size(0)
+            data_batch_size = buffer.size(0)
+            assert idx_batch_size == 1 or idx_batch_size == data_batch_size, (
+                "Cannot rearrange buffer: "
+                f"load_balance_indices has shape {load_balance_indices.shape}, "
+                f"but buffer has shape {buffer.shape}."
+            )
+
+            for i in range(data_batch_size):
+                if idx_batch_size == 1:  # identical load-balance in batch
+                    buffer_batch_i = torch.index_select(
+                        buffer[i], dim=seq_dim - 1, index=load_balance_indices[0]
+                    )
+                else:
                     buffer_batch_i = torch.index_select(
                         buffer[i], dim=seq_dim - 1, index=load_balance_indices[i]
                     )
-                    buffer[i] = buffer_batch_i
+
+                buffer[i] = buffer_batch_i
 
         # use DTensor to shard the buffer on sequence dimension, retain the local tensor
         sharded_buffer = distribute_tensor(
@@ -1335,19 +1342,26 @@ def context_parallel_unshard(
         unsharded_b = _maybe_wait(ft_c.all_gather_tensor(b, dim, mesh))
 
         if restore_indices is not None:
-            if restore_indices.size(0) == 1:  # identical load-balance in batch
-                unsharded_b = torch.index_select(
-                    unsharded_b, dim=dim, index=restore_indices[0]
-                )
-            else:
-                # restore_indices has shape (batch_size, seq_length)
-                # TODO: this for-looop can be done in a smarter way
-                for i in range(restore_indices.size(dim=0)):
-                    # NOTE: assuming batch dim is 0
+            # NOTE: assuming batch dim is 0
+            idx_batch_size = restore_indices.size(0)
+            data_batch_size = unsharded_b.size(0)
+            assert idx_batch_size == 1 or idx_batch_size == data_batch_size, (
+                "Cannot restore buffer: "
+                f"restore_indices has shape {restore_indices.shape}, "
+                f"but unsharded_b has shape {unsharded_b.shape}."
+            )
+
+            for i in range(data_batch_size):
+                if idx_batch_size == 1:  # identical load-balance in batch
+                    unsharded_b_batch_i = torch.index_select(
+                        unsharded_b[i], dim=dim - 1, index=restore_indices[0]
+                    )
+                else:
                     unsharded_b_batch_i = torch.index_select(
                         unsharded_b[i], dim=dim - 1, index=restore_indices[i]
                     )
-                    unsharded_b[i] = unsharded_b_batch_i
+
+                unsharded_b[i] = unsharded_b_batch_i
 
         unsharded_buffers.append(unsharded_b)
 

@@ -28,6 +28,7 @@ from torch.distributed.tensor.experimental._load_balancer import (
     _HeadTailLoadBalancer,
     _LoadBalancer,
     _PerDocumentHeadTailLoadBalancer,
+    _PTRRLoadBalancer,
 )
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
@@ -473,7 +474,9 @@ class CPFlexAttentionTest(DTensorTestBase):
             _DispatchMode.TORCH_FUNCTION
         )
         with context_parallel(
-            device_mesh, buffers=[torch.empty(self.world_size * 2)], buffer_seq_dims=[0]
+            device_mesh,
+            buffers=[torch.empty(1, self.world_size * 2)],
+            buffer_seq_dims=[1],
         ):
             cp_out, cp_aux = compiled_flex_attention(
                 *cp_qkv,
@@ -564,6 +567,7 @@ class CPFlexAttentionTest(DTensorTestBase):
             2048,
             # 128 * self.world_size  # NOTE: Mismatched elements: 8 / 131072 (0.0%),
         ]
+        load_balance_type = ["_PerDocumentHeadTailLoadBalancer", "_PTRRLoadBalancer"]
 
         # NOTE: Each (enable_load_balance, batch_size, seq_len) tuple introduces 2
         # create_block_mask compilations: 1 for single-rank flex_attention and 1 for
@@ -575,14 +579,18 @@ class CPFlexAttentionTest(DTensorTestBase):
             * len(enable_load_balance_list)
             * len(batch_size_list)
             * len(max_seq_len_list)
+            * len(load_balance_type)
         )
 
         # TODO: change this for-loop to run_subtests
         # Use a for-loop instead of run_subtests because we need to intialize the mask
         # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
-        for enable_load_balance, batch_size, max_seq_len in itertools.product(
-            enable_load_balance_list, batch_size_list, max_seq_len_list
+        for enable_load_balance, batch_size, max_seq_len, lb_type in itertools.product(
+            enable_load_balance_list,
+            batch_size_list,
+            max_seq_len_list,
+            load_balance_type,
         ):
             _cp_options.enable_load_balance = enable_load_balance
 
@@ -601,13 +609,26 @@ class CPFlexAttentionTest(DTensorTestBase):
             document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
 
             # generate load balancer
-            load_balancer = (
-                _PerDocumentHeadTailLoadBalancer(
-                    lengths, self.world_size, torch.device(self.device_type)
-                )
-                if enable_load_balance
-                else None
-            )
+            load_balancer = None  # no load-balance
+            if enable_load_balance:
+                if lb_type == "_PerDocumentHeadTailLoadBalancer":
+                    load_balancer = _PerDocumentHeadTailLoadBalancer(
+                        lengths, self.world_size, torch.device(self.device_type)
+                    )
+                elif lb_type == "_PTRRLoadBalancer":
+                    load_balancer = _PTRRLoadBalancer(
+                        create_block_mask(
+                            document_causal_mask,
+                            B=batch_size,
+                            H=1,
+                            Q_LEN=max_seq_len,
+                            KV_LEN=max_seq_len,
+                        ),
+                        self.world_size,
+                        self.device_type,
+                    )
+                else:
+                    raise ValueError(f"load_balancer type {lb_type} is not supported!")
 
             # construct testing function
             test_func = functools.partial(
