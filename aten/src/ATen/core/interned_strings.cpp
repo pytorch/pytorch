@@ -67,12 +67,7 @@ Symbol InternedStrings::_symbol(const std::string& s) {
   if (it != string_to_sym_.end())
     return it->second;
 
-  auto pos = s.find("::");
-  if (pos == std::string::npos) {
-    std::stringstream ss;
-    ss << "all symbols must have a namespace, <namespace>::<string>, but found: " << s;
-    TORCH_CHECK(false, ss.str());
-  }
+  TORCH_CHECK(s.find("::") != std::string::npos, "all symbols must have a namespace, <namespace>::<string>, but found: ", s);
   Symbol ns = _symbol("namespaces::" + s.substr(0, pos));
 
   Symbol sym(sym_to_info_.size());
@@ -121,12 +116,7 @@ std::string Symbol::domainString() const {
 }
 
 Symbol Symbol::fromDomainAndUnqualString(const std::string & d, const std::string & s) {
-  if (d.compare(0, domain_prefix().size(), domain_prefix()) != 0) {
-    std::ostringstream ss;
-    ss << "Symbol: domain string is expected to be prefixed with '"
-       << domain_prefix() << "', e.g. 'org.pytorch.aten'";
-    TORCH_CHECK(false, ss.str());
-  }
+  TORCH_CHECK(d.compare(0, domain_prefix().size(), domain_prefix()) == 0, "Symbol: domain string is expected to be prefixed with '", domain_prefix(), "', e.g. 'org.pytorch.aten'");
   std::string qualString = d.substr(domain_prefix().size()) + "::" + s;
   return fromQualString(qualString);
 }
