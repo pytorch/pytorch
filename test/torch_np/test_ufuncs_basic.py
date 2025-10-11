@@ -380,7 +380,7 @@ class TestUfuncDtypeKwd(TestCase):
 
         # now force the cast
         rb = np.add(1.0, 1e-15, dtype=bool, casting="unsafe")
-        assert rb.dtype is bool
+        assert rb.dtype == bool
 
     def test_binary_ufunc_dtype_and_out(self):
         # all in float64: no precision loss

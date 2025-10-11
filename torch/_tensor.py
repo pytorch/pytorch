@@ -1261,7 +1261,7 @@ class Tensor(torch._C.TensorBase):
             return handle_torch_function(
                 Tensor.__array_wrap__, (self,), self, array=array
             )
-        if array.dtype is bool:
+        if array.dtype == bool:
             # Workaround, torch has no built-in bool tensor
             array = array.astype("uint8")
         return torch.from_numpy(array)

@@ -719,7 +719,7 @@ class TestMultiIndexingAutomated(TestCase):
         for i, indx in enumerate(in_indices):
             if indx is None:
                 continue
-            if isinstance(indx, np.ndarray) and indx.dtype is bool:
+            if isinstance(indx, np.ndarray) and indx.dtype == bool:
                 no_copy = False
                 if indx.ndim == 0:
                     raise IndexError
@@ -782,7 +782,7 @@ class TestMultiIndexingAutomated(TestCase):
                 indices.append(["n", np.array([0], dtype=np.intp)])
                 arr = arr.reshape(arr.shape[:ax] + (1,) + arr.shape[ax:])
                 continue
-            if isinstance(indx, np.ndarray) and indx.dtype is bool:
+            if isinstance(indx, np.ndarray) and indx.dtype == bool:
                 if indx.shape != arr.shape[ax : ax + indx.ndim]:
                     raise IndexError
 

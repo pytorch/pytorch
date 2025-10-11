@@ -1122,7 +1122,7 @@ class TestMatrixPower(TestCase):
     def test_power_is_two(self, dt):
         def tz(mat):
             mz = matrix_power(mat, 2)
-            mmul = matmul if mat.dtype is not object else dot
+            mmul = matmul if mat.dtype != object else dot
             assert_equal(mz, mmul(mat, mat))
             assert_equal(mz.dtype, mat.dtype)
 
@@ -1135,7 +1135,7 @@ class TestMatrixPower(TestCase):
     def test_power_is_minus_one(self, dt):
         def tz(mat):
             invmat = matrix_power(mat, -1)
-            mmul = matmul if mat.dtype is not object else dot
+            mmul = matmul if mat.dtype != object else dot
             assert_almost_equal(mmul(invmat, mat), identity_like_generalized(mat))
 
         for mat in self.rshft_all:

@@ -669,7 +669,8 @@ class TestIter(TestCase):
         a = np.arange(5)[None, :]
         lst = list(a)
         assert len(lst) == 1
-        assert type(lst[0]) is np.ndarray
+        # FIXME: "is" cannot be used here because dynamo fails
+        assert type(lst[0]) == np.ndarray  # noqa: E721
         assert_equal(lst[0], np.arange(5))
 
 
