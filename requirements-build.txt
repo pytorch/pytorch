@@ -2,8 +2,8 @@
 setuptools>=70.1.0
 cmake>=3.27
 ninja
-numpy
-packaging
+numpy>=2.0
+packaging>=24.2
 pyyaml
 requests
 six  # dependency chain: NNPACK -> PeachPy -> six

@@ -32,20 +32,11 @@ if [[ "$PACKAGE_TYPE" != libtorch ]]; then
 fi
 
 EXTRA_CONDA_FLAGS=""
-NUMPY_PIN=""
+NUMPY_PIN=">=2.0.2"
 PROTOBUF_PACKAGE="defaults::protobuf"
 
 if [[ "\$python_nodot" = *310* ]]; then
-  # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
-  # we set a lower boundary here just to be safe
-  NUMPY_PIN=">=1.21.2"
   PROTOBUF_PACKAGE="protobuf>=3.19.0"
-fi
-
-if [[ "\$python_nodot" = *39* ]]; then
-  # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
-  # we set a lower boundary here just to be safe
-  NUMPY_PIN=">=1.20"
 fi
 
 # Move debug wheels out of the package dir so they don't get installed
