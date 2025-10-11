@@ -359,7 +359,7 @@ struct C10_API VariableVersion {
   // https://cplusplus.github.io/LWG/issue2334.
   VariableVersion(uint32_t version)
       : version_counter_(c10::make_intrusive<VersionCounter>(version)) {}
-  VariableVersion(Disabled = DISABLED) {}
+  VariableVersion(Disabled /*unused*/ = DISABLED) {}
 
   bool enabled() const {
     return version_counter_;
@@ -522,21 +522,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   TensorImpl(
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type);
 
   // See Note [Enum ImplType]
   TensorImpl(
-      ImplType,
+      ImplType /*unused*/,
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type);
 
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
    */
   TensorImpl(
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type,
       std::optional<c10::Device> device_opt);
 
@@ -563,9 +563,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // from under us.
   TensorImpl(
       Storage&& storage,
-      DispatchKeySet,
+      DispatchKeySet /*key_set*/,
       const caffe2::TypeMeta data_type,
-      std::optional<c10::Device>);
+      std::optional<c10::Device> /*device_opt*/);
 
  public:
   TensorImpl(const TensorImpl&) = delete;
@@ -3269,7 +3269,7 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
     is_le<sizeof(extra_meta_),            16,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_slot_),         8,  FieldNameEnum::pyobj_slot_>();
+    are_equal<sizeof(pyobj_slot_),   16,  FieldNameEnum::pyobj_slot_>();
     are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();

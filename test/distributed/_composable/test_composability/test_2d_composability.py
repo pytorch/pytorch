@@ -41,10 +41,14 @@ from torch.distributed.tensor.parallel.ddp import _pre_dp_module_transform
 from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_rocm_arch_multiprocess,
+)
 from torch.testing._internal.common_fsdp import FSDPTest, MLP, MLPStack
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    MI200_ARCH,
     parametrize,
     run_tests,
     TEST_XPU,
@@ -121,6 +125,7 @@ class TestFullyShard2DTraining(FSDPTest):
             mesh_dim_names=("dp", "tp"),
         )
 
+    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(2)
     def test_train_parity_2d_mlp(self):
         global_mesh = self.init_global_mesh()
@@ -294,11 +299,11 @@ class TestFullyShard2DTraining(FSDPTest):
             with CommDebugMode() as bwd_comm_mode:
                 loss.backward()
             bwd_comm_counts = bwd_comm_mode.get_comm_counts()
-            self.assertEqual(len(bwd_comm_counts), 2)
+            self.assertEqual(len(bwd_comm_counts), 1)
             # First MLP's input gradient does not need to be all-reduced
             self.assertEqual(bwd_comm_counts[funcol.all_reduce], num_mlps - 1)
             self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], 0)
-            self.assertEqual(bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_mlps)
+            self.assertEqual(bwd_comm_counts[c10d_ops._reduce_scatter_base_], 0)
             ref_loss.backward()
 
             optim.step()

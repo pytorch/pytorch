@@ -58,6 +58,7 @@ def promote_types(
 ):
     dtype_prop_candidates = []
 
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         assert not isinstance(arg, str)
         if isinstance(arg, OpsValue):
@@ -68,6 +69,7 @@ def promote_types(
             dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
             continue
 
+        # pyrefly: ignore  # missing-attribute
         dtype_prop_candidates.append((arg.dtype, getattr(arg, "is_scalar", False)))
 
     dtype = get_promoted_dtype(
@@ -374,8 +376,8 @@ class DtypePropagationOpsHandler:
         )
 
     @staticmethod
-    def device_assert_async(cond, msg: str) -> torch.dtype:
-        return torch.bool
+    def device_assert_async(cond, msg: str) -> None:
+        return None
 
 
 if TYPE_CHECKING:
