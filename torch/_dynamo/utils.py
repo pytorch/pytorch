@@ -1375,6 +1375,7 @@ class CompilationMetrics:
     param_count: Optional[int] = None
     recompile_user_contexts: Optional[set[str]] = None
     inline_inbuilt_nn_modules_candidate: Optional[bool] = False
+    pytorch_version: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1645,6 +1646,7 @@ def record_compilation_metrics(
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
+        "pytorch_version": torch.__version__,
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
