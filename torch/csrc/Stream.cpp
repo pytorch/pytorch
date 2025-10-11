@@ -95,6 +95,7 @@ static PyObject* THPStream_pynew(
   self->device_index = static_cast<int64_t>(stream_opt->device_index());
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
   self->context = nullptr;
+  self->weakreflist = nullptr;
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -114,11 +115,15 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
   self->context = nullptr;
+  self->weakreflist = nullptr;
   return ptr.release();
   END_HANDLE_TH_ERRORS
 }
 
 static void THPStream_dealloc(THPStream* self) {
+  if (self->weakreflist != nullptr) {
+    PyObject_ClearWeakRefs((PyObject*)self);
+  }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -436,7 +441,7 @@ static PyTypeObject THPStreamType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     THPStream_richcompare, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    offsetof(THPStream, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     // NOLINTNEXTLINE(*const-cast)
