@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from inspect import ismethod, Parameter
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._guards import detect_fake_mode
@@ -1144,6 +1144,165 @@ def placeholder_naming_pass(
             ):
                 constants[new_name] = constant
                 del constants[name]
+
+def _root_out_spec_from_call_graph(sig) -> Optional[Any]:
+    """
+    Try to fetch the output spec
+    from export_graph_signature.module_call_graph.
+    Returns the TreeSpec or None.
+    """
+    mcg = getattr(sig, "module_call_graph", None)
+    if mcg is None:
+        return None
+
+    # Find root node
+    root = getattr(mcg, "root", None)
+    if root is None:
+        nodes = getattr(mcg, "nodes", None) or mcg
+        if isinstance(nodes, (list, tuple)) and nodes:
+            # If root is marked
+            root = next((n for n in nodes if getattr(n, "is_root", False)), nodes[0])
+
+    if root is None:
+        return None
+
+    for holder in (
+        root,
+        getattr(root, "call_spec", None),
+        getattr(root, "schema", None),
+        getattr(root, "context", None),
+        ):
+        if holder is None:
+            continue
+        ospec = getattr(holder, "out_spec", None)
+        if ospec is None:
+            ospec = getattr(holder, "pytree_out_spec", None)
+        if ospec is not None:
+            return ospec
+    return None
+
+def _build_output_prefixes() -> dict[OutputKind, str]:
+    """
+    Build output prefixes for named outputs.
+    Returns mapping for output kinds.
+    """
+    mapping: dict[OutputKind, str] = {}
+    for name, pref in [
+        ("USER_OUTPUT", "o_"),
+        ("BUFFER_MUTATION", "b_"),
+        ("CUSTOM_OBJ", "obj_"),
+        ("CONSTANT_TENSOR", "c_"),
+        ("LIFTED_TENSOR_CONSTANT", "c_"),
+        ("USER_INPUT_MUTATION", "o_"),
+        ("TOKEN", "token"),
+    ]:
+        kind = getattr(OutputKind, name, None)
+        if kind is not None:
+            mapping[cast(OutputKind, kind)] = pref
+    return mapping
+
+def _compute_output_name_map(export_graph_signature, out_spec):
+    """
+    Build a name_map for outputs using `out_spec`.
+    Uses early returns to avoid large nested branches.
+    """
+    name_map: dict[str, str] = {}
+    find_available: dict[str, int] = defaultdict(int)
+    used_names: set[str] = set()
+    output_prefixes: dict[OutputKind, str] = _build_output_prefixes()
+
+    def _assign(old: str, base: str, kind: OutputKind) -> None:
+        prefix = output_prefixes.get(kind, "o_")
+        sanitized = re.sub(r"[^0-9a-zA-Z]", "_", base).lower()
+        candidate = f"{prefix}{sanitized}"
+        _rename_without_collisions(
+            name_map, find_available, used_names, old, candidate, is_placeholder=True
+        )
+
+    def _fallback():
+        for spec in export_graph_signature.output_specs:
+            base = spec.arg.name or spec.target or ""
+            _assign(spec.arg.name, base, spec.kind)
+        return name_map
+
+    # No useful spec - just fallback
+    if out_spec is None or len(getattr(out_spec, "children_specs", [])) != 1:
+        return _fallback()
+
+    ctx = out_spec.children_specs[0].context
+
+    # Try to extract field names
+    # NamedTuple
+    if hasattr(ctx, "_fields"):
+        all_fields = list(ctx._fields)
+    elif isinstance(ctx, (list, tuple)) and ctx and isinstance(ctx[0], (list, tuple)):
+        # dataclass (registered)
+        all_fields = list(ctx[0])
+    else:
+        all_fields = []
+
+    # We use fallback
+    if not all_fields:
+        return _fallback()
+
+    # We found names
+    for spec, field_name in zip(export_graph_signature.output_specs, all_fields):
+        base = field_name or spec.arg.name or spec.target or ""
+        _assign(spec.arg.name, base, spec.kind)
+
+    return name_map
+
+def outputs_naming_pass(
+    gm: torch.fx.GraphModule,
+    export_graph_signature: "ExportGraphSignature",
+    mod: torch.nn.Module,
+) -> None:
+    """
+    Rename each output to match the NamedTuple field
+    that produced it and update the export signature.
+    If outputs are named using Dataclass, then context
+    list/tuple is used.
+    """
+    out_spec = _root_out_spec_from_call_graph(export_graph_signature)
+    if out_spec is None:
+        out_spec = getattr(mod, "_out_spec", None)
+
+    name_map = _compute_output_name_map(export_graph_signature, out_spec)
+
+    # Apply renames to all matching nodes
+    for node in gm.graph.nodes:
+        if node.name in name_map:
+            node.name = name_map[node.name]
+
+    # Apply renames into the FX graph
+    for node in gm.graph.nodes:
+        if node.op == "output":
+            new_outs = []
+            for out_node in node.args[0]:
+                if out_node.name in name_map:
+                    out_node.name = name_map[out_node.name]
+                new_outs.append(out_node)
+            node.args = (tuple(new_outs),)
+        elif node.name in name_map:
+            node.name = name_map[node.name]
+
+    # Update the ExportGraphSignature
+    for spec in export_graph_signature.output_specs:
+        spec.arg.name = name_map[spec.arg.name]
+
+    # Patch mod._out_spec for NamedTuple
+    if (
+        out_spec is not None
+        and len(out_spec.children_specs) == 1
+        and hasattr(out_spec.children_specs[0].context, "_fields")
+    ):
+        ctx = out_spec.children_specs[0].context
+        for i, field_name in enumerate(ctx._fields):
+            # set attribute so debugger sees the new names
+            setattr(ctx, field_name, export_graph_signature.output_specs[i].arg.name)
+
+    _name_hoo_subgraph_placeholders(gm)
+    gm.recompile()
 
 
 def remove_proxy_from_state_dict(state_dict: dict, in_place: bool) -> dict:

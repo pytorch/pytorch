@@ -49,6 +49,7 @@ from torch._export.utils import (
     _populate_param_buffer_metadata_to_new_gm,
     _update_gm_meta_if_possible,
     apply_runtime_assertion_pass,
+    outputs_naming_pass,
     placeholder_naming_pass,
     placeholder_prefixes,
 )
@@ -553,7 +554,7 @@ def _produce_aten_artifact(
     3. Populate meta val when missing
     4. Lift constants as placeholders
     5. Replace raw autograd and autocast ops with HOPs
-    6. Prettify names for placeholders
+    6. Prettify names for placeholders/outputs
     7. Preserve requires_grad value on node meta val
     """
     # Run runtime asserts pass before creating input/output specs, since size-related CSE/DCE might affect output signature.
@@ -626,6 +627,7 @@ def _produce_aten_artifact(
             fake_params_buffers,
             constants,
         )
+        outputs_naming_pass(gm, export_graph_signature, mod)
 
     _preserve_requires_grad_pass(
         gm, export_graph_signature, fake_params_buffers, constants, flat_fake_args
