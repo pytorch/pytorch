@@ -17,6 +17,9 @@ class _LoadBalancer(ABC):
         Generate indices for load balancing.
         Args:
             restore (bool):
+                If True, generate restore indices that map the rearranged positions
+                back to original positions. If False, generate load balance indices
+                that rearrange original positions to the target positions.
 
         Returns:
             The generated indices of shape `(1, seq_len)` if the load-balancing is
