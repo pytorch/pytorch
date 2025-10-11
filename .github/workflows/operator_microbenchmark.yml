@@ -73,3 +73,28 @@ jobs:
       test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
       aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
     secrets: inherit
+
+  # ROCM MI300 runner
+  opmicrobenchmark-build-rocm:
+    if: github.repository_owner == 'pytorch'
+    name: opmicrobenchmark-build-rocm
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-rocm-py3_10
+      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+      test-matrix: |
+        { include: [
+          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1" },
+        ]}
+    secrets: inherit
+
+  opmicrobenchmark-test-rocm:
+    name: opmicrobenchmark-test-rocm
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: opmicrobenchmark-build-rocm
+    with:
+      timeout-minutes: 500
+      build-environment: linux-jammy-rocm-py3_10
+      docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
+      test-matrix: ${{ needs.opmicrobenchmark-build-rocm.outputs.test-matrix }}
+    secrets: inherit
