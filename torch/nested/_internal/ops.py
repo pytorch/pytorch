@@ -18,6 +18,23 @@ __all__: list[Any] = []
 JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
 
+def _get_padding_value(dtype, padding_type):
+    if dtype.is_floating_point:
+        return (
+            torch.finfo(dtype).max if padding_type == "max" else torch.finfo(dtype).min
+        )
+    elif dtype == torch.int64:
+        # Largest int64 value exactly representable in float64 (IEEE 754 double precision).
+        # Avoids overflow when padding_value is passed as double to _jagged_to_padded_dense_forward.
+        int64_safe_max = (1 << 53) - 1
+        int64_safe_min = -int64_safe_max
+        return int64_safe_max if padding_type == "max" else int64_safe_min
+    else:
+        return (
+            torch.iinfo(dtype).max if padding_type == "max" else torch.iinfo(dtype).min
+        )
+
+
 def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     from torch._prims_common import canonicalize_dims
 
@@ -29,11 +46,14 @@ def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     if canonicalize:
         dim = canonicalize_dims(ndim, dim)
 
-    assert dim >= 0 and dim < ndim
+    assert dim >= 0 and dim < ndim  # pyrefly: ignore  # unsupported-operation
 
     # Map dim=0 (AKA batch dim) -> packed dim i.e. outer ragged dim - 1.
     # For other dims, subtract 1 to convert to inner space.
-    return ragged_dim - 1 if dim == 0 else dim - 1
+    return (
+        # pyrefly: ignore  # unsupported-operation
+        ragged_dim - 1 if dim == 0 else dim - 1
+    )
 
 
 def _wrap_jagged_dim(
@@ -412,6 +432,36 @@ def jagged_torch_function(func, *args, **kwargs):
         new_shape = (*inp.shape[:start_dim], product, *inp.shape[end_dim + 1 :])
 
         return inp.reshape(*new_shape)
+
+    # Handle NestedTensor share_memory_.
+    if func.__name__ == "share_memory_":
+        nt = args[0]
+
+        if nt.is_cuda:
+            return nt
+
+        names, _ = nt.__tensor_flatten__()
+        with torch._C.DisableTorchFunctionSubclass():
+            for name in names:
+                component = getattr(nt, name, None)
+                if component is not None:
+                    component.share_memory_()
+        return nt
+
+    # Handle NestedTensor is_shared.
+    if func.__name__ == "is_shared":
+        nt = args[0]
+
+        if nt.is_cuda:
+            return False
+
+        names, _ = nt.__tensor_flatten__()
+        if not names:
+            return False
+        return all(
+            getattr(nt, name) is not None and getattr(nt, name).is_shared()
+            for name in names
+        )
 
     # Handle nested-specific input validation for CompositeImplicit rms_norm
     if func.__name__ == "rms_norm":
@@ -1089,7 +1139,7 @@ def unbind_int(func, *args, **kwargs):
     ragged_idx = inp._ragged_idx
 
     def _torch_check(_lengths: list[int], _offsets: Optional[list[int]] = None):
-        # This torch._check and torch._check_is_size are needed for torch.compile
+        # This torch._check are needed for torch.compile
         # symbolic shapes processing.
         # offsets and lengths are symbolic variables during compilation,
         # we guarantee the correct offsets/lengths correspondence:
@@ -1101,7 +1151,7 @@ def unbind_int(func, *args, **kwargs):
         lengths_sum = 0
         ragged_dim_size = values.shape[ragged_idx - 1]
         for i in range(len(_lengths)):
-            torch._check_is_size(_lengths[i])
+            torch._check(_lengths[i] >= 0)
             torch._check(_lengths[i] <= ragged_dim_size)
 
             lengths_sum += _lengths[i]
@@ -1114,7 +1164,7 @@ def unbind_int(func, *args, **kwargs):
 
         if _offsets is not None:
             for i in range(len(_offsets)):
-                torch._check_is_size(_offsets[i])
+                torch._check(_offsets[i] >= 0)
                 torch._check(_offsets[i] <= ragged_dim_size)
 
     if lengths is None:
@@ -1958,6 +2008,7 @@ def index_put_(func, *args, **kwargs):
     else:
         lengths = inp.lengths()
     torch._assert_async(
+        # pyrefly: ignore  # no-matching-overload
         torch.all(indices[inp._ragged_idx] < lengths),
         "Some indices in the ragged dimension are out of bounds!",
     )
@@ -2101,13 +2152,27 @@ def all_any_max_min_default(func, *args, **kwargs):
     return func(inp._values, **new_kwargs)
 
 
+@register_jagged_func(
+    [torch.ops.aten._is_all_true.default, torch.ops.aten._is_any_true.default],
+    "self: jt_all",
+)
+def _is_true_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    return func(inp._values)
+
+
 @register_jagged_func(torch.ops.aten.min.dim, "self: jt_all, dim: any, keepdim: any?")
 def min_dim(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
+    dtype = new_kwargs["input"].dtype
+    dtype_max = _get_padding_value(dtype, "max")
     return _apply_reduction(func, "min", dtype_max, *args, **kwargs)
 
 
@@ -2117,7 +2182,8 @@ def max_dim(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
+    dtype = new_kwargs["input"].dtype
+    dtype_min = _get_padding_value(dtype, "min")
     return _apply_reduction(func, "max", dtype_min, *args, **kwargs)
 
 
@@ -2129,7 +2195,8 @@ def amin_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
+    dtype = new_kwargs["input"].dtype
+    dtype_max = _get_padding_value(dtype, "max")
     return _apply_reduction(func, "amin", dtype_max, *args, **kwargs)
 
 
@@ -2141,7 +2208,8 @@ def amax_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
+    dtype = new_kwargs["input"].dtype
+    dtype_min = _get_padding_value(dtype, "min")
     return _apply_reduction(func, "amax", dtype_min, *args, **kwargs)
 
 
@@ -2153,7 +2221,8 @@ def argmin_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
+    dtype = new_kwargs["input"].dtype
+    dtype_max = _get_padding_value(dtype, "max")
     return _apply_reduction(func, "argmin", dtype_max, *args, **kwargs)
 
 
@@ -2165,7 +2234,8 @@ def argmax_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
+    dtype = new_kwargs["input"].dtype
+    dtype_min = _get_padding_value(dtype, "min")
     return _apply_reduction(func, "argmax", dtype_min, *args, **kwargs)
 
 

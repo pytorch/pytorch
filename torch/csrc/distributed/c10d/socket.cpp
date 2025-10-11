@@ -532,8 +532,8 @@ class SocketListenOp {
 
   std::string port_;
   const SocketOptions* opts_;
-  std::vector<std::string> errors_{};
-  std::unique_ptr<SocketImpl> socket_{};
+  std::vector<std::string> errors_;
+  std::unique_ptr<SocketImpl> socket_;
 };
 
 SocketListenOp::SocketListenOp(std::uint16_t port, const SocketOptions& opts)
@@ -772,9 +772,9 @@ class SocketConnectOp {
   const char* host_;
   std::string port_;
   const SocketOptions* opts_;
-  TimePoint deadline_{};
-  std::vector<std::string> errors_{};
-  std::unique_ptr<SocketImpl> socket_{};
+  TimePoint deadline_;
+  std::vector<std::string> errors_;
+  std::unique_ptr<SocketImpl> socket_;
 };
 
 SocketConnectOp::SocketConnectOp(

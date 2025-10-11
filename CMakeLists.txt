@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
-# cmake_policy(SET CMP0022 NEW) cmake_policy(SET CMP0023 NEW)
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
 # sometimes makes XCode C compiler gets detected as "Clang", even when the C++
@@ -181,9 +180,8 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)
 endif()
 
-# For non-supported platforms, turn USE_DISTRIBUTED off by default.
-# NB: USE_DISTRIBUTED simply disables the backend; distributed code
-# still gets built
+# For non-supported platforms, turn USE_DISTRIBUTED off by default. It is not
+# tested and likely won't work without additional changes.
 if(NOT LINUX AND NOT WIN32)
   set(USE_DISTRIBUTED
       OFF
@@ -263,11 +261,11 @@ option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
-option(USE_DISTRIBUTED "Enable default distributed backends" ON)
+option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_XCCL "Use XCCL" ON
-                       "USE_DISTRIBUTED;USE_XPU;UNIX;NOT APPLE" OFF)
+                       "USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
@@ -380,12 +378,19 @@ cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
+# prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
+set(USE_PRIORITIZED_TEXT_DEFAULT OFF)
+if(LINUX AND CPU_AARCH64)
+  set(USE_PRIORITIZED_TEXT_DEFAULT ON)
+endif()
+cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker for ld."
+  "${USE_PRIORITIZED_TEXT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
-# on Windows.
+# on Windows and AArch64.
 option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
-if(WIN32)
+if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
   set(USE_MIMALLOC ON)
 
   # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
@@ -432,11 +437,12 @@ if(WIN32)
       PATH_SUFFIXES lib
       NO_DEFAULT_PATH)
     if(NOT libuv_tmp_LIBRARY)
+      set(USE_DISTRIBUTED OFF)
       set(USE_GLOO OFF)
       message(
         WARNING
-          "Libuv is not installed in current conda env. Set USE_GLOO to OFF. "
-          "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv."
+          "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
+          "Please run command 'conda install -c conda-forge libuv=1.51' to install libuv."
       )
     else()
       set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
@@ -656,6 +662,11 @@ if(MSVC)
 endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
+
+# Set linker max-page-size to 64KiB on AArch64 Linux
+if(LINUX AND CPU_AARCH64)
+  add_link_options_if_supported("-z,max-page-size=0x10000")
+endif()
 
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable. Setting
@@ -877,23 +888,28 @@ cmake_dependent_option(
   "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
+
+IF(USE_ROCM AND "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  message(WARNING "Setting USE_FBGEMM_GENAI for gfx942 to ON by default, doing ROCM build")
+  set(USE_FBGEMM_GENAI_DEFAULT ON)
+elseif(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
+  message(STATUS "Setting USE_FBGEMM_GENAI to ON by default , doing CUDA build for SM100a")
+  set(USE_FBGEMM_GENAI_DEFAULT ON)
+else()
+  set(USE_FBGEMM_GENAI_DEFAULT OFF)
+endif()
+
 cmake_dependent_option(
   USE_FBGEMM_GENAI
   "Whether to build FBGEMM GenAI quantized GEMM kernels.\
   Will be disabled if not supported by the platform"
-  ON
-  "USE_ROCM"
+  ${USE_FBGEMM_GENAI_DEFAULT}
+  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
-IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
-  set(USE_FBGEMM_GENAI off)
-endif()
 
 # Set USE_FBGEMM_GENAI to ON for CUDA build on SM100.
 if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
-  message(STATUS "Setting USE_FBGEMM_GENAI to ON, doing CUDA build for SM100a")
-  set(USE_FBGEMM_GENAI ON)
 endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
@@ -1379,10 +1395,6 @@ endif()
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
 
-if(BUILD_FUNCTORCH)
-  add_subdirectory(functorch)
-endif()
-
 # Parse custom debug info
 if(DEFINED USE_CUSTOM_DEBINFO)
   string(REPLACE ";" " " SOURCE_FILES "${USE_CUSTOM_DEBINFO}")
@@ -1420,4 +1432,58 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
   endif()
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
+endif()
+
+if(USE_PRIORITIZED_TEXT_FOR_LD)
+  add_compile_options(
+    $<$<COMPILE_LANGUAGE:C,CXX>:-ffunction-sections>
+    $<$<COMPILE_LANGUAGE:C,CXX>:-fdata-sections>
+  )
+  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
+  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
+
+  add_custom_command(
+    OUTPUT "${LINKER_SCRIPT_FILE_OUT}"
+    COMMAND ${Python_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py --filein "${LINKER_SCRIPT_FILE_IN}" --fout "${LINKER_SCRIPT_FILE_OUT}"
+    DEPENDS ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py "${LINKER_SCRIPT_FILE_IN}"
+    COMMENT "Generating prioritized text linker files"
+    VERBATIM
+  )
+
+  add_custom_target(generate_linker_script DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
+
+  if(BUILD_PYTHON)
+    set(LINKER_OPT_TARGETS torch_python)
+  endif()
+
+  if(NOT BUILD_LIBTORCHLESS)
+    list(APPEND LINKER_OPT_TARGETS torch_cpu c10)
+    if(USE_CUDA)
+      list(APPEND LINKER_OPT_TARGETS torch_cuda c10_cuda)
+    endif()
+    if(USE_XPU)
+      list(APPEND LINKER_OPT_TARGETS torch_xpu c10_xpu)
+    endif()
+    if(USE_ROCM)
+      list(APPEND LINKER_OPT_TARGETS torch_hip c10_hip)
+    endif()
+  endif()
+
+  foreach(tgt IN LISTS LINKER_OPT_TARGETS)
+    if(TARGET ${tgt})
+      add_dependencies("${tgt}" generate_linker_script)
+      target_link_options_if_supported(${tgt} "-T,${LINKER_SCRIPT_FILE_OUT}")
+      set_property(TARGET ${tgt} APPEND PROPERTY LINK_DEPENDS "${LINKER_SCRIPT_FILE_OUT}")
+    else()
+       message(WARNING "Requested target '${tgt}' for linker script optimization was not found.")
+    endif()
+  endforeach()
+
+else()
+  if(LINUX AND CPU_AARCH64)
+    message(WARNING [[
+    It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
+    To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+    ]])
+  endif()
 endif()

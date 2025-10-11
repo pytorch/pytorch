@@ -11,7 +11,8 @@ a functionalized version of the graph under compilation.
 import collections
 import contextlib
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -43,10 +44,10 @@ from .functional_utils import (
     has_metadata_mutation,
     MetadataKey,
     to_fun,
+    ViewMetaSequence,
     was_inductor_storage_resized,
 )
 from .schemas import (
-    FunctionalTensorMetadataEq,
     InputAliasInfo,
     MemoryFormatMeta,
     MutationType,
@@ -85,8 +86,10 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
 
     memory_format = MemoryFormatMeta.from_tensor(out)
 
+    # pyrefly: ignore  # missing-attribute
     if memory_format.memory_format is not None:
         was = out
+        # pyrefly: ignore  # bad-argument-type
         out = out.contiguous(memory_format=memory_format.memory_format)
         updated = was is not out
 
@@ -116,6 +119,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
         out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
 
     if is_subclass:
+        # pyrefly: ignore  # missing-attribute
         attrs = out.__tensor_flatten__()[0]
 
         for attr in attrs:
@@ -125,6 +129,7 @@ def coerce_tangent_and_suggest_memory_format(x: Tensor):
                 new_elem_memory_format,
                 elem_updated,
             ) = coerce_tangent_and_suggest_memory_format(elem)
+            # pyrefly: ignore  # missing-attribute
             out_memory_format.append(new_elem_memory_format)
             if elem_updated:
                 setattr(out, attr, new_elem)
@@ -199,6 +204,7 @@ def run_functionalized_fw_and_collect_metadata(
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
+            # pyrefly: ignore  # unbound-name
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         with disable_above, mode, suppress_pending:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
@@ -491,6 +497,7 @@ def run_functionalized_fw_and_collect_metadata(
                 curr_storage in inp_storage_refs
                 and not functional_tensor_storage_changed
             ):
+                # pyrefly: ignore  # index-error
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 num_aliased_outs = out_tensor_alias_counts[curr_storage]
@@ -640,7 +647,7 @@ from a multi-output view call"
             #
             # The FunctionalTensor will be saved if one of the 2 conditions below
             # is true:
-            functional_tensor = None
+            view_meta_sequence = None
             if (
                 # 1. If the output_type is either of:
                 #    (i) alias_of_intermediate;
@@ -672,7 +679,7 @@ from a multi-output view call"
                 and not input_info[base_idx].mutates_metadata
             ):
                 if isinstance(o, FunctionalTensor):
-                    functional_tensor = FunctionalTensorMetadataEq(o.elem)
+                    view_meta_sequence = ViewMetaSequence(o)
 
             out_info = OutputAliasInfo(
                 output_type=output_type,
@@ -680,7 +687,7 @@ from a multi-output view call"
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
-                functional_tensor=functional_tensor,
+                view_meta_sequence=view_meta_sequence,
             )
             output_info.append(out_info)
 
@@ -698,6 +705,7 @@ from a multi-output view call"
         # Anything that aliases (inputs returned in the fw due to metadata mutations, or outputs that alias inputs/intermediates)
         # are *regenerated* later, and not used directly in the autograd graph
         def _plain_fake_tensor_like_subclass(x):
+            # pyrefly: ignore  # bad-context-manager
             with detect_fake_mode():
                 return torch.empty(
                     x.shape, dtype=x.dtype, device=x.device, layout=x.layout

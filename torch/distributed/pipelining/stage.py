@@ -3,13 +3,15 @@
 import logging
 import operator
 from abc import ABC, abstractmethod
-from typing import Any, Callable, cast, Optional, Union
+from collections.abc import Callable
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.distributed._composable.replicate_with_fsdp import replicate, ReplicateModule
 from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.fx.node import Argument, map_aggregate
 from torch.nn.parallel import DistributedDataParallel
@@ -153,6 +155,7 @@ class _PipelineStageBase(ABC):
         self.submod = submodule
         self.stage_index = stage_index
         self.num_stages = num_stages
+        # pyrefly: ignore  # read-only
         self.device = device
         self.group = group
 
@@ -587,7 +590,7 @@ class _PipelineStageBase(ABC):
         last_backward: bool = False,
     ) -> tuple[tuple[Optional[torch.Tensor], ...], Optional[list[dict[str, Any]]]]:
         """
-        Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
+        Whether using PP with FSDP, DDP, or replicate there are some runtime differences between the last backward step and the
         other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
         there are additional state-variables and performance considerations depending on the data parallelism used.
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
@@ -641,7 +644,8 @@ class _PipelineStageBase(ABC):
             else:
                 with self.submod.no_sync():  # type: ignore[operator]
                     result = perform_backward(backward_type)()
-        # If submod is a FSDP module
+
+        # If submod is a FSDP or replicate module
         elif isinstance(self.submod, FSDPModule):
             self.submod.set_is_last_backward(False)
             self.submod.set_reshard_after_backward(False)
@@ -653,15 +657,20 @@ class _PipelineStageBase(ABC):
                     fsdp_module.set_is_last_backward(True)
                     fsdp_module.set_reshard_after_backward(True)
                     fsdp_module.set_requires_gradient_sync(True)
-                    fsdp_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
-                    for state in fsdp_state._state_ctx.all_states:
+
+                    if isinstance(fsdp_module, ReplicateModule):
+                        distributed_state = replicate.state(fsdp_module)  # type: ignore[arg-type]
+                    else:
+                        distributed_state = fully_shard.state(fsdp_module)  # type: ignore[attr-defined]
+
+                    for state in distributed_state._state_ctx.all_states:
                         if state._fsdp_param_group:
                             state._fsdp_param_group.post_backward()
 
                     # it would be much better if pipelining backward invoked .backward so autograd hooks
                     # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
                     # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
-                    fsdp_state._root_post_backward_final_callback()
+                    distributed_state._root_post_backward_final_callback()
 
                 run_post_backward(self.submod)
 
@@ -1516,14 +1525,12 @@ class PipelineStage(_PipelineStageBase):
             if not self.is_first:
                 # We assume that we always receive from stage - 1
                 recv_infos = tuple(
-                    [
-                        _RecvInfo(
-                            f"recv_for_{self.stage_index}_from_{self.stage_index - 1}",
-                            self.stage_index - 1,
-                            _make_tensor_from_meta(inp, self.device),
-                        )
-                        for inp in self.inputs_meta
-                    ]
+                    _RecvInfo(
+                        f"recv_for_{self.stage_index}_from_{self.stage_index - 1}",
+                        self.stage_index - 1,
+                        _make_tensor_from_meta(inp, self.device),
+                    )
+                    for inp in self.inputs_meta
                 )
                 # In case there is backward pass, set requires_grad for receive buffers
                 if self.has_backward:
@@ -1533,7 +1540,7 @@ class PipelineStage(_PipelineStageBase):
                 self.args_recv_info[chunk_id] = recv_infos
             else:
                 self.args_recv_info[chunk_id] = tuple(
-                    [_RootArgPlaceholder(i) for i in self.inputs_meta]
+                    _RootArgPlaceholder(i) for i in self.inputs_meta
                 )
 
         # Send info during forward for each activation
@@ -1558,15 +1565,11 @@ class PipelineStage(_PipelineStageBase):
             # Receiving gradients from multiple sources is not supported
             # hence we only take the first destination
             grad_recv_info = tuple(
-                [
-                    _RecvInfo(
-                        f"recv_grad_for_{self.stage_index}_from_{dst_list[0]}",
-                        dst_list[0],
-                        _make_tensor_from_meta(
-                            self.get_outputs_meta()[idx], self.device
-                        ),
-                    )
-                    for idx, dst_list in act_send_info.items()
-                ]
+                _RecvInfo(
+                    f"recv_grad_for_{self.stage_index}_from_{dst_list[0]}",
+                    dst_list[0],
+                    _make_tensor_from_meta(self.get_outputs_meta()[idx], self.device),
+                )
+                for idx, dst_list in act_send_info.items()
             )
         return grad_recv_info
