@@ -2386,7 +2386,6 @@ class _XpuDeviceProperties:
     sub_group_sizes: list[_int]
     has_fp16: _bool
     has_fp64: _bool
-    has_tf32: _bool
     has_atomic64: _bool
     has_bfloat16_conversions: _bool
     has_subgroup_matrix_multiply_accumulate: _bool

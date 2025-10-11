@@ -330,7 +330,6 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(sub_group_sizes)                                        \
       ._(has_fp16)                                               \
       ._(has_fp64)                                               \
-      ._(has_tf32)                                               \
       ._(has_atomic64)                                           \
       ._(has_bfloat16_conversions)                               \
       ._(has_subgroup_matrix_multiply_accumulate)                \
