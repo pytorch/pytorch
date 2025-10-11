@@ -976,7 +976,7 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def _post_backward(self):
+    def _post_backward(self, grad_scale_factor: int):
         # Manually call post backward for FSDP
         if isinstance(self.submod, FSDPModule):
             fsdp_module = self.submod
@@ -996,9 +996,10 @@ class _PipelineStageBase(ABC):
             # it would be much better if pipelining backward invoked .backward so autograd hooks
             # worked and modules like DDP/FSDP behaved as expected.  Working around this for the time being,
             # we need to call this too to ensure FSDP syncs its grad reduction ops back to the default stream.
-            # The stage passes in a list to hold the reduce scatter events for the last backward step. After
-            # the pipeline is finished, we will wait on these events to ensure that the grad reduction ops are finished.
             distributed_state._root_post_backward_final_callback()
+        # Call gradient scaling at the end of the backward pass
+        # NOTE: this must happen after FSDP post_backward is FSDP is enabled
+        self.scale_grads(grad_scale_factor)
 
 
 class _PipelineStage(_PipelineStageBase):

@@ -625,6 +625,10 @@ or equal to the number of stages ({self._num_stages})."
         # Run microbatches
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)
 
+        # Stage post processing
+        grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+        self._stage._post_backward(grad_scale_factor)
+
         # Return merged results per original format
         if self._stage.is_last:
             return self._merge_outputs(self._stage.output_chunks)
@@ -772,10 +776,6 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 bwd_sends_to_wait.extend(works.values())
 
             logger.debug("[%s] Backwarded microbatch %s", self._stage.stage_index, i)
-
-        self._stage.scale_grads(
-            grad_scale_factor=self._n_microbatches if self.scale_grads else 1
-        )
 
         # Wait for all backward sends to finish
         for work in bwd_sends_to_wait:
@@ -950,10 +950,6 @@ class Schedule1F1B(PipelineScheduleSingle):
             bwd_sends = self._stage.get_bwd_send_ops(bwd_mb_index)
             send_work = _batch_p2p(bwd_sends, desc="bwd_send")
             bwd_mb_index += 1
-
-        self._stage.scale_grads(
-            grad_scale_factor=self._n_microbatches if self.scale_grads else 1
-        )
 
         # Wait for the last backward send to finish
         _wait_batch_p2p(send_work)
@@ -1556,9 +1552,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
         self._step_microbatches(args_split, kwargs_split, targets_split, losses)
 
         # Stage post processing
-        # TODO: remove this section and include as part of the schedule IR
+        # TODO: remove this section and include as part of the schedule IR?
         for stage in self._stages:
-            stage._post_backward()
+            grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+            stage._post_backward(grad_scale_factor)
 
         # Return merged results per original format
         for stage in self._stages:
@@ -2091,15 +2088,12 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                 loss = self._maybe_get_loss(stage, mb_index)
                 backward_counter[stage_idx] += 1
                 last_backward = backward_counter[stage_idx] == self._n_microbatches
-                grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                 stage.backward_one_chunk(
                     mb_index,
                     loss=loss,
                     full_backward=True,
                     last_backward=last_backward,
                 )
-                if last_backward:
-                    stage.scale_grads(grad_scale_factor)
                 # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                 # see [Note: V-schedule special case]
                 if is_prev_stage_on_this_rank:
@@ -2136,13 +2130,10 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                     _assert_unsharded(stage_idx)
                 backward_counter[stage_idx] += 1
                 last_backward = backward_counter[stage_idx] == self._n_microbatches
-                grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                 stage.backward_weight_one_chunk(
                     mb_index,
                     last_backward=last_backward,
                 )
-                if last_backward:
-                    stage.scale_grads(grad_scale_factor)
             else:
                 raise ValueError(f"{action=} is unknown or unsupported")
 
