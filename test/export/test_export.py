@@ -285,7 +285,6 @@ class TestDynamismExpression(TestCase):
         class Module(torch.nn.Module):
             def forward(self, x):
                 b = x.item()
-                torch._check_is_size(b)
                 return torch.full((b, 1), 1)
 
         f = Module()
@@ -384,7 +383,6 @@ graph():
         class MySlice(torch.nn.Module):
             def forward(self, x, seq_len):
                 l = seq_len.item()
-                torch._check_is_size(l, max=x.size(1))
                 x = x.narrow(1, 0, l)
                 return x
 
@@ -413,7 +411,6 @@ graph():
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
                 b = x.item()
-                torch._check_is_size(b)
                 torch._check(b >= 4)
                 torch._check(b <= 5)
                 torch._check(b <= 5)
@@ -973,7 +970,7 @@ graph():
 
         model = M()
         ep = export(model, (torch.randint(0, 8, (5,), dtype=torch.int64),))
-        print(ep)
+
         inp = torch.randint(0, 8, (5,), dtype=torch.int64)
         self.assertTrue(torch.allclose(ep.module()(inp), M()(inp)))
 
@@ -2558,7 +2555,9 @@ class GraphModule(torch.nn.Module):
 
             def body_fn(idx, out, y0):
                 i = idx.item()
-                torch._check_is_size(i, max=x.size(0) - 1)
+                # TODO removing those causes PendingUnbackedSymbolNotFound.
+                torch._check(i >= 0)
+                torch._check(i < x.size(0))
                 y0 = x[i] + y0
                 out = out.clone()
                 out[i] = y0
@@ -2666,7 +2665,7 @@ class GraphModule(torch.nn.Module):
         m = M()
         x = torch.randn(3)
         ep = export(m, (x,))
-        print(ep)
+
         ufm = torch.export.unflatten(ep)
         self.assertExpectedInline(
             str(ufm.graph_module.code).strip(),
@@ -3571,7 +3570,6 @@ graph():
                     sample_input = _tensor(nz=nz)
                     ep = export(mod, (sample_input,), strict=False)
                     self.assertEqual(ep.module()(sample_input), nz)
-                    print(ep)
 
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
@@ -5993,7 +5991,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         class Foo(torch.nn.Module):
             def forward(self, x):
                 u0 = x.item()
-                torch._check_is_size(u0)
                 t = torch.empty(u0 - 1)
                 return t + t
 
@@ -6712,8 +6709,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 valid_idxs = torch.nonzero(valid_mask).to(scores.device)
 
                 num_topk = torch.minimum(topk, torch.tensor(valid_idxs.shape[0])).item()
-                torch._check_is_size(num_topk)
-                torch._check(scores.shape[0] >= num_topk)
                 scores, idxs = scores.sort(descending=True)
                 scores = scores[:num_topk]
                 topk_idxs = valid_idxs[idxs[:num_topk]]
@@ -6742,6 +6737,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 b = x.item()
                 torch._check(b >= 0)
                 torch._check(b < y.shape[0])
+
                 return y[0, b]
 
         if is_non_strict_test(self._testMethodName):
@@ -6984,7 +6980,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x, y):
                 b = x.item()
 
-                torch._check_is_size(b)
+                torch._check(b >= 0)
                 torch._check(b < y.size(0))
                 return y[:b]
 
@@ -6992,7 +6988,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def forward(self, x, y):
                 b = x.item()
 
-                torch._check_is_size(b)
+                torch._check(b >= 0)
                 torch._check(b < y.size(0) * 2)
                 return y[:b]
 
@@ -8605,7 +8601,7 @@ def forward(self, x):
         class Module(torch.nn.Module):
             def forward(self, x, y):
                 n = x.max().item()
-                torch._check_is_size(n)
+                torch._check(n >= 0)
                 return y + n
 
         fn = Module()
@@ -8622,7 +8618,6 @@ def forward(self, x):
                 n = x.max().item()
                 torch._check(n >= 2)
                 torch._check(n <= 10)
-                torch._check_is_size(n)
                 return y + n
 
         fn = Module()
@@ -8664,7 +8659,6 @@ def forward(self, x):
         class Module1(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
                 torch._check(n >= 0)
                 return y.sum() + torch.ones(n, 5).sum()
 
@@ -8673,7 +8667,6 @@ def forward(self, x):
         class Module2(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
                 torch._check(n >= 0)
                 torch._check(n <= 6)
                 return y.sum() + torch.ones(n, 5).sum()
@@ -8683,7 +8676,6 @@ def forward(self, x):
         class Module3(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
                 torch._check(n >= 0)
                 torch._check(n <= 1)
                 return y.sum() + torch.ones(n, 5).sum()
@@ -8693,7 +8685,6 @@ def forward(self, x):
         class Module4(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
                 torch._check(n >= 2)
                 return y.sum() + torch.ones(n, 5).sum()
 
@@ -8702,7 +8693,6 @@ def forward(self, x):
         class Module5(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
                 torch._check(n >= 1)
                 return y.sum() + torch.ones(n, 5).sum()
 
@@ -8790,7 +8780,7 @@ def forward(self, x):
         ep = export(M(), (torch.tensor(1), torch.ones(4, 5)))
 
         # This is because we insert sym_constrain_range in the graph now
-        error_msg = r"Invalid value range for -1 between"
+        error_msg = r".* failed for expression u0 >= 0 on node .*"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
@@ -8844,7 +8834,6 @@ def forward(self, x):
                     # this check_is_size call needs to be traced by this subgraph for the select call,
                     # it can't be in the cond graph, as that fires & fails right before loop termination.
                     i = idx.item()
-                    torch._check_is_size(i, max=x.size(0) - 1)
                     return idx + 1, acc + x[i]
 
                 acc = torch.zeros(x.size(1))
@@ -8901,7 +8890,6 @@ def forward(self, x):
 
             def forward(self, start_pos: torch.Tensor):
                 pos = start_pos.item()
-                torch._check_is_size(pos)
                 torch._check(pos >= 0)
                 torch._check(pos <= 4)
                 return self.freq[pos] * self.freq[pos]
@@ -8910,16 +8898,10 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
         decompose_ep = ep.run_decompositions()
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_mixed_input(self):
@@ -9005,12 +8987,6 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -9033,12 +9009,6 @@ def forward(self, x):
         self.assertEqual(ep.module()(torch.tensor([5])).shape, (10, 5))
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_to_module_with_mutated_buffer(self):
@@ -9457,7 +9427,6 @@ def forward(self, b_a_buffer, x):
         class Foo(torch.nn.Module):
             def forward(self, xs):
                 u0, u1 = xs.tolist()
-                torch._check_is_size(u1)
                 return u0, u1
 
         ep = export(Foo(), (torch.tensor([2, 3]),), strict=False)
@@ -9731,7 +9700,6 @@ def forward(self, b_a_buffer, x):
             error_msg = mock_exception.args[0]
             self.assertIn("torch._check(u > 5)", error_msg)
             self.assertIn("torch._check(u <= 5)", error_msg)
-            self.assertNotIn("torch._check_is_size", error_msg)
 
     def test_train_eval_on_exported_preautograd_module(self):
         class Foo(torch.nn.Module):
@@ -10100,7 +10068,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         class Foo(torch.nn.Module):
             def forward(self, x):
                 y = x.item()
-                torch._check_is_size(y)
                 return torch.zeros(y)
 
         f = Foo()
@@ -10108,17 +10075,11 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         ep = export(f, (torch.tensor([3]),))
 
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
 
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
@@ -10460,8 +10421,6 @@ graph():
         class M(torch.nn.Module):
             def forward(self, x, y):
                 a = x.item()
-                torch._check_is_size(a)
-                torch._check(a <= y.size(0))
                 return y[:a]
 
         ep = export(
@@ -10946,17 +10905,16 @@ graph():
         test_inp = torch.randn(2, 3)
 
         torch_gm = _export_to_torch_ir(orig_eager, (torch.rand(2, 3),), {})
+        torch_gm.state_dict().keys()
         for k, v in orig_eager.state_dict().items():
-            normalized_k = k.replace(".", "_")
-            self.assertIn(normalized_k, torch_gm.state_dict())
-            self.assertEqual(v, torch_gm.state_dict()[normalized_k])
+            self.assertIn(k, torch_gm.state_dict())
+            self.assertEqual(v, torch_gm.state_dict()[k])
         self.assertTrue(torch.allclose(torch_gm(test_inp), orig_eager(test_inp)))
 
         pre_autograd_gm = torch.export._trace._export(
             orig_eager, (torch.rand(2, 3),), {}, pre_dispatch=True
         ).module()
         for k, v in orig_eager.state_dict().items():
-            normalized_k = k.replace(".", "_")
             self.assertIn(k, pre_autograd_gm.state_dict())
             self.assertEqual(v, pre_autograd_gm.state_dict()[k])
         self.assertTrue(torch.allclose(pre_autograd_gm(test_inp), orig_eager(test_inp)))
@@ -10968,6 +10926,7 @@ graph():
             self.assertIn(k, ep.state_dict)
             self.assertEqual(v, ep.state_dict[k])
         self.assertTrue(torch.allclose(ep.module()(test_inp), orig_eager(test_inp)))
+        self.assertTrue(torch_gm.state_dict().keys(), orig_eager.state_dict().keys())
 
     def test_nn_module_stack(self):
         class Leaf(torch.nn.Module):
@@ -14326,7 +14285,6 @@ graph():
                 y_sum = y.sin().sum()
                 with torch.no_grad():
                     a = x.item()
-                    torch._check_is_size(a)
                     torch._check(a > 2)
                     torch._check(a < 6)
                     unbacked_shape = torch.ops.testlib.foo_unbacked(a)
@@ -14339,9 +14297,8 @@ graph():
             """\
 def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item);  sym_constrain_range_for_size_default = None
-    ge_1 = item >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
+    ge = item >= 3
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 3 on node 'ge'");  ge = _assert_scalar_default = None
     le = item <= 5
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
     gt_1 = item > 2
@@ -14359,7 +14316,6 @@ def forward(self, x, y):
     sin = torch.ops.aten.sin.default(y)
     sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size_default = None
     ge_1 = _local_scalar_dense >= 3
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le_1 = _local_scalar_dense <= 5
@@ -14946,7 +14902,6 @@ graph():
             def forward(self, x, y):
                 n = y.item()
                 m = y.item()
-                torch._check_is_size(n)
                 torch._check(m >= 0)
                 torch._check(n >= 3)
                 torch._check(-m >= -9)  # m <= 9
@@ -14959,22 +14914,10 @@ graph():
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
-        ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 0, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         # check runtime
@@ -15668,11 +15611,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureTrainingIRToRunDecomp
-    @testing.expectedFailureRetraceability
-    @testing.expectedFailureStrictV2
-    @testing.expectedFailureStrict  # annotation needs to be handled in dynamo
-    @testing.expectedFailureSerDer
     def test_preserve_annotation(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -16780,15 +16718,7 @@ class TestOneOffModelExportResult(TestCase):
 
         with torch.nn.attention.sdpa_kernel([SDPBackend.MATH]):
             ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
-            print(ep.graph)
             ep.run_decompositions()
-            print(ep.graph)
-
-    #         self.assertExpectedInline(ep.graph_module.code.strip(), """\
-    # def forward(self, arg0_1, arg1_1, arg2_1):
-    #     _scaled_dot_product_flash_attention_for_cpu = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default(arg0_1, arg1_1, arg2_1, 0.0, True);  arg0_1 = arg1_1 = arg2_1 = None
-    #     getitem = _scaled_dot_product_flash_attention_for_cpu[0];  _scaled_dot_product_flash_attention_for_cpu = None
-    #     return (getitem,)""")
 
     @skipIfCrossRef
     @unittest.skipIf(

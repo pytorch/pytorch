@@ -48,13 +48,17 @@ class TestAOTInductorWindowsCrossCompilation(TestCase):
                     "aot_inductor.model_name_for_generated_files": "model",
                     "aot_inductor.cross_target_platform": "windows",
                     "aot_inductor.link_libtorch": False,
+                    # TODO: need to add aoti_shim_library_path for CI
                     "aot_inductor.aoti_shim_library": "executorch",
                     # no fallback ops
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "TRITON,CPP",
                     "max_autotune_conv_backends": "TRITON,CPP",
+                    "aot_inductor.embed_kernel_binary": True,
                     # simplify things for now
                     "aot_inductor.precompile_headers": False,
+                    "aot_inductor.package_constants_on_disk_format": "binary_blob",
+                    "aot_inductor.package_constants_in_so": False,
                 },
             )
 
