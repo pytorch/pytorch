@@ -743,8 +743,6 @@ class DTensor(torch.Tensor):
                 dimensions and values are sequences of mesh dimensions (or mesh dimension names)
                 that the tensor dimension is sharded across, in execution order.
 
-                Internally, this is converted to a ShardOrder (tuple of ShardOrderEntry objects).
-
                 If not specified, a default sharding order is used.
 
                 Example: For a 3D tensor and a 4D device mesh, to shard tensor dimension 0 over
@@ -996,9 +994,6 @@ def distribute_tensor(
             dimensions they are sharded over. It is a dictionary where keys are tensor
             dimensions and values are sequences of mesh dimensions (or mesh dimension names)
             that the tensor dimension is sharded across, in execution order.
-
-            Internally, this is converted to a :class:`ShardOrder` (tuple of
-            :class:`ShardOrderEntry` objects).
 
             If not specified, a default sharding order is used.
 

@@ -763,7 +763,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
 
         match = re.search(r"trace:\s*(.*)\)", s)
         if match:
-            trace_str = match.group(1).rstrip(")")
+            trace_str = match.group(1)
             return trace_str
         else:
             return ""
@@ -938,7 +938,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             elif idx == 3:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]R->S(0)S(1)R->RS(1)R->RS(1)S(0""",
+                    """S(0)[0]S(0)[1]R->S(0)S(1)R->RS(1)R->RS(1)S(0)""",
                 )
             expected_dt = self.distribute_tensor(
                 input_data.clone(), mesh, dst_placement, shard_order=dst_order

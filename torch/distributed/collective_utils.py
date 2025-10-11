@@ -208,7 +208,7 @@ def all_gather_object_enforce_type(
     # pyre-fixme[2]: Parameter must have a type other than `Any`
     obj: Any,
     # pyre-fixme[2]: Parameter must have a type that does not contain `Any`
-    type_checker: Callable[[Any, Any], bool] = lambda x, y: type(x) == type(y),
+    type_checker: Callable[[Any, Any], bool] = lambda x, y: type(x) is type(y),
 ) -> None:
     """
     Similar to plain all_gather_object but with additional type checking
