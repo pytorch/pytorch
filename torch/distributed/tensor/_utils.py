@@ -21,17 +21,45 @@ from torch.utils._typing_utils import not_none
 def _explicit_order_placements(
     mesh_shape: ShapeType,
     placements: Sequence[Placement],
-    shard_order: Optional[ShardOrder],
+    shard_order: Optional[ShardOrder] = None,
 ) -> Sequence[tuple[int, Placement]]:
     """
-    Replace Strided Shards with regular shards in an adjusted order.
+    Replace Strided Shards with regular shards in an adjusted order, or reorder
+    placements according to the provided shard_order.
 
-    Returns a list of (mesh_dim, placement) tuples where the list order is the sharding order.
+    Example 1 (_StridedShard with default order):
+        Input:
+            mesh_shape = (2, 2, 2)  # 3D device mesh
+            placements = [Shard(0), _StridedShard(0, split_factor=2), Shard(0)]
+            shard_order = None  # must be None when `_StridedShard` exists
+        Output:
+            [(0, Shard(0)), (2, Shard(0)), (1, Shard(0))]
 
-    ex.
-    [Shard(0), _StridedShard(0, split_factor=2), Shard(0)] ->
-    [(0, Shard(0)), (2, Shard(0)), (1, Shard(0))]
+        Explanation: The strided shard on mesh dim 1 is deferred and appears after
+        the regular shard on mesh dim 2.
 
+    Example 2 (Explicit mutated order, must without _StridedShard):
+        Input:
+            mesh_shape = (2, 2, 2)  # 3D device mesh
+            placements = [Shard(0), Shard(0), Shard(0)]
+            shard_order = (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(2, 0, 1)),
+            )
+        Output:
+            [(2, Shard(0)), (0, Shard(0)), (1, Shard(0))]
+
+        Explanation: Tensor dim 0 is sharded first on mesh dim 1, then on mesh dim 2,
+        then on mesh dim 0
+
+    Args:
+        mesh_shape: Shape of the device mesh
+        placements: Sequence of placement objects, one per mesh dimension
+        shard_order: Optional ShardOrder specifying the execution order of shardings.
+            If None, default left-to-right order is used (shard_order does not work with _StridedShard).
+
+    Returns:
+        A list of tuples, where each tuple contains the execution order and the corresponding placement,
+            aligned with the input `placements`.
     """
     if not len(placements) == len(mesh_shape):
         raise RuntimeError(
@@ -132,9 +160,6 @@ def compute_local_shape_and_global_offset(
             dimensions they are sharded over. It is a dictionary where keys are tensor
             dimensions and values are sequences of mesh dimensions (or mesh dimension names)
             that the tensor dimension is sharded across, in execution order.
-
-            Internally, this is converted to a ShardOrder (tuple of ShardOrderEntry objects)
-            where each ShardOrderEntry contains a tensor_dim and mesh_dims tuple.
 
             If not specified, a default left-to-right on the device mesh sharding
             order is used.
@@ -363,7 +388,7 @@ def compute_local_tensor_info(
                 ):
                     local_stride[i] = local_stride[i] // mesh_dim_size
 
-        elif not isinstance(placement, (Replicate, Partial)):
+        elif not isinstance(placement, Replicate | Partial):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
 
     return local_shape, local_stride
