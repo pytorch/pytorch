@@ -7,7 +7,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch._prims_common import ShapeType
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, ShardOrder
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Partial,
@@ -19,60 +19,110 @@ from torch.utils._typing_utils import not_none
 
 
 def _explicit_order_placements(
-    mesh_shape: ShapeType, placements: Sequence[Placement]
+    mesh_shape: ShapeType,
+    placements: Sequence[Placement],
+    shard_order: Optional[ShardOrder] = None,
 ) -> Sequence[tuple[int, Placement]]:
     """
-    Replace Strided Shards with regular shards in an adjusted order.
+    Replace Strided Shards with regular shards in an adjusted order, or reorder
+    placements according to the provided shard_order.
 
-    Returns a list of (mesh_dim, placement) tuples where the list order is the sharding order.
+    Example 1 (_StridedShard with default order):
+        Input:
+            mesh_shape = (2, 2, 2)  # 3D device mesh
+            placements = [Shard(0), _StridedShard(0, split_factor=2), Shard(0)]
+            shard_order = None  # must be None when `_StridedShard` exists
+        Output:
+            [(0, Shard(0)), (2, Shard(0)), (1, Shard(0))]
 
-    ex.
-    [Shard(0), _StridedShard(0, split_factor=2), Shard(0)] ->
-    [(0, Shard(0)), (2, Shard(0)), (1, Shard(0))]
+        Explanation: The strided shard on mesh dim 1 is deferred and appears after
+        the regular shard on mesh dim 2.
 
+    Example 2 (Explicit mutated order, must without _StridedShard):
+        Input:
+            mesh_shape = (2, 2, 2)  # 3D device mesh
+            placements = [Shard(0), Shard(0), Shard(0)]
+            shard_order = (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(2, 0, 1)),
+            )
+        Output:
+            [(2, Shard(0)), (0, Shard(0)), (1, Shard(0))]
+
+        Explanation: Tensor dim 0 is sharded first on mesh dim 1, then on mesh dim 2,
+        then on mesh dim 0
+
+    Args:
+        mesh_shape: Shape of the device mesh
+        placements: Sequence of placement objects, one per mesh dimension
+        shard_order: Optional ShardOrder specifying the execution order of shardings.
+            If None, default left-to-right order is used (shard_order does not work with _StridedShard).
+
+    Returns:
+        A list of tuples, where each tuple contains the execution order and the corresponding placement,
+            aligned with the input `placements`.
     """
     if not len(placements) == len(mesh_shape):
         raise RuntimeError(
             "Expected one placement per mesh dim, "
             f"but found {len(placements)} placements and {len(mesh_shape)} mesh dims."
         )
-    ordered = []
-    deferred_strided_placements = defaultdict(list)
-    strided_part_ended_for_dim = set()
-    for mesh_dim, p in enumerate(placements):
-        if isinstance(p, _StridedShard):
-            # validate the stride is the correct multiple of the meshdim and the earlier shard
-            deferred_strided_placements[p.dim].append((mesh_dim, p))
+    if shard_order is None or DTensorSpec.is_default_device_order(shard_order):
+        # handles _StridedShard case
+        ordered = []
+        deferred_strided_placements = defaultdict(list)
+        strided_part_ended_for_dim = set()
+        for mesh_dim, p in enumerate(placements):
+            if isinstance(p, _StridedShard):
+                # validate the stride is the correct multiple of the meshdim and the earlier shard
+                deferred_strided_placements[p.dim].append((mesh_dim, p))
 
-        else:
-            ordered.append((mesh_dim, p))
-            if isinstance(p, Shard):
-                if p.dim in strided_part_ended_for_dim:
-                    raise NotImplementedError(
-                        f"Strided sharding does not allow Shard() to appear after "
-                        f"the strided part has ended. {p} at mesh dim {mesh_dim} in "
-                        f"{placements} violates this assumption."
-                    )
+            else:
+                ordered.append((mesh_dim, p))
+                if isinstance(p, Shard):
+                    if p.dim in strided_part_ended_for_dim:
+                        raise NotImplementedError(
+                            f"Strided sharding does not allow Shard() to appear after "
+                            f"the strided part has ended. {p} at mesh dim {mesh_dim} in "
+                            f"{placements} violates this assumption."
+                        )
 
-                if p.dim in deferred_strided_placements:
-                    strided_part_ended_for_dim.add(p.dim)
-                    strided_placements = deferred_strided_placements.pop(p.dim)
-                    aggregate_size = mesh_shape[mesh_dim]
-                    while len(strided_placements) > 0:
-                        strided_mesh_dim, strided = strided_placements.pop()
-                        if not strided.split_factor == aggregate_size:
-                            raise RuntimeError(
-                                f"Can only convert _StridedShard to ordered Shard if split_factor({strided.split_factor})"
-                                f" == aggregate mesh size ({aggregate_size})"
-                            )
-                        aggregate_size *= mesh_shape[strided_mesh_dim]
-                        ordered.append((strided_mesh_dim, Shard(p.dim)))
-
-    return ordered
+                    if p.dim in deferred_strided_placements:
+                        strided_part_ended_for_dim.add(p.dim)
+                        strided_placements = deferred_strided_placements.pop(p.dim)
+                        aggregate_size = mesh_shape[mesh_dim]
+                        while len(strided_placements) > 0:
+                            strided_mesh_dim, strided = strided_placements.pop()
+                            if not strided.split_factor == aggregate_size:
+                                raise RuntimeError(
+                                    f"Can only convert _StridedShard to ordered Shard if split_factor({strided.split_factor})"
+                                    f" == aggregate mesh size ({aggregate_size})"
+                                )
+                            aggregate_size *= mesh_shape[strided_mesh_dim]
+                            ordered.append((strided_mesh_dim, Shard(p.dim)))
+        return ordered
+    else:
+        # Build a sequence that pairs each device mesh dimension with its
+        # placement, ordering them according to the provided shard_order. There
+        # may be multiple valid device orders for a given shard_order, but any
+        # such order is acceptable here.
+        device_order = [-1 for _ in range(len(mesh_shape))]
+        current_order = 0
+        for entry in shard_order:
+            for mesh_dim in entry.mesh_dims:
+                device_order[mesh_dim] = current_order
+                current_order += 1
+        for idx, val in enumerate(device_order):
+            if val == -1:
+                device_order[idx] = current_order
+                current_order += 1
+        return [(i, j) for i, j in zip(device_order, placements, strict=True)]
 
 
 def compute_local_shape_and_global_offset(
-    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
+    global_shape: ShapeType,
+    mesh: DeviceMesh,
+    placements: Sequence[Placement],
+    shard_order: Optional[ShardOrder] = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """
     Compute the local tensor shape and the global offsets into the original tensor
@@ -105,6 +155,14 @@ def compute_local_shape_and_global_offset(
         global_shape (ShapeType): The global shape of the DTensor.
         mesh (:class:`DeviceMesh`): The device mesh this DTensor is distributed on.
         placements (Sequence[:class:`Placement`]]): The placements of the DTensor.
+        shard_order (dict[int, Sequence[int | str]], optional):
+            Specifies the mapping of tensor dimensions to the order of device mesh
+            dimensions they are sharded over. It is a dictionary where keys are tensor
+            dimensions and values are sequences of mesh dimensions (or mesh dimension names)
+            that the tensor dimension is sharded across, in execution order.
+
+            If not specified, a default left-to-right on the device mesh sharding
+            order is used.
 
     Return:
         local_shape: the shape of the DTensor's _local_tensor on the current rank.
@@ -113,7 +171,7 @@ def compute_local_shape_and_global_offset(
 
     """
     return _compute_local_shape_and_global_offset(
-        global_shape, mesh.shape, mesh.get_coordinate(), placements
+        global_shape, mesh.shape, mesh.get_coordinate(), placements, shard_order
     )
 
 
@@ -123,6 +181,7 @@ def _compute_local_shape_and_global_offset(
     mesh_shape: ShapeType,
     my_coordinate: Optional[list[int]],
     placements: Sequence[Placement],
+    shard_order: Optional[ShardOrder] = None,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """
     Suppose you have a full tensor with size global_shape, and you have sharded
@@ -146,7 +205,7 @@ def _compute_local_shape_and_global_offset(
 
     # StridedShard implies a non-standard order to apply shards; get the
     # correct order to start applying splits
-    ordered_placements = _explicit_order_placements(mesh_shape, placements)
+    ordered_placements = _explicit_order_placements(mesh_shape, placements, shard_order)
 
     local_shape = list(global_shape)
     # We'll compute the data for where the shard beings on a per-dim basis.
@@ -266,7 +325,7 @@ def compute_global_tensor_info(
                 if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
                     # rescale the stride by the shard size
                     tensor_stride[i] = tensor_stride[i] * mesh_dim_size
-        elif not isinstance(placement, (Replicate, Partial)):
+        elif not isinstance(placement, Replicate | Partial):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
     return tensor_shape, tensor_stride
 
@@ -329,7 +388,7 @@ def compute_local_tensor_info(
                 ):
                     local_stride[i] = local_stride[i] // mesh_dim_size
 
-        elif not isinstance(placement, (Replicate, Partial)):
+        elif not isinstance(placement, Replicate | Partial):
             raise RuntimeError(f"placement type {type(placement)} not supported!")
 
     return local_shape, local_stride
@@ -406,12 +465,12 @@ def try_find_mesh_from_args(
     NOTE: we can optimize this search if needed
     """
     for arg in args:
-        if isinstance(arg, (dtensor.DTensor, DTensorSpec)):
+        if isinstance(arg, dtensor.DTensor | DTensorSpec):
             return arg.device_mesh
         elif (
-            isinstance(arg, (list, tuple))
+            isinstance(arg, list | tuple)
             and len(arg) > 0
-            and isinstance(arg[0], (dtensor.DTensor, DTensorSpec))
+            and isinstance(arg[0], dtensor.DTensor | DTensorSpec)
         ):
             return arg[0].device_mesh
 
