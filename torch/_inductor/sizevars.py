@@ -2,6 +2,7 @@
 import functools
 import itertools
 import logging
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from typing import Any, Callable, cast, Optional, Union
 
@@ -739,47 +740,110 @@ class SizeVarAllocator:
         hint for both s0 + u0 and u1, but it first needs to know they are equal.
         Then it can substitute s0 + u0 for u1.
         """
+
         if self.unbacked_replacements is not None:
             return self.unbacked_replacements
 
-        def should_keep_src_dst(lhs: Expr, rhs: Expr):
-            # assuming lhs is the expr to be replaced (src), rhs is the replacement (dst)
-            # checking if we should keep them for the replacement rule or swap
+        class UnionFind:
+            def __init__(self, equality_graph: dict[Expr, OrderedSet[Expr]]):
+                self.eq_graph = equality_graph
+                self.expressions = list(equality_graph.keys())
+                self.reverse_expressions = {
+                    expr: i for i, expr in enumerate(self.expressions)
+                }
 
-            if not has_free_unbacked_symbols(rhs):
-                # prioritize replacing unbacked exprs with backed expressions
-                # e.g. u0 + s3 ==> s0 + s1
-                return True
-            elif not has_free_unbacked_symbols(lhs):
-                return False
-            elif lhs.has(rhs):
-                # handles cases where LHS is a sub-expression of the RHS
-                # e.g. Max(2, u0) == s1 * Max(2, u0)
-                return True
-            elif rhs.has(lhs):
-                return False
-            else:
-                # fallback to sympy.Basic.compare for a deterministic ordering
-                return lhs.compare(rhs) == 1
+                # Each node is its own parent initially
+                self.parent = list(range(len(self.expressions)))
+                # Track rank for union-by-rank
+                self.rank = [1] * len(self.expressions)
 
-        self.unbacked_replacements = {}
+            def find_expr(self, expr: Expr):
+                parent = self.find(self.reverse_expressions[expr])
+                return self.expressions[parent]
+
+            def find(self, x: int):
+                # Path compression
+                if self.parent[x] != x:
+                    self.parent[x] = self.find(self.parent[x])
+                return self.parent[x]
+
+            def choose_leader(self, x: int, y: int):
+                def _choose(x: int, y: int) -> bool:
+                    # Do I choose leader x over y?
+                    this, that = self.expressions[x], self.expressions[y]
+
+                    # Prefer replacing unbacked exprs with backed expressions/constants.
+                    # e.g. u0 + s3 ==> s0 + s1
+                    # e.g. u2 ==> 300
+                    any_unbacked_this = has_free_unbacked_symbols(this)
+                    any_unbacked_that = has_free_unbacked_symbols(that)
+                    if any_unbacked_this != any_unbacked_that:
+                        return False if any_unbacked_this else True
+
+                    if this.has(that):
+                        # Handles cases where this is a sub-expression of that.
+                        # e.g. s1 * Max(2, u0) ==> Max(2, u0)
+                        return False
+                    elif that.has(this):
+                        return True
+
+                    # Prefer expressions seen more often.
+                    degrees_this = len(self.eq_graph[this])
+                    degrees_that = len(self.eq_graph[that])
+                    if degrees_this != degrees_that:
+                        return True if degrees_this < degrees_that else False
+
+                    # Try to union-by-rank.
+                    if self.rank[x] != self.rank[y]:
+                        return True if self.rank[x] > self.rank[y] else False
+
+                    # Fallback to sympy.Basic.compare for a deterministic ordering.
+                    return this.compare(that) == -1
+
+                if _choose(x, y):
+                    return x, y
+                return y, x
+
+            def union_expr(self, a: Expr, b: Expr):
+                return self.union(
+                    self.reverse_expressions[a], self.reverse_expressions[b]
+                )
+
+            def union(self, a: int, b: int):
+                rootA = self.find(a)
+                rootB = self.find(b)
+                if rootA == rootB:
+                    return False  # already connected
+                leader, other = self.choose_leader(rootA, rootB)
+                self.parent[other] = leader
+                self.rank[leader] += self.rank[other]
+                return True
+
+        self.equality_graph: dict[Expr, OrderedSet[Expr]] = defaultdict(OrderedSet)
         for assertions in self.shape_env.deferred_runtime_asserts.values():
             for assertion in assertions:
                 if not isinstance(assertion.expr, sympy.Equality):
                     continue
-
                 lhs, rhs = assertion.expr.lhs, assertion.expr.rhs
-                should_keep = should_keep_src_dst(lhs, rhs)
-                src = lhs if should_keep else rhs
-                dst = rhs if should_keep else lhs
+                # don't think we need this but just in case?
+                if isinstance(lhs, int):
+                    lhs = sympy.Integer(lhs)
+                if isinstance(rhs, int):
+                    rhs = sympy.Integer(lhs)
+                self.equality_graph[lhs].add(rhs)
+                self.equality_graph[rhs].add(lhs)
 
-                existing_replacement = self.unbacked_replacements.get(src, None)
-                if existing_replacement and isinstance(
-                    existing_replacement, sympy.Symbol
-                ):
-                    # Prefer to keep replacements with symbols.
-                    continue
-                self.unbacked_replacements[src] = dst
+        uf = UnionFind(self.equality_graph)
+        for expr, edges in self.equality_graph.items():
+            for adj in edges:
+                uf.union_expr(expr, adj)
+
+        self.unbacked_replacements: dict[Expr, Expr] = {}
+        for expr in self.equality_graph.keys():
+            canonical_expr = uf.find_expr(expr)
+            if expr != canonical_expr:
+                self.unbacked_replacements[expr] = canonical_expr
+
         return self.unbacked_replacements
 
     @functools.lru_cache  # noqa: B019
