@@ -110,7 +110,7 @@ def _check_vector_norm_args(
             x.numel() != 0,
             not isinstance(dim, IntLike) and dim is not None and len(dim) != 0,
         ),
-        f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+        lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
         "because the operation does not have an identity",
     )
 
@@ -119,7 +119,7 @@ def _check_vector_norm_args(
         for d in dim:
             torch._check(
                 sym_or(x.numel() != 0, d < len(shape) and d >= 0 and shape[d] != 0),
-                f"linalg.vector_norm cannot compute the {ord} norm on the "
+                lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
             )
