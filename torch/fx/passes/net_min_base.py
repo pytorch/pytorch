@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Optional
+from typing import Any, cast, Optional
 
 import torch
 import torch.fx

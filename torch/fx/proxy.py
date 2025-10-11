@@ -10,9 +10,9 @@ import operator
 import sys
 import traceback
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import fields, is_dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
 import torch.fx.traceback as fx_traceback

@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 import sympy

@@ -9,10 +9,10 @@ import logging
 import math
 import os
 import warnings
+from collections.abc import Callable
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
-from typing import Any, Callable, get_args, NamedTuple, Optional, Union
-from typing_extensions import TypeAlias
+from typing import Any, get_args, NamedTuple, Optional, TypeAlias, Union
 
 import torch
 import torch.utils._pytree as pytree
