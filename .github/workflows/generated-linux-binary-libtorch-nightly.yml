@@ -358,6 +358,9 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm6.4
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -473,6 +476,9 @@ jobs:
       DOCKER_IMAGE_TAG_PREFIX: rocm7.0
       LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm

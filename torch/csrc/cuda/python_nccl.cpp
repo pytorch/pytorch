@@ -141,7 +141,7 @@ PyObject* THCPModule_nccl_reduce(PyObject* self, PyObject* args) {
         "nccl_reduce",
         1,
         "(sequence[Tensor] inputs, Tensor output, int root,"
-        " int op, sequence[torch.cuda.Stream or None]");
+        " int op, sequence[torch.cuda.Stream or None])");
     return nullptr;
   }
 
