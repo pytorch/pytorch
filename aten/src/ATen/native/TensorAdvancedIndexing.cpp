@@ -2003,7 +2003,10 @@ static bool can_use_expanded_index_path(
     return false;
   }
 #else
+// On non-FBGEMM platforms, allow fast path only if OpenMP is available
+#ifndef _OPENMP
   return false;
+#endif
 #endif
 
   if (!self.device().is_cpu()) {
