@@ -34,6 +34,7 @@ struct MPSHooks : public at::MPSHooksInterface {
   // MPSAllocator interface
   Allocator* getMPSDeviceAllocator() const override;
   void emptyCache() const override;
+  void emptyGraphCache() const override;
   size_t getCurrentAllocatedMemory() const override;
   size_t getDriverAllocatedMemory() const override;
   size_t getRecommendedMaxMemory() const override;
@@ -55,6 +56,14 @@ struct MPSHooks : public at::MPSHooksInterface {
   bool queryEvent(uint32_t event_id) const override;
   double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id)
       const override;
+
+  // Command buffer flush threshold interface
+  void setCommandBufferFlushThreshold(size_t threshold) const override;
+  size_t getCommandBufferFlushThreshold() const override;
+
+  // LRU cache size interface
+  void setMaxOperationCacheSize(size_t size) const override;
+  size_t getMaxOperationCacheSize() const override;
 
   bool isBuilt() const override {
     return true;

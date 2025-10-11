@@ -6,6 +6,7 @@
 #include <ATen/mps/MPSHooks.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/mps/MPSStream.h>
+#include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/Logging.h>
 
 namespace at::mps {
@@ -81,7 +82,28 @@ void* MPSHooks::getDispatchQueue() const {
 }
 
 void MPSHooks::emptyCache() const {
-  at::mps::getIMPSAllocator()->emptyCache();
+  @autoreleasepool {
+    // Synchronize to ensure all command buffers complete
+    // This allows completion handlers to run and buffers_pending_free to be processed
+    deviceSynchronize();
+
+    // Clear the buffer allocator cache (now includes freeInactiveBuffers)
+    at::mps::getIMPSAllocator()->emptyCache();
+
+    // Clear the event pool to prevent event accumulation
+    at::mps::getMPSEventPool()->emptyCache();
+
+    // Clear profiling data to prevent accumulation in profiler maps
+    at::mps::getMPSProfiler().clearProfilingData();
+  }
+}
+
+void MPSHooks::emptyGraphCache() const {
+  @autoreleasepool {
+    // Clear both graph and kernel caches
+    at::native::mps::MPSGraphCache::getInstance()->clearCache();
+    at::native::mps::MPSKernelCache::getInstance()->clearCache();
+  }
 }
 
 size_t MPSHooks::getCurrentAllocatedMemory() const {
@@ -138,6 +160,22 @@ bool MPSHooks::queryEvent(uint32_t event_id) const {
 
 double MPSHooks::elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
   return at::mps::getMPSEventPool()->elapsedTime(start_event_id, end_event_id);
+}
+
+void MPSHooks::setCommandBufferFlushThreshold(size_t threshold) const {
+  at::mps::getDefaultMPSStream()->setCommandBufferFlushThreshold(threshold);
+}
+
+size_t MPSHooks::getCommandBufferFlushThreshold() const {
+  return at::mps::getDefaultMPSStream()->getCommandBufferFlushThreshold();
+}
+
+void MPSHooks::setMaxOperationCacheSize(size_t size) const {
+  at::mps::getDefaultMPSStream()->setMaxOperationCacheSize(size);
+}
+
+size_t MPSHooks::getMaxOperationCacheSize() const {
+  return at::mps::getDefaultMPSStream()->getMaxOperationCacheSize();
 }
 
 bool MPSHooks::isPinnedPtr(const void* data) const {

@@ -77,6 +77,15 @@ static PyObject* MPSModule_emptyCache(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* MPSModule_emptyGraphCache(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  at::detail::getMPSHooks().emptyGraphCache();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+} //new method to clear MPS graph cache
+
 static PyObject* MPSModule_setMemoryFraction(
     PyObject* _unused,
     PyObject* args) {
@@ -211,6 +220,48 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* MPSModule_setCommandBufferFlushThreshold(
+    PyObject* _unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(args), "invalid argument to setCommandBufferFlushThreshold()");
+  const size_t threshold = THPUtils_unpackUInt64(args);
+  at::detail::getMPSHooks().setCommandBufferFlushThreshold(threshold);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_getCommandBufferFlushThreshold(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(
+      at::detail::getMPSHooks().getCommandBufferFlushThreshold());
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_setMaxOperationCacheSize(
+    PyObject* _unused,
+    PyObject* args) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(args), "invalid argument to setMaxOperationCacheSize()");
+  const size_t size = THPUtils_unpackUInt64(args);
+  at::detail::getMPSHooks().setMaxOperationCacheSize(size);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_getMaxOperationCacheSize(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packUInt64(
+      at::detail::getMPSHooks().getMaxOperationCacheSize());
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(*-c-arrays, *-global-variables)
 static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_deviceSynchronize",
@@ -228,6 +279,7 @@ static struct PyMethodDef _MPSModule_methods[] = {
      METH_NOARGS,
      nullptr},
     {"_mps_emptyCache", MPSModule_emptyCache, METH_NOARGS, nullptr},
+    {"_mps_emptyGraphCache", MPSModule_emptyGraphCache, METH_NOARGS, nullptr},
     {"_mps_setMemoryFraction", MPSModule_setMemoryFraction, METH_O, nullptr},
     {"_mps_currentAllocatedMemory",
      MPSModule_currentAllocatedMemory,
@@ -258,6 +310,22 @@ static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_elapsedTimeOfEvents",
      MPSModule_elapsedTimeOfEvents,
      METH_VARARGS,
+     nullptr},
+    {"_mps_setCommandBufferFlushThreshold",
+     MPSModule_setCommandBufferFlushThreshold,
+     METH_O,
+     nullptr},
+    {"_mps_getCommandBufferFlushThreshold",
+     MPSModule_getCommandBufferFlushThreshold,
+     METH_NOARGS,
+     nullptr},
+    {"_mps_setMaxOperationCacheSize",
+     MPSModule_setMaxOperationCacheSize,
+     METH_O,
+     nullptr},
+    {"_mps_getMaxOperationCacheSize",
+     MPSModule_getMaxOperationCacheSize,
+     METH_NOARGS,
      nullptr},
     {nullptr}};
 
