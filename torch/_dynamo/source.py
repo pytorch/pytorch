@@ -22,6 +22,7 @@ import enum
 import functools
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
+from torch import device as device_type
 from torch._guards import ChainedSource, Guard, GuardSource, Source
 
 from . import utils
@@ -1076,6 +1077,30 @@ class ShapeEnvSource(Source):
 
     def guard_source(self) -> GuardSource:
         return GuardSource.SHAPE_ENV
+
+
+@dataclasses.dataclass(frozen=True)
+class CurrentStreamSource(Source):
+    device: device_type
+
+    def name(self) -> str:
+        return f"___get_current_stream({self.device})"
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(utils.__name__, "get_current_stream")
+        )
+        num_args = 1
+        codegen.extend_output([codegen.create_load_const(self.device.type)])
+        if self.device.index is not None:
+            num_args += 1
+            codegen.extend_output([codegen.create_load_const(self.device.index)])
+        codegen.add_push_null(lambda: codegen.load_import_from("torch", "device"))
+        codegen.extend_output(create_call_function(num_args, False))
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self) -> GuardSource:
+        return GuardSource.GLOBAL
 
 
 @dataclasses.dataclass(frozen=True)
