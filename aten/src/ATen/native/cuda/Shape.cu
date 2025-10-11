@@ -243,14 +243,14 @@ __global__ void CatArrayBatchedCopy_vectorized(
     const char * data = (char*)inputs.input[blockIdx.y];
     IndexType offset = inputs.offset[blockIdx.y] * trailingSize / elems_per_vec;
     IndexType dimSize = inputs.dimSize[blockIdx.y] * trailingSize / elems_per_vec;
-    IndexType dataOffset = offset  * alignment; // in bytes
+    int64_t dataOffset = (int64_t)offset  * alignment; // in bytes
 
     IndexType stride = gridDim.x * blockDim.x;
 
     while( tid < nElements){
-      IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(
+      int64_t elementOffset = (int64_t)CatArrIndexToOffset<IndexType, Dims>::compute(
                     os.tensorSize, os.tensorStride, dimSize, concatDim, tid) * alignment; // in bytes
-      auto vec = at::native::memory::ld_vec<alignment>(data + alignment * tid);
+      auto vec = at::native::memory::ld_vec<alignment>(data + (int64_t)alignment * tid);
       at::native::memory::st_vec<alignment>(output + dataOffset + elementOffset, vec);
       tid += stride;
     }
@@ -488,15 +488,16 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       }
     }
 
+    int cat_dim = dimension;
     if (memory_format != c10::MemoryFormat::Contiguous) {
-      switch (dimension) {
+      switch (cat_dim) {
       case 0:
         break;
       case 1:
-        dimension = nDims - dimension;
+        cat_dim = nDims - cat_dim;
         break;
       default:
-        dimension--;
+        cat_dim--;
       }
     }
     // Template Declarations for dim = 1, 2, 3, 4
@@ -505,23 +506,23 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       constexpr auto elems_per_vec = alignment / sizeof(scalar_t); \
       CatArrayBatchedCopy_vectorized<scalar_t, unsigned int, DIMS, batch_size, stride_size, alignment, elems_per_vec><<<\
       catGrid, applyBlock, 0, stream.stream()>>>(\
-        (char*)data, catMetaData, kernelOutputParam, dimension, trailingSize);\
+        (char*)data, catMetaData, kernelOutputParam, cat_dim, trailingSize);\
     } else if (isContig && isAligned && sizeof(scalar_t) > 2 && sizeof(scalar_t) <= 8) {\
       CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_16><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+              data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
     } else if (isContig && isAligned && sizeof(scalar_t) == 2) { \
       CatArrayBatchedCopy_alignedK_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size, ALIGNED_VEC_LOAD_BYTES_8><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+              data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
     } else if (isContig) {\
       CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+              data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
     } else {\
       CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
-              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+              data, catMetaData, outputParam, cat_dim, outputParam.tensorStride[cat_dim]);\
     }\
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     switch (nDims) {

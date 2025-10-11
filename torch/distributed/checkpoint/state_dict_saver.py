@@ -312,10 +312,6 @@ def async_save(
                 )
             )
 
-    storage_writer = cast(
-        StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
-    )
-
     state_dict = _stateful_to_state_dict(state_dict)
 
     @_dcp_method_logger(log_exceptions=True)
@@ -333,6 +329,7 @@ def async_save(
     upload_future: Future = upload_executor.execute_save(
         staging_future_or_state_dict,
         checkpoint_id=checkpoint_id,
+        # pyrefly: ignore  # bad-argument-type
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,

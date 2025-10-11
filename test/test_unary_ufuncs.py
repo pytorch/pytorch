@@ -1654,6 +1654,15 @@ class TestUnaryUfuncs(TestCase):
             ),
         )
 
+        # empty input
+        # https://github.com/pytorch/pytorch/issues/162473
+        input_tensor = torch.tensor([], device=device)
+        static_size = 1
+        self.assertEqual(
+            torch.nonzero_static(input_tensor, size=static_size),
+            torch.tensor([[-1]], device=device),
+        )
+
         # 1D input
         input_tensor = torch.tensor([0, 8], device=device)
         static_size = 1

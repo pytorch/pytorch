@@ -308,6 +308,7 @@ class DeviceCodegen:
     scheduling: SchedulingConstructor
     wrapper_codegen: WrapperConstructor
     cpp_wrapper_codegen: Optional[WrapperConstructor] = None
+    fx_wrapper_codegen: Optional[WrapperConstructor] = None
 
 
 KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg, TMADescriptorArg, ConstexprArg]
@@ -402,11 +403,15 @@ def register_backend_for_device(
     device_scheduling: SchedulingConstructor,
     device_wrapper_codegen: WrapperConstructor,
     device_cpp_wrapper_codegen: Optional[WrapperConstructor] = None,
+    device_fx_wrapper_codegen: Optional[WrapperConstructor] = None,
     device_custom_pass: Optional[CustomGraphModulePass] = None,
     device_custom_config: Optional[ConfigModule] = None,
 ) -> None:
     device_codegens[device] = DeviceCodegen(
-        device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
+        device_scheduling,
+        device_wrapper_codegen,
+        device_cpp_wrapper_codegen,
+        device_fx_wrapper_codegen,
     )
     custom_backend_passes[device] = device_custom_pass
     if device_custom_config:
@@ -468,9 +473,7 @@ def get_wrapper_codegen_for_device(
     if device in device_codegens:
         wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
         if fx_wrapper:
-            from .wrapper_fxir import WrapperFxCodegen
-
-            return WrapperFxCodegen
+            return wrapper_codegen_obj.fx_wrapper_codegen
         elif cpp_wrapper:
             return wrapper_codegen_obj.cpp_wrapper_codegen
         else:
@@ -507,6 +510,7 @@ def init_backend_registration() -> None:
     from .python_wrapper_mtia import PythonWrapperMtia
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
+    from .wrapper_fxir import WrapperFxCodegen
 
     if get_scheduling_for_device("cpu") is None:
         cpu_backends = {
@@ -521,6 +525,7 @@ def init_backend_registration() -> None:
             CppWrapperCpuArrayRef
             if config.aot_inductor.allow_stack_allocation
             else CppWrapperCpu,
+            WrapperFxCodegen,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -534,6 +539,7 @@ def init_backend_registration() -> None:
             lambda scheduling: cuda_backends[config.cuda_backend](scheduling),
             PythonWrapperCodegen,
             CppWrapperGpu,
+            WrapperFxCodegen,
         )
 
     if get_scheduling_for_device("xpu") is None:
@@ -542,6 +548,7 @@ def init_backend_registration() -> None:
             TritonScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
+            WrapperFxCodegen,
         )
 
     if get_scheduling_for_device("mps") is None:
@@ -550,6 +557,7 @@ def init_backend_registration() -> None:
             MetalScheduling,
             PythonWrapperCodegen,
             CppWrapperMps,
+            WrapperFxCodegen,
         )
 
     if get_scheduling_for_device("mtia") is None:
@@ -558,6 +566,7 @@ def init_backend_registration() -> None:
             TritonScheduling,
             PythonWrapperMtia,
             CppWrapperGpu,
+            WrapperFxCodegen,
         )
 
     private_backend = torch._C._get_privateuse1_backend_name()
@@ -571,12 +580,14 @@ def init_backend_registration() -> None:
             device_scheduling = _get_custom_mod_func("Scheduling")
             wrapper_codegen = _get_custom_mod_func("PythonWrapperCodegen")
             cpp_wrapper_codegen = _get_custom_mod_func("CppWrapperCodegen")
+            fx_wrapper_codegen = _get_custom_mod_func("WrapperFxCodegen")
             if device_scheduling and wrapper_codegen and cpp_wrapper_codegen:
                 register_backend_for_device(
                     private_backend,
                     device_scheduling,
                     wrapper_codegen,
                     cpp_wrapper_codegen,
+                    fx_wrapper_codegen,
                 )
         except RuntimeError:
             pass
@@ -698,6 +709,18 @@ def check_dtype(
             is_same_dt = f"std::is_same_v<{c_var_type}, {DTYPE_TO_CPP[dtype]}>"
 
         buffer.writeline(f"static_assert({is_same_dt});")
+
+
+def check_shape(
+    buffer: IndentedBuffer, var: CSEVariableType, shape: BlockShapeType
+) -> None:
+    backend = get_current_backend()
+    assert shape is not None
+    if config.test_configs.runtime_triton_dtype_assert and backend == "triton":
+        shape_str = (
+            ", ".join(str(d) for d in shape) if len(shape) != 1 else f"{shape[0]},"
+        )
+        buffer.writeline(f"tl.static_assert({var}.shape == ({shape_str}))")
 
 
 class DataTypePropagation:
@@ -1003,6 +1026,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     ) -> None:
         raise NotImplementedError(
             f"{type(self).__name__}: store should be handled by CSEProxy"
+        )
+
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
         )
 
     def store_reduction(self, name: str, index: sympy.Expr, value: OpVarT) -> None:
@@ -2025,6 +2053,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.stores = IndentedBuffer()
 
         self.num_load = 0
+        self.num_store = 0
         self.num_reduction = 0
 
         self.cse: CSE[CSEVariableType, Any] = CSE(self.newvar_prefix, self.suffix)
@@ -2106,6 +2135,11 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
         raise NotImplementedError
+
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )
 
     def reduction(
         self,
@@ -2233,6 +2267,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     name, fused_node_names
                 )
             ):
+                self.num_store -= 1
                 names_to_remove.add(name)
 
         for name in names_to_remove:
@@ -2396,8 +2431,9 @@ class KernelTemplate:
 
         return get_dtype
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, hash: Optional[str] = None) -> None:
         self.name = name
+        self._hash = hash
 
     @property
     def uid(self) -> str:
@@ -2409,6 +2445,17 @@ class KernelTemplate:
         """
         # TODO(coconutruben): add some central registration to assert on global uniqueness
         return self.name
+
+    @property
+    def src_hash(self) -> Union[str, None]:
+        """
+        source hash for a Template.
+
+        Templates can optionally provide a src hash to make it easier to cache/validate that
+        a template has not changed from one version to another. Override this if that detection
+        is different for your specific Template
+        """
+        return self._hash
 
     def choice_or_none(self, **kwargs: Any) -> Optional[ChoiceCaller]:
         """
@@ -2454,6 +2501,10 @@ class KernelTemplate:
 
 
 class CSEProxy(DefaultHandler):
+    """A ops handler that proxies calls to `kernel` and its
+    handler and returns `CSEVariable`s with correct shape and dtype.
+    """
+
     name = "CSEProxy"
 
     def __init__(self, kernel: Kernel[Any], parent_handler: OpsHandler[Any]):
@@ -2537,6 +2588,11 @@ class CSEProxy(DefaultHandler):
             ):
                 assert var_dtype is not None
                 check_dtype(V.kernel.compute, csevar, var_dtype)
+
+            if config.test_configs.runtime_triton_shape_assert:
+                assert output_shape is not None
+                check_shape(V.kernel.compute, csevar, output_shape)
+
             return csevar
 
         return pytree.tree_map(do_cse, value)
@@ -2678,12 +2734,17 @@ class CSEProxy(DefaultHandler):
             self._update_store_cache(name, value)
         if name not in V.graph.removed_buffers:
             self.kernel.store(name, index, value, mode=mode)
+            self.kernel.num_store += 1
+
+    def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
+        self.kernel.device_assert_async(cond, msg)
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
         self._update_store_cache(name, value)
 
         if name not in V.graph.removed_buffers:
+            self.kernel.num_store += 1
             return self.kernel.store_reduction(name, index, value)
 
     def reduction(

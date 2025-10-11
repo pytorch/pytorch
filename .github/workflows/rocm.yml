@@ -3,19 +3,13 @@ name: rocm
 on:
   push:
     branches:
-  #     - main
+      - main
       - release/*
     tags:
       - ciflow/rocm/*
   workflow_dispatch:
   schedule:
-    # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
-    # Also run less frequently on weekends.
-    - cron: 45 0,8,16 * * 1-5
-    - cron: 45 4 * * 0,6
-    - cron: 45 4,12,20 * * 1-5
-    - cron: 45 12 * * 0,6
-    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+    - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -64,4 +58,30 @@ jobs:
       build-environment: linux-jammy-rocm-py3.10
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-jammy-rocm-py3_10-gfx1100-test:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    permissions:
+      id-token: write
+      contents: read
+    name: linux-jammy-rocm-py3_10-gfx1100
+    uses: ./.github/workflows/_rocm-test.yml
+    needs:
+      - linux-jammy-rocm-py3_10-build
+      - target-determination
+    with:
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.gfx1100" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.gfx1100" },
+        ]}
+      tests-to-include: >
+         test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs
+         test_autograd inductor/test_torchinductor inductor/test_kernel_benchmark
+         inductor/test_pad_mm inductor/test_benchmark_fusion inductor/test_aot_inductor
+         inductor/test_torchinductor inductor/test_decompose_mem_bound_mm
+         inductor/test_flex_attention inductor/test_max_autotune
     secrets: inherit

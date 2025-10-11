@@ -55,7 +55,6 @@
 #include <ATen/ops/is_pinned_native.h>
 #include <ATen/ops/resize_as_sparse.h>
 #include <ATen/ops/resize_as_sparse_native.h>
-#include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/sparse_coo_tensor_native.h>
 #include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/sparse_mask_native.h>
@@ -391,13 +390,13 @@ void _validate_sparse_coo_tensor_args(
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
   TORCH_CHECK(
-      static_cast<int64_t>(size.size()) == sparse_dim + dense_dim,
-      "number of dimensions must be sparse_dim (",
-      sparse_dim,
-      ") + dense_dim (",
-      dense_dim,
-      "), but got ",
-      size.size());
+    sparse_dim + dense_dim == static_cast<int64_t>(size.size()),
+    "'len(size) == sparse_dim + dense_dim' is not satisfied: len(size) = ",
+    size.size(),
+    ", sparse_dim = ",
+    sparse_dim,
+    ", dense_dim = ",
+    dense_dim);
 
   if (check_pinning) {
     TORCH_CHECK(
