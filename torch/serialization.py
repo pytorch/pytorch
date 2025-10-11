@@ -1140,6 +1140,9 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
     pickler = PyTorchLegacyPickler(f, protocol=pickle_protocol)
     pickler.dump(obj)
 
+    # The class def keeps the persistent_id closure alive, leaking memory.
+    persistent_id = None
+
     serialized_storage_keys = sorted(serialized_storages.keys())
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
     f.flush()
@@ -1221,6 +1224,10 @@ def _save(
 
     pickler = PyTorchPickler(data_buf, protocol=pickle_protocol)
     pickler.dump(obj)
+
+    # The class def keeps the persistent_id closure alive, leaking memory.
+    persistent_id = None
+
     data_value = data_buf.getvalue()
     zip_file.write_record("data.pkl", data_value, len(data_value))
     # .format_version is used to track
