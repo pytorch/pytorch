@@ -168,22 +168,52 @@ static void build_batch_ptr_mps(
   });
 }
 
+static void build_row_ptr_per_batch_mps(
+    const Tensor& rows,
+    const Tensor& batch_ptr,
+    int64_t B,
+    int64_t I,
+    Tensor& row_ptr
+) {
+  TORCH_CHECK(rows.is_mps() && batch_ptr.is_mps() && row_ptr.is_mps(), "MPS device expected");
+  auto stream = getCurrentMPSStream();
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto pso = lib.getPipelineStateForFunc("build_row_ptr_from_sorted_rows_by_batch");
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+
+      const uint32_t tew = pso.threadExecutionWidth;
+      const uint32_t Qx = static_cast<uint32_t>(I + 1);
+      const uint32_t Qy = static_cast<uint32_t>(B);
+      const uint32_t tgW = std::min<uint32_t>(Qx, tew);
+
+      MTLSize grid = MTLSizeMake(Qx, Qy, 1);
+      MTLSize tgs = MTLSizeMake(tgW, 1, 1);
+
+      mtl_setArgs(enc,
+                  rows,
+                  batch_ptr,
+                  row_ptr,
+                  std::array<uint32_t, 2>{static_cast<uint32_t>(I),
+                                           static_cast<uint32_t>(B)});
+      [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
+    }
+  });
+}
+
 Tensor& bmm_out_sparse_mps(const SparseTensor& self_, const Tensor& mat2_, Tensor& result_) {
   TORCH_CHECK(result_.is_mps(), "bmm_sparse: expected 'out' to be MPS, got ", result_.device());
   TORCH_CHECK(self_.is_mps(),  "bmm_sparse: expected 'self' to be MPS, got ", self_.device());
   TORCH_CHECK(mat2_.is_mps(),  "bmm_sparse: expected 'mat2' to be MPS, got ", mat2_.device());
 
-  TORCH_CHECK(self_.dense_dim() == 0,
-              "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self_.dense_dim());
-  TORCH_CHECK(self_.sparse_dim() == 3,
-              "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self_.sparse_dim());
-  TORCH_CHECK(mat2_.dim() == 3,
-              "bmm_sparse: Tensor 'mat2' must have 3 dims, but has ", mat2_.dim());
+  TORCH_CHECK(self_.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self_.dense_dim());
+  TORCH_CHECK(self_.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self_.sparse_dim());
+  TORCH_CHECK(mat2_.dim() == 3, "bmm_sparse: Tensor 'mat2' must have 3 dims, but has ", mat2_.dim());
 
-  TORCH_CHECK(self_.size(0) == mat2_.size(0),
-              "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
-  TORCH_CHECK(self_.size(2) == mat2_.size(1),
-              "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
+  TORCH_CHECK(self_.size(0) == mat2_.size(0), "bmm_sparse: 'self.size(0)' and 'mat2.size(0)' must match");
+  TORCH_CHECK(self_.size(2) == mat2_.size(1), "bmm_sparse: 'self.size(2)' and 'mat2.size(1)' must match");
 
   const int64_t B = self_.size(0);
   const int64_t I = self_.size(1);
@@ -203,47 +233,55 @@ Tensor& bmm_out_sparse_mps(const SparseTensor& self_, const Tensor& mat2_, Tenso
 
   auto values_c = values.scalar_type() == computeDtype ? values : values.to(computeDtype);
   auto mat2_c = mat2_.scalar_type()   == computeDtype ? mat2_   : mat2_.to(computeDtype);
+  auto mat2_contig = mat2_c.contiguous();
 
   auto idx_b = indices.select(0, 0).contiguous();
   auto idx_i = indices.select(0, 1).contiguous();
   auto idx_j = indices.select(0, 2).contiguous();
 
-  auto mat2_contig = mat2_c.contiguous();
-
   // builds an array of pointers of where the batch_idx's pointer starts and ends
   // look in function for better explanation
   auto batch_ptr = at::empty({B + 1}, at::device(result_.device()).dtype(kLong));
   build_batch_ptr_mps(idx_b, B, batch_ptr);
+  // build row_ptr per batch: for each (b, i) get [start, end) into rows/cols/vals
+  auto row_ptr = at::empty({B * (I + 1)}, at::device(result_.device()).dtype(kLong));
+  build_row_ptr_per_batch_mps(idx_i, batch_ptr, B, I, row_ptr);
+
+  const bool out_needs_cast = (result_.scalar_type() != computeDtype) || !result_.is_contiguous();
+  Tensor out_buf = out_needs_cast
+      ? at::empty({B, I, K}, result_.options().dtype(computeDtype))
+      : result_;
+  auto out_contig = out_buf.contiguous();
 
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      const std::string func = "spmm_bmm_coo_grouped";
-      auto pso = lib.getPipelineStateForFunc(func);
+      auto pso = lib.getPipelineStateForFunc("spmm_bmm_coo_rows_grouped");
       auto enc = stream->commandEncoder();
       [enc setComputePipelineState:pso];
 
       const uint32_t tew = pso.threadExecutionWidth;
-
       const uint32_t tgW = std::min<uint32_t>((uint32_t)K, tew);
 
-      MTLSize grid = MTLSizeMake(tgW, B, 1);
-      MTLSize tgs = MTLSizeMake(tgW, 1, 1);
+      // One threadgroup per (row i, batch b), lanes cover K
+      MTLSize grid = MTLSizeMake(tgW, (uint32_t)I, (uint32_t)B);
+      MTLSize tgs  = MTLSizeMake(tgW, 1, 1);
 
       mtl_setArgs(enc,
                   idx_i,
                   idx_j,
                   values_c,
                   mat2_contig,
-                  result_,
-                  batch_ptr,
-                  std::array<uint32_t, 4>{(uint32_t)B, (uint32_t)I, (uint32_t)J, (uint32_t)K}
-                  );
-
+                  out_contig,
+                  row_ptr,
+                  std::array<uint32_t, 4>{(uint32_t)B, (uint32_t)I, (uint32_t)J, (uint32_t)K});
+      // one threadgroup per (batch b, row i), lanes stride across K
       [enc dispatchThreads:grid threadsPerThreadgroup:tgs];
     }
   });
-
+  if (out_needs_cast) {
+    result_.copy_(out_contig.to(result_.scalar_type()));
+  }
   return result_;
 }
 

@@ -1,6 +1,101 @@
 #include <c10/metal/indexing.h>
 using namespace metal;
 
+inline uint lower_bound_i64(device const long* arr, uint lo, uint hi, long key) {
+  uint l = lo, r = hi;
+  while (l < r) {
+    uint m = (l + r) >> 1;
+    long v = arr[m];
+    if (v < key) {
+      l = m + 1;
+    } else {
+      r = m;
+    }
+  }
+  return l;
+}
+
+inline uint upper_bound_i64(device const long* arr, uint lo, uint hi, long key) {
+  uint l = lo, r = hi;
+  while (l < r) {
+    uint m = (l + r) >> 1;
+    long v = arr[m];
+    if (v <= key) {
+      l = m + 1;
+    } else {
+      r = m;
+    }
+  }
+  return l;
+}
+
+kernel void build_row_ptr_from_sorted_rows_by_batch(
+    device const long* rows        [[buffer(0)]],
+    device const long* batch_ptr   [[buffer(1)]],
+    device long*       row_ptr     [[buffer(2)]],
+    constant uint2&    dims        [[buffer(3)]],
+    uint3              tid         [[thread_position_in_grid]])
+{
+  const uint I = dims.x;
+  const uint B = dims.y;
+
+  const uint i = tid.x;
+  const uint b = tid.y;
+
+  if (b >= B || i > I) return;
+
+  const uint base = (uint)batch_ptr[b];
+  const uint lim  = (uint)batch_ptr[b + 1];
+
+  const ulong out_base = (ulong)b * (ulong)(I + 1);
+
+  if (i == I) {
+    row_ptr[out_base + (ulong)I] = (long)lim;
+  } else {
+    const long key = (long)i;
+    const uint pos = lower_bound_i64(rows, base, lim, key);
+    row_ptr[out_base + (ulong)i] = (long)pos;
+  }
+}
+
+kernel void spmm_bmm_coo_rows_grouped(
+    device const long*   rows      [[buffer(0)]],
+    device const long*   cols      [[buffer(1)]],
+    device const float*  vals      [[buffer(2)]],
+    device const float*  dense     [[buffer(3)]],
+    device float*        out       [[buffer(4)]],
+    device const long*   row_ptr   [[buffer(5)]],
+    constant uint4&      dims      [[buffer(6)]],
+    uint3                tid       [[thread_position_in_grid]],
+    uint3                ltid      [[thread_position_in_threadgroup]],
+    uint3                tptg      [[threads_per_threadgroup]])
+{
+  const uint B = dims.x;
+  const uint I = dims.y;
+  const uint J = dims.z;
+  const uint K = dims.w;
+
+  const uint b = tid.z;
+  const uint i = tid.y;
+  const uint lane = ltid.x;
+  const uint tgW  = tptg.x;
+
+  const ulong rp_base = (ulong)b * (ulong)(I + 1);
+  const uint start = (uint)row_ptr[rp_base + (ulong)i];
+  const uint end   = (uint)row_ptr[rp_base + (ulong)i + 1];
+
+  for (uint k = lane; k < K; k += tgW) {
+    float acc = 0.0f;
+    for (uint p = start; p < end; ++p) {
+      const uint c = (uint)cols[p];
+      const float v = vals[p];
+      const uint d_off = ((b * J) + c) * K + k;
+      acc = fma(v, dense[d_off], acc);
+    }
+    const uint y_off = ((b * I) + i) * K + k;
+    out[y_off] = acc;
+  }
+}
 
 template <typename T>
 kernel void dense_sparse_mul_kernel(
@@ -115,33 +210,6 @@ kernel void fused_gather_mul_kernel(
   }
 }
 
-inline uint lower_bound_i64(device const long* arr, uint lo, uint hi, long key) {
-  uint l = lo, r = hi;
-  while (l < r) {
-    uint m = (l + r) >> 1;
-    long v = arr[m];
-    if (v < key) {
-      l = m + 1;
-    } else {
-      r = m;
-    }
-  }
-  return l;
-}
-
-inline uint upper_bound_i64(device const long* arr, uint lo, uint hi, long key) {
-  uint l = lo, r = hi;
-  while (l < r) {
-    uint m = (l + r) >> 1;
-    long v = arr[m];
-    if (v <= key) {
-      l = m + 1;
-    } else {
-      r = m;
-    }
-  }
-  return l;
-}
 
 kernel void build_batch_ptr_from_sorted_batches(
     device const long* batches       [[buffer(0)]],
