@@ -36,6 +36,10 @@ from .common import (
 )
 from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
+from .flex_flash_attention import (
+    _use_flex_flash_attention,
+    create_flex_flash_attention_kernel,
+)
 
 
 if TYPE_CHECKING:
@@ -178,6 +182,19 @@ def flex_attention(
     )
     if _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa):
         return create_flex_decoding_kernel(
+            query,
+            key,
+            value,
+            block_mask,
+            scale,
+            kernel_options,
+            subgraph_buffer,
+            mask_graph_buffer,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+    if _use_flex_flash_attention(subgraph, mask_graph, kernel_options):
+        return create_flex_flash_attention_kernel(
             query,
             key,
             value,
@@ -821,6 +838,7 @@ def flex_attention_backward(*args, **kwargs):
             **cur_kernel_options,
         )
     inputs_for_autotuning = (
+        # pyrefly: ignore  # unsupported-operation
         [
             query,
             key,
@@ -891,9 +909,11 @@ def get_bwd_subgraph_outputs(
     joint_outputs: JointOutputResult,
 ) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
     subgraph_buffer = (
+        # pyrefly: ignore  # bad-assignment
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
+        # pyrefly: ignore  # bad-assignment
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
@@ -905,4 +925,5 @@ def get_bwd_subgraph_outputs(
         *joint_outputs.mutated_grads,
     ]
 
+    # pyrefly: ignore  # not-iterable
     return [*subgraph_buffer, *mask_graph_buffer, *joint_output_buffers]
