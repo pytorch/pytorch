@@ -37,7 +37,7 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
 
     if isinstance(dtype, str):
         dtype = _import_dotted_name(dtype)
-    if dtype == type(self):
+    if dtype is type(self):
         return self
     if self.is_sparse:
         if not dtype.is_sparse:
