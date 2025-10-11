@@ -156,7 +156,7 @@ class TokenArgument:
 
 # This is use for storing the contents of a list which contain optional tensors
 # (Tensor?[], ex. [Tensor, None, ...]), where the list will be serialized to the
-# type List[OptionalTensorArgument], with tensor values seiralized to the
+# type List[OptionalTensorArgument], with tensor values serialized to the
 # "as_tensor" field, and None values serialized to the "as_none" field.
 @_union_dataclass
 class OptionalTensorArgument(_Union):
