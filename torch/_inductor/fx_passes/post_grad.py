@@ -666,6 +666,7 @@ def lazy_init():
         prepare_softmax_replacement,
         [torch.empty(4, 8)],
         scalar_workaround=dict(dim=-1),
+        # pyrefly: ignore  # bad-argument-type
         trace_fn=fwd_only,
         # pyrefly: ignore  # bad-argument-type
         pass_dicts=pass_patterns[1],
@@ -730,6 +731,7 @@ def register_lowering_pattern(
     return pattern_matcher.register_lowering_pattern(
         pattern,
         extra_check,
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=pass_patterns[pass_number],
     )
 
@@ -1573,6 +1575,7 @@ def register_partial_reduction_pattern():
 
         @register_graph_pattern(
             MultiOutputPattern([partial_reduc, full_reduc]),
+            # pyrefly: ignore  # bad-argument-type
             pass_dict=pass_patterns[2],
         )
         def reuse_partial(match, input, reduced_dims, keepdim):

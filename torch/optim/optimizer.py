@@ -398,7 +398,6 @@ class Optimizer:
         self.state: defaultdict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: list[dict[str, Any]] = []
 
-        # pyrefly: ignore  # no-matching-overload
         param_groups = list(params)
         if len(param_groups) == 0:
             raise ValueError("optimizer got an empty parameter list")

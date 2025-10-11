@@ -20,9 +20,13 @@ else:
 
 def _pair_uniform_to_normal(u1, u2):
     """Box-Muller transform"""
+    # pyrefly: ignore  # missing-attribute
     u1 = hl.max(hl.f32(1.0e-7), u1)
+    # pyrefly: ignore  # missing-attribute
     th = hl.f32(6.283185307179586) * u2
+    # pyrefly: ignore  # missing-attribute
     r = hl.sqrt(hl.f32(-2.0) * hl.log(u1))
+    # pyrefly: ignore  # missing-attribute
     return r * hl.cos(th), r * hl.sin(th)
 
 
@@ -35,17 +39,24 @@ def _uint_to_uniform_float(x):
     # conditions can be simplified
     # scale is ((2**23 - 1) / 2**23) * 2**(N_BITS - 1)
     # https://github.com/triton-lang/triton/blob/e4a0d93ff1a367c7d4eeebbcd7079ed267e6b06f/python/triton/language/random.py#L116-L132.
+    # pyrefly: ignore  # missing-attribute
     assert x.type() == hl.UInt(32) or x.type() == hl.Int(32)
+    # pyrefly: ignore  # missing-attribute
     x = hl.cast(hl.Int(32), x)
+    # pyrefly: ignore  # missing-attribute
     scale = hl.f64(4.6566127342e-10)
+    # pyrefly: ignore  # missing-attribute
     x = hl.select(x < 0, -x - 1, x)
     return x * scale
 
 
 def philox_impl(c0, c1, c2, c3, k0, k1, n_rounds):
     def umulhi(a, b):
+        # pyrefly: ignore  # missing-attribute
         a = hl.cast(hl.UInt(64), a)
+        # pyrefly: ignore  # missing-attribute
         b = hl.cast(hl.UInt(64), b)
+        # pyrefly: ignore  # missing-attribute
         return hl.cast(hl.UInt(32), ((a * b) >> 32) & hl.u64(0xFFFFFFFF))
 
     for _ in range(n_rounds):
@@ -63,18 +74,23 @@ def philox_impl(c0, c1, c2, c3, k0, k1, n_rounds):
 
 
 def halide_philox(seed, c0, c1, c2, c3, n_rounds):
+    # pyrefly: ignore  # missing-attribute
     seed = hl.cast(hl.UInt(64), seed)
 
     assert c0.type().bits() == 32
 
+    # pyrefly: ignore  # missing-attribute
     seed_hi = hl.cast(hl.UInt(32), (seed >> 32) & hl.u64(0xFFFFFFFF))
+    # pyrefly: ignore  # missing-attribute
     seed_lo = hl.cast(hl.UInt(32), seed & hl.u64(0xFFFFFFFF))
 
     return philox_impl(c0, c1, c2, c3, seed_lo, seed_hi, n_rounds)
 
 
 def randint4x(seed, offset, n_rounds):
+    # pyrefly: ignore  # missing-attribute
     offset = hl.cast(hl.UInt(32), offset)
+    # pyrefly: ignore  # missing-attribute
     _0 = hl.u32(0)
     return halide_philox(seed, offset, _0, _0, _0, n_rounds)
 
@@ -108,11 +124,15 @@ def randn(seed, offset):
 
 def randint64(seed, offset, low, high):
     r0, r1, _r2, _r3 = randint4x(seed, offset, PHILOX_N_ROUNDS_DEFAULT)
+    # pyrefly: ignore  # missing-attribute
     r0 = hl.cast(hl.UInt(64), r0)
+    # pyrefly: ignore  # missing-attribute
     r1 = hl.cast(hl.UInt(64), r1)
 
     result = r0 | (r1 << 32)
     size = high - low
+    # pyrefly: ignore  # missing-attribute
     result = result % hl.cast(hl.UInt(64), size)
+    # pyrefly: ignore  # missing-attribute
     result = hl.cast(hl.Int(64), result) + low
     return result

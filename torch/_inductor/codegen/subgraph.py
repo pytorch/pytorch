@@ -80,6 +80,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             bm_graph_lowering.graph_input_names.append(sym_inp.name)
 
         sym_inputs = [
+            # pyrefly: ignore  # no-matching-overload
             int(V.graph.sizevars.shape_env.size_hint(sym_var))
             for sym_var in self.sym_inputs
         ]
@@ -109,6 +110,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_func([*sym_inputs, *args])
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
+        # pyrefly: ignore  # bad-return
         return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
 
     def hash_key(self) -> str:

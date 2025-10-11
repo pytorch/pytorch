@@ -15,11 +15,14 @@ from .triton_compat import (  # noqa: F401
 
 
 _T = TypeVar("_T")
+# pyrefly: ignore  # not-a-type
 _LOG_2_E: tl.constexpr = tl.constexpr(pymath.log2(pymath.e))
 
 
 def set_driver_to_cpu():
+    # pyrefly: ignore  # missing-attribute
     driver = triton.runtime.driver
+    # pyrefly: ignore  # missing-attribute
     if backend := triton.backends.backends.get("cpu", None):
         if isinstance(driver.active, backend.driver):
             # Don't re-initialize backend if it is already active
@@ -33,7 +36,9 @@ def set_driver_to_cpu():
 
 
 def set_driver_to_gpu():
+    # pyrefly: ignore  # missing-attribute
     driver = triton.runtime.driver
+    # pyrefly: ignore  # missing-attribute
     for name, backend in triton.backends.backends.items():
         if backend.driver.is_active() and name != "cpu":
             # After https://github.com/triton-lang/triton/commit/b844d519bc5e86edf00fe6b3c6c2d1badcd509a4,
@@ -54,6 +59,7 @@ def get_backend_options():
     from triton.runtime import driver
 
     target = driver.active.get_current_target()
+    # pyrefly: ignore  # missing-attribute
     backend = triton.compiler.compiler.make_backend(target)
     options = backend.parse_options(dict())
     return options.__dict__
@@ -62,6 +68,7 @@ def get_backend_options():
 @triton.jit
 def promote_to_tensor(x):
     # Addition promotes to tensor for us
+    # pyrefly: ignore  # missing-attribute
     return x + tl.zeros((1,), tl.int1)
 
 
@@ -71,7 +78,9 @@ def div_floor_integer(a, b):
     # Based on c10::div_floor_integer
     quot = a // b
     remainder = a % b
+    # pyrefly: ignore  # missing-attribute
     fixed = tl.where(remainder != 0, quot - 1, quot)
+    # pyrefly: ignore  # missing-attribute
     return tl.where((a < 0) != (b < 0), fixed, quot)
 
 
@@ -79,6 +88,7 @@ def div_floor_integer(a, b):
 def remainder_integer(a, b):
     # NOTE: a % b matches C division, not floor division
     remainder = a % b
+    # pyrefly: ignore  # missing-attribute
     return tl.where((remainder != 0) & ((a < 0) != (b < 0)), remainder + b, remainder)
 
 
@@ -94,6 +104,7 @@ def _prod_accumulate(a, b):
 
 @triton.jit
 def prod(input, axis):
+    # pyrefly: ignore  # missing-attribute
     return tl.reduce(input, axis, _prod_accumulate)
 
 
@@ -102,6 +113,7 @@ def minimum(a, b):
     mask = a < b
     if is_floating(a):
         mask |= a != a
+    # pyrefly: ignore  # missing-attribute
     return tl.where(mask, a, b)
 
 
@@ -110,16 +122,19 @@ def maximum(a, b):
     mask = a > b
     if is_floating(a):
         mask |= a != a
+    # pyrefly: ignore  # missing-attribute
     return tl.where(mask, a, b)
 
 
 @triton.jit
 def min2(a, dim):
+    # pyrefly: ignore  # missing-attribute
     return tl.reduce(a, dim, minimum)
 
 
 @triton.jit
 def max2(a, dim):
+    # pyrefly: ignore  # missing-attribute
     return tl.reduce(a, dim, maximum)
 
 
@@ -136,6 +151,7 @@ def minimum_with_index(a_value, a_index, b_value, b_index):
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
+    # pyrefly: ignore  # missing-attribute
     return tl.where(mask, a_value, b_value), tl.where(mask, a_index, b_index)
 
 
@@ -152,37 +168,48 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
 
     # Prefer lowest index if values are equal
     mask |= equal & (a_index < b_index)
+    # pyrefly: ignore  # missing-attribute
     return tl.where(mask, a_value, b_value), tl.where(mask, a_index, b_index)
 
 
 @triton.jit
 def min_with_index(value, index, dim):
+    # pyrefly: ignore  # missing-attribute
     return tl.reduce((value, index), dim, minimum_with_index)
 
 
 @triton.jit
 def max_with_index(value, index, dim):
+    # pyrefly: ignore  # missing-attribute
     return tl.reduce((value, index), dim, maximum_with_index)
 
 
 @triton.jit
+# pyrefly: ignore  # not-a-type
 def exp(x, use_fast_math: tl.constexpr):
     if use_fast_math:
+        # pyrefly: ignore  # missing-attribute
         return math.exp(x)
     else:
+        # pyrefly: ignore  # missing-attribute
         return libdevice.exp(x)
 
 
 @triton.jit
+# pyrefly: ignore  # not-a-type
 def online_softmax_reduce(lhs_max, lhs_sum, dim, use_fast_math: tl.constexpr):
     out_max = max2(lhs_max, dim)
+    # pyrefly: ignore  # missing-attribute
     out_max_keepdim = tl.expand_dims(out_max, dim)
+    # pyrefly: ignore  # missing-attribute
     delta = tl.where(out_max_keepdim == float("-inf"), 0, lhs_max - out_max_keepdim)
+    # pyrefly: ignore  # missing-attribute
     out_sum = tl.sum(lhs_sum * exp(delta, use_fast_math), dim)
     return out_max, out_sum
 
 
 @triton.jit
+# pyrefly: ignore  # not-a-type
 def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexpr):
     """
     When we do combine, we assume lhs is the accumulator and rhs is the next
@@ -192,9 +219,11 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
     """
     out_max = maximum(lhs_max, rhs_max)
 
+    # pyrefly: ignore  # missing-attribute
     lhs_scale = tl.where(
         out_max == float("-inf"), 1.0, exp(lhs_max - out_max, use_fast_math)
     )
+    # pyrefly: ignore  # missing-attribute
     rhs_scale = tl.where(
         out_max == float("-inf"), 1.0, exp(rhs_max - out_max, use_fast_math)
     )
@@ -209,8 +238,10 @@ def online_softmax_combine(lhs_max, lhs_sum, rhs_max, use_fast_math: tl.constexp
 @triton.jit
 def welford_reduce(value, mean, m2, weight, first_iteration):
     if first_iteration:
+        # pyrefly: ignore  # missing-attribute
         new_weight = tl.full(weight.shape, 1, weight.dtype)
         new_mean = value
+        # pyrefly: ignore  # missing-attribute
         new_m2 = tl.zeros_like(m2)
     else:
         delta = value - mean
@@ -224,6 +255,7 @@ def welford_reduce(value, mean, m2, weight, first_iteration):
 def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
     delta = mean_2 - mean_1
     new_weight = weight_1 + weight_2
+    # pyrefly: ignore  # missing-attribute
     w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
     return (
         mean_1 + delta * w2_over_w,
@@ -234,23 +266,30 @@ def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
 
 @triton.jit
 def welford(mean, m2, weight, dim):
+    # pyrefly: ignore  # missing-attribute
     return tl.reduce((mean, m2, weight), dim, welford_combine)
 
 
 @triton.jit
 def device_assert_then(cond, msg, r):
+    # pyrefly: ignore  # missing-attribute
     tl.device_assert(cond, msg)
     return r
 
 
 @triton.jit
 def randint64(seed, offset, low, high):
+    # pyrefly: ignore  # missing-attribute
     r0, r1, _r2, _r3 = tl.randint4x(seed, offset)
+    # pyrefly: ignore  # missing-attribute
     r0 = r0.to(tl.uint64)
+    # pyrefly: ignore  # missing-attribute
     r1 = r1.to(tl.uint64)
     result = r0 | (r1 << 32)
     size = high - low
+    # pyrefly: ignore  # missing-attribute
     result = result % size.to(tl.uint64)
+    # pyrefly: ignore  # missing-attribute
     result = result.to(tl.int64) + low
     return result
 
@@ -262,6 +301,7 @@ def _any_combine(a, b):
 
 @triton.jit
 def any(a, dim):
+    # pyrefly: ignore  # missing-attribute
     return tl.reduce(a, dim, _any_combine)
 
 
@@ -307,18 +347,22 @@ def bucketize_binary_search(
     BLOCK_SHAPE: the shape of the data block being processed.
     """
 
+    # pyrefly: ignore  # missing-attribute
     low = tl.zeros(values.shape, dtype=indexing_dtype)
+    # pyrefly: ignore  # missing-attribute
     high = tl.full(values.shape, BOUNDARIES_SIZE, dtype=indexing_dtype)
 
     full_range = BOUNDARIES_SIZE + 1
     while full_range > 1:
         mid = (high + low) // 2
+        # pyrefly: ignore  # missing-attribute
         mask = (
             (mid * BOUNDARIES_STRIDE + boundary_indices) < BOUNDARIES_UNDERLYING_NUMEL
         ).logical_and(mid < BOUNDARIES_SIZE)
         mid_indices = (
             mid
             if sorter_ptr is None or SORTER_STRIDE is None
+            # pyrefly: ignore  # missing-attribute
             else tl.load(
                 sorter_ptr + sorter_indices + SORTER_STRIDE * mid,
                 mask=mask,
@@ -326,6 +370,7 @@ def bucketize_binary_search(
             )
         )
 
+        # pyrefly: ignore  # missing-attribute
         bucket_upper_bound = tl.load(
             boundaries_ptr + boundary_indices + BOUNDARIES_STRIDE * mid_indices,
             mask=mask,
@@ -336,7 +381,9 @@ def bucketize_binary_search(
         else:
             is_above = values > bucket_upper_bound
 
+        # pyrefly: ignore  # missing-attribute
         low = tl.where(is_above & mask, mid + 1, low)
+        # pyrefly: ignore  # missing-attribute
         high = tl.where(is_above, high, mid)
 
         full_range = (full_range + 1) // 2
@@ -348,10 +395,13 @@ def bucketize_binary_search(
 def pack_value_flag(
     value,
     flag,
+    # pyrefly: ignore  # not-a-type
     DTYPE_VALUE_AS_UINT: tl.constexpr,
+    # pyrefly: ignore  # not-a-type
     DTYPE_PACK: tl.constexpr,
 ):
     # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
+    # pyrefly: ignore  # missing-attribute
     DTYPE_VALUE_AS_UINT = tl.core._unwrap_if_constexpr(DTYPE_VALUE_AS_UINT)
     bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
     uv = value.to(DTYPE_VALUE_AS_UINT, bitcast=True).to(DTYPE_PACK)
@@ -365,7 +415,9 @@ def unpack_value(
     DTYPE_VALUE_AS_UINT,
 ):
     # Workaround for triton bug, tensor.to doesn't unwrap constexpr values
+    # pyrefly: ignore  # missing-attribute
     DTYPE_VALUE = tl.core._unwrap_if_constexpr(DTYPE_VALUE)
+    # pyrefly: ignore  # missing-attribute
     DTYPE_VALUE_AS_UINT = tl.core._unwrap_if_constexpr(DTYPE_VALUE_AS_UINT)
     bitwidth = DTYPE_VALUE_AS_UINT.primitive_bitwidth
     value_uint = (pack >> bitwidth).to(DTYPE_VALUE_AS_UINT)
@@ -383,7 +435,9 @@ def exclusive_scan_decoupled_lookback(
     block_value,
     index,
     combine_fn,
+    # pyrefly: ignore  # not-a-type
     DTYPE_VALUE_AS_UINT: tl.constexpr,
+    # pyrefly: ignore  # not-a-type
     DTYPE_PACK: tl.constexpr,
 ):
     """Compute exclusive scan of a scalar value between blocks
@@ -404,21 +458,26 @@ def exclusive_scan_decoupled_lookback(
     DTYPE_VALUE = block_value.dtype
     pack = pack_value_flag(
         block_value,
+        # pyrefly: ignore  # missing-attribute
         tl.full(block_value.shape, 1, DTYPE_VALUE_AS_UINT),
         DTYPE_VALUE_AS_UINT,
         DTYPE_PACK,
     )
     if index > 0:
+        # pyrefly: ignore  # missing-attribute
         tl.atomic_xchg(scratch_base + index, pack, sem="relaxed")
 
     # Calculate exclusive prefix scan
+    # pyrefly: ignore  # missing-attribute
     exclusive_prefix = tl.zeros([], DTYPE_VALUE)
     prefix_valid = False
     test_target = index - 1
     while test_target >= 0:
         # tl.atomic_load
+        # pyrefly: ignore  # missing-attribute
         flag = tl.full([], 0, DTYPE_VALUE_AS_UINT)
         while flag == 0:
+            # pyrefly: ignore  # missing-attribute
             pack = tl.atomic_add(scratch_base + test_target, 0, sem="relaxed")
             flag = unpack_flag(pack, DTYPE_VALUE_AS_UINT)
 
@@ -441,10 +500,12 @@ def exclusive_scan_decoupled_lookback(
         inclusive_prefix = block_value
     pack = pack_value_flag(
         inclusive_prefix,
+        # pyrefly: ignore  # missing-attribute
         tl.full([], 2, DTYPE_VALUE_AS_UINT),
         DTYPE_VALUE_AS_UINT,
         DTYPE_PACK,
     )
+    # pyrefly: ignore  # missing-attribute
     tl.atomic_xchg(scratch_base + index, pack, sem="relaxed")
     return exclusive_prefix
 
@@ -463,21 +524,30 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
     """
     # Publish block sum so subsequent blocks don't get stuck waiting for us
     if index > 0:
+        # pyrefly: ignore  # missing-attribute
         block_value_u64 = block_value.to(tl.uint64, bitcast=True)
+        # pyrefly: ignore  # missing-attribute
         tl.store(scratch_base + 3 * index + 1, block_value_u64)
+        # pyrefly: ignore  # missing-attribute
         tl.debug_barrier()
+        # pyrefly: ignore  # missing-attribute
         flag_one = tl.full([], 1, tl.uint64)
+        # pyrefly: ignore  # missing-attribute
         tl.atomic_xchg(scratch_base + 3 * index + 0, flag_one, sem="release")
 
     # Calculate exclusive prefix scan
+    # pyrefly: ignore  # missing-attribute
     exclusive_prefix = tl.zeros([], block_value.dtype)
     prefix_valid = False
     test_target = index - 1
     while test_target >= 0:
+        # pyrefly: ignore  # missing-attribute
         flag = tl.full([], 0, tl.uint64)
         while flag == 0:
+            # pyrefly: ignore  # missing-attribute
             flag = tl.atomic_add(scratch_base + 3 * test_target + 0, 0, sem="acquire")
 
+        # pyrefly: ignore  # missing-attribute
         value_u64 = tl.load(scratch_base + 3 * test_target + flag.to(tl.int32))
         value = value_u64.to(block_value.dtype, bitcast=True)
         if prefix_valid:
@@ -496,10 +566,15 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
         inclusive_prefix = combine_fn(exclusive_prefix, block_value)
     else:
         inclusive_prefix = block_value
+    # pyrefly: ignore  # missing-attribute
     inclusive_prefix_u64 = inclusive_prefix.to(tl.uint64, bitcast=True)
+    # pyrefly: ignore  # missing-attribute
     tl.store(scratch_base + 3 * index + 2, inclusive_prefix_u64)
+    # pyrefly: ignore  # missing-attribute
     tl.debug_barrier()
+    # pyrefly: ignore  # missing-attribute
     flag_two = tl.full([], 2, tl.uint64)
+    # pyrefly: ignore  # missing-attribute
     tl.atomic_xchg(scratch_base + 3 * index + 0, flag_two, sem="release")
 
     return exclusive_prefix
@@ -508,8 +583,11 @@ def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combi
 @triton.jit
 def frexp(x):
     # TODO(isuruf): use inline_asm_elementwise here
+    # pyrefly: ignore  # missing-attribute
     y = libdevice.ilogb(x) + 1
+    # pyrefly: ignore  # missing-attribute
     exponent = tl.where(x == 0, 0, y)
+    # pyrefly: ignore  # missing-attribute
     mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
     return mantissa, exponent
 
@@ -520,42 +598,66 @@ def _compare_and_swap_with_index(
     idxs,
     rnumel,
     flip,
+    # pyrefly: ignore  # not-a-type
     i: tl.constexpr,
+    # pyrefly: ignore  # not-a-type
     n_dims: tl.constexpr,
+    # pyrefly: ignore  # not-a-type
     stable: tl.constexpr,
+    # pyrefly: ignore  # not-a-type
     descending: tl.constexpr,
 ):
+    # pyrefly: ignore  # not-a-type
     n_outer: tl.constexpr = x.numel >> n_dims
+    # pyrefly: ignore  # not-a-type
     shape: tl.constexpr = [n_outer * 2**i, 2, 2 ** (n_dims - i - 1)]
 
+    # pyrefly: ignore  # missing-attribute
     idtype = tl.core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
 
+    # pyrefly: ignore  # missing-attribute
     y = tl.reshape(x, shape)
     iy = y.to(idtype, bitcast=True)
     # slice left/right with 'stride' 2**(n_dims - i - 1)
+    # pyrefly: ignore  # missing-attribute
     right_mask = tl.arange(0, 2)[None, :, None].to(idtype)
     left_mask = (1 - right_mask).to(idtype)
+    # pyrefly: ignore  # missing-attribute
     ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1).to(idtype)[:, None, :], shape)
+    # pyrefly: ignore  # missing-attribute
     iright = tl.broadcast_to(tl.sum(iy * right_mask, 1).to(idtype)[:, None, :], shape)
+    # pyrefly: ignore  # missing-attribute
     ileft = tl.reshape(ileft, x.shape)
+    # pyrefly: ignore  # missing-attribute
     iright = tl.reshape(iright, x.shape)
     left = ileft.to(x.dtype, bitcast=True)
     right = iright.to(x.dtype, bitcast=True)
 
     # idx
+    # pyrefly: ignore  # missing-attribute
     y_idx = tl.reshape(idxs, shape)
+    # pyrefly: ignore  # missing-attribute
     left_idx = tl.broadcast_to(
-        tl.sum(y_idx * left_mask.to(y_idx.dtype), 1)[:, None, :], shape
+        # pyrefly: ignore  # missing-attribute
+        tl.sum(y_idx * left_mask.to(y_idx.dtype), 1)[:, None, :],
+        shape,
     )
+    # pyrefly: ignore  # missing-attribute
     right_idx = tl.broadcast_to(
-        tl.sum(y_idx * right_mask.to(y_idx.dtype), 1)[:, None, :], shape
+        # pyrefly: ignore  # missing-attribute
+        tl.sum(y_idx * right_mask.to(y_idx.dtype), 1)[:, None, :],
+        shape,
     )
+    # pyrefly: ignore  # missing-attribute
     left_idx = tl.reshape(left_idx, x.shape)
+    # pyrefly: ignore  # missing-attribute
     right_idx = tl.reshape(right_idx, x.shape)
 
     # valid
     if rnumel is None:
+        # pyrefly: ignore  # missing-attribute
         left_valid_mask = tl.full(x.shape, True, tl.int1)
+        # pyrefly: ignore  # missing-attribute
         right_valid_mask = tl.full(x.shape, True, tl.int1)
     else:
         left_valid_mask = left_idx < rnumel
@@ -596,8 +698,11 @@ def _compare_and_swap_with_index(
     cond = (right_valid_mask > left_valid_mask) | (
         (right_valid_mask == left_valid_mask) & cond
     )
+    # pyrefly: ignore  # missing-attribute
     cond = (cond ^ flip).to(tl.int1)
+    # pyrefly: ignore  # missing-attribute
     ret = ix ^ tl.where(cond, ileft ^ iright, tl.zeros_like(ix))
+    # pyrefly: ignore  # missing-attribute
     new_idxs = idxs ^ tl.where(cond, left_idx ^ right_idx, tl.zeros_like(idxs))
 
     return ret.to(x.dtype, bitcast=True), new_idxs
@@ -608,13 +713,20 @@ def _bitonic_merge_with_index(
     x,
     idxs,
     rnumel,
+    # pyrefly: ignore  # not-a-type
     stage: tl.constexpr,
+    # pyrefly: ignore  # not-a-type
     alternating: tl.constexpr,
+    # pyrefly: ignore  # not-a-type
     n_dims: tl.constexpr,
+    # pyrefly: ignore  # not-a-type
     stable: tl.constexpr,
+    # pyrefly: ignore  # not-a-type
     descending: tl.constexpr,
 ):
+    # pyrefly: ignore  # not-a-type
     n_outer: tl.constexpr = x.numel >> n_dims
+    # pyrefly: ignore  # missing-attribute
     tl.static_assert(stage <= n_dims)
     # flip denotes whether to re-arrange sub-sequences of elements in ascending or
     # descending order.
@@ -622,13 +734,18 @@ def _bitonic_merge_with_index(
     # if flip = 00110011... then all the elements will be re-arranged alternatingly (with
     # a stride of 2) at this stage
     if alternating:
+        # pyrefly: ignore  # not-a-type
         shape: tl.constexpr = [n_outer * 2 ** (n_dims - 1 - stage), 2, 2**stage]
+        # pyrefly: ignore  # missing-attribute
         flip = tl.reshape(
-            tl.broadcast_to(tl.arange(0, 2)[None, :, None], shape), x.shape
+            # pyrefly: ignore  # missing-attribute
+            tl.broadcast_to(tl.arange(0, 2)[None, :, None], shape),
+            x.shape,
         )
     else:
         flip = False
     # perform `stage` rounds of `compare-and-swap`
+    # pyrefly: ignore  # missing-attribute
     for i in tl.static_range(stage):
         x, idxs = _compare_and_swap_with_index(
             x, idxs, rnumel, flip, i + (n_dims - stage), n_dims, stable, descending
@@ -641,19 +758,27 @@ def sort_with_index(
     x,  # value
     idxs,  # index
     rnumel,  # number of elements
+    # pyrefly: ignore  # not-a-type
     dim: tl.constexpr = None,
+    # pyrefly: ignore  # not-a-type
     stable: tl.constexpr = tl.constexpr(False),
+    # pyrefly: ignore  # not-a-type
     descending: tl.constexpr = tl.constexpr(False),
 ):
+    # pyrefly: ignore  # missing-attribute
     x, idxs = tl.broadcast(x, idxs)
     # handle default dimension or check that it is the most minor dim
+    # pyrefly: ignore  # not-a-type
     _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
+    # pyrefly: ignore  # missing-attribute
     tl.static_assert(
         _dim == len(x.shape) - 1, "only minor dimension is currently supported"
     )
     # iteratively run bitonic merge-sort steps
+    # pyrefly: ignore  # not-a-type
     n_dims: tl.constexpr = _log2(x.shape[_dim])
 
+    # pyrefly: ignore  # missing-attribute
     for i in tl.static_range(1, n_dims + 1):
         x, idxs = _bitonic_merge_with_index(
             x,
@@ -670,8 +795,10 @@ def sort_with_index(
 
 @triton.jit
 def select_one(x, mask, dim, keep_dims=False):
+    # pyrefly: ignore  # missing-attribute
     idtype = tl.core.get_int_dtype(x.dtype.primitive_bitwidth, signed=False)
     ix = x.to(idtype, bitcast=True)
+    # pyrefly: ignore  # missing-attribute
     iy = tl.sum(ix * mask, dim, keep_dims=keep_dims)
     return iy.to(x.dtype, bitcast=True)
 
@@ -686,26 +813,32 @@ def x_grid_barrier(sem):
         sem: an uint32 semaphores, zero or 0x80000000 initialized.  Must be unique to each y/z program ID.
     """
     # ensure stores before this are visible
+    # pyrefly: ignore  # missing-attribute
     tl.debug_barrier()
 
     one_i32 = 1
     one_u32 = one_i32.to(tl.uint32)  # type: ignore[attr-defined]
+    # pyrefly: ignore  # missing-attribute
     expected = tl.num_programs(0).to(tl.uint32)
+    # pyrefly: ignore  # missing-attribute
     if tl.program_id(0) == 0:
         nb = 0x80000000 - (expected - one_u32)
     else:
         nb = one_u32
 
+    # pyrefly: ignore  # missing-attribute
     old_arrive = tl.atomic_add(sem, nb, sem="release")
 
     bar_flipped = False
     while not bar_flipped:
         # want a `ld.acquire.gpu.u32 $0,[$1];` but Triton doesn't have it
+        # pyrefly: ignore  # missing-attribute
         current_arrive = tl.atomic_add(sem, 0, sem="acquire")
         # current_arrive = tl.load(sem, volatile=True)
         bar_flipped = ((old_arrive ^ current_arrive) & 0x80000000) != 0
 
     # TODO(jansel): is this needed?
+    # pyrefly: ignore  # missing-attribute
     tl.debug_barrier()
 
 
@@ -735,21 +868,29 @@ def triton_builtin(f: Callable[..., _T]) -> Callable[..., _T]:
 
 @triton_builtin
 def constexpr_next_power_of_2(
-    n: tl.constexpr, *, _builder: object = None
+    # pyrefly: ignore  # not-a-type
+    n: tl.constexpr,
+    *,
+    _builder: object = None,
+    # pyrefly: ignore  # not-a-type
 ) -> tl.constexpr:
     """
     A version triton.next_power_of_two that can be used within a kernel on constants.
     """
+    # pyrefly: ignore  # invalid-argument
     assert isinstance(n, tl.constexpr)
+    # pyrefly: ignore  # missing-attribute
     return tl.constexpr(triton.next_power_of_2(n.value))
 
 
 @triton_builtin
+# pyrefly: ignore  # not-a-type
 def if_mask(mask: Any, val, *, _builder: object = None) -> tl.constexpr:
     """
     Work around triton compile error: `ValueError: `other` cannot be provided without `mask``
     A compile-time to check to return either `val` or `None` depending on the value of mask.
     """
+    # pyrefly: ignore  # invalid-argument
     if isinstance(mask, tl.constexpr) and mask.value is None:
         return tl.constexpr(None)
     return val

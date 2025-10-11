@@ -4405,7 +4405,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             and isinstance(tos, LocalGeneratorObjectVariable)
         ):
             self.stack[-1] = ListIteratorVariable(
-                # pyrefly: ignore  # unbound-name
                 tos.force_unpack_var_sequence(self),
                 mutation_type=ValueMutationNew(),
             )

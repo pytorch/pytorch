@@ -1336,9 +1336,9 @@ def float_power(
 
     # Float power has the following contiguous cast behavior to be
     # consistent with its C++ impl
-    # pyrefly: ignore  # no-matching-overload
+
     a = _maybe_convert_to_dtype(a, dtype)
-    # pyrefly: ignore  # no-matching-overload
+
     b = _maybe_convert_to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
@@ -2348,7 +2348,6 @@ def all(
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
 ) -> TensorLikeType:
-    # pyrefly: ignore  # no-matching-overload
     result = torch.logical_not(torch.any(torch.logical_not(a), dim, keepdim=keepdim))
 
     if a.dtype == torch.uint8:
@@ -3245,7 +3244,7 @@ def _normalize(
         mean (Tensor): mean of the tensor along norm_dims.
         rstd (Tensor): 1/std of the tensor along norm_dims.
     """
-    # pyrefly: ignore  # no-matching-overload
+
     norm_dims = utils.canonicalize_dims(a.ndim, norm_dims)
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
@@ -3975,7 +3974,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 @out_wrapper()
 def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
-    # pyrefly: ignore  # no-matching-overload
+
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
     if not isinstance(shifts, Iterable):
@@ -4286,7 +4285,7 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
         return prims.squeeze(a, dims) if dims else prims.view_of(a)
 
     ndim = a.ndim
-    # pyrefly: ignore  # no-matching-overload
+
     dim = utils.canonicalize_dims(ndim, dim)
     dims = (dim,) if isinstance(dim, Dim) else dim
     # Short-circuits if the tensor has no dimensions

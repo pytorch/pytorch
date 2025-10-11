@@ -18,10 +18,6 @@ project-includes = [
     # "test/test_utils.py", # uncomment when enabling pyrefly
 ]
 project-excludes = [
-  # ==== below will be enabled directory by directory ====
-  # ==== to test Pyrefly on a specific directory, simply comment it out ====
-  "torch/_inductor/runtime",
-  "torch/_inductor/codegen",
   # formatting issues, will turn on after adjusting where suppressions can be
   # in import statements
   "torch/linalg/__init__.py",
@@ -36,6 +32,7 @@ project-excludes = [
   "torch/nn/modules/rnn.py", # only remove when parsing errors are fixed
   "torch/_inductor/codecache.py",
   "torch/distributed/elastic/metrics/__init__.py",
+  "torch/backends/cuda/__init__.py",
   # ====
   "benchmarks/instruction_counts/main.py",
   "benchmarks/instruction_counts/definitions/setup.py",

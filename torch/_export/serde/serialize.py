@@ -2183,7 +2183,6 @@ class GraphModuleDeserializer(metaclass=Final):
                     simplify=True,
                 )
             ):
-                # pyrefly: ignore  # unbound-name
                 node.meta["unbacked_bindings"] = unbacked_bindings
 
         assert len(self.unbacked_symbols) == 0

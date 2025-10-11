@@ -95,7 +95,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         and the backend should be able to fuse the ops with `*` into a quantized conv1d
         """
         weight_quant_dequant = self.get_weight()
-        # pyrefly: ignore  # no-matching-overload
+
         result = F.conv1d(
             x,
             weight_quant_dequant,
@@ -160,7 +160,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         and the backend should be able to fuse the ops with `*` into a quantized conv2d
         """
         weight_quant_dequant = self.get_weight()
-        # pyrefly: ignore  # no-matching-overload
+
         result = F.conv2d(
             x,
             weight_quant_dequant,
@@ -225,7 +225,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         and the backend should be able to fuse the ops with `*` into a quantized conv3d
         """
         weight_quant_dequant = self.get_weight()
-        # pyrefly: ignore  # no-matching-overload
+
         result = F.conv3d(
             x,
             weight_quant_dequant,

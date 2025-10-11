@@ -744,10 +744,7 @@ class ExceptionWrapper:
         if exc_info is None:
             exc_info = sys.exc_info()
         self.exc_type = exc_info[0]
-        self.exc_msg = "".join(
-            # pyrefly: ignore  # no-matching-overload
-            traceback.format_exception(*exc_info)
-        )
+        self.exc_msg = "".join(traceback.format_exception(*exc_info))
         self.where = where
 
     def reraise(self):

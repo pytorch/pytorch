@@ -527,7 +527,6 @@ def _replace_unbacked_bindings(gm: torch.fx.GraphModule) -> None:
                 simplify=True,
             )
         ):
-            # pyrefly: ignore  # unbound-name
             node.meta["unbacked_bindings"] = unbacked_bindings
 
 
@@ -700,6 +699,7 @@ def _restore_state_dict(
     # Replace state dict attr names with the fqn
     for name, _ in chain(
         original_module.named_parameters(remove_duplicate=False),
+        # pyrefly: ignore  # bad-argument-type
         original_module.named_buffers(remove_duplicate=False),
     ):
         if name in param_buffer_table_reverse:

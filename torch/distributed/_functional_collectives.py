@@ -1176,7 +1176,7 @@ def all_gather_inplace(
     return tensor_list
 
 
-from torch.distributed.distributed_c10d import (
+from torch.distributed.distributed_c10d import (  # pyrefly: ignore  # deprecated
     _all_gather_base as legacy_all_gather_base,
     _reduce_scatter_base as legacy_reduce_scatter_base,
     all_gather as legacy_all_gather,
