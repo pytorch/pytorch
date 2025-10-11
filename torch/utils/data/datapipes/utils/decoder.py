@@ -61,7 +61,7 @@ def basichandlers(extension: str, data):
     if extension in "txt text transcript":
         return data.decode("utf-8")
 
-    if extension in "cls cls2 class count index inx id".split():
+    if extension in ["cls", "cls2", "class", "count", "index", "inx", "id"]:
         try:
             return int(data)
         except ValueError:
@@ -70,10 +70,10 @@ def basichandlers(extension: str, data):
     if extension in "json jsn":
         return json.loads(data)
 
-    if extension in "pyd pickle".split():
+    if extension in ["pyd", "pickle"]:
         return pickle.loads(data)
 
-    if extension in "pt".split():
+    if extension in ["pt"]:
         stream = io.BytesIO(data)
         return torch.load(stream)
 
@@ -175,7 +175,7 @@ class ImageHandler:
         self.imagespec = imagespec.lower()
 
     def __call__(self, extension, data):
-        if extension.lower() not in "jpg jpeg png ppm pgm pbm pnm".split():
+        if extension.lower() not in ["jpg", "jpeg", "png", "ppm", "pgm", "pbm", "pnm"]:
             return None
 
         try:
@@ -235,7 +235,17 @@ def imagehandler(imagespec):
 # torch video
 ################################################################
 def videohandler(extension, data):
-    if extension not in "mp4 ogv mjpeg avi mov h264 mpg webm wmv".split():
+    if extension not in [
+        "mp4",
+        "ogv",
+        "mjpeg",
+        "avi",
+        "mov",
+        "h264",
+        "mpg",
+        "webm",
+        "wmv",
+    ]:
         return None
 
     try:
