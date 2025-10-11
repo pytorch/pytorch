@@ -9,7 +9,7 @@ import torch.utils.checkpoint
 from torch._dynamo.backends.common import aot_autograd
 from torch._inductor.test_case import run_tests
 from torch._inductor.utils import run_fw_bw_and_get_code
-from torch.fx.passes.regional_inductor import compile_fx_annotated_nodes_with_inductor
+from torch.fx.passes.regional_inductor import _compile_fx_annotated_nodes_with_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
@@ -38,8 +38,8 @@ from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 def aot_eager_regional_inductor():
     return aot_autograd(
-        fw_compiler=compile_fx_annotated_nodes_with_inductor,
-        bw_compiler=compile_fx_annotated_nodes_with_inductor,
+        fw_compiler=_compile_fx_annotated_nodes_with_inductor,
+        bw_compiler=_compile_fx_annotated_nodes_with_inductor,
     )
 
 
