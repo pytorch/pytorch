@@ -1375,6 +1375,7 @@ class CompilationMetrics:
     param_count: Optional[int] = None
     recompile_user_contexts: Optional[set[str]] = None
     inline_inbuilt_nn_modules_candidate: Optional[bool] = False
+    pytorch_version: Optional[str] = None
 
     @classmethod
     def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
@@ -1645,6 +1646,7 @@ def record_compilation_metrics(
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
+        "pytorch_version": torch.__version__,
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -4642,6 +4644,12 @@ def set_torch_function_mode_stack(stack: list[Any]) -> None:
 def clear_torch_function_mode_stack() -> None:
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
+
+
+def get_current_stream(device: torch.device) -> torch.Stream:
+    from .device_interface import get_interface_for_device
+
+    return get_interface_for_device(device).current_stream()
 
 
 # call from C dynamo in order to inspect values in pdb

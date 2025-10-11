@@ -800,7 +800,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 from .streams import StreamVariable
 
                 ind = register_graph_created_object(
-                    stream, StreamVariable._construct_in_graph_stream
+                    stream, StreamVariable.construct_in_graph_stream
                 )
                 tensor_variable = wrap_fx_proxy(
                     tx=tx,
@@ -1690,7 +1690,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         def __eq__(self, other):
             return (
-                type(self) == type(other)
+                type(self) is type(other)
                 and self.cls == other.cls
                 and self.fields == other.fields
             )

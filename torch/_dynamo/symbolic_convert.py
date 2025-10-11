@@ -43,6 +43,7 @@ import threading
 import traceback
 import types
 import weakref
+from collections import deque
 from traceback import StackSummary
 from typing import Any, Callable, cast, NoReturn, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeAlias, TypeIs
@@ -172,6 +173,7 @@ from .variables.misc import (
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.streams import SymbolicStreamState
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.torch_function import (
     SymbolicTorchFunctionState,
@@ -544,6 +546,7 @@ def log_graph_break(
     reason: str = "",
     exc_info: bool = False,
     user_stack: Optional[StackSummary] = None,
+    latest_bytecode_log: Optional[str] = None,
 ) -> None:
     if user_stack is None:
         user_stack = torch._guards.TracingContext.extract_stack()
@@ -606,6 +609,10 @@ def log_graph_break(
         # This log line MUST contain the string "Graph break in user code",
         # This log line is exercised from
         #   python test/dynamo/test_exc.py -k test_graph_break_log
+        if latest_bytecode_log and config.verbose:
+            user_stack_trace += "Most recent bytecode instructions traced (max 20):\n"
+            user_stack_trace += latest_bytecode_log
+
         graph_break_log.debug(
             user_stack_trace,
         )
@@ -933,6 +940,7 @@ def break_graph_if_unsupported(
                     exc_info=True,
                     reason=str(excp),
                     user_stack=excp.real_stack,
+                    latest_bytecode_log="\n".join(self.latest_bytecode_queue),
                 )
 
                 if self.maybe_has_backedge():
@@ -1163,6 +1171,7 @@ class InstructionTranslatorBase(
     symbolic_locals: dict[str, VariableTracker]
     symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
+    symbolic_stream_state: SymbolicStreamState
     post_prune_cell_and_freevars: Optional[dict[str, VariableTracker]]
     stack: list[VariableTracker]
     instruction_pointer: Optional[int]
@@ -1184,6 +1193,8 @@ class InstructionTranslatorBase(
     parent: Optional[InstructionTranslatorBase]
     debug_locals: list[tuple[VariableTracker, list[VariableTracker]]]
     package: Optional[CompilePackage]
+    latest_bytecode_queue: deque[str]
+    # Store the latest bytecode before graph_break() call by user
 
     def mark_inconsistent_side_effects(self) -> None:
         """
@@ -1350,6 +1361,17 @@ class InstructionTranslatorBase(
             trace_bytecode_log.debug(
                 "TRACE %s %s %s", inst.opname, inst.argval, self.stack
             )
+
+        # Store the latest 20 bytecode execution for the process,
+        # Used repr for byte processing and limiting the length to 2048
+        try:
+            stack_repr = repr(self.stack)
+        except ValueError:
+            # Handle large integers that exceed sys.int_info.str_digits_check_threshold
+            stack_repr = "<self.stack repr truncated due to large integer>"
+        self.latest_bytecode_queue.append(
+            f"TRACE {inst.opname} {repr(inst.argval)} {stack_repr}"
+        )
 
         self.update_block_stack(inst)
 
@@ -4049,6 +4071,7 @@ class InstructionTranslatorBase(
         symbolic_locals: dict[str, VariableTracker],
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
+        symbolic_stream_state: SymbolicStreamState,
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
@@ -4068,6 +4091,7 @@ class InstructionTranslatorBase(
         self.symbolic_locals = symbolic_locals
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
+        self.symbolic_stream_state = symbolic_stream_state
         # used to keep cell/freevars alive after pruning symbolic_locals (prune_dead_locals)
         # in order to generate any nested closures
         self.post_prune_cell_and_freevars = None
@@ -4083,6 +4107,7 @@ class InstructionTranslatorBase(
         self.accept_prefix_inst = True
         self.prefix_insts = []
         self.exn_vt_stack = exn_vt_stack
+        self.latest_bytecode_queue = deque(maxlen=20)
 
         # Properties of the input/output code
         self.instructions: list[Instruction] = instructions
@@ -4220,6 +4245,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             # A global var is inserted only after a STORE_GLOBAL happens to it
             symbolic_globals={},
             symbolic_torch_function_state=None,  # type: ignore[arg-type] # set below
+            symbolic_stream_state=None,  # type: ignore[arg-type] # set below
             f_code=f_code,
             export=export,
             inline_depth=0,
@@ -4323,6 +4349,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
                 torch_function_mode_stack
             )
+
+            self.symbolic_stream_state = SymbolicStreamState()
 
             if export:
                 # export gets confused if we never realize unused inputs
@@ -4652,6 +4680,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
+                parent.symbolic_stream_state,
                 func,
             )
         else:
@@ -4663,6 +4692,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 sub_locals,
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
+                parent.symbolic_stream_state,
                 # pyrefly: ignore  # bad-argument-type
                 func,
             )
@@ -4746,6 +4776,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_locals: dict[str, VariableTracker],
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
+        symbolic_stream_state: SymbolicStreamState,
         funcvar: BaseUserFunctionVariable,
     ) -> None:
         f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
@@ -4779,6 +4810,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
             symbolic_torch_function_state=symbolic_torch_function_state,
+            symbolic_stream_state=symbolic_stream_state,
             instructions=instructions,
             code_options={k: getattr(code, k) for k in get_code_keys()},
             f_code=code,
