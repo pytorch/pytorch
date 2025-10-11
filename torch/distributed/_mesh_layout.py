@@ -37,7 +37,9 @@ class _MeshLayout(Layout):
     different from that of PyCute's.
     """
 
+    # pyrefly: ignore  # bad-override
     shape: IntTuple
+    # pyrefly: ignore  # bad-override
     stride: IntTuple
 
     def __post_init__(self) -> None:
