@@ -236,7 +236,6 @@ class TestUnbackedSymints(InductorTestCase):
 
         def fn(x, w, repeats, is_bmm):
             u0 = repeats.item()
-            torch._check_is_size(u0)
 
             x_unbacked = x.expand(u0, 32)
             w_unbacked = w.expand(32, u0)
@@ -268,7 +267,6 @@ class TestUnbackedSymints(InductorTestCase):
     def test_unbacked_range_tree_divisor(self, device):
         def fn(x, num):
             u0 = num.item()
-            torch._check_is_size(u0)
             zeros = torch.zeros(u0, device=device, dtype=torch.int)
             return (torch.ops.aten.index(x, [None, zeros]),)
 
@@ -302,8 +300,6 @@ class TestUnbackedSymints(InductorTestCase):
     def test_unbacked_repeat(self, device):
         def fn(x, a, b):
             u0, u1 = a.item(), b.item()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
 
             return x.repeat(u0, 2).repeat(2, u1)
 
@@ -361,11 +357,11 @@ class TestUnbackedSymints(InductorTestCase):
                     inp = args[0]
 
                     start = inp.slice_bounds[0].item()
-                    torch._check_is_size(start)
+                    torch._check(start >= 0)
                     torch._check(start <= inp.size(0))
 
                     length = (args[0].slice_bounds[1] - args[0].slice_bounds[0]).item()
-                    torch._check_is_size(length)
+                    torch._check(length >= 0)
                     torch._check(start + length <= inp.size(0))
 
                     return CustomSliceSubclass(
@@ -531,6 +527,35 @@ class TestUnbackedSymints(InductorTestCase):
         x = torch.tensor([1.0, 0.0, 1.0, 0.0], device=device)
         torch.compile(fn, fullgraph=True)(x)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipIfXpu(msg="scaled_dot_product_attention is not supported on XPU yet")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_sdfpa_unbacked_strides(self, device):
+        if device == "cpu":
+            raise unittest.SkipTest("scaled_dot_product_attention has no CPU backend")
+
+        def fn(x, y):
+            B, H, d_h = 2, 4, 16
+            nz = torch.nonzero(x)
+            seq_len = nz.size(0)
+            y = torch.nonzero(y).size(0)
+            strides = (H * seq_len * d_h, seq_len * d_h, d_h, y)
+
+            q = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            k = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            v = torch.randn(B, H, seq_len, d_h, device=device, dtype=torch.float16)
+            q = torch.as_strided(q, size=(B, H, seq_len, d_h), stride=strides)
+            k = torch.as_strided(k, size=(B, H, seq_len, d_h), stride=strides)
+            v = torch.as_strided(v, size=(B, H, seq_len, d_h), stride=strides)
+            result = torch.ops.aten._scaled_dot_product_flash_attention.default(
+                q, k, v, dropout_p=0.0, is_causal=False, scale=None
+            )
+            return result
+
+        x = torch.tensor([1.0, 0.0] * 8, device=device)
+        y = torch.tensor([1.0, 0.0], device=device)
+        torch.compile(fn, fullgraph=True)(x, y)
+
     @skipGPUIf(not HAS_GPU, "torch.compile for gpu requires triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_unbacked_linear_layer_norm_input(self, device):
@@ -567,7 +592,6 @@ class TestUnbackedSymints(InductorTestCase):
     def test_to_int_with_unbacked_size(self, device):
         def fn(x):
             unbacked = x.item()
-            torch._check_is_size(unbacked)
 
             # Transpose to avoid contig short-circuit.
             unbacked_size = torch.ones(
@@ -600,6 +624,28 @@ class TestUnbackedSymints(InductorTestCase):
             out3 = t3 * 3
             out4 = t4 / 4
             return out1, out2, out3, out4
+
+        example_inputs = (torch.randn(32, device=device, dtype=torch.float16),)
+        torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    @inductor_config.patch({"benchmark_kernel": True})
+    def test_triton_kernel_with_unbacked_symint_fallback(self, device):
+        # The benchmark_kernel=True config exercises the codegen_kernel_benchmark code path
+        # Test isinstance(arg_sig, SizeArg) == True in the fallback path
+        def fn(x):
+            # Create unbacked SymInt
+            nz = torch.nonzero(x)
+            u0 = nz.size(0)
+            # Create indices for index_select operation
+            indices = torch.tensor([1, u0 - 5], device=device)
+            # Create SizeArg object
+            x = torch.index_select(x, 0, indices)
+            return x
 
         example_inputs = (torch.randn(32, device=device, dtype=torch.float16),)
         torch._dynamo.mark_dynamic(example_inputs[0], 0)

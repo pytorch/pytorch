@@ -241,8 +241,11 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
         _check_inputs_match(args, kwargs, self._in_spec)
         return
 
-    # NOTE: this call is Dynamo disabled, as it used to be
-    _check_input_constraints_for_module(self, args, kwargs)
+    # NOTE: for some reason, Dynamo is tracing into this, we should see why and
+    # put compile at the right place. Until then, we can skip the input
+    # constraint checks.
+    if not torch.compiler.is_dynamo_compiling():
+        _check_input_constraints_for_module(self, args, kwargs)
 
 
 def _unlift_inputs_as_getattr(
@@ -353,10 +356,10 @@ def _get_codegen(
     if forward_arg_names:
         names = forward_arg_names
     elif (
-        in_spec.type == tuple
+        in_spec.type is tuple
         and in_spec.num_children == 2
-        and in_spec.children_specs[0].type == tuple
-        and in_spec.children_specs[1].type == dict
+        and in_spec.children_specs[0].type is tuple
+        and in_spec.children_specs[1].type is dict
     ):
         # if in_spec contains the args (tuple) and kwargs (dict)
         names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
