@@ -85,7 +85,7 @@ def _needs_inductor_compile(node):
     )
 
 
-def _compile_fx_annotated_nodes_with_inductor_helper(gm):
+def _compile_fx_annotated_nodes_with_inductor(gm):
     from torch.fx.passes.operator_support import OperatorSupport
 
     found_marked_node = False
@@ -119,11 +119,14 @@ def _recursive_compile_fx_annotated_nodes_with_inductor(gm):
         if isinstance(submod, torch.fx.GraphModule):
             _recursive_compile_fx_annotated_nodes_with_inductor(submod)
 
-    return _compile_fx_annotated_nodes_with_inductor_helper(gm)
+    return _compile_fx_annotated_nodes_with_inductor(gm)
 
 
 @compatibility(is_backward_compatible=False)
-def _compile_fx_annotated_nodes_with_inductor(gm, *example_args):
+def compile_fx_annotated_nodes_with_inductor(gm, *example_args):
+    """
+    Scoops out inductor marked regions and compiles them with inductor.
+    """
     # fuser utils create new nodes using create_proxy which retains the seq_nr
     # metadata and cause issues
     with torch.fx.traceback.preserve_node_meta(enable=False):
