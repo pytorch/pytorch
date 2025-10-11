@@ -5,7 +5,7 @@
 #endif
 
 namespace at::cuda {
-  GreenContext::GreenContext(int device_id, unsigned int num_sms) {
+  GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
     int driver_version;
     C10_CUDA_CHECK(cudaDriverGetVersion(&driver_version));
@@ -70,8 +70,8 @@ namespace at::cuda {
   }
 
   std::unique_ptr<GreenContext> GreenContext::create(
-      unsigned int num_sms,
-      std::optional<unsigned int> device_id) {
+      uint32_t num_sms,
+      std::optional<uint32_t> device_id) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
     if (!device_id.has_value()) {
       device_id = at::cuda::current_device();
