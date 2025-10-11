@@ -56,6 +56,7 @@ def fuzz_and_execute(
     template: str = "default",
     supported_ops: Optional[list[str]] = None,
     op_weights: Optional[dict[str, float]] = None,
+    minify: bool = False,
 ) -> None:
     """
     Generate a fuzzed operation stack, convert it to Python code, and execute it.
@@ -63,13 +64,15 @@ def fuzz_and_execute(
     Args:
         seed: Random seed for reproducible generation. If None, uses a random seed.
         max_depth: Maximum depth for operation stack (1-10). If None, uses a random depth.
+        minify: When execution fails, iteratively replace subtrees with args to find a minimal repro.
 
     This function:
     1. Generates a random target specification
     2. Creates a stack of operations to produce that target
     3. Converts the stack into executable Python code
     4. Executes the generated Python code
-    5. Validates the final result matches the target spec
+    5. If failure occurs and --minify is set, iteratively reduces the graph to a minimal failing repro
+    6. Logs artifacts to /tmp for inspection
     """
 
     # Generate seed if not provided
@@ -79,7 +82,7 @@ def fuzz_and_execute(
     # Generate max_depth if not provided (range 3-12)
     if max_depth is None:
         random.seed(seed + 999)  # Use seed offset for consistent depth selection
-        max_depth = random.randint(2, 4)
+        max_depth = random.randint(2, 7)
     else:
         # Clamp max_depth to valid range
         max_depth = max(1, max_depth)
@@ -92,8 +95,9 @@ def fuzz_and_execute(
     operation_stack = None
     python_code = None
     target_spec = None
+    operation_graph = None
 
-    def log(success: bool) -> None:
+    def log(success: bool, iteration_folder: Optional[str] = None) -> None:
         import os
         import time
 
@@ -102,7 +106,9 @@ def fuzz_and_execute(
         folder_name = (
             f"fuzzing_seed_{seed}_{timestamp}_{'success' if success else 'failed'}"
         )
-        iteration_folder = os.path.join("/tmp", folder_name)
+        base_folder = os.path.join("/tmp", folder_name)
+        if iteration_folder is None:
+            iteration_folder = base_folder
         os.makedirs(iteration_folder, exist_ok=True)
 
         # Write summary file
@@ -114,28 +120,94 @@ def fuzz_and_execute(
             f.write(f"Max depth: {max_depth}\n")
             f.write(f"Success: {success}\n")
             f.write(f"Target specification: {target_spec}\n")
-            if operation_stack:
-                f.write(f"Operations count: {len(operation_stack)}\n")
-
-        if operation_stack:
-            # Write operation stack to file in iteration folder
-            stack_file_path = os.path.join(iteration_folder, "operation_stack.txt")
-            with open(stack_file_path, "w") as f:
-                f.write(f"Target specification: {target_spec}\n")
-                f.write(f"Generated {len(operation_stack)} operations in stack\n\n")
-                f.write("Operation stack (in reverse order - dependencies first):\n")
-                for i in range(len(operation_stack) - 1, -1, -1):
-                    op = operation_stack[i]
-                    f.write(
-                        f"  {i}: {op.op_name} -> {op.output_spec} (depth {op.depth})\n"
-                    )
-
-            # Generate visualization in the iteration folder
-            visualize_operation_graph(
-                operation_graph, "Operation Graph", iteration_folder
-            )
 
     import time
+
+    def _reachable_nodes(graph):
+        """Compute nodes reachable from root via input edges."""
+        reachable = set()
+        def dfs(nid):
+            if nid in reachable or nid not in graph.nodes:
+                return
+            reachable.add(nid)
+            for inp in graph.nodes[nid].input_nodes:
+                if inp in graph.nodes:
+                    dfs(inp)
+        dfs(graph.root_node_id)
+        return reachable
+
+    def _prune_unreachable(graph):
+        r = _reachable_nodes(graph)
+        graph.nodes = {nid: node for nid, node in graph.nodes.items() if nid in r}
+
+    def _minify_graph(graph, template: str, seed: int) -> tuple[str, str]:
+        """
+        Iteratively snap off subtrees by converting nodes to args when the failure persists.
+        Returns (program_path, artifacts_dir) for the final minimized repro.
+        """
+        from copy import deepcopy
+
+        runner = ProgramRunner()
+        # Make a working copy
+        working = deepcopy(graph)
+
+        def _run_graph(g) -> bool:
+            code = convert_graph_to_python_code(g, seed=seed, template=template)
+            path = create_program_file(code)
+            try:
+                runner.run_program(path)
+                return True  # success (no failure)
+            except Exception:
+                return False  # failure persists
+
+        # First confirm current graph fails
+        if _run_graph(working):
+            return create_program_file(
+                convert_graph_to_python_code(working, seed=seed, template=template)
+            ), "/tmp"
+
+        changed = True
+        while changed:
+            changed = False
+            # Consider non-root nodes; try larger subtrees first
+            candidate_ids = [nid for nid in working.get_topological_order() if nid != working.root_node_id]
+            # Sort by number of dependencies (subtree size) descending
+            candidate_ids.sort(key=lambda nid: len(working.get_node_dependencies(nid)), reverse=True)
+
+            for nid in candidate_ids:
+                node = working.nodes.get(nid)
+                if node is None:
+                    continue
+                # Skip if already an arg
+                if node.op_name == "arg" or node.op_name.startswith("arg_"):
+                    continue
+                # Mutate: convert node to arg leaf
+                original = (node.op_name, list(node.input_nodes), list(node.input_specs))
+                node.op_name = "arg"
+                node.input_nodes = []
+                node.input_specs = []
+                # Prune now-unreachable nodes
+                _prune_unreachable(working)
+                # Test
+                if not _run_graph(working):
+                    # Failure persists, keep change and continue
+                    changed = True
+                else:
+                    # Revert change
+                    node.op_name, node.input_nodes, node.input_specs = original
+                    _prune_unreachable(working)
+
+        # Write minimized artifacts
+        final_code = convert_graph_to_python_code(working, seed=seed, template=template)
+        final_path = create_program_file(final_code)
+        # Create an artifacts dir and dump a visualization
+        import os
+        artifacts_dir = os.path.join("/tmp", f"minified_{seed}")
+        os.makedirs(artifacts_dir, exist_ok=True)
+        visualize_operation_graph(working, "Minified Operation Graph", artifacts_dir)
+        with open(os.path.join(artifacts_dir, "minified.py"), "w") as f:
+            f.write(final_code)
+        return final_path, artifacts_dir
 
     try:
         logger = logging.getLogger(__name__)
@@ -221,17 +293,27 @@ def fuzz_and_execute(
 
         logger.debug("   Completed in %.3fs", time.time() - start_time)
 
-        # # Validate the result matches target specification
         if not log_at_faluire:
             log(True)
 
     except Exception as e:
         print(f"\n❌ Execution failed: {e}")
-        # from visualize_stack import visualize_operation_stack
-        log(False)
         import traceback
-
         traceback.print_exc()
+        if minify and operation_graph is not None:
+            print("🪚 Minifying failing repro by snapping off subtrees to args...")
+            try:
+                final_path, artifacts_dir = _minify_graph(operation_graph, template, seed)
+                print(f"Minified repro written to: {final_path}")
+                print(f"Artifacts (graph viz, code) at: {artifacts_dir}")
+                log(False, iteration_folder=artifacts_dir)
+            except Exception as me:
+                print(f"Minification failed: {me}")
+        else:
+            if minify and operation_graph is None:
+                print("Minification requested but operation graph was not generated; skipping minify.")
+            # from visualize_stack import visualize_operation_stack
+            log(False)
         error_message = str(e)
         print(f"Error: {error_message}")
         sys.exit(1)
@@ -241,7 +323,7 @@ if __name__ == "__main__":
     import argparse
 
     try:
-        from multi_process_fuzzer import run_multi_process_fuzzer
+        from multi_process_fuzzer import run_multi_process_fuzzer, run_until_failure
     except ImportError:
         # If importing as a module fails, import from the same directory
         import os
@@ -249,7 +331,7 @@ if __name__ == "__main__":
 
         current_dir = os.path.dirname(os.path.abspath(__file__))
         sys.path.insert(0, current_dir)
-        from multi_process_fuzzer import run_multi_process_fuzzer
+        from multi_process_fuzzer import run_multi_process_fuzzer, run_until_failure
 
     # Set up command-line argument parsing
     parser = argparse.ArgumentParser(
@@ -296,6 +378,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Print detailed output for all runs (not just failures)",
     )
+    parser.add_argument(
+        "--stop-at-first-failure",
+        action="store_true",
+        help="Pick a random seed and keep iterating until finding a failure (exits with non-zero code)",
+    )
 
     # Legacy arguments
     parser.add_argument(
@@ -308,6 +395,14 @@ if __name__ == "__main__":
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
         help="Set the logging level (default: INFO)",
+    )
+    parser.add_argument(
+        "--minify",
+        action="store_true",
+        help=(
+            "When a failure is discovered, iteratively snap off entire subtrees by converting"
+            " them to args and keep reductions that preserve the failure, producing a minimal repro"
+        ),
     )
 
     args = parser.parse_args()
@@ -336,7 +431,32 @@ if __name__ == "__main__":
             template=args.template,
             supported_ops=parsed_supported_ops,
             op_weights=(parsed_weights if parsed_weights else None),
+            minify=args.minify,
         )
+    elif args.stop_at_first_failure:
+        # Stop-at-first-failure mode
+        # Default number of processes
+        if args.processes is None:
+            cpu_count = mp.cpu_count()
+            args.processes = max(1, min(16, int(cpu_count * 0.75)))
+
+        if args.processes < 1:
+            print("❌ Error: Number of processes must be at least 1")
+            sys.exit(1)
+
+        try:
+            run_until_failure(
+                num_processes=args.processes,
+                verbose=args.verbose,
+                template=args.template,
+                supported_ops=args.supported_ops,
+            )
+        except Exception as e:
+            print(f"❌ Unexpected error: {str(e)}")
+            import traceback
+
+            traceback.print_exc()
+            sys.exit(1)
     elif args.start is not None or args.count is not None:
         # Multi-process fuzzing mode
         if args.start is None:
