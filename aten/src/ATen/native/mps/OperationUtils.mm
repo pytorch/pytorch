@@ -568,7 +568,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     MPSShape* mpsStrides = getMPSShape(_tensor.strides());
     check_mps_shape(mpsShape);
 
-    auto storage_numel = src.storage().nbytes() / src.element_size();
+    auto storage_numel = src.storage().nbytes() / src.element_size() - src.storage_offset();
     TORCH_CHECK(storage_numel <= std::numeric_limits<int32_t>::max(),
                 "MPSGaph does not support tensor dims larger than INT_MAX");
     MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType
@@ -915,6 +915,22 @@ std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
 std::shared_ptr<MetalKernelFunction> MetalShaderLibrary::getKernelFunction(const std::string& name) {
   auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
   return std::make_shared<MetalKernelFunction>(cpl, func);
+}
+
+MetalKernelFunction* MetalShaderLibrary::getCachedKernelFunctionPtr(const std::string& name) {
+  // Check if kernel is already cached
+  auto it = kernelCache.find(name);
+  if (it != kernelCache.end()) {
+    return it->second.get();
+  }
+
+  // Create new kernel function and cache it
+  auto [cpl, func] = getLibraryPipelineState(getLibrary(), name);
+  auto kernel = std::make_unique<MetalKernelFunction>(cpl, func);
+  MetalKernelFunction* raw_ptr = kernel.get();
+  kernelCache[name] = std::move(kernel);
+
+  return raw_ptr;
 }
 
 class BundledShaderLibary : public MetalShaderLibrary {
