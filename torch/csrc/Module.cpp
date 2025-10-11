@@ -410,9 +410,11 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
   // associated with the TensorImpl. Swap this field as well.
   std::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
+      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          /*ignore_hermetic_tls=*/false);
   std::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj();
+      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+          /*ignore_hermetic_tls=*/false);
   TORCH_INTERNAL_ASSERT(
       mb_obj_a.has_value() && mb_obj_b.has_value(),
       "Both tensors should have PyObjects tagged by the current python interpreter");
@@ -492,7 +494,7 @@ static PyObject* THPModule_addDocStr(PyObject* _unused, PyObject* args) {
 
 static PyObject* THPModule_inferSize(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  Py_ssize_t num_args = args ? (Py_ssize_t)PyTuple_Size(args) : 0;
+  Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
   TORCH_CHECK(num_args == 2, "expected exactly 2 arguments");
   PyObject* arg1 = PyTuple_GET_ITEM(args, 0);
   TORCH_CHECK(THPSize_Check(arg1), "expected a torch.Size as argument 1");

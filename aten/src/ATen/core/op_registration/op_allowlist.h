@@ -114,7 +114,7 @@ constexpr bool allowlist_contains(std::string_view allowlist, std::string_view i
         }
         next++;
       } else {
-        if (allowlist.substr(cur).compare(item) == 0) {
+        if (allowlist.substr(cur) == item) {
           return true;
         }
         break;
