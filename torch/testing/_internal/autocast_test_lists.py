@@ -443,7 +443,7 @@ class TestAutocast(TestCase):
 
             # If both torch.* and Tensor.* variants were found, check outputs are identical
             if (output is not None) and (output_method is not None):
-                self.assertTrue(type(output) == type(output_method))
+                self.assertTrue(type(output) is type(output_method))
                 comparison = compare(output, output_method)
                 self.assertTrue(
                     comparison, f"torch.{op} result did not match Tensor.{op} result"
@@ -465,7 +465,7 @@ class TestAutocast(TestCase):
                     control = getattr(args[0].to(run_as_type), op)(
                         *cast(args[1:], run_as_type), **add_kwargs
                     )
-                self.assertTrue(type(output_to_compare) == type(control))
+                self.assertTrue(type(output_to_compare) is type(control))
                 comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, f"torch.{op} result did not match control")
             self.assertTrue(torch.is_autocast_enabled(device_type=device))
