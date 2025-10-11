@@ -23,7 +23,6 @@ restoring state changes.
 import inspect
 import sys
 import warnings
-from contextlib import ExitStack
 from typing import TYPE_CHECKING, Union
 
 import torch._C
@@ -1279,13 +1278,9 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx, *args):
-        # Run the annotation ctx manager in eager. Also ensure that
-        # preserve_node_meta context manager is setup. This is important to pass
-        # on the metadata to the create_proxy nodes.
-        stack = ExitStack()
-        stack.enter_context(torch.fx.traceback.annotate(self.target_values))
-        stack.enter_context(torch.fx.traceback.preserve_node_meta())
-        self.set_cleanup_hook(tx, lambda: stack.close())
+        cm = torch.fx.traceback.annotate(self.target_values)
+        cm.__enter__()
+        self.set_cleanup_hook(tx, lambda: cm.__exit__(None, None, None))
         return variables.ConstantVariable.create(None)
 
     def module_name(self):
