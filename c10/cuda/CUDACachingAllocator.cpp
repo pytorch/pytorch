@@ -638,11 +638,11 @@ struct ExpandableSegment {
     return *stream_;
   }
 
-  size_t getMappedSize() {
+  size_t getMappedSize() const {
     return mapped_size_;
   }
 
-  size_t getSegmentSize() {
+  size_t getSegmentSize() const {
     return segment_size_;
   }
 
@@ -799,11 +799,11 @@ struct ExpandableSegment {
     return nullptr;
   }
 
-  size_t getMappedSize() {
+  size_t getMappedSize() const {
     return 0;
   }
 
-  size_t getSegmentSize() {
+  size_t getSegmentSize() const {
     return 0;
   }
   void addPeer(c10::DeviceIndex device) {}
@@ -824,14 +824,14 @@ struct BlockState {
   // maintain invariant that event_count == 0 ;
   // history will be left alone in checkpoint
 
-  BlockState(Block* block);
+  explicit BlockState(Block* block);
 };
 
 struct SegmentState {
   std::vector<BlockState> blocks;
   bool is_small = false;
 
-  SegmentState(Block* head);
+  explicit SegmentState(Block* head);
 };
 
 struct PrivatePoolState : AllocatorState {
@@ -850,7 +850,7 @@ struct RestoreResult {
   std::vector<Block*> allocations_created;
 };
 
-static bool BlockComparatorSize(const Block* a, const Block* b) {
+bool BlockComparatorSize(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
   }
@@ -859,7 +859,7 @@ static bool BlockComparatorSize(const Block* a, const Block* b) {
   }
   return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
-static bool BlockComparatorAddress(const Block* a, const Block* b) {
+bool BlockComparatorAddress(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
   }
@@ -949,7 +949,7 @@ class EventPool {
 
 // CUDA graphs helper
 struct PrivatePool {
-  PrivatePool(MempoolId_t id, CUDAAllocator* allocator = nullptr)
+  explicit PrivatePool(MempoolId_t id, CUDAAllocator* allocator = nullptr)
       : id(std::move(id)),
         allocator_(allocator),
         large_blocks(/*small=*/false, this),
@@ -1078,7 +1078,7 @@ class RingBuffer {
     }
   }
 
-  void getEntries(std::vector<T>& result) {
+  void getEntries(std::vector<T>& result) const {
     std::lock_guard<std::mutex> lk(alloc_trace_lock);
     result.reserve(alloc_trace->size());
     result.insert(
@@ -1106,7 +1106,7 @@ class RingBuffer {
 
   // Both alloc_trace and alloc_trace_next needs to be used
   // under alloc_trace_lock.
-  std::mutex alloc_trace_lock;
+  mutable std::mutex alloc_trace_lock;
   size_t alloc_trace_next = 0;
   std::vector<T>*
       alloc_trace; // pointer because we need to intentionally leak this on
@@ -1182,6 +1182,8 @@ class DeviceCachingAllocator {
 
   // device statistics
   DeviceStats stats;
+
+  c10::DeviceIndex device_id;
 
   // unallocated cached blocks larger than 1 MB
   BlockPool large_blocks;
@@ -1271,8 +1273,10 @@ class DeviceCachingAllocator {
 
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  DeviceCachingAllocator()
-      : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
+  explicit DeviceCachingAllocator(c10::DeviceIndex id)
+      : device_id(id),
+        large_blocks(/*small=*/false),
+        small_blocks(/*small=*/true) {
     stats.max_split_size =
         static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
@@ -1295,7 +1299,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  bool isHistoryEnabled() {
+  bool isHistoryEnabled() const {
     return record_history;
   }
 
@@ -1311,7 +1315,7 @@ class DeviceCachingAllocator {
 
   bool checkPoolLiveAllocations(
       MempoolId_t mempool_id,
-      const std::unordered_set<void*>& expected_live_allocations) {
+      const std::unordered_set<void*>& expected_live_allocations) const {
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
     PrivatePool* pool = nullptr;
@@ -1358,10 +1362,7 @@ class DeviceCachingAllocator {
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
 
-  Block* malloc(
-      c10::DeviceIndex device,
-      size_t orig_size,
-      cudaStream_t stream) {
+  Block* malloc(size_t orig_size, cudaStream_t stream) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
@@ -1389,7 +1390,7 @@ class DeviceCachingAllocator {
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
-    AllocParams params(device, size, stream, &pool, alloc_size);
+    AllocParams params(device_id, size, stream, &pool, alloc_size);
     params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
@@ -1436,7 +1437,7 @@ class DeviceCachingAllocator {
           beginAllocateToPool(mempool_id, filter);
           auto& mempool = get_pool(size, stream);
           AllocParams mempool_params(
-              device, size, stream, &mempool, alloc_size);
+              device_id, size, stream, &mempool, alloc_size);
           mempool_params.stat_types = get_stat_types_for_pool(mempool);
           block_found = get_free_block(mempool_params);
           endAllocateToPool(mempool_id);
@@ -1463,7 +1464,7 @@ class DeviceCachingAllocator {
         allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
       }
 
-      std::string proc_info = reportProcessMemoryInfo(device);
+      std::string proc_info = reportProcessMemoryInfo(device_id);
 
       record_trace(
           TraceEntry::OOM,
@@ -1481,7 +1482,7 @@ class DeviceCachingAllocator {
               .current,
           stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
-          c10::Device(c10::DeviceType::CUDA, device));
+          c10::Device(c10::DeviceType::CUDA, device_id));
 
       auto allocated_bytes =
           stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
@@ -1519,7 +1520,7 @@ class DeviceCachingAllocator {
       lock.unlock();
 
       for (const auto& obs : observers_local) {
-        obs(device,
+        obs(device_id,
             alloc_size,
             set_fraction ? allowed_memory_maximum : device_total,
             device_free);
@@ -1549,7 +1550,7 @@ class DeviceCachingAllocator {
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
           ". GPU ",
-          static_cast<int>(device),
+          static_cast<int>(device_id),
           " has a total capacity of ",
           format_size(device_total),
           " of which ",
@@ -2080,7 +2081,7 @@ class DeviceCachingAllocator {
   }
 
   /** Returns a copy of the memory allocator stats **/
-  DeviceStats getStats() {
+  DeviceStats getStats() const {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     return stats;
   }
@@ -2456,7 +2457,7 @@ class DeviceCachingAllocator {
   }
 
   std::vector<TraceEntry> trace(
-      const std::function<time_t(approx_time_t)>& tsc_to_us) {
+      const std::function<time_t(approx_time_t)>& tsc_to_us) const {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     std::vector<TraceEntry> result;
     alloc_buffer.getEntries(result);
@@ -2501,6 +2502,8 @@ class DeviceCachingAllocator {
       auto divisions = CUDAAllocatorConfig::roundup_power2_divisions(size);
       if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
+      } else if (divisions == 1) {
+        return llvm::PowerOf2Ceil(size);
       } else {
         return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
       }
@@ -2590,7 +2593,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  int getPoolUseCount(MempoolId_t mempool_id) {
+  int getPoolUseCount(MempoolId_t mempool_id) const {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     auto pp = get_private_pool(mempool_id);
     return pp->use_count;
@@ -2686,7 +2689,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  PrivatePool* get_private_pool(MempoolId_t mempool_id) {
+  PrivatePool* get_private_pool(MempoolId_t mempool_id) const {
     auto it = graph_pools.find(mempool_id);
     TORCH_INTERNAL_ASSERT(it != graph_pools.end());
     return it->second.get();
@@ -3683,7 +3686,7 @@ class DeviceCachingAllocator {
     if (!compile_context.empty()) {
       compile_string = compile_context.top();
     }
-    auto te = TraceEntry(
+    TraceEntry te(
         action,
         device,
         addr,
@@ -3809,7 +3812,8 @@ class NativeCachingAllocator : public CUDAAllocator {
     if (size < device_count) {
       device_allocator.resize(device_count);
       for (const auto i : c10::irange(size, device_count)) {
-        device_allocator[i] = std::make_unique<DeviceCachingAllocator>();
+        device_allocator[i] =
+            std::make_unique<DeviceCachingAllocator>(c10::DeviceIndex(i));
       }
     }
   }
@@ -3829,7 +3833,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    Block* block = device_allocator[device]->malloc(device, size, stream);
+    Block* block = device_allocator[device]->malloc(size, stream);
     add_allocated_block(block);
     *devPtr = block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();

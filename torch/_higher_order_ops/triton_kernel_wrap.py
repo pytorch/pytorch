@@ -899,7 +899,6 @@ def analyze_kernel_mutations(
             if op.name == "tt.call":
                 assert op.fn_call_name in functions
                 mutations = analyze_kernel_mutations(
-                    # pyrefly: ignore  # bad-argument-type
                     functions,
                     # pyrefly: ignore  # bad-argument-type
                     op.fn_call_name,
