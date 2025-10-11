@@ -1211,7 +1211,7 @@ class CppVecOverrides(CppOverrides):
             return wrapper
 
         for name, method in vars(CppVecOverrides).items():
-            if getattr(method, "__class__", None) == staticmethod and name not in [
+            if getattr(method, "__class__", None) is staticmethod and name not in [
                 "masked",
                 "index_expr",
             ]:

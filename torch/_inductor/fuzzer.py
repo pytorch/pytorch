@@ -220,15 +220,15 @@ class SamplingMethod(Enum):
         if field_name in TYPE_OVERRIDES:
             return random.choice(TYPE_OVERRIDES[field_name])
 
-        if type_hint == bool:
+        if type_hint is bool:
             return random.choice([True, False]) if random_sample else not default
-        elif type_hint == int:
+        elif type_hint is int:
             # NOTE initially tried to use negation of the value, but it doesn't work because most types are ints
             # when they should be natural numbers + zero. Python types to cover these values aren't super convenient.
             return random.randint(0, 1000)
-        elif type_hint == float:
+        elif type_hint is float:
             return random.uniform(0, 1000)
-        elif type_hint == str:
+        elif type_hint is str:
             characters = string.ascii_letters + string.digits + string.punctuation
             return "".join(
                 random.choice(characters) for _ in range(random.randint(1, 20))
@@ -306,7 +306,7 @@ class SamplingMethod(Enum):
                 new_type = random.choice(type_hint.__args__)
             else:
                 new_type = random.choice(
-                    [t for t in type_hint.__args__ if t != type(default)]
+                    [t for t in type_hint.__args__ if t is not type(default)]
                 )
             try:
                 new_default = new_type()

@@ -78,7 +78,7 @@ def issubtype(left, right, recursive=True):
         if getattr(right, "__origin__", None) is Generic:
             return True
 
-    if right == type(None):
+    if right is type(None):
         return False
 
     # Right-side type
