@@ -329,7 +329,7 @@ def _sliced_mask_mod_error(
 ) -> Tensor:
     """
     Raises helpful error when using mask_mod from a sliced BlockMask.
-    
+
     After slicing a BlockMask, the mask_mod is reset and cannot be used directly.
     Users must reassign mask_mod from the original (unsliced) BlockMask.
     """
