@@ -9,7 +9,7 @@ from torch.fx._compatibility import compatibility
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["compile_fx_annotated_nodes_with_inductor"]
+__all__ = ["regional_inductor"]
 
 
 # standalone_inductor returns a callable class object - this does not sit well
@@ -123,7 +123,7 @@ def _recursive_compile_fx_annotated_nodes_with_inductor(gm):
 
 
 @compatibility(is_backward_compatible=False)
-def compile_fx_annotated_nodes_with_inductor(gm, *example_args):
+def regional_inductor(gm, *example_args):
     """
     Scoops out inductor marked regions and compiles them with inductor.
     """
