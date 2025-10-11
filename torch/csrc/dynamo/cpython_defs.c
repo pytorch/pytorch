@@ -5,12 +5,14 @@
 #if IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32))
 
 const uint8_t* THP_PyOpcode_Caches = NULL;
-const int THP_PyOpcode_Caches_size = 0;
+int THP_PyOpcode_Caches_size = 0;
 
 void THP_PyThreadState_PopFrame(
     PyThreadState* tstate,
     _PyInterpreterFrame* frame) {}
 void THP_PyFrame_Clear(_PyInterpreterFrame* frame) {}
+
+void init_THPCaches() {}
 
 #else
 
@@ -481,16 +483,13 @@ void THP_PyThreadState_PopFrame(
 
 #endif
 
-#if IS_PYTHON_3_11_PLUS
-
-const uint8_t* THP_PyOpcode_Caches = _PyOpcode_Caches;
-const int THP_PyOpcode_Caches_size = sizeof(_PyOpcode_Caches) / sizeof(uint8_t);
-
-#else
-
 const uint8_t* THP_PyOpcode_Caches = NULL;
-const int THP_PyOpcode_Caches_size = 0;
-
+int THP_PyOpcode_Caches_size = 0;
+void init_THPCaches() {
+#if IS_PYTHON_3_11_PLUS
+  THP_PyOpcode_Caches = _PyOpcode_Caches;
+  THP_PyOpcode_Caches_size = sizeof(_PyOpcode_Caches) / sizeof(uint8_t);
 #endif
+}
 
 #endif // IS_PYTHON_3_15_PLUS
