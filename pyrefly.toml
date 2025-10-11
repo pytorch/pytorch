@@ -20,9 +20,10 @@ project-includes = [
 project-excludes = [
   # ==== below will be enabled directory by directory ====
   # ==== to test Pyrefly on a specific directory, simply comment it out ====
-  "torch/_inductor/**",
-  "torch/distributed/**",
-  # formatting issues
+  "torch/_inductor/runtime",
+  "torch/_inductor/codegen",
+  # formatting issues, will turn on after adjusting where suppressions can be
+  # in import statements
   "torch/linalg/__init__.py",
   "torch/package/importer.py",
   "torch/package/_package_pickler.py",
@@ -32,6 +33,9 @@ project-excludes = [
   "torch/_export/utils.py",
   "torch/fx/experimental/unification/multipledispatch/__init__.py",
   "torch/nn/modules/__init__.py",
+  "torch/nn/modules/rnn.py", # only remove when parsing errors are fixed
+  "torch/_inductor/codecache.py",
+  "torch/distributed/elastic/metrics/__init__.py",
   # ====
   "benchmarks/instruction_counts/main.py",
   "benchmarks/instruction_counts/definitions/setup.py",
