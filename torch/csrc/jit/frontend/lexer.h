@@ -443,14 +443,14 @@ struct Lexer {
     std::stringstream ss;
     ss << what << ":\n";
     t.range.highlight(ss);
-    throw std::runtime_error(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   [[noreturn]] void expected(const std::string& what, const Token& t) {
     std::stringstream ss;
     ss << "expected " << what << " but found '" << t.kindString()
        << "' here:\n";
     t.range.highlight(ss);
-    throw std::runtime_error(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
   [[noreturn]] void expected(const std::string& what) {
     expected(what, cur());
