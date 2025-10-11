@@ -14,6 +14,51 @@ if TYPE_CHECKING:
 
     from ..codegen import PyCodegen
 
+from torch._library.custom_ops import custom_op
+
+
+Tensor = torch.Tensor
+
+
+@custom_op("streams::fork", mutates_args=())
+def fork_stream(
+    from_index: int,
+    from_device: torch.device,
+    to_index: int,
+    to_device: torch.device,
+) -> None:
+    pass
+
+
+@fork_stream.register_fake
+def _(
+    from_index: int,
+    from_device: torch.device,
+    to_index: int,
+    to_device: torch.device,
+) -> None:
+    pass
+
+
+@custom_op("streams::join", mutates_args=())
+def join_stream(
+    from_index: int,
+    from_device: torch.device,
+    to_index: int,
+    to_device: torch.device,
+) -> None:
+    pass
+
+
+@join_stream.register_fake
+def _(
+    from_index: int,
+    from_device: torch.device,
+    to_index: int,
+    to_device: torch.device,
+) -> None:
+    pass
+
 
 class StreamVariable(VariableTracker):
     def __init__(
