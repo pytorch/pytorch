@@ -1604,11 +1604,30 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_unbacked(self):
+    def test_unbacked1(self):
         @nested_compile_region
         def gn(x, y):
             b = x.item()
-            torch._check_is_size(b)
+            return y[:b].clone()
+
+        def fn(x, y):
+            return gn(x, y)
+
+        x = torch.tensor(4)
+        y = torch.randn(8)
+        ref = fn(x, y)
+        opt_fn = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )  # Inductor fails with assertion error when lowering aten.sym_constrain_range_for_size.default
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked2(self):
+        @nested_compile_region
+        def gn(x, y):
+            b = x.item()
+            torch._check(b >= 0)
             torch._check(b < y.shape[0])
             return y[:b].clone()
 
@@ -2563,7 +2582,6 @@ class GraphModule(torch.nn.Module):
         @nested_compile_region
         def gn(x, y):
             b = x.item()
-            torch._check_is_size(b)
             torch._check(b < y.shape[0])
             return y[:b].clone()
 
