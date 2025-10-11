@@ -3603,7 +3603,9 @@ class CheckFunctionManager:
                     output_graph.local_scope,
                     CompileContext.current_compile_id(),
                 )
-                raise AssertionError(f"Guard check failed: {reasons}")
+                raise AssertionError(
+                    f"Guard failed on the same frame it was created. This is a bug - please create an issue. Guard fail reason: {reasons}"
+                )
 
             if guard_manager_testing_hook_fn is not None:
                 guard_manager_testing_hook_fn(
