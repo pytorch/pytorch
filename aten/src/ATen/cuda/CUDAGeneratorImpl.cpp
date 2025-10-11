@@ -15,19 +15,19 @@ namespace cuda::detail {
 namespace {
 
 // Total number of gpus in the system.
-static int64_t num_gpus;
+int64_t num_gpus;
 
 // Ensures default_gens_cuda is initialized once.
-static std::deque<c10::once_flag> cuda_gens_init_flag;
+std::deque<c10::once_flag> cuda_gens_init_flag;
 
 // Default, global CUDA generators, one per GPU.
-static std::vector<Generator> default_gens_cuda;
+std::vector<Generator> default_gens_cuda;
 
 /*
  * Populates the global variables related to CUDA generators
  * Warning: this function must only be called once!
  */
-static void initCUDAGenVector() {
+void initCUDAGenVector() {
   // Ensures we only call cudaGetDeviceCount only once.
   static bool num_gpu_init_flag [[maybe_unused]] = []() {
     num_gpus = static_cast<int32_t>(c10::cuda::device_count());
