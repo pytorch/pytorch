@@ -4,6 +4,7 @@ import contextlib
 
 import torch
 import torch.distributed as dist
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.tensor import DeviceMesh, DTensor, Partial, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
@@ -48,15 +49,15 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  torch.mm(dt: f32[8, 8]S(0), dt: f32[8, 32]S(0))
-    aten::mm(dt: f32[8, 8]S(0), dt: f32[8, 32]S(0))
+  torch.mm(dt: f32[8, 8]| S(0), dt: f32[8, 32]| S(0))
+    aten::mm(dt: f32[8, 8]| S(0), dt: f32[8, 32]| S(0))
       redistribute_input(1, S(0) -> R)
         redistribute_input(t: f32[1, 32], trace: S(0)->R)
           _c10d_functional::all_gather_into_tensor(t: f32[1, 32], 8, 0)
           _c10d_functional::wait_tensor(t: f32[8, 32])
       aten::mm(t: f32[1, 8], t: f32[8, 32])
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 32]S(0))
-    aten::sum(dt: f32[8, 32]S(0))
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 32]| S(0))
+    aten::sum(dt: f32[8, 32]| S(0))
       aten::sum(t: f32[1, 32])""",
         )
 
@@ -89,19 +90,19 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  <method 'add' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]S(0), dt: f32[8, 8]S(1))
-    aten::add.Tensor(dt: f32[8, 8]S(0), dt: f32[8, 8]S(1))
+  <method 'add' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
+    aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
       redistribute_input(1, S(1) -> S(0))
         redistribute_input(t: f32[8, 1], trace: S(1)->S(0))
           _dtensor::shard_dim_alltoall(t: f32[8, 1], 1, 0, 0)
       aten::add.Tensor(t: f32[1, 8], t: f32[1, 8])
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]S(0))
-    aten::sum(dt: f32[8, 8]S(0))
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0))
+    aten::sum(dt: f32[8, 8]| S(0))
       aten::sum(t: f32[1, 8])
-  torch._tensor.backward(dt: f32[]P, gradient=None, retain_graph=None, create_graph=False, inputs=None)
-    aten::ones_like(dt: f32[]P, pin_memory=False, memory_format=torch.preserve_format)
+  torch._tensor.backward(dt: f32[]| P, gradient=None, retain_graph=None, create_graph=False, inputs=None)
+    aten::ones_like(dt: f32[]| P, pin_memory=False, memory_format=torch.preserve_format)
       aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)
-    aten::expand(dt: f32[]R, [8, 8])
+    aten::expand(dt: f32[]| R, [8, 8])
       aten::expand(t: f32[], [8, 8])
       redistribute_input(t: f32[8, 8], trace: R->S(1))
         aten::split.Tensor(t: f32[8, 8], 1, 1)
@@ -130,7 +131,7 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  aten::mm(dt: f32[128, 8]S(0)[0]S(0)[1], dt: f32[8, 128]S(1)[0]S(1)[1])
+  aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
     redistribute_input(0, S(0)[0]S(0)[1] -> S(0)R)
       redistribute_input(t: f32[16, 8], trace: S(0)[0]S(0)[1]->S(0)R)
         _c10d_functional::all_gather_into_tensor(t: f32[16, 8], 2, 3)
@@ -148,7 +149,7 @@ class TestDTensorDebugMode(TestCase):
         aten::chunk(t: f32[8, 128], 2, 1)
         aten::clone(t: f32[8, 64])
     aten::mm(t: f32[32, 8], t: f32[8, 64])
-  aten::sum(dt: f32[128, 128]S(0)S(1))
+  aten::sum(dt: f32[128, 128]| S(0)S(1))
     aten::sum(t: f32[32, 64])""",
         )
 
@@ -169,28 +170,28 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  torch.functional.einsum(bld,dnh->blnh, dt: f32[16, 6, 8]PR, dt: f32[8, 4, 4]RP)
-    aten::unsqueeze(dt: f32[16, 6, 8]PR, 3)
+  torch.functional.einsum(bld,dnh->blnh, dt: f32[16, 6, 8]| PR, dt: f32[8, 4, 4]| RP)
+    aten::unsqueeze(dt: f32[16, 6, 8]| PR, 3)
       aten::unsqueeze(t: f32[16, 6, 8], 3)
-    aten::unsqueeze(dt: f32[16, 6, 8, 1]PR, 4)
+    aten::unsqueeze(dt: f32[16, 6, 8, 1]| PR, 4)
       aten::unsqueeze(t: f32[16, 6, 8, 1], 4)
-    aten::permute(dt: f32[16, 6, 8, 1, 1]PR, [0, 1, 3, 4, 2])
+    aten::permute(dt: f32[16, 6, 8, 1, 1]| PR, [0, 1, 3, 4, 2])
       aten::permute(t: f32[16, 6, 8, 1, 1], [0, 1, 3, 4, 2])
-    aten::unsqueeze(dt: f32[8, 4, 4]RP, 3)
+    aten::unsqueeze(dt: f32[8, 4, 4]| RP, 3)
       aten::unsqueeze(t: f32[8, 4, 4], 3)
-    aten::unsqueeze(dt: f32[8, 4, 4, 1]RP, 4)
+    aten::unsqueeze(dt: f32[8, 4, 4, 1]| RP, 4)
       aten::unsqueeze(t: f32[8, 4, 4, 1], 4)
-    aten::permute(dt: f32[8, 4, 4, 1, 1]RP, [3, 4, 1, 2, 0])
+    aten::permute(dt: f32[8, 4, 4, 1, 1]| RP, [3, 4, 1, 2, 0])
       aten::permute(t: f32[8, 4, 4, 1, 1], [3, 4, 1, 2, 0])
-    aten::permute(dt: f32[16, 6, 1, 1, 8]PR, [0, 1, 4, 2, 3])
+    aten::permute(dt: f32[16, 6, 1, 1, 8]| PR, [0, 1, 4, 2, 3])
       aten::permute(t: f32[16, 6, 1, 1, 8], [0, 1, 4, 2, 3])
-    aten::view(dt: f32[16, 6, 8, 1, 1]PR, [1, 96, 8])
+    aten::view(dt: f32[16, 6, 8, 1, 1]| PR, [1, 96, 8])
       aten::view(t: f32[16, 6, 8, 1, 1], [1, 96, 8])
-    aten::permute(dt: f32[1, 1, 4, 4, 8]RP, [4, 2, 3, 0, 1])
+    aten::permute(dt: f32[1, 1, 4, 4, 8]| RP, [4, 2, 3, 0, 1])
       aten::permute(t: f32[1, 1, 4, 4, 8], [4, 2, 3, 0, 1])
-    aten::view(dt: f32[8, 4, 4, 1, 1]RP, [1, 8, 16])
+    aten::view(dt: f32[8, 4, 4, 1, 1]| RP, [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
-    aten::bmm(dt: f32[1, 96, 8]PR, dt: f32[1, 8, 16]RP)
+    aten::bmm(dt: f32[1, 96, 8]| PR, dt: f32[1, 8, 16]| RP)
       redistribute_input(0, PR -> S(2)[0]S(2)[1])
         redistribute_input(t: f32[1, 96, 8], trace: PR->S(2)R->S(2)[0]S(2)[1])
           aten::chunk(t: f32[1, 96, 8], 4, 2)
@@ -208,11 +209,11 @@ class TestDTensorDebugMode(TestCase):
           _c10d_functional::reduce_scatter_tensor(t: f32[2, 1, 16], sum, 2, 3)
           _c10d_functional::wait_tensor(t: f32[1, 1, 16])
       aten::bmm(t: f32[1, 96, 1], t: f32[1, 1, 16])
-    aten::view(dt: f32[1, 96, 16]PP, [16, 6, 1, 4, 4])
+    aten::view(dt: f32[1, 96, 16]| PP, [16, 6, 1, 4, 4])
       aten::view(t: f32[1, 96, 16], [16, 6, 1, 4, 4])
-    aten::permute(dt: f32[16, 6, 1, 4, 4]PP, [0, 1, 3, 4, 2])
+    aten::permute(dt: f32[16, 6, 1, 4, 4]| PP, [0, 1, 3, 4, 2])
       aten::permute(t: f32[16, 6, 1, 4, 4], [0, 1, 3, 4, 2])
-    aten::view(dt: f32[16, 6, 4, 4, 1]PP, [16, 6, 4, 4])
+    aten::view(dt: f32[16, 6, 4, 4, 1]| PP, [16, 6, 4, 4])
       aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])""",
         )
 
@@ -250,6 +251,29 @@ class TestDTensorDebugMode(TestCase):
       aten::view(ft: f32[8, 8, 8], [64, 8])
       aten::mm(ft: f32[64, 8], ft: f32[8, 8])
       aten::_unsafe_view(ft: f32[64, 8], [8, 8, 8])""",
+        )
+
+    def test_tensor_attributes(self):
+        x = torch.randn(8, 8)
+        x.a1 = "x1"
+        x.a2 = "x2"
+        y = torch.randn(8, 8, 8)
+        y.a1 = "y"
+
+        with DebugMode(
+            record_torchfunction=True,
+            record_faketensor=True,
+            record_tensor_attributes=["a1", "a2"],
+        ) as debug_mode:
+            torch.matmul(y, x)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  torch.matmul(t: f32[8, 8, 8]{a1=y}, t: f32[8, 8]{a1=x1, a2=x2})
+      aten::view(t: f32[8, 8, 8]{a1=y}, [64, 8])
+      aten::mm(t: f32[64, 8], t: f32[8, 8]{a1=x1, a2=x2})
+      aten::_unsafe_view(t: f32[64, 8], [8, 8, 8])""",
         )
 
     @parametrize("has_inner_mode", [True, False])
@@ -298,14 +322,21 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
     def test_compile(self):
-        @torch.compile
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt)
         def f(x):
             return x.sin().cos()
 
         x = torch.randn(8)
         with DebugMode() as debug_mode:
             f(x)
-        self.assertEqual(len(debug_mode.debug_string()), 0)
+            self.assertEqual(len(debug_mode.debug_string()), 0)
+            f(x)
+            f(x)
+        self.assertEqual(
+            cnt.frame_count, 1
+        )  # check DebugMode doesn't trigger additional recompilations
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)

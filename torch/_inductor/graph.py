@@ -1756,10 +1756,15 @@ class GraphLowering(torch.fx.Interpreter):
                                 allow_padding=allow_padding,
                             )
                         else:
-                            strides = [
-                                s.node.expr if isinstance(s, torch.SymInt) else s
-                                for s in strides
-                            ]
+                            # Fix for 0-d tensors: if result size is empty,
+                            # strides should also be empty
+                            if len(result.get_size()) == 0 and len(strides) > 0:
+                                strides = []
+                            else:
+                                strides = [
+                                    s.node.expr if isinstance(s, torch.SymInt) else s
+                                    for s in strides
+                                ]
                             result = ir.ExternKernel.require_exact_strides(
                                 result, strides, allow_padding=allow_padding
                             )
