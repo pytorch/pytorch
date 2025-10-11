@@ -39,14 +39,10 @@ class TemplateConfigHeuristics:
         if not self.should_run(kernel_inputs):
             return
 
-        # Get extra kwargs once
-        extra_kwargs = self.get_extra_kwargs(kernel_inputs, op_name)
-
         # Generate configs and fuse with extra_kwargs
         for config_dict in self._get_template_configs_impl(kernel_inputs, op_name):
             # Fuse extra_kwargs into config
-            fused_kwargs = {**config_dict, **extra_kwargs}
-            yield DictKernelTemplateParams(fused_kwargs)
+            yield DictKernelTemplateParams(config_dict)
 
     def _get_template_configs_impl(
         self,

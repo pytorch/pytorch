@@ -225,7 +225,7 @@
 #
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
-#      By default, It is only enabled on Windows.
+#      By default, It is only enabled on Windows and AArch64.
 #
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
@@ -256,7 +256,7 @@ import platform
 
 
 # Also update `project.requires-python` in pyproject.toml when changing this
-python_min_version = (3, 9, 0)
+python_min_version = (3, 10, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
@@ -381,12 +381,6 @@ def _get_package_path(package_name: str) -> Path:
 
 BUILD_LIBTORCH_WHL = str2bool(os.getenv("BUILD_LIBTORCH_WHL"))
 BUILD_PYTHON_ONLY = str2bool(os.getenv("BUILD_PYTHON_ONLY"))
-
-# set up appropriate env variables
-if BUILD_LIBTORCH_WHL:
-    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
-    # functorch is not supported without python
-    os.environ["BUILD_FUNCTORCH"] = "OFF"
 
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
@@ -1250,21 +1244,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
     def build_extensions(self) -> None:
         self.create_compile_commands()
 
-        build_lib = Path(self.build_lib).resolve()
-
-        # Copy functorch extension
-        for ext in self.extensions:
-            if ext.name != "functorch._C":
-                continue
-            fullname = self.get_ext_fullname(ext.name)
-            filename = Path(self.get_ext_filename(fullname))
-            src = filename.with_stem("functorch")
-            dst = build_lib / filename
-            if src.exists():
-                report(f"Copying {ext.name} from {src} to {dst}")
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                self.copy_file(src, dst)
-
         super().build_extensions()
 
     def get_outputs(self) -> list[str]:
@@ -1552,11 +1531,6 @@ def configure_extension_build() -> tuple[
     )
     ext_modules.append(C)
 
-    # These extensions are built by cmake and copied manually in build_extensions()
-    # inside the build_ext implementation
-    if cmake_cache_vars["BUILD_FUNCTORCH"]:
-        ext_modules.append(Extension(name="functorch._C", sources=[]))
-
     cmdclass = {
         "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
@@ -1730,7 +1704,18 @@ def main() -> None:
     package_data = {
         "torch": torch_package_data,
     }
-    exclude_package_data = {}
+    # some win libraries are excluded
+    # these are statically linked
+    exclude_windows_libs = [
+        "lib/dnnl.lib",
+        "lib/kineto.lib",
+        "lib/libprotobuf-lite.lib",
+        "lib/libprotobuf.lib",
+        "lib/libprotoc.lib",
+    ]
+    exclude_package_data = {
+        "torch": exclude_windows_libs,
+    }
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
