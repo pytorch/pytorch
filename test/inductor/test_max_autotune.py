@@ -801,6 +801,9 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
+    @unittest.skipIf(
+        has_datacenter_blackwell_tma_device(), "B200 doesn't support sm carveout"
+    )
     @parametrize("carveout", (None, 0, 27))
     @parametrize("op", ("mm", "scaled_mm"))
     def test_honor_sm_carveout_with_triton_tma(self, carveout, op: str):
