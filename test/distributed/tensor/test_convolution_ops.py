@@ -203,6 +203,28 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertTrue(b_dt.grad is not None)
         self.assertTrue(x_dt.grad is None)
 
+    @with_comms
+    def test_conv1d(self):
+        device_mesh = self.build_device_mesh()
+        model = nn.Conv1d(64, 64, 3, padding=1)
+        x = torch.randn(1, 64, 8)
+        x_dt = DTensor.from_local(x, device_mesh, [Replicate()])
+        model_dt = distribute_module(
+            model, device_mesh, _conv_fn, input_fn=None, output_fn=None
+        )
+        out_dt = model_dt(x_dt)
+
+    @with_comms
+    def test_conv3d(self):
+        device_mesh = self.build_device_mesh()
+        model = nn.Conv3d(64, 64, 3, padding=1)
+        x = torch.randn(1, 64, 8, 8, 8)
+        x_dt = DTensor.from_local(x, device_mesh, [Replicate()])
+        model_dt = distribute_module(
+            model, device_mesh, _conv_fn, input_fn=None, output_fn=None
+        )
+        out_dt = model_dt(x_dt)
+
 
 if __name__ == "__main__":
     run_tests()
