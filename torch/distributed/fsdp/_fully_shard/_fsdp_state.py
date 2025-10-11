@@ -2,8 +2,8 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -96,6 +96,7 @@ class FSDPState(_State):
         for module in modules:
             _insert_module_state(module, self)
         self._modules = modules
+        # pyrefly: ignore  # read-only
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
@@ -230,7 +231,7 @@ class FSDPState(_State):
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         # When composing with module-hook-based activation checkpointing, the
-        # the pre-backward hook is responsible for the unshard
+        # pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
             return args, kwargs
         self._training_state = TrainingState.FORWARD

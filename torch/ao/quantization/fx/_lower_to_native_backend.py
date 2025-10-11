@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -227,7 +228,7 @@ def is_getattr_tensor_metadata_node(node):
     return (
         node.op == "call_function"
         and node.target == getattr
-        and node.args[1] in ["shape"]
+        and node.args[1] == "shape"
     )
 
 

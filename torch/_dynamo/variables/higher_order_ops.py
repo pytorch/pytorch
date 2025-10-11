@@ -312,6 +312,244 @@ def _check_supported_callable_arg(
         )
 
 
+def _call_while_loop(
+    self: VariableTracker,
+    tx: "InstructionTranslator",
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+    stack_output: bool,
+) -> VariableTracker:
+    from torch._higher_order_ops.while_loop import _create_unbacked_symint
+
+    from . import TensorVariable
+
+    args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+    cond_fn, body_fn, operands, additional_inputs = args
+
+    # Input checks
+    for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
+        if v := kwargs.pop(k, None):
+            assert i == len(args), (
+                "did not provide the right number of non-keyword args"
+            )
+            args.append(v)
+
+    if kwargs:
+        unimplemented(f"torch.while_loop: Got unexpected kwargs: {list(kwargs.keys())}")
+
+    if len(args) != 4:
+        unimplemented(
+            f"Expected 4 arguments but got {len(args)}.\n"
+            f"Usage: while_loop(cond_fn, body_fn, operands)",
+        )
+
+    # cond_fn and body_fn input check
+    _check_supported_callable_arg(tx, cond_fn, "cond_fn")
+    _check_supported_callable_arg(tx, body_fn, "body_fn")
+
+    # operands input check
+    operands_seq = operands.unpack_var_sequence(tx)
+
+    # additional_inputs input check
+    if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
+        unimplemented(
+            f"Expected additional_inputs to be a list/tuple but got "
+            f"{additional_inputs.python_type()}. It seems to be an "
+            f"internal error, please report an issue to PyTorch."
+        )
+    additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
+
+    with discard_graph_changes(tx):
+        # Note: this must be run under discard graph changes.
+        def unspecialize_carried_inputs(tx, carry) -> VariableTracker:
+            # See NOTE [unspecialize int carry with unbacked symints]
+            if (
+                isinstance(carry, ConstantVariable) and carry.python_type() is int
+            ) or isinstance(carry, SymNodeVariable):
+                example_value = _create_unbacked_symint(
+                    tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
+                )
+                proxy = tx.output.current_tracer.create_graph_input(
+                    "unbacked_symint", type(example_value), example_value
+                )
+                return SymNodeVariable.create(tx, proxy, example_value)
+            else:
+                # See NOTE [unspecialize constant tensor carry]
+                assert isinstance(carry, TensorVariable)
+                cloned_carry = carry.clone()
+                cloned_carry.proxy.node.meta["example_value"].constant = None
+                return cloned_carry
+
+        # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
+        cond_operands_seq = [
+            unspecialize_carried_inputs(
+                tx,
+                (
+                    carry.call_method(tx, "clone", args=(), kwargs={})
+                    if isinstance(carry, TensorVariable)
+                    else carry
+                ),
+            )
+            for carry in operands_seq
+        ]
+        body_operands_seq = [
+            unspecialize_carried_inputs(
+                tx,
+                (
+                    carry.call_method(tx, "clone", args=(), kwargs={})
+                    if isinstance(carry, TensorVariable)
+                    else carry
+                ),
+            )
+            for carry in operands_seq
+        ]
+
+    # create cond subgrpahs
+    (
+        (cond_r, _cond_treespec),
+        cond_graph,
+        cond_lifted_freevars,
+    ) = speculate_subgraph(
+        tx,
+        cond_fn,
+        cond_operands_seq + additional_inputs_seq,
+        {},
+        "while_loop",
+        source_target=self.value,
+        # NOTE [why we cannot use "automatic" for while_loop]:
+        # The reason is that we want to enforce
+        # the ordering of inputs and outputs to be consistent and the ordering
+        # of cond_fn and body_fn to the consistent.
+        # e.g. suppose we use "automatic" and we have:
+        #
+        # def body_fn(ph1, ph2):
+        #   new_a, new_b = ph2.cos(), ph1.sin()
+        #   return new_a, new_b
+        #
+        # a, b = torch.randn(3), torch.randn(3)
+        # new_a, new_b = body_fn(a, b)
+        #
+        # Using automatic, the ordering of arguments will be the order that they're
+        # used. In this example, the capture graph looks like:
+        #
+        # def captured_body(ph1, ph2):
+        #   new_a, new_b = ph1.cos(), ph2.add_(1)
+        #   return new_a, new_b
+        #
+        # This is fine when we change the calling convention of captured_body to be
+        # new_a, new_b = captured_body(b, a).
+        # But for while_loop, the next iteration's input is previous iteration output
+        # we'll end up feeding captured_body(new_a, new_b) instead.
+        # So it's best we always enforce the ordering of carried_inputs the same as outputs
+        # with "flatten_manual".
+        set_subgraph_inputs="flatten_manual",
+        supports_input_mutation=self.supports_input_mutation,
+        supports_aliasing=self.supports_aliasing,
+        remove_consts_from_outputs=False,
+    )
+    cond_nn_modules = dict(tx.output.nn_modules)
+    validate_subgraph_output_types(cond_r)
+    if isinstance(cond_r, TensorVariable):
+        cond_r_meta = _extract_tensor_metadata(
+            cond_r.proxy.node.meta["example_value"], include_contiguity=False
+        )
+        if cond_r_meta.dtype != torch.bool or cond_r_meta.shape != torch.Size([]):
+            unimplemented(
+                f"Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}"
+            )
+    elif isinstance(cond_r, ConstantVariable):
+        # short-circuiting while_loop when cond_fn returns a constant such as 0, 1 True or False
+        pred = cond_r.as_python_constant()
+        if pred:
+            unimplemented(
+                f"Infinite loop detected because while_loop's cond_fn always returns the same value {pred}"
+            )
+        else:
+            return operands
+
+    # create body subgraph
+    (
+        (body_r, body_treespec),
+        body_graph,
+        body_lifted_freevars,
+    ) = speculate_subgraph(
+        tx,
+        body_fn,
+        body_operands_seq + additional_inputs_seq,
+        {},
+        "while_loop",
+        source_target=self.value,
+        set_subgraph_inputs="flatten_manual",
+        should_flatten_outputs=True,
+        supports_input_mutation=False,
+        supports_aliasing=False,
+        remove_consts_from_outputs=False,
+    )
+    validate_subgraph_output_types(body_r)
+
+    # We set include contiguity=False because we have vmap x HOP tests, where if
+    # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
+    # "querying is_contiguous inside of vmap for memory_format other than
+    # torch.contiguous_format is not yet implemented". This is okay because stride
+    # is still checked.
+    check_meta_consistency_vt(
+        body_r.unpack_var_sequence(tx),
+        operands_seq,
+        "body_fn_output",
+        "carried_inputs",
+        include_contiguity=False,
+    )
+
+    (
+        cond_graph,
+        body_graph,
+        cond_shared,
+        _body_shared,
+        cond_unique,
+        body_unique,
+    ) = _merge_graph_inputs(
+        cond_graph,
+        cond_lifted_freevars,
+        "cond_fn",
+        body_graph,
+        body_lifted_freevars,
+        "body_fn",
+    )
+
+    # Note: cond_shared and body_shared refer to the same proxy in parent graph
+    # so using either of them is OK. Use cond_shared as it doesn't matter.
+    additional_lifted_inputs = cond_shared + cond_unique + body_unique
+
+    body_nn_modules = dict(tx.output.nn_modules)
+
+    cond_gm = torch.fx.GraphModule(cond_nn_modules, cond_graph)
+    body_gm = torch.fx.GraphModule(body_nn_modules, body_graph)
+    cond_name = tx.output.install_subgraph("cond_fn", cond_gm)
+    body_name = tx.output.install_subgraph("body_fn", body_gm)
+
+    cond_node = make_attr(tx, cond_name)
+    body_node = make_attr(tx, body_name)
+
+    operands_proxy = tuple(operand.as_proxy() for operand in operands_seq)
+    additional_inputs_proxy = tuple(
+        [inp.as_proxy() for inp in additional_inputs_seq] + additional_lifted_inputs
+    )
+    p_args = (
+        cond_node,
+        body_node,
+        operands_proxy,
+        additional_inputs_proxy,
+    )
+    return _call_function_and_unflatten_output(
+        tx,
+        self.value,
+        p_args,
+        {},
+        None,
+        body_treespec,
+    )
+
+
 def are_same_graph_modules(fn_name, a_mod, b_mod, fake_mode):
     from torch._subclasses._fake_tensor_utils import _CacheKeyState
     from torch._subclasses.fake_tensor import extract_tensor_metadata
@@ -1280,243 +1518,23 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        from torch._higher_order_ops.while_loop import _create_unbacked_symint
+        return _call_while_loop(self, tx, args, kwargs, stack_output=False)
 
-        from . import TensorVariable
 
-        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
-        cond_fn, body_fn, operands, additional_inputs = args
+class WhileLoopStackOutputHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    supports_input_mutation = False
+    supports_aliasing = False
 
-        # Input checks
-        for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
-            if v := kwargs.pop(k, None):
-                assert i == len(args), (
-                    "did not provide the right number of non-keyword args"
-                )
-                args.append(v)
-
-        if kwargs:
-            unimplemented(
-                f"torch.while_loop: Got unexpected kwargs: {list(kwargs.keys())}"
-            )
-
-        if len(args) != 4:
-            unimplemented(
-                f"Expected 4 arguments but got {len(args)}.\n"
-                f"Usage: while_loop(cond_fn, body_fn, operands)",
-            )
-
-        # cond_fn and body_fn input check
-        _check_supported_callable_arg(tx, cond_fn, "cond_fn")
-        _check_supported_callable_arg(tx, body_fn, "body_fn")
-
-        # operands input check
-        operands_seq = operands.unpack_var_sequence(tx)
-
-        # additional_inputs input check
-        if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
-            unimplemented(
-                f"Expected additional_inputs to be a list/tuple but got "
-                f"{additional_inputs.python_type()}. It seems to be an "
-                f"internal error, please report an issue to PyTorch."
-            )
-        additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
-
-        with discard_graph_changes(tx):
-            # Note: this must be run under discard graph changes.
-            def unspecialize_carried_inputs(tx, carry) -> VariableTracker:
-                # See NOTE [unspecialize int carry with unbacked symints]
-                if (
-                    isinstance(carry, ConstantVariable) and carry.python_type() is int
-                ) or isinstance(carry, SymNodeVariable):
-                    example_value = _create_unbacked_symint(
-                        tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
-                    )
-                    proxy = tx.output.current_tracer.create_graph_input(
-                        "unbacked_symint", type(example_value), example_value
-                    )
-                    return SymNodeVariable.create(tx, proxy, example_value)
-                else:
-                    # See NOTE [unspecialize constant tensor carry]
-                    assert isinstance(carry, TensorVariable)
-                    cloned_carry = carry.clone()
-                    cloned_carry.proxy.node.meta["example_value"].constant = None
-                    return cloned_carry
-
-            # clone inputs across subgraphs, to avoid unbacked memoization in fake prop
-            cond_operands_seq = [
-                unspecialize_carried_inputs(
-                    tx,
-                    (
-                        carry.call_method(tx, "clone", args=(), kwargs={})
-                        if isinstance(carry, TensorVariable)
-                        else carry
-                    ),
-                )
-                for carry in operands_seq
-            ]
-            body_operands_seq = [
-                unspecialize_carried_inputs(
-                    tx,
-                    (
-                        carry.call_method(tx, "clone", args=(), kwargs={})
-                        if isinstance(carry, TensorVariable)
-                        else carry
-                    ),
-                )
-                for carry in operands_seq
-            ]
-
-        # create cond subgrpahs
-        (
-            (cond_r, _cond_spec),
-            cond_graph,
-            cond_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            cond_fn,
-            cond_operands_seq + additional_inputs_seq,
-            {},
-            "while_loop",
-            source_target=self.value,
-            # NOTE [why we cannot use "automatic" for while_loop]:
-            # The reason is that we want to enforce
-            # the ordering of inputs and outputs to be consistent and the the ordering
-            # of cond_fn and body_fn to the consistent.
-            # e.g. suppose we use "automatic" and we have:
-            #
-            # def body_fn(ph1, ph2):
-            #   new_a, new_b = ph2.cos(), ph1.sin()
-            #   return new_a, new_b
-            #
-            # a, b = torch.randn(3), torch.randn(3)
-            # new_a, new_b = body_fn(a, b)
-            #
-            # Using automatic, the ordering of arguments will be the order that they're
-            # used. In this example, the capture graph looks like:
-            #
-            # def captured_body(ph1, ph2):
-            #   new_a, new_b = ph1.cos(), ph2.add_(1)
-            #   return new_a, new_b
-            #
-            # This is fine when we change the calling convention of captured_body to be
-            # new_a, new_b = captured_body(b, a).
-            # But for while_loop, the next iteration's input is previous iteration output
-            # we'll end up feeding captured_body(new_a, new_b) instead.
-            # So it's best we always enforce the ordering of carried_inputs the same as outputs
-            # with "flatten_manual".
-            set_subgraph_inputs="flatten_manual",
-            supports_input_mutation=self.supports_input_mutation,
-            supports_aliasing=self.supports_aliasing,
-        )
-        cond_nn_modules = dict(tx.output.nn_modules)
-        validate_subgraph_output_types(cond_r)
-        if isinstance(cond_r, TensorVariable):
-            cond_r_meta = _extract_tensor_metadata(
-                cond_r.proxy.node.meta["example_value"], include_contiguity=False
-            )
-            if (
-                not cond_r_meta.dtype == torch.bool
-                or not cond_r_meta.shape == torch.Size([])
-            ):
-                unimplemented(
-                    f"Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}"
-                )
-        elif isinstance(cond_r, ConstantVariable):
-            # short-circuiting while_loop when cond_fn returns a constant such as 0, 1 True or False
-            pred = cond_r.as_python_constant()
-            if pred:
-                unimplemented(
-                    f"Infinite loop detected because while_loop's cond_fn always returns the same value {pred}"
-                )
-            else:
-                return operands
-
-        # create body subgraph
-        (
-            (body_r, body_spec),
-            body_graph,
-            body_lifted_freevars,
-        ) = speculate_subgraph(
-            tx,
-            body_fn,
-            body_operands_seq + additional_inputs_seq,
-            {},
-            "while_loop",
-            source_target=self.value,
-            set_subgraph_inputs="flatten_manual",
-            should_flatten_outputs=True,
-            # TODO - removing consts from control flow ops need more work
-            remove_consts_from_outputs=False,
-            supports_input_mutation=False,
-            supports_aliasing=False,
-        )
-        validate_subgraph_output_types(body_r)
-
-        # We set include contiguity=False because we have vmap x HOP tests, where if
-        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
-        # "querying is_contiguous inside of vmap for memory_format other than
-        # torch.contiguous_format is not yet implemented". This is okay because stride
-        # is still checked.
-        check_meta_consistency_vt(
-            body_r.unpack_var_sequence(tx),
-            operands_seq,
-            "body_fn_output",
-            "carried_inputs",
-            include_contiguity=False,
-        )
-
-        (
-            cond_graph,
-            body_graph,
-            cond_shared,
-            _body_shared,
-            cond_unique,
-            body_unique,
-        ) = _merge_graph_inputs(
-            cond_graph,
-            cond_lifted_freevars,
-            "cond_fn",
-            body_graph,
-            body_lifted_freevars,
-            "body_fn",
-        )
-
-        # Note: cond_shared and body_shared refer to the same proxy in parent graph
-        # so using either of them is OK. Use cond_shared as it doesn't matter.
-        additional_lifted_inputs = cond_shared + cond_unique + body_unique
-
-        body_nn_modules = dict(tx.output.nn_modules)
-
-        cond_name = tx.output.install_subgraph(
-            "cond_fn",
-            torch.fx.GraphModule(cond_nn_modules, cond_graph),
-        )
-        body_name = tx.output.install_subgraph(
-            "body_fn",
-            torch.fx.GraphModule(body_nn_modules, body_graph),
-        )
-
-        cond_node = make_attr(tx, cond_name)
-        body_node = make_attr(tx, body_name)
-
-        p_args = (
-            cond_node,
-            body_node,
-            tuple([operand.as_proxy() for operand in operands_seq]),
-            tuple(
-                [inp.as_proxy() for inp in additional_inputs_seq]
-                + additional_lifted_inputs
-            ),
-        )
-        return _call_function_and_unflatten_output(
-            tx,
-            torch.ops.higher_order.while_loop,
-            p_args,
-            {},
-            None,
-            body_spec,
-        )
+    @raise_hard_error_if_graph_break(
+        reason="while_loop_stack_output doesn't work unless it is captured completely with torch.compile."
+    )
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return _call_while_loop(self, tx, args, kwargs, stack_output=True)
 
 
 class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
@@ -1748,6 +1766,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 combine_fn_var,
                 (
                     variables.nn_module.NNModuleVariable,
+                    variables.nn_module.UnspecializedNNModuleVariable,
                     variables.FunctoolsPartialVariable,
                 ),
             ):
@@ -1756,7 +1775,13 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     f"or a graph module if we're re-exporting but got "
                     f"{combine_fn.python_type()}. Please report an issue to PyTorch if you're seeing this."
                 )
-            return isinstance(combine_fn_var, variables.nn_module.NNModuleVariable)
+            return isinstance(
+                combine_fn_var,
+                (
+                    variables.nn_module.NNModuleVariable,
+                    variables.nn_module.UnspecializedNNModuleVariable,
+                ),
+            )
 
         def arg_extractor(combine_fn, init, xs, additional_inputs):
             return combine_fn, init, xs, additional_inputs
@@ -2556,7 +2581,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             elif isinstance(
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
-                context_fn = ctx.as_python_constant()
+                context_fn = ctx.guard_as_python_constant()
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"
@@ -3363,6 +3388,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
             lambda a: a.node.meta["example_value"],
             body_r.as_proxy(),
         )
+
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         return _call_function_and_unflatten_output(
             tx, self.value, p_args, p_kwargs, flat_example_value, treespec
@@ -3477,10 +3503,257 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         )
 
 
+class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
+    supports_input_mutation = False
+    supports_aliasing = False
+
+    # Subclasses aren't supported by speculate_subgraph yet
+    # So this HOP is only usable with plain tensors
+    _enabled = False
+
+    @classmethod
+    @contextlib.contextmanager
+    def enable(cls):
+        """Context manager to temporarily enable local map wrapping.
+        Will be removed when speculate_subgraph supports subclass inputs:
+        https://github.com/pytorch/pytorch/issues/161456.
+
+        Usage:
+            with LocalMapWrappedHigherOrderVariable.enable_wrapping():
+                # Code where should_wrap_in_hop will return True
+                pass
+        """
+        old_value = cls._enabled
+        cls._enabled = True
+        try:
+            yield
+        finally:
+            cls._enabled = old_value
+
+    @classmethod
+    def should_wrap_in_hop(cls, value):
+        if not torch.distributed.is_available():
+            return False
+
+        from torch.distributed.tensor.experimental._func_map import _local_map_wrapped
+
+        # check is important to avoid subclass dispatch
+        if type(value) is not type(_local_map_wrapped):
+            return False
+
+        return value == _local_map_wrapped and cls._enabled
+
+    @staticmethod
+    def build(**options):
+        return TorchHigherOrderOperatorVariable.make(
+            torch._higher_order_ops.local_map_hop,
+            **options,
+        )
+
+    def python_type(self):
+        return type(self.value)
+
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        """
+        Goal of this function is to rewrite local_map usage as a HOP:
+            local_map(func, ...) -> local_map_hop(gm, ...)
+        """
+
+        (
+            user_func,
+            out_placements,
+            in_placements,
+            in_grad_placements,
+            device_mesh,
+            redistribute_inputs,
+            *user_args,
+        ) = args
+
+        # None placements are used to pass non-Tensors into the local_map function.
+        # Containers passed this way can not hold tensors. Thus, Dynamo would have inlined
+        # into them, and we handle None placements by assuming they will be desugared away.
+        # This will need to be adjusted for dynamic shapes support.
+        def check_none_last(placements):
+            seen_none = 0
+            for p in placements:
+                if p is None:
+                    seen_none += 1
+                else:
+                    assert seen_none == 0, (
+                        "Tracing local_map is only currently supported with None placements last."
+                    )
+            return seen_none
+
+        inputs_none_placements = check_none_last(in_placements.value)
+        output_none_placements = check_none_last(out_placements.value)
+
+        local_map_kwargs = {
+            "out_placements": out_placements.value,
+            "in_placements": in_placements.value,
+            "redistribute_inputs": redistribute_inputs.value,
+            "in_grad_placements": in_grad_placements.value,
+            "device_mesh": device_mesh.value,
+        }
+        assert local_map_kwargs["device_mesh"] is not None, (
+            "Not yet implemented, please manually provide a device_mesh to local_map."
+        )
+        mesh = local_map_kwargs["device_mesh"]
+
+        # For Autoparallel, the initial trace is done with global shapes, then we decide model weights sharding,
+        # and reuse the graph. Since the sharding decision is after the initial trace, we can't trace with local shapes.
+        # For local_map however, since we specify all placements, we can trace with local shapes.
+
+        # Step 1: Validate the annotated function matches the input_placements (i.e. that it can run in eager)
+        template = (
+            "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
+            ", but found {actual}. Please ensure the count matches for eager. "
+        )
+        assert len(in_placements.value) == len(user_args), template.format(
+            expected=len(in_placements.value),
+            inputs_or_outputs="inputs",
+            actual=len(user_args),
+        )
+
+        from torch._higher_order_ops.local_map import (
+            redistribute_fw_inputs,
+            redistribute_fw_outputs,
+        )
+
+        # Step 2: Convert inputs to local shapes
+        priors = {}
+        for placements, vt in zip(in_placements.value, user_args):
+            if isinstance(vt, variables.lazy.LazyVariableTracker):
+                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
+
+            if not isinstance(vt, variables.TensorVariable):
+                assert placements is None
+                continue
+
+            global_tensor = vt.as_proxy().node.meta["example_value"]
+            # NOTE: We don't support local_map region relying on exact grad_fn information
+            # This is okay since accessing grad_fn is a graph break.
+            local_tensor = redistribute_fw_inputs(
+                (global_tensor,),
+                (placements,),
+                mesh,
+            )
+            local_tensor = local_tensor[0]
+
+            priors[vt] = global_tensor
+            vt.as_proxy().node.meta["example_value"] = local_tensor
+            vt.synchronize_attributes(tx)
+
+        # Step 3: Trace local_map subgraph with local tensors
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            body_gmod,
+            body_name,
+        ) = self.create_wrapped_node(
+            tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
+        )
+
+        # Step 4: Validate traced graph signature still matches placement information
+        expected_num_inputs = len(in_placements.value) - inputs_none_placements
+        actual_num_inputs = len(body_gmod.graph.find_nodes(op="placeholder"))
+        expected_num_outputs = len(out_placements.value) - output_none_placements
+        assert len(body_gmod.graph.find_nodes(op="output")) == 1
+        actual_num_outputs = len(body_gmod.graph.find_nodes(op="output")[0].args[0])
+
+        template = (
+            "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
+            ", but found {actual}. If the count matches for eager, "
+            "Dynamo may have flattened {inputs_or_outputs} to the function or found additional "
+            "tensors used via closures. "
+            "Please adjust the input placements to match what the traced graph sees: \n{gm_str}."
+        )
+
+        def make_error_msg(*args):
+            expected_num, actual_num, inputs_or_outputs = args
+            gm_str = body_gmod.print_readable(print_output=False)
+            return template.format(
+                expected=expected_num,
+                inputs_or_outputs=inputs_or_outputs,
+                actual=actual_num,
+                gm_str=gm_str,
+            )
+
+        if expected_num_inputs != actual_num_inputs:
+            raise AssertionError(
+                make_error_msg(expected_num_inputs, actual_num_inputs, "inputs")
+            )
+        if expected_num_outputs != actual_num_outputs:
+            raise AssertionError(
+                make_error_msg(expected_num_outputs, actual_num_outputs, "outputs")
+            )
+
+        assert len(p_kwargs) == 0
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        # Step 5: Install local_map subgraph
+        p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
+        out = _call_function_and_unflatten_output(
+            tx, self.value, p_args, p_kwargs, flat_example_value, treespec
+        )
+
+        # Step 6: Restore inputs and outputs to global shapes
+        for vt, global_tensor in priors.items():
+            vt.as_proxy().node.meta["example_value"] = global_tensor
+            vt.synchronize_attributes(tx)
+
+        outs = out.items if isinstance(out, TupleVariable) else [out]
+        assert len(outs) == len(out_placements.value)
+        for placements, vt in zip(out_placements.value, outs):
+            if not isinstance(vt, variables.TensorVariable):
+                assert placements is None
+                continue
+
+            local_tensor = vt.as_proxy().node.meta["example_value"]
+
+            # NOTE: We don't support code after the local_map region relying on exact grad_fn information
+            # This is okay since accessing grad_fn is a graph break.
+            global_tensor = redistribute_fw_outputs(
+                (local_tensor,),
+                (placements,),
+                mesh,
+                num_activations=0,  # this is not the joint
+            )
+            global_tensor = global_tensor[0]
+
+            vt.as_proxy().node.meta["example_value"] = global_tensor
+            vt.synchronize_attributes(tx)
+
+        # Treat as const, so we don't have to deal with Placement types in fx IR
+        # Guarded with EQUALS_MATCH on local_map call's arguments
+        body_gmod.meta["local_map_kwargs"] = {
+            "out_placements": out_placements.value[:expected_num_outputs],
+            "in_placements": in_placements.value[:expected_num_inputs],
+            "redistribute_inputs": redistribute_inputs.value,
+            "in_grad_placements": in_grad_placements.value,
+            "device_mesh": device_mesh.value,
+        }
+
+        return out
+
+
 # Map operator names to their corresponding variable for fast TorchHigherOrderOperatorVariable.make()
 _hop_name_to_variable_class = {
     "cond": CondHigherOrderVariable,
     "while_loop": WhileLoopHigherOrderVariable,
+    "while_loop_stack_output": WhileLoopStackOutputHigherOrderVariable,
     "map_impl": MapHigherOrderVariable,
     "executorch_call_delegate": ExecutorchCallDelegateHigherOrderVariable,
     "out_dtype": OutDtypeHigherOrderVariable,
@@ -3504,4 +3777,5 @@ _hop_name_to_variable_class = {
     "auto_functionalized_v2": AutoFunctionalizeHigherOrderVariable,
     "invoke_subgraph": InvokeSubgraphHigherOrderVariable,
     "custom_function_call": CustomFunctionHigherOrderOperatorVariable,
+    "local_map_hop": LocalMapWrappedHigherOrderVariable,
 }

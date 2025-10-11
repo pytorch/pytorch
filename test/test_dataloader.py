@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_JETSON,
+    IS_MACOS,
     IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
@@ -3472,6 +3473,10 @@ class TestIndividualWorkerQueue(TestCase):
             if current_worker_idx == num_workers:
                 current_worker_idx = 0
 
+    @unittest.skipIf(
+        IS_WINDOWS or IS_MACOS,
+        "Flaky on Windows and MacOS https://github.com/pytorch/pytorch/issues/68643",
+    )
     def test_ind_worker_queue(self):
         max_num_workers = None
         if hasattr(os, "sched_getaffinity"):

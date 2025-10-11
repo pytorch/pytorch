@@ -22,6 +22,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 class SimpleModelUneven(nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -40,7 +43,7 @@ class SimpleModelUneven(nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(4, 5, device="cuda")
+        return torch.rand(4, 5, device=device_type)
 
 
 class TestFormatUtils(DTensorTestBase):
@@ -87,7 +90,7 @@ class TestFormatUtils(DTensorTestBase):
 
         # Load into a sharded model
         device_mesh = init_device_mesh(self.device_type, (self.world_size,))
-        model = SimpleModelUneven().cuda()
+        model = SimpleModelUneven().to(self.device_type)
         model = FSDP(
             model,
             device_mesh=device_mesh,
