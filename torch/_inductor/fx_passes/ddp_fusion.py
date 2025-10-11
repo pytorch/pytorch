@@ -215,6 +215,7 @@ def _fuse_allreduce_by_concat(
 
     # Move the fused all_reduce and its args to right after the input node
     nodes_to_move = cat_inputs + [cat_node, div_node, fused_comm_node, fused_wait_node]
+    # pyrefly: ignore  # bad-argument-type
     move_block_after(nodes_to_move, last_input_node)
 
     return CommBlock(
@@ -307,6 +308,7 @@ def _scatter_fused_allreduce_waits(
     # in orig_comm_blocks. This index will be later used to determine what users
     # nodes need to be move to maintain a correct topological sort order.
     last_wait_node_idx = 0
+    # pyrefly: ignore  # bad-assignment
     for node in graph.nodes:
         last_wait_node_idx = max(
             node_indices.get(node, last_wait_node_idx), last_wait_node_idx
@@ -356,6 +358,7 @@ def _scatter_fused_allreduce_waits(
             user_node = nodes.popleft()
             if not isinstance(user_node, fx.Node):
                 continue
+            # pyrefly: ignore  # unsupported-operation
             if node_indices[user_node] < last_wait_node_idx:
                 incorrect_order_nodes.append(user_node)
                 nodes.extend(list(user_node.users))
