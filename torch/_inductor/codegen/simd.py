@@ -2296,7 +2296,7 @@ class SIMDScheduling(BaseScheduling):
                     return ([], [])
 
             key = (repr(vars_to_use), use_split_var, is_pointwise)
-            if out := scored_sub_split.get(key, None):
+            if out := scored_sub_split.get(key):
                 return out
 
             splitting_vars = all_iter_vars if is_pointwise else all_red_vars
