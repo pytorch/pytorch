@@ -44,7 +44,18 @@ if TYPE_CHECKING:
 Node = torch.fx.Node
 Region = list[Node]
 IdenticalNodes = list[Node]
-GlobalStateKey = tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
+GlobalStateKey = tuple[
+    bool,
+    bool,
+    int,
+    tuple[bool, bool],
+    tuple[bool, bool],
+    torch.dtype,
+    bool,
+    bool,
+    bool,
+    bool,
+]
 
 log = logging.getLogger(__name__)
 graph_expansion_log = torch._logging.getArtifactLogger(

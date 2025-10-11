@@ -6826,13 +6826,10 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         self.assertTrue(guard_failure is not None)
         first_guard_failure = guard_failure[0].partition("\n")[0]
-        if torch._dynamo.config.assume_static_by_default:
-            self.assertIn(
-                """tensor 'x' size mismatch at index 0. expected 2, actual 5""",
-                first_guard_failure,
-            )
-        else:
-            self.assertIn("""x.size()[0] < 3""", first_guard_failure)
+        self.assertIn(
+            """tensor 'x' size mismatch at index 0. expected 2, actual 5""",
+            first_guard_failure,
+        )
 
     def test_guard_failure_fn2(self):
         def fn(x, y):
@@ -11340,12 +11337,12 @@ fn
             fn(x, y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_guard_size_oblivious(self):
+    def test_infer_unbacked_size_gt_zero(self):
         # This code, in fact, does NOT work in eager
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             y = torch.zeros(x.item())
-            if guard_size_oblivious(y.size(0) == 0):
+            if y.size(0) < 0:
                 assert False
             return y
 
