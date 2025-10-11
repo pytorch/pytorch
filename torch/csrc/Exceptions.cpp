@@ -252,10 +252,10 @@ PyWarningHandler::PyWarningHandler() noexcept(true)
 // Get the Python warning type for a warning
 static PyObject* map_warning_to_python_type(const c10::Warning& warning) {
   struct Visitor {
-    PyObject* operator()(const c10::UserWarning&) const {
+    PyObject* operator()(const c10::UserWarning& /*unused*/) const {
       return PyExc_UserWarning;
     }
-    PyObject* operator()(const c10::DeprecationWarning&) const {
+    PyObject* operator()(const c10::DeprecationWarning& /*unused*/) const {
       return PyExc_DeprecationWarning;
     }
   };

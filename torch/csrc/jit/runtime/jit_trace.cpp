@@ -62,7 +62,10 @@ void eraseAllOutputs(Node* opt_pn) {
   }
 }
 
-void insertTracingNodes(Block*, ProfilingRecord*, TracingData&);
+void insertTracingNodes(
+    Block* /*block*/,
+    ProfilingRecord* /*pr*/,
+    TracingData& /*td*/);
 
 // The subtlety in `createPropNodeForIfBlock` is that we need to create
 // a "propagate" node that will propagate the mapping between the outputs
