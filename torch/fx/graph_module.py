@@ -193,7 +193,7 @@ def _deserialize_graph_module(
     graph = KeepModules().trace(com, **tracer_extras)
 
     # Recover node.meta["stack_trace"] after re-tracing
-    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace", None)
+    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace")
     if node_meta_stack_trace is not None:
         del body["_graphmodule_graph_node_meta_stack_trace"]
         for node in graph.nodes:
