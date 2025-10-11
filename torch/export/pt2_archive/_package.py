@@ -1022,7 +1022,7 @@ def _load_aoti(
     )
 
     from torch._inductor.codecache import get_device_information
-    
+
     device = loaded_metadata["AOTI_DEVICE_KEY"]
     current_device_info = get_device_information(device)
 
