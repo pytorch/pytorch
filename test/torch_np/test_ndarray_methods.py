@@ -661,7 +661,7 @@ class TestIter(TestCase):
         # numpy generates array scalars, we do 0D arrays
         a = np.arange(5)
         lst = list(a)
-        assert all(type(x) is np.ndarray for x in lst), f"{[type(x) for x in lst]}"
+        assert all(type(x) == np.ndarray for x in lst), f"{[type(x) for x in lst]}"
         assert all(x.ndim == 0 for x in lst)
 
     def test_iter_2d(self):
@@ -669,8 +669,7 @@ class TestIter(TestCase):
         a = np.arange(5)[None, :]
         lst = list(a)
         assert len(lst) == 1
-        # FIXME: "is" cannot be used here because dynamo fails
-        assert type(lst[0]) == np.ndarray  # noqa: E721
+        assert type(lst[0]) == np.ndarray
         assert_equal(lst[0], np.arange(5))
 
 

@@ -116,7 +116,7 @@ class TestTensorType(TestCase):
 
         for dtype, str in dtypes_map.items():
             x = torch.empty(4, 4, dtype=dtype, device="openreg")
-            self.assertTrue(x.type() is str)
+            self.assertTrue(x.type() == str)
 
     # Note that all dtype-d Tensor objects here are only for legacy reasons
     # and should NOT be used.
