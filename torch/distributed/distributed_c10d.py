@@ -1258,6 +1258,18 @@ def is_xccl_available() -> bool:
     return _XCCL_AVAILABLE
 
 
+def _check_single_backend_availability(backend_name: str) -> bool:
+    """
+    Helper function to check if a single backend is available.
+    """
+    available_func = getattr(
+        torch.distributed, f"is_{str(backend_name).lower()}_available", None
+    )
+    if available_func:
+        return available_func()
+    return str(backend_name).lower() in Backend.backend_list
+
+
 def is_backend_available(backend: str) -> bool:
     """
     Check backend availability.
@@ -1271,11 +1283,16 @@ def is_backend_available(backend: str) -> bool:
         bool: Returns true if the backend is available otherwise false.
     """
     # If the backend has an ``is_backend_available`` function, return the result of that function directly
-    available_func = getattr(torch.distributed, f"is_{backend.lower()}_available", None)
-    if available_func:
-        return available_func()
-
-    return backend.lower() in Backend.backend_list
+    if ":" in backend.lower():  # composite backend like "cpu:gloo"
+        backend_config = BackendConfig(Backend(backend))
+        device_backend_map = backend_config.get_device_backend_map()
+        return all(
+            _check_single_backend_availability(str(backend_name))
+            for backend_name in device_backend_map.values()
+        )
+    else:
+        # Handle simple backend strings like "nccl", "gloo"
+        return _check_single_backend_availability(backend)
 
 
 def is_initialized() -> bool:
