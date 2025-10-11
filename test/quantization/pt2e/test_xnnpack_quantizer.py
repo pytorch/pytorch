@@ -1062,7 +1062,7 @@ class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
             # the result matches exactly after prepare
             # Note: this currently will always be true since we are inserting observers
             # the check becomes useful when we add qat examples
-            # but we can still manully inspect the printed observers to make sure
+            # but we can still manually inspect the printed observers to make sure
             # it matches
             self.assertEqual(after_prepare_result, after_prepare_result_fx)
             self.assertEqual(

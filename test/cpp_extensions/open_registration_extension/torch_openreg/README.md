@@ -188,7 +188,7 @@ Please refer to [this](https://docs.pytorch.org/docs/main/accelerator/index.html
   - Device-agnostic APIs
   - Memory Management
   - Generator
-  - Distrubuted
+  - Distributed
   - Custom Tensor&Storage
   - ...
 - **Improve Tests**: Add more test cases related to the integration mechanism.

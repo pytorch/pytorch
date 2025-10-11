@@ -336,7 +336,7 @@ graph():
             self.rank, self.world_size, self.backend(device_type), fake_pg=True
         ):
             # all_reduces remain in order!
-            # note: this isnt actually invariant of pass currently..
+            # note: this isn't actually invariant of pass currently..
             # but we should keep collectives stable without reordering opportunities
 
             _, code = run_and_get_aten_graph(fn, g1, g2, g3)

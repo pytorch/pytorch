@@ -1682,7 +1682,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         qconfig_mapping.set_object_type(torch.nn.Linear, dynamic_qconfig)
         # Had to turn off check against fx because fx quant workflow does not seem
         # to propagate observers for permute node for this model.
-        # Suprisingly it does propagate it for EmbeddingConvLinearModule
+        # Surprisingly it does propagate it for EmbeddingConvLinearModule
         # TODO: Figure out the right behavior for propagation
         self._test_quantizer(
             m_eager,
@@ -2253,7 +2253,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             model = prepare_qat_pt2e(model, composed_quantizer)
             cur = time.time()
             # print("prepare time:", cur - prev)
-            # Without Calibraiton, scale/zero value will have an initialized value of 1.0
+            # Without Calibration, scale/zero value will have an initialized value of 1.0
             # Per channel quantization needs a proper scale/zero shape/value to work properly.
             # So we need to run calibration before converting to quantized model.
             model(*example_inputs)

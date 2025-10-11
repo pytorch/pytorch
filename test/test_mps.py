@@ -8051,7 +8051,7 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(x_mps.cpu(), x_cpu)
 
     def test_empty_posneginf(self):
-        # just to check that it doesnt crash
+        # just to check that it doesn't crash
         input_tensor = torch.empty(0, device="mps")
         out_pos = torch.isposinf(input_tensor)
         out_neg = torch.isposinf(input_tensor)
@@ -12772,8 +12772,8 @@ class TestMetalLibrary(TestCaseMPS):
         idx = 25
         x[idx] = torch.nan
         lib.do_max(z0, z1, x)
-        self.assertTrue(z0.isnan().all().item(), f"results are {z0}, but all elements shold have been nan")
-        self.assertTrue((z1 == idx).all().item(), f"results are {z1}, but all elements shold have been {idx}")
+        self.assertTrue(z0.isnan().all().item(), f"results are {z0}, but all elements should have been nan")
+        self.assertTrue((z1 == idx).all().item(), f"results are {z1}, but all elements should have been {idx}")
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.bfloat16])
     def test_atomic_add(self, dtype):

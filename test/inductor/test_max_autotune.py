@@ -381,7 +381,7 @@ class TestMaxAutotune(TestCase):
         a[:] = torch.randn((M, K), dtype=torch.float16)
         b = torch.empty_strided((K, N), (1, K), dtype=torch.float16, device=GPU_TYPE)
         b[:] = torch.randn((K, N), dtype=torch.float16)
-        # allocate an output with a stride not divisble by 16, so it can't satisfy TMA alignment checks.
+        # allocate an output with a stride not divisible by 16, so it can't satisfy TMA alignment checks.
         out = torch.empty_strided((M, N), (N, 1), dtype=torch.float16, device=GPU_TYPE)
 
         with (

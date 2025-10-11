@@ -578,7 +578,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         )
 
         # TODO: change this for-loop to run_subtests
-        # Use a for-loop instead of run_subtests because we need to intialize the mask
+        # Use a for-loop instead of run_subtests because we need to initialize the mask
         # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
         for enable_load_balance, batch_size, max_seq_len in itertools.product(
