@@ -266,9 +266,12 @@ inductor_expected_failures_single_sample["cuda"] = {
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {
+        b8,
         f16,
         f32,
         f64,
+        i32,
+        i64,
     },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCUDA
 }
 
