@@ -13,9 +13,9 @@ namespace cuda {
 
 class TORCH_CUDA_CPP_API GreenContext {
  public:
-  GreenContext(int device_id, unsigned int num_sms);
+  GreenContext(uint32_t device_id, uint32_t num_sms);
 
-  static std::unique_ptr<GreenContext> create(unsigned int num_sms, std::optional<unsigned int> device_id);
+  static std::unique_ptr<GreenContext> create(uint32_t num_sms, std::optional<uint32_t> device_id);
 
   // Delete copy constructor and assignment
   GreenContext(const GreenContext&) = delete;
@@ -41,7 +41,7 @@ class TORCH_CUDA_CPP_API GreenContext {
 
  private:
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
-  int device_id_ = -1;
+  int32_t device_id_ = -1;
   CUgreenCtx green_ctx_ = nullptr;
   CUcontext context_ = nullptr;
   cudaStream_t parent_stream_ = nullptr;
