@@ -1309,9 +1309,9 @@ if "optree" in sys.modules:
 
         python_pytree.register_pytree_node(
             ACustomPytree,
-            flatten_fn=lambda f: ([f.x, f.y], f.z),
-            unflatten_fn=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
-            flatten_with_keys_fn=lambda f: ((("x", f.x), ("y", f.y)), f.z),
+            flatten_func=lambda f: ([f.x, f.y], f.z),
+            unflatten_func=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
+            flatten_with_keys_func=lambda f: ((("x", f.x), ("y", f.y)), f.z),
         )
         from_two_trees = python_pytree.tree_map_with_path(
             lambda kp, a, b: a + b, tree1, tree2
@@ -1341,9 +1341,9 @@ if "optree" in sys.modules:
 
         python_pytree.register_pytree_node(
             ACustomPytree,
-            flatten_fn=lambda f: ([f.x, f.y], f.z),
-            unflatten_fn=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
-            flatten_with_keys_fn=lambda f: ((("x", f.x), ("y", f.y)), f.z),
+            flatten_func=lambda f: ([f.x, f.y], f.z),
+            unflatten_func=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
+            flatten_with_keys_func=lambda f: ((("x", f.x), ("y", f.y)), f.z),
         )
 
         SOME_PYTREES = [
@@ -1373,9 +1373,9 @@ if "optree" in sys.modules:
 
         python_pytree.register_pytree_node(
             ACustomPytree,
-            flatten_fn=lambda f: ([f.x, f.y], f.z),
-            unflatten_fn=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
-            flatten_with_keys_fn=lambda f: ((("x", f.x), ("y", f.y)), f.z),
+            flatten_func=lambda f: ([f.x, f.y], f.z),
+            unflatten_func=lambda xy, z: ACustomPytree(xy[0], xy[1], z),
+            flatten_with_keys_func=lambda f: ((("x", f.x), ("y", f.y)), f.z),
         )
 
         SOME_PYTREES = [

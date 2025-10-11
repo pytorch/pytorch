@@ -126,7 +126,7 @@ pytree.register_pytree_node(
     lambda xs: (list(xs), None),
     lambda xs, _: tuple(xs),
     # pyrefly: ignore  # bad-argument-type
-    flatten_with_keys_fn=lambda xs: (
+    flatten_with_keys_func=lambda xs: (
         [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
         None,
     ),
