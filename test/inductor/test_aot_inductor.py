@@ -1661,10 +1661,9 @@ class AOTInductorTestsTemplate:
         self.check_model(Repro(), example_inputs)
 
     @skipIfMPS
+    @config.patch({"unbacked_symint_fallback": 12})
     @parametrize("shift_k", [0, 1, 2, 3])
     @parametrize("use_static_size", [True, False])
-    @config.patch({"unbacked_symint_fallback": 12})
-    @config.patch({"triton.autotune_at_compile_time": None})
     def test_unbacked_expr_replacements(self, shift_k, use_static_size):
         """
         Test parameters

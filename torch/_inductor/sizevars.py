@@ -745,7 +745,7 @@ class SizeVarAllocator:
             return self.unbacked_replacements
 
         class UnionFind:
-            def __init__(self, equality_graph: dict[Expr, Set[Expr]]):
+            def __init__(self, equality_graph: dict[Expr, OrderedSet[Expr]]):
                 self.eq_graph = equality_graph
                 self.expressions = list(equality_graph.keys())
                 self.reverse_expressions = {
@@ -819,7 +819,7 @@ class SizeVarAllocator:
                 self.rank[leader] += self.rank[other]
                 return True
 
-        self.equality_graph: dict[Expr, Set] = defaultdict(Set)
+        self.equality_graph: dict[Expr, OrderedSet[Expr]] = defaultdict(OrderedSet)
         for assertions in self.shape_env.deferred_runtime_asserts.values():
             for assertion in assertions:
                 if not isinstance(assertion.expr, sympy.Equality):
