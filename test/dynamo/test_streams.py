@@ -94,7 +94,7 @@ class TestStreams(torch._dynamo.test_case.TestCase):
     def test_get_current_stream_return(self):
         def fn(x, s):
             with s:
-                s0 = torch.cuda.current_stream()
+                s0 = torch.accelerator.current_stream()
             return x, s0
 
         s_inp = torch.Stream(device="cuda")
@@ -104,6 +104,21 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         _, s1 = fn_opt(*inp)
         self.assertEqual(s_inp, s0)
         self.assertEqual(s0, s1)
+
+    def test_get_current_stream_return_different_device(self):
+        def fn(x, s0, s1):
+            with s0:
+                with s1:
+                    s = torch.accelerator.current_stream(torch.device("cuda:1"))
+            return s
+
+        s0 = torch.Stream(device="cuda:0")
+        s1 = torch.Stream(device="cuda:1")
+        inp = (torch.ones(2, 2) + 1, s0, s1)
+        fn_opt = torch.compile(fn, fullgraph=True)
+        s_act = fn_opt(*inp)
+        s_exp = fn(*inp)
+        self.assertEqual(s_act, s_exp)
 
     def test_nested_stream_enter_exit(self):
         pass

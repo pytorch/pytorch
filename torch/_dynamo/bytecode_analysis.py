@@ -228,7 +228,6 @@ class StackSize:
 
 def stacksize_analysis(instructions: list["Instruction"]) -> Union[int, float]:
     assert instructions
-    print(instructions)
     fixed_point = FixedPointBox()
     stack_sizes = {
         inst: StackSize(float("inf"), float("-inf"), fixed_point)
