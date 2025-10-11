@@ -1540,9 +1540,10 @@ static at::Tensor _quantized_convolution_onednn(
   // inv_scale = 1.0 / scale will be folded.
   // So, we can only get inv_scale from quant node which is used as
   // output_scale of this op.
-  bool fp32_output = output_dtype.has_value() && (output_dtype.value() == c10::kFloat);
-  bool bfloat16_output = output_dtype.has_value() && (output_dtype.value() == c10::kBFloat16);
-  if (fp32_output || bfloat16_output) {
+  bool is_fp8 = weight.scalar_type() == c10::ScalarType::Float8_e4m3fn;
+  bool high_prec_output = output_dtype.has_value() &&
+     ((output_dtype.value() != c10::ScalarType::Byte) && !is_fp8);
+  if (high_prec_output) {
     // When fp32 or bf16 output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
     // So, we will use default output_scale as 1.0 and output_zero_point as 0, since
     // when output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
@@ -1569,7 +1570,7 @@ static at::Tensor _quantized_convolution_onednn(
       ),
       "For post op sum, accum tensor must be contiguous."
     );
-    if (fp32_output || bfloat16_output) {
+  if (high_prec_output) {
       TORCH_CHECK(accum_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, accum_scale must be 1.0.");
       TORCH_CHECK(accum_zero_point == 0,  " (ONEDNN): fp32 or bf16 output, accum_zero_point must be 0");
       TORCH_CHECK((accum.value().scalar_type() == c10::kFloat) || (accum.value().scalar_type() == c10::kBFloat16), "The accum tensor should be KFloat or KBFloat.");
@@ -1623,7 +1624,6 @@ static at::Tensor _quantized_convolution_onednn(
     dilation.size() == (decltype(dilation.size()))kSpatialDim,
     func_name, ": dilation should contain ", kSpatialDim, " elements for ",
     kSpatialDim, "D convolution.");
-  bool is_fp8 = weight.scalar_type() == c10::ScalarType::Float8_e4m3fn;
   if (is_fp8) {
     TORCH_CHECK(act_dtype == c10::ScalarType::Float8_e4m3fn,
       func_name, ": expect input tensor to have fp8 data type, but got ", act_dtype);
@@ -1740,7 +1740,7 @@ static at::Tensor _quantized_convolution_onednn(
     at::empty(
       dst_dims,
       at::device(c10::kCPU)
-          .dtype(out_dtype)
+          .dtype(high_prec_output ? output_dtype.value() : act.scalar_type())
           .memory_format(kSpatialDim == 2 ?
               c10::MemoryFormat::ChannelsLast :
               c10::MemoryFormat::ChannelsLast3d)

@@ -2559,6 +2559,7 @@ if torch._C._has_mkldnn:
             output_dtype = x.dtype
         assert output_dtype in [
             torch.float32,
+            torch.float16,
             torch.bfloat16,
             torch.uint8,
             torch.int8,
@@ -2626,6 +2627,7 @@ if torch._C._has_mkldnn:
         output_shape[-1] = w.shape[1]
         assert output_dtype in [
             torch.float32,
+            torch.float16,
             torch.bfloat16,
             torch.int8,
             torch.uint8,

@@ -1166,6 +1166,57 @@ class TestPatternMatcher(TestPatternMatcherBase):
             quantization_with_autocast=quantization_with_autocast,
         )
 
+    def _qconv2d_fp16_test_helper(self, device="cpu"):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                **kwargs,
+            ):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 128, kernel_size=3, stride=1)
+                self.conv2 = torch.nn.Conv2d(128, 128, kernel_size=3, stride=1)
+                self.conv3 = torch.nn.Conv2d(
+                    128, 128, kernel_size=3, stride=1, groups=4
+                )
+                self.softmax = torch.nn.Softmax(dim=1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.softmax(x.to(torch.float32)).to(torch.float16)
+                x = self.conv3(self.conv2(x))
+                return x
+                # return self.conv3(self.conv2(self.conv(x).to(torch.float32)))
+
+        mod = M().eval().to(device=device, dtype=torch.float16)
+        v = (
+            torch.randn((1, 3, 8, 8), dtype=torch.float16, requires_grad=False)
+            .add(1)
+            .to(device=device)
+        )
+
+        def matcher_check_fn():
+            # 1. Dequant-Conv2D pattern matched in QConv2D weight prepack * 1
+            #    int8_mixed_fp32: [dequant_node, dequantize_per_channel, clone, convolution]
+            #    int8_mixed_bf16: [dequant_node, optional(convert_element_type_4),
+            #     dequantize_per_channel, optional(convert_element_type_3), clone, convolution]
+            self.assertEqual(
+                counters["inductor"]["qconv_weight_prepack_matcher_count"], 3
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv_weight_prepack_matcher_nodes"], 12
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv_unary_lower_count"], 0 if TEST_ACL else 3
+            )
+
+        self._test_common(
+            mod,
+            (v,),
+            matcher_check_fn,
+            check_quantization=True,
+            check_autocast=torch.float,
+        )
+
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
@@ -1183,6 +1234,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Conv2d module.
         """
         self._qconv2d_test_helper("xpu")
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    def test_qconv2d_fp16_xpu(self):
+        r"""
+        This testcase will quantize a single Conv2d module.
+        """
+        self._qconv2d_fp16_test_helper("xpu")
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -2394,6 +2454,69 @@ class TestPatternMatcher(TestPatternMatcherBase):
             is_dynamic=is_dynamic,
             quantization_with_autocast=quantization_with_autocast,
         )
+
+    def _qlinear_fp16_test_helper(
+        self,
+        inputs,
+        device="cpu",
+        do_permute=False,
+        matcher_check_fn=None,
+        bias=True,
+        is_dynamic=False,
+        is_qat=False,
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, use_bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 3, use_bias)
+                self.linear2 = torch.nn.Linear(3, 4, use_bias)
+                self.softmax = torch.nn.Softmax(dim=1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.softmax(x.to(torch.float32))
+                x = self.linear2(x.to(torch.float16))
+                return x
+
+        mod = M(bias).eval().to(device=device, dtype=torch.float16)
+        assert isinstance(inputs, tuple)
+
+        def __convert_tensor_to_device(input, device):
+            return input.to(device=device) if isinstance(input, torch.Tensor) else input
+
+        inputs = tuple(__convert_tensor_to_device(input, device) for input in inputs)
+
+        def _default_matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"], 2
+            )
+
+        self._test_common(
+            mod,
+            inputs,
+            matcher_check_fn=(
+                matcher_check_fn
+                if matcher_check_fn is not None
+                else _default_matcher_check_fn
+            ),
+            check_quantization=True,
+            is_qat=is_qat,
+            is_dynamic=is_dynamic,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    def test_qlinear_fp16_xpu(self):
+        r"""
+        This testcase will quantize a single Linear Moduel with fp16 quantization.
+        """
+        for bias in [True, False]:
+            self._qlinear_fp16_test_helper(
+                (torch.randn((2, 4), dtype=torch.float16, device="xpu"),),
+                device="xpu",
+                bias=bias,
+            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
