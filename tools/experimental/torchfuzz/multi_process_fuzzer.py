@@ -67,9 +67,13 @@ IGNORE_PATTERNS: list[re.Pattern] = [
         r"torch\._inductor\.exc\.InductorError: CppCompileError: C\+\+ compile error"
     ),  # https://github.com/pytorch/pytorch/issues/164686
     re.compile(
-        r"\.item\(\) # dtype=bool"
+        r"\.item\(\) # dtype="
     ),  # https://github.com/pytorch/pytorch/issues/164725
+    re.compile(
+        r"dimensionality of sizes \(0\) must match dimensionality of strides \(1\)"
+    ),  # https://github.com/pytorch/pytorch/issues/164814
     # Add more patterns here as needed, e.g.:
+
 
     # re.compile(r"Some other error message"),
 ]
