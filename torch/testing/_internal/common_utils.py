@@ -4243,7 +4243,7 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
     def assertEqualTypeString(self, x, y) -> None:
-        # This API is used simulate deprecated x.type() == y.type()
+        # This API is used simulate deprecated x.type() is y.type()
         self.assertEqual(x.device, y.device)
         self.assertEqual(x.dtype, y.dtype)
         self.assertEqual(x.is_sparse, y.is_sparse)
