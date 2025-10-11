@@ -49,7 +49,7 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
 
     tensor_meta = TensorMeta(
         torch.Size(output_shape),
-        output_stride,
+        tuple(output_stride),
         input_spec.tensor_meta.dtype,
     )
     return OutputSharding(

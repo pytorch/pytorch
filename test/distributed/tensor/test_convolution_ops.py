@@ -207,23 +207,29 @@ class DistConvolutionOpsTest(DTensorTestBase):
     def test_conv1d(self):
         device_mesh = self.build_device_mesh()
         model = nn.Conv1d(64, 64, 3, padding=1)
+        model_gt = copy.deepcopy(model).to(self.device_type)
         x = torch.randn(1, 64, 8)
         x_dt = DTensor.from_local(x, device_mesh, [Replicate()])
         model_dt = distribute_module(
             model, device_mesh, _conv_fn, input_fn=None, output_fn=None
         )
         out_dt = model_dt(x_dt)
+        out = model_gt(x)
+        self.assertEqual(out_dt.shape, out.shape)
 
     @with_comms
     def test_conv3d(self):
         device_mesh = self.build_device_mesh()
         model = nn.Conv3d(64, 64, 3, padding=1)
-        x = torch.randn(1, 64, 8, 8, 8)
+        model_gt = copy.deepcopy(model).to(self.device_type)
+        x = torch.randn(1, 64, 8, 8, 8, device=self.device_type)
         x_dt = DTensor.from_local(x, device_mesh, [Replicate()])
         model_dt = distribute_module(
             model, device_mesh, _conv_fn, input_fn=None, output_fn=None
         )
         out_dt = model_dt(x_dt)
+        out = model_gt(x)
+        self.assertEqual(out_dt.shape, out.shape)
 
 
 if __name__ == "__main__":
