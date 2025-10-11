@@ -802,7 +802,7 @@ def _insert_fused_matmul_reduce_scatter(
     scatter_dim_after_reshape: int,  # only used for reshape -> scaled_mm -> reshape pattern
     output_shape: list[int],  # only used for reshape -> scaled_mm -> reshape pattern
 ) -> torch.fx.Node:
-    if type(matmul) == _Matmul:
+    if type(matmul) is _Matmul:
         return graph.call_function(
             torch.ops.symm_mem.fused_matmul_reduce_scatter.default,
             args=(
@@ -813,7 +813,7 @@ def _insert_fused_matmul_reduce_scatter(
                 group_name,
             ),
         )
-    elif type(matmul) == _ScaledMatmul:
+    elif type(matmul) is _ScaledMatmul:
         return graph.call_function(
             torch.ops.symm_mem.fused_scaled_matmul_reduce_scatter.default,
             args=(
@@ -1037,7 +1037,7 @@ def _get_unexposed_collectives(graph: torch.fx.Graph) -> list[torch.fx.Node]:
     """
 
     def _is_compute_intensive(node: torch.fx.Node) -> bool:
-        return node.target in [torch.ops.aten.mm.default]
+        return node.target is torch.ops.aten.mm.default
 
     collective_to_overlapping_candidates = defaultdict(list)
     available_nodes = OrderedSet[torch.fx.Node]()

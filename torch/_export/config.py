@@ -22,6 +22,11 @@ use_new_tracer_experimental = False
 # by default, but user can turn it on to debug leaks.
 detect_non_strict_fake_tensor_leaks = False
 
+# error on potentially pre-dispatch/non-strict tracing limitation
+# this type of error usually happens when we encounter an op
+# that we don't know how to proxy, resulting in untracked fake tensors
+error_on_lifted_constant_tensors = True
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 

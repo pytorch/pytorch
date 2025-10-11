@@ -96,7 +96,7 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   std::vector<int64_t> outputSplitSizes_;
   int globalRankStart_{};
   int globalRankStride_{};
-  std::vector<int64_t> groupRanks_{};
+  std::vector<int64_t> groupRanks_;
   bool isSynchronizedOp_{};
 };
 
