@@ -6032,6 +6032,25 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
+    def test_unbacked_dynamic(self):
+        # Test that Dim.UNBACKED works properly and marks dimensions as unbacked
+        UNBACKED = Dim.UNBACKED
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                # x should have an unbacked dimension
+                return x * 2
+
+        inputs = (torch.randn(4, 4),)
+        shapes = {
+            "x": (UNBACKED, Dim.STATIC),
+        }
+        # This should export successfully with unbacked dimension on first dim
+        ep = export(Foo(), inputs, dynamic_shapes=shapes)
+        # We can run it with different sizes for the unbacked dimension
+        ep.module()(torch.randn(6, 4))
+        ep.module()(torch.randn(1, 4))
+
     def test_map(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
@@ -17231,6 +17250,82 @@ def forward(self, x, y):
         FileCheck().check_count("torch.ops.aten.mul.Tensor", 1, exactly=True).run(
             str(ep.graph)
         )
+
+    def test_dim_unbacked_basic(self):
+        """Test basic Dim.UNBACKED functionality - marking a dimension as unbacked/data-dependent."""
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, idx):
+                # idx is a tensor, so idx.item() creates an unbacked symint
+                return x[: idx.item()]
+
+        x = torch.randn(10, 4)
+        idx = torch.tensor([5])
+
+        # Mark idx's dimension as unbacked since it's data-dependent
+        dynamic_shapes = {
+            "x": (Dim.UNBACKED, Dim.AUTO),
+            "idx": (Dim.UNBACKED,),
+        }
+
+        ep = export(Foo(), (x, idx), dynamic_shapes=dynamic_shapes)
+
+        # Test that the export works with different inputs
+        result1 = ep.module()(torch.randn(8, 4), torch.tensor([3]))
+        self.assertEqual(result1.shape[0], 3)
+
+        result2 = ep.module()(torch.randn(12, 4), torch.tensor([7]))
+        self.assertEqual(result2.shape[0], 7)
+
+    def test_dim_unbacked_with_auto_static(self):
+        """Test mixing Dim.UNBACKED with Dim.AUTO and Dim.STATIC."""
+
+        class Bar(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y + z
+
+        inputs = (
+            torch.randn(6, 4),
+            torch.randn(6, 4),
+            torch.randn(6, 4),
+        )
+
+        # Mix UNBACKED, AUTO, and STATIC
+        shapes = {
+            "x": (Dim.UNBACKED, Dim.STATIC),
+            "y": (Dim.AUTO, Dim.AUTO),
+            "z": (Dim.UNBACKED, Dim.STATIC),
+        }
+
+        ep = export(Bar(), inputs, dynamic_shapes=shapes)
+
+        # Verify it works with different shapes
+        # AUTO allows variation, STATIC requires same shape
+        ep.module()(torch.randn(8, 4), torch.randn(8, 5), torch.randn(10, 4))
+
+    def test_dim_unbacked_validation(self):
+        """Test that Dim.UNBACKED is properly validated in dynamic_shapes."""
+
+        class Baz(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        x = torch.randn(4, 4)
+
+        # Test dict format
+        shapes = {"x": {0: Dim.UNBACKED, 1: Dim.UNBACKED}}
+        ep = export(Baz(), (x,), dynamic_shapes=shapes)
+        self.assertIsNotNone(ep)
+
+        # Test tuple format
+        shapes = {"x": (Dim.UNBACKED, Dim.UNBACKED)}
+        ep = export(Baz(), (x,), dynamic_shapes=shapes)
+        self.assertIsNotNone(ep)
+
+        # Test list format
+        shapes = {"x": [Dim.UNBACKED, Dim.UNBACKED]}
+        ep = export(Baz(), (x,), dynamic_shapes=shapes)
+        self.assertIsNotNone(ep)
 
 
 if __name__ == "__main__":
