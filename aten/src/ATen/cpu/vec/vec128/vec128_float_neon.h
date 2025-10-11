@@ -4,9 +4,12 @@
 // See Note [Do not compile initializers with AVX]
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/sve/sve_helper.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
+
+#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#include <sleef.h>
+#endif
 
 // Sleef offers vectorized versions of some transcedentals
 // such as sin, cos, tan etc..
@@ -30,6 +33,12 @@ inline namespace CPU_CAPABILITY {
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
+#endif
+
+#if defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
+#else
+#define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
 template <int index, bool mask_val>
@@ -85,12 +94,6 @@ class Vectorized<float> {
   operator float32x4_t() const {
     return values;
   }
-#ifdef CPU_CAPABILITY_SVE128
-  Vectorized(svfloat32_t v) : values(svget_neonq(v)) {}
-  operator svfloat32_t() const {
-    return svset_neonq(svundef_f32(), values);
-  }
-#endif
   template <int64_t mask>
   static Vectorized<float> blend(
       const Vectorized<float>& a,
