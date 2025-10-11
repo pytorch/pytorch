@@ -4057,6 +4057,26 @@ print(ret)
         )
         self.assertEqual(r, "1.0")
 
+    def test_sort_negative_zero_consistency(self):
+        """
+        Test that sort/argsort handle -0.0 vs +0.0 consistently with CPU.
+        Regression test for https://github.com/pytorch/pytorch/issues/162235
+        """
+        # Test with pair [-0.0, 0.0]
+        x_cpu = torch.tensor([-0.0, 0.0], dtype=torch.float32)
+        x_cuda = x_cpu.cuda()
+
+        # Test sort operator (both values and indices)
+        vals_cpu, idx_cpu = torch.sort(x_cpu)
+        vals_cuda, idx_cuda = torch.sort(x_cuda)
+        self.assertEqual(vals_cpu, vals_cuda.cpu())
+        self.assertEqual(idx_cpu, idx_cuda.cpu())
+
+        # Test argsort operator
+        idx_cpu = torch.argsort(x_cpu)
+        idx_cuda = torch.argsort(x_cuda)
+        self.assertEqual(idx_cpu, idx_cuda.cpu())
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest

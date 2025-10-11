@@ -46,6 +46,14 @@ inline bool getGridFromTiles(int64_t gridTiles, dim3& grid) {
 template <typename scalar_t, bool handleNaN = false>
 struct GTOp {
   __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
+    if constexpr (std::is_floating_point<scalar_t>::value || 
+                  std::is_same_v<scalar_t, c10::Half> || 
+                  std::is_same_v<scalar_t, c10::BFloat16>) {
+      // Use signbit as tiebreaker for -0.0 vs +0.0 to match CPU sort behavior
+      if (lhs == rhs && lhs == scalar_t(0)) {
+        return signbit(static_cast<double>(lhs)) < signbit(static_cast<double>(rhs));
+      }
+    }
     return (handleNaN && at::_isnan(lhs) && !at::_isnan(rhs)) ||
         (static_cast<scalar_t>(lhs) > static_cast<scalar_t>(rhs));
   }
@@ -54,6 +62,14 @@ struct GTOp {
 template <typename scalar_t, bool handleNaN = false>
 struct LTOp {
   __device__ bool operator()(const scalar_t& lhs, const scalar_t& rhs) const {
+    if constexpr (std::is_floating_point<scalar_t>::value || 
+                  std::is_same_v<scalar_t, c10::Half> || 
+                  std::is_same_v<scalar_t, c10::BFloat16>) {
+      // Use signbit as tiebreaker for -0.0 vs +0.0 to match CPU sort behavior
+      if (lhs == rhs && lhs == scalar_t(0)) {
+        return signbit(static_cast<double>(lhs)) > signbit(static_cast<double>(rhs));
+      }
+    }
     return (handleNaN && at::_isnan(rhs) && !at::_isnan(lhs)) ||
         (static_cast<scalar_t>(lhs) < static_cast<scalar_t>(rhs));
   }
