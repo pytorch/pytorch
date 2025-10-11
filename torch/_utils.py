@@ -1001,6 +1001,13 @@ def _dummy_type(name: str) -> type:
                 class_name = obj.__class__.__name__
             else:
                 class_name = obj.__name__
+
+            # Provide helpful error message for CUDA-related classes
+            if "Cuda" in class_name or "CUDA" in class_name:
+                raise RuntimeError(
+                    f"Tried to instantiate {class_name}, but CUDA is not available. "
+                    f"Ensure PyTorch is built with CUDA support and CUDA drivers are installed."
+                )
             raise RuntimeError(f"Tried to instantiate dummy base class {class_name}")
 
         return err_fn
