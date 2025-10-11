@@ -1,8 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
-import functools
 import logging
-import operator
 import warnings
 from collections.abc import Sequence
 from typing import cast, Optional
@@ -175,6 +173,7 @@ class OpDispatcher:
 
         mesh = op_info.compute_mesh
         participating = mesh.get_coordinate() is not None
+        local_results = None
         if participating:
             # computation that happens in the current rank of the mesh, normal case
             if output_sharding.needs_redistribute:
@@ -278,14 +277,16 @@ class OpDispatcher:
 
         if output_sharding.output_spec is None:
             if op_call == aten.equal.default:
-                # For equal operator, The local results from all devices should be all-gathered
-                # and a reduce op (AND) will be performed on the list of results to ensure SPMD
-                # execution. We can extend this for more ops if necessary.
-                obj_list = [None for _ in range(dist.get_world_size())]
-                dist.all_gather_object(obj_list, local_results)  # type: ignore[possibly-undefined]
-                obj_list = list(filter(lambda x: x is not None, obj_list))
-                # perform reduce on the collection with AND op
-                local_results = functools.reduce(operator.and_, obj_list, True)
+                # The output of the equal op is a bool, by converting it into a
+                # a single value tensor, we can use all-reduce with min reduce op
+                # to simulate logical and.
+                assert local_results is None or isinstance(local_results, bool)
+                r = torch.tensor(
+                    int(local_results) if local_results is not None else 1,
+                    device=mesh.device_type,
+                )
+                dist.all_reduce(r, op=dist.ReduceOp.MIN)
+                local_results = bool(r.item())
 
         if op_info.schema.is_inplace_op():
             # inplace op should return self instead of re-wrapping

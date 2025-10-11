@@ -3009,7 +3009,8 @@ class SqueezeView(BaseView):
 
             for i, (size, stride) in enumerate(zip(old_layout.size, old_layout.stride)):
                 if dim is None:
-                    if size != 1:
+                    # Only append if dim is not squeezed out
+                    if not V.graph.sizevars.is_size_one_or_false(size):
                         new_size.append(size)
                         new_stride.append(stride)
                 else:
@@ -3030,8 +3031,14 @@ class SqueezeView(BaseView):
             return ReinterpretView(data=storage, layout=new_layout)
 
         if dim is None:
-            # redirect to a generic view
-            return View.create(x, [s for s in x.get_size() if s != 1])
+            return View.create(
+                x,
+                [
+                    s
+                    for s in x.get_size()
+                    if not V.graph.sizevars.is_size_one_or_false(s)
+                ],
+            )
         else:
             assert x.get_size()[dim] == 1
             return View.create(x, [s for i, s in enumerate(x.get_size()) if i != dim])
@@ -8713,7 +8720,6 @@ class WhileLoop(ExternKernel):
             return carried_inputs
 
         # Import clone from lowering module
-        from .lowering import clone
 
         # Unwrap views to get the underlying buffers for comparison
         unwrapped_buffers = [
@@ -8723,13 +8729,13 @@ class WhileLoop(ExternKernel):
 
         # Track which buffers we've seen and their indices
         seen_buffers: OrderedSet[int] = OrderedSet()
-        result = []
+        result: list[Union[IRNode, TensorBox, ShapeAsConstantBuffer]] = []
 
         for i, (original_input, unwrapped_buffer) in enumerate(
             zip(carried_inputs, unwrapped_buffers)
         ):
             if id(unwrapped_buffer) in seen_buffers:
-                result.append(clone(original_input))
+                result.append(ExternKernel.copy_input(original_input))
             else:
                 seen_buffers.add(id(unwrapped_buffer))
                 result.append(original_input)
