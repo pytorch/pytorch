@@ -249,7 +249,9 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     def test_dropout_errors(self):
         device_mesh = self.build_device_mesh()
-        with self.assertRaisesRegex(RuntimeError, "supported"):
+        with self.assertRaisesRegex(
+            RuntimeError, "redistributing to Partial is for internal use only"
+        ):
             self._run_sharded_elementwise_ops(
                 device_mesh=device_mesh,
                 placements=[Partial("sum")],
