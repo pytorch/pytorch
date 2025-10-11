@@ -3,6 +3,8 @@ import random
 
 from typing import Union
 
+import pandas as pd
+
 import torch
 from torch import Tensor
 
@@ -126,7 +128,7 @@ cfa = torch.compile(flex_attention, dynamic=False, fullgraph=True)
 cbm = torch.compile(create_block_mask, dynamic=False, fullgraph=True)
 
 
-def flex_attention_benchmark() -> None:
+def flex_attention_benchmark(filename: str) -> None:
     # random init
     random.seed(10)
     torch.manual_seed(42)
@@ -158,7 +160,8 @@ def flex_attention_benchmark() -> None:
     )
 
     # generate block_mask
-    num_experiments = 10
+    num_experiments = 400
+    exp_records = []
 
     for i in range(num_experiments):
         num_documents = 1 + i
@@ -201,8 +204,26 @@ def flex_attention_benchmark() -> None:
             save_path=None,
             show_speedups=False,
         )
+        exp_records.append(
+            (
+                1.0 - block_mask_sparsity,
+                exp_result.fwd_time / 1000,
+                exp_result.bwd_time / 1000,
+            )
+        )
         print("\n")
+
+    # write to file
+    df = pd.DataFrame(
+        exp_records,
+        columns=[
+            "mask density",
+            "fwd_time",
+            "bwd_time",
+        ],
+    )
+    df.to_csv(filename)
 
 
 if __name__ == "__main__":
-    flex_attention_benchmark()
+    flex_attention_benchmark("flex_attention_density_benchmark.csv")
