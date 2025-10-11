@@ -4433,7 +4433,9 @@ class CommonTemplate:
     def test_low_memory_max_pool(self, dilation: int, dim: int):
         # Skip GPU 3D due to Triton compile failures
         if getattr(self.device, "type", str(self.device)) != "cpu" and dim == 3:
-            self.skipTest("Skip GPU 3D low_memory_max_pool due to Triton compile failure (dilation=1,2)")
+            self.skipTest(
+                "Skip GPU 3D low_memory_max_pool due to Triton compile failure (dilation=1,2)"
+            )
         prims = torch.ops.prims
 
         def fn(x):
@@ -10004,7 +10006,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         # Regression for https://github.com/pytorch/pytorch/issues/163929
         # Ensure argmax/argmin indices are correct on transposed views after base mutation
         # This test is CPU-only to avoid backend-specific failures unrelated to the core fix
-        device_type = self.device if isinstance(self.device, str) else getattr(self.device, "type", str(self.device))
+        device_type = (
+            self.device
+            if isinstance(self.device, str)
+            else getattr(self.device, "type", str(self.device))
+        )
         if device_type != "cpu":
             self.skipTest("CPU-only test for argreduce index semantics on views")
 
