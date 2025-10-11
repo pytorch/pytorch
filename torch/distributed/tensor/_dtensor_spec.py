@@ -9,6 +9,8 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.utils._debug_mode import _stringify_shape
+from torch.utils._dtype_abbrs import dtype_abbrs
 
 
 class TensorMeta(NamedTuple):
@@ -106,14 +108,16 @@ class DTensorSpec:
         if len(self.placements) == 1:
             placement_str = str(self.placements[0])
         else:
-            placement_str = str(self.placements)
+            placement_str = f"{''.join(str(p) for p in self.placements)}"
 
         if self.tensor_meta is not None:
-            tensor_shape = str(tuple(self.tensor_meta.shape))
+            tensor_shape = _stringify_shape(self.tensor_meta.shape)
+            tensor_dtype = dtype_abbrs[self.tensor_meta.dtype]
         else:
             tensor_shape = "unknown shape"
+            tensor_dtype = "unknown dtype"
 
-        return f"Spec({placement_str} on {tensor_shape})"
+        return f"Spec({tensor_dtype}{tensor_shape}({placement_str}))"
 
     @property
     def shape(self) -> torch.Size:

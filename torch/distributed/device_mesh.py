@@ -686,7 +686,7 @@ else:
                 if self._mesh_dim_names
                 else f"{tuple(self._mesh.shape)}"
             )
-            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, device: '{self._device_type}', stride: {self._mesh.stride()}"
+            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, '{self.device_type}', stride={self._mesh.stride()}"
             # We only print the mesh tensor if the debug mode is turned on.
             if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
                 device_mesh_repr += f", Mesh: {self._mesh.tolist()}"
