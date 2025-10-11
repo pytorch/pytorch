@@ -653,6 +653,33 @@ class TestInductorDynamic(TestCase):
 
         self.assertEqual(foo_c(t, y), foobar(t, y))
 
+    @parametrize("with_replacement", [False, True])
+    def test_dynamic_shapes_r2_matches_eager(self, with_replacement):
+        def _eager(x, r):
+            out = torch.combinations(
+                x.flatten(), r=r, with_replacement=with_replacement
+            )
+            # Canonicalize for stable comparison
+            return out.to(torch.float32).sort(dim=0).values
+
+        def _compiled(r):
+            def fn(x):
+                return torch.combinations(
+                    x.flatten(), r=r, with_replacement=with_replacement
+                )
+
+            # The original bug repro failed under aot_eager + dynamic=True
+            return torch.compile(fn, backend="aot_eager", dynamic=True)
+
+        def _assert_match(compiled, x, r):
+            out = compiled(x)
+            exp = _eager(x, r=r)
+            self.assertEqual(out.to(torch.float32).sort(dim=0).values, exp)
+
+        compiled = _compiled(r=2)
+        _assert_match(compiled, torch.tensor([1, 2, 3, 4], dtype=torch.int64), r=2)
+        _assert_match(compiled, torch.tensor([5, 6, 7], dtype=torch.int64), r=2)
+
     def test_floor(self):
         def fn(x):
             n = x.size(-1)
