@@ -296,7 +296,7 @@ static bool isSupportedHipLtROCmArch(int index) {
 #endif
 
 template <typename scalar_t>
-static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
@@ -1177,7 +1177,7 @@ bool is_blockwise_128x128_scaling(const at::Tensor& t, const at::Tensor& scale) 
           scale,
           0,
           ceil_div<int64_t>(t.size(0), 128),
-          round_up<int64_t>(ceil_div<int64_t>(t.size(1), 128), 4)) &&
+          ceil_div<int64_t>(t.size(1), 128)) &&
       check_size_stride(
           scale, 1, ceil_div<int64_t>(t.size(1), 128), 1));
 }

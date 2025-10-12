@@ -850,7 +850,7 @@ struct RestoreResult {
   std::vector<Block*> allocations_created;
 };
 
-static bool BlockComparatorSize(const Block* a, const Block* b) {
+bool BlockComparatorSize(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
   }
@@ -859,7 +859,7 @@ static bool BlockComparatorSize(const Block* a, const Block* b) {
   }
   return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
-static bool BlockComparatorAddress(const Block* a, const Block* b) {
+bool BlockComparatorAddress(const Block* a, const Block* b) {
   if (a->stream != b->stream) {
     return (uintptr_t)a->stream < (uintptr_t)b->stream;
   }

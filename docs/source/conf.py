@@ -1081,6 +1081,8 @@ coverage_ignore_functions = [
     "loop_pass",
     "these_before_those_pass_constraint",
     "this_before_that_pass_constraint",
+    # torch.fx.passes.regional_inductor
+    "regional_inductor",
     # torch.fx.passes.reinplace
     "reinplace",
     # torch.fx.passes.split_module
