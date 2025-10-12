@@ -3160,19 +3160,36 @@ class Scheduler:
                     min_node_unfused,
                     torch._inductor.ir.TritonTemplateCallerBase,
                 ):
-                    if config.multi_kernel_hints:
-                        callers: dict[Optional[int], TritonTemplateCallerBase] = {}
-                        callers[None] = min_node_unfused
+                    callers: dict[Optional[Any], TritonTemplateCallerBase] = {}
 
-                        for hint in config.multi_kernel_hints:
-                            timings = multi_node.choice_timings(hint_override=hint)
+                    # get free symbols
+                    free_symbols = set()
+                    for inp in multi_node.inputs:
+                        if (size := inp.maybe_get_size()) is not None:
+                            for s in size:
+                                free_symbols |= s.free_symbols
+                    for s in multi_node.layout.size:
+                        free_symbols |= s.free_symbols
+
+                    # enumerate overrides for free symbols
+                    overrides = {}
+                    for sym in free_symbols:
+                        if sym in V.graph.sizevars.var_to_hint_override:
+                            overrides[sym] = V.graph.sizevars.var_to_hint_override[sym]
+
+                    # see if overrides apply
+                    if overrides:
+                        callers[None] = min_node_unfused
+                        for override_vals in itertools.product(*[overrides[k] for k in free_symbols if k in overrides]):
+                            override_key = tuple((s, v) for s, v in zip(free_symbols, override_vals))
+                            timings = multi_node.choice_timings(hint_override=override_key)
                             triton_timings = {
                                 k: v
                                 for k, v in timings.items()
                                 if isinstance(k, TritonTemplateCallerBase)
                             }
                             choice = min(triton_timings.items(), key=lambda x: x[1])[0]
-                            callers[hint] = choice
+                            callers[override_key] = choice
 
                         node.node.finalize_as_triton_callers(callers)
                     else:
@@ -3325,11 +3342,28 @@ class Scheduler:
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
 
             hint_override_best_fusion_choice: dict[
-                Optional[int], TritonTemplateCallerBase
+                Optional[Any], TritonTemplateCallerBase
             ] = {}
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
-            for hint_override in config.multi_kernel_hints:
-                choice_timings = multi_node.choice_timings(hint_override)
+
+            # free symbols
+            free_symbols = set()
+            for inp in multi_node.inputs:
+                if (size := inp.maybe_get_size()) is not None:
+                    for s in size:
+                        free_symbols |= s.free_symbols
+            for s in multi_node.layout.size:
+                free_symbols |= s.free_symbols
+
+            # overrides for symbols
+            overrides = {}
+            for sym in free_symbols:
+                if sym in V.graph.sizevars.var_to_hint_override:
+                    overrides[sym] = V.graph.sizevars.var_to_hint_override[sym]
+
+            for override_vals in itertools.product(*[overrides[k] for k in free_symbols if k in overrides]):
+                override_key = tuple((s, v) for s, v in zip(free_symbols, override_vals))
+                choice_timings = multi_node.choice_timings(override_key)
                 for choice, unfused_time in sorted(
                     choice_timings.items(), key=lambda x: x[1]
                 ):
@@ -3370,9 +3404,9 @@ class Scheduler:
                         if ms_fused < min_ms_fused:
                             min_ms_fused = ms_fused
                             ms_fused_choice = choice
-                multi_node._choice_timings[hint_override] = new_timings
+                multi_node._choice_timings[override_key] = new_timings
                 assert isinstance(ms_fused_choice, TritonTemplateCallerBase)
-                hint_override_best_fusion_choice[hint_override] = ms_fused_choice
+                hint_override_best_fusion_choice[override_key] = ms_fused_choice
 
             # Eagerly compile and benchmark non-template nodes
             choice_timings = multi_node.choice_timings()
