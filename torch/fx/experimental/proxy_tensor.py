@@ -60,8 +60,10 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.nn import Module
 from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import (
+    _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
+    autograd_would_have_decomposed,
     TorchDispatchMode,
 )
 from torch.utils._stats import count
@@ -83,17 +85,16 @@ if TYPE_CHECKING:
     from torch.types import IntLikeType
 
 __all__ = [
-    "DecompositionInterpreter",
     "PythonKeyTracer",
     "dispatch_trace",
+    "make_fx",
+    "DecompositionInterpreter",
+    "py_sym_types",
     "get_innermost_proxy_mode",
     "get_proxy_mode",
     "handle_sym_dispatch",
-    "is_sym_tracing",
-    "make_fx",
-    "maybe_disable_thunkify",
     "maybe_enable_thunkify",
-    "py_sym_types",
+    "maybe_disable_thunkify",
 ]
 
 _ProxyTracer = Union["PythonKeyTracer", "_GraphAppendingTracerEx"]
@@ -285,7 +286,8 @@ def set_proxy_slot(  # type: ignore[no-redef]
         # is derivable from a primal that we use that.
         assert isinstance(obj, py_sym_types), type(obj)
         if obj not in tracer.symnode_tracker:
-            tracer.symnode_tracker[obj] = typing.cast(_PySymProxyType, proxy)
+            proxy = typing.cast(_PySymProxyType, proxy)
+            tracer.symnode_tracker[obj] = proxy
 
             # WAR: python test/dynamo/test_subclasses.py
             # TestNestedTensor.test_basic_autograd
@@ -302,7 +304,9 @@ def set_proxy_slot(  # type: ignore[no-redef]
             import sympy
 
             if isinstance(obj.node.expr, sympy.Symbol):
-                tracer.sympy_expr_tracker[obj.node.expr] = proxy
+                tracer.sympy_expr_tracker[obj.node.expr] = _SympyExprTrackerValue(
+                    proxy, obj
+                )
 
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
@@ -404,22 +408,127 @@ def get_proxy_slot(
         assert isinstance(obj, py_sym_types), type(obj)
         tracker = tracer.symnode_tracker
 
-    # pyrefly: ignore  # unsupported-operation
-    if obj not in tracker:
-        # Last ditch
-        if isinstance(obj, py_sym_types) and obj.node.expr in tracer.sympy_expr_tracker:
-            value = tracer.sympy_expr_tracker[obj.node.expr]
-        else:
-            if isinstance(default, _NoDefault):
-                raise RuntimeError(
-                    f"{obj} ({id(obj)}) is not tracked with proxy for {tracer}"
-                )
-            return default
-    else:
-        # pyrefly: ignore  # index-error
-        value = tracker[obj]
+    # pyrefly: ignore  # index-error
+    value = tracker.get(obj)
+
+    if value is None:
+        if isinstance(obj, py_sym_types):
+            if obj.node.is_symbolic():
+                # Last ditch - we found a SymInt (SymBool, etc) we don't know
+                # about.
+                if (tmp := tracer.sympy_expr_tracker.get(obj.node.expr)) is not None:
+                    value = tmp.proxy
+
+                else:
+                    # Attempt to build it from first principles.
+                    _build_proxy_for_sym_expr(tracer, obj.node.expr, obj)
+                    value = tracker.get(obj)
+
+    if value is None:
+        # We don't know this value - return the default.
+        if isinstance(default, _NoDefault):
+            raise RuntimeError(
+                f"{obj} ({type(obj)}, {id(obj)})is not tracked with proxy for {tracer}"
+            )
+        return default
+
     res = transform(value)
     return res
+
+
+def _build_proxy_for_sym_expr(
+    tracer: _ProxyTracer, expr: sympy.Expr, out: PySymType | None = None
+) -> PySymType | None:
+    """
+    This function is used when the ProxyTorchDispatchMode sees a SymNode
+    that it hasn't seen before to try to associate it with traced inputs.
+
+    How can this happen?
+
+    First thing to remember is that although sympy.Exprs are interned (so
+    `sympy.Expr("s3*s4")` will always have the same `id` and will always compare
+    equal) SymNode does not (so doing `SymNode("s3")*SymNode("s4")` twice in a
+    row will give two unique SymNodes).
+
+    - On way for this to happen is if we turn off tracing to compute an
+      intermediate value and then USE that value with tracing turned on - for
+      example if we turn off tracing to do some FakeTensor propagation to
+      compute a size (dtensor does this) but then turn tracing back on and use
+      that computed size.
+
+    - Another way is if we compute a size in one graph and stash it somewhere
+      hidden (such as in some meta-data) and later use it in a different graph
+      (dtensor does this too). Since the size was computed in the first graph
+      and it's not an official input to the second graph it's not tracked
+      properly. This is often going to show up as it usually works in fullgraph
+      but a graph break causes a failure.
+
+    To handle this we decompose the sympy.Expr and look for the pieces as
+    inputs. But there are problems with this approach:
+
+    - We lose operation provanance: We end up figuring out where to get the
+      inputs - but those may not actually be correct. If we have "s1" coming in
+      from both tensor1 and tensor2 and we pick the wrong one we could end up
+      keeping a tensor alive longer than intended.
+
+    - There's no guarantee that those values are inputs to the graph: If we have
+      "s1*s2" computed in a graph #1 and used in graph #2 there's no guarantee
+      that the input that holds "s1" is actually an input on graph #2.
+
+    - The decomposition isn't guaranteed to be the same: Sympy can "simplify"
+      expressions so it's possible that our inputs are "s1*s2" and "s3" but we
+      decompose it into "s1" and "s2*s3" - which wouldn't be found.
+
+    Other ways we could handle this:
+
+    - Don't: Just require that all inputs are tracked properly. This is the
+      "correct" solution but harder because you need to track down each
+      potential problem one by one and fix them. And when it fails it's a lot of
+      work to figure out both why it's failing and the right way to fix it. This
+      is complicated by the fact that a stashed value could be incorrect but
+      work fine until we happen to get an graph break in the wrong place - so it
+      may be a while before the bug is found. (Maybe we need a "dynamo abuse
+      mode" where we run tests with as many graph breaks inserted as possible?)
+
+    - Track SymNode ops separately from proxy tracing: Right now SymNode
+      operations are tracked as part of the proxy tracing - so when we disable
+      proxy tracing we also disable SymNode tracing. But we don't have to do
+      that - we could instead always have SymNodes track where they came from
+      and just use that when needed. This solves the problem of tracing being
+      temporarily turned off but doesn't help if an input isn't present after a
+      graph break.
+
+    - Better decomposition: Right now the decomposition is pretty simple. We do
+      have a sat-solver available to us so we could theoretically do a better
+      job figuring out a "correct" decomposition. But that still relies on
+      having the inputs available at all - which isn't a guarantee.
+    """
+
+    if (value := tracer.sympy_expr_tracker.get(expr)) is not None:
+        assert not out
+        return value.value
+
+    args = []
+    for arg in expr.args:
+        if (arg_value := _build_proxy_for_sym_expr(tracer, arg)) is None:
+            return None
+        args.append(arg_value)
+    args = tuple(args)
+
+    import sympy
+
+    func: OpOverload
+    match expr:
+        case sympy.Mul():
+            func = operator.mul  # type: ignore[assignment]
+        case _:
+            raise RuntimeError(f"Unhandled sympy type: {type(expr)}")
+
+    if out is None:
+        out = func(*args)
+    else:
+        _sym_register(tracer, func, args, out)
+    return out
 
 
 def snapshot_fake(val: Tensor, include_real: bool = False) -> Optional[Tensor]:
@@ -908,11 +1017,16 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
-        torch.ops.aten.size.default,
-        torch.ops.aten.stride.default,
-        torch.ops.aten.storage_offset.default,
-    ]:
+    if (
+        not pre_dispatch
+        and func
+        not in [
+            torch.ops.aten.size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.storage_offset.default,
+        ]
+        and autograd_would_have_decomposed(func, flat_args_kwargs)
+    ):
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -1102,10 +1216,16 @@ class _SymNodeDict:
         return len(self.sym_node_dict)
 
 
+@dataclass
+class _SympyExprTrackerValue:
+    proxy: _PySymProxyType
+    value: PySymType
+
+
 class PythonKeyTracer(Tracer):
     script_object_tracker: MutableMapping[_AnyScriptObjectType, Proxy]
     symnode_tracker: _SymNodeDict
-    sympy_expr_tracker: dict[sympy.Symbol, object]
+    sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
@@ -1117,7 +1237,7 @@ class PythonKeyTracer(Tracer):
         self.script_object_tracker = WeakIdKeyDictionary(
             dict=None, ref_type=_WeakHashRef
         )
-        self.sympy_expr_tracker = dict()
+        self.sympy_expr_tracker = {}
 
         # Stores the torch function that was called during tracing
         self.torch_fn_metadata = None
@@ -1498,19 +1618,7 @@ _temp_remove_pre_dispatch_torch_function_mode = _make_temp_remove_mode_context_m
 )
 
 
-class _CurrentProxyTorchDispatchModeState(threading.local):
-    # If this is non-None then it overrides the current ProxyTorchDispatchMode
-    # for SymNode tracing. See disable_proxy_modes_tracing().
-    #
-    # Note: Since we use `None` as our "don't override" sentinel we don't have a
-    # way to enable operator tracing but disable sym tracing... but that would
-    # be weird, right?
-    sym_mode_override: ProxyTorchDispatchMode | None = None
-
-
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    _global_state = _CurrentProxyTorchDispatchModeState()
-
     # Ensure this is read-only; this exists only for legacy reasons
     @property
     def enable_tracing(self) -> bool:
@@ -1534,16 +1642,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # Indicates to our torch_dispatch dispatching infra that
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.PROXY
-        # Every time we enter a mode, we maintain a stack telling us what the
-        # previous ProxyTorchDispatchMode state was (if there was any) as well
-        # as the previous _global_state.sym_mode_override.
+        # Every time we enter a mode, we maintain a stack telling us what the previous
+        # ProxyTorchDispatchMode state was (if there was any).
         # This lets us properly reset the state on exit.
-        #
-        # QUESTION (ako): Should this be a class variable instead? Kind of weird
-        # that it's per-instance...
-        self.enter_stack: list[
-            tuple[ProxyTorchDispatchMode | None, ProxyTorchDispatchMode | None]
-        ] = []
+        self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
         self.decomp_layers: int = 0
         from torch._inductor import config
 
@@ -1567,13 +1669,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     def __enter__(self) -> Self:
         # Stash and store the previous proxy mode (there may or may not be one)
-        prev_proxy_mode: ProxyTorchDispatchMode | None = _unset_infra_mode(
-            torch._C._TorchDispatchModeKey.PROXY
-        )
-        prev_sym_mode = self._global_state.sym_mode_override
-        self.enter_stack.append((prev_proxy_mode, prev_sym_mode))
-        # We're entering a new ProxyTorchDispatchMode - disable the sym_mode_override.
-        self._global_state.sym_mode_override = None
+        maybe_prev_proxy_mode = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
+        self.enter_stack.append(maybe_prev_proxy_mode)
         return super().__enter__()
 
     def __exit__(
@@ -1585,49 +1682,15 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         b = super().__exit__(exc_type, exc_value, traceback)
 
         # Re-enable the previous proxy mode, if there was one.
-        prev_proxy_mode, prev_sym_mode = self.enter_stack.pop()
-        if prev_proxy_mode is not None:
-            _push_mode(prev_proxy_mode)
-        self._global_state.sym_mode_override = prev_sym_mode
+        mb_previous_proxy_mode = self.enter_stack.pop()
+        if mb_previous_proxy_mode is not None:
+            _push_mode(mb_previous_proxy_mode)
 
         return b
 
     @classmethod
     def is_infra_mode(cls) -> bool:
         return True
-
-    def _compute_proxy(
-        self, func: OpOverload, args: tuple[object, ...], out: PySymType
-    ) -> Proxy:
-        # Handle torch.sym_sum
-        n_args: tuple[object, ...]
-        if len(args) == 1 and isinstance(args[0], (list, tuple)):
-            n_args = (
-                tuple(
-                    (
-                        get_proxy_slot(a, self.tracer).force().node
-                        if isinstance(a, py_sym_types)
-                        else a
-                    )
-                    for a in args[0]
-                ),
-            )
-        else:
-            n_args = tuple(
-                (
-                    get_proxy_slot(a, self.tracer).force().node
-                    if isinstance(a, py_sym_types)
-                    else a
-                )
-                for a in args
-            )
-
-        # func doesn't have a __torch_function__ that Proxy can interpose, so
-        # we gotta do it manually
-        n_out = self.tracer.create_node("call_function", func, n_args, {})  # type: ignore[arg-type]
-        p_out = fx.Proxy(n_out, self.tracer)
-        set_meta(p_out, out)
-        return p_out
 
     def __sym_dispatch__(
         self,
@@ -1636,10 +1699,9 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         args: tuple[object, ...],
         kwargs: dict[str, object],
     ) -> object:
-        # Peephole optimize
+        # Peephole optimize multiply by one
         # NB: be careful not to trigger guards here!
         if func == operator.mul:
-            # multiply by one
             if isinstance(args[1], int) and args[1] == 1:
                 return args[0]
             elif isinstance(args[0], int) and args[0] == 1:
@@ -1650,25 +1712,63 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # We also assume there are no keyword arguments.
         assert not kwargs
         out = func(*args, **kwargs)
-
-        # If func returned a constant, we don't need to trace; we have
-        # determined that the result is constant (no matter if the inputs
-        # were symbolic) and it is no longer necessary to trace the
-        # computation.  This could occur if func triggered some guards.
-        if isinstance(out, py_sym_types):
-            p_out_thunk = thunkify(
-                self.tracer, self._compute_proxy, func=func, args=args, out=out
-            )
-            set_proxy_slot(out, self.tracer, p_out_thunk)
-
+        _sym_register(self.tracer, func, args, out)
         return out
+
+
+def _sym_register(
+    tracer: _ProxyTracer, func: OpOverload, args: tuple[object, ...], out: object
+) -> None:
+    # If func returned a constant, we don't need to trace; we have
+    # determined that the result is constant (no matter if the inputs
+    # were symbolic) and it is no longer necessary to trace the
+    # computation.  This could occur if func triggered some guards.
+    if isinstance(out, py_sym_types):
+        p_out_thunk = thunkify(
+            tracer, _compute_proxy, tracer, func=func, args=args, out=out
+        )
+        set_proxy_slot(out, tracer, p_out_thunk)
+
+
+def _compute_proxy(
+    tracer: _ProxyTracer, func: OpOverload, args: tuple[object, ...], out: PySymType
+) -> Proxy:
+    # Handle torch.sym_sum
+    n_args: tuple[object, ...]
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
+        n_args = (
+            tuple(
+                (
+                    get_proxy_slot(a, tracer).force().node
+                    if isinstance(a, py_sym_types)
+                    else a
+                )
+                for a in args[0]
+            ),
+        )
+    else:
+        n_args = tuple(
+            (
+                get_proxy_slot(a, tracer).force().node
+                if isinstance(a, py_sym_types)
+                else a
+            )
+            for a in args
+        )
+
+    # func doesn't have a __torch_function__ that Proxy can interpose, so
+    # we gotta do it manually
+    n_out = tracer.create_node("call_function", func, n_args, {})  # type: ignore[arg-type]
+    p_out = fx.Proxy(n_out, tracer)
+    set_meta(p_out, out)
+    return p_out
 
 
 class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     script_object_tracker: MutableMapping[_AnyScriptObjectType, Proxy]
     symnode_tracker: MutableMapping[PySymType, _PySymProxyType]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
-    sympy_expr_tracker: dict[sympy.Symbol, object]
+    sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     torch_fn_metadata: Optional[OpOverload]
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
@@ -2254,9 +2354,9 @@ class _MakefxTracer:
             self.fake_tensor_mode = parent_tracer.fake_tensor_mode
 
             def _create_sub_fx_tracer(parent_tracer: _ProxyTracer) -> PythonKeyTracer:
-                if type(parent_tracer) == PythonKeyTracer:
+                if type(parent_tracer) is PythonKeyTracer:
                     return PythonKeyTracer()
-                elif type(parent_tracer) == _ModuleStackTracer:
+                elif type(parent_tracer) is _ModuleStackTracer:
                     return _ModuleStackTracer(parent_tracer.scope_root)
                 else:
                     raise RuntimeError(
@@ -2502,26 +2602,6 @@ def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     return pre_dispatch_mode or mode
 
 
-def _get_proxy_torch_dispatch_mode_sym_tracing() -> ProxyTorchDispatchMode | None:
-    return ProxyTorchDispatchMode._global_state.sym_mode_override or get_proxy_mode()
-
-
-def is_sym_tracing() -> bool:
-    """
-    Return True if symbolic shape operations (such as `SymNode * SymNode`)
-    will be traced by a ProxyTorchDispatchMode. This can either be from an
-    active ProxyTorchDispatchMode or a sym_mode_override.
-    """
-    return _get_proxy_torch_dispatch_mode_sym_tracing() is not None
-
-
-class _NoSymDispatch:
-    pass
-
-
-no_sym_dispatch = _NoSymDispatch()
-
-
 def handle_sym_dispatch(
     func: Callable[_P, R],
     args: _P.args,  # type: ignore[valid-type]  # not allowed to use _P.args here
@@ -2532,12 +2612,8 @@ def handle_sym_dispatch(
     SymInt/SymFloat/SymBool dispatch trace on a function that operates on
     these arguments.
     """
-
-    mode = _get_proxy_torch_dispatch_mode_sym_tracing()
+    mode = get_proxy_mode()
     assert mode
-
-    # Temporary disable the proxy mode (AND sym_mode_override!) while we run
-    # the op.
     # Have to do it manually, because we're not doing the normal torch
     # dispatch machinery which disables it for us
     with disable_proxy_modes_tracing():
@@ -2547,49 +2623,8 @@ def handle_sym_dispatch(
 
 
 @contextmanager
-def disable_proxy_modes_tracing(
-    trace_symbolic_shapes: bool = False,
-) -> Generator[ProxyTorchDispatchMode, None, None]:
-    """
-    Temporarily disable the current PROXY dispatcher.
-
-    If `trace_symbolic_shapes` is True then disables dispatch tracing but continues
-    tracing symbolic expressions (like `s1*s2`).
-
-    Why might you need this?  Let's say you have some code which is tracing an
-    operation and in the middle needs to do some FakeTensor operations to
-    compute a size but it doesn't want those temporary operations to be added to
-    the graph - so it disables tracing. If it uses the result of those
-    operations and they contain a SymNode then the proxy will not know the
-    provinance of the SymNode and will raise an exception.
-
-    Be careful when using this because the automatic disabling of the dispatch
-    mode that you get won't apply to this override!
-    """
-    saved_sym_mode_override = ProxyTorchDispatchMode._global_state.sym_mode_override
-    mode_unset = _unset_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
-    if trace_symbolic_shapes:
-        # Make sure that if they already override the mode we use that, not just
-        # blindly set from the current mode.
-        #
-        # TODO: What's the right thing to do if we have a nesting like this?
-        # Currently does NOT trace syms in the inner code. Do we need to
-        # remember the "last" dispatch mode too?
-        #
-        #     disable:
-        #         disable(trace=True):
-        #             ...
-        #
-        new_sym_mode_override = saved_sym_mode_override or mode_unset
-    else:
-        new_sym_mode_override = None
-    ProxyTorchDispatchMode._global_state.sym_mode_override = new_sym_mode_override
-    try:
-        yield mode_unset
-    finally:
-        ProxyTorchDispatchMode._global_state.sym_mode_override = saved_sym_mode_override
-        if mode_unset is not None:
-            _push_mode(mode_unset)
+def disable_proxy_modes_tracing() -> Generator[ProxyTorchDispatchMode, None, None]:
+    return _disable_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
 
 
 def maybe_handle_decomp(
