@@ -1571,6 +1571,7 @@ class FakeTensorMode(TorchDispatchMode):
         Create a cache key given the dispatch args. Raises _BypassDispatchCache
         for any situation that precludes caching.
         """
+        is_tracing = torch.fx.experimental.proxy_tensor.get_proxy_mode() is not None
         key_values = [
             func,
             # Capture the default_dtype mode since that can affect the output tensor,
@@ -1589,7 +1590,7 @@ class FakeTensorMode(TorchDispatchMode):
             # ProxyTorchDispatchMode needs to track how SymNodes are constructed
             # so we need to handle things a little different depending on
             # whether we're tracing or not.
-            torch.fx.experimental.proxy_tensor.is_sym_tracing(),
+            is_tracing,
         ]
         if state.known_symbols:
             # If there are symbols then include the epoch - this is really more
@@ -2093,7 +2094,7 @@ class FakeTensorMode(TorchDispatchMode):
             elif a is None:
                 assert b is None
             elif isinstance(a, py_sym_types):
-                assert type(a) == type(b) and a.node is b.node
+                assert type(a) is type(b) and a.node is b.node
             elif isinstance(a, torch.Tensor):
                 assert isinstance(b, torch.Tensor)
                 assert_metadata_eq(assert_eq, a, b)
@@ -2646,7 +2647,7 @@ class FakeTensorMode(TorchDispatchMode):
                 if (
                     not isinstance(fake_out, Tensor)
                     and not isinstance(real_out, Tensor)
-                    and type(fake_out) != type(real_out)
+                    and type(fake_out) is not type(real_out)
                 ):
                     # This can happen when decompositions have different return types,
                     # e.g. namedtuple vs. tuple vs. list.
@@ -3113,8 +3114,8 @@ def _validate_symbolic_output_for_caching(
     """
     from torch.fx.experimental.symbolic_shapes import _iterate_exprs, _iterate_nodes
 
-    is_sym_tracing = torch.fx.experimental.proxy_tensor.is_sym_tracing()
-    if is_sym_tracing:
+    is_tracing = torch.fx.experimental.proxy_tensor.get_proxy_mode() is not None
+    if is_tracing:
         # Check for SymNode types in PROXY mode - this should bypass caching
         # regardless of whether symbols are known or not
         for node in _iterate_nodes(output):
