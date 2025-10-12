@@ -15,10 +15,7 @@ The tests cover:
 
 import torch
 from torch._inductor import config
-from torch._inductor.kernel.custom_op import (
-    autotune_custom_op,
-    register_custom_op_autotuning,
-)
+from torch._inductor.kernel.custom_op import register_custom_op_autotuning
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -35,16 +32,6 @@ class TestCustomOpAutoTune(TestCase):
         super().setUp()
         self.device = "cuda" if HAS_GPU else "cpu"
         self.dtype = torch.float16 if self.device == "cuda" else torch.float32
-
-    def simple_randn_gen(self, x):
-        """Simple random normal generator for input_gen_fns - reusable across all tests."""
-        from torch._inductor.virtualized import V
-
-        return torch.randn(
-            [V.graph.sizevars.size_hint(i) for i in x.get_size()],
-            dtype=x.get_dtype(),
-            device=x.get_device(),
-        )
 
     def _create_test_configs(self):
         """Create common test configurations for different sizes."""
@@ -204,15 +191,19 @@ class TestCustomOpAutoTune(TestCase):
             rmsnorm_decomposition2,
         ]
 
-        @register_custom_op_autotuning(op_object.default)
-        def _(input_tensor, weight, eps: float = 1e-8, default_impl=None):
-            return autotune_custom_op(
-                name="test_rmsnorm_autotuned",
-                decompositions=decompositions,
-                inputs=[input_tensor, weight],
-                kwargs={"eps": eps},
-                default_impl=default_impl,
-            )
+        # Example of user-friendly input generation functions
+        register_custom_op_autotuning(
+            op_object.default,
+            decompositions=decompositions,
+            name="test_rmsnorm_autotuned",
+            input_gen_fns={
+                0: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                * 0.02,  # Small values for input
+                1: lambda fake_tensor: torch.ones_like(
+                    fake_tensor, device="cuda"
+                ),  # Ones for weight
+            },
+        )
 
         # Test inputs
         input_tensor, weight = self._create_rmsnorm_inputs()
@@ -306,15 +297,21 @@ class TestCustomOpAutoTune(TestCase):
             mlp_decomposition3,
         ]
 
-        @register_custom_op_autotuning(op_object.default)
-        def _(input_tensor, gate_weight, up_weight, down_weight, default_impl=None):
-            return autotune_custom_op(
-                name="test_mlp_autotuned",
-                decompositions=decompositions,
-                inputs=[input_tensor, gate_weight, up_weight, down_weight],
-                kwargs={},
-                default_impl=default_impl,
-            )
+        register_custom_op_autotuning(
+            op_object.default,
+            decompositions=decompositions,
+            name="test_mlp_autotuned",
+            input_gen_fns={
+                0: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                * 0.1,  # Input tensor
+                1: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                * 0.05,  # Gate weight
+                2: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                * 0.05,  # Up weight
+                3: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                * 0.05,  # Down weight
+            },
+        )
 
         # Test inputs
         input_tensor, gate_weight, up_weight, down_weight = self._create_mlp_inputs()
@@ -411,15 +408,17 @@ class TestCustomOpAutoTune(TestCase):
             decompose_k_decomposition5,  # k_splits=256
         ]
 
-        @register_custom_op_autotuning(op_object.default)
-        def _(a, b, k_splits: int = 4, default_impl=None):
-            return autotune_custom_op(
-                name="test_decompose_k_autotuned",
-                decompositions=decompositions,
-                inputs=[a, b],
-                kwargs={},  # No kwargs - let autotune choose the best decomposition
-                default_impl=default_impl,
-            )
+        register_custom_op_autotuning(
+            op_object.default,
+            decompositions=decompositions,
+            name="test_decompose_k_autotuned",
+            input_gen_fns={
+                0: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                * 0.1,  # Matrix A
+                1: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                * 0.1,  # Matrix B
+            },
+        )
 
         # Test inputs
         a, b = self._create_decompose_k_inputs()
