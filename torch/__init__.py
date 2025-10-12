@@ -810,6 +810,14 @@ class SymBool:
         else:
             # Force specialization
             return hash(builtins.bool(self))
+        
+    def __sym_float__(self):
+        """
+        Provides a SymFloat representation (0.0 or 1.0) for this SymBool.
+        Called by torch.sym_float() when casting SymBool to float.
+        """
+        float_node = self.node.sym_float()
+        return torch.fx.experimental.sym_node.wrap_node(float_node)
 
 
 def sym_not(a):
