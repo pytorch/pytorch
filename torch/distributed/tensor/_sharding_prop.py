@@ -166,7 +166,7 @@ class ShardingPropagator:
         # these operators to be inserted in the fx graph.
         from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
-        with FakeTensorMode(), disable_proxy_modes_tracing(trace_symbolic_shapes=True):
+        with FakeTensorMode(), disable_proxy_modes_tracing():
             fake_args = op_schema.gen_fake_args()
             fake_kwargs = op_schema.gen_fake_kwargs()
             fake_out = op_schema.op(*fake_args, **fake_kwargs)
