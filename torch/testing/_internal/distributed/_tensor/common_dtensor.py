@@ -43,6 +43,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import (
+    ACCELERATOR_DIST_BACKENDS,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
@@ -399,14 +400,19 @@ class DTensorTestBase(MultiProcessTestCase):
         if backend is None:
             backend = self.backend
 
-        if "gloo" not in backend and torch.accelerator.device_count() < self.world_size:
+        requires_gpu = any(
+            gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
+        )
+        if requires_gpu and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
 
         if backend not in [
             "nccl",
             "gloo",
             "mpi",
-            f"cpu:gloo,{self.device_type}:{self.backend}",
+            f"cpu:gloo,{self.device_type}:{curr_backend}",
             "hccl",
             "xccl",
             "fake",
