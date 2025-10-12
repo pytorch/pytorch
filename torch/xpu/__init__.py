@@ -82,7 +82,7 @@ def is_tf32_supported() -> bool:
     r"""Return a bool indicating if the current XPU device supports dtype tf32."""
     if not is_available():
         return False
-    # On Intel Xe2 architecture and newer, TF32 operations can be accelerated
+    # On Intel Xe architecture and newer, TF32 operations can be accelerated
     # through DPAS (Dot Product Accumulate Systolic) instructions. Therefore,
     # TF32 support can be determined by checking whether the device supports
     # subgroup matrix multiply-accumulate operations.
