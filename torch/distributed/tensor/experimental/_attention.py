@@ -7,7 +7,7 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import partial
-from typing import Any, cast, Optional, Protocol
+from typing import Any, cast, Mapping, Optional, Protocol, Sequence, TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -27,6 +27,7 @@ from torch.nn.attention.flex_attention import (
     BlockMask,
     create_block_mask,
 )
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 from ._cp_custom_ops import flex_cp_allgather
 
@@ -1337,10 +1338,15 @@ class _ContextParallel(ParallelStyle):
         return tuple(new_outputs)
 
 
+CPBuffer: TypeAlias = torch.Tensor | BlockMask
+CPBufferContainer: TypeAlias = Sequence[CPBuffer] | Mapping[str, CPBuffer]
+CPBufferSeqDims: TypeAlias = Sequence[int] | Mapping[str, int]
+
+
 def _context_parallel_shard(
     mesh: DeviceMesh,
-    buffers: list[torch.Tensor | BlockMask],
-    seq_dims: list[int],
+    buffers: CPBufferContainer,
+    seq_dims: CPBufferSeqDims,
     load_balancer: Optional[_LoadBalancer] = None,
 ) -> list[torch.Tensor | BlockMask]:
     """
@@ -1386,11 +1392,16 @@ def _context_parallel_shard(
             "`seq_dims` must have the same number of elements as `buffers`."
         )
 
-    if isinstance(buffers[0], torch.Tensor):
-        device = buffers[0].device
+    flat_buffers, spec = tree_flatten(buffers)
+    flat_seq_dims, _ = tree_flatten(seq_dims)
+    if len(flat_buffers) != len(flat_seq_dims):
+        raise ValueError("`seq_dims` must have the pytree structure as `buffers`.")
+
+    if isinstance(flat_buffers[0], torch.Tensor):
+        device = flat_buffers[0].device
     else:
-        device = buffers[0].kv_num_blocks.device
-    for buffer in buffers:
+        device = flat_buffers[0].kv_num_blocks.device
+    for buffer in flat_buffers:
         if isinstance(buffer, torch.Tensor):
             assert device == buffer.device, "All buffers must be on the same device"
         else:
@@ -1398,7 +1409,11 @@ def _context_parallel_shard(
                 device == buffer.kv_num_blocks.device
             ), "All buffers must be on the same device"
 
-    return _context_parallel_buffers(mesh, buffers, seq_dims, load_balancer)
+    flat_sharded_buffers = _context_parallel_buffers(
+        mesh, flat_buffers, flat_seq_dims, load_balancer
+    )
+
+    return tree_unflatten(flat_sharded_buffers, spec)
 
 
 def _enable_context_parallel_dispatcher() -> None:
