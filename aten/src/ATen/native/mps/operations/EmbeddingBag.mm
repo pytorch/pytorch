@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/mps/MPSProfiler.h>
@@ -72,6 +73,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
     num_bags -= 1;
   }
   int64_t feature_size = weight.size(1);
+  int64_t num_embeddings = weight.size(0);
 
   auto bag_size = at::empty({num_bags}, indices.options());
   auto offset2bag = at::empty({indices.size(0)}, indices.options());
@@ -105,6 +107,24 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   params.feature_size = feature_size;
   params.mode = static_cast<EmbeddingBagMode>(mode);
   params.padding_idx = padding_idx;
+
+  if (num_indices > 0) {
+    auto indices_cpu = indices.to(kCPU);
+    AT_DISPATCH_INDEX_TYPES(indices_cpu.scalar_type(), "embedding_bag_mps_check_indices", [&]() {
+      const auto* indices_data = indices_cpu.const_data_ptr<index_t>();
+      for (const auto i : c10::irange(indices_cpu.numel())) {
+        const auto idx = static_cast<int64_t>(indices_data[i]);
+        TORCH_CHECK(0 <= idx && idx < num_embeddings,
+                    "Index ",
+                    i,
+                    " of input takes value ",
+                    idx,
+                    " which is not in the valid range [0, ",
+                    num_embeddings,
+                    ")");
+      }
+    });
+  }
 
   auto num_threads = output.numel();
   MPSStream* stream = getCurrentMPSStream();

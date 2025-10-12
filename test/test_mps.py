@@ -6972,6 +6972,51 @@ class TestMPS(TestCaseMPS):
         helper(3, 6, 7, [0, 1, 2])  # verify if changes in shape would cause cached graph lookup problems
         helper(3, 5, 7, 2)  # test scalar index
 
+    def test_embedding_bag_out_of_bounds_matches_cpu(self):
+        padding_idx = 0
+        weight_cpu = torch.randn(10, 2, dtype=torch.float32)
+        weight_mps = weight_cpu.to('mps')
+        idx_cpu_neg = torch.tensor([[-1, 1]], dtype=torch.long)
+        idx_cpu_pos = torch.tensor([[11, 8]], dtype=torch.long)
+        idx_cases = (
+            (idx_cpu_neg, idx_cpu_neg.to('mps')),
+            (idx_cpu_pos, idx_cpu_pos.to('mps')),
+        )
+        num_embeddings = weight_cpu.size(0)
+        msg = (
+            r"(?:embedding_bag: )?"
+            r"(Expected idx >= 0 && idx < num_embeddings|"
+            rf"Index \d+ of input takes value -?\d+ which is not in the valid range \[0, {num_embeddings}\))"
+        )
+
+        for mode in ("sum", "mean", "max"):
+            ps_weight_pairs = ((None, None),)
+            if mode == "sum":
+                psw_cpu = torch.randn(idx_cpu_neg.shape, dtype=weight_cpu.dtype)
+                ps_weight_pairs = (
+                    (None, None),
+                    (psw_cpu, psw_cpu.to('mps')),
+                )
+
+            for idx_cpu, idx_mps in idx_cases:
+                for per_sample_cpu, per_sample_mps in ps_weight_pairs:
+                    with self.assertRaisesRegex(RuntimeError, msg):
+                        F.embedding_bag(
+                            idx_cpu,
+                            weight_cpu,
+                            per_sample_weights=per_sample_cpu,
+                            padding_idx=padding_idx,
+                            mode=mode,
+                        )
+                    with self.assertRaisesRegex(RuntimeError, msg):
+                        F.embedding_bag(
+                            idx_mps,
+                            weight_mps,
+                            per_sample_weights=per_sample_mps,
+                            padding_idx=padding_idx,
+                            mode=mode,
+                        )
+
     # Test pytorch gather
     def test_gather(self):
         def helper(shape, dim, idx_shape, idx_dtype=torch.int64):
