@@ -4963,6 +4963,7 @@ class TestBlockMask(InductorTestCase):
     @supported_platform
     def test_sliced_blockmask_mask_mod_error(self, device):
         """Test that sliced BlockMask raises helpful error when used with flex_attention"""
+
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 

@@ -1403,6 +1403,13 @@ def flex_attention(
     if block_mask is None:
         block_mask = _create_empty_block_mask(query, key)
 
+    # If BlockMask was sliced, its mask_mod is intentionally replaced with an error-raising stub.
+    # This guard ensures we surface the intended error message before any shape-based checks.
+    if getattr(block_mask, "mask_mod", None) is _sliced_mask_mod_error:
+        raise RuntimeError(
+            "Cannot use mask_mod from a sliced BlockMask"
+        )
+
     if (
         block_mask.BLOCK_SIZE[0] == _LARGE_SPARSE_BLOCK_SIZE
         and block_mask.BLOCK_SIZE[1] == _LARGE_SPARSE_BLOCK_SIZE
