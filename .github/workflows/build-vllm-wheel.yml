@@ -48,12 +48,6 @@ jobs:
             device: cu129
             manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.9'
             runner: linux.arm64.r7g.12xlarge.memory
-          # TODO (huydhn): Add cu130 aarch64 once PyTorch is on 2.9+ and
-          # xformers is update to support 13.0
-          # - platform: manylinux_2_28_aarch64
-          #   device: cu130
-          #   manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda13.0'
-          #   runner: linux.arm64.r7g.12xlarge.memory
     name: "Build ${{ matrix.device }} vLLM wheel on ${{ matrix.platform }}"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 480
@@ -186,10 +180,6 @@ jobs:
             device: cu128
           - platform: manylinux_2_28_aarch64
             device: cu129
-          # TODO (huydhn): Add cu130 aarch64 once PyTorch is on 2.9+ and
-          # xformers is update to support 13.0
-          # - platform: manylinux_2_28_aarch64
-          #   device: cu130
     env:
       PLATFORM: ${{ matrix.platform }}
       BUILD_DEVICE: ${{ matrix.device }}
