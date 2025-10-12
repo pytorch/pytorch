@@ -173,7 +173,7 @@ def split(
     return tensor.split(split_size_or_sections, dim)
 
 
-def einsum(*args: Any) -> Tensor:
+def einsum(equation: str, *operands: Tensor, out_dtype: Optional[torch.dtype] = None) -> Tensor:
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -380,7 +380,7 @@ def einsum(*args: Any) -> Tensor:
         )[0]
         # flatten path for dispatching to C++
         path = [*itertools.chain.from_iterable(tupled_path)]
-    return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
+    return _VF.einsum(equation, operands, path=path, out_dtype=out_dtype)  # type: ignore[attr-defined]
 
 
 # This wrapper exists to support variadic args.

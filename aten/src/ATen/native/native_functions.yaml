@@ -2308,7 +2308,7 @@
   dispatch:
     CompositeExplicitAutograd: vdot_out
 
-- func: einsum(str equation, Tensor[] tensors, *, int[]? path=None) -> Tensor
+- func: einsum(str equation, Tensor[] tensors, *, int[]? path=None, ScalarType? out_dtype=None) -> Tensor
 
 - func: embedding(Tensor weight, Tensor indices, SymInt padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   dispatch:
