@@ -411,18 +411,17 @@ def get_proxy_slot(
     # pyrefly: ignore  # index-error
     value = tracker.get(obj)
 
-    if value is None:
-        if isinstance(obj, py_sym_types):
-            if obj.node.is_symbolic():
-                # Last ditch - we found a SymInt (SymBool, etc) we don't know
-                # about.
-                if (tmp := tracer.sympy_expr_tracker.get(obj.node.expr)) is not None:
-                    value = tmp.proxy
+    if value is None and isinstance(obj, py_sym_types):
+        if obj.node.is_symbolic():
+            # Last ditch - we found a SymInt (SymBool, etc) we don't know
+            # about.
+            if (tmp := tracer.sympy_expr_tracker.get(obj.node.expr)) is not None:
+                value = tmp.proxy
 
-                else:
-                    # Attempt to build it from first principles.
-                    _build_proxy_for_sym_expr(tracer, obj.node.expr, obj)
-                    value = tracker.get(obj)
+            else:
+                # Attempt to build it from first principles.
+                _build_proxy_for_sym_expr(tracer, obj.node.expr, obj)
+                value = tracker.get(obj)
 
     if value is None:
         # We don't know this value - return the default.
