@@ -3208,6 +3208,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
+        """
+        store the 'value' to the memory location 'name', offset by some indexing expression 'index'.
+        """
+
         var = self.args.output(name)
         original_index = index
         dtype = V.graph.get_dtype(name)
@@ -3251,9 +3255,32 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 name, indexing, block_descriptor, value, other
             )
         elif mode is None:
-            line = f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})"
+            # If indexing is an integer and value has block shape larger than one,
+            # broadcasting fails. So, we manually broadcast indexing to the value shape.
+            # Without broadcast :
+            # tl.store(out_ptr0 + (tl.full([1, 1], 0, tl.int32)), tmp4, xmask) # Fail
+            #
+            # With broadcast:
+            # tl.store(out_ptr0 + (tl.full([1, 1], 0, tl.int32).broadcast_to((XBLOCK,1)), tmp4, xmask)
+            indexing_str = indexing.index_str
+            if (
+                is_sympy_integer_like(index)
+                and value.shape is not None
+                and not all(str(x) == "1" for x in value.shape)
+            ):
+                value_shape = ", ".join(map(str, value.shape))
+                indexing_str += f".broadcast_to({value_shape})"
+            line = f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})"
         elif mode == "atomic_add":
-            line = f"tl.atomic_add({var} + ({indexing.index_str}), {value}, {indexing.mask_str}, sem='relaxed')"
+            indexing_str = indexing.index_str
+            if (
+                is_sympy_integer_like(index)
+                and value.shape is not None
+                and not all(str(x) == "1" for x in value.shape)
+            ):
+                value_shape = ", ".join(map(str, value.shape))
+                indexing_str += f".broadcast_to({value_shape})"
+            line = f"tl.atomic_add({var} + ({indexing_str}), {value}, {indexing.mask_str}, sem='relaxed')"
         else:
             raise NotImplementedError(f"store mode={mode}")
 
@@ -4067,7 +4094,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self,
         name: str,
         index: sympy.Expr,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+        value: CSEVariable,
     ):
         assert self.inside_reduction
         self.inside_reduction = False
@@ -4106,10 +4133,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
         else:
             assert isinstance(indexing, IndexingOptions)
+
+            indexing_str = indexing.index_str
+            if (
+                is_sympy_integer_like(index)
+                and value.shape is not None
+                and not all(str(x) == "1" for x in value.shape)
+            ):
+                value_shape = ", ".join(map(str, value.shape))
+                indexing_str += f".broadcast_to({value_shape})"
+
             self.post_loop_store.writeline(
                 DeferredLine(
                     name,
-                    f"tl.store({var} + ({indexing.index_str}), {value}, {indexing.mask_str})",
+                    f"tl.store({var} + ({indexing_str}), {value}, {indexing.mask_str})",
                 )
             )
 

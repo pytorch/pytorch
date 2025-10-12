@@ -2734,7 +2734,7 @@ def _reduction_configs(
         MAX_R0_BLOCK = 1024
         register_intensive = True
 
-    if triton_meta["native_matmul"]:
+    if triton_meta.get("native_matmul"):
         if len(size_hints) == 3:
             return [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
@@ -3174,7 +3174,7 @@ def _persistent_reduction_configs(
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
-    if triton_meta["native_matmul"]:
+    if triton_meta.get("native_matmul"):
         if len(size_hints) == 3:
             return [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
