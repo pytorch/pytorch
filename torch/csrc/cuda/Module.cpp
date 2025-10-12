@@ -4,6 +4,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/Exception.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -861,7 +862,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
     }
-    throw std::runtime_error("unreachable");
+    TORCH_CHECK(false, "unreachable");
   };
 
   for (const auto& traceInfo : snapshot.device_traces) {
