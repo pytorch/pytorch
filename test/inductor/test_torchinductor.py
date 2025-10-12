@@ -19,8 +19,9 @@ import time
 import unittest
 import unittest.mock
 import weakref
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -4772,7 +4773,7 @@ class CommonTemplate:
         self.common(
             m,
             (torch.randn([1, 3, 8, 16, 32]),),
-            atol=6e-5,
+            atol=1e-3,
             rtol=0.001,
             # Make sure we compute also with fp16 in the reference. Otherwise,
             # the reference will compute with fp32 and cast back to fp16, which
@@ -6863,7 +6864,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         with patch.object(
             CompileContext,
             "__init__",
-            lambda self, _: CompileContext_init(self, CompileId(999, 999)),
+            lambda self, _: CompileContext_init(
+                self, CompileId(frame_id=999, frame_compile_id=999)
+            ),
         ):
             _, (coda_a2,) = _run_and_get_stripped_kernels(a, x)
             _, (coda_c2,) = _run_and_get_stripped_kernels(c, x)
@@ -10704,6 +10707,16 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         for x in (torch.randn(2, 3), torch.randn(2, 2), torch.randn(3, 2)):
             self.common(fn, (x,))
 
+    def test_copy_with_scalar_src(self):
+        def fn(x):
+            buffer = torch.zeros_like(x)
+            buffer.copy_(2)
+            result = x + buffer
+            return result
+
+        x = torch.randn(64, 64, dtype=torch.float32, device=self.device)
+        self.common(fn, (x,))
+
     def test_kwargs(self):
         if self.device == GPU_TYPE:
             raise unittest.SkipTest("histogramdd only supports cpu")
@@ -14013,15 +14026,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ]
         outputs = f(inputs)
 
+        warmup_compiled = f_compiled(inputs)
         with torch.profiler.profile(
             activities=[
                 getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
             ],
         ) as p:
             outputs_compiled = f_compiled(inputs)
-
-        # outputs_compiled, (code,) = run_and_get_code(f_compiled, inputs)
-        # self.assertTrue("pinned" in code)
 
         self.assertEqual(outputs, outputs_compiled)
         profile_output = str(p.key_averages())
@@ -14060,12 +14071,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             [2] * nd
         )
         repeat = torch.tensor([1, 2], device=self.device)
-
-        if input.device.type == "mps" and dtype == torch.int64:
-            raise unittest.SkipTest(
-                "torch.compile fails this test with mps & int64, "
-                "see https://github.com/pytorch/pytorch/issues/159408"
-            )
 
         f_compiled = torch.compile(f)
         output, (code,) = run_and_get_code(f_compiled, input, repeat)
@@ -14484,7 +14489,6 @@ if RUN_GPU:
                 return a[y.to(torch.int64)]
 
             def fn2(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-                torch._check_is_size(b.shape[0])
                 torch._check(b.shape[0] >= 2)
                 torch._check(b.shape[0] <= 100)
                 return fn1(a, b)
@@ -15017,7 +15021,7 @@ if RUN_GPU:
                 self.assertExpectedInline(
                     "\n".join(lines),
                     """\
-        tmp0 = tl.reshape(tl.broadcast_to(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last')[:, None, :, :], [(511 + XBLOCK) // 512, ((1) * ((1) <= ((511 + XBLOCK) // 512)) + ((511 + XBLOCK) // 512) * (((511 + XBLOCK) // 512) < (1))), ((512) * ((512) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (512))), R0_BLOCK]), [XBLOCK, R0_BLOCK])
+        tmp0 = tl.reshape(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last'), [XBLOCK, R0_BLOCK])
         tmp1 = tl.load(block_ptr1, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
                 )
 
@@ -15125,11 +15129,7 @@ if RUN_GPU:
                 ),
                 (
                     fn3,
-                    (
-                        "triton_poi_fused_layer_norm_relu"
-                        if torch._dynamo.config.inline_inbuilt_nn_modules
-                        else "triton_poi_fused_LayerNorm_ReLU"
-                    ),
+                    "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]

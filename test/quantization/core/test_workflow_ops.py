@@ -724,7 +724,7 @@ class TestFakeQuantizeOps(TestCase):
                 X.cpu(), scale.cpu(), zero_point.cpu(), axis, quant_min, quant_max)
             Y_prime = torch.fake_quantize_per_channel_affine(
                 X, scale, zero_point, axis, quant_min, quant_max)
-            torch.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
+            torch.testing.assert_close(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
             self.assertTrue(Y.dtype == float_type)
 
     def test_forward_per_channel_cachemask_cpu(self):
@@ -823,21 +823,20 @@ class TestFakeQuantizeOps(TestCase):
         self._test_learnable_forward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
 
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
-                                   qparams=hu.qparams(dtypes=torch.quint8)))
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    @unittest.skip(
-        "this is broken without changes to any relevant code, "
-        "we need to remove hypothesis testing in CI")
-    def test_learnable_forward_per_channel_cuda(self, X):
+    def test_learnable_forward_per_channel_cuda(self):
         torch.random.manual_seed(NP_RANDOM_SEED)
-        X, (_, _, axis, _) = X
-        X_base = torch.tensor(X).to('cuda')
-        channel_size = X_base.size(axis)
-        scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
-        zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
-        self._test_learnable_forward_per_channel(
-            X_base, 'cuda', scale_base, zero_point_base, axis)
+        shape = (2, 1, 2, 10)
+        axis = 1
+
+        for dtype in [torch.float32, torch.bfloat16]:
+            X_base = torch.randn(shape, device="cuda").to(dtype)
+            channel_size = X_base.size(axis)
+            scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100).to(dtype)
+            zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,)).to(dtype)
+
+            self._test_learnable_forward_per_channel(
+                X_base, 'cuda', scale_base, zero_point_base, axis)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
@@ -1065,15 +1064,17 @@ class TestFakeQuantizeOps(TestCase):
 
 class TestFusedObsFakeQuant(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           sampled_dtype=st.sampled_from(['bf16', 'fp16', 'fp32']),
            symmetric_quant=st.booleans(), use_bool=st.booleans())
     @settings(deadline=None)
-    def test_fused_obs_fake_quant_moving_avg(self, device, symmetric_quant, use_bool) -> None:
+    def test_fused_obs_fake_quant_moving_avg(self, device, sampled_dtype, symmetric_quant, use_bool) -> None:
         """
         Tests the case where we call the fused_obs_fake_quant op multiple times
         and update the running_min and max of the activation tensors.
         """
-        sampled_dtype = st.sampled_from(["bf16", "fp32"]) if device == "cuda" else "fp32"
-        dtype = torch.bfloat16 if sampled_dtype == "bf16" else torch.float32
+        if device == "cpu":
+            sampled_dtype = "fp32"
+        dtype = {'bf16' : torch.bfloat16, 'fp16' : torch.half, 'fp32' : torch.float32}[sampled_dtype]
 
         in_running_min_ref = out_running_min_ref = torch.tensor(float("inf"), dtype=dtype)
         in_running_min_op = torch.tensor(float("inf"), dtype=dtype, device=device)

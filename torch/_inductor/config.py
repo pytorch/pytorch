@@ -407,6 +407,7 @@ reorder_iterative_debug_limit_to_reorder: Optional[int] = (
     else int(env_str)
 )
 sink_waits_iterative_debug_limit_to_sink: Optional[int] = (
+    # pyrefly: ignore  # unbound-name
     None if (env_str := os.getenv("PYTORCH_SINK_WAITS_LIMIT")) is None else int(env_str)
 )
 
@@ -705,6 +706,10 @@ conv_1x1_as_mm = False
 #   triton.cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
 # enabling both of these will implicitly disable split_reductions
 split_reductions = True
+
+# A deterministic mode that skips any on device benchmarking in Inductor
+# if we know they affect numerics.  WARNING: Expect perf hit in this mode.
+deterministic = os.getenv("TORCHINDUCTOR_DETERMINISTIC") == "1"
 
 # When we do split reduction, this number control the minimum value for
 # num_split. Too small num_split make the split reduction less efficient.
@@ -1077,6 +1082,8 @@ enable_caching_generated_triton_templates: bool = True
 
 # Lookup table for overriding autotune configs based on hash of Triton source code
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
+
+file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
 
 
 def get_worker_log_path() -> Optional[str]:
@@ -1469,6 +1476,8 @@ class triton:
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
+    # If set to true, will generate PDL code on devices that support it.
+    # If set to false, will never generate PDL code.
     enable_pdl = False
 
 
@@ -1529,6 +1538,10 @@ class aot_inductor:
     package: bool = False
     package_cpp_only: Optional[bool] = None
 
+    # If package_cpp_only is True, whether cpp files will be compiled to a
+    # dynamically linked library or static linked library
+    dynamic_linkage: bool = True
+
     # Dictionary of metadata users might want to save to pass to the runtime.
     # TODO: Move this somewhere else, since it's no longer really a config
     metadata: dict[str, str] = {}
@@ -1572,10 +1585,22 @@ class aot_inductor:
     )
 
     # Experimental. Flag to control whether to include weight in .so
+    # Not supported for cross_target_platform="windows".
     package_constants_in_so: bool = True
 
-    # Experimental. Flag to control whether to package weight separately on disk
-    package_constants_on_disk: bool = False
+    # Experimental. Flag to control whether to package weight separately on disk and which
+    # format to package it in.
+    # Options:
+    # None:
+    #       Do not package weight separately on disk.
+    # "pickle_weights":
+    #       Each weight is pickled and stored separately in data/weights. We also store the
+    #       FQN names of each weight in a weights_config.json in each model's data/aot_inductor/model folder.
+    #       Can only be load back from python using torch._inductor.aoti_load_package API now.
+    # "binary_blob":
+    #       Stores all weights in a single binary blob in data/aot_inductor/model folder for each model.
+    #       This option and config.aot_inductor.force_mmap_weights cannot both be True
+    package_constants_on_disk_format: Optional[str] = None
 
     # Experimental.  Controls automatic precompiling of common AOTI include files.
     precompile_headers: bool = not is_fbcode()
@@ -1604,21 +1629,36 @@ class aot_inductor:
     # custom op libs that have implemented C shim wrappers
     custom_op_libs: Optional[list[str]] = None
 
-    compile_standalone: bool = False
-
     # Whether to enable link-time-optimization
     enable_lto = os.environ.get("AOT_INDUCTOR_ENABLE_LTO", "0") == "1"
 
     # Whether the compiled .so should link to libtorch
-    # TODO: should consolidate this flag with compile_standalone
     link_libtorch: bool = True
 
-    # If None, the default torch headers such as torch/include
-    # will be used. Otherwise, the provided path will be used instead.
-    # This is needed for torchnative to load libtorch-free .so.
-    # Such as [f"{torchnative_dir}/standalone",f"{torchnative_dir}/",].
-    # TODO: should consolidate this flag with compile_standalone
-    libtorch_free_headers: Optional[list[str]] = None
+    # Currently the only valid option is "windows".
+    # We'll use x86_64-w64-mingw32-gcc to cross-compile a .dll file
+    # If using cuda, you also need to set WINDOWS_CUDA_HOME env var
+    # to point to windows CUDA toolkit.
+    # Example: WINDOWS_CUDA_HOME=cuda-windows-base/cuda_cudart/cudart/
+    # The path should contain lib cuda and lib cudart
+    cross_target_platform: Optional[str] = None
+
+    # If link_libtorch is False and cross_target_platform is windows,
+    # a library needs to be provided to provide the shim implementations.
+    aoti_shim_library: Optional[str] = None
+    aoti_shim_library_path: Optional[str] = None
+
+
+# a convenient class that automatically sets a group of the configs in aot_inductor
+# it should only control the flags in aot_inductor.
+# it should not do anything else.
+class aot_inductor_mode:
+    # dynamic_linkage=False
+    # link_libtorch=False
+    # package_cpp_only=True
+    # embed_kernel_binary=True
+    # emit_multi_arch_kernel=True
+    compile_standalone: bool = False
 
 
 class cuda:
@@ -1719,11 +1759,6 @@ class cuda:
     cutlass_instantiation_level: str = os.environ.get(
         "TORCHINDUCTOR_CUTLASS_INSTANTIATION_LEVEL", "0"
     )
-
-    # Experimental. Only for H100 for now. Flag to control whether to use presets.
-    # Format looks like: "0,1,3" for using presets 0, 1, and 3. Presets can be
-    # controlled by some cutlass instantiation level flags (e.g. 0, 1111, 2222, ...)
-    cutlass_presets: Optional[str] = os.environ.get("TORCHINDUCTOR_CUTLASS_PRESETS")
 
     # use compile command to create kernel .cu and .so name
     cutlass_hash_with_compile_cmd: bool = (
@@ -1983,6 +2018,10 @@ _cache_config_ignore_prefix: list[str] = [
 # External callable for matmul tuning candidates
 external_matmul: list[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]] = []
 
+write_are_deterministic_algorithms_enabled = (
+    os.getenv("TORCHINDUCTOR_WRITE_ARE_DETERMINISTIC_ALGORITHMS_ENABLED", "1") == "1"
+)
+
 
 class test_configs:
     force_extern_kernel_in_multi_template: bool = False
@@ -1990,6 +2029,7 @@ class test_configs:
     max_mm_configs: Optional[int] = None
 
     runtime_triton_dtype_assert = False
+    runtime_triton_shape_assert = False
     static_cpp_dtype_assert = False
 
     # regex to control the set of considered autotuning
@@ -2004,6 +2044,36 @@ class test_configs:
     # If set to True, AOTI-generated CMakelists.txt will still use libtorch
     # for unit testing
     use_libtorch = False
+
+    # to be migrated when ready for use
+    aten_fx_overlap_scheduling = False
+
+    # insert ordering deps for overlap
+    aten_fx_overlap_insert_overlap_deps = True
+
+    # to be migrated when ready for use
+    aten_fx_overlap_preserving_bucketing = False
+
+    # to be migrated when ready for use
+    # runtime estimation function for ops
+    # for user-defined estimation function, pass in the function handle
+    # TODO - need estimated and profile based version
+    estimate_aten_runtime: Union[
+        Literal["default"], Callable[[torch.fx.Node], Optional[float]]
+    ] = "default"
+
+    # A test config to ease the test for perf of reduction config filtering
+    force_filter_reduction_configs = (
+        os.getenv("TORCHINDUCTOR_FORCE_FILTER_REDUCTION_CONFIGS") == "1"
+    )
+
+    # a testing config to distort benchmarking result
+    # - empty string to disable
+    # - "inverse" to inverse the numbers
+    # - "random" return a random value
+    distort_benchmarking_result = os.getenv(
+        "TORCHINDUCTOR_DISTORT_BENCHMARKING_RESULT", ""
+    )
 
 
 if TYPE_CHECKING:

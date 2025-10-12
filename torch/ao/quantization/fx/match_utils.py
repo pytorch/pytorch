@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import sys
-from collections.abc import Iterable
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Iterable
+from typing import Any, Optional
 
 import torch
 from torch.ao.quantization.qconfig import QConfigAny
@@ -51,7 +51,7 @@ def _is_match(modules, node, pattern, max_uses=sys.maxsize):
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
         if node.op != "call_module":
             return False
-        if not type_before_parametrizations(modules[node.target]) == self_match:
+        if type_before_parametrizations(modules[node.target]) != self_match:
             return False
     elif callable(self_match):
         if node.op != "call_function" or node.target is not self_match:
