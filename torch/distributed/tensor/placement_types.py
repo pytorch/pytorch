@@ -68,8 +68,9 @@ class Shard(Placement):
         else:
             return True
 
-    def _split_tensor(
-        self,
+    @staticmethod
+    def _make_split_tensor(
+        dim: int,
         tensor: torch.Tensor,
         num_chunks: int,
         *,
@@ -85,30 +86,46 @@ class Shard(Placement):
             few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
             This is because collectives usually require equal size tensor inputs
         """
-        assert self.dim <= tensor.ndim, (
-            f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
+        assert dim <= tensor.ndim, (
+            f"Sharding dim {dim} greater than tensor ndim {tensor.ndim}"
         )
 
         # chunk tensor over dimension `dim` into n slices
-        tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
+        tensor_list = list(torch.chunk(tensor, num_chunks, dim=dim))
         tensor_list = fill_empty_tensor_to_shards(
-            tensor_list, self.dim, num_chunks - len(tensor_list)
+            tensor_list, dim, num_chunks - len(tensor_list)
         )
 
         # compute the chunk size inline with ``torch.chunk`` to calculate padding
-        full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
+        full_chunk_size = (tensor.size(dim) + num_chunks - 1) // num_chunks
 
         shard_list: list[torch.Tensor] = []
         pad_sizes: list[int] = []
         for shard in tensor_list:
             if with_padding:
-                pad_size = full_chunk_size - shard.size(self.dim)
-                shard = pad_tensor(shard, self.dim, pad_size)
+                pad_size = full_chunk_size - shard.size(dim)
+                shard = pad_tensor(shard, dim, pad_size)
                 pad_sizes.append(pad_size)
             if contiguous:
                 shard = shard.contiguous()
             shard_list.append(shard)
         return shard_list, pad_sizes
+
+    def _split_tensor(
+        self,
+        tensor: torch.Tensor,
+        num_chunks: int,
+        *,
+        with_padding: bool = True,
+        contiguous: bool = True,
+    ) -> tuple[list[torch.Tensor], list[int]]:
+        return Shard._make_split_tensor(
+            self.dim,
+            tensor,
+            num_chunks,
+            with_padding=with_padding,
+            contiguous=contiguous,
+        )
 
     @staticmethod
     def local_shard_size_and_offset(
@@ -153,8 +170,9 @@ class Shard(Placement):
     ) -> tuple[int, Optional[int]]:
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
-    def _shard_tensor(
-        self,
+    @staticmethod
+    def _make_shard_tensor(
+        dim: int,
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
@@ -176,14 +194,14 @@ class Shard(Placement):
         if src_data_rank is None:
             # src_data_rank specified as None explicitly means to skip the
             # communications, simply split
-            scatter_list, _ = self._split_tensor(
-                tensor, num_chunks, with_padding=False, contiguous=True
+            scatter_list, _ = Shard._make_split_tensor(
+                dim, tensor, num_chunks, with_padding=False, contiguous=True
             )
 
             return scatter_list[mesh_dim_local_rank]
 
-        scatter_list, pad_sizes = self._split_tensor(
-            tensor, num_chunks, with_padding=True, contiguous=True
+        scatter_list, pad_sizes = Shard._make_split_tensor(
+            dim, tensor, num_chunks, with_padding=True, contiguous=True
         )
         output = torch.empty_like(scatter_list[mesh_dim_local_rank])
 
@@ -194,10 +212,19 @@ class Shard(Placement):
 
         # Only unpad if the local_tensor was padded on the dimension.
         if pad_sizes[mesh_dim_local_rank] > 0:
-            output = unpad_tensor(output, self.dim, pad_sizes[mesh_dim_local_rank])
+            output = unpad_tensor(output, dim, pad_sizes[mesh_dim_local_rank])
             # Unpad might return a view, hence we need to remake it contiguous
             output = output.contiguous()
         return output
+
+    def _shard_tensor(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        src_data_rank: Optional[int] = 0,
+    ) -> torch.Tensor:
+        return Shard._make_shard_tensor(self.dim, tensor, mesh, mesh_dim, src_data_rank)
 
     def _reduce_shard_tensor(
         self,
@@ -219,8 +246,8 @@ class Shard(Placement):
 
         is_padded = tensor.size(self.dim) % num_chunks != 0
         if is_padded:
-            scattered_list, pad_sizes = self._split_tensor(
-                tensor, num_chunks, with_padding=True, contiguous=True
+            scattered_list, pad_sizes = Shard._make_split_tensor(
+                self.dim, tensor, num_chunks, with_padding=True, contiguous=True
             )
             tensor = torch.cat(scattered_list, dim=self.dim)
         elif not tensor.is_contiguous():
@@ -613,8 +640,8 @@ class Replicate(Placement):
         """
         return "R"
 
-    def _replicate_tensor(
-        self,
+    @staticmethod
+    def _make_replicate_tensor(
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
@@ -635,6 +662,15 @@ class Replicate(Placement):
             # perform broadcast from the src_data_rank as data source when it is not None
             mesh_broadcast(tensor, mesh, mesh_dim=mesh_dim, group_src=src_data_rank)
         return tensor
+
+    def _replicate_tensor(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        src_data_rank: Optional[int] = 0,
+    ) -> torch.Tensor:
+        return Replicate._make_replicate_tensor(tensor, mesh, mesh_dim, src_data_rank)
 
     def is_replicate(self) -> bool:
         return True
