@@ -243,11 +243,11 @@ def _get_subgraph_relationship_type(
         key = (type(mod_a), type(mod_b))
 
         if key not in type_a_related_to_b:
-            if type(mod_a) == type(mod_b):
+            if type(mod_a) is type(mod_b):
                 return SubgraphTypeRelationship.EQUAL_BUT_UKNOWN
             else:
                 return SubgraphTypeRelationship.NOT_RELATED
-        elif type(mod_a) == type(mod_b):
+        elif type(mod_a) is type(mod_b):
             return SubgraphTypeRelationship.EQUAL
         else:
             return SubgraphTypeRelationship.RELATED_BUT_NOT_EQUAL

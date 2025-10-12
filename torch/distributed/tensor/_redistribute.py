@@ -1,7 +1,10 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
+import dataclasses
 import logging
+from collections import defaultdict
+from collections.abc import Sequence
 from functools import cache
 from typing import cast, NamedTuple, Optional
 
@@ -9,7 +12,12 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch.distributed._functional_collectives import _are_we_tracing
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._dtensor_spec import (
+    DTensorSpec,
+    ShardOrder,
+    ShardOrderEntry,
+    TensorMeta,
+)
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -28,6 +36,138 @@ class _TransformInfo(NamedTuple):
     src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: list[int]
+
+
+# TODO(zpcore): complete the core algorithm of redistributing from source
+# placement to target placement considering device ordering
+class DTensorRedistributePlanner:
+    """
+    This class is used to plan the collective calls to transform the local shard
+    of the DTensor from its current spec to the target spec.
+    """
+
+    @dataclasses.dataclass(frozen=True, slots=True)
+    class DistState:
+        placements: tuple[Placement, ...]
+        tensor_dim_to_mesh_dim: ShardOrder
+        _hash: Optional[int] = dataclasses.field(
+            default=None, init=False, repr=False, compare=False
+        )
+
+        def __str__(self):
+            return DTensorSpec.format_shard_order_str(
+                self.placements,
+                self.tensor_dim_to_mesh_dim,
+            )
+
+        def __repr__(self):
+            return self.__str__()
+
+        def __post_init__(self):
+            # precompute hash after all attributes are set
+            object.__setattr__(
+                self,
+                "_hash",
+                self._compute_hash(),
+            )
+
+        def __hash__(self) -> int:
+            return self._hash if self._hash is not None else self._compute_hash()
+
+        def _compute_hash(self) -> int:
+            return hash(
+                (
+                    self.placements,
+                    self.tensor_dim_to_mesh_dim,
+                )
+            )
+
+        def __eq__(self, other: object) -> bool:
+            if not isinstance(other, DTensorRedistributePlanner.DistState):
+                return False
+            if self._hash != other._hash:
+                return False
+            return (
+                self.placements,
+                self.tensor_dim_to_mesh_dim,
+            ) == (
+                other.placements,
+                other.tensor_dim_to_mesh_dim,
+            )
+
+    @staticmethod
+    def _dict_to_ShardOrder(x: dict[int, list[int]]) -> ShardOrder:
+        """Convert dict to ShardOrder"""
+        return tuple(
+            ShardOrderEntry(tensor_dim=key, mesh_dims=tuple(value))
+            for key, value in sorted(x.items())
+            if value
+        )
+
+    @staticmethod
+    def _ShardOrder_to_dict(x: ShardOrder) -> dict[int, list[int]]:
+        """Convert ShardOrder to dict with tensor dim as key"""
+        tensor_mesh_dim_dict = defaultdict(list)
+        for entry in x:
+            tensor_mesh_dim_dict[entry.tensor_dim] = list(entry.mesh_dims)
+        return tensor_mesh_dim_dict
+
+    @staticmethod
+    def stringify_transform_infos(
+        mesh: DeviceMesh,
+        transform_infos: Sequence[_TransformInfo],
+        src_placement: tuple[Placement, ...],
+        src_shard_order: Optional[ShardOrder] = None,
+    ) -> str:
+        """
+        Generate a string representation of the sequence of state transitions
+        (placements and shard orders) as described by the given transform_info.
+
+        Args:
+            mesh: The DeviceMesh used for the redistribution.
+            transform_infos: A sequence of _TransformInfo objects describing each
+                transformation step.
+            src_placement: The initial tuple of Placement objects.
+            src_shard_order: (Optional) The initial ShardOrder representing
+                the mapping of tensor dimensions to mesh dimensions. If None,
+                the default shard order is computed from src_placement and mesh.
+
+        Returns:
+            A string showing the sequence of DistState transitions, separated by '->'.
+        """
+        assert len(src_placement) == mesh.ndim
+        if src_shard_order is None:
+            src_shard_order = DTensorSpec.compute_default_shard_order(src_placement)
+        cur_placement = list(src_placement)
+        shard_order_dict = DTensorRedistributePlanner._ShardOrder_to_dict(
+            src_shard_order
+        )
+        cur_state = DTensorRedistributePlanner.DistState(
+            tuple(cur_placement), src_shard_order
+        )
+        state_list = [
+            cur_state,
+        ]
+        for transform_info in transform_infos:
+            src_dim_placement, dst_dim_placement = transform_info.src_dst_placements
+            if src_dim_placement.is_shard():
+                src_dim = src_dim_placement.dim  # type: ignore[attr-defined]
+                assert (
+                    src_dim in shard_order_dict and len(shard_order_dict[src_dim]) > 0
+                )
+                shard_order_dict[src_dim].pop()
+            if dst_dim_placement.is_shard():
+                dst_dim = dst_dim_placement.dim  # type: ignore[attr-defined]
+                if dst_dim not in shard_order_dict:
+                    shard_order_dict[dst_dim] = []
+                shard_order_dict[dst_dim].append(transform_info.mesh_dim)
+            cur_placement[transform_info.mesh_dim] = dst_dim_placement
+            new_state = DTensorRedistributePlanner.DistState(
+                tuple(cur_placement),
+                DTensorRedistributePlanner._dict_to_ShardOrder(shard_order_dict),
+            )
+            state_list.append(new_state)
+        return "->".join([str(s) for s in state_list])
 
 
 def _gen_transform_infos_non_cached(
@@ -192,7 +332,15 @@ def redistribute_local_tensor(
     debug_mode = get_active_debug_mode()
     redistribute_context = (
         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
-            local_tensor, current_spec, target_spec
+            local_tensor,
+            current_spec.placements,
+            target_spec.placements,
+            DTensorRedistributePlanner.stringify_transform_infos(
+                device_mesh,
+                transform_infos,
+                current_spec.placements,
+                current_spec.shard_order,
+            ),
         )
         if debug_mode is not None
         else contextlib.nullcontext()
