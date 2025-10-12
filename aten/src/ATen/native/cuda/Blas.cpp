@@ -1177,7 +1177,7 @@ bool is_blockwise_128x128_scaling(const at::Tensor& t, const at::Tensor& scale) 
           scale,
           0,
           ceil_div<int64_t>(t.size(0), 128),
-          round_up<int64_t>(ceil_div<int64_t>(t.size(1), 128), 4)) &&
+          ceil_div<int64_t>(t.size(1), 128)) &&
       check_size_stride(
           scale, 1, ceil_div<int64_t>(t.size(1), 128), 1));
 }
