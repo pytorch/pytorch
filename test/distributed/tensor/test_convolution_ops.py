@@ -221,7 +221,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
     def test_conv3d(self):
         device_mesh = self.build_device_mesh()
         model = nn.Conv3d(64, 64, 3, padding=1)
-        model_gt = copy.deepcopy(model)
+        model_gt = copy.deepcopy(model).to(device=self.device_type)
         x = torch.randn(1, 64, 8, 8, 8, device=self.device_type)
         x_dt = DTensor.from_local(x, device_mesh, [Replicate()])
         model_dt = distribute_module(
