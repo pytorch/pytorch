@@ -32,7 +32,7 @@ _is_in_non_infra_torch_dispatch_mode = False
 _is_in_any_mode_without_ignore_compile_internals = False
 
 
-def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
+def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
     return (
         _is_in_torch_dispatch_mode
         if include_infra_modes
@@ -71,7 +71,7 @@ class TorchDispatchMode:
     the next mode on the mode stack.  If you want recursively call back into
     your current ``__torch_dispatch__`` implementation, either explicitly
     invoke ``self.__torch_dispatch__(...)``, or use the context manager
-    ``__torch_dispatch__(self)`` to make PyTorch
+    ``self`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
 
@@ -200,9 +200,12 @@ class TorchDispatchMode:
         return False
 
 
-def _get_current_dispatch_mode():
+def _get_current_dispatch_mode() -> Optional[TorchDispatchMode]:
+    """
+    Return the top user mode on the stack (the next one that would be
+    executed) if there are any.
+    """
     stack_len = _len_torch_dispatch_stack()
-    # Return a user mode on the stack if there are any
     if stack_len > 0:
         return _get_dispatch_stack_at(stack_len - 1)
     return None
@@ -256,7 +259,12 @@ def _disable_infra_mode(key):
             _push_mode(mode_unset)
 
 
-def _get_current_dispatch_mode_stack():
+def _get_current_dispatch_mode_stack() -> list[TorchDispatchMode]:
+    """
+    Returns the current stack of dispatch modes, with the most recent
+    (i.e., the one that will be processed first) at the end of the
+    list (standard stack convention).
+    """
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
@@ -548,7 +556,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         ):
             ret_list = ret if isinstance(ret, list) else [ret]
             for r in ret_list:
-                assert type(arg) == type(
+                assert type(arg) is type(
                     r
                 ), f"""Called {str(func)} with input of type {type(arg)}
 and output of type {type(ret)}. But expected types to match."""

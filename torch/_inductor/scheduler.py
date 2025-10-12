@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
     from types import ModuleType
 
+import weakref
+
 import sympy
 
 import torch
@@ -90,6 +92,28 @@ compute_dependencies_log = torch._logging.getArtifactLogger(
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+
+_custom_should_partition_fns: weakref.WeakKeyDictionary[
+    torch._ops.OpOverload, Callable[..., bool]
+] = weakref.WeakKeyDictionary()
+
+
+def register_should_partition_rule(
+    op: torch._ops.OpOverload,
+    func: Callable[..., bool],
+) -> None:
+    """Register a function that says if Inductor should partition the graph on this op.
+
+    The function should be have the same signature as the operator.
+    Inductor will invoke the function with FakeTensors when it needs to decide
+    if the graph should be partitioned.
+
+    `register_should_partition_rule` is currently private and experimental.
+    Use at your own risk.
+    """
+    assert isinstance(op, torch._ops.OpOverload)
+    _custom_should_partition_fns[op] = func
 
 
 @dataclasses.dataclass
@@ -995,6 +1019,7 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
         if mm_fn is None:
             return None
         bench_fn = mm_fn
+        # pyrefly: ignore  # unbound-name
         args_kwargs_fn = lambda: snode_args_kwargs(snode)  # noqa: E731
     else:
         return None
@@ -1009,18 +1034,18 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
     from .utils import snode_args_kwargs
 
     args, kwargs = args_kwargs_fn()
-    from triton.testing import do_bench
+    from torch._inductor.runtime.benchmarking import benchmarker
 
-    ms = do_bench(lambda: bench_fn(*args, **kwargs))
+    ms = benchmarker.benchmark(bench_fn, args, kwargs)  # type: ignore[arg-type]
 
     cache.set_value(cache_key, value=ms)
     return ms
 
 
+@dataclasses.dataclass(slots=True)
 class WhyNoFuse:
-    # TODO when we drop support for Python < 3.10, we can use
-    # @dataclass(slots=True) instead of manually specifying __slots__.
-    __slots__ = ["name1", "name2", "reason", "args"]
+    name1: str
+    name2: str
     reason: str
     args: tuple[Any, ...]
 
@@ -1088,7 +1113,11 @@ def _prune_redundant_deps(
     def should_prune(dep: Dep) -> bool:
         if isinstance(dep, WeakDep):
             op_name = name_to_buf[dep.name].defining_op_name()
-            is_redundant = name_to_dep_count[name_to_fused_node[op_name].get_name()] > 0
+            is_redundant = name_to_dep_count[
+                name_to_fused_node[op_name].get_name()
+            ] > 0 and node.scheduler.fusable_weak_dep(
+                dep, name_to_fused_node[op_name], node
+            )
             # These can occur because fused nodes always gather deps from their snodes
             # If B has a weakdep on A
             # B gets fused with C, then any time BC is fused, the weakdep will reappear
@@ -1267,6 +1296,7 @@ class SchedulerNode(BaseSchedulerNode):
             new_order = self_dep.decide_loop_order_to_match(other_dep)
 
         if new_order:
+            # pyrefly: ignore  # bad-assignment
             metrics.num_loop_reordering += 1
             loop_ordering_log.debug(
                 "Reorder loops for %s with order %s", self.get_name(), new_order
@@ -1563,6 +1593,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
                 self.get_name(),
             )
             return False
+        # pyrefly: ignore  # bad-assignment
         metrics.num_loop_reordering += 1
         loop_ordering_log.debug(
             "Reorder loops for fused node %s with order %s", self.get_name(), new_order
@@ -2294,6 +2325,7 @@ class Scheduler:
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
 
+        # pyrefly: ignore  # bad-assignment
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         from torch._inductor.debug import log_ir_post_fusion, log_ir_pre_fusion
 
@@ -2331,7 +2363,10 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
-        if config.reorder_for_compute_comm_overlap:
+
+        # reorder_for_compute_comm_overlap may do benchmarking to estimate
+        # op runtime. Disable it for now in deterministic mode.
+        if not config.deterministic and config.reorder_for_compute_comm_overlap:
             if not config.reorder_for_peak_memory:
                 from .memory import assign_memory_planning_info_for_scheduler_buffers
 
@@ -2518,6 +2553,7 @@ class Scheduler:
                 ]
                 return DedupList(new_items, new_membership)
 
+        # pyrefly: ignore  # not-a-type
         name_to_users: defaultdict[str, DedupList[NodeUser]] = collections.defaultdict(
             DedupList
         )
@@ -2554,12 +2590,14 @@ class Scheduler:
                     else:
                         name_to_users[buf1_name] = name_to_users[buf2_name]
 
+        # pyrefly: ignore  # not-a-type
         def rename(n: str) -> str:
             if n in self.mutation_renames:
                 return rename(self.mutation_renames[n])
             return n
 
         def add_user(
+            # pyrefly: ignore  # not-a-type
             used_by_name: str,
             user_node: Union[BaseSchedulerNode, OutputNode],
             can_inplace: bool = False,
@@ -2569,6 +2607,7 @@ class Scheduler:
                 NodeUser(user_node, can_inplace, is_weak)
             )
 
+        # pyrefly: ignore  # not-a-type
         unbacked_symbol_to_origin_node: dict[sympy.Symbol, Optional[str]] = {}
 
         # NB: None means that the dependency is on an input.  Don't actually
@@ -2627,6 +2666,7 @@ class Scheduler:
                 and (dep := next(iter(node.read_writes.writes)))
                 and isinstance(dep, MemoryDep)
             ):
+                # pyrefly: ignore  # unbound-name
                 node_mode = dep.mode
             else:
                 node_mode = None
@@ -2652,6 +2692,10 @@ class Scheduler:
                                 WeakDep(other_name, mutating_buf=buf.get_name())
                             )
                             add_user(other_name, node, is_weak=True)
+
+            for add_dep in V.graph.additional_buffer_deps[node.get_name()]:
+                add_user(add_dep, node, is_weak=True)
+                node.add_fake_dep(WeakDep(add_dep, node.get_name()))
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
@@ -2978,7 +3022,7 @@ class Scheduler:
                     i + 1,
                     old_len,
                 )
-                nodes = self.fuse_nodes_once(nodes)
+                nodes = self.fuse_nodes_once(nodes, is_reorder_round=False)
                 new_len = len(nodes)
                 fusion_log.debug(
                     "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
@@ -2991,6 +3035,9 @@ class Scheduler:
                         "===== fusion complete (%d iterations) =====", i + 1
                     )
                     break
+
+            if config.loop_ordering_after_fusion:
+                nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
             return nodes
 
     def process_grouped_nodes(self) -> None:
@@ -3391,9 +3438,12 @@ class Scheduler:
                                 str(e),
                             )
                         continue
+                    # pyrefly: ignore  # missing-attribute
                     with multi_node.swap_as_triton_caller(choice):
                         ms_fused, path = self.benchmark_codegened_module(
-                            mod_fused, device
+                            mod_fused,
+                            # pyrefly: ignore  # bad-argument-type
+                            device,
                         )
                         new_timings[choice] = ms_fused
                         if ms_fused < min_ms_fused:
@@ -3405,12 +3455,15 @@ class Scheduler:
                 if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
                     if config.multi_kernel_hints:
                         hint_override_best_fusion_choice[None] = ms_fused_choice
+                        # pyrefly: ignore  # missing-attribute
                         multi_node.finalize_as_triton_callers(
                             hint_override_best_fusion_choice
                         )
                     else:
+                        # pyrefly: ignore  # missing-attribute
                         multi_node.finalize_as_triton_caller(ms_fused_choice)
 
+                    # pyrefly: ignore  # missing-attribute
                     multi_node._choice_timings[None] = new_timings
                     return True
                 else:
@@ -3440,21 +3493,27 @@ class Scheduler:
                             fut.result()
 
                     ms1, path1 = self.benchmark_codegened_module(
-                        future_and_mod_l1[1], device
+                        future_and_mod_l1[1],
+                        # pyrefly: ignore  # bad-argument-type
+                        device,
                     )
                     if math.isinf(ms1):
                         why("register spilling of the first kernel")
                         return False
 
                     ms2, path2 = self.benchmark_codegened_module(
-                        future_and_mod_l2[1], device
+                        future_and_mod_l2[1],
+                        # pyrefly: ignore  # bad-argument-type
+                        device,
                     )
                     if math.isinf(ms2):
                         why("register spilling of the second kernel")
                         return False
 
                     ms_fused, path_fused = self.benchmark_codegened_module(
-                        future_and_mod_l1_fused[1], device
+                        future_and_mod_l1_fused[1],
+                        # pyrefly: ignore  # bad-argument-type
+                        device,
                     )
                     if math.isinf(ms_fused):
                         why("register spilling of the fused kernel")
@@ -3497,7 +3556,9 @@ class Scheduler:
         return self.name_to_fused_node[node.get_first_name()]
 
     def fuse_nodes_once(
-        self, nodes: list[BaseSchedulerNode]
+        self,
+        nodes: list[BaseSchedulerNode],
+        is_reorder_round: bool,
     ) -> list[BaseSchedulerNode]:
         """
         Combine eligible nodes into FusedSchedulerNodes.
@@ -3506,6 +3567,7 @@ class Scheduler:
             - self.can_fuse(): checks if a fusion is legal
             - self.score_fusion(): assigns priority to a given fusion
         """
+        self.prune_redundant_deps(nodes)
         fused_nodes = OrderedSet(nodes)
         if fusion_log.isEnabledFor(logging.DEBUG):
             fusion_log.debug("fuse_nodes_once, candidates:")
@@ -3560,7 +3622,7 @@ class Scheduler:
 
                 fuse_two_nodes(node_key1, node_key2)
 
-        for node1, node2 in self.get_possible_fusions(nodes):
+        for node1, node2 in self.get_possible_fusions(nodes, is_reorder_round):
             # if either node is in a pending fusion, resolve it.
             # since we iterate on potential fusions based on profitability
             # the first potential fusion should take precedence.
@@ -3568,9 +3630,9 @@ class Scheduler:
             node1 = self.get_fused_node(node1)
             node2 = self.get_fused_node(node2)
 
-            if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
-                node1, node2
-            ):
+            if self.can_fuse(
+                node1, node2, is_reorder_round
+            ) and not self.will_fusion_create_cycle(node1, node2):
                 speedup = self.speedup_by_fusion(node1, node2)
                 if callable(speedup):
                     pending_fusions[node1] = (speedup, node1, node2)
@@ -3599,7 +3661,6 @@ class Scheduler:
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
-        self.prune_redundant_deps(nodes)
         return nodes
 
     def create_combo_kernel_nodes(self, num_ck_nodes: Optional[int] = None) -> None:
@@ -3655,7 +3716,9 @@ class Scheduler:
             node.prune_redundant_deps(self.name_to_fused_node)
 
     def get_possible_fusions(
-        self, nodes: list[BaseSchedulerNode]
+        self,
+        nodes: list[BaseSchedulerNode],
+        is_reorder_round: bool,
     ) -> list[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         """
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
@@ -3675,10 +3738,10 @@ class Scheduler:
                         continue
                     seen.add(key)
 
-                    if self.can_fuse(node1, node2):
+                    if self.can_fuse(node1, node2, is_reorder_round):
                         possible_fusions.append(key)
                     elif (node2.is_template() or node2.is_foreach()) and self.can_fuse(
-                        node2, node1
+                        node2, node1, is_reorder_round
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
@@ -4148,7 +4211,12 @@ class Scheduler:
         else:
             return None
 
-    def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+    def can_fuse(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        can_reorder: bool = False,
+    ) -> bool:
         """
         Determine if it is possible to combine node1 and node2 into a
         single fused node.
@@ -4265,7 +4333,8 @@ class Scheduler:
 
         shared_data_score = self.score_fusion_memory(node1, node2)
         if (
-            shared_data_score < config.score_fusion_memory_threshold
+            can_reorder
+            and shared_data_score < config.score_fusion_memory_threshold
             and config.loop_ordering_after_fusion
         ):
             new_shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
@@ -4275,6 +4344,7 @@ class Scheduler:
         if config.expand_dimension_for_pointwise_nodes and (
             expand_analysis := self.get_expand_dim_for_pointwise_nodes(node1, node2)
         ):
+            # pyrefly: ignore  # unbound-name
             (expand_dim, smaller_node, expand_size) = expand_analysis
             smaller_node.expand_dimension_for_pointwise_node(expand_dim, expand_size)
             shared_data_score = self.score_fusion_memory(node1, node2)
@@ -4371,22 +4441,36 @@ class Scheduler:
         if len(mutating_writes) != 1:
             return False
         write = mutating_writes[0]
+        if isinstance(write, StarDep):
+            return False
         assert isinstance(write, MemoryDep)
 
         if free_symbol_is_type(write.index, SymT.TMP):
             return False
 
         real_name = self.mutation_real_name[weak_dep.mutating_buf]
-        relevant_reads = [
-            read for read in node1.read_writes.reads if read.name == real_name
-        ]
-        return all(
-            isinstance(read, MemoryDep)
-            and not free_symbol_is_type(read.index, SymT.TMP)
-            and read.index == write.index
-            and read.size == write.size
-            for read in relevant_reads
-        )
+        relevant_reading_nodes = [node1]
+        if isinstance(node1, ForeachKernelSchedulerNode):
+            relevant_reading_nodes = node1.snodes
+        num_concurrent_reads = 0
+        for reading_node in relevant_reading_nodes:
+            relevant_reads = [
+                read
+                for read in reading_node.read_writes.reads
+                if read.name == real_name
+            ]
+            if not relevant_reads:
+                continue
+            num_concurrent_reads += 1
+            if not all(
+                isinstance(read, MemoryDep)
+                and not free_symbol_is_type(read.index, SymT.TMP)
+                and read.index == write.index
+                and read.size == write.size
+                for read in relevant_reads
+            ):
+                return False
+        return num_concurrent_reads <= 1
 
     # StarDep doesn't match MemoryDep, different indices don't match
     # However, broadcasting sometimes strips dimensions, and if that's the case
@@ -4571,6 +4655,7 @@ class Scheduler:
                 device.type == "cuda"
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
             ):
+                # pyrefly: ignore  # unbound-name
                 raise GPUTooOldForTriton(device_props, inspect.currentframe())
             elif is_gpu(device.type) and not device.type == "mps":
                 raise TritonMissing(inspect.currentframe())
@@ -4618,6 +4703,25 @@ class Scheduler:
         self, node: BaseSchedulerNode, should_log: bool = False
     ) -> bool:
         """Return True if we should partition the inductor graph on this node"""
+
+        # Allow users to manually specify if a node should be partitioned
+        # Can only do this for FallbackKernels
+        ir_node = node.node
+        if isinstance(ir_node, torch._inductor.ir.FallbackKernel):
+            operator = ir_node.op_overload
+            if operator is not None and operator in _custom_should_partition_fns:
+                assert isinstance(operator, torch._ops.OpOverload)
+                should_partition_fn = _custom_should_partition_fns[operator]
+                fx_node = ir_node.get_origin_node()
+                assert fx_node is not None
+                success, fake_args, fake_kwargs = (
+                    torch._inductor.fx_utils.get_fake_args_kwargs(fx_node)
+                )
+                assert success, (
+                    "If this op came from a custom inductor pass, make sure to run FakeTensorUpdator"
+                )
+                should_partition = should_partition_fn(*fake_args, **fake_kwargs)
+                return should_partition
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
@@ -4849,6 +4953,7 @@ class Scheduler:
                 if isinstance(buf.node, ir.MutationOutput) and (
                     real_name := self.mutation_real_name.get(buf_name, None)
                 ):
+                    # pyrefly: ignore  # unbound-name
                     return is_none_layout(real_name)
 
                 return True
@@ -4899,7 +5004,7 @@ class Scheduler:
                 if name in name_to_node
             }
             input_deallocation = {
-                name: True if name in buffer_names_to_free else False
+                name: name in buffer_names_to_free
                 for name in partition_input_names
                 if name in name_to_node
             }
@@ -4947,6 +5052,7 @@ class Scheduler:
             signatures.append(partition_signature)
 
             unmet_output_names = partition_input_names.union(
+                # pyrefly: ignore  # unsupported-operation
                 unmet_output_names - returned_output_names
             )
 
@@ -5189,9 +5295,10 @@ class Scheduler:
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()
 
+            graph_name = V.graph.name
             partition_code, _ = V.graph.wrapper_code.generate(V.graph.is_inference)
 
-        V.graph.wrapper_code.define_subgraph_launcher_fn(partition_code.value)
+        V.graph.wrapper_code.define_subgraph_launcher_fn(graph_name, partition_code)
 
         V.graph.wrapper_code.codegen_partition_call(graph_partition_id, signature)
         V.graph.wrapper_code.allocated.update(  # type: ignore[has-type]
@@ -5328,6 +5435,7 @@ class Scheduler:
 
         self.current_device = self.default_device_context
 
+        # pyrefly: ignore  # unbound-name
         if self.default_device_context and config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.write_get_raw_stream_header()
 
@@ -5371,6 +5479,7 @@ class Scheduler:
                 prologue, template_node, epilogue = node.get_prologue_template_epilogue(
                     list(node.get_nodes())
                 )
+                # pyrefly: ignore  # unbound-name
                 self.get_backend(device).codegen_template(
                     template_node, epilogue, prologue
                 )
@@ -5379,6 +5488,7 @@ class Scheduler:
                 self.codegen_extern_call(node)
             elif node.is_foreach():
                 node = typing.cast(ForeachKernelSchedulerNode, node)
+                # pyrefly: ignore  # unbound-name
                 backend_ = self.get_backend(device)
                 from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
                 from .codegen.simd import SIMDScheduling
@@ -5389,12 +5499,15 @@ class Scheduler:
                     raise AssertionError(f"{type(self)=}")
                 backend.codegen_combo_kernel(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
+                # pyrefly: ignore  # unbound-name
                 self.get_backend(device).codegen_node(node)
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.mark_run()
 
+            # pyrefly: ignore  # unbound-name
             if config.triton.debug_sync_kernel:
+                # pyrefly: ignore  # unbound-name
                 self.get_backend(device).codegen_sync()
 
             self.available_buffer_names.update(node.get_buffer_names())
@@ -5531,7 +5644,7 @@ class Scheduler:
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)
 
 
-class BaseScheduling:
+class BaseScheduling:  # noqa: docstring_linter
     def __init__(self, scheduler: Optional[Scheduler]):
         super().__init__()
         self.scheduler = scheduler
@@ -5674,3 +5787,19 @@ class BaseScheduling:
         and memory copy time in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError
+
+    def codegen_comment(
+        self,
+        node_schedule: Sequence[BaseSchedulerNode],
+        kernel_name: Optional[str] = None,
+    ) -> None:
+        if kernel_name:
+            from torch._inductor.debug import set_kernel_post_grad_provenance_tracing
+
+            debug_handle = set_kernel_post_grad_provenance_tracing(
+                node_schedule,  # type: ignore[arg-type]
+                kernel_name,
+            )
+            V.graph.wrapper_code.write_provenance_debug_handle(
+                kernel_name, debug_handle
+            )

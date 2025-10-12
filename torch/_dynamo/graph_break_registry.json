@@ -1384,6 +1384,20 @@
   "GB0142": [
     {
       "Gb_type": "Unsupported context manager",
+      "Context": "Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on {ctx}",
+      "Explanation": "Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
+      "Hints": [
+        "Avoid using the unsupported context manager.",
+        "If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then ",
+        "it may be the case that it was created outside the compiled region, which Dynamo does not support. ",
+        "Supported context managers can cross graph break boundaries only if they are local non-closure ",
+        "variables, or are intermediate values.",
+        "File an issue to PyTorch. Simple context managers can potentially be supported, ",
+        "but note that context managers can't be supported in general"
+      ]
+    },
+    {
+      "Gb_type": "Unsupported context manager",
       "Context": "Attempted SETUP_WITH/BEFORE_WITH on {ctx}",
       "Explanation": "Dynamo does not know how to enter a `{ctx.python_type_name()}` context manager.",
       "Hints": [
@@ -2717,6 +2731,50 @@
       "Context": "str(self.value)",
       "Explanation": "Dyanmo does not support tracing mutations on a class when its __dict__ is materialized",
       "Hints": []
+    }
+  ],
+  "GB0272": [
+    {
+      "Gb_type": "Failed to make weakref to User Object",
+      "Context": "user_objected: {obj}",
+      "Explanation": "Object does not allow us to make a weakref to it",
+      "Hints": []
+    }
+  ],
+  "GB0273": [
+    {
+      "Gb_type": "Keyword args passed to exception constructor",
+      "Context": "{self} with kwargs {init_kwargs}",
+      "Explanation": "Dynamo does not know how to handle keyword args passed to an exception constructor",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0274": [
+    {
+      "Gb_type": "Attempted to reconstruct context manager's __enter__ method",
+      "Context": "str(self.ctx)",
+      "Explanation": "Attempted to reconstruct context manager {type_str} while tracing `with ...:`",
+      "Hints": [
+        "It is likely there is a graph break while tracing `with ctx:` ",
+        "but outside the actual `ctx.__enter__()` method. ",
+        "`torch.compile` does not expect this to happen.",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB0275": [
+    {
+      "Gb_type": "torch._dynamo.step_unsupported() with empty checkpoint",
+      "Context": "",
+      "Explanation": "traced torch._dynamo.step_unsupported(), but there is no checkpoint to step_graph_break from. This graph break is used for debugging only.",
+      "Hints": [
+        "Remove the torch._dynamo.step_unsupported() call.",
+        "Include at least one checkpoint: (1) include at least 2 ops and (2) make sure there is some ",
+        "line of code that is not in a try/with block, and has an empty Python stack.",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
     }
   ]
 }

@@ -393,6 +393,10 @@ static std::
 #endif // (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
 }
 
+void reset_nccl_trace() {
+  FlightRecorderCUDA::get()->reset_all();
+}
+
 std::string dump_nccl_trace(
     bool includeCollectives,
     bool includeStackTraces,
@@ -1426,17 +1430,41 @@ bool ProcessGroupNCCL::abortComms(
   return true;
 }
 
+void ProcessGroupNCCL::dumpExtraDebuggingInfo() {
+  // This extra dump is intended to capture the current snapshot of collectives
+  // When this process group is terminated for some exception out of NCCL
+  bool dumpExtraOnExec_ = getCvarBool(TORCH_NCCL_EXTRA_DUMP_ON_EXEC, false);
+  if (dumpExtraOnExec_) {
+    bool should_dump_local = false;
+    bool succeeded = shouldDump_.compare_exchange_strong(
+        should_dump_local,
+        true,
+        std::memory_order_release,
+        std::memory_order_acquire);
+    if (succeeded) {
+      LOG(INFO) << logPrefix() << "Sending extra dumping signal";
+      broadcastDumpSignal();
+      // When this routine is called, exception is captured so
+      // dumping by default_pg is not guaranteed due to early termination of
+      // process So we call dumping manually here
+      bool onlyActive = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
+      // Stacktrace is not included at the moment to prevent deadlock due to GIL
+      dumpDebuggingInfo(false, onlyActive);
+    }
+  }
+}
+
 // Abort this backend.
 void ProcessGroupNCCL::abort() {
   // This will log counter for how long the abort actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__abort);
 
+  dumpExtraDebuggingInfo();
   // Don't join threads here since the purpose of this method is to abort all
   // communicators and signal the threads to exit. Joining on the threads could
   // potentially block and hence avoid it in this method.
   terminateProcessGroup_.store(true);
   watchdog_->notify();
-
   // launch abort asynchronously and wait for it to complete or timeout
   LOG(INFO) << logPrefix()
             << "Launching ProcessGroupNCCL abort asynchronously.";
@@ -1564,7 +1592,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   }
 }
 
-bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
+bool ProcessGroupNCCL::dumpDebuggingInfo(
+    bool includeStackTrace /*=true*/,
+    bool onlyActive /*=false*/) {
   // This will log counter for how long dumpDebuggingInfo actually takes.
   STATIC_SCOPED_WAIT_COUNTER(pytorch.ProcessGroupNCCL__dumpDebuggingInfo);
 
@@ -1575,12 +1605,12 @@ bool ProcessGroupNCCL::dumpDebuggingInfo(bool includeStackTrace /*=true*/) {
   LOG(ERROR)
       << logPrefix()
       << "ProcessGroupNCCL preparing to dump debug info. Include stack trace: "
-      << includeStackTrace;
+      << includeStackTrace << ", only active collectives: " << onlyActive;
   if (traceBufferSize_ > 0) {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
-    auto ncclTrace = dump_nccl_trace(true, includeStackTrace, false);
+    auto ncclTrace = dump_nccl_trace(true, includeStackTrace, onlyActive);
     // dump_nccl_trace will hang so we don't grab the global lock until we get
     // the trace.
     std::lock_guard<std::mutex> lock(writeDebugInfoMutex);
@@ -1848,10 +1878,11 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     // recorder and dump. After dump, the training should continue.
     if (dumpPipe.has_value() && dumpPipe->shouldDump()) {
       // best effort dump, not waiting for the dump here
+      bool onlyActive = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
       LOG(INFO) << pg_->logPrefix()
                 << "Dump signal received through pipe, triggering FR dump.";
-      futures.emplace_back(std::async(std::launch::async, [this]() {
-        return this->pg_->dumpDebuggingInfo();
+      futures.emplace_back(std::async(std::launch::async, [this, onlyActive]() {
+        return this->pg_->dumpDebuggingInfo(false, onlyActive);
       }));
     }
   }
@@ -1869,7 +1900,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
-    bool dumpStackTrace = true;
+    bool dumpStackTrace = getCvarBool(TORCH_INCLUDE_STACK_TRACE, true);
+    bool onlyActive = getCvarBool(TORCH_INCLUDE_ONLY_ACTIVE, false);
     ::c10d::C10dLoggingData debugLog;
     debugLog.integers["pg_id"] = static_cast<int64_t>(pg_->getUid());
     debugLog.integers["rank"] = pg_->getRank();
@@ -1878,8 +1910,8 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
     debugLog.strings["flight_recorder_version"] = c10d::version_val_str;
     for (int i = 0; i < 2; i++) {
       std::future<bool> asyncDebugDump =
-          std::async(std::launch::async, [this, dumpStackTrace]() {
-            return this->pg_->dumpDebuggingInfo(dumpStackTrace);
+          std::async(std::launch::async, [this, dumpStackTrace, onlyActive]() {
+            return this->pg_->dumpDebuggingInfo(dumpStackTrace, onlyActive);
           });
 
       // wait for the dump until timeout - log data
@@ -2041,6 +2073,9 @@ void ProcessGroupNCCL::Watchdog::run() {
     VLOG(2) << pg_->logPrefix()
             << "Process group watchdog thread terminated normally";
   } catch (std::exception& e) {
+    // This condition is triggered when any routine in watchdog gets an
+    // exception
+    pg_->dumpExtraDebuggingInfo();
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
       VLOG(2)
@@ -3217,9 +3252,15 @@ void check_gpu_single_tensor(
   if (!tensor.is_cuda() || tensor.is_sparse()) {
     C10_THROW_ERROR(ValueError, "Tensors must be CUDA and dense");
   }
-  // Skip the following requirements for P2P operations
+  // Check memory format
   if (!tensor.is_contiguous(tensor.suggest_memory_format())) {
+    // P2P is a bit relaxed, supporting transfer of a transposed tensor
     if (p2p) {
+      // But must be dense still
+      if (!tensor.is_non_overlapping_and_dense()) {
+        C10_THROW_ERROR(
+            ValueError, "Tensors for P2P must be non-overlapping and dense");
+      }
       TORCH_WARN_ONCE(
           "Detected non-contiguous tensor in P2P operations. It is user "
           "responsibility to guarantee that source and destination tensors have "
@@ -3504,6 +3545,30 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
 
   if (enqueue) {
     workEnqueue(work);
+  }
+
+  {
+    c10::cuda::CUDAMultiStreamGuard streamGuard(ncclStream);
+    std::vector<at::Device> devices{device};
+    work->future_ = c10::make_intrusive<at::ivalue::Future>(
+        c10::ListType::create(c10::TensorType::get()), devices);
+
+    // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
+    // future blocks the stream this callback runs on the corresponding
+    // ncclEndEvents_ ensuring appropriate synchronization.
+    if (work->recordFunctionEndCallback_) {
+      work->future_->addCallback(
+          [work](at::ivalue::Future& /* unused */) {
+            work->recordFunctionEndCallback_();
+          },
+          // uses_future = false allows us to skip synchronization in
+          // ivalue::Future, but is only valid as long as the lambda doesn't use
+          // the "Future" argument.
+          /*uses_future=*/false);
+    }
+    // Mark the future as completed since coalesced operations complete
+    // immediately
+    work->future_->markCompleted(at::IValue(std::vector<at::Tensor>{}));
   }
 
   // Reset coalescing state
