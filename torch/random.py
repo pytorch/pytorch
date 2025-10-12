@@ -19,17 +19,16 @@ def set_rng_state(new_state: torch.Tensor) -> None:
     default_generator.set_state(new_state)
 
 
-def get_rng_state(device: torch.device = torch.device("cpu")) -> torch.Tensor:
+def get_rng_state(device: torch.device = None) -> torch.Tensor:
     r"""Returns the random number generator state as a `torch.ByteTensor`.
 
     Args:
         device (torch.device, optional): The device to return the RNG state of.
-            Default: ``torch.device('cpu')``, the current CPU device.
 
     See also: :func:`torch.random.fork_rng`.
     """
 
-    if device.type == "cpu":
+    if device is None or device.type == "cpu":
         return default_generator.get_state()
     else:
         return torch.get_device_module(device).get_rng_state(device)
