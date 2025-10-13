@@ -4,7 +4,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/FakeQuantAffine.h>
-#include <iostream>
 
 // FakeQuantize Op for PerTensorAffine quantization scheme.
 
@@ -187,6 +186,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
   */
 
   bool is_bfloat16 = (X.scalar_type() == at::kBFloat16);
+
   at::Tensor X_ = is_bfloat16 ? X.to(ScalarType::Float) : X;
   at::Tensor dY_ = is_bfloat16 ? dY.to(ScalarType::Float) : dY;
   at::Tensor scale_ = is_bfloat16 ? scale.to(ScalarType::Float) : scale;

@@ -94,6 +94,12 @@ def _fake_quantize_learnable_per_tensor_affine_grad_reference(dY, X, scale, zero
 
     grad_scale = (grad_scale * dY).sum().unsqueeze(dim=0)
     grad_zp = (grad_zp * dY).sum().unsqueeze(dim=0)
+
+    if dtype is torch.bfloat16:
+        grad_X = grad_X.to(torch.bfloat16)
+        grad_scale = grad_scale.to(torch.bfloat16)
+        grad_zp = grad_zp.to(torch.bfloat16)
+
     return grad_X, grad_scale, grad_zp
 
 
@@ -473,7 +479,7 @@ class TestFakeQuantizeOps(TestCase):
         self._test_learnable_forward_per_tensor(
             X, 'cuda', scale_base, zero_point_base)
 
-    def _test_learnable_backward_per_tensor(self, X, device, scale_base, zero_point_base):
+    def _test_learnable_backward_per_tensor(self, X, device, scale_base, zero_point_base, dtype=torch.float32):
         r"""Tests the backward method with additional backprop support for scale and zero point.
         """
         X_base = torch.tensor(X).to(device)
@@ -481,7 +487,7 @@ class TestFakeQuantizeOps(TestCase):
         for n_bits in (4, 8):
             quant_min, quant_max = 0, 2 ** n_bits - 1
 
-            X = X_base.clone().float().to(device)
+            X = X_base.clone().to(device)
             X.requires_grad_()
             scale_base = scale_base.to(device)
             zero_point_base = zero_point_base.to(device)
@@ -503,6 +509,8 @@ class TestFakeQuantizeOps(TestCase):
                 actual_dScale = scale.grad.to(device).detach()
                 expected_dZeroPoint = dZeroPoint.to(device).detach()
                 actual_dZeroPoint = zero_point.grad.to(device).detach()
+
+                tolerance = 1e-2 if dtype is torch.bfloat16 else 1e-6
 
                 self.assertTrue(
                     torch.allclose(
@@ -541,10 +549,10 @@ class TestFakeQuantizeOps(TestCase):
 
         for dtype in [torch.bfloat16, torch.float32]:
             X_base = torch.randn(x_shape, dtype=dtype, device='cuda')
-            scale_base = torch.normal(mean=0, std=1, size=(1,)).clamp(1e-4, 100)
-            zero_point_base = torch.normal(mean=0, std=128, size=(1,))
+            scale_base = torch.normal(mean=0, std=1, size=(1,)).clamp(1e-4, 100).to(dtype=dtype)
+            zero_point_base = torch.normal(mean=0, std=128, size=(1,)).to(dtype=dtype)
             self._test_learnable_backward_per_tensor(
-                X_base, 'cuda', scale_base, zero_point_base)
+                X_base, 'cuda', scale_base, zero_point_base, dtype)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
