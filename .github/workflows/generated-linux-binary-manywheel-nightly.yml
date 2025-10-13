@@ -386,13 +386,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm6.4
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -498,13 +498,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.0
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -980,13 +980,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm6.4
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -1092,13 +1092,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.0
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -1574,13 +1574,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm6.4
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -1686,13 +1686,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.0
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -2168,13 +2168,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm6.4
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -2280,13 +2280,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.0
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -2762,13 +2762,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm6.4
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -2874,13 +2874,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.0
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -3356,13 +3356,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm6.4
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -3468,13 +3468,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.0
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -3950,13 +3950,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm6.4
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
@@ -4062,13 +4062,13 @@ jobs:
           docker-image-name: manylinux2_28-builder
           custom-tag-prefix: rocm7.0
           docker-build-dir: .ci/docker
-          working-directory: pytorch
+          working-directory: .
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: ./pytorch/.github/actions/test-pytorch-binary
+        uses: .github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
