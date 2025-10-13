@@ -23,7 +23,6 @@ TORCHBENCH_MODELS: list[str] = [
     "resnet50",
     "moco",
     "llama",
-    "hf_T5",
 ]
 HUGGINGFACE_MODELS: list[str] = [
     "AllenaiLongformerBase",

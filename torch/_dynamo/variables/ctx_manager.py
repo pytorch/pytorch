@@ -1262,6 +1262,34 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return "_sdpa_kernel_variadic"
 
 
+class FxTracebackAnnotateVariable(ContextWrappingVariable):
+    """
+    fx.traceback.annotate is a context manager that allows users to annotate the
+    fx graph nodes with custom metadata. In the context of Dynamo, we don't have
+    to trace the body of the context manager. Instead we want to directly run
+    the body of the context manager, so the Dynamo created Fx graphs have the
+    right custom metadata. This variable tracker just runs __enter__ and
+    __exit__ method (instead of tracing).
+    """
+
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def enter(self, tx, *args):
+        cm = torch.fx.traceback.annotate(self.target_values)
+        cm.__enter__()
+        self.set_cleanup_hook(tx, lambda: cm.__exit__(None, None, None))
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "torch.fx.traceback"
+
+    def fn_name(self):
+        return "annotate"
+
+
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:

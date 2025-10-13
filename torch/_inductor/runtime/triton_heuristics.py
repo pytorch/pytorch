@@ -30,8 +30,9 @@ from typing import (
 )
 
 import torch
-from torch._dynamo.utils import set_feature_use
+from torch._dynamo.utils import counters, set_feature_use
 from torch._environment import is_fbcode
+from torch._inductor import metrics
 from torch._prims_common import compute_required_storage_length
 from torch.utils._ordered_set import OrderedSet
 
@@ -184,14 +185,6 @@ def autotune_hints_to_configs(
     return configs
 
 
-def disable_pointwise_autotuning(inductor_meta):
-    # Autotuning can give different benchmarking results from run to run, and
-    # therefore we disable autotuning when use_deterministic flag is on.
-    if inductor_meta.get("are_deterministic_algorithms_enabled"):
-        return True
-    return not inductor_meta.get("autotune_pointwise", True)
-
-
 def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
     call_args = []
     call_kwargs = {}
@@ -236,7 +229,7 @@ def check_autotune_cache(
         not disabled
         and filename is not None
         and (len(configs) > 1 or inductor_meta.get("coordinate_descent_tuning"))
-        and not os.environ.get("TRITON_INTERPRET", "0") == "1"
+        and os.environ.get("TRITON_INTERPRET", "0") != "1"
     ):
         configs_hash = hash_configs(configs)
 
@@ -311,6 +304,8 @@ class CachingAutotuner(KernelInterface):
             "device_type": self.device_props.type,
         }
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
+        self.deterministic_mode = self.inductor_meta.get("deterministic", False)
+
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
         self.reset_to_zero_arg_names = (
@@ -482,7 +477,8 @@ class CachingAutotuner(KernelInterface):
         # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg.
         device_prop = self.device_props
         if (
-            self.inductor_meta.get("dynamic_scale_rblock", True)
+            not self.deterministic_mode
+            and self.inductor_meta.get("dynamic_scale_rblock", True)
             and not self.inductor_meta.get("persistent_reduction")
             and self.heuristic_type == HeuristicType.REDUCTION
             and self.size_hints is not None
@@ -933,7 +929,9 @@ class CachingAutotuner(KernelInterface):
         if self.device_props.type == "cpu":
             return benchmarker.benchmark_cpu(kernel_call)
 
-        return benchmarker.benchmark_gpu(kernel_call, rep=40)
+        return benchmarker.benchmark_gpu(
+            kernel_call, rep=40, is_vetted_benchmarking=True
+        )
 
     def copy_args_to_cpu_if_needed(self, *args, **kwargs):
         """
@@ -1088,6 +1086,18 @@ class CachingAutotuner(KernelInterface):
                         k.shared,
                     )
 
+            if metrics.is_metric_table_enabled("kernel_autotune"):
+                if self.fn.fn is None:
+                    self.fn = self._reload_kernel().fn
+
+                kernel_path = self.fn.fn.__code__.co_filename
+                kernel_name = self.fn.__name__
+
+                for k, v in timings.items():
+                    metrics.log_kernel_autotune_result(
+                        kernel_path, kernel_name, k.config, v
+                    )
+
             self.reset_to_zero_args(*args, **kwargs)
             return timings
 
@@ -1182,11 +1192,24 @@ class CachingAutotuner(KernelInterface):
         Then if coordinate desecnt tuning is run with max-autotune disabled, it will start from C1;
         while if coordinate descent tuning is run with max-autotune enabled, it will start from C3.
         """
-        if (
-            self.heuristic_type == HeuristicType.TEMPLATE
-            or self.heuristic_type == HeuristicType.USER_AUTOTUNE
+        if self.heuristic_type in (
+            HeuristicType.TEMPLATE,
+            HeuristicType.USER_AUTOTUNE,
+            HeuristicType.FIXED,
         ):
             # skip triton template
+            return launcher
+
+        if self.deterministic_mode and self.heuristic_type in (
+            HeuristicType.REDUCTION,
+            HeuristicType.PERSISTENT_REDUCTION,
+            HeuristicType.SPLIT_SCAN,
+        ):
+            # Not only RBLOCK size matters for numericals of reduction.
+            # num_warps also matters since that affect how much data
+            # is handled by each thread, how many warp-reduction we do
+            # in parallel and how much data is there for block
+            # reduction.
             return launcher
 
         with dynamo_timed(
@@ -1222,6 +1245,7 @@ class CachingAutotuner(KernelInterface):
             config2launcher[config] = launcher
 
             out = self.bench(launcher, *args, **kwargs)
+            counters["inductor"]["coordesc_tuning_bench"] += 1
             log.debug(
                 "COORDESC: %s: %f, nreg %d, nspill %d, #shared-mem %d",
                 launcher.config,
@@ -1551,7 +1575,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             return None
 
         def check_can_launch() -> StaticallyLaunchedCudaKernel:
-            if triton_meta.get("device_type", None) != "cuda":
+            if triton_meta.get("device_type") != "cuda":
                 # Only cuda kernels
                 raise CannotStaticallyLaunchKernel("Non-cuda device")
 
@@ -1568,7 +1592,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                 # Don't support user defined triton kernels yet
                 raise CannotStaticallyLaunchKernel("User defined triton kernel")
 
-            if inductor_meta.get("store_cubin", None):
+            if inductor_meta.get("store_cubin"):
                 # Requires storing the entire binary
                 raise CannotStaticallyLaunchKernel("store_cubin is enabled")
 
@@ -2367,6 +2391,7 @@ def triton_config_reduction(
     num_warps=None,
     register_intensive=False,
     dynamic_scale_rblock=True,
+    reduction_hint=None,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2394,7 +2419,13 @@ def triton_config_reduction(
             rnumels[prefix] *= 2
 
     if num_warps is None:
-        num_warps = total_numel() // 128
+        if reduction_hint == ReductionHint.INNER and not is_fbcode():
+            # r is contiguous, so ensure that each thread has 8 elements for
+            # vectorized loads, assuming bf16/fp16
+            # xblock is usually 1-2, default to giving each thread more work
+            num_warps = r // 128
+        else:
+            num_warps = total_numel() // 128
 
     max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
@@ -2544,7 +2575,7 @@ def pointwise(
 
     configs = None
     if len(size_hints) == 1:
-        if disable_pointwise_autotuning(inductor_meta) and not (
+        if not inductor_meta.get("autotune_pointwise", True) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
@@ -2559,7 +2590,8 @@ def pointwise(
             ]
     if len(size_hints) == 2:
         if (
-            disable_pointwise_autotuning(inductor_meta) or tile_hint == TileHint.SQUARE
+            not inductor_meta.get("autotune_pointwise", True)
+            or tile_hint == TileHint.SQUARE
         ) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -2576,7 +2608,7 @@ def pointwise(
                 *hinted_configs,
             ]
     if len(size_hints) == 3:
-        if disable_pointwise_autotuning(inductor_meta):
+        if not inductor_meta.get("autotune_pointwise", True):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
@@ -2608,7 +2640,7 @@ def pointwise(
 def _reduction_configs(
     *, size_hints: dict[str, int], inductor_meta: dict[str, Any], num_dynamic=0
 ) -> list[Config]:
-    reduction_hint = inductor_meta.get("reduction_hint", None)
+    reduction_hint = inductor_meta.get("reduction_hint")
 
     # Convert reductions to 1D, to simplify heuristics.
     rnumel = get_total_reduction_numel(size_hints)
@@ -2664,6 +2696,7 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
                 dynamic_scale_rblock=dynamic_scale_rblock,
+                reduction_hint=reduction_hint,
             )
 
     def outer_config_opt():
@@ -2715,7 +2748,7 @@ def _reduction_configs(
         )
 
     contiguous_config = make_config(
-        1,
+        2 if rnumel <= 2048 and not is_fbcode() else 1,  # 1024 or less is persistent
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
@@ -2756,8 +2789,6 @@ def _reduction_configs(
         return configs + [outer_config]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return configs + [tiny_config]
-    if disable_pointwise_autotuning(inductor_meta):
-        return configs + [make_config(32, 128)]
 
     return configs + [
         contiguous_config,
@@ -2848,6 +2879,112 @@ def adapt_config_for_tiling(
     )
 
 
+def filter_reduction_configs_for_determinism(
+    inductor_meta: dict[str, Any], configs: list[Config]
+) -> list[Config]:
+    """
+    Filter configs for reduction so the numerics can be deterministic.
+
+    Heuristics:
+    - skip reduction configs with too small RBLOCK
+    - skip reduction configs with XBLOCK==1 if we are confident it will not perform well
+    - if there is a tie, pick the config with second largest RBLOCK
+    - if there is still a tie, pick the config with second largest num_warps
+    - if there is still a tie, pick the config with second largest XBLOCK
+    """
+    configs = unique_configs(configs)
+    assert len(configs) > 0
+
+    def _do_filter_due_to_inductor_config():
+        return (
+            inductor_meta.get("deterministic", False)
+            or torch._inductor.config.test_configs.force_filter_reduction_configs
+        ) or inductor_meta.get("are_deterministic_algorithms_enabled")
+
+    if not _do_filter_due_to_inductor_config() or len(configs) == 1:
+        # no filtering happening if NOT in deterministic mode
+        return configs
+
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("reduction configs before filtering:")
+        for c in configs:
+            log.debug("%s", c)
+            log.debug("")
+
+    def _has_too_small_rblock(config):
+        rblock = config.kwargs.get("R0_BLOCK")
+        # too small RBLOCK is likely to be bad
+        return rblock is not None and rblock <= 4
+
+    def _nonpromising_xblock_1(config):
+        # kernel like https://gist.github.com/shunting314/0b3281c087e79bc915fe45985ff9d7d5
+        # without a load/store having contiguous rdim is unlikely to perform well with XBLOCK==1
+        return config.kwargs["XBLOCK"] == 1 and not inductor_meta.get(
+            "has_loadstore_with_contiguous_rdim", True
+        )
+
+    newconfigs = [*filter(lambda x: not _has_too_small_rblock(x), configs)]
+    # accept the filtering only if there are configs left
+    if len(newconfigs) > 0:
+        configs = newconfigs
+
+    newconfigs = [*filter(lambda x: not _nonpromising_xblock_1(x), configs)]
+    if len(newconfigs) > 0:
+        configs = newconfigs
+
+    assert len(configs) > 0
+
+    def _r0_block(c):
+        return c.kwargs.get("R0_BLOCK", -1)
+
+    def _xblock(c):
+        return c.kwargs.get("XBLOCK", -1)
+
+    def _num_warps(c):
+        return c.num_warps
+
+    def _pick_second_largest(accessor):
+        nonlocal configs
+        configs = sorted(configs, key=lambda x: accessor(x))
+        if accessor(configs[0]) != accessor(configs[-1]):
+            max_val = accessor(configs[-1])
+            configs = [*filter(lambda x: accessor(x) != max_val, configs)]
+            second_max_val = accessor(configs[-1])
+            configs = [*filter(lambda x: accessor(x) == second_max_val, configs)]
+        return configs
+
+    def _pick_config():
+        nonlocal configs
+        assert len(configs) > 0
+        if len(configs) == 1:
+            return configs[0]
+
+        # break tie by R0_BLOCK
+        configs = _pick_second_largest(_r0_block)
+        if len(configs) == 1:
+            return configs[0]
+
+        # break tie by num_warps
+        configs = _pick_second_largest(_num_warps)
+        if len(configs) == 1:
+            return configs[0]
+
+        # break tie by XBLOCK
+        configs = _pick_second_largest(_xblock)
+
+        # there is still a tie, pick the first one
+        return configs[0]
+
+    configs = [_pick_config()]
+
+    if log.isEnabledFor(logging.DEBUG):
+        log.debug("reduction configs after filtering:")
+        for c in configs:
+            log.debug("%s", c)
+            log.debug("")
+    return configs
+
+
 def reduction(
     size_hints,
     reduction_hint=False,
@@ -2873,6 +3010,8 @@ def reduction(
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+
     return cached_autotune(
         size_hints,
         configs=configs,
@@ -2920,6 +3059,7 @@ def cooperative_reduction(
     # TODO(jansel): add more configs in max_autotune
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,
@@ -2945,7 +3085,13 @@ def _persistent_reduction_configs(
 
     if "y" not in size_hints:
         configs = [
-            triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
+            triton_config_reduction(
+                size_hints,
+                xblock,
+                rnumel,
+                register_intensive=True,
+                reduction_hint=reduction_hint,
+            )
             for xblock in (1, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
@@ -2971,15 +3117,12 @@ def _persistent_reduction_configs(
     if "y" in size_hints:
         pass
     # TODO(jansel): we should be able to improve these heuristics
-    elif reduction_hint == ReductionHint.INNER:
+    elif reduction_hint == ReductionHint.INNER and rnumel >= 256:
         if rnumel > 1024:
             configs = configs[:1]
         else:
             x_block = 8
-            if xnumel // x_block < 128 or (loads_and_stores >= 5 and rnumel >= 256):
-                # If loads/stores greater than 5, a lot of register pressure
-                # rnumel < 256 means no vectorized loads if we split up r dim
-                # so xblock still needs to be larger
+            if xnumel // x_block < 128 or loads_and_stores >= 5:
                 x_block = 1
 
             configs = [
@@ -2988,6 +3131,7 @@ def _persistent_reduction_configs(
                     x_block,
                     rnumel,
                     register_intensive=True,
+                    reduction_hint=reduction_hint,
                 )
             ]
 
@@ -2999,6 +3143,7 @@ def _persistent_reduction_configs(
                 size_hints,
                 2 * (256 // rnumel) if rnumel <= 256 else 1,
                 rnumel,
+                reduction_hint=reduction_hint,
             )
         ]
     for c in configs:
@@ -3006,9 +3151,6 @@ def _persistent_reduction_configs(
         for prefix in size_hints:
             if prefix_is_reduction(prefix):
                 c.kwargs.pop(f"{prefix.upper()}BLOCK")
-
-    if disable_pointwise_autotuning(inductor_meta):
-        configs = configs[:1]
 
     return configs
 
@@ -3035,6 +3177,7 @@ def persistent_reduction(
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     inductor_meta.pop(persistent_reduction_key)
 
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs,
@@ -3072,6 +3215,7 @@ def split_scan(
                 cfg.kwargs[var] = min_rblock
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
     return cached_autotune(
         size_hints,
         configs=configs,

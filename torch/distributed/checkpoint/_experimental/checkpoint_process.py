@@ -322,6 +322,7 @@ class CheckpointProcess:
             subprocess_pid = self.process.processes[0].pid
             # send graceful termination to sub process
             try:
+                # pyrefly: ignore  # missing-attribute
                 self._parent_end.send(
                     WorkerRequest(
                         request_type=RequestType.TERMINATE_PROCESS,
