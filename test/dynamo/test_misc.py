@@ -3370,9 +3370,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # Test on non autocast state and autocast cache states.
         self.assertIn("autocast_state", json_guards)
         for key, value in json_guards.items():
-            if type(value) == int:
+            if type(value) is int:
                 variant = value + 1
-            elif type(value) == bool:
+            elif type(value) is bool:
                 variant = not value
             elif isinstance(value, dict) and key == "autocast_state":
                 variant = value.copy()
