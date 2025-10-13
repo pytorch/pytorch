@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     NOTEST_CPU,
     IS_WINDOWS,
     TEST_WITH_TORCHDYNAMO,
+    TEST_XPU,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -4630,12 +4631,15 @@ if NOTEST_CPU:
 else:
     device_types = ("cpu", "cuda", "mps")
 
+if TEST_XPU:
+    device_types += ("xpu", )
+
 instantiate_device_type_tests(TestTransformers, globals(), only_for=device_types)
 instantiate_device_type_tests(TestSDPAFailureModes, globals(), only_for=device_types, allow_mps=True)
-instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True)
+instantiate_device_type_tests(TestSDPA, globals(), only_for=device_types, allow_mps=True, allow_xpu=True)
 instantiate_device_type_tests(TestSDPACudaOnly, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestSDPACpuOnly, globals(), only_for=("cpu"))
-instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types)
+instantiate_device_type_tests(TestAttnBias, globals(), only_for=device_types, allow_xpu=True)
 instantiate_device_type_tests(TestSDPAXpuOnly, globals(), only_for="xpu", allow_xpu=True)
 
 if __name__ == '__main__':
