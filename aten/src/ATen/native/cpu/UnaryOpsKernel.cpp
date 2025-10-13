@@ -561,15 +561,15 @@ static void nan_to_num_complex_kernel(
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
       using value_t = scalar_t::value_type;
-      auto nan_replacement = static_cast<c10::complex<value_t>>(nan.value_or(c10::complex<double>(0.0, 0.0)));
-      auto pos_inf_replacement = static_cast<c10::complex<value_t>>(pos_inf.has_value()
+      auto nan_replacement = static_cast<scalar_t>(nan.value_or(scalar_t(0.0, 0.0)));
+      auto pos_inf_replacement = static_cast<scalar_t>(pos_inf.has_value()
           ? pos_inf.value()
-          : c10::complex<double>(std::numeric_limits<double>::max(), 0.0));
-      auto neg_inf_replacement = static_cast<c10::complex<value_t>>(neg_inf.has_value()
+          : scalar_t(std::numeric_limits<value_t>::max(), 0.0));
+      auto neg_inf_replacement = static_cast<scalar_t>(neg_inf.has_value()
           ? neg_inf.value()
-          : c10::complex<double>(std::numeric_limits<double>::lowest(), 0.0));
+          : scalar_t(std::numeric_limits<value_t>::lowest(), 0.0));
       cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-        return _nan_to_num_replace(static_cast<c10::complex<value_t>>(a), nan_replacement, pos_inf_replacement, neg_inf_replacement);
+        return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
       });
     });
   } else {
