@@ -100,6 +100,7 @@ from .exc import (
     unimplemented_v2,
     unimplemented_v2_with_warning,
 )
+from .graph_bytecode_inputs import has_user_objects, index_to_source
 from .graph_deduplication import apply_graph_deduplication
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
@@ -1512,6 +1513,27 @@ class OutputGraph(OutputGraphCommon):
 
         from .decorators import disable
 
+        if has_user_objects():
+            # NB: This is where we store possible user objects before running the graph
+            # index_to_user_object_weakref is the function used in the graph to translate
+            # the dynamo-generated index into the actual object passed to the compiled function.
+            # We generate bytecode to store all user objects at the proper index in the below
+            # call.
+            codegen = PyCodegen(
+                self.root_tx, root, overridden_sources=overridden_sources
+            )
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.graph_bytecode_inputs.__name__,
+                    "store_user_object_weakrefs",
+                )
+            )
+            for source in reversed(index_to_source.values()):
+                codegen(source)
+            codegen.call_function(len(index_to_source), False)
+            codegen.pop_top()
+            self.add_output_instructions(codegen.get_instructions())
+
         # to handle random calls
         if len(self.random_calls) > 0:
             random_calls_instructions = []
@@ -1657,7 +1679,7 @@ class OutputGraph(OutputGraphCommon):
                             )
                         elif (
                             vt.source is not None
-                            and (source := getattr(vt.source, "base", None))
+                            and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
                             and source.is_input
                         ):
                             self.export_metadata.output_return_type[idx] = (
