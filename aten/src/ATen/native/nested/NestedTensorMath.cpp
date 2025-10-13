@@ -14,6 +14,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include <c10/util/Exception.h>
 
 #include <tuple>
 #include <utility>
@@ -745,12 +746,8 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
           numel_reshaped *= size_reshaped;
         }
         else if (size_reshaped == -1) {
-          if (infer_index > -1) {
-            throw std::runtime_error("only one dimension can be inferred");
-          }
-          else {
-            infer_index = idim;
-          }
+          TORCH_CHECK(infer_index <= -1, "only one dimension can be inferred");
+          infer_index = idim;
         }
         else {
           TORCH_CHECK(false, "invalid shape dimension ", size_reshaped);

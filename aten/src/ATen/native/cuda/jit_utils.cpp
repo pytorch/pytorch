@@ -12,7 +12,7 @@
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/native/cuda/reduction_template.cuh>
-
+#include <c10/util/Exception.h>
 #include <sstream>
 #include <fstream>
 #include <cstdio>
@@ -1615,7 +1615,7 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
     std::string log(logsize, '\0');
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, &log[0]));
-    throw std::runtime_error(code + log);
+    TORCH_CHECK(false, code + log);
   }
 
   size_t ptx_size = 0;
