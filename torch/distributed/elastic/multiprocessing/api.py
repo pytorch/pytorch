@@ -19,12 +19,13 @@ import tempfile
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import IntFlag
 from multiprocessing import synchronize
 from types import FrameType
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure, record
@@ -875,8 +876,7 @@ class SubprocessContext(PContext):
             for local_rank in range(self.nprocs)
         }
 
-    def _poll(self) -> Optional[RunProcsResult]:
-        done_local_ranks = set()
+    def _capture_process_failures(self, done_local_ranks: set[int]):
         for local_rank in self._running_local_ranks:
             handler = self.subprocess_handlers[local_rank]
             exitcode = handler.proc.poll()
@@ -891,11 +891,19 @@ class SubprocessContext(PContext):
                     )
                 # else: --> succeeded; nothing to do
 
+    def _poll(self) -> Optional[RunProcsResult]:
+        done_local_ranks: set[int] = set()
+        self._capture_process_failures(done_local_ranks)
+
         self._running_local_ranks.difference_update(done_local_ranks)
 
         # if ALL procs are finished or ANY have failed
         if not self._running_local_ranks or self._failures:
             self.close()  # terminate all running procs
+            self._capture_process_failures(
+                done_local_ranks
+            )  # log sigterms and sigkill exit codes in the self._failures for bookkeeping purposes
+
             result = RunProcsResult(
                 failures=self._failures,
                 stdouts=self.stdouts,

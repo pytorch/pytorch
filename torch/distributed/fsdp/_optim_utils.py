@@ -351,7 +351,7 @@ def _broadcast_state(
         if isinstance(state, torch.Tensor):
             assert state.dim() == 0, (
                 "For non-zero ranks, a tensor state should have zero dimension, "
-                "but got the state with shape {state.shape()}."
+                f"but got the state with shape {state.shape}."
             )
             return state
         elif not isinstance(state, _PosDimTensorInfo):
@@ -426,7 +426,7 @@ def _flatten_optim_state_dict(
     Note that ``_flatten_tensor_optim_state`` does not need ``optim`` to
     flatten/shard the state. However, NamedOptimizer and KeyedOptimizer require
     all the states even if the corresponding parameters are empty. To this end,
-    ``optim`` will be used to to get the initial state of the empty parameters.
+    ``optim`` will be used to get the initial state of the empty parameters.
     ``optim`` should only be non-None if the ``optim` is KeyedOptimizer or
     NamedOptimizer.
 
@@ -603,6 +603,7 @@ def _flatten_optim_state(
     ]
     # Check that the unflattened parameters have the same state names
     state_names = None
+    # pyrefly: ignore  # bad-assignment
     for unflat_param_state in unflat_param_states:
         if unflat_param_state is None:
             continue
@@ -918,6 +919,7 @@ def _rekey_sharded_optim_state_dict(
         flat_param_key = unflat_param_names_to_flat_param_key.get(
             key.unflat_param_names, key.unflat_param_names
         )
+        # pyrefly: ignore  # unsupported-operation
         rekeyed_osd_state[flat_param_key] = param_state
 
     # Only process param_groups if it exists in sharded_osd
@@ -980,6 +982,7 @@ def _get_param_id_to_param_from_optim_input(
     if optim_input is None:
         return dict(enumerate(model.parameters()))
     try:
+        # pyrefly: ignore  # no-matching-overload
         params = cast(list[nn.Parameter], list(optim_input))
     except TypeError as e:
         raise TypeError(
@@ -1508,8 +1511,7 @@ def _allgather_orig_param_states(
         return output_states
 
     has_state_params: list[bool] = [
-        True if fqn in output_states else False
-        for fqn, idx in fsdp_param_info.param_indices.items()
+        fqn in output_states for fqn, idx in fsdp_param_info.param_indices.items()
     ]
 
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,

@@ -36,6 +36,7 @@ from .ctx_manager import (
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
     FSDPParamGroupUseTrainingStateVariable,
+    FxTracebackAnnotateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
@@ -47,6 +48,7 @@ from .ctx_manager import (
     StreamVariable,
     TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
+    WithEnterFunctionVariable,
     WithExitFunctionVariable,
 )
 from .dicts import (
@@ -230,6 +232,7 @@ __all__ = [
     "UserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
+    "WithEnterFunctionVariable",
     "WithExitFunctionVariable",
     "MappingProxyVariable",
 ]
