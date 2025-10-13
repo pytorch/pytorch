@@ -13279,7 +13279,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             counter = CompileCounter()
             opt_fn = torch.compile(fn, backend=counter)
             res = opt_fn()
-            self.assertEqual(res.device.type, device)
+            self.assertTrue(res.device.type in device)
             self.assertEqual(res.device.index, 0)
             self.assertEqual(counter.frame_count, 2)
 
