@@ -73,17 +73,19 @@ class _NormPartial(Partial):
 
     norm_type: Union[int, float, str] = 2
 
-    def __post_init__(self):
-        """Set the appropriate reduce op based on the norm type."""
-        # Use `object.__setattr__` to bypass frozen checks
-        if self.norm_type in (float("inf"), "inf"):
-            object.__setattr__(self, "reduce_op", "max")
-        elif self.norm_type in (float("-inf"), "-inf"):
-            object.__setattr__(self, "reduce_op", "min")
-        elif isinstance(self.norm_type, (int, float)):
-            object.__setattr__(self, "reduce_op", "sum")
+    def __init__(self, norm_type: Union[int, float, str] = 2):
+        reduce_op = None
+        if norm_type in (float("inf"), "inf"):
+            reduce_op = "max"
+        elif norm_type in (float("-inf"), "-inf"):
+            reduce_op = "min"
+        elif isinstance(norm_type, (int, float)):
+            reduce_op = "sum"
         else:
-            raise NotImplementedError(f"Unsupported norm type: {self.norm_type}")
+            raise NotImplementedError(f"Unsupported norm type: {norm_type}")
+
+        super().__init__(reduce_op)
+        object.__setattr__(self, "norm_type", norm_type)
 
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
