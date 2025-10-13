@@ -31,7 +31,7 @@ if not IS_WINDOWS:
 
             # Create a test tensor
             input_tensor = torch.ones(1, 3)
-            if os.environ.get("TARGET", "0") == "V3":
+            if os.environ.get("TARGET", "0") != "V1" and os.environ.get("TARGET", "0") != "V2":
                 expected_result = torch.empty_like(input_tensor).fill_(42 * 2)
             else:
                 expected_result = torch.empty_like(input_tensor).fill_(42)
