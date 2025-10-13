@@ -1184,13 +1184,12 @@ def repeat_interleave_Tensor(
         return NotImplemented
     if repeat.device.type == "mps":
         return NotImplemented
-    assert repeat.dtype in [torch.int32, torch.int64]
-    assert repeat.ndim == 1
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
-    return torch.searchsorted(
+    indices = torch.searchsorted(
         cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True
     )
+    return torch.clamp(indices, max=repeat.size(0) - 1)
 
 
 # intentionally not regiestered
