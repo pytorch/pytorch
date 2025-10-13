@@ -1198,8 +1198,22 @@ def repeat(x, repeats):
 @register_lowering(aten._unsafe_view, type_promotion_kind=None)
 @register_lowering(aten.view, type_promotion_kind=None)
 @register_lowering(aten.reshape, type_promotion_kind=None)
+
 def view(x: TensorBox, sizes: Sequence[sympy.Expr]) -> TensorBox:
-    return TensorBox(View.create(x.data, sizes))
+    old_size = x.get_size()
+    new_size = [V.graph.sizevars.simplify(s) for s in sizes]
+
+    if V.graph.sizevars.statically_known_list_equals(old_size, new_size):
+        return x
+
+    if is_contiguous_storage_and_layout(x):
+        x.view_metadata(new_size)
+        return x
+
+    if is_stride_compatible(x.get_stride(), old_size, new_size):
+        x.view_metadata(new_size)
+        return x
+    return TensorBox(View.create(x.data, new_size))
 
 
 @register_lowering(aten.permute, type_promotion_kind=None)
