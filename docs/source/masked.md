@@ -52,7 +52,7 @@ allows the user to systematically ignore any elements they'd like during computa
 
 There are already a number of existing tutorials that we've written to help users onboard, such as:
 
-- Overview – the place to start for new users, discusses how to use MaskedTensors and why they're useful
+- [Overview – the place to start for new users, discusses how to use MaskedTensors and why they're useful](https://pytorch.org/tutorials/prototype/maskedtensor_overview.html)
 - Sparsity – MaskedTensor supports sparse COO and CSR data and mask Tensors
 - Adagrad sparse semantics – a practical example of how MaskedTensor can simplify sparse semantics and implementations
 - Advanced semantics – discussion on why certain decisions were made (e.g. requiring masks to match for binary/reduction operations), differences with NumPy's MaskedArray, and reduction semantics
@@ -220,7 +220,7 @@ The available inplace binary operators are all of the above **except**:
 ### Reductions
 
 The following reductions are available (with autograd support). For more information, the
-Overview tutorial details some examples of reductions, while the
+[Overview](https://pytorch.org/tutorials/prototype/maskedtensor_overview.html) tutorial details some examples of reductions, while the
 Advanced semantics tutorial has some further in-depth discussions about how we decided on certain reduction semantics.
 
 ```{eval-rst}
