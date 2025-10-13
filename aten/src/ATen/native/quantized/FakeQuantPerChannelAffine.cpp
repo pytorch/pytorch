@@ -51,7 +51,7 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   TORCH_CHECK(scale.scalar_type() == ScalarType::Float || scale.scalar_type() == at::kBFloat16,
               "Scale must be Float or BFloat16, found ", scale.scalar_type());
   TORCH_CHECK(zero_point.scalar_type() == ScalarType::Int || zero_point.scalar_type() == ScalarType::Float || zero_point.scalar_type() == ScalarType::Half,
-              "Zero-point must be Int32, Float, or Half, found ", zero_point.scalar_type());
+              "Zero-point must be Int32, Float or Half, found ", zero_point.scalar_type());
   TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
   TORCH_CHECK(zero_point.dim() == 1, "zero point should be a 1-D tensor");
   TORCH_CHECK(
