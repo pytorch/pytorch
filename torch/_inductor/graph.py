@@ -2393,7 +2393,7 @@ class GraphLowering(torch.fx.Interpreter):
                 V.graph.all_codegen_kernel_names,
             )
 
-            if config.triton.autotune_full_graph:
+            if V.aot_compilation and config.triton.autotune_full_graph and config.triton.autotune_at_compile_time:
                 # If we're doing full graph autotuning, we need to generate the autotuning wrapper code
                 # and the autotuning kernels
                 original_wrapper_code = self.wrapper_code.original_wrapper_code
