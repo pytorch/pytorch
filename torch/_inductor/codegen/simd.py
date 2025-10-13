@@ -12,7 +12,6 @@ import operator
 import textwrap
 from collections import Counter
 from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeVar
 
 import sympy
 
@@ -30,6 +29,7 @@ from torch.utils._sympy.symbol import (
     symbol_is_type,
     SymT,
 )
+from typing_extensions import TypeVar
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
@@ -719,9 +719,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
             return_getters_groups.append(return_getters)
 
-        assert all(V.graph.sizevars.size_hint(s) == 1 for s in remaining), (
-            f"failed to set ranges {remaining} {lengths}"
-        )
+        assert all(
+            V.graph.sizevars.size_hint(s) == 1 for s in remaining
+        ), f"failed to set ranges {remaining} {lengths}"
 
         return new_ranges, return_getters_groups
 
@@ -1090,25 +1090,33 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                     log.warning(msg)
 
                     stride_order_list = [
-                        ir.get_stride_order(
-                            V.graph.get_buffer(name).get_layout().stride
+                        (
+                            ir.get_stride_order(
+                                V.graph.get_buffer(name).get_layout().stride
+                            )
+                            if V.graph.try_get_buffer(name)
+                            else None
                         )
-                        if V.graph.try_get_buffer(name)
-                        else None
                         for name in call_args
                     ]
                     size_list = [
-                        V.graph.get_buffer(name).get_layout().size
-                        if V.graph.try_get_buffer(name)
-                        else None
+                        (
+                            V.graph.get_buffer(name).get_layout().size
+                            if V.graph.try_get_buffer(name)
+                            else None
+                        )
                         for name in call_args
                     ]
                     source_list = [
-                        "GraphInput"
-                        if name in V.graph.graph_inputs
-                        else "IntermediateBuffer"
-                        if name in V.graph.name_to_buffer
-                        else None
+                        (
+                            "GraphInput"
+                            if name in V.graph.graph_inputs
+                            else (
+                                "IntermediateBuffer"
+                                if name in V.graph.name_to_buffer
+                                else None
+                            )
+                        )
                         for name in call_args
                     ]
 
@@ -1504,24 +1512,35 @@ class SIMDScheduling(BaseScheduling):
         V.graph.removed_buffers |= final_kernel.removed_buffers
         V.graph.inplaced_to_remove |= final_kernel.inplaced_to_remove
 
-        if (
-            V.graph.wrapper_code.supports_intermediate_hooks  # type: ignore[has-type]
-            and config.generate_intermediate_hooks
-        ):
-            # Not every node in the schedule will actually be live on output;
-            # we can't check dead buffers.
-            live_outs = kernels[0].args.live_output_buffers()
-            for node in kernel_features.scheduler_nodes():
-                name = node.get_name()
-                if name not in live_outs:
-                    continue
-                assert node.node is not None
-                origin_node = node.node.get_origin_node()
-                if origin_node is not None:
-                    counters["inductor"]["intermediate_hooks"] += 1
-                    V.graph.wrapper_code.writeline(
-                        f"run_intermediate_hooks({origin_node.name!r}, {name})"
-                    )
+        wrapper = V.graph.wrapper_code
+
+        def process_intermediate_hooks_for_wrapper(w):
+            if (
+                w.supports_intermediate_hooks  # type: ignore[has-type]
+                and config.generate_intermediate_hooks
+            ):
+                # Not every node in the schedule will actually be live on output;
+                # we can't check dead buffers.
+                live_outs = kernels[0].args.live_output_buffers()
+                for node in kernel_features.scheduler_nodes():
+                    name = node.get_name()
+                    if name not in live_outs:
+                        continue
+                    assert node.node is not None
+                    origin_node = node.node.get_origin_node()
+                    if origin_node is not None:
+                        counters["inductor"]["intermediate_hooks"] += 1
+                        w.writeline(
+                            f"run_intermediate_hooks({origin_node.name!r}, {name})"
+                        )
+
+        # Handle DualWrapperCodegen case
+        from ..codegen.wrapper import DualWrapperCodegen
+
+        if isinstance(wrapper, DualWrapperCodegen):
+            wrapper.for_each_wrapper(process_intermediate_hooks_for_wrapper)
+        else:
+            process_intermediate_hooks_for_wrapper(wrapper)
 
         self.free_buffers_in_scheduler()
 
@@ -1737,9 +1756,11 @@ class SIMDScheduling(BaseScheduling):
         shapes = self._get_multikernel_shapes(node)
         return tuple(
             tuple(
-                hint
-                if isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer)
-                else s
+                (
+                    hint
+                    if isinstance(s, sympy.Expr) and not isinstance(s, sympy.Integer)
+                    else s
+                )
                 for s in shape
             )
             for shape in shapes

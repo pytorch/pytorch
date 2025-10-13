@@ -5626,19 +5626,27 @@ class ExternKernel(InputsKernel):
     def codegen_comment(
         self, wrapper: PythonWrapperCodegen, kernel_name: Optional[str] = None
     ) -> None:
-        origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
-        if origin_str:
-            wrapper.make_comment(origin_str)
+        def generate_comment_for_wrapper(w):
+            origin_str, _detailed_origin_str = get_kernel_metadata(self, w)
+            if origin_str:
+                w.make_comment(origin_str)
 
-        if not kernel_name:
-            kernel_name = self.try_get_kernel_name()
-        if kernel_name:
-            from .debug import set_kernel_post_grad_provenance_tracing
+            if not kernel_name:
+                kernel_name = self.try_get_kernel_name()
+            if kernel_name:
+                from .debug import set_kernel_post_grad_provenance_tracing
 
-            debug_handle = set_kernel_post_grad_provenance_tracing(
-                self, kernel_name, is_extern=True
-            )
-            wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
+                debug_handle = set_kernel_post_grad_provenance_tracing(
+                    self, kernel_name, is_extern=True
+                )
+                w.write_provenance_debug_handle(kernel_name, debug_handle)
+        
+        # Handle DualWrapperCodegen case
+        from .codegen.wrapper import DualWrapperCodegen
+        if isinstance(wrapper, DualWrapperCodegen):
+            wrapper.for_each_wrapper(generate_comment_for_wrapper)
+        else:
+            generate_comment_for_wrapper(wrapper)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         raise NotImplementedError

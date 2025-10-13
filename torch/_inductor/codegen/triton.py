@@ -4737,23 +4737,32 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None):
         wrapper = V.graph.wrapper_code
-        wrapper.write_triton_header_once()
-        _, call_args, _, arg_types = self.args.python_argdefs()
-        self.add_numel_to_call_args(name, call_args, arg_types)
+        
+        def call_kernel_for_wrapper(w):
+            w.write_triton_header_once()
+            _, call_args, _, arg_types = self.args.python_argdefs()
+            self.add_numel_to_call_args(name, call_args, arg_types)
 
-        for ws in self.args.workspace_args:
-            wrapper.generate_workspace_allocation(ws)
+            for ws in self.args.workspace_args:
+                w.generate_workspace_allocation(ws)
 
-        wrapper.generate_kernel_call(
-            name,
-            call_args,
-            triton=True,
-            arg_types=arg_types,
-            triton_meta=self.triton_meta,
-        )
+            w.generate_kernel_call(
+                name,
+                call_args,
+                triton=True,
+                arg_types=arg_types,
+                triton_meta=self.triton_meta,
+            )
 
-        for ws in reversed(self.args.workspace_args):
-            wrapper.generate_workspace_deallocation(ws)
+            for ws in reversed(self.args.workspace_args):
+                w.generate_workspace_deallocation(ws)
+        
+        # Handle DualWrapperCodegen case
+        from ..codegen.wrapper import DualWrapperCodegen
+        if isinstance(wrapper, DualWrapperCodegen):
+            wrapper.for_each_wrapper(call_kernel_for_wrapper)
+        else:
+            call_kernel_for_wrapper(wrapper)
 
     def codegen_nan_check(self) -> None:
         wrapper = V.graph.wrapper_code
@@ -5019,9 +5028,18 @@ class TritonScheduling(SIMDScheduling):
 
     def codegen_comment(self, node_schedule, kernel_name=None):
         wrapper = V.graph.wrapper_code
-        origins, _detailed_origins = get_kernel_metadata(node_schedule, wrapper)
-        if origins:
-            wrapper.make_comment(origins)
+        
+        def generate_comment_for_wrapper(w):
+            origins, _detailed_origins = get_kernel_metadata(node_schedule, w)
+            if origins:
+                w.make_comment(origins)
+        
+        # Handle DualWrapperCodegen separately since get_kernel_metadata doesn't support it
+        from ..codegen.wrapper import DualWrapperCodegen
+        if isinstance(wrapper, DualWrapperCodegen):
+            wrapper.for_each_wrapper(generate_comment_for_wrapper)
+        else:
+            generate_comment_for_wrapper(wrapper)
 
         if config.debug_fusion:
             from torch._inductor.scheduler import (
@@ -5039,9 +5057,16 @@ class TritonScheduling(SIMDScheduling):
                     for n in node_schedule
                     if isinstance(n, BaseSchedulerNode)
                 ]
-                wrapper.make_comment(
-                    f"{wrapper.comment} Fused node name list: {', '.join(node_names)}"
-                )
+                def make_comment_for_wrapper(w):
+                    w.make_comment(
+                        f"{w.comment} Fused node name list: {', '.join(node_names)}"
+                    )
+                  
+                from ..codegen.wrapper import DualWrapperCodegen
+                if isinstance(wrapper, DualWrapperCodegen):
+                    wrapper.for_each_wrapper(make_comment_for_wrapper)
+                else:
+                    make_comment_for_wrapper(wrapper)
 
         if kernel_name:
             debug_handle = set_kernel_post_grad_provenance_tracing(
@@ -5070,7 +5095,14 @@ class TritonScheduling(SIMDScheduling):
                 kernel_name = f"{config.aot_inductor.model_name_for_generated_files}_{kernel_name}"
 
             # use the original src_code as the key
-            wrapper.src_to_kernel[src_code] = kernel_name
+            def set_src_to_kernel(w):
+                w.src_to_kernel[src_code] = kernel_name
+            
+            from ..codegen.wrapper import DualWrapperCodegen
+            if isinstance(wrapper, DualWrapperCodegen):
+                wrapper.for_each_wrapper(set_src_to_kernel)
+            else:
+                set_src_to_kernel(wrapper)
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
 
             # DESCRIPTIVE_NAME is used for profiling purposes; it shows the full kernel name
@@ -5097,13 +5129,20 @@ class TritonScheduling(SIMDScheduling):
             compile_wrapper.splice(src_code, strip=True)
             current_device = V.graph.get_current_device_or_throw()
             compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
-
-            metadata_comment = f"# kernel path: {kernel_path}"
-            origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
-            metadata_comment += "\n" + origins + "\n" + detailed_origins
-            wrapper.define_kernel(
-                kernel_name, compile_wrapper.getvalue(), metadata_comment
-            )
+            def define_kernel_for_wrapper(w):
+                metadata_comment = f"# kernel path: {kernel_path}"
+                origins, detailed_origins = get_kernel_metadata(node_schedule, w)
+                metadata_comment += "\n" + origins + "\n" + detailed_origins
+                w.define_kernel(
+                    kernel_name, compile_wrapper.getvalue(), metadata_comment
+                )
+            
+            # Handle DualWrapperCodegen separately since get_kernel_metadata doesn't support it
+            from ..codegen.wrapper import DualWrapperCodegen
+            if isinstance(wrapper, DualWrapperCodegen):
+                wrapper.for_each_wrapper(define_kernel_for_wrapper)
+            else:
+                define_kernel_for_wrapper(wrapper)
 
             # log kernel metadata for offline analysis.
             # E.g. one can find all unaligned inner reduction and check if
