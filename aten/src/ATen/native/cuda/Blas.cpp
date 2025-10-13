@@ -2803,9 +2803,13 @@ _scaled_grouped_mm_cuda(
       out);
 }
 
+namespace {
+
 std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 2> scale_grouped_kernel_dispatch = {{
   { "rowwise_rowwise", check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "mxfp8_mxfp8", check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8}}};
+
+} // anonymous namespace
 
 Tensor
 _scaled_grouped_mm_cuda_v2(
