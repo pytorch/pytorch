@@ -48,6 +48,7 @@ class WindowsCrossCompilationTestFramework:
     """
 
     _base_path: Optional[Path] = None
+    _win_torch_libs_path: Optional[str] = None
 
     @classmethod
     def base_path(cls) -> Path:
@@ -62,11 +63,23 @@ class WindowsCrossCompilationTestFramework:
         cls._base_path = path
 
     @classmethod
+    def set_win_torch_libs_path(cls, path: Optional[str] = None) -> None:
+        """Set the path for Windows torch libs."""
+        cls._win_torch_libs_path = path
+
+    @classmethod
     def get_package_path(cls, model_name: str) -> str:
         """Get the path for a model's .pt2 package file."""
         package_dir = cls.base_path()
         package_dir.mkdir(parents=True, exist_ok=True)
         return str(package_dir / f"{model_name}_windows.pt2")
+
+    @classmethod
+    def get_win_torch_libs_path(cls) -> str:
+        """Get the path for Windows torch libs."""
+        if cls._win_torch_libs_path is None:
+            raise RuntimeError("Windows torch libs path not set")
+        return str(cls._win_torch_libs_path)
 
     @classmethod
     def create_compile_test(cls, config: ModelTestConfig):
@@ -83,6 +96,8 @@ class WindowsCrossCompilationTestFramework:
 
             if not HAS_GPU:
                 raise unittest.SkipTest("Test requires GPU")
+
+            self.assertTrue("WINDOWS_CUDA_HOME" in os.environ)
 
             with torch.no_grad():
                 # Windows cross-compilation is only used for GPU.
@@ -103,6 +118,9 @@ class WindowsCrossCompilationTestFramework:
                 inductor_configs = {
                     "aot_inductor.cross_target_platform": "windows",
                     "aot_inductor.precompile_headers": False,
+                    "aot_inductor.package_constants_on_disk_format": "binary_blob",
+                    "aot_inductor.package_constants_in_so": False,
+                    "aot_inductor.aoti_shim_library_path": cls.get_win_torch_libs_path(),
                 }
                 if config.inductor_configs:
                     inductor_configs.update(config.inductor_configs)
@@ -320,6 +338,7 @@ if __name__ == "__main__":
 
     # Check for --package-dir argument and remove it before unittest sees it
     package_dir = None
+    win_torch_lib_dir = None
     filtered_argv = []
     i = 0
     while i < len(sys.argv):
@@ -332,6 +351,16 @@ if __name__ == "__main__":
                 sys.exit(1)
         elif sys.argv[i].startswith("--package-dir="):
             package_dir = sys.argv[i].split("=", 1)[1]
+            i += 1
+        elif sys.argv[i] == "--win-torch-lib-dir":
+            if i + 1 < len(sys.argv):
+                win_torch_lib_dir = sys.argv[i + 1]
+                i += 2  # Skip both --win-torch-lib-dir and its value
+            else:
+                print("Error: --win-torch-lib-dir requires a valid directory path")
+                sys.exit(1)
+        elif sys.argv[i].startswith("--win-torch-lib-dir="):
+            win_torch_lib_dir = sys.argv[i].split("=", 1)[1]
             i += 1
         else:
             filtered_argv.append(sys.argv[i])
@@ -350,6 +379,11 @@ if __name__ == "__main__":
         except Exception:
             print("Error: --package-dir requires a valid directory path")
             sys.exit(1)
+
+    # Set Windows torch libs path if provided
+    if win_torch_lib_dir is None:
+        raise RuntimeError("Windows torch libs path not set")
+    WindowsCrossCompilationTestFramework.set_win_torch_libs_path(win_torch_lib_dir)
 
     # Update sys.argv to remove our custom arguments
     sys.argv = filtered_argv
