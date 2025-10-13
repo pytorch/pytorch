@@ -80,6 +80,7 @@ class StableLibrary final {
   //    [stable_arg1, stable_arg2, stable_arg3, stable_arg4]
   // to end, fn should fill the stack with 2 StableIValues representing outputs:
   //    [stable_ret1, stable_ret2, -, -]
+
   StableLibrary& impl(
       const char* name,
       void (*fn)(StableIValue*, uint64_t, uint64_t)) {

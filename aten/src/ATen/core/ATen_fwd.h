@@ -44,3 +44,8 @@ using c10::SymIntList;
 using c10::TensorOptions;
 
 }  // namespace at
+
+// Forward declarations for dummy types used in operator signatures
+namespace dummy_types {
+struct Dummy;
+} // namespace dummy_types

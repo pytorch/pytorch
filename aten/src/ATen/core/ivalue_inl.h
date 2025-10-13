@@ -29,6 +29,8 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 
+#include <torch/headeronly/dummy.h>
+
 namespace torch {
 namespace jit {
 struct Function;
@@ -1931,6 +1933,11 @@ std::optional<T> generic_to(IValue ivalue, _fake_type<std::optional<T>> /*unused
     return std::nullopt;
   }
   return std::move(ivalue).template to<T>();
+}
+
+template<>
+inline dummy_types::Dummy generic_to(IValue ivalue, _fake_type<dummy_types::Dummy> /*unused*/) {
+  return ivalue.toDummy();
 }
 
 namespace detail {
