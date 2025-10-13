@@ -4591,7 +4591,9 @@ class TestCudaMallocAsync(TestCase):
             torch._C._accelerator_setAllocatorSettings("max_split_size_mb:2")
 
         with self.assertRaises(ValueError):
-            torch._C._accelerator_setAllocatorSettings("release_lock_on_cudamalloc:none")
+            torch._C._accelerator_setAllocatorSettings(
+                "release_lock_on_cudamalloc:none"
+            )
 
         with self.assertRaises(ValueError):
             torch._C._accelerator_setAllocatorSettings(
