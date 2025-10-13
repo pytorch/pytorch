@@ -464,7 +464,7 @@ class TestMisc(JitTestCase):
         graph = torch._C.parse_ir(ir, True)
         func = torch._C._create_function_from_graph("forward", graph)
         ret = func()
-        self.assertTrue(ret == True)
+        self.assertTrue(ret == True) # noqa: E712
 
     def test_parse_ir_bool_false(self):
         ir = """
@@ -475,7 +475,7 @@ class TestMisc(JitTestCase):
         graph = torch._C.parse_ir(ir, True)
         func = torch._C._create_function_from_graph("forward", graph)
         ret = func()
-        self.assertTrue(ret == False)
+        self.assertTrue(ret == False) # noqa: E712
 
     def test_script_many_decorators(self):
         def no_op_decorator(f):
