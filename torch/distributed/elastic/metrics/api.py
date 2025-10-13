@@ -171,12 +171,15 @@ def profile(group=None):
             try:
                 start_time = time.time()
                 result = func(*args, **kwargs)
+                # pyrefly: ignore  # bad-argument-type
                 publish_metric(group, f"{func.__name__}.success", 1)
             except Exception:
+                # pyrefly: ignore  # bad-argument-type
                 publish_metric(group, f"{func.__name__}.failure", 1)
                 raise
             finally:
                 publish_metric(
+                    # pyrefly: ignore  # bad-argument-type
                     group,
                     f"{func.__name__}.duration.ms",
                     get_elapsed_time_ms(start_time),  # type: ignore[possibly-undefined]

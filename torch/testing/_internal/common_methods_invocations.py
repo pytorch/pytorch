@@ -9346,7 +9346,7 @@ def sample_inputs_multi_head_attention_forward(opinfo, device, dtype, requires_g
             "k_proj_weight" : k_proj_weight,
             "v_proj_weight" : v_proj_weight,
             "attn_mask" : attn_mask,
-            "training" : True if dropout_p > 0.0 else False,
+            "training" : dropout_p > 0.0,
             "use_separate_proj_weight" : use_separate_proj_weight
         }
 
