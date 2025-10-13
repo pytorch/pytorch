@@ -240,6 +240,8 @@ constexpr uint64_t TORCH_VERSION_2_8_0 =
     ((uint64_t)2 << 56) | ((uint64_t)8 << 48);
 constexpr uint64_t TORCH_VERSION_2_9_0 =
     ((uint64_t)2 << 56) | ((uint64_t)9 << 48);
+constexpr uint64_t TORCH_VERSION_2_10_0 =
+    ((uint64_t)2 << 56) | ((uint64_t)10 << 48);
 
 #if TORCH_FEATURE_VERSION >= (((0ULL + 2) << 56) | ((0ULL + 8 << 48)))
 
@@ -257,11 +259,19 @@ inline torch::stable::Tensor op(
         "aten::_test_versioning", "", stack.data(), TORCH_ABI_VERSION));
     return to<torch::stable::Tensor>(stack[0]);
   } else {
+    StableIValue scale_val = scale.has_value() ? from(scale.value()) :
+    #if TORCH_FEATURE_VERSION <= (((0ULL + 2) << 56) | ((0ULL + 9) << 48))
+        from(1);
+    #else
+        from(2);
+    #endif
+
     const auto num_args = 3;
     std::array<StableIValue, num_args> stack{
         from(self),
         from(dummy),
-        scale.has_value() ? from(scale.value()) : from(1)};
+        scale_val};
+
     TORCH_ERROR_CODE_CHECK(aoti_torch_call_dispatcher_v2(
         "aten::_test_versioning", "", stack.data(), TORCH_ABI_VERSION));
     return to<torch::stable::Tensor>(stack[0]);
