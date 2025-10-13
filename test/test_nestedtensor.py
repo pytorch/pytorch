@@ -7915,9 +7915,13 @@ torch.cuda.synchronize()
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
-                if dtype is torch.bool
-                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                (
+                    torch.randint(
+                        2, (n, *post_seq_len_shape), device=device, dtype=dtype
+                    )
+                    if dtype is torch.bool
+                    else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                )
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7966,9 +7970,13 @@ torch.cuda.synchronize()
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
-                if dtype is torch.bool
-                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                (
+                    torch.randint(
+                        2, (n, *post_seq_len_shape), device=device, dtype=dtype
+                    )
+                    if dtype is torch.bool
+                    else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                )
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -8713,7 +8721,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # min() / max(): weird bug
     XFailRule(
         error_type=AttributeError,
-        error_msg="'ConstantIntNode' object has no attribute 'add'",
+        error_msg="'NestedIntNode' object has no attribute 'add'",
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
@@ -8730,7 +8738,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(
         error_type=AttributeError,
-        error_msg="'ConstantIntNode' object has no attribute 'add'",
+        error_msg="'NestedIntNode' object has no attribute 'add'",
         op_match_fn=lambda device, op: (op.full_name == "copysign"),
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_copysign_compile_backward",

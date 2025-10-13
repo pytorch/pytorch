@@ -2047,6 +2047,10 @@ def export(
                 capture_scalar_outputs=True,
                 constant_fold_autograd_profiler_enabled=True,
                 prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                # install_free_tensors ensures that params and buffers are still
+                # added as graph attributes, and makes Dynamo emits graphs that
+                # follow export pytree-able input requirements
+                install_free_tensors=config.install_free_tensors_for_export,
             ),
             _compiling_state_context(),
         ):
