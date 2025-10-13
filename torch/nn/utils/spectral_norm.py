@@ -332,6 +332,7 @@ def spectral_norm(
         else:
             dim = 0
     SpectralNorm.apply(module, name, n_power_iterations, dim, eps)
+    # pyrefly: ignore  # bad-return
     return module
 
 
