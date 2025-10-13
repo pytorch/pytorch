@@ -15,6 +15,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
     detect_compiled_autograd,
+    FSDPMeshInfo,
     HSDPMeshInfo,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
@@ -24,7 +25,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _init_default_fully_shard_mesh,
     _move_states_to_device,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.fsdp._fully_shard._fsdp_state import (
     _register_group_forward_hooks,
     FSDPState,
@@ -37,6 +37,9 @@ from torch.distributed.tensor import DeviceMesh, init_device_mesh
 from torch.distributed.utils import _get_root_modules
 
 from .contract import _get_registry, contract
+
+# from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from .replicate_param_group import FSDPParamGroup
 
 
 if TYPE_CHECKING:
@@ -184,7 +187,7 @@ def replicate_impl(
         )
 
     mesh = mesh or _init_default_fully_shard_mesh()
-    if mesh.ndim != 2:
+    if mesh.ndim != 1:
         raise ValueError(f"replicate expects a 2D DeviceMesh but got {mesh}")
 
     else:
@@ -192,7 +195,7 @@ def replicate_impl(
             raise AssertionError(
                 "Please init the 2D mesh for HSDP with mesh_dim_names specified"
             )
-        mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
+        mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
     auto_reshard_after_forward = reshard_after_forward is None
     # If the user does not provide ``reshard_after_forward``, we set it to True.
@@ -341,8 +344,8 @@ def replicate_mesh():
     device = torch._C._get_accelerator()
     mesh = init_device_mesh(
         device.type,
-        mesh_shape=(default_pg.size(), 1),
-        mesh_dim_names=("replicate", "shard"),
+        mesh_shape=(default_pg.size(),),
+        mesh_dim_names=("replicate",),
     )
     return mesh
 
