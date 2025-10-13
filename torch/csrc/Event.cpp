@@ -84,9 +84,7 @@ static void THPEvent_dealloc(THPEvent* self) {
     pybind11::gil_scoped_release no_gil{};
     self->event.~Event();
   }
-  if (self->weakreflist != nullptr) {
-    PyObject_ClearWeakRefs((PyObject*)self);
-  }
+  PyObject_ClearWeakRefs((PyObject*)self);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -305,7 +303,10 @@ PyTypeObject THPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
     offsetof(THPEvent, weakreflist), /* tp_weaklistoffset */
+#pragma GCC diagnostic pop
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPEvent_methods, /* tp_methods */
