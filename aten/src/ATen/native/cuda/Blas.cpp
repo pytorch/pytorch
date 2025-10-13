@@ -2574,7 +2574,9 @@ _mx8_mx8_bf16_grouped_mm_fbgemm(
         const Tensor& mat_a,
         const Tensor& mat_b,
         const Tensor& scale_a,
+        const SwizzleType& swizzle_a,
         const Tensor& scale_b,
+        const SwizzleType& swizzle_b,
         const std::optional<at::Tensor>& offs,
         Tensor& out) {
     const bool a_is_2d = mat_a.dim() == 2;
@@ -2585,6 +2587,11 @@ _mx8_mx8_bf16_grouped_mm_fbgemm(
     TORCH_CHECK_VALUE(is_2d_2d || is_2d_3d, "MXFP8 grouped GEMM currently only supports 2d-2d and 2d-3d cases");
     TORCH_CHECK_VALUE(offs.has_value(), "MXFP8 2d-2d and 2d-3d grouped GEMMs requires offsets");
     TORCH_CHECK_VALUE(out.scalar_type() == at::kBFloat16, "Only bf16 out_dtype is supported for MXFP8 grouped gemm");
+    // MXFP8 expects float8_e8m0fnu scales.
+    TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu,
+        "For MXFP8 grouped gemm, both scales must be float8_e8m0fnu tensors.");
+    TORCH_CHECK_VALUE(swizzle_a == SwizzleType::SWIZZLE_32_4_4 && swizzle_b == SwizzleType::SWIZZLE_32_4_4,
+        "For MXFP8 grouped gemm, both scale swizzle types must be SWIZZLE_32_4_4");
 
 #if defined(USE_FBGEMM_GENAI) and !defined(USE_ROCM)
     fbgemm_gpu::mx8mx8bf16_grouped_mm(
@@ -2669,6 +2676,9 @@ _f8_f8_bf16_rowwise_grouped_mm(
       const std::optional<Tensor>& bias,
       bool use_fast_accum,
       Tensor& out) {
+  // FP8 per-tensor and per-row scaling expect fp32 scales.
+  TORCH_CHECK_VALUE(scale_a.scalar_type() == kFloat && scale_b.scalar_type() == kFloat,
+      "For grouped FP8 rowwise, both scales must be float32 tensors");
 #ifndef USE_ROCM
   return _f8_f8_bf16_rowwise_grouped_mm_cuda(
       mat_a,
@@ -2768,11 +2778,15 @@ _scaled_grouped_mm_cuda(
 #endif
 
   if (is_mx8mx8bf16) {
+    // Note: Passing implied SwizzleType here, correctness of scale previously checked
+    //       in `check_scale` call
     return _mx8_mx8_bf16_grouped_mm_fbgemm(
         mat_a,
         mat_b,
         scale_a,
+        SwizzleType::SWIZZLE_32_4_4,
         scale_b,
+        SwizzleType::SWIZZLE_32_4_4,
         offs.value(),
         out);
   }
@@ -2843,11 +2857,6 @@ _scaled_grouped_mm_cuda_v2(
     TORCH_CHECK_VALUE(offs->dtype() == at::kInt, "Offsets have to be int32");
   }
 
-  const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
-  // TODO(slayton): handle multiple scales
-  check_scale(mat_a, scale_a[0], 0 ,0, scale_multiplier);
-  check_scale(mat_b, scale_b[0], 1, 1, scale_multiplier);
-
   const auto out_dtype_ = out_dtype.value_or(kBFloat16);
   TORCH_CHECK_VALUE(out_dtype_ == kBFloat16, "Only bf16 high precision output types are supported for grouped gemm");
 
@@ -2882,9 +2891,9 @@ _scaled_grouped_mm_cuda_v2(
 
   switch (gemm_impl) {
     case ScaledGemmImplementation::ROWWISE_ROWWISE:
-      // FP8 per-tensor and per-row scaling expect fp32 scales.
-      TORCH_CHECK_VALUE(scale_a[0].scalar_type() == kFloat && scale_b[0].scalar_type() == kFloat,
-          "For grouped FP8 rowwise, both scales must be float32 tensors");
+      const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
+      _check_scales_fp8_rowwise(mat_a, scale_a[0], 0 /* dim */ , 0 /* arg_idx */, scale_multiplier);
+      _check_scales_fp8_rowwise(mat_b, scale_b[0], 1 /* dim */ , 1 /* arg_idx */, scale_multiplier);
       return _f8_f8_bf16_rowwise_grouped_mm(
           mat_a,
           mat_b,
@@ -2895,16 +2904,15 @@ _scaled_grouped_mm_cuda_v2(
           use_fast_accum,
           out);
     case ScaledGemmImplementation::MXFP8_MXFP8:
-      // MXFP8 expects float8_e8m0fnu scales.
-      TORCH_CHECK_VALUE(scale_a[0].scalar_type() == at::kFloat8_e8m0fnu && scale_b[0].scalar_type() == at::kFloat8_e8m0fnu,
-          "For MXFP8 grouped gemm, both scales must be float8_e8m0fnu tensors.");
-      TORCH_CHECK_VALUE(swizzle_a_enum[0] == SwizzleType::SWIZZLE_32_4_4 && swizzle_b_enum[0] == SwizzleType::SWIZZLE_32_4_4,
-          "For MXFP8 grouped gemm, both scale swizzle types must be SWIZZLE_32_4_4");
+      _check_scales_mxfp8(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
+      _check_scales_mxfp8(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
       return _mx8_mx8_bf16_grouped_mm_fbgemm(
           mat_a,
           mat_b,
           scale_a[0],
+          swizzle_a_enum[0],
           scale_b[0],
+          swizzle_b_enum[0],
           offs.value(),
           out);
     default:
