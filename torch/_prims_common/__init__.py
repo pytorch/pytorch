@@ -4,22 +4,23 @@ from __future__ import annotations
 import operator
 import typing
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import reduce
 from typing import (
     Any,
-    Callable,
     cast,
     NamedTuple,
     Optional,
     overload,
     TYPE_CHECKING,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, TypeAlias
+from typing_extensions import deprecated
 
 import torch
 from torch import sym_float, sym_int, sym_max
@@ -305,7 +306,10 @@ def is_contiguous(a: TensorLikeType, false_if_dde=False) -> bool:
         guard_size_oblivious,
     )
 
-    maybe_guard_or_false = guard_or_false if false_if_dde else guard_size_oblivious
+    def eval_eager(x):
+        return bool(x)
+
+    maybe_guard_or_false = guard_or_false if false_if_dde else eval_eager
 
     if maybe_guard_or_false(a.numel() < 2):
         return True
@@ -388,7 +392,11 @@ def validate_memory_format(memory_format: torch.memory_format):
 
 
 def is_contiguous_for_memory_format(  # type: ignore[return]
-    a: Tensor, *, memory_format: torch.memory_format, false_if_dde=False
+    a: Tensor,
+    *,
+    memory_format: torch.memory_format,
+    false_if_dde=False,
+    # pyrefly: ignore  # bad-return
 ) -> bool:
     validate_memory_format(memory_format)
 
@@ -720,7 +728,7 @@ def validate_dim_length(length: int):
     """
 
     if isinstance(length, (int, torch.SymInt)):
-        torch._check_is_size(length)
+        torch._check(length >= 0)
     else:
         # sometimes called with sympy expression by inductor
         assert length >= 0
@@ -809,12 +817,16 @@ def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
 # mapping negative offsets to positive ones
 @overload
 def canonicalize_dims(
-    rank: int, indices: Sequence[int], wrap_scalar: bool = True
+    rank: int,
+    indices: Sequence[int],
+    wrap_scalar: bool = True,
+    # pyrefly: ignore  # bad-return
 ) -> tuple[int, ...]:
     pass
 
 
 @overload
+# pyrefly: ignore  # bad-return
 def canonicalize_dims(rank: int, indices: int, wrap_scalar: bool = True) -> int:
     pass
 
@@ -843,7 +855,7 @@ def is_same_shape(a: Sequence, b: Sequence) -> bool:
     return tuple(a) == tuple(b)
 
 
-def is_cpu_scalar_tensor(a: Any) -> bool:
+def is_cpu_scalar_tensor(a: object) -> TypeGuard[TensorLike]:
     return isinstance(a, TensorLike) and a.ndim == 0 and a.device.type == "cpu"
 
 
@@ -861,6 +873,7 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
 
     # Note: cannot initialize device to the first arg's device (it may not have one)
     device = None
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -908,6 +921,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
     """
     shape = None
 
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -934,6 +948,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     shape = None
     scalar_shape = None
 
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -990,6 +1005,7 @@ def extract_shape_from_varargs(
 
     # Handles tuple unwrapping
     if len(shape) == 1 and isinstance(shape[0], Sequence):
+        # pyrefly: ignore  # bad-assignment
         shape = shape[0]
 
     if validate:
@@ -1067,13 +1083,7 @@ def infer_size(shape: ShapeType, numel: int) -> tuple[int, ...]:
         # PyTorch, which prints sequences in square brackets.
         shape = list(shape)
         shape[dim] = numel // newsize
-        # NB: This is pretty important when you have unbacked SymInts.
-        # Suppose you have (i0, 12) resizing into (2, -1, 12).  The old
-        # range for i0 is typically [2, inf], which means if you divide
-        # by two the new range should be [1, inf].  But this is bad news
-        # if you have an unbacked SymInt: we need to reapply the unsound
-        # assumption that the size is >= 2.
-        torch._check_is_size(shape[dim])
+        torch._check(shape[dim] >= 0)
     return tuple(shape)
 
 
@@ -1291,6 +1301,7 @@ def get_higher_dtype(
 
         raise RuntimeError("Unexpected type given to _extract_dtype!")
 
+    # pyrefly: ignore  # bad-argument-type
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
@@ -1386,6 +1397,7 @@ def check_same_dtype(*args):
     full_dtype = None
     scalar_type = None
 
+    # pyrefly: ignore  # bad-assignment
     for arg in args:
         if isinstance(arg, Number):
             # Scalar type checking is disabled (and may be removed in the future)
@@ -1656,8 +1668,10 @@ def elementwise_dtypes(
 
         # Prefers dtype of tensors with one or more dimensions
         if one_plus_dim_tensor_dtype is not None:
+            # pyrefly: ignore  # bad-return
             return one_plus_dim_tensor_dtype
 
+        # pyrefly: ignore  # bad-return
         return zero_dim_tensor_dtype
 
     if highest_type is float:
