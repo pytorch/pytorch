@@ -126,9 +126,7 @@ def _all_gather_dtensor(
     All gather a DTensor in its sharded dimension and return the local tensor.
     """
     if root_mesh != tensor.device_mesh:
-        raise AssertionError(
-            "The device mesh of a tensor should be a root mesh."
-        )
+        raise AssertionError("The device mesh of a tensor should be a root mesh.")
 
     placements = list(copy.deepcopy(tensor.placements))
     # FSDP placements: [Shard(0)] -> [Replicate()]

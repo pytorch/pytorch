@@ -471,9 +471,7 @@ def _local_pre_load_state_dict_hook(
         return
     load_tensor = state_dict[fqn]
     if not isinstance(load_tensor, ShardedTensor):
-        raise AssertionError(
-            "Tensors in local_state_dict should be ShardedTensor."
-        )
+        raise AssertionError("Tensors in local_state_dict should be ShardedTensor.")
 
     # Convert the ShardedTensor to a Tensor.
     flat_param = _module_handle(fsdp_state, module).flat_param
@@ -483,7 +481,9 @@ def _local_pre_load_state_dict_hook(
     shards = load_tensor.local_shards()
     if valid_data_size > 0:
         if not len(shards):
-            raise AssertionError("load_local_state_dict assume one shard per ShardedTensor.")
+            raise AssertionError(
+                "load_local_state_dict assume one shard per ShardedTensor."
+            )
         load_tensor = shards[0].tensor
 
         # Get the metadata of the flat_param to decide whether to pad the loaded

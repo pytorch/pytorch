@@ -36,7 +36,9 @@ class _GeneralMultiDeviceReplicator(_MultiDeviceReplicator):
 
     def __init__(self, master_tensor: torch.Tensor) -> None:
         if not _is_supported_device(master_tensor):
-            raise AssertionError(f"Expected supported device, got {master_tensor.device}")
+            raise AssertionError(
+                f"Expected supported device, got {master_tensor.device}"
+            )
         self.master = master_tensor
         self._per_device_tensors: dict[torch.device, torch.Tensor] = {}
 
@@ -155,7 +157,9 @@ class ShardedGradScaler(GradScaler):
                     if self._scale is None:
                         self._lazy_init_scale_growth_tracker(val.device)
                     if self._scale is None:
-                        raise AssertionError("Expected _scale to be initialized, got None")
+                        raise AssertionError(
+                            "Expected _scale to be initialized, got None"
+                        )
                     stash.append(_GeneralMultiDeviceReplicator(self._scale))
                 scaled_val = val * stash[0].get(val.device)
                 # Here we ensure the return dtype is the same as the outputs dtype.
@@ -287,7 +291,9 @@ class ShardedGradScaler(GradScaler):
         Otherwise, scale is multiplied by the growth factor when the growth interval is reached.
         """
         if self._scale is None or self._growth_tracker is None:
-            raise AssertionError("Expected _scale and _growth_tracker to be initialized, got None")
+            raise AssertionError(
+                "Expected _scale and _growth_tracker to be initialized, got None"
+            )
 
         if found_inf.item() >= 1.0:
             self._scale *= self._backoff_factor

@@ -521,7 +521,9 @@ def _recursive_wrap(
             continue
         try:
             if isinstance(child, cast(type, wrapper_cls)):
-                raise AssertionError(f"Child module {child} is already wrapped by {wrapper_cls}")
+                raise AssertionError(
+                    f"Child module {child} is already wrapped by {wrapper_cls}"
+                )
         except TypeError:
             # wrapper_cls is a function as opposed to a class type, just bypass above check.
             pass

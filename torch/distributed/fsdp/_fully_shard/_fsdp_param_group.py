@@ -577,7 +577,9 @@ class FSDPParamGroup:
             if all_reduce_input is not None:
                 if self.device.type != "cpu":
                     if all_reduce_event is None:
-                        raise AssertionError("Expected all_reduce_event to be set for non-CPU device")
+                        raise AssertionError(
+                            "Expected all_reduce_event to be set for non-CPU device"
+                        )
                 self._all_reduce_state = AllReduceState(
                     all_reduce_input, all_reduce_event
                 )
@@ -761,19 +763,25 @@ class FSDPParamGroup:
             else self.mesh_info
         )
         if not isinstance(mesh_info, FSDPMeshInfo):
-            raise AssertionError(f"Expected mesh_info to be FSDPMeshInfo, got {type(mesh_info)}")
+            raise AssertionError(
+                f"Expected mesh_info to be FSDPMeshInfo, got {type(mesh_info)}"
+            )
         return mesh_info.shard_process_group
 
     @property
     def _reduce_scatter_process_group(self) -> dist.ProcessGroup:
         if not isinstance(self.mesh_info, FSDPMeshInfo):
-            raise AssertionError(f"Expected mesh_info to be FSDPMeshInfo, got {type(self.mesh_info)}")
+            raise AssertionError(
+                f"Expected mesh_info to be FSDPMeshInfo, got {type(self.mesh_info)}"
+            )
         return self.mesh_info.shard_process_group
 
     @property
     def _all_reduce_process_group(self) -> dist.ProcessGroup:
         if not isinstance(self.mesh_info, HSDPMeshInfo):
-            raise AssertionError(f"Expected mesh_info to be HSDPMeshInfo, got {type(self.mesh_info)}")
+            raise AssertionError(
+                f"Expected mesh_info to be HSDPMeshInfo, got {type(self.mesh_info)}"
+            )
         return self.mesh_info.replicate_process_group
 
     def _with_fqn(self, label: str) -> str:

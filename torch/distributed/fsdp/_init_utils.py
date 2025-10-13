@@ -711,7 +711,9 @@ def _get_ignored_modules(
         optional_fsdp_state = _get_module_fsdp_state(submodule)
         if optional_fsdp_state is not None:
             if not hasattr(optional_fsdp_state, "_ignored_modules"):
-                raise AssertionError("Expected optional_fsdp_state to have _ignored_modules attribute")
+                raise AssertionError(
+                    "Expected optional_fsdp_state to have _ignored_modules attribute"
+                )
             ignored_modules.update(optional_fsdp_state._ignored_modules)
     return ignored_modules
 
@@ -745,7 +747,9 @@ def _get_ignored_params(
         optional_fsdp_state = _get_module_fsdp_state(submodule)
         if optional_fsdp_state is not None:
             if not hasattr(optional_fsdp_state, "_ignored_params"):
-                raise AssertionError("Expected optional_fsdp_state to have _ignored_params attribute")
+                raise AssertionError(
+                    "Expected optional_fsdp_state to have _ignored_params attribute"
+                )
             all_ignored_params.update(optional_fsdp_state._ignored_params)
 
     return all_ignored_params
@@ -775,7 +779,9 @@ def _get_ignored_buffer_names(
         optional_fsdp_state = _get_module_fsdp_state(submodule)
         if optional_fsdp_state is not None:
             if not hasattr(optional_fsdp_state, "_ignored_buffer_names"):
-                raise AssertionError("Expected optional_fsdp_state to have _ignored_buffer_names attribute")
+                raise AssertionError(
+                    "Expected optional_fsdp_state to have _ignored_buffer_names attribute"
+                )
             all_ignored_buffer_names.update(optional_fsdp_state._ignored_buffer_names)
 
     return all_ignored_buffer_names

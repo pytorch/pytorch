@@ -728,7 +728,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 if not isinstance(
                     submodule._state_dict_config, type(prev_state_dict_config)
                 ):
-                    raise AssertionError("All FSDP modules must have the same type of state_dict_config.")
+                    raise AssertionError(
+                        "All FSDP modules must have the same type of state_dict_config."
+                    )
             if prev_optim_state_dict_config is None:
                 prev_optim_state_dict_config = submodule._optim_state_dict_config
             else:
@@ -1281,7 +1283,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         else:
             using_optim_input = False
             if optim_input is not None or rank0_only:
-                raise AssertionError(f"Expected optim_input to be None and rank0_only to be False, got optim_input={optim_input}, rank0_only={rank0_only}")
+                raise AssertionError(
+                    f"Expected optim_input to be None and rank0_only to be False, got optim_input={optim_input}, rank0_only={rank0_only}"
+                )
 
         use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
             0
@@ -1290,7 +1294,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
         ):
-            raise AssertionError("Not all FSDP modules have the same _use_orig_params value")
+            raise AssertionError(
+                "Not all FSDP modules have the same _use_orig_params value"
+            )
 
         return _optim_state_dict(
             model=model,
@@ -1337,7 +1343,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         else:
             using_optim_input = False
             if optim_input is not None or rank0_only:
-                raise AssertionError(f"Expected optim_input to be None and rank0_only to be False, got optim_input={optim_input}, rank0_only={rank0_only}")
+                raise AssertionError(
+                    f"Expected optim_input to be None and rank0_only to be False, got optim_input={optim_input}, rank0_only={rank0_only}"
+                )
 
         use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
             0
@@ -1346,7 +1354,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             use_orig_params == m._use_orig_params
             for m in FullyShardedDataParallel.fsdp_modules(model)
         ):
-            raise AssertionError("Not all FSDP modules have the same _use_orig_params value")
+            raise AssertionError(
+                "Not all FSDP modules have the same _use_orig_params value"
+            )
 
         if rank0_only and dist.get_rank(group) > 0:
             optim_state_dict = {}
@@ -1732,7 +1742,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             OptimStateKeyType.PARAM_NAME,
             OptimStateKeyType.PARAM_ID,
         ):
-            raise AssertionError(f"Expected optim_state_key_type to be PARAM_NAME or PARAM_ID, got {optim_state_key_type}")
+            raise AssertionError(
+                f"Expected optim_state_key_type to be PARAM_NAME or PARAM_ID, got {optim_state_key_type}"
+            )
         osd = optim_state_dict  # alias
         # Validate that the existing parameter keys are uniformly typed
         uses_param_name_mask = [type(param_key) is str for param_key in osd["state"]]

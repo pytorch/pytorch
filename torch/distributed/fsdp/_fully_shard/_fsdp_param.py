@@ -276,7 +276,9 @@ class FSDPParam:
         elif fsdp_placement.dim < 0:
             fsdp_placement = Shard(fsdp_placement.dim + param.ndim)
         if not isinstance(fsdp_placement, Shard):
-            raise AssertionError(f"Expected Shard, got {type(fsdp_placement)}: {fsdp_placement}")
+            raise AssertionError(
+                f"Expected Shard, got {type(fsdp_placement)}: {fsdp_placement}"
+            )
         self.fsdp_placement = fsdp_placement
         shard_dim = fsdp_placement.dim
         # TODO: Replace the sharded DTensor parameter construction logic with
@@ -326,7 +328,9 @@ class FSDPParam:
                 self._spmd_placements = dp_shard_tp_placement
             else:  # HSDP
                 if self.mesh_info.replicate_mesh_dim != 0:
-                    raise AssertionError(f"Expected replicate_mesh_dim to be 0, got {self.mesh_info.replicate_mesh_dim}")
+                    raise AssertionError(
+                        f"Expected replicate_mesh_dim to be 0, got {self.mesh_info.replicate_mesh_dim}"
+                    )
                 self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
@@ -347,7 +351,9 @@ class FSDPParam:
             )
             param_data = param
         if not param_data.is_contiguous():
-            raise AssertionError(f"Expected contiguous tensor, got {param_data.shape=} {param_data.stride()=}")
+            raise AssertionError(
+                f"Expected contiguous tensor, got {param_data.shape=} {param_data.stride()=}"
+            )
         shard_dim = fsdp_placement.dim
         if shard_dim >= param_data.ndim:
             raise AssertionError(
@@ -390,7 +396,9 @@ class FSDPParam:
             dim=shard_dim, start=0, length=length
         )
         if not sharded_param.is_contiguous():
-            raise AssertionError(f"Expected contiguous tensor with {self.fsdp_placement=}")
+            raise AssertionError(
+                f"Expected contiguous tensor with {self.fsdp_placement=}"
+            )
         self.sharded_param = nn.Parameter(self.to_sharded_dtensor(sharded_param))
         self.sharded_param.requires_grad_(param.requires_grad)
         # Let `param_data` be freed normally when its ref count reaches 0 when
@@ -507,7 +515,9 @@ class FSDPParam:
             # For the default path (no post-all-gather), the all-gather output
             # gives the unsharded parameter data directly
             if len(self.all_gather_outputs) != 1:
-                raise AssertionError(f"Expected 1 all_gather_output, got {len(self.all_gather_outputs)}")
+                raise AssertionError(
+                    f"Expected 1 all_gather_output, got {len(self.all_gather_outputs)}"
+                )
             unsharded_tensor = self.all_gather_outputs[0]
         unsharded_param = torch.as_strided(
             unsharded_tensor,
@@ -559,7 +569,9 @@ class FSDPParam:
         if self.post_forward_mesh_info is None:
             raise AssertionError("Expected post_forward_mesh_info to not be None")
         if len(self.all_gather_outputs) != 1:
-            raise AssertionError(f"Expected 1 all_gather_output, got {len(self.all_gather_outputs)}")
+            raise AssertionError(
+                f"Expected 1 all_gather_output, got {len(self.all_gather_outputs)}"
+            )
         shard_world_size = self.post_forward_mesh_info.shard_mesh_size
         if (numel := self.all_gather_outputs[0].numel()) % shard_world_size != 0:
             _raise_assert_with_print(
@@ -629,7 +641,9 @@ class FSDPParam:
                 f"Expects size {self.sharded_post_forward_size} but got {tensor.shape}"
             )
         if not isinstance(self.post_forward_mesh_info, HSDPMeshInfo):
-            raise AssertionError(f"Expected HSDPMeshInfo, got {type(self.post_forward_mesh_info)}")
+            raise AssertionError(
+                f"Expected HSDPMeshInfo, got {type(self.post_forward_mesh_info)}"
+            )
         # TODO: Prefer this DTensor to be read-only and generalize the
         # placement once we support TP.
         post_forward_sharding_spec = DTensorSpec(
@@ -796,7 +810,9 @@ class FSDPParam:
             placements = self._tp_spec.placements
             if placements != grad.placements:
                 if len(self._tp_spec.placements) != len(grad.placements):
-                    raise AssertionError(f"Expected same placement length: {self._tp_spec=} {grad.placements=}")
+                    raise AssertionError(
+                        f"Expected same placement length: {self._tp_spec=} {grad.placements=}"
+                    )
                 grad = grad.redistribute(placements=placements)
             grad = grad._local_tensor
         return grad
@@ -876,7 +892,9 @@ class FSDPParam:
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
         if local_tensor.size() != padded_sharded_size and not same_local_tensor:
             if shard_dim != 0:
-                raise AssertionError(f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}")
+                raise AssertionError(
+                    f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
+                )
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
                 local_tensor
@@ -896,7 +914,9 @@ class FSDPParam:
                 dim=shard_dim, start=0, length=length
             )
             if not self.sharded_param._local_tensor.is_contiguous():
-                raise AssertionError("Expected sharded_param._local_tensor to be contiguous")
+                raise AssertionError(
+                    "Expected sharded_param._local_tensor to be contiguous"
+                )
         self._sharding_spec = self.sharded_param._spec
 
     def __repr__(self):

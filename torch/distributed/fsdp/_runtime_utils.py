@@ -1605,7 +1605,9 @@ def _get_buffers_and_dtypes_for_computation(
             buffers.append(buffer)
             buffer_dtypes.append(fsdp_state.mixed_precision.buffer_dtype)
     if len(buffers) != len(buffer_dtypes):
-        raise AssertionError(f"Expected buffers and buffer_dtypes to have the same length, got {len(buffers)} and {len(buffer_dtypes)}")
+        raise AssertionError(
+            f"Expected buffers and buffer_dtypes to have the same length, got {len(buffers)} and {len(buffer_dtypes)}"
+        )
     return buffers, buffer_dtypes
 
 

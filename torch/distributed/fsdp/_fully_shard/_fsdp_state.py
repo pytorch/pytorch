@@ -224,7 +224,9 @@ class FSDPState(_State):
                     module_to_fsdp_param_group[module]._module_fqn = module_name
                 else:
                     if not isinstance(module_fqn, str):
-                        raise AssertionError(f"Expected module_fqn to be str, got {type(module_fqn)}: {module_fqn}")
+                        raise AssertionError(
+                            f"Expected module_fqn to be str, got {type(module_fqn)}: {module_fqn}"
+                        )
                     module_fqn += f", {module_name}"
                     module_to_fsdp_param_group[module]._module_fqn = module_fqn
 

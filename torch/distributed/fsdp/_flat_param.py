@@ -400,15 +400,25 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
             See the Attributes in the class docstring.
         """
         if len(param_infos) != len(shapes):
-            raise AssertionError(f"Expected param_infos length {len(param_infos)} to match shapes length {len(shapes)}")
+            raise AssertionError(
+                f"Expected param_infos length {len(param_infos)} to match shapes length {len(shapes)}"
+            )
         if len(param_infos) != len(strides):
-            raise AssertionError(f"Expected param_infos length {len(param_infos)} to match strides length {len(strides)}")
+            raise AssertionError(
+                f"Expected param_infos length {len(param_infos)} to match strides length {len(strides)}"
+            )
         if len(param_infos) != len(contiguities):
-            raise AssertionError(f"Expected param_infos length {len(param_infos)} to match contiguities length {len(contiguities)}")
+            raise AssertionError(
+                f"Expected param_infos length {len(param_infos)} to match contiguities length {len(contiguities)}"
+            )
         if len(param_infos) != len(fqns):
-            raise AssertionError(f"Expected param_infos length {len(param_infos)} to match fqns length {len(fqns)}")
+            raise AssertionError(
+                f"Expected param_infos length {len(param_infos)} to match fqns length {len(fqns)}"
+            )
         if len(param_infos) != len(param_extensions):
-            raise AssertionError(f"Expected param_infos length {len(param_infos)} to match param_extensions length {len(param_extensions)}")
+            raise AssertionError(
+                f"Expected param_infos length {len(param_infos)} to match param_extensions length {len(param_extensions)}"
+            )
         self._num_params = len(param_infos)
         self._param_infos = param_infos
         self._shapes = shapes
@@ -425,17 +435,23 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         self._numels = tuple(numels_without_padding)
         self._numels_with_padding = tuple(numels)
         if len(self._numels) != self._num_params:
-            raise AssertionError(f"Expected _numels length {len(self._numels)} to equal _num_params {self._num_params}")
+            raise AssertionError(
+                f"Expected _numels length {len(self._numels)} to equal _num_params {self._num_params}"
+            )
 
         self._shared_param_infos = tuple(shared_param_infos)
         self._modules = {pi.module for pi in self._param_infos}.union(
             {spi.module for spi in self._shared_param_infos}
         )
         if (params is None) != (shared_params is None):
-            raise AssertionError(f"Expected params and shared_params to both be None or both be not None")
+            raise AssertionError(
+                "Expected params and shared_params to both be None or both be not None"
+            )
         if params is not None:
             if shared_params is None or len(shared_params) != len(shared_param_infos):
-                raise AssertionError(f"Expected shared_params to be not None and have length {len(shared_param_infos)}, got {shared_params}")
+                raise AssertionError(
+                    f"Expected shared_params to be not None and have length {len(shared_param_infos)}, got {shared_params}"
+                )
             self._params = []
             for param, is_padding in zip(params, is_padding_mask):
                 if not is_padding:
@@ -1000,7 +1016,9 @@ class FlatParamHandle:
             unsharded_start_idx, unsharded_end_idx
         )
         if len(shard_param_infos) != flat_param._num_params:
-            raise AssertionError(f"Expects length {flat_param._num_params} but got {len(shard_param_infos)}")
+            raise AssertionError(
+                f"Expects length {flat_param._num_params} but got {len(shard_param_infos)}"
+            )
         flat_param._shard_param_infos = shard_param_infos  # type: ignore[attr-defined]
         flat_param._shard_numel_padded = numel_padded  # type: ignore[attr-defined]
 
@@ -1017,7 +1035,9 @@ class FlatParamHandle:
         """
         flat_param_offsets = self._get_flat_param_offsets()
         if len(flat_param_offsets) != len(self.flat_param._numels_with_padding):
-            raise AssertionError(f"Expected {len(self.flat_param._numels_with_padding)} but got {len(flat_param_offsets)}")
+            raise AssertionError(
+                f"Expected {len(self.flat_param._numels_with_padding)} but got {len(flat_param_offsets)}"
+            )
         shard_param_infos: list[_ShardParamInfo] = []
         sharded_flat_param_numel = unsharded_end_idx - unsharded_start_idx + 1
         # `unsharded_param_start_idx` and `unsharded_param_end_idx` are indices
@@ -1045,7 +1065,9 @@ class FlatParamHandle:
                         unsharded_start_idx - unsharded_param_start_idx
                     )
                     offset_in_shard = 0
-                if not (offset_in_shard >= 0 and offset_in_shard < sharded_flat_param_numel):
+                if not (
+                    offset_in_shard >= 0 and offset_in_shard < sharded_flat_param_numel
+                ):
                     raise AssertionError(
                         f"Invalid `offset_in_shard` of {offset_in_shard} for "
                         f"sharded flat parameter with {sharded_flat_param_numel} numel"
@@ -1094,7 +1116,9 @@ class FlatParamHandle:
             chunk = chunks[rank]
         numel_to_pad = chunks[0].numel() - chunk.numel()
         if numel_to_pad < 0:
-            raise AssertionError("Chunk's size should be at most the first chunk's size")
+            raise AssertionError(
+                "Chunk's size should be at most the first chunk's size"
+            )
         return chunk, numel_to_pad
 
     @staticmethod
@@ -1132,7 +1156,9 @@ class FlatParamHandle:
         )
         unpadded_sharded_size = unpadded_sharded_tensor.size()
         if len(unpadded_sharded_size) != 1:
-            raise AssertionError(f"Expected 1D unpadded_sharded_size, got {unpadded_sharded_size}")
+            raise AssertionError(
+                f"Expected 1D unpadded_sharded_size, got {unpadded_sharded_size}"
+            )
         return torch.Size([unpadded_sharded_size[0] + numel_to_pad])
 
     def _get_flat_param_offsets(self) -> list[tuple[int, int]]:
@@ -2594,7 +2620,9 @@ class FlatParamHandle:
             # meaningful gradient (even if the gradient happens to be zeros)
             if param.requires_grad:
                 if flat_param._is_grad_none_mask is None:
-                    raise AssertionError("Expected _is_grad_none_mask to be not None")  # mypy
+                    raise AssertionError(
+                        "Expected _is_grad_none_mask to be not None"
+                    )  # mypy
                 flat_param._is_grad_none_mask[i] = False
 
     #######################
