@@ -16,9 +16,9 @@ from torch import nn
 from torch._dynamo.variables.higher_order_ops import LocalMapWrappedHigherOrderVariable
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.utils.checkpoint import create_selective_checkpoint_contexts
-from torch.fx.experimental.proxy_tensor import make_fx
 
 
 if torch.distributed.is_available():
