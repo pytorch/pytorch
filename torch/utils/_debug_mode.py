@@ -77,6 +77,15 @@ def _arg_to_str(arg, attributes) -> str:
     return str(arg)
 
 
+def _op_to_str(op) -> str:
+    if isinstance(op, torch._ops.OpOverload):
+        return op.__qualname__
+    elif hasattr(op, "__module__") and hasattr(op, "__name__"):
+        return f"{op.__module__}.{op.__name__}"
+    else:
+        return str(op)
+
+
 class _DebugCall:
     """Base class for tracking operator calls in DebugMode"""
     def __init__(self, call_depth: int):
@@ -104,14 +113,7 @@ class _OpCall(_DebugCall):
         else:
             kwargs_str = ""
 
-        if isinstance(self.op, torch._ops.OpOverload):
-            op_name = self.op.__qualname__
-        elif hasattr(self.op, "__module__") and hasattr(self.op, "__name__"):
-            op_name = f"{self.op.__module__}.{self.op.__name__}"
-        else:
-            op_name = str(self.op)
-
-        return f"{op_name}({args_str}{kwargs_str})"
+        return f"{_op_to_str(self.op)}({args_str}{kwargs_str})"
 
 
 class _RedistributeCall(_DebugCall):
@@ -132,6 +134,49 @@ class _RedistributeCall(_DebugCall):
             dst_placement_str = _arg_to_str(self.dst_placement, attributes)
             placement_str = f"{src_placement_str} -> {dst_placement_str}"
         return f"{REDISTRIBUTE_FUNC}({arg_str}, {placement_str})"
+
+
+class _FXNodeCall(_DebugCall):
+    """FX graph node call"""
+    def __init__(self, node, call_depth: int):
+        super().__init__(call_depth)
+        self.node = node
+
+    def render(self, attributes: list[str] = []) -> str:
+        # Format the node operation
+        node = self.node
+
+        if node.op in ["placeholder", "output"]:
+            return f"[node] {node.name}: {node.op}"
+        else:
+            args_str = ", ".join(str(n) for n in node.args)
+            if node.kwargs:
+                kwargs_str = ", " + ", ".join(f"{k}={n}" for k, n in node.kwargs.items())
+            else:
+                kwargs_str = ""
+            target_str = _op_to_str(node.target)
+            return f"[node] {node.name}: {node.op}[{target_str}]({args_str}{kwargs_str})"
+
+
+class _DebugInterpreter(torch.fx.Interpreter):
+    """Custom FX Interpreter that logs node execution to DebugMode"""
+    def __init__(self, module, mode: "DebugMode"):
+        super().__init__(module)
+        self.parent = mode
+
+    def run_node(self, n):
+        # Log the node execution
+        self.parent.operators.append(_FXNodeCall(n, self.parent.call_depth))
+
+        # Increment call depth before executing
+        self.parent.call_depth += 1
+        try:
+            # Execute the node using parent's run_node
+            result = super().run_node(n)
+            return result
+        finally:
+            # Decrement call depth after execution
+            self.parent.call_depth -= 1
 
 
 class DebugMode(TorchDispatchMode):
@@ -234,6 +279,11 @@ class DebugMode(TorchDispatchMode):
             yield
         finally:
             self.call_depth -= 1
+
+    def run_graph(self, graph_module, *args, **kwargs):
+        interpreter = _DebugInterpreter(graph_module, self)
+        with self:
+            return interpreter.run(*args, **kwargs)
 
     def debug_string(self) -> str:
         with torch._C.DisableTorchFunction():
