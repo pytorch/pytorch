@@ -317,7 +317,7 @@ def get_arg_indices_of_inputs_to_log(node: Node) -> list[int]:
         node.target in (torch.add, torch.ops.quantized.add, operator.add)
         or node.target in (torch.mul, torch.ops.quantized.mul, operator.mul)
     ):
-        result = [i for i in range(2) if type(node.args[i]) == Node]
+        result = [i for i in range(2) if type(node.args[i]) is Node]
         return result
     return [0]
 
