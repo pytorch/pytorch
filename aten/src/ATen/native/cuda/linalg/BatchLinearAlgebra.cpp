@@ -2084,7 +2084,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   // apply_linalg_eig modifies the provided input matrix in-place, therefore we need a copy
   // MAGMA doesn't have GPU interface for the eigendecomposition, and it forces us to transfer 'input' to CPU
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
-#if defined(USE_CUSOLVER_64_BIT) && defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
   // ───────────────────────────────────────────────
   // New CUDA 12.6+ path using cuSOLVER Xgeev
   // ───────────────────────────────────────────────
@@ -2092,7 +2092,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   switch (preferred_backend) {
     case at::LinalgBackend::Cusolver:
     default:
-      linalg_eig_cusolver(eigenvalues, eigenvectors, infos, compute_eigenvectors);
+      linalg_eig_cusolver_xgeev(eigenvalues, eigenvectors, infos, compute_eigenvectors);
       return;
     case at::LinalgBackend::Magma:
       break; // fallback to CPU path below

@@ -1630,6 +1630,7 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 // cuSOLVERDnXgeev (CUDA >= 12.6 Update 2 / cuSOLVER >= 11.7.2)
 // ---------------------------------------------------------------------------
 #if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+#pragma message("Compiling with cuSOLVER >= 11.7.2 — Xgeev bindings enabled")
 
 void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool compute_eigenvectors) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(eigenvalues.is_cuda());
@@ -1647,7 +1648,7 @@ void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvec
 
   // Query workspace (dummy for now)
   size_t ws_dev = 0, ws_host = 0;
-  cuda::solver::xgeev_bufferSize(
+  ::at::cuda::solver::xgeev_bufferSize(
       handle,
       params,
       CUSOLVER_EIG_MODE_VECTOR,
