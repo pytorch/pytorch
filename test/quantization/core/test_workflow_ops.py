@@ -110,10 +110,10 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
     per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int32)
     grad_X = _fake_quantize_per_channel_affine_grad_reference(
         dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max).to(device)
-    per_channel_scale = per_channel_scale.detach().to(dtype)
+    per_channel_scale = per_channel_scale.detach().type(torch.float)
 
-    grad_scale = torch.zeros([per_channel_scale.size(0)]).to(device, dtype=dtype)
-    grad_zero_point = torch.zeros([per_channel_zero_point.size(0)]).to(device, dtype=dtype)
+    grad_scale = torch.zeros([per_channel_scale.size(0)]).to(device)
+    grad_zero_point = torch.zeros([per_channel_zero_point.size(0)]).to(device)
 
     X_flattened = torch.unbind(X, dim=axis)
     dY_flattened = torch.unbind(dY, dim=axis)
@@ -127,14 +127,14 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
         Xq_i = ((X_i / scale_i) + zero_point_i).round()
         Xfq_i = (Xq_i - zero_point_i) * scale_i
 
-        indicate_small_scale_i = (Xq_i < quant_min).to(device, dtype=dtype)
-        indicate_big_scale_i = (Xq_i > quant_max).to(device, dtype=dtype)
-        indicate_middle_scale_i = torch.ones(indicate_small_scale_i.shape).to(device, dtype=dtype) - \
+        indicate_small_scale_i = (Xq_i < quant_min).float().to(device)
+        indicate_big_scale_i = (Xq_i > quant_max).float().to(device)
+        indicate_middle_scale_i = torch.ones(indicate_small_scale_i.shape).to(device) - \
             indicate_small_scale_i - indicate_big_scale_i
 
-        indicate_saturate_zp_i = ((Xq_i < quant_min) +
-                                  (Xq_i > quant_max)).to(device, dtype=dtype)
-        indicate_unsaturate_zp_i = torch.ones(indicate_saturate_zp_i.shape).to(device, dtype=dtype) - \
+        indicate_saturate_zp_i = ((Xq_i < quant_min).float() +
+                                  (Xq_i > quant_max).float()).to(device)
+        indicate_unsaturate_zp_i = torch.ones(indicate_saturate_zp_i.shape).to(device) - \
             indicate_saturate_zp_i
 
         Xq_i = Xq_i.clamp(quant_min, quant_max)
@@ -919,8 +919,9 @@ class TestFakeQuantizeOps(TestCase):
         for n_bits in (4, 8):
             quant_min, quant_max = 0, 2 ** n_bits - 1
 
-            scale_base = scale_base.to(device)
-            zero_point_base = zero_point_base.to(device=device)
+            X_base = X_base.to(dtype=torch.float32)
+            scale_base = scale_base.to(device, dtype=torch.float32)
+            zero_point_base = zero_point_base.to(device=device, dtype=torch.float32)
 
             X_curr = X_base.clone()
             X_curr.requires_grad_()
