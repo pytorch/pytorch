@@ -18,6 +18,18 @@
 
 #include <cstdint>
 
+namespace c10 {
+
+// dummy struct for uint1 to uint7, actual functionality
+// of these dtypes will be implemented in python with Tensor subclass
+template <unsigned int N>
+struct dummy_uint1_7_t {};
+
+// dummy struct for int1 to int7, actual functionality
+// of these dtypes will be implemented in python with Tensor subclass
+template <unsigned int N>
+struct dummy_int1_7_t {};
+
 // [dtype Macros note] For the macros below:
 //
 // For users: If you want to macro some code for all non-QInt scalar types
@@ -239,18 +251,6 @@
 #define AT_FORALL_COMPLEX_TYPES(_)     \
   _(c10::complex<float>, ComplexFloat) \
   _(c10::complex<double>, ComplexDouble)
-
-namespace c10 {
-
-// dummy struct for uint1 to uint7, actual functionality
-// of these dtypes will be implemented in python with Tensor subclass
-template <unsigned int N>
-struct dummy_uint1_7_t {};
-
-// dummy struct for int1 to int7, actual functionality
-// of these dtypes will be implemented in python with Tensor subclass
-template <unsigned int N>
-struct dummy_int1_7_t {};
 
 enum class ScalarType : int8_t {
 #define DEFINE_ST_ENUM_VAL_(_1, n) n,
