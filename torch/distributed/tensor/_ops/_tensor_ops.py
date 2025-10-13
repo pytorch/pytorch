@@ -52,9 +52,7 @@ def propagate_single_input_strategy(op_schema: OpSchema) -> StrategyType:
         )
     first_input_strategy = op_schema.args_schema[0]
     if not isinstance(first_input_strategy, OpStrategy):
-        raise AssertionError(
-            f"Expected OpStrategy, got {type(first_input_strategy)}"
-        )
+        raise AssertionError(f"Expected OpStrategy, got {type(first_input_strategy)}")
     return OpStrategy(
         [
             OpSpec(
@@ -297,9 +295,7 @@ def select_int_strategy(op_schema: OpSchema) -> StrategyType:
     if not isinstance(input_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
     if len(op_schema.args_schema) != 3:
-        raise AssertionError(
-            f"Expected 3 args, got {len(op_schema.args_schema)}"
-        )
+        raise AssertionError(f"Expected 3 args, got {len(op_schema.args_schema)}")
     selected_dim, index = (
         cast(int, op_schema.args_schema[1]),
         cast(int, op_schema.args_schema[2]),
@@ -733,7 +729,9 @@ def _derive_follow_placements_from_tuple_strategy(
                 follow_placements = list(arg_placements)
                 continue
             if follow_placements is None:
-                raise AssertionError("follow_placements should not be None at this point")
+                raise AssertionError(
+                    "follow_placements should not be None at this point"
+                )
             for mesh_idx in range(mesh.ndim):
                 # merge placements with the priority
                 follow_placements[mesh_idx] = merge_placement(
@@ -845,7 +843,9 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
                     # extract the strategy for the idx tensors to build the tensor_metadata and redistribute_cost
                     that_tensor_strategy = input_tuple_strategy.children[idx]
                     if not isinstance(that_tensor_strategy, OpStrategy):
-                        raise AssertionError(f"Expected OpStrategy, got {type(that_tensor_strategy)}")
+                        raise AssertionError(
+                            f"Expected OpStrategy, got {type(that_tensor_strategy)}"
+                        )
                     input_spec = DTensorSpec(
                         mesh,
                         exemplar_placement,
@@ -1054,7 +1054,9 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     if not need_reshard_on_indices:
         # this means that our inputs are already sharded properly and we will use that as our indices_spec
         if not isinstance(indices_out.output_spec, DTensorSpec):
-            raise AssertionError(f"Expected DTensorSpec, got {type(indices_out.output_spec)}")
+            raise AssertionError(
+                f"Expected DTensorSpec, got {type(indices_out.output_spec)}"
+            )
         indices_spec: DTensorSpec = indices_out.output_spec
     else:
         if indices_out.redistribute_schema is None:
@@ -1066,7 +1068,9 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         # use that to compute our ideal values_spec
         indices_output_spec = pointwise_rule(valid_indices_suggestion).output_spec
         if not isinstance(indices_output_spec, DTensorSpec):
-            raise AssertionError(f"Expected DTensorSpec, got {type(indices_output_spec)}")
+            raise AssertionError(
+                f"Expected DTensorSpec, got {type(indices_output_spec)}"
+            )
         indices_spec = indices_output_spec
 
     lookup_dims = {v[0] for v in valid_indices_spec}
