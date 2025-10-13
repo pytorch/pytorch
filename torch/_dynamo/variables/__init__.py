@@ -18,14 +18,7 @@ allows Dynamo to accurately trace and optimize Python code while preserving its 
 
 from .base import VariableTracker
 from .builtin import BuiltinVariable
-from .constant import (
-    constant_false,
-    constant_none,
-    constant_NotImplemented,
-    constant_true,
-    ConstantVariable,
-    EnumVariable,
-)
+from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,

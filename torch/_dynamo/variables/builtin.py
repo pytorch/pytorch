@@ -1831,8 +1831,6 @@ class BuiltinVariable(VariableTracker):
             ret = obj
         elif isinstance(obj, variables.RangeVariable):
             ret = obj.call_method(tx, "__iter__", [], {})
-        elif isinstance(obj, variables.LocalGeneratorObjectVariable):
-            ret = obj  # type: ignore[assignment]
         else:
             # Handle the case where we are iterating over a tuple, list or iterator
             ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
@@ -1871,7 +1869,7 @@ class BuiltinVariable(VariableTracker):
                 NNModuleVariable,
             ),
         ):
-            return variables.constant_true
+            return variables.ConstantVariable.create(True)
         elif isinstance(arg, UserDefinedVariable):
             return variables.ConstantVariable.create(callable(arg.value))
         elif isinstance(
@@ -1885,7 +1883,7 @@ class BuiltinVariable(VariableTracker):
                 ListIteratorVariable,
             ),
         ):
-            return variables.constant_false
+            return variables.ConstantVariable.create(False)
 
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
@@ -1942,7 +1940,7 @@ class BuiltinVariable(VariableTracker):
             )
             raise_observed_exception(TypeError, tx, args=[msg])
         if len(args) == 1:
-            args = (*args, variables.constant_none)
+            args = (*args, ConstantVariable.create(None))
         assert len(args) == 2
         arg, value = args
         DictVariableType = (
