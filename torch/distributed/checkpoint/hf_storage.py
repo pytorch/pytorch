@@ -307,6 +307,7 @@ class HuggingFaceStorageReader(FileSystemReader):
         fut.set_result(None)
         return fut
 
+    # pyrefly: ignore  # bad-override
     def read_metadata(self) -> Metadata:
         from safetensors import safe_open  # type: ignore[import]
         from safetensors.torch import _getdtype  # type: ignore[import]
