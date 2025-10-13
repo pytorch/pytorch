@@ -221,11 +221,11 @@ C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace(scalar_t a, scalar_t 
 
 // used to calulate complex values
 // Note that z = a + bi with a = c1 + c2i and b = d1 + d2i,
-//  z = (c1+c2i) + (d1+d2i)i = (c1-d2) + (c2+d1)i 
+// z = (c1+c2i) + (d1+d2i)i = (c1-d2) + (c2+d1)i
 template <typename scalar_t>
 C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace_real(
     scalar_t a_real,
-    scalar_t a_imag, 
+    scalar_t a_imag,
     scalar_t nan_replacement_real,
     scalar_t nan_replacement_imag,
     scalar_t pos_inf_replacement_real,
@@ -245,30 +245,32 @@ C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace_real(
     a_real_new -= pos_inf_replacement_imag;
   } else if (a_imag == -std::numeric_limits<scalar_t>::infinity()) {
     a_real_new -= neg_inf_replacement_imag;
-  } 
+  }
   return a_real_new;
 }
 
 template <typename scalar_t>
 C10_HOST_DEVICE static inline scalar_t _nan_to_num_replace_imag(
     scalar_t a_real,
-    scalar_t a_imag, 
+    scalar_t a_imag,
     scalar_t nan_replacement_real,
     scalar_t nan_replacement_imag,
     scalar_t pos_inf_replacement_real,
     scalar_t pos_inf_replacement_imag,
     scalar_t neg_inf_replacement_real,
     scalar_t neg_inf_replacement_imag) {
-  // the imaginary part can be computed similar to the real part, 
-  // but values need to be permuted and some signs changed.
-  return _nan_to_num_replace_real(a_imag, 
-    a_real, 
-    nan_replacement_imag, 
-    -nan_replacement_real, 
-    pos_inf_replacement_imag, 
-    -pos_inf_replacement_real, 
-    neg_inf_replacement_imag, 
-    -neg_inf_replacement_real);
+  // the imaginary part can be computed similar to the real part,
+  // but the a_real and a_imag need to switch
+  // and the imag part of the replacement values need to change signs.
+  // (see note above and compare signs of d1 and d2)
+  return _nan_to_num_replace_real(a_imag,
+    a_real,
+    nan_replacement_real,
+    -nan_replacement_imag,
+    pos_inf_replacement_real,
+    -pos_inf_replacement_imag,
+    neg_inf_replacement_real,
+    -neg_inf_replacement_imag);
 }
 
 void nan_to_num_kernel_cuda(
@@ -328,7 +330,6 @@ void nan_to_num_complex_kernel_cuda(
       auto neg_inf_replacement = static_cast<c10::complex<value_t>>(neg_inf.has_value()
           ? neg_inf.value()
           : c10::complex<double>(std::numeric_limits<double>::lowest(), 0.0));
-      std::cout << "neg_inf_replacement = " << neg_inf_replacement << std::endl;
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
         value_t res_real = _nan_to_num_replace_real(
           a.real(), a.imag(), nan_replacement.real(), nan_replacement.imag(), pos_inf_replacement.real(), pos_inf_replacement.imag(), neg_inf_replacement.real(), neg_inf_replacement.imag());
