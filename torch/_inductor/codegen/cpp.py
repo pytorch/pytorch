@@ -2604,7 +2604,7 @@ class CppKernel(Kernel):
                     var_id = i
                     break
             if (
-                type(self) == CppKernel
+                type(self) is CppKernel
                 and var_id
                 and start == 0
                 and end == self.ranges[var_id]
@@ -4534,7 +4534,7 @@ class CppKernelProxy(CppKernel):
             assert isinstance(main_loop_kernel, self.vec_kernel_cls)
 
             # Prefix
-            if type(tail_loop_kernel) == self.kernel_cls:
+            if type(tail_loop_kernel) is self.kernel_cls:
                 # if tail loop kernel is a scalar kernel, we need to extend tmp_acc -> tmp_acc_arr[] to
                 # hold the temporary inner loop acc result for outer tail loop
                 tail_loop_kernel.finalize_reduction_prefix(
@@ -4562,7 +4562,7 @@ class CppKernelProxy(CppKernel):
                     suffix_buf, "C10_UNLIKELY", outer_loop.var
                 ):
                     stack.enter_context(suffix_buf.indent())
-                    if type(tail_loop_kernel) == self.kernel_cls:
+                    if type(tail_loop_kernel) is self.kernel_cls:
                         reduction_vars = tail_loop_kernel.reduction_var_names
                         for name in reduction_vars:
                             new_name = f"{name}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiled_size)}]"
