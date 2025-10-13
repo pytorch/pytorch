@@ -7,6 +7,19 @@
 
 #include <c10/util/FileSystem.h>
 
+#include <fcntl.h>
+#ifdef _WIN32
+#include <errno.h>
+#include <io.h>
+#include <sys/stat.h>
+#include <windows.h>
+#include <functional> // std::function
+#else // !_WIN32
+#include <dlfcn.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#endif // _WIN32
+
 namespace torch::inductor {
 
 AOTIModelContainerRunner::AOTIModelContainerRunner(
@@ -88,6 +101,12 @@ consider rebuild your model with the latest AOTInductor.");
   TRY_LOAD_SYMBOL(
       update_user_managed_constant_buffer_func_,
       "AOTInductorModelContainerUpdateUserManagedConstantBuffer")
+  TRY_LOAD_SYMBOL(
+      get_constants_blob_size_func_,
+      "AOTInductorModelContainerGetConstantsBlobSize")
+  TRY_LOAD_SYMBOL(
+      update_constants_from_blob_func_,
+      "AOTInductorModelUpdateConstantsFromBlob")
 #undef TRY_LOAD_SYMBOL
 
   // Hack to find the json file name from the model so file
@@ -249,6 +268,81 @@ void AOTIModelContainerRunner::update_constant_buffer(
         use_inactive,
         check_full_update));
   }
+}
+
+void AOTIModelContainerRunner::update_constant_buffer_from_blob(
+    const std::string& weights_path) {
+  uint64_t weights_size;
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      get_constants_blob_size_func_(container_handle_, &weights_size));
+
+#ifdef _WIN32
+  // Proper Windows file mapping implementation
+
+  HANDLE hFile = CreateFileA(
+      weights_path.c_str(),
+      GENERIC_READ,
+      FILE_SHARE_READ,
+      NULL,
+      OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL,
+      NULL);
+
+  if (hFile == INVALID_HANDLE_VALUE) {
+    throw std::runtime_error(
+        "Failed to open external weights file: " + weights_path);
+  }
+
+  // Get actual file size for validation
+  LARGE_INTEGER fileSize;
+  if (!GetFileSizeEx(hFile, &fileSize)) {
+    CloseHandle(hFile);
+    throw std::runtime_error("Failed to get file size");
+  }
+
+  if (static_cast<uint64_t>(fileSize.QuadPart) < weights_size) {
+    CloseHandle(hFile);
+    throw std::runtime_error("File size smaller than expected weights size");
+  }
+
+  HANDLE hMapping = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+  CloseHandle(hFile); // Close file handle, keep mapping handle
+
+  if (hMapping == NULL) {
+    throw std::runtime_error("CreateFileMapping failed");
+  }
+
+  uint8_t* ptr = static_cast<uint8_t*>(
+      MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, weights_size));
+
+  if (ptr == NULL) {
+    CloseHandle(hMapping);
+    throw std::runtime_error("MapViewOfFile failed");
+  }
+
+#else
+  // Unix/Linux implementation
+  int fd = open(weights_path.c_str(), O_RDONLY);
+  TORCH_CHECK(fd >= 0, "Failed to open external weights file: " + weights_path);
+
+  uint8_t* ptr = static_cast<uint8_t*>(
+      mmap(NULL, weights_size, PROT_READ, MAP_PRIVATE, fd, 0));
+
+  close(fd);
+  TORCH_CHECK(ptr != MAP_FAILED, "mmap() failed");
+#endif
+  AOTI_RUNTIME_ERROR_CODE_CHECK(
+      update_constants_from_blob_func_(container_handle_, ptr));
+
+  // After update_constants_from_blob_func_ returns, the model has copied
+  // all the data from the mmap'd memory to its own internal storage,
+  // so we can safely unmap the memory now.
+#ifdef _WIN32
+  UnmapViewOfFile(ptr);
+  CloseHandle(hMapping);
+#else
+  munmap(ptr, weights_size);
+#endif
 }
 
 void AOTIModelContainerRunner::update_inactive_constant_buffer(
