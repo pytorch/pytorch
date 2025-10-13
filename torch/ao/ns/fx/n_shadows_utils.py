@@ -2,7 +2,8 @@
 import collections
 import copy
 import operator
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 import torch.fx
@@ -93,6 +94,7 @@ class OutputProp:
                 )
 
             if isinstance(result, torch.Tensor):  # type: ignore[possibly-undefined]
+                # pyrefly: ignore  # unbound-name
                 node.traced_result = result
 
             # pyrefly: ignore  # unsupported-operation

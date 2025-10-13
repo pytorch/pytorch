@@ -603,6 +603,7 @@ def _flatten_optim_state(
     ]
     # Check that the unflattened parameters have the same state names
     state_names = None
+    # pyrefly: ignore  # bad-assignment
     for unflat_param_state in unflat_param_states:
         if unflat_param_state is None:
             continue
@@ -918,6 +919,7 @@ def _rekey_sharded_optim_state_dict(
         flat_param_key = unflat_param_names_to_flat_param_key.get(
             key.unflat_param_names, key.unflat_param_names
         )
+        # pyrefly: ignore  # unsupported-operation
         rekeyed_osd_state[flat_param_key] = param_state
 
     # Only process param_groups if it exists in sharded_osd
@@ -980,6 +982,7 @@ def _get_param_id_to_param_from_optim_input(
     if optim_input is None:
         return dict(enumerate(model.parameters()))
     try:
+        # pyrefly: ignore  # no-matching-overload
         params = cast(list[nn.Parameter], list(optim_input))
     except TypeError as e:
         raise TypeError(

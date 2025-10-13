@@ -2763,5 +2763,18 @@
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
+  ],
+  "GB0275": [
+    {
+      "Gb_type": "torch._dynamo.step_unsupported() with empty checkpoint",
+      "Context": "",
+      "Explanation": "traced torch._dynamo.step_unsupported(), but there is no checkpoint to step_graph_break from. This graph break is used for debugging only.",
+      "Hints": [
+        "Remove the torch._dynamo.step_unsupported() call.",
+        "Include at least one checkpoint: (1) include at least 2 ops and (2) make sure there is some ",
+        "line of code that is not in a try/with block, and has an empty Python stack.",
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
   ]
 }
