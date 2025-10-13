@@ -356,7 +356,9 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
     return size
 
 
-def estimate_nccl_collective_runtime_from_fx_node(fx_node: torch.fx.Node, override_size: Optional[int] = None) -> float:
+def estimate_nccl_collective_runtime_from_fx_node(
+    fx_node: torch.fx.Node, override_size: Optional[int] = None
+) -> float:
     """
     Returns estimated NCCL collective runtime in nanoseconds (ns).
 

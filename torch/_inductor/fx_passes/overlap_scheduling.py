@@ -9,20 +9,24 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
 import torch
-from torch._inductor.fx_passes.memory_estimator import MemoryTracker, build_memory_profile, _is_releasable
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.fx_passes.bucketing import is_wait_tensor
+from torch._inductor.fx_passes.memory_estimator import (
+    _is_releasable,
+    build_memory_profile,
+    MemoryTracker,
+)
+from torch.fx.operator_schemas import normalize_function
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
-from torch.fx.operator_schemas import normalize_function
 
 
 log = logging.getLogger(__name__)
 
-from ..pattern_matcher import stable_topological_sort
-
 from torch._inductor.fx_passes.bucketing import bucket_key
+
+from ..pattern_matcher import stable_topological_sort
 
 
 def get_group_name(n: fx.Node) -> str:
@@ -36,7 +40,6 @@ def get_group_name(n: fx.Node) -> str:
     assert opt_args_kwargs is not None
     _, kwargs = opt_args_kwargs
     return kwargs["group_name"]
-
 
 
 def get_custom_estimation(n: fx.Node) -> Optional[float]:
@@ -242,7 +245,9 @@ class OverlapScheduler:
         self.unscheduled_collectives: OrderedSet[fx.Node] = OrderedSet()
 
         # Memory tracking using abstracted MemoryTracker
-        self.original_peak_memory = max((build_memory_profile(self.graph, _is_releasable)))
+        self.original_peak_memory = max(
+            build_memory_profile(self.graph, _is_releasable)
+        )
         self.memory_tracker = MemoryTracker(self.graph)
 
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
@@ -304,7 +309,7 @@ class OverlapScheduler:
     def _calculate_compute_node_domination_index(self) -> dict[fx.Node, int]:
         """
         Compute the topological index of the earliest compute node each node dominates.
-        
+
         Compute nodes are assigned indices based on their topological order (0, 1, 2, ...).
         For each node, returns the minimum index of compute nodes it blocks/dominates.
         Returns sys.maxsize if the node doesn't block any compute nodes.
@@ -313,7 +318,7 @@ class OverlapScheduler:
         for node in self.graph.nodes:
             if is_compute_node(node):
                 compute_node_index[node] = len(compute_node_index)
-        
+
         domination_index: dict[fx.Node, int] = {}
         for node in reversed(self.graph.nodes):
             if node in compute_node_index:
@@ -321,10 +326,9 @@ class OverlapScheduler:
                 domination_index[node] = compute_node_index[node]
             else:
                 domination_index[node] = min(
-                    (domination_index[succ] for succ in node.users),
-                    default=sys.maxsize
+                    (domination_index[succ] for succ in node.users), default=sys.maxsize
                 )
-        
+
         return domination_index
 
     def _align_compute_nodes_runtime_estimations_across_all_distributed_ranks(
@@ -394,9 +398,15 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        if torch._inductor.config.test_configs.aten_fx_overlap_preserving_bucketing and False:
+        if (
+            torch._inductor.config.test_configs.aten_fx_overlap_preserving_bucketing
+            and False
+        ):
             self._bucket_collectives()
-        elif torch._inductor.config.test_configs.aten_fx_overlap_insert_overlap_deps and False:
+        elif (
+            torch._inductor.config.test_configs.aten_fx_overlap_insert_overlap_deps
+            and False
+        ):
             # If not bucketing, add effect tokens to preserve hiding dependencies
             self._add_effect_tokens_for_overlap()
 
@@ -441,7 +451,7 @@ class OverlapScheduler:
             "Scheduled node %s: current_memory=%d bytes, total_scheduled=%d",
             node.name,
             self.memory_tracker.get_current_memory_bytes(),
-            len(self.scheduled)
+            len(self.scheduled),
         )
 
         for user in node.users:
@@ -495,10 +505,9 @@ class OverlapScheduler:
         """Check if we need to force a wait due to memory pressure"""
         if not self.in_flight:
             return False
-        return (
-            self.in_flight_bytes >= self.max_in_flight_bytes
-            or (self.memory_tracker.current_memory_bytes - self.original_peak_memory) > gb_to_bytes(1.0)
-        )
+        return self.in_flight_bytes >= self.max_in_flight_bytes or (
+            self.memory_tracker.current_memory_bytes - self.original_peak_memory
+        ) > gb_to_bytes(1.0)
 
     def _force_oldest_wait(self) -> None:
         """Schedule the oldest in flight wait"""
@@ -524,8 +533,8 @@ class OverlapScheduler:
         coll_start = self.wait_to_start[node]
         assert coll_start in self.in_flight
 
-        # Scheduling a wait of a collective also forces the wait 
-        # of every node enqueued prior to the collective on the 
+        # Scheduling a wait of a collective also forces the wait
+        # of every node enqueued prior to the collective on the
         # same process group
         group_name = get_group_name(coll_start)
         to_schedule: list[fx.Node] = []
@@ -582,22 +591,27 @@ class OverlapScheduler:
 
             # Skip collectives that are too far ahead in compute depth, but allow scheduling
             # collectives which are off compute path (which typically release memory)
-            # TODO: we could potentially be more strict about limiting the amount of 
-            # pre-fetched memory before memory peak, and adjust allowed collective mem. 
+            # TODO: we could potentially be more strict about limiting the amount of
+            # pre-fetched memory before memory peak, and adjust allowed collective mem.
             if not self.off_compute_path(collective):
-                if (self.compute_depth[collective] - self.current_compute_depth) > self.max_compute_pre_fetch:
+                if (
+                    self.compute_depth[collective] - self.current_compute_depth
+                ) > self.max_compute_pre_fetch:
                     continue
 
             possible_collectives.append(collective)
 
-        possible_collectives = sorted(possible_collectives, key=lambda n: (self.compute_depth[n], self.node_idx[n]))
+        possible_collectives = sorted(
+            possible_collectives,
+            key=lambda n: (self.compute_depth[n], self.node_idx[n]),
+        )
 
         log.debug(
             "Scheduling collectives for overlap: compute_node=%s, available_time=%.2f ms, candidates=%d, current_memory=%d bytes",
             compute_node.name,
             available_compute_time,
             len(possible_collectives),
-            self.memory_tracker.current_memory_bytes
+            self.memory_tracker.current_memory_bytes,
         )
 
         for collective in possible_collectives:
@@ -633,7 +647,7 @@ class OverlapScheduler:
                 collective.name,
                 compute_node.name,
                 self.compute_depth[collective],
-                self.current_compute_depth
+                self.current_compute_depth,
             )
 
             # Schedule path to this collective
@@ -647,7 +661,6 @@ class OverlapScheduler:
             if info.exposed_time_ms == 0:
                 info.hiding_node = compute_node
             available_compute_time -= overlap_amount
-
 
     def _find_schedulable_path(
         self, target: fx.Node, curr_compute_node: Optional[fx.Node]
@@ -689,11 +702,11 @@ class OverlapScheduler:
         key = bucket_key(node)
         if key is None:
             return False
-        
+
         for in_flight_coll in self.in_flight.keys():
             if bucket_key(in_flight_coll) == key:
                 return True
-        
+
         return False
 
     def _get_oldest_wait(self) -> fx.Node:
@@ -768,7 +781,7 @@ class OverlapScheduler:
             len(bad_exposed),
             len(potentially_hidden_collectives),
             self.original_peak_memory,
-            self.memory_tracker.peak_memory
+            self.memory_tracker.peak_memory,
         )
 
         self.reorder_graph()

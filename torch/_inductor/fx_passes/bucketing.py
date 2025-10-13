@@ -42,6 +42,7 @@ def bucket_key(node: torch.fx.Node) -> Optional[object]:
     else:
         return None
 
+
 def bucket_cap_mb_by_bucket_idx_default(bucket_id: int) -> float:
     """
     Determine the size of a bucket based on its ID.
