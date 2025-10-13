@@ -178,8 +178,7 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:
-      - name: Checkout PyTorch
-        uses: !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: !{{ common.download_artifact_action }}

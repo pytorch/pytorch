@@ -349,7 +349,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -474,7 +473,6 @@ jobs:
       DESIRED_PYTHON: "3.10"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -969,7 +967,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -1094,7 +1091,6 @@ jobs:
       DESIRED_PYTHON: "3.11"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -1589,7 +1585,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -1714,7 +1709,6 @@ jobs:
       DESIRED_PYTHON: "3.12"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -2209,7 +2203,6 @@ jobs:
       DESIRED_PYTHON: "3.13"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -2334,7 +2327,6 @@ jobs:
       DESIRED_PYTHON: "3.13"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -2829,7 +2821,6 @@ jobs:
       DESIRED_PYTHON: "3.13t"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -2954,7 +2945,6 @@ jobs:
       DESIRED_PYTHON: "3.13t"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -3449,7 +3439,6 @@ jobs:
       DESIRED_PYTHON: "3.14"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -3574,7 +3563,6 @@ jobs:
       DESIRED_PYTHON: "3.14"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -4069,7 +4057,6 @@ jobs:
       DESIRED_PYTHON: "3.14t"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -4194,7 +4181,6 @@ jobs:
       DESIRED_PYTHON: "3.14t"
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}

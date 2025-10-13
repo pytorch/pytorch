@@ -360,7 +360,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -488,7 +487,6 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
     steps:
       - name: Checkout PyTorch
-        uses: - name: Checkout PyTorch
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
