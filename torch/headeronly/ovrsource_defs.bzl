@@ -40,6 +40,7 @@ def define_torch_headeronly_ovrsource(name, is_mobile):
         ],
         exported_deps = [
             ":ovrsource_torch_headeronly_cmake_macros.h",
+            ":generate-version-header",
         ],
     )
 

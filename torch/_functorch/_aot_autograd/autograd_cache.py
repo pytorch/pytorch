@@ -235,7 +235,7 @@ def check_node_safe(node: Node):
                 f"Unsupported call_method target {method_target}. \nMethod module: {module}, \nMethod name: {name}"
             )
         if (
-            type(method_name) != str
+            type(method_name) is not str
             and type(method_name).__name__ != "method_descriptor"
         ):
             raise BypassAOTAutogradCache(
@@ -384,6 +384,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
 class AOTAutogradCachePickler(FxGraphCachePickler):
     def __init__(self, gm: torch.fx.GraphModule):
         super().__init__(gm)
+        # pyrefly: ignore  # bad-override
         self.dispatch_table: dict
         self.dispatch_table.update(
             {
