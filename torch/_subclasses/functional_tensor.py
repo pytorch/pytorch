@@ -288,9 +288,29 @@ class FunctionalTensor(torch.Tensor):
     int = _conversion_method_template(dtype=torch.int32)
     long = _conversion_method_template(dtype=torch.int64)
 
-    # TODO(sparse-team): fixes #133174 but can we do without the relay?
+    def _wrap_maybe_functional_output(self, out):
+        mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
+        if isinstance(out, torch.Tensor) and torch._is_functional_tensor(out):
+            return FunctionalTensor(out, mode) if mode is not None else torch._from_functional_tensor(out)
+        return out
+
     def to_dense(self):  # type: ignore[override]
-        return self.elem.to_dense()
+        return self._wrap_maybe_functional_output(self.elem.to_dense())
+
+    def to_sparse(self, *args, **kwargs):
+        return self._wrap_maybe_functional_output(self.elem.to_sparse(*args, **kwargs))
+
+    def to_sparse_csr(self, *args, **kwargs):
+        return self._wrap_maybe_functional_output(self.elem.to_sparse_csr(*args, **kwargs))
+
+    def to_sparse_csc(self, *args, **kwargs):
+        return self._wrap_maybe_functional_output(self.elem.to_sparse_csc(*args, **kwargs))
+
+    def to_sparse_bsr(self, *args, **kwargs):
+        return self._wrap_maybe_functional_output(self.elem.to_sparse_bsr(*args, **kwargs))
+
+    def to_sparse_bsc(self, *args, **kwargs):
+        return self._wrap_maybe_functional_output(self.elem.to_sparse_bsc(*args, **kwargs))
 
     @property
     def layout(self):  # type: ignore[override]

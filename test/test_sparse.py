@@ -568,6 +568,74 @@ class TestSparse(TestSparseBase):
                     self.assertEqual(expected.size(), result.size())
                     self.assertEqual(dim, result.sparse_dim())
 
+    @skipIfTorchDynamo("Test specifically for torch.compile with sparse tensors")
+    @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
+    def test_compile_sparse_mm_to_dense(self, device, dtype):
+        """Test that torch.compile works with to_sparse() --> sparse.mm() --> to_dense() sequence.
+
+        Regression test for issue where functional tensors weren't properly handled
+        in sparse tensor format conversions during compilation.
+        """
+        torch.manual_seed(0)
+
+        class SparseMMModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("weights", torch.randn(64, 128, dtype=dtype, device=device))
+
+            def forward(self, x):
+                x_sparse = x.to_sparse()
+                mm_res = torch.sparse.mm(x_sparse, self.weights)
+                return mm_res.to_dense()
+
+        x = torch.randn(32, 64, dtype=dtype, device=device)
+        model = SparseMMModel().eval()
+
+        with torch.no_grad():
+            eager_output = model(x)
+            compiled_model = torch.compile(model)
+            compiled_output = compiled_model(x)
+
+        self.assertEqual(eager_output.shape, compiled_output.shape)
+        torch.testing.assert_close(compiled_output, eager_output, rtol=1e-4, atol=1e-4)
+
+    @skipIfTorchDynamo("Test specifically for torch.compile with sparse layout conversions")
+    @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
+    def test_compile_sparse_layout_conversions(self, device, dtype):
+        """Test that torch.compile handl all sparse layout conversions.
+
+        Ensures to_dense(), to_sparse(), to_sparse_csr(), to_sparse_csc(),
+        to_sparse_bsr(), and to_sparse_bsc() properly wrap functional tensors.
+        """
+        x = torch.randn(8, 8, dtype=dtype, device=device)
+
+        for method_name in ['to_sparse', 'to_sparse_csr', 'to_sparse_csc']:
+            with self.subTest(method=method_name):
+                to_fn = getattr(x, method_name)
+                sparse = to_fn()
+
+                # Compile a function that converts back to dense
+                compiled_fn = torch.compile(lambda t: t.to_dense())
+                dense_output = compiled_fn(sparse)
+
+                self.assertEqual(dense_output.shape, x.shape)
+                torch.testing.assert_close(dense_output, x, rtol=1e-4, atol=1e-4)
+
+        for method_name, blocksize in [('to_sparse_bsr', (2, 2)), ('to_sparse_bsc', (2, 2))]:
+            with self.subTest(method=method_name):
+                to_fn = getattr(x, method_name, None)
+                if to_fn is None:
+                    self.skipTest(f"{method_name} not available")
+
+                sparse = to_fn(blocksize)
+                compiled_fn = torch.compile(lambda t: t.to_dense())
+                dense_output = compiled_fn(sparse)
+
+                self.assertEqual(dense_output.shape, x.shape)
+                torch.testing.assert_close(dense_output, x, rtol=1e-4, atol=1e-4)
+
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_sparse_bool(self, device, dtype):
