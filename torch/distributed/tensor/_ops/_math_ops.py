@@ -105,7 +105,9 @@ class _NormPartial(Partial):
             elif self.norm_type == 1:
                 return tensor / mesh.size(mesh_dim)
             if not isinstance(self.norm_type, (int, float)):
-                raise AssertionError(f"Expected int or float, got {type(self.norm_type)}")
+                raise AssertionError(
+                    f"Expected int or float, got {type(self.norm_type)}"
+                )
             return tensor / math.pow(mesh.size(mesh_dim), 1 / self.norm_type)
         raise NotImplementedError(self.reduce_op)
 
@@ -132,7 +134,9 @@ class _NormPartial(Partial):
     def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
         if self.reduce_op == "sum":
             if not isinstance(self.norm_type, (int, float)):
-                raise AssertionError(f"Expected int or float, got {type(self.norm_type)}")
+                raise AssertionError(
+                    f"Expected int or float, got {type(self.norm_type)}"
+                )
             if self.norm_type != 0 and self.norm_type != 1:
                 # pyrefly: ignore  # unsupported-operation
                 return tensor**self.norm_type
@@ -141,7 +145,9 @@ class _NormPartial(Partial):
     def _post_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
         if self.reduce_op == "sum":
             if not isinstance(self.norm_type, (int, float)):
-                raise AssertionError(f"Expected int or float, got {type(self.norm_type)}")
+                raise AssertionError(
+                    f"Expected int or float, got {type(self.norm_type)}"
+                )
             if self.norm_type != 0 and self.norm_type != 1:
                 # pyrefly: ignore  # unsupported-operation
                 return tensor ** (1.0 / self.norm_type)
@@ -441,7 +447,9 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
     if not isinstance(input_tuple_strategy, TupleStrategy):
-        raise AssertionError(f"Expected TupleStrategy, got {type(input_tuple_strategy)}")
+        raise AssertionError(
+            f"Expected TupleStrategy, got {type(input_tuple_strategy)}"
+        )
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
@@ -666,7 +674,9 @@ def nll_loss_forward_strategy(op_schema: OpSchema) -> OpStrategy:
         # make sure it is replicated
         if weight_strategy is not None:
             if not isinstance(weight_strategy, OpStrategy):
-                raise AssertionError(f"Expected OpStrategy, got {type(weight_strategy)}")
+                raise AssertionError(
+                    f"Expected OpStrategy, got {type(weight_strategy)}"
+                )
             weight_src_spec = weight_strategy.strategies[idx].output_spec
             weight_expected_spec = DTensorSpec(
                 mesh=mesh,
@@ -812,7 +822,9 @@ def nll_loss_backward_strategy(op_schema: OpSchema) -> OpStrategy:
         # make sure it is replicated
         if weight_strategy is not None:
             if not isinstance(weight_strategy, OpStrategy):
-                raise AssertionError(f"Expected OpStrategy, got {type(weight_strategy)}")
+                raise AssertionError(
+                    f"Expected OpStrategy, got {type(weight_strategy)}"
+                )
             weight_src_spec = weight_strategy.strategies[idx].output_spec
             weight_expected_spec = DTensorSpec(
                 mesh=mesh,
@@ -888,7 +900,9 @@ def _common_norm_forward_strategy(
     if not isinstance(input_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
     if not isinstance(normalized_shape, (int, Sequence, torch.Size)):
-        raise AssertionError(f"Expected int, Sequence, or torch.Size, got {type(normalized_shape)}")
+        raise AssertionError(
+            f"Expected int, Sequence, or torch.Size, got {type(normalized_shape)}"
+        )
     normalized_size = normalize_to_torch_size(normalized_shape)
 
     input_ndim = input_strategy.ndim
@@ -917,7 +931,9 @@ def _common_norm_forward_strategy(
 
         if weight_strategy is not None:
             if not isinstance(weight_strategy, OpStrategy):
-                raise AssertionError(f"Expected OpStrategy, got {type(weight_strategy)}")
+                raise AssertionError(
+                    f"Expected OpStrategy, got {type(weight_strategy)}"
+                )
             weight_src_spec = weight_strategy.strategies[idx].output_spec
 
             # for the weight tensor, we replicate it on all dims if necessary
@@ -1030,7 +1046,9 @@ def _common_norm_backward_strategy(
             raise AssertionError(f"Expected OpStrategy, got {type(mean_strategy)}")
 
     if not isinstance(normalized_shape, (int, Sequence, torch.Size)):
-        raise AssertionError(f"Expected int, Sequence, or torch.Size, got {type(normalized_shape)}")
+        raise AssertionError(
+            f"Expected int, Sequence, or torch.Size, got {type(normalized_shape)}"
+        )
     normalized_size = normalize_to_torch_size(normalized_shape)
     input_ndim = input_strategy.ndim
     axis = input_ndim - len(normalized_size)
@@ -1038,10 +1056,14 @@ def _common_norm_backward_strategy(
 
     if not rms_norm:
         if not (isinstance(output_mask, list) and len(output_mask) == 3):
-            raise AssertionError(f"Expected output_mask to be list of length 3, got {type(output_mask)} of length {len(output_mask) if isinstance(output_mask, list) else 'N/A'}")
+            raise AssertionError(
+                f"Expected output_mask to be list of length 3, got {type(output_mask)} of length {len(output_mask) if isinstance(output_mask, list) else 'N/A'}"
+            )
     else:
         if not (isinstance(output_mask, list) and len(output_mask) == 2):
-            raise AssertionError(f"Expected output_mask to be list of length 2, got {type(output_mask)} of length {len(output_mask) if isinstance(output_mask, list) else 'N/A'}")
+            raise AssertionError(
+                f"Expected output_mask to be list of length 2, got {type(output_mask)} of length {len(output_mask) if isinstance(output_mask, list) else 'N/A'}"
+            )
 
     # output tuple: (d_input, d_weight[, d_bias])
     out_tuple_strategy = OpStrategy([])
@@ -1133,7 +1155,7 @@ def _common_norm_backward_strategy(
                 error_msg = "output_mask[1] should not be `True` while weight argument is `None` in native_layer_norm_backward."
             else:
                 error_msg = "output_mask[1] should not be `True` while weight argument is `None` in _fused_rms_norm_backward."
-            if not output_mask[1] is False:
+            if output_mask[1] is not False:
                 raise AssertionError(error_msg)
             output_specs_list.append(None)
 
@@ -1159,8 +1181,10 @@ def _common_norm_backward_strategy(
                 )
                 output_specs_list.append(bias_out_spec if output_mask[2] else None)
             else:
-                if not output_mask[2] is False:
-                    raise AssertionError("output_mask[2] should not be `True` while bias argument is `None` in native_layer_norm_backward.")
+                if output_mask[2] is not False:
+                    raise AssertionError(
+                        "output_mask[2] should not be `True` while bias argument is `None` in native_layer_norm_backward."
+                    )
                 output_specs_list.append(None)
 
         out_tuple_strategy.strategies.append(
@@ -1291,7 +1315,9 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
     # args_schema contains all but the DTensor args (e.g., dim, keepdim).
     args_schema = op_schema.args_schema
     if not len(args_schema) > 1:
-        raise AssertionError(f"Expected more than 1 arg (input and dim are required), got {len(args_schema)}")
+        raise AssertionError(
+            f"Expected more than 1 arg (input and dim are required), got {len(args_schema)}"
+        )
 
     input_strategy = args_schema[0]
     if not isinstance(input_strategy, OpStrategy):

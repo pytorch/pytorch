@@ -80,7 +80,9 @@ def _mm_like_strategy(
     filtered_strategies = []
     for strtg in strategies:
         if strtg.input_specs is None:
-            raise AssertionError(f"Expected input_specs to be not None, got {strtg.input_specs}")
+            raise AssertionError(
+                f"Expected input_specs to be not None, got {strtg.input_specs}"
+            )
         self_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
         if is_tensor_shardable(self_strategy.shape, self_spec) and is_tensor_shardable(
@@ -123,7 +125,9 @@ def _addmm_like_strategy(
     for strtg in strategies:
         # construct new strategy by consider the self arg
         if strtg.input_specs is None:
-            raise AssertionError(f"Expected input_specs to be not None, got {strtg.input_specs}")
+            raise AssertionError(
+                f"Expected input_specs to be not None, got {strtg.input_specs}"
+            )
         mat1_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
         out_spec = strtg.output_spec
@@ -188,7 +192,9 @@ def _scaled_mm_like_strategy(
     filtered_strategies = []
     for strtg in strategies:
         if strtg.input_specs is None:
-            raise AssertionError(f"Expected input_specs to be not None, got {strtg.input_specs}")
+            raise AssertionError(
+                f"Expected input_specs to be not None, got {strtg.input_specs}"
+            )
         self_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
         # propagate the operands' specs to their scales, except for tensor-wise
@@ -813,7 +819,9 @@ def scaled_scaled_dot_product_cudnn_attention_backward_strategy(
     mesh = op_schema.get_mesh_from_args(validate=False)
 
     if len(op_schema.args_schema) < 15:
-        raise AssertionError(f"Expected at least 15 args_schema, got {len(op_schema.args_schema)}")
+        raise AssertionError(
+            f"Expected at least 15 args_schema, got {len(op_schema.args_schema)}"
+        )
     has_attn_bias = op_schema.args_schema[8] is not None
     has_scale = len(op_schema.args_schema) >= 16 and False
 
@@ -1072,9 +1080,13 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
         # UGH the input DTensorSpecs are missing their tensormetas... so i can get them another way
         def local_meta(spec: OpSpec, placements: tuple[Placement, ...]) -> TensorMeta:
             if not isinstance(spec.output_specs, DTensorSpec):
-                raise AssertionError(f"Expected DTensorSpec, got {type(spec.output_specs)}")
+                raise AssertionError(
+                    f"Expected DTensorSpec, got {type(spec.output_specs)}"
+                )
             if not isinstance(spec.output_specs.tensor_meta, TensorMeta):
-                raise AssertionError(f"Expected TensorMeta, got {type(spec.output_specs.tensor_meta)}")
+                raise AssertionError(
+                    f"Expected TensorMeta, got {type(spec.output_specs.tensor_meta)}"
+                )
             meta: TensorMeta = spec.output_specs.tensor_meta
             local_stride = compute_local_stride(meta.stride, mesh, placements)
             local_shape, _ = compute_local_shape_and_global_offset(
