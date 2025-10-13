@@ -449,6 +449,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
         "torch._C._accelerator_getStream",
+        "torch._C._accelerator_setAllocatorSettings",
         "torch._C._accelerator_setStream",
         "torch._C._accelerator_synchronizeDevice",
         "torch._C._activate_gpu_trace",

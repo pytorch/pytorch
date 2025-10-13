@@ -1077,8 +1077,12 @@ def _save_memory_usage(filename="output.svg", snapshot=None):
         f.write(_memory(snapshot))
 
 
+@deprecated(
+    "torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.",
+    category=FutureWarning,
+)
 def _set_allocator_settings(env: str):
-    return torch._C._cuda_cudaCachingAllocator_set_allocator_settings(env)
+    return torch._C._accelerator_setAllocatorSettings(env)
 
 
 def get_allocator_backend() -> str:
