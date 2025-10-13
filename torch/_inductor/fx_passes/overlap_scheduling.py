@@ -398,15 +398,9 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        if (
-            torch._inductor.config.test_configs.aten_fx_overlap_preserving_bucketing
-            and False
-        ):
+        if torch._inductor.config.test_configs.aten_fx_overlap_preserving_bucketing:
             self._bucket_collectives()
-        elif (
-            torch._inductor.config.test_configs.aten_fx_overlap_insert_overlap_deps
-            and False
-        ):
+        elif torch._inductor.config.test_configs.aten_fx_overlap_insert_overlap_deps:
             # If not bucketing, add effect tokens to preserve hiding dependencies
             self._add_effect_tokens_for_overlap()
 
