@@ -279,7 +279,6 @@ def out_wrapper(
             TensorLikeType
             if is_tensor
             else NamedTuple(
-                # pyrefly: ignore  # bad-argument-count
                 f"return_types_{fn.__name__}",
                 # pyrefly: ignore  # bad-argument-count
                 [(o, TensorLikeType) for o in out_names],
@@ -331,7 +330,7 @@ def out_wrapper(
                 # Naively you might expect this assert to be true, but
                 # it's not:
                 #
-                #   assert type(out) == type(result)
+                #   assert type(out) is type(result)
                 #
                 # The reason is that functions under this wrapper can
                 # get registered to the Meta dispatch key, and that

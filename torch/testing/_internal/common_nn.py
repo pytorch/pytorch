@@ -3421,7 +3421,7 @@ class ModuleTest(TestBase):
             kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
         self.precision = kwargs.get('precision', 2e-4)
         self.check_forward_only = kwargs.get('check_forward_only', False)
-        self.default_dtype = kwargs.get('default_dtype', None)
+        self.default_dtype = kwargs.get('default_dtype')
         if self.default_dtype is None:
             self.default_dtype = torch.get_default_dtype()
 
@@ -3632,7 +3632,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.test_cpu = kwargs.get('test_cpu', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
-        self.gradcheck_fast_mode = kwargs.get('gradcheck_fast_mode', None)
+        self.gradcheck_fast_mode = kwargs.get('gradcheck_fast_mode')
         self.supports_forward_ad = kwargs.get('supports_forward_ad', False)
         self.supports_fwgrad_bwgrad = kwargs.get('supports_fwgrad_bwgrad', False)
 
@@ -3836,7 +3836,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         self.with_tf32 = kwargs.get('with_tf32', True)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
         self.check_batched_grad = kwargs.get('check_batched_grad', True)
-        self.default_dtype = kwargs.get('default_dtype', None)
+        self.default_dtype = kwargs.get('default_dtype')
         if self.default_dtype is None:
             self.default_dtype = torch.get_default_dtype()
 

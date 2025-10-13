@@ -13,6 +13,7 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed._local_tensor import LocalTensor
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -379,6 +380,8 @@ class DTensorTestBase(MultiProcessTestCase):
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+
         if backend is None:
             backend = self.backend
 
@@ -386,7 +389,7 @@ class DTensorTestBase(MultiProcessTestCase):
             "nccl",
             "gloo",
             "mpi",
-            "cpu:gloo,cuda:nccl",
+            f"cpu:gloo,{self.device_type}:{curr_backend}",
             "hccl",
             "xccl",
             "fake",
@@ -658,7 +661,7 @@ class DTensorConverter:
     def to_dist_tensor(
         self, t: torch.Tensor, mesh: DeviceMesh, placements: list[Placement]
     ) -> torch.Tensor:
-        if type(t) is torch.Tensor or type(t) is nn.Parameter:
+        if type(t) is torch.Tensor or type(t) is nn.Parameter or type(t) is LocalTensor:
             if self.is_supported_tensor(t):
                 self.hit += 1
                 if t.ndim == 0:
@@ -667,7 +670,7 @@ class DTensorConverter:
                 else:
                     # distribute non-scalar tensors
                     r = distribute_tensor(t, mesh, placements)
-                if type(t) is nn.Parameter:
+                if isinstance(t, nn.Parameter):
                     r = nn.Parameter(  # type: ignore[assignment]
                         r, requires_grad=r.requires_grad
                     )
