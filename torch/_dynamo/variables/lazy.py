@@ -104,9 +104,15 @@ class LazyVariableTracker(VariableTracker):
             self._cache.name_hint = name
 
     def __str__(self) -> str:
+        variable_info = "LazyVariableTracker("
         if self.is_realized():
-            return repr(self.unwrap())
-        return super().__repr__()
+            variable_info += (
+                f"realized:{type(self.original_value)}, {repr(self.unwrap())})"
+            )
+        else:
+            variable_info += f"Unrealized: {self.peek_type()})"
+
+        return variable_info
 
     def __getattr__(self, item: str) -> Any:
         return getattr(self.realize(), item)

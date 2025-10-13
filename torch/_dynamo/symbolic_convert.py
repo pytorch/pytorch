@@ -1337,30 +1337,9 @@ class InstructionTranslatorBase(
                 return False
 
         if self.is_trace_bytecode_log_enabled:
-            if self.stack:
-                variables_tracker = []
-                for var in self.stack:
-                    if isinstance(var, LazyVariableTracker):
-                        variable_info = "LazyVariableTracker("
-                        if not var.is_realized():
-                            variable_info += f"Unrealized: {var.peek_type()})"
-
-                        else:
-                            variable_info += (
-                                f"realized:{type(var.original_value)}, {var}"
-                            )
-
-                        variables_tracker.append(variable_info)
-
-                    else:
-                        variables_tracker.append(str(var))
-
-                trace_bytecode_log.debug(
-                    "TRACE %s %s %s", inst.opname, inst.argval, variables_tracker
-                )
-
-            else:
-                trace_bytecode_log.debug("TRACE %s %s %s", inst.opname, inst.argval, [])
+            trace_bytecode_log.debug(
+                "TRACE %s %s %s", inst.opname, inst.argval, repr(self.stack)
+            )
 
         self.update_block_stack(inst)
 
