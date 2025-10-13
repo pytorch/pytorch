@@ -129,7 +129,8 @@ size_t AcceleratorAllocatorConfig::parseRoundUpPower2Divisions(
         std::fill(
             std::next(
                 roundup_power2_divisions_.begin(),
-                static_cast<std::vector<size_t>::difference_type>(last_index)),
+                static_cast<std::vector<size_t>::difference_type>(
+                    last_index + 1)),
             roundup_power2_divisions_.end(),
             value);
       } else {
