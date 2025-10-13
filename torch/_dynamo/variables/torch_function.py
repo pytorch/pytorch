@@ -57,7 +57,7 @@ from ..utils import (
     set_torch_function_mode_stack,
 )
 from .base import VariableTracker
-from .constant import constant_none, ConstantVariable
+from .constant import ConstantVariable
 from .ctx_manager import GenericContextWrappingVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .lazy import LazyVariableTracker
@@ -344,12 +344,12 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         from .torch import TorchInGraphFunctionVariable
 
         if isinstance(self.value, NoEnterTorchFunctionMode):
-            return constant_none
+            return ConstantVariable.create(None)
 
         TorchInGraphFunctionVariable(
             torch._C._push_on_torch_function_stack
         ).call_function(tx, [self], {})
-        return constant_none
+        return ConstantVariable.create(None)
 
     def exit(self, tx: "InstructionTranslator", *args):
         from .torch import TorchInGraphFunctionVariable
@@ -357,7 +357,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         TorchInGraphFunctionVariable(torch._C._pop_torch_function_stack).call_function(
             tx, [], {}
         )
-        return constant_none
+        return ConstantVariable.create(None)
 
     def reconstruct_type(self, codegen: "PyCodegen"):
         ty = NoEnterTorchFunctionMode

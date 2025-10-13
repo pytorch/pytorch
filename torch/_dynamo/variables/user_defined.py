@@ -341,10 +341,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         from . import ConstantVariable
 
         def normalize_args(
-            weight=variables.constant_none,
-            size_average=variables.constant_none,
+            weight=ConstantVariable.create(None),
+            size_average=ConstantVariable.create(None),
             ignore_index=ConstantVariable.create(-100),
-            reduce=variables.constant_none,
+            reduce=ConstantVariable.create(None),
             reduction=ConstantVariable.create("mean"),
             label_smoothing=ConstantVariable.create(0.0),
         ):
@@ -515,7 +515,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
             return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
         elif self.value is collections.deque:
-            maxlen = variables.constant_none
+            maxlen = variables.ConstantVariable.create(None)
 
             def deque_signature(iterable=None, maxlen=None):
                 pass
@@ -563,7 +563,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if len(args) > 1:
                 callback = args[1]
             else:
-                callback = variables.constant_none
+                callback = variables.ConstantVariable.create(None)
             return variables.WeakRefVariable(args[0], callback)
         elif self.value is functools.partial:
             if not args:
@@ -1016,7 +1016,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
             if method is object.__init__:
-                return variables.constant_none
+                return ConstantVariable.create(None)
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
@@ -1029,7 +1029,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__eq__ and len(args) == 1 and not kwargs:
                 other = args[0]
                 if not isinstance(other, UserDefinedObjectVariable):
-                    return variables.constant_NotImplemented
+                    return variables.ConstantVariable.create(NotImplemented)
 
                 # TODO(anijain2305) - Identity checking should already be a part
                 # of the cmp_eq  polyfill function.
@@ -1658,7 +1658,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         except ObservedAttributeError:
             handle_observed_exception(tx)
-            return variables.constant_false
+            return variables.ConstantVariable.create(False)
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
@@ -1906,7 +1906,7 @@ class RemovableHandleVariable(VariableTracker):
             if self.idx != self.REMOVED:
                 tx.output.side_effects.remove_hook(self.idx)
                 self.idx = self.REMOVED
-            return variables.constant_none
+            return variables.ConstantVariable.create(None)
         super().call_method(tx, method_name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen"):
