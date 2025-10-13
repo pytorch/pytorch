@@ -94,7 +94,6 @@ class StreamContextVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.device = device
-        self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
 
     def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
         # to stream, from stream is the order of the arguments
