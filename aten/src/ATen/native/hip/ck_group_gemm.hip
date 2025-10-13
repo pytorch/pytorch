@@ -388,14 +388,30 @@ void launch_grouped_bgemm_ck_impl_dispatch(
 }
 
 void group_gemm_ck(
-    const at::Tensor& mat_a,
-    const at::Tensor& mat_b,
+    const at::Tensor& input_a,
+    const at::Tensor& input_b_colmajor,
     const std::optional<at::Tensor>& offs,
     const std::optional<at::Tensor>& /*bias*/,
     at::Tensor& out)
-{    
+{
+    // Detect if input_a is row-major based on stride pattern
+    bool a_row_major = (input_a.dim() == 3) ? (input_a.stride(2) == 1) : (input_a.stride(1) == 1);
+    bool b_col_major = (input_b_colmajor.dim() == 3) ? (input_b_colmajor.stride(1) == 1) : (input_b_colmajor.stride(0) == 1);
+    // Ensure tensor A is row-major and contiguous if not already
+    at::Tensor mat_a = input_a;
+    if (!a_row_major) {
+        // If A is not row-major, make it contiguous (row-major)
+        mat_a = input_a.contiguous();
+    }
+    // Force tensor B to be column-major using double transpose trick
+    // This guarantees stride(0) == 1 and stride(1) == K for [K, N] shape
+    at::Tensor mat_b = input_b_colmajor;
+    if (!b_col_major) {
+        mat_b = input_b_colmajor.transpose(-2, -1).contiguous().transpose(-2, -1);
+    }
+
     // For 3D tensors, check the last dimension stride for row-major detection
-    bool a_row_major = (mat_a.dim() == 3) ? (mat_a.stride(2) == 1) : (mat_a.stride(1) == 1);
+    a_row_major = (mat_a.dim() == 3) ? (mat_a.stride(2) == 1) : (mat_a.stride(1) == 1);
     bool b_row_major = (mat_b.dim() == 3) ? (mat_b.stride(2) == 1) : (mat_b.stride(1) == 1);
 
     if (mat_a.dtype() == at::kBFloat16) {
