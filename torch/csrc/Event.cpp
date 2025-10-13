@@ -277,7 +277,8 @@ static PyMethodDef THPEvent_methods[] = {
     {"synchronize", THPEvent_synchronize, METH_NOARGS, nullptr},
     {"ipc_handle", THPEvent_ipc_handle, METH_NOARGS, nullptr},
     {nullptr}};
-
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
 PyTypeObject THPEventType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch.Event", /* tp_name */
@@ -303,10 +304,7 @@ PyTypeObject THPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Winvalid-offsetof"
     offsetof(THPEvent, weakreflist), /* tp_weaklistoffset */
-#pragma GCC diagnostic pop
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPEvent_methods, /* tp_methods */
@@ -321,6 +319,7 @@ PyTypeObject THPEventType = {
     nullptr, /* tp_alloc */
     THPEvent_pynew, /* tp_new */
 };
+#pragma GCC diagnostic pop
 
 void THPEvent_init(PyObject* module) {
   THPEventClass = &THPEventType;
