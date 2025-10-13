@@ -1337,7 +1337,7 @@ class InstructionTranslatorBase(
                 return False
 
         if self.is_trace_bytecode_log_enabled:
-            trace_bytecode_log.debug("TRACE %s %s %s", inst.opname, inst.argval, self.stack)
+            trace_bytecode_log.debug("TRACE %s %s %s", inst.opname, inst.argval, repr(self.stack))
 
         self.update_block_stack(inst)
 

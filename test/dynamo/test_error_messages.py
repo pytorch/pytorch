@@ -113,7 +113,7 @@ sort with non-constant keys
   Explanation: Cannot perform sort with non-constant key. First non-constant key type: <class 'torch.Tensor'>. Most notably, we cannot sort with Tensor or SymInt keys, but we can sort ints.
   Hint: Use something else as the key.
 
-  Developer debug context: TensorVariable()
+  Developer debug context: LazyVariableTracker(realized:<class 'method'>, TensorVariable())
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0207.html
 
@@ -216,7 +216,7 @@ Unsupported context manager
   Hint: If the context manager seems like it should be supported (e.g. torch.set_grad_enabled), then it may be the case that it was created outside the compiled region, which Dynamo does not support. Supported context managers can cross graph break boundaries only if they are local non-closure variables, or are intermediate values.
   Hint: File an issue to PyTorch. Simple context managers can potentially be supported, but note that context managers can't be supported in general
 
-  Developer debug context: Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on ConstantVariable(int: 3)
+  Developer debug context: Attempted SETUP_WITH/BEFORE_WITH/LOAD_SPECIAL on LazyVariableTracker(realized:<class 'method'>, ConstantVariable(int: 3))
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0142.html
 
@@ -543,7 +543,7 @@ Dynamic slicing with Tensor arguments
   Explanation: Creating slices with Tensor arguments is not supported. e.g. `l[:x]`, where `x` is a 1-element tensor.
   Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
 
-  Developer debug context: SliceVariable start: ConstantVariable(NoneType: None), stop: TensorVariable(), step: ConstantVariable(NoneType: None)
+  Developer debug context: SliceVariable start: ConstantVariable(NoneType: None), stop: LazyVariableTracker(realized:<class 'method'>, TensorVariable()), step: ConstantVariable(NoneType: None)
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0038.html
 
@@ -886,7 +886,7 @@ from user code:
             # Split the string into lines
             lines = long_string.split("\n")
             # More comprehensive pattern to capture LazyVariableTracker info
-            pattern = r"LazyVariableTracker\((.*?)\)"
+            pattern = r"LazyVariableTracker\([^)]*\)"
             # Find all lines containing the pattern
             result = [line for line in lines if re.search(pattern, line)]
             return result
@@ -902,7 +902,7 @@ from user code:
         combined_msg = "\n".join(all_messages)
         all_lines = find_trace_bytecode_lines(combined_msg)
 
-        # For now, just check that we found some lines
+        # For now, just check that we found some lines with LazyVariableTracker
         self.assertGreater(
             len(all_lines), 0, "Should find at least one LazyVariableTracker line"
         )
