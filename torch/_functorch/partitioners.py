@@ -1021,6 +1021,8 @@ def default_partition(
     saved_sym_nodes = []
 
     def is_mutated_later_in_fw(node):
+        if _has_tag_is_backward(node):
+            return False
         tensor_arg_aliases = [
             x
             for x in node.args
@@ -1036,9 +1038,12 @@ def default_partition(
                 # If we witness a mutation on our node later, and that mutation is not "must be in backward",
                 # then our node needs to be computed in the forward (otherwise we will compute it on the mutated values)
                 if (
+                    # one of the args was mutated
                     u.target._schema.is_mutable
+                    # and the mutation happens "later"
                     and order[u] > order[node]
-                    and u.meta.get("partitioner_tag", None) != "during_backward"
+                    # and the mutation happened during the forward
+                    and not (_has_tag_is_backward(u) or _has_tag_must_be_in_backward(u))
                 ):
                     for idx, alias_info in enumerate(u.target._schema.arguments):
                         if alias_info.is_write and u.args[idx] is a:
