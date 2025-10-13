@@ -339,8 +339,9 @@ def pre_grad_passes(
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.pre_grad_custom_pass is not None:
-        with GraphTransformObserver(gm, "pre_grad_custom_pass"):
-            config.pre_grad_custom_pass(gm.graph)
+        GraphTransformObserver(gm, "pre_grad_custom_pass").apply_graph_pass(
+            config.pre_grad_custom_pass
+        )
     stable_topological_sort(gm.graph)
 
     from .quantization import quant_lift_up
@@ -508,6 +509,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 conv = conv_bn_fusion.conv_module
                 bn = conv_bn_fusion.bn_module
 
+                # pyrefly: ignore  # bad-argument-type
                 fused_conv = fuse_conv_bn_eval(conv, bn)
                 for bn_node in bn_nodes:
                     replace_node_module(bn_node.args[0], modules, fused_conv)
@@ -595,8 +597,11 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 fused_conv.weight, fused_conv.bias = fuse_conv_bn_weights(
                     fused_conv.weight,
                     fused_conv.bias,
+                    # pyrefly: ignore  # bad-argument-type
                     bn_running_mean,
+                    # pyrefly: ignore  # bad-argument-type
                     bn_running_var,
+                    # pyrefly: ignore  # bad-argument-type
                     bn_eps,
                     bn_weight,
                     bn_bias,
@@ -633,7 +638,7 @@ class NormalizedLinearNode:
         if len(self.node.args) > 2:
             return self.node.args[2]  # type: ignore[return-value]
         else:
-            return self.node.kwargs["bias"] if "bias" in self.node.kwargs else None  # type: ignore[return-value]
+            return self.node.kwargs.get("bias", None)  # type: ignore[return-value]
 
 
 class NormalizedMatmulNode:
