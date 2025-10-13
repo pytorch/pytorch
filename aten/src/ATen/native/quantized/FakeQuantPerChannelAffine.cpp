@@ -214,7 +214,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
       "`axis` must be between 0 and number of dimensions of input");
 
   if (X_.numel() <= 0) {
-    return std::make_tuple(X_, scale_, zero_point_);
+    return std::make_tuple(X, scale, zero_point);
   }
 
   auto dX = at::empty_like(X_, X_.options(), MemoryFormat::Preserve);
