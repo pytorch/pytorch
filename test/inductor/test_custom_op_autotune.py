@@ -172,7 +172,6 @@ class TestCustomOpAutoTune(TestCase):
             x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
             """vLLM-style RMSNorm implementation - variance computation first approach."""
-            hidden_size = x.shape[-1]
             x_var = x  # In vLLM, this could be sliced for variance_size_override
 
             variance = x_var.pow(2).mean(dim=-1, keepdim=True)
@@ -187,9 +186,6 @@ class TestCustomOpAutoTune(TestCase):
             x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
             """vLLM-style RMSNorm with extended variance computation pattern."""
-            # Get hidden size (following vLLM pattern)
-            hidden_size = x.shape[-1]
-
             x_squared = x.pow(2)
             variance = x_squared.mean(dim=-1, keepdim=True)
 
@@ -228,10 +224,10 @@ class TestCustomOpAutoTune(TestCase):
             decompositions=decompositions,
             name="test_rmsnorm_autotuned",
             input_gen_fns={
-                0: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                0: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
                 * 0.02,  # Small values for input
                 1: lambda fake_tensor: torch.ones_like(
-                    fake_tensor, device="cuda"
+                    fake_tensor, device=self.device
                 ),  # Ones for weight
             },
         )
@@ -333,13 +329,13 @@ class TestCustomOpAutoTune(TestCase):
             decompositions=decompositions,
             name="test_mlp_autotuned",
             input_gen_fns={
-                0: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                0: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
                 * 0.1,  # Input tensor
-                1: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                1: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
                 * 0.05,  # Gate weight
-                2: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                2: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
                 * 0.05,  # Up weight
-                3: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                3: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
                 * 0.05,  # Down weight
             },
         )
@@ -444,9 +440,9 @@ class TestCustomOpAutoTune(TestCase):
             decompositions=decompositions,
             name="test_decompose_k_autotuned",
             input_gen_fns={
-                0: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                0: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
                 * 0.1,  # Matrix A
-                1: lambda fake_tensor: torch.randn_like(fake_tensor, device="cuda")
+                1: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
                 * 0.1,  # Matrix B
             },
         )

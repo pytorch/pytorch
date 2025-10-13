@@ -44,12 +44,6 @@ def _create_fallback_choice(
     Returns:
         ExternKernelChoice configured for the default implementation
     """
-    layout = FixedLayout(
-        device=fake_output.device,
-        dtype=fake_output.dtype,
-        size=fake_output.shape,
-        stride=fake_output.stride(),
-    )
 
     def fallback_wrapper(*args: Any) -> Any:
         return default_impl(*args, **kwargs)
@@ -90,8 +84,11 @@ def _create_user_input_gen_fns(
 
         fake_template = fake_inputs[i]
 
-        def create_internal_input_gen_fn(user_function, template):
-            def internal_input_gen_fn(ir_buffer):
+        def create_internal_input_gen_fn(
+            user_function: Callable[[torch.Tensor], torch.Tensor],
+            template: torch.Tensor,
+        ) -> Callable[[Any], torch.Tensor]:
+            def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
                 fake_tensor_for_user = torch.empty(
                     template.shape,
                     dtype=template.dtype,
@@ -109,7 +106,7 @@ def _create_user_input_gen_fns(
 
 
 def _extract_tensor_inputs(
-    args: tuple, kwargs: dict[str, Any]
+    args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> tuple[list[Any], dict[str, Any]]:
     """Extract tensor inputs from mixed args/kwargs for custom op processing.
 
@@ -357,13 +354,11 @@ def register_parametric_op_autotuning(
         name = f"{custom_op._name}_parametric_autotuned"
 
     # Generate specialized functions for each parameter value using functools.partial
-    def make_variant(value):
-        """Create a specialized variant that fixes the parameter to a specific value."""
+    decompositions: list[Callable[..., Any]] = []
+    for value in parameter_values:
         variant = functools.partial(implementation_fn, **{parameter_name: value})
-        variant.__name__ = f"{implementation_fn.__name__}_{parameter_name}_{value}"
-        return variant
-
-    decompositions = [make_variant(value) for value in parameter_values]
+        variant.__name__ = f"{implementation_fn.__name__}_{parameter_name}_{value}"  # type: ignore[attr-defined]
+        decompositions.append(variant)
 
     register_custom_op_autotuning(
         custom_op=custom_op,
