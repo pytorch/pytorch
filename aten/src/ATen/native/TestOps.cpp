@@ -143,9 +143,12 @@ Tensor _test_schema_upgrader(
 
 Tensor _test_versioning(
     const Tensor& self,
-    dummy_types::Dummy dummy) {
+    dummy_types::Dummy dummy,
+    int64_t scale
+) {
   Tensor output = at::empty_like(self);
-  int32_t fill_value = dummy.get_id();
+  int32_t fill_value = dummy.get_id() * scale;
+  TORCH_WARN("id=", dummy.get_id(), " scale=", scale, " fill_value=", fill_value);
   output.fill_(fill_value);
   return output;
 }
