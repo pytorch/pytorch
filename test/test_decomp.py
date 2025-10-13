@@ -878,7 +878,7 @@ def forward(self, scores_1, mask_1, value_1):
                     zip(real_out, decomp_out, real_out_double)
                 ):
                     if not isinstance(orig, torch.Tensor):
-                        assert type(orig) == type(decomp)
+                        assert type(orig) is type(decomp)
                         assert orig == decomp
                         continue
                     op_assert_ref(
@@ -895,7 +895,7 @@ def forward(self, scores_1, mask_1, value_1):
             else:
                 for orig, decomp in zip(real_out, decomp_out):
                     if not isinstance(orig, torch.Tensor):
-                        assert type(orig) == type(decomp)
+                        assert type(orig) is type(decomp)
                         assert orig == decomp
                         continue
                     op_assert_equal(

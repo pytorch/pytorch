@@ -165,7 +165,7 @@ class OpDispatcher:
                 raise
         except Exception as e:
             raise RuntimeError(
-                f"Sharding propagation failed for {op_info.schema}"
+                f"{e}\n\nSharding propagation failed for {op_info.schema}"
             ) from e
 
         output_sharding = op_info.output_sharding
