@@ -1597,7 +1597,7 @@ def _register_qconv_weight_prepack_pass(
             convert_to_bf16 = conv_node.args[0]
             dequant_node = convert_to_bf16.args[0]  # type: ignore[union-attr]
 
-        dequant_dtype = dequant_node.kwargs.get("out_dtype", dtype)
+        dequant_dtype = dequant_node.kwargs.get("out_dtype", dtype)  # type: ignore[union-attr]
         is_amp = dtype == torch.bfloat16
         if is_amp:
             dequant_dtype = torch.bfloat16
@@ -2932,7 +2932,13 @@ def _register_qconv_post_op_fusion_pass(
             kwargs["groups"],
         )
         output_dtype = _get_pattern_output_dtype(match)
-        assert output_dtype in [torch.int8, torch.uint8, torch.float32, torch.bfloat16, torch.float16]
+        assert output_dtype in [
+            torch.int8,
+            torch.uint8,
+            torch.float32,
+            torch.bfloat16,
+            torch.float16,
+        ]
         # Output QParams
         o_inv_scale = (
             kwargs["o_inv_scale"]
