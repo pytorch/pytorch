@@ -4,6 +4,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/Exception.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -303,7 +304,7 @@ at::Scalar as_scalar(PyObject* arg) {
   }
 
   if (THPUtils_checkLong(arg)) {
-    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(arg)));
+    return at::Scalar(THPUtils_unpackLong(arg));
   }
 
   if (PyBool_Check(arg)) {
@@ -735,8 +736,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
         "mempool_id elements must be integers");
 
     mempool_id = c10::cuda::MempoolId_t(
-        static_cast<int64_t>(THPUtils_unpackLong(id1)),
-        static_cast<int64_t>(THPUtils_unpackLong(id2)));
+        THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
   }
 
   using c10::cuda::CUDACachingAllocator::BlockInfo;
@@ -862,7 +862,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
     }
-    throw std::runtime_error("unreachable");
+    TORCH_CHECK(false, "unreachable");
   };
 
   for (const auto& traceInfo : snapshot.device_traces) {

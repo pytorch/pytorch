@@ -73,19 +73,17 @@ class _NormPartial(Partial):
 
     norm_type: Union[int, float, str] = 2
 
-    def __init__(self, norm_type: Union[int, float, str] = 2):
-        reduce_op = None
-        if norm_type in (float("inf"), "inf"):
-            reduce_op = "max"
-        elif norm_type in (float("-inf"), "-inf"):
-            reduce_op = "min"
-        elif isinstance(norm_type, (int, float)):
-            reduce_op = "sum"
+    def __post_init__(self):
+        """Set the appropriate reduce op based on the norm type."""
+        # Use `object.__setattr__` to bypass frozen checks
+        if self.norm_type in (float("inf"), "inf"):
+            object.__setattr__(self, "reduce_op", "max")
+        elif self.norm_type in (float("-inf"), "-inf"):
+            object.__setattr__(self, "reduce_op", "min")
+        elif isinstance(self.norm_type, (int, float)):
+            object.__setattr__(self, "reduce_op", "sum")
         else:
-            raise NotImplementedError(f"Unsupported norm type: {norm_type}")
-
-        super().__init__(reduce_op)
-        object.__setattr__(self, "norm_type", norm_type)
+            raise NotImplementedError(f"Unsupported norm type: {self.norm_type}")
 
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -133,6 +131,7 @@ class _NormPartial(Partial):
         if self.reduce_op == "sum":
             assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
             if self.norm_type != 0 and self.norm_type != 1:
+                # pyrefly: ignore  # unsupported-operation
                 return tensor**self.norm_type
         return tensor
 
@@ -140,6 +139,7 @@ class _NormPartial(Partial):
         if self.reduce_op == "sum":
             assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
             if self.norm_type != 0 and self.norm_type != 1:
+                # pyrefly: ignore  # unsupported-operation
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 
@@ -319,6 +319,10 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.all.dim: "sum",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
+    aten.any.default: "sum",
+    aten.any.dim: "sum",
+    aten.any.out: "sum",
+    # These are only valid when there is no padding
     aten.prod.default: "product",
     aten.prod.dim_int: "product",
     aten.prod.int_out: "product",
@@ -332,9 +336,6 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.min.default: "min",
     aten.min.dim: "min",
     aten.min.out: "min",
-    aten.any.default: "sum",
-    aten.any.dim: "sum",
-    aten.any.out: "sum",
     aten.amax.default: "max",
     aten.amax.out: "max",
     aten.amin.default: "min",

@@ -65,8 +65,7 @@ def grouped_mm_configs():
     return _NV_CONFIGS
 
 
-def early_config_prune(g, m, configs, named_args):
-    dtsize = 1
+def early_config_prune(g, m, dtsize, configs, named_args):
     pruned_configs = []
     for config in configs:
         kw = config.kwargs
@@ -347,39 +346,19 @@ triton_grouped_mm_source = r"""
 {%- endif %}
 {%- endif %}
 
-{%- if M_IS_VARYING %}
-                    if m_tile_offset + BLOCK_M > m_size:
-                        group_offs = m_tile_offset + tl.arange(0, BLOCK_M)
-                        mask = group_offs < m_size
-{%- if A_IS_K_MAJOR %}
-                        a = tl.where(mask[:, None], a, 0)
-{%- else %}
-                        a = tl.where(mask, a, 0)
-{%- endif %}
-{%- endif %}
-{%- if N_IS_VARYING %}
-                    if n_tile_offset + BLOCK_N > n_size:
-                        group_offs = n_tile_offset + tl.arange(0, BLOCK_N)
-                        mask = group_offs < n_size
-{%- if B_IS_K_MAJOR %}
-                        b = tl.where(mask[:, None], b, 0)
-{%- else %}
-                        b = tl.where(mask, b, 0)
-{%- endif %}
-{%- endif %}
 {%- if K_IS_VARYING %}
                     if k_block_offset + BLOCK_K > k_size:
                         group_offs = k_block_offset + tl.arange(0, BLOCK_K)
-                        mask = group_offs < k_size
+                        k_mask = group_offs < k_size
 {%- if A_IS_K_MAJOR %}
-                        a = tl.where(mask, a, 0)
+                        a = tl.where(k_mask[None, :], a, 0)
 {%- else %}
-                        a = tl.where(mask[:, None], a, 0)
+                        a = tl.where(k_mask[:, None], a, 0)
 {%- endif %}
 {%- if B_IS_K_MAJOR %}
-                        b = tl.where(mask, b, 0)
+                        b = tl.where(k_mask[None, :], b, 0)
 {%- else %}
-                        b = tl.where(mask[:, None], b, 0)
+                        b = tl.where(k_mask[:, None], b, 0)
 {%- endif %}
 {%- endif %}
 
@@ -428,8 +407,8 @@ triton_grouped_mm_source = r"""
                     )
                     a_mask = (offs_am[:, None] < m_size) & (block_offs_k[None, :] < k_size)
                     b_mask = (offs_bn[:, None] < n_size) & (block_offs_k[None, :] < k_size)
-                    a = tl.load(a_ptrs, mask=a_mask, other=0)
-                    b = tl.load(b_ptrs, mask=b_mask, other=0)
+                    a = tl.load(a_ptrs, mask=a_mask, other=tl.zeros((), dtype=a_ptrs.dtype.element_ty))
+                    b = tl.load(b_ptrs, mask=b_mask, other=tl.zeros((), dtype=b_ptrs.dtype.element_ty))
 {%- if USE_FAST_ACCUM %}
                     accumulator = tl.dot(a, b.T, accumulator)
 {%- else %}
@@ -451,7 +430,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_am[:, None],
                     mask=offs_am[:, None] < m_size,
-                    other=0,
+                    other=tl.zeros((), dtype=scale_a_ptr.dtype.element_ty),
                 )
                 scale_b = tl.load(
                     scale_b_ptr
@@ -462,7 +441,7 @@ triton_grouped_mm_source = r"""
 {%- endif %}
                     + offs_bn[None, :],
                     mask=offs_bn[None, :] < n_size,
-                    other=0,
+                    other=tl.zeros((), dtype=scale_b_ptr.dtype.element_ty),
                 )
                 c = accumulator.to(tl.float32) * scale_a * scale_b
 {%- else %}
@@ -714,10 +693,12 @@ def _tuned_grouped_mm_common(
             if len(m2_size) == 2:
                 m, k1 = m1_size
                 k2, _ = m2_size
+                # pyrefly: ignore  # missing-attribute
                 g = offs.get_size()[0]
                 V.graph.sizevars.check_equals(k1, k2)
                 a_is_2d, b_is_2d = True, True
             else:
+                # pyrefly: ignore  # missing-attribute
                 g1 = offs.layout.size[0]
                 m, k1 = m1_size
                 g2, k2, _ = m2_size
@@ -726,6 +707,7 @@ def _tuned_grouped_mm_common(
                 a_is_2d, b_is_2d = True, False
         else:
             if len(m2_size) == 2:
+                # pyrefly: ignore  # missing-attribute
                 g1 = offs.layout.size[0]
                 g2, m, k1 = m1_size
                 k2, _ = m2_size
@@ -762,7 +744,9 @@ def _tuned_grouped_mm_common(
             "USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR": triton_has_experimental_make_tensor_descriptor,
         }
 
-        for config in early_config_prune(g, m, grouped_mm_configs(), kwargs):
+        for config in early_config_prune(
+            g, m, mat_a.dtype.itemsize, grouped_mm_configs(), kwargs
+        ):
             kernel_template.maybe_append_choice(
                 choices,
                 input_nodes=input_nodes,
