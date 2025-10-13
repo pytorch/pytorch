@@ -185,7 +185,13 @@ void CUDAAllocatorConfig::parseArgs(const std::string& env) {
           "' in CUDA allocator config.");
       // Skip the key and its value
       consumeToken(config, ++i, ':');
-      i++;
+      i++; // Move to the value
+      if (config[i] == "[") {
+        // Skip config inside the list until matching ']'
+        // NOLINTNEXTLINE(bugprone-inc-dec-in-conditions)
+        while (++i < config.size() && config[i] != "]") {
+        }
+      }
     }
 
     if (i + 1 < config.size()) {
