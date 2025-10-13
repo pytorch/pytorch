@@ -18,6 +18,7 @@ from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.utils.checkpoint import create_selective_checkpoint_contexts
+from torch.fx.experimental.proxy_tensor import make_fx
 
 
 if torch.distributed.is_available():
@@ -556,8 +557,10 @@ class GraphModule(torch.nn.Module):
             out = x.view(-1) + 10
             return (out.view(x.shape),)
 
-        # pretend this is a GraphModule for testing convenience
-        fn.meta = {
+        x = torch.randn(10, 80)
+        gm = make_fx(fn)(x)
+
+        gm.meta = {
             "local_map_kwargs": {
                 "in_placements": ((Shard(0), Replicate(), Replicate()),),
                 "out_placements": ((Shard(0), Replicate(), Replicate()),),
@@ -568,7 +571,7 @@ class GraphModule(torch.nn.Module):
         with FakeTensorMode():
             global_tensor = torch.randn(80, 80, requires_grad=True)
         with torch._higher_order_ops.local_map.defer_inlining():
-            out = torch._higher_order_ops.local_map_hop(fn, global_tensor)
+            out = torch._higher_order_ops.local_map_hop(gm, global_tensor)
             out[0].sum().backward()
         self.assertEqual(global_tensor.shape, (80, 80))
 
