@@ -1751,10 +1751,11 @@ def _adjusted_atol(atol, u, v):
     # We see that atol needs to be scaled by v^T M u (where M is an all-ones M x N
     # matrix): v^T M u = \sum_{i} \sum_{j} u_i * v_j = (\sum_{i} u_i)(\sum_{i} v_i)
     # TODO: properly handle case when u is tuple instead of only taking first element
-    u = u[0] if isinstance(u, tuple) else u
-    sum_u = u.sum()
+    ur = u[0] if isinstance(u, tuple) else u
+    sum_ur = ur.sum()
     sum_v = 1.0 if v is None else v.sum()
-    return atol * float(sum_u) * float(sum_v)
+    modified_atol = atol * float(sum_ur) * float(sum_v)
+    return modified_atol
 
 
 FAST_FAIL_SLOW_OK_MSG = """
