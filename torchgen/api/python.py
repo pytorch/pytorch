@@ -699,6 +699,7 @@ def argument_type_str(
             BaseTy.Dimname,
             BaseTy.Stream,
             BaseTy.SymInt,
+            BaseTy.Dummy,
         ]:
             # These python schema type names line up with their function schema names
             return t.name.name
@@ -965,7 +966,7 @@ def argument_type_str_pyi(t: Type) -> str:
             ret = "str | EllipsisType | None"
         elif t.name == BaseTy.Storage:
             ret = "Storage | UntypedStorage"
-        elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Stream]:
+        elif t.name in [BaseTy.Tensor, BaseTy.Generator, BaseTy.Stream, BaseTy.Dummy]:
             # These python schema type names line up with their function schema names
             ret = t.name.name
 
@@ -1313,6 +1314,7 @@ def arg_parser_unpack_method(
             BaseTy.Storage,
             BaseTy.Scalar,
             BaseTy.Dimname,
+            BaseTy.Dummy,
         ]:
             # These unpack methods line up with their schema names
             return t.name.name.lower()
