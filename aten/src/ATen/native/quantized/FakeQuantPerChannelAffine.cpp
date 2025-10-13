@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/FakeQuantAffine.h>
 
 #include <c10/util/irange.h>
+#include <iostream>
 
 // FakeQuantize Op for PerChannelAffine quantization scheme.
 
@@ -51,7 +52,7 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
   TORCH_CHECK(scale.scalar_type() == ScalarType::Float || scale.scalar_type() == at::kBFloat16,
               "Scale must be Float or BFloat16, found ", scale.scalar_type());
   TORCH_CHECK(zero_point.scalar_type() == ScalarType::Int || zero_point.scalar_type() == ScalarType::Float || zero_point.scalar_type() == ScalarType::Half,
-              "Zero-point must be Int32, Float or Half, found ", zero_point.scalar_type());
+              "Zero-point must be Int32, Float, or Half, found ", zero_point.scalar_type());
   TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
   TORCH_CHECK(zero_point.dim() == 1, "zero point should be a 1-D tensor");
   TORCH_CHECK(
@@ -180,10 +181,11 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   */
   auto zero_point_rounded = _get_rounded_zero_point(zero_point, quant_min, quant_max);
 
-  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(X.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(scale.scalar_type() == ScalarType::Float);
-  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Float);
+  std::cout << "here" << std::endl;
+  TORCH_CHECK(dY.scalar_type() == ScalarType::Float || dY.scalar_type() == at::kBFloat16);
+  TORCH_CHECK(X.scalar_type() == ScalarType::Float || X.scalar_type() == at::kBFloat16);
+  TORCH_CHECK(scale.scalar_type() == ScalarType::Float || scale.scalar_type() == at::kBFloat16);
+  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Float || zero_point.scalar_type() == at::kBFloat16);
 
   TORCH_CHECK(X.sizes() == dY.sizes(), "`X` and `dY` are not the same size");
   TORCH_CHECK(
