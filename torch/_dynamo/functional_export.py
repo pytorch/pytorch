@@ -51,11 +51,7 @@ def post_process_error_msg(
 
 
 EXPORT_ROOT_REPLACEMENTS = [
-    ("____modules___export_root_", "_"),
-    ("__modules['_export_root']_", ""),
     ("__export_root_", "_"),
-    # when used as FQN name path
-    ("._modules['_export_root']", ""),
     ("_export_root.", ""),
     ("._export_root", ""),
 ]
