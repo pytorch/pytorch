@@ -1871,7 +1871,7 @@ class BuiltinVariable(VariableTracker):
                 NNModuleVariable,
             ),
         ):
-            return variables.ConstantVariable.create(True)
+            return variables.constant_true
         elif isinstance(arg, UserDefinedVariable):
             return variables.ConstantVariable.create(callable(arg.value))
         elif isinstance(
@@ -1885,7 +1885,7 @@ class BuiltinVariable(VariableTracker):
                 ListIteratorVariable,
             ),
         ):
-            return variables.ConstantVariable.create(False)
+            return variables.constant_false
 
     def call_cast(self, _, *args, **kwargs):
         if len(args) == 2:
@@ -1942,7 +1942,7 @@ class BuiltinVariable(VariableTracker):
             )
             raise_observed_exception(TypeError, tx, args=[msg])
         if len(args) == 1:
-            args = (*args, ConstantVariable.create(None))
+            args = (*args, variables.constant_none)
         assert len(args) == 2
         arg, value = args
         DictVariableType = (

@@ -594,9 +594,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 and isinstance(arg, UserDefinedObjectVariable)
                 and hasattr(arg.value, "__torch_function__")
             ):
-                return ConstantVariable.create(True)
+                return variables.constant_true
             else:
-                return ConstantVariable.create(False)
+                return variables.constant_false
 
         @register(
             torch.is_floating_point,
@@ -1177,7 +1177,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             assert len(args) == 1 and not kwargs
             TorchFunctionModeStackVariable.register_mutation(tx)
             tx.symbolic_torch_function_state.push_torch_function_mode(args[0])
-            return ConstantVariable.create(None)
+            return variables.constant_none
 
         @register(torch._C._len_torch_function_stack)
         def handle_len_torch_function(
@@ -1254,7 +1254,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
 
-            return ConstantVariable.create(None)
+            return variables.constant_none
 
         return handlers
 

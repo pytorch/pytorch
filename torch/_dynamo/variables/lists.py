@@ -510,7 +510,7 @@ class RangeVariable(BaseListVariable):
                 )
 
             if pt is not range:
-                return ConstantVariable.create(NotImplemented)
+                return variables.constant_NotImplemented
 
             cmp = self.range_equals(other)
 
@@ -549,7 +549,7 @@ class CommonListMethodsVariable(BaseListVariable):
             (arg,) = args
             tx.output.side_effects.mutation(self)
             self.items.append(arg)
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "extend" and self.is_mutable():
             if len(args) != 1 or kwargs:
                 raise_args_mismatch(tx, name)
@@ -562,7 +562,7 @@ class CommonListMethodsVariable(BaseListVariable):
             arg.force_apply_to_var_sequence(
                 tx, lambda item: self.call_method(tx, "append", [item], {})
             )
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "insert" and self.is_mutable():
             if kwargs or len(args) != 2:
                 raise_args_mismatch(tx, name)
@@ -573,7 +573,7 @@ class CommonListMethodsVariable(BaseListVariable):
                 const_idx = idx.as_python_constant()
             tx.output.side_effects.mutation(self)
             self.items.insert(const_idx, value)
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "pop" and self.is_mutable():
             assert not kwargs
             if kwargs or len(args) > 1:
@@ -595,7 +595,7 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_observed_exception(TypeError, tx)
             tx.output.side_effects.mutation(self)
             self.items.clear()
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif (
             name == "__setitem__"
             and self.is_mutable()
@@ -634,7 +634,7 @@ class CommonListMethodsVariable(BaseListVariable):
                     self.items[items] = list(value.items)
             else:
                 self.items[key.as_python_constant()] = value
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "__delitem__" and self.is_mutable():
             if kwargs or len(args) != 1:
                 raise_args_mismatch(tx, name)
@@ -661,7 +661,7 @@ class CommonListMethodsVariable(BaseListVariable):
                     f"list indices must be integers or slices, not {args[0].python_type_name()}"
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "copy":
             # List copy() doesn't have args and kwargs
             if args or kwargs:
@@ -673,14 +673,14 @@ class CommonListMethodsVariable(BaseListVariable):
                 raise_args_mismatch(tx, name)
             self.items.reverse()
             tx.output.side_effects.mutation(self)
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "remove" and self.is_mutable():
             if len(args) != 1 or kwargs:
                 raise_args_mismatch(tx, name)
 
             idx = self.call_method(tx, "index", args, kwargs)
             self.call_method(tx, "pop", [idx], {})
-            return ConstantVariable.create(None)
+            return variables.constant_none
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -749,13 +749,13 @@ class ListVariable(CommonListMethodsVariable):
                     raise_observed_exception(
                         type(e), tx, args=list(map(ConstantVariable.create, e.args))
                     )
-            return ConstantVariable.create(None)
+            return variables.constant_none
 
         if name == "sort" and self.is_mutable():
             assert len(args) == 0
-            key_fn_var = kwargs.pop("key", ConstantVariable.create(None))
+            key_fn_var = kwargs.pop("key", variables.constant_none)
             reverse = kwargs.pop(
-                "reverse", ConstantVariable.create(False)
+                "reverse", variables.constant_false
             ).as_python_constant()
             assert len(kwargs) == 0
 
@@ -805,17 +805,17 @@ class ListVariable(CommonListMethodsVariable):
                 reverse=reverse,
             )
             self.items[:] = [x for x, *_ in sorted_items_with_keys]
-            return ConstantVariable.create(None)
+            return variables.constant_none
 
         if name == "__init__" and self.is_mutable():
             assert not kwargs
             if len(args) == 0:
-                return ConstantVariable.create(None)
+                return variables.constant_none
             elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
                 (arg,) = args
                 tx.output.side_effects.mutation(self)
                 self.items[:] = arg.force_unpack_var_sequence(tx)
-                return ConstantVariable.create(None)
+                return variables.constant_none
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -840,7 +840,7 @@ class ListVariable(CommonListMethodsVariable):
 class DequeVariable(CommonListMethodsVariable):
     def __init__(self, items, maxlen=None, **kwargs) -> None:
         if maxlen is None:
-            maxlen = ConstantVariable.create(None)
+            maxlen = variables.constant_none
         assert maxlen.is_python_constant(), (
             f"maxlen must be a constant, got: {maxlen.debug_repr()}"
         )
@@ -902,7 +902,7 @@ class DequeVariable(CommonListMethodsVariable):
             assert isinstance(key.as_python_constant(), int)
             tx.output.side_effects.mutation(self)
             self.items[key.as_python_constant()] = value
-            return ConstantVariable.create(None)
+            return variables.constant_none
 
         maxlen = self.maxlen.as_python_constant()
         if maxlen is not None:
@@ -924,7 +924,7 @@ class DequeVariable(CommonListMethodsVariable):
                 tx, lambda item: self.call_method(tx, "appendleft", [item], {})
             )
             slice_within_maxlen = slice(None, maxlen)
-            result = ConstantVariable.create(None)
+            result = variables.constant_none
         elif name == "popleft" and self.is_mutable():
             assert not args
             assert not kwargs
@@ -936,7 +936,7 @@ class DequeVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             self.items[:] = [args[0], *self.items]
             slice_within_maxlen = slice(None, maxlen)
-            result = ConstantVariable.create(None)
+            result = variables.constant_none
         elif name == "insert" and len(args) > 0 and self.is_mutable():
             assert len(args) == 2
             assert not kwargs
@@ -1388,7 +1388,7 @@ class NamedTupleVariable(TupleVariable):
 class SliceVariable(VariableTracker):
     def __init__(self, items, **kwargs) -> None:
         items_to_map = items
-        start, stop, step = [variables.ConstantVariable.create(None)] * 3
+        start, stop, step = [variables.constant_none] * 3
 
         if len(items_to_map) == 1:
             (stop,) = items_to_map

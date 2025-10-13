@@ -619,7 +619,7 @@ class ComptimeVariable(VariableTracker):
         else:
             raise RuntimeError(f"unsupported argument to comptime: {type(fn)}")
 
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
 
 class CellVariable(VariableTracker):
@@ -948,7 +948,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         elif name == "mark_non_differentiable":
             assert len(kwargs) == 0
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
-            return variables.ConstantVariable.create(None)
+            return variables.constant_none
 
         if name != "save_for_backward":
             unimplemented_v2(
@@ -982,7 +982,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             self.saved_tensors.tensors = []
         for arg in args:
             self.saved_tensors.tensors.append(arg)
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         if name in ["save_for_backward", "mark_non_differentiable"]:
@@ -1659,7 +1659,7 @@ class LoggingLoggerVariable(VariableTracker):
         method = getattr(self.value, name, None)
         function = getattr(method, "__func__", None)
         if {method, function}.intersection(torch._dynamo.config.ignore_logger_methods):
-            return variables.ConstantVariable.create(None)
+            return variables.constant_none
         unimplemented(
             "Logger not supported for non-export cases. "
             "To avoid graph breaks caused by logger in compile-mode, it is recommended to"
@@ -1776,7 +1776,7 @@ class RandomClassVariable(VariableTracker):
             unimplemented("random.Random() with > 1 arg")
         elif kwargs:
             unimplemented("random.Random() with kwargs")
-        seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
+        seed = variables.constant_none if len(args) == 0 else args[0]
         return RandomVariable(
             seed=seed, mutation_type=variables.base.ValueMutationNew()
         )
@@ -1882,13 +1882,13 @@ class RandomVariable(VariableTracker):
                 *[x.as_python_constant() for x in args],
                 **{key: val.as_python_constant() for key, val in kwargs.items()},
             )
-            return variables.ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "getstate":
             return self.wrap_state(self.random.getstate())
         elif name == "setstate":
             tx.output.side_effects.mutation(self)
             self.random.setstate(self.unwrap_state(args[0]))
-            return variables.ConstantVariable.create(None)
+            return variables.constant_none
         elif name in self._supported_fn_names:
             tx.output.side_effects.mutation(self)
             state = self.random.getstate()

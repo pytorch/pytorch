@@ -220,7 +220,7 @@ class PlacementVariable(DistributedVariable):
             except AttributeError:
                 method = None
             if method is object.__init__:
-                return ConstantVariable.create(None)
+                return variables.constant_none
 
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}

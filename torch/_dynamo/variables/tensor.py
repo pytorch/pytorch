@@ -1121,7 +1121,7 @@ class TensorVariable(VariableTracker):
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
 
-        return ConstantVariable.create(None)
+        return variables.constant_none
 
     def method_resize_(self, *args, **kwargs):
         unimplemented_v2(

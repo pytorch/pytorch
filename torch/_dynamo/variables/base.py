@@ -500,7 +500,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
                 # object can map to GetAttrVariable but other time as
                 # SkipFunctionVariable if it is an input to the compiled
                 # function, e.g. tensor.data_ptr
-                return variables.ConstantVariable.create(NotImplemented)
+                return variables.constant_NotImplemented
             # NB : Checking for mutation is necessary because we compare
             # constant values
             if (

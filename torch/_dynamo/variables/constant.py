@@ -45,6 +45,9 @@ class ConstantVariable(VariableTracker):
         """
         source = kwargs.get("source")
 
+        # if c := _check_constant_cache(value):
+        #     return c
+
         # Routing for supported collection literals.
         if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
@@ -245,6 +248,46 @@ its type to `common_constant_types`.
     ) -> "VariableTracker":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
+
+
+_constant_cache = {}
+constant_none = ConstantVariable(None)
+constant_true = ConstantVariable(True)
+constant_false = ConstantVariable(False)
+constant_NotImplemented = ConstantVariable(NotImplemented)
+
+
+def _check_constant_cache(value):
+    global _constant_cache
+    if value in (None, NotImplemented) or istype(value, (int, bool, str)):
+        return _constant_cache.get((value, type(value)))
+
+
+def _fill_constant_cache(cache):
+    # CPython caches literals (i.e. None, True, False), small integers (-5, 257),
+    # strings (one-char latin-1) and code object constants, which are stored
+    # in "tx._constants_cache"
+
+    if len(cache) > 0:
+        return
+
+    cache[(None, type(None))] = constant_none
+    cache[(True, bool)] = constant_true
+    cache[(False, bool)] = constant_false
+    cache[(NotImplemented, type(NotImplemented))] = constant_NotImplemented
+
+    _PY_NSMALLNEGINTS = 5
+    _PY_NSMALLPOSINTS = 257
+
+    for i in range(-_PY_NSMALLNEGINTS, _PY_NSMALLPOSINTS):
+        cache[(i, int)] = ConstantVariable(i)
+
+    # latin1 one-char strings
+    for i in range(256):
+        cache[(chr(i), str)] = ConstantVariable(chr(i))
+
+
+# _fill_constant_cache(_constant_cache)
 
 
 class EnumVariable(VariableTracker):

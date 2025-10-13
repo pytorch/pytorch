@@ -352,7 +352,7 @@ class BaseUserFunctionVariable(VariableTracker):
         except NotImplementedError:
             if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
                 result = True
-        return variables.ConstantVariable.create(result)
+        return variables.constant_true if result else variables.constant_false
 
     def inspect_parameter_names(self):
         return list(inspect.signature(self.get_function()).parameters)
@@ -728,8 +728,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def call_obj_hasattr(self, tx, name):
         if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
+            return variables.constant_true
+        return variables.constant_false
 
     def has_unpack_var_sequence(self, tx):
         return False

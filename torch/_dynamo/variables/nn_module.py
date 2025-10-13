@@ -591,7 +591,7 @@ class NNModuleVariable(VariableTracker):
         if name == "_check_input_dim" and trace_rules.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
         ):
-            return ConstantVariable.create(True)
+            return variables.constant_true
 
         if name == "_get_item_by_idx":
             assert args[1].is_python_constant()

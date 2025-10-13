@@ -75,7 +75,7 @@ class ContextWrappingVariable(VariableTracker):
     def enter(self, tx):
         self._call_func(tx, self.target_values)
         self.set_cleanup_hook(tx)
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def set_cleanup_hook(self, tx: "InstructionTranslator", fn=None):
         if fn is None:
@@ -88,7 +88,7 @@ class ContextWrappingVariable(VariableTracker):
 
     def exit(self, tx: "InstructionTranslator", *args):
         self.cleanup_assert()
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def reconstruct_type(self, codegen: "PyCodegen"):
         codegen(
@@ -252,7 +252,7 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
             (enabled,),
             {},
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def exit(self, tx: "InstructionTranslator", *args):
         self.cleanup()
@@ -262,7 +262,7 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
             (self.prev_state,),
             {},
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
 
 class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
@@ -288,7 +288,7 @@ class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
             (),
             {},
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def exit(self, tx: "InstructionTranslator", *args):
         self.cleanup()
@@ -298,7 +298,7 @@ class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
             (self.proxy,),
             {},
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
 
 class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -339,7 +339,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         tx.output.create_node(
             "call_function", torch._C._functorch._jvp_decrement_nesting, (), {}
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
 
 class SetFwdGradEnabledContextManager(ContextWrappingVariable):
@@ -367,7 +367,7 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
             (mode,),
             {},
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def exit(self, tx: "InstructionTranslator", *args):
         self.cleanup()
@@ -377,7 +377,7 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
             (self.prev_state,),
             {},
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
 
 class DualLevelContextManager(ContextWrappingVariable):
@@ -415,7 +415,7 @@ class DualLevelContextManager(ContextWrappingVariable):
             (self.new_level,),
             {},
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
 
 class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -454,7 +454,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         tx.output.create_node(
             "call_function", torch._C._functorch._grad_decrement_nesting, (), {}
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
 
 class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
@@ -537,7 +537,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
             (),
             {},
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
 
 class GradModeVariable(ContextWrappingVariable):
@@ -566,11 +566,11 @@ class GradModeVariable(ContextWrappingVariable):
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def exit(self, tx: "InstructionTranslator", *args):
         self._call_func(tx, self.initial_values)
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def call_function(
         self,
@@ -696,7 +696,7 @@ class CUDADeviceVariable(ContextWrappingVariable):
             (self.proxy,),
             {},
         )
-        return variables.ConstantVariable.create(False)
+        return variables.constant_false
 
     def enter(self, tx):
         prev_idx = torch.cuda._exchange_device(*self.target_values)
@@ -805,7 +805,7 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         install_guard(self._guards_singleton)
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
@@ -844,7 +844,7 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def _call_func(self, tx: "InstructionTranslator", values):
         assert len(values) == 1
@@ -918,7 +918,7 @@ class AutocastModeVariable(ContextWrappingVariable):
         tx.output.create_node(
             "call_function", torch.amp._exit_autocast, (self.proxy,), {}
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def enter(self, tx):
         ctx = torch.amp._enter_autocast(*self.target_values)
@@ -943,11 +943,11 @@ class NullContextVariable(ContextWrappingVariable):
         super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
-        none = variables.ConstantVariable.create(None)
+        none = variables.constant_none
         return self.target_values if self.target_values else none
 
     def exit(self, tx: "InstructionTranslator", *args):
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def module_name(self):
         return "contextlib"
@@ -972,7 +972,7 @@ class ProfilerContextVariable(ContextWrappingVariable):
         return self
 
     def exit(self, tx: "InstructionTranslator", *args):
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def module_name(self):
         return "contextlib"
@@ -1142,11 +1142,11 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
 
     def enter(self, tx):
         self._call_func(tx, self.target_values)
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def exit(self, tx: "InstructionTranslator", *args):
         self._call_func(tx, self.initial_values)
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def call_function(
         self,
@@ -1240,7 +1240,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
             (arg, bool(self.set_priority)),
             {},
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def exit(self, tx: "InstructionTranslator", *args):
         self.cleanup_assert()
@@ -1251,7 +1251,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
             (arg, bool(self.set_priority)),
             {},
         )
-        return variables.ConstantVariable.create(None)
+        return variables.constant_none
 
     def module_name(self):
         return "torch.nn.attention"
@@ -1343,7 +1343,7 @@ class StreamVariable(VariableTracker):
             # constant values
             other = args[0]
             if not isinstance(other, StreamVariable):
-                return variables.ConstantVariable.create(NotImplemented)
+                return variables.constant_NotImplemented
             return variables.ConstantVariable.create(
                 cmp_name_to_op_mapping[name](self.value, other.value)
             )
