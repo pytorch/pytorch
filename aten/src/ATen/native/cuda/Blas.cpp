@@ -2890,7 +2890,7 @@ _scaled_grouped_mm_cuda_v2(
       "No gemm implementation was found");
 
   switch (gemm_impl) {
-    case ScaledGemmImplementation::ROWWISE_ROWWISE:
+    case ScaledGemmImplementation::ROWWISE_ROWWISE: {
       const int scale_multiplier = (mat_a.dim() == 2 && mat_b.dim() == 2) ? offs->size(0) : 1;
       _check_scales_fp8_rowwise(mat_a, scale_a[0], 0 /* dim */ , 0 /* arg_idx */, scale_multiplier);
       _check_scales_fp8_rowwise(mat_b, scale_b[0], 1 /* dim */ , 1 /* arg_idx */, scale_multiplier);
@@ -2903,7 +2903,8 @@ _scaled_grouped_mm_cuda_v2(
           bias,
           use_fast_accum,
           out);
-    case ScaledGemmImplementation::MXFP8_MXFP8:
+    }
+    case ScaledGemmImplementation::MXFP8_MXFP8: {
       _check_scales_mxfp8(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
       _check_scales_mxfp8(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
       return _mx8_mx8_bf16_grouped_mm_fbgemm(
@@ -2915,6 +2916,7 @@ _scaled_grouped_mm_cuda_v2(
           swizzle_b_enum[0],
           offs.value(),
           out);
+    }
     default:
       TORCH_CHECK_NOT_IMPLEMENTED(false,
           "_scaled_grouped_mm_cuda_v2 is in an inconsistent state - should never reach here");
