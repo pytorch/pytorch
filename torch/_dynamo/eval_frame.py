@@ -856,6 +856,12 @@ class _TorchDynamoContext:
                     else:
                         return fn(*args, **kwargs)
 
+                # This will invoke torch.compile call and
+                # it will setup the right env to run this.
+                # if torch.compiler.is_exporting():
+                #     breakpoint()
+                #     return fn(*args, **kwargs)
+
                 if is_jit_tracing():
                     raise RuntimeError(
                         "Detected that you are using FX to torch.jit.trace "
