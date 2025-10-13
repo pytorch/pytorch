@@ -1184,6 +1184,8 @@ def repeat_interleave_Tensor(
         return NotImplemented
     if repeat.device.type == "mps":
         return NotImplemented
+    assert repeat.dtype in [torch.int32, torch.int64]
+    assert repeat.ndim == 1
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
     indices = torch.searchsorted(
