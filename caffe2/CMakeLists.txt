@@ -1278,8 +1278,6 @@ endif()
 if(NOT BUILD_LITE_INTERPRETER)
   set(TH_CPU_INCLUDE
     # dense
-    aten/src/TH
-    ${CMAKE_CURRENT_BINARY_DIR}/aten/src/TH
     ${TORCH_ROOT}/aten/src
     ${CMAKE_CURRENT_BINARY_DIR}/aten/src
 
