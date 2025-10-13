@@ -2698,7 +2698,8 @@ def _reduction_configs(
 
     def outer_config_opt():
         max_x_block = 256
-        load_factor = inductor_meta.get("num_load", 0) + inductor_meta.get("num_store")
+        num_loads = inductor_meta.get("num_load", 0)
+        load_factor = num_loads + inductor_meta.get("num_store")
         x = size_hints["x"]
         num_warps = None
         outer_register_intensive = register_intensive
@@ -2707,10 +2708,16 @@ def _reduction_configs(
         if x <= 1024:
             x_block = max(x // 128, 2)
         # Lower bound x = 1024, 1024 // 16 = 128 around # of SMs
-        elif x // 4096 <= 8:
+        elif x < 16384:
             x_block = 16
+        elif x < 65536:
+            x_block = 32
         else:
-            x_block = min(max_x_block, x // 4096)
+            x_block = min(max_x_block, max((x // 4096), 64))
+
+        # Less possible vectorization, decrease xblock
+        if num_loads == 1 and x_block > 1:
+            x_block //= 2
 
         if num_dynamic >= 1:
             # Dynamic shapes introduce a lot register pressure for indexing
