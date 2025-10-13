@@ -719,11 +719,8 @@ def share_comm_ctx(modules: list[FSDPModule]) -> None:
     This avoids allocating inter-stream memory framgmentation
 
     example usage:
-        ```
         from torch.distributed.fsdp import share_comm_ctx
-
         share_comm_ctx([fsdp_model_1, fsdp_model_2, ...])
-        ```
     """
     if len(modules) == 0:
         return
