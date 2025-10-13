@@ -211,7 +211,7 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Test Pytorch binary
-        uses: .github/actions/test-pytorch-binary
+        uses: ./.github/actions/test-pytorch-binary
         env:
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
       - name: Teardown ROCm
