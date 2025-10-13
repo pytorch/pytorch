@@ -610,6 +610,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             self.module_cache_key,
             self.module_path,
         )
+        print("input_tensors", [x.shape for x in input_tensors])
+        print("out", out.shape)
 
         run_method = getattr(mod, self.kernel_name).run
         extra_args = list(self.extra_args)
@@ -632,6 +634,9 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 self.output_tensor_meta.device.index
             )
 
+        if len(input_tensors) >= 2 and tuple(input_tensors[0].shape) == (256, 256, 768) and tuple(input_tensors[1].shape) == (3072, 768):
+            breakpoint()
+            print("a")
         if isinstance(
             getattr(mod, self.kernel_name),
             torch._inductor.runtime.triton_heuristics.DebugAutotuner,

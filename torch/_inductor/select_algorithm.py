@@ -3200,6 +3200,16 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
+        print("choice benchmark", choice)
+        print([x.shape for x in inputs])
+        print(output.shape)
+        print(choice.description)
+        print(autotune_args)
+        if tuple(inputs[0].shape) == (256, 256, 768) and tuple(inputs[1].shape) == (768, 768) and tuple(output.shape) == (256, 768):
+            if "ACC_TYPE='tl.float32', ALLOW_TF32=True, BLOCK_K=32, BLOCK_M=64, BLOCK_N=32, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8" in choice.description:
+                breakpoint()
+                print("AAA")
+        print("\n")
         result = choice.benchmark(*inputs, out=output)
         device_type = next(
             (tensor.device.type for tensor in inputs if is_gpu(tensor.device.type)),
@@ -3221,57 +3231,61 @@ class AlgorithmSelectorCache(PersistentCache):
     ) -> dict[ChoiceCaller, float]:
         timings = {}
         for choice in choices:
-            try:
-                timing = cls.benchmark_choice(choice, autotune_args)
-            except CUDACompileError as e:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+            print("benchmarking choice", choice)
+            print(autotune_args)
+            timing = cls.benchmark_choice(choice, autotune_args)
+            # try:
+            #     timing = cls.benchmark_choice(choice, autotune_args)
+            # except CUDACompileError as e:
+            #     from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
-                if not isinstance(choice, CUDATemplateCaller):
-                    log.error(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
-                        e,
-                    )
-                timing = float("inf")
-            except NotImplementedError as e:
-                log.warning("Not yet implemented: %s", e)
-                timing = float("inf")
-            except RuntimeError as e:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+            #     if not isinstance(choice, CUDATemplateCaller):
+            #         log.error(
+            #             "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
+            #             e,
+            #         )
+            #     timing = float("inf")
+            # except NotImplementedError as e:
+            #     log.warning("Not yet implemented: %s", e)
+            #     timing = float("inf")
+            # except RuntimeError as e:
+            #     from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
-                msg = str(e)
-                if "invalid argument" in msg:
-                    msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                else:
-                    if "illegal memory access" in msg:
-                        msg += "\n\nEither error in template or triton bug.\n"
+            #     msg = str(e)
+            #     if "invalid argument" in msg:
+            #         msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
+            #     else:
+            #         if "illegal memory access" in msg:
+            #             msg += "\n\nEither error in template or triton bug.\n"
 
-                if isinstance(choice, CUDATemplateCaller):
-                    log.debug(
-                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
-                        msg,
-                        exc_info=True,
-                    )
-                else:
-                    log.error(
-                        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
-                        msg,
-                    )
-                timing = float("inf")
-            except AssertionError as e:
-                raise AssertionError(  # noqa: B904
-                    f"Incorrect result from choice {choice}\n\n{e}"
-                )
-            except Exception as e:
-                try:
-                    from triton.runtime.autotuner import OutOfResources
+            #     if isinstance(choice, CUDATemplateCaller):
+            #         log.debug(
+            #             "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+            #             msg,
+            #             exc_info=True,
+            #         )
+            #     else:
+            #         breakpoint()
+            #         log.error(
+            #             "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+            #             msg,
+            #         )
+            #     timing = float("inf")
+            # except AssertionError as e:
+            #     raise AssertionError(  # noqa: B904
+            #         f"Incorrect result from choice {choice}\n\n{e}"
+            #     )
+            # except Exception as e:
+            #     try:
+            #         from triton.runtime.autotuner import OutOfResources
 
-                    if isinstance(e, OutOfResources):
-                        log.warning(e)
-                        timing = float("inf")
-                    else:
-                        raise e
-                except ImportError:
-                    raise e from None
+            #         if isinstance(e, OutOfResources):
+            #             log.warning(e)
+            #             timing = float("inf")
+            #         else:
+            #             raise e
+            #     except ImportError:
+            #         raise e from None
 
             timings[choice] = timing
 
