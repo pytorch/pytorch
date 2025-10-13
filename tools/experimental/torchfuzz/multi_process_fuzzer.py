@@ -73,8 +73,6 @@ IGNORE_PATTERNS: list[re.Pattern] = [
         r"dimensionality of sizes \(0\) must match dimensionality of strides \(1\)"
     ),  # https://github.com/pytorch/pytorch/issues/164814
     # Add more patterns here as needed, e.g.:
-
-
     # re.compile(r"Some other error message"),
 ]
 
@@ -549,7 +547,9 @@ def run_until_failure(
     # Pick a random seed to start from
     initial_seed = random.randint(0, 2**31 - 1)
 
-    persist_print(f"🎲 Starting continuous fuzzing with random initial seed: {initial_seed}")
+    persist_print(
+        f"🎲 Starting continuous fuzzing with random initial seed: {initial_seed}"
+    )
     persist_print(f"🚀 Using {num_processes} processes")
     persist_print(
         f"🔧 Command template: python fuzzer.py --seed {{seed}} --template {template}"
@@ -588,10 +588,11 @@ def run_until_failure(
                         dynamic_ncols=True,
                     )
                     pbar.set_postfix_str(f"{total_successful}/{total_ignored}")
-                    write_func = pbar.write
+
+                    def write_func(msg):
+                        pbar.write(msg)
                 else:
                     pbar = None
-                    write_func = persist_print
 
                 # Collect results as they complete
                 for seed, future in future_results:
@@ -612,16 +613,22 @@ def run_until_failure(
                         persist_print("🎯 FAILURE FOUND!")
                         persist_print("=" * 60)
                         persist_print(f"❌ Failing seed: {result.seed}")
-                        persist_print(f"⏱️  Duration for this seed: {result.duration:.2f}s")
+                        persist_print(
+                            f"⏱️  Duration for this seed: {result.duration:.2f}s"
+                        )
                         persist_print(f"⏱️  Total time elapsed: {elapsed:.2f}s")
                         persist_print(f"✅ Successful seeds tested: {total_successful}")
                         persist_print(f"🚫 Ignored seeds: {total_ignored}")
-                        persist_print(f"📊 Total seeds tested: {total_successful + total_ignored + 1}")
+                        persist_print(
+                            f"📊 Total seeds tested: {total_successful + total_ignored + 1}"
+                        )
                         persist_print("\n💥 Failure output:")
                         persist_print("-" * 60)
                         print_output_lines(result.output, persist_print)
                         persist_print("-" * 60)
-                        persist_print(f"\n🔄 Reproduce with: python fuzzer.py --seed {result.seed} --template {template}")
+                        persist_print(
+                            f"\n🔄 Reproduce with: python fuzzer.py --seed {result.seed} --template {template}"
+                        )
 
                         # Exit with non-zero code
                         sys.exit(1)
@@ -651,5 +658,7 @@ def run_until_failure(
         persist_print(f"✅ Successful seeds: {total_successful}")
         persist_print(f"🚫 Ignored seeds: {total_ignored}")
         persist_print(f"📊 Total seeds tested: {total_successful + total_ignored}")
-        persist_print(f"⚡ Throughput: {((total_successful + total_ignored) / (elapsed / 3600)):.2f} seeds/hr")
+        persist_print(
+            f"⚡ Throughput: {((total_successful + total_ignored) / (elapsed / 3600)):.2f} seeds/hr"
+        )
         sys.exit(130)

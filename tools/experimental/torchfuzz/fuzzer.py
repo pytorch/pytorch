@@ -92,7 +92,6 @@ def fuzz_and_execute(
     # Set seed for reproducible generation
     random.seed(seed)
     torch.manual_seed(seed)
-    operation_stack = None
     python_code = None
     target_spec = None
     operation_graph = None
@@ -126,6 +125,7 @@ def fuzz_and_execute(
     def _reachable_nodes(graph):
         """Compute nodes reachable from root via input edges."""
         reachable = set()
+
         def dfs(nid):
             if nid in reachable or nid not in graph.nodes:
                 return
@@ -133,6 +133,7 @@ def fuzz_and_execute(
             for inp in graph.nodes[nid].input_nodes:
                 if inp in graph.nodes:
                     dfs(inp)
+
         dfs(graph.root_node_id)
         return reachable
 
@@ -170,9 +171,15 @@ def fuzz_and_execute(
         while changed:
             changed = False
             # Consider non-root nodes; try larger subtrees first
-            candidate_ids = [nid for nid in working.get_topological_order() if nid != working.root_node_id]
+            candidate_ids = [
+                nid
+                for nid in working.get_topological_order()
+                if nid != working.root_node_id
+            ]
             # Sort by number of dependencies (subtree size) descending
-            candidate_ids.sort(key=lambda nid: len(working.get_node_dependencies(nid)), reverse=True)
+            candidate_ids.sort(
+                key=lambda nid: len(working.get_node_dependencies(nid)), reverse=True
+            )
 
             for nid in candidate_ids:
                 node = working.nodes.get(nid)
@@ -182,7 +189,11 @@ def fuzz_and_execute(
                 if node.op_name == "arg" or node.op_name.startswith("arg_"):
                     continue
                 # Mutate: convert node to arg leaf
-                original = (node.op_name, list(node.input_nodes), list(node.input_specs))
+                original = (
+                    node.op_name,
+                    list(node.input_nodes),
+                    list(node.input_specs),
+                )
                 node.op_name = "arg"
                 node.input_nodes = []
                 node.input_specs = []
@@ -202,6 +213,7 @@ def fuzz_and_execute(
         final_path = create_program_file(final_code)
         # Create an artifacts dir and dump a visualization
         import os
+
         artifacts_dir = os.path.join("/tmp", f"minified_{seed}")
         os.makedirs(artifacts_dir, exist_ok=True)
         visualize_operation_graph(working, "Minified Operation Graph", artifacts_dir)
@@ -299,11 +311,14 @@ def fuzz_and_execute(
     except Exception as e:
         print(f"\n❌ Execution failed: {e}")
         import traceback
+
         traceback.print_exc()
         if minify and operation_graph is not None:
             print("🪚 Minifying failing repro by snapping off subtrees to args...")
             try:
-                final_path, artifacts_dir = _minify_graph(operation_graph, template, seed)
+                final_path, artifacts_dir = _minify_graph(
+                    operation_graph, template, seed
+                )
                 print(f"Minified repro written to: {final_path}")
                 print(f"Artifacts (graph viz, code) at: {artifacts_dir}")
                 log(False, iteration_folder=artifacts_dir)
@@ -311,7 +326,9 @@ def fuzz_and_execute(
                 print(f"Minification failed: {me}")
         else:
             if minify and operation_graph is None:
-                print("Minification requested but operation graph was not generated; skipping minify.")
+                print(
+                    "Minification requested but operation graph was not generated; skipping minify."
+                )
             # from visualize_stack import visualize_operation_stack
             log(False)
         error_message = str(e)
