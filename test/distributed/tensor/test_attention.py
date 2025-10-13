@@ -4,30 +4,39 @@ import functools
 import itertools
 import random
 import unittest
-from typing import Union
+from typing import Callable, ClassVar, Optional, Union
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch import nn, Tensor
+from torch import Tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental._attention import (
-    _AttentionContextParallel,
     _CausalBehavior,
+    _context_parallel_shard,
+    _ContextParallel,
     _cp_options,
-    _DispatchMode,
+    _disable_context_parallel_dispatcher,
+    _enable_context_parallel_dispatcher,
     _is_causal_behavior,
     _RotateMethod,
     context_parallel,
     context_parallel_unshard,
     set_rotate_method,
 )
+from torch.distributed.tensor.experimental._load_balancer import (
+    _HeadTailLoadBalancer,
+    _LoadBalancer,
+    _PerDocumentHeadTailLoadBalancer,
+)
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
+    AuxOutput,
+    AuxRequest,
     create_block_mask,
     flex_attention,
 )
@@ -41,8 +50,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    ModelArgs,
-    Transformer,
     with_comms,
 )
 
@@ -60,6 +67,24 @@ rotater_enum_to_str = {
     _RotateMethod.ALL_GATHER: "allgather",
     _RotateMethod.ALL_TO_ALL: "alltoall",
 }  # mapping from _RotateMethod enum to string
+
+
+class SDPAWrapper(torch.nn.Module):
+    def __init__(self, compiled: bool, backend: SDPBackend) -> None:
+        super().__init__()
+        if compiled:
+            self.sdpa = torch.compile(
+                F.scaled_dot_product_attention,
+                fullgraph=True,
+                backend="aot_eager",
+            )
+        else:
+            self.sdpa = F.scaled_dot_product_attention
+        self.backend = backend
+
+    def forward(self, *args: object, **kwargs: object) -> torch.Tensor:
+        with sdpa_kernel(self.backend):
+            return self.sdpa(*args, **kwargs)
 
 
 class RingAttentionTest(DTensorTestBase):
@@ -87,13 +112,104 @@ class RingAttentionTest(DTensorTestBase):
                 "load_balance": [True, False],
                 "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
                 "test_forward_only": [True, False],
-                "dispatch_mode": [
-                    _DispatchMode.MONKEY_PATCH,
-                    _DispatchMode.TORCH_FUNCTION,
-                ],
+                "use_context": [True, False],
             },
             self._test_ring_attention_sdpa,
         )
+
+    def _ring_attention_sdpa(
+        self,
+        cp_q: torch.Tensor,
+        cp_k: torch.Tensor,
+        cp_v: torch.Tensor,
+        *,
+        fn_eval: Callable,
+        mesh: DeviceMesh,
+        seq_dim: int,
+        is_causal: bool,
+        compiled: bool,
+        backend: SDPBackend,
+        rotater: _RotateMethod,
+        test_forward_only: bool,
+        load_balance: bool,
+        use_context: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if not use_context:
+            cp_plan = _ContextParallel(
+                seq_dim=seq_dim,
+                attention_type=_ContextParallel.AttentionType.SDPA,
+            )
+            attention = SDPAWrapper(compiled=compiled, backend=backend)
+            attention = parallelize_module(attention, mesh, cp_plan)
+            if load_balance:
+                seq_len = cp_q.size(seq_dim)
+                load_balancer = _HeadTailLoadBalancer(seq_len, mesh.size(), cp_q.device)
+            else:
+                load_balancer = None
+            cp_q, cp_k, cp_v = _context_parallel_shard(
+                mesh, (cp_q, cp_k, cp_v), (seq_dim,) * 3, load_balancer=load_balancer
+            )
+            _enable_context_parallel_dispatcher()
+        else:
+            # Theoretically, context_parallel() should not be used to shard
+            # parameters because when require_grad is True, resize_ is not
+            # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
+            # now. So we can just use context_parallel() to shard q, k, v.
+            # In reality, context_paralle() should be used to shard the input.
+            # In reality, context_parallel() should only be used to shard
+            # the model inputs (batch).
+
+            _cp_options.enable_load_balance = load_balance
+            cp_context = context_parallel(
+                mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(seq_dim,) * 3
+            )
+            cp_context.__enter__()
+
+            # NOTE: This demonstrates that monkey patching is not fully reliable.
+            # If we use SDPAWrapper directly, the monkey patching dispatch mode
+            # does not function correctly. To ensure proper behavior,
+            # F.scaled_dot_product_attention must be referenced within the
+            # context_parallel() scope.
+            attention = F.scaled_dot_product_attention
+            if compiled:
+                attention = torch.compile(
+                    attention, fullgraph=True, backend="aot_eager"
+                )
+
+        for target in [cp_q, cp_k, cp_v]:
+            target.requires_grad = True
+
+        with CommDebugMode() as comm_mode:
+            with sdpa_kernel(backend):
+                cp_out = fn_eval(
+                    attention,
+                    cp_q,
+                    cp_k,
+                    cp_v,
+                    is_causal=is_causal,
+                )
+
+            if not compiled and rotater == _RotateMethod.ALL_TO_ALL:
+                # Compiler and CommDebugMode do not work well together.
+                expect_all2all_count = (
+                    self.world_size - 1
+                    if test_forward_only
+                    else self.world_size * 3 - 2
+                )
+                self.assertDictEqual(
+                    comm_mode.get_comm_counts(),
+                    {c10d_functional.all_to_all_single: expect_all2all_count},
+                )
+        cp_dq, cp_dk, cp_dv = cp_q.grad, cp_k.grad, cp_v.grad
+        for target in [cp_q, cp_k, cp_v]:
+            target.requires_grad = False
+
+        if not use_context:
+            _disable_context_parallel_dispatcher()
+        else:
+            cp_context.__exit__(None, None, None)
+
+        return cp_out, cp_dq, cp_dk, cp_dv
 
     def _test_ring_attention_sdpa(
         self,
@@ -103,10 +219,8 @@ class RingAttentionTest(DTensorTestBase):
         load_balance: bool,
         rotater: _RotateMethod,
         test_forward_only: bool,
-        dispatch_mode: _DispatchMode,
+        use_context: bool,
     ) -> None:
-        torch.distributed.tensor.experimental._attention._dispatch_mode = dispatch_mode
-
         def fn_eval(fn, *args, **kwargs):
             if test_forward_only:
                 with torch.no_grad():
@@ -124,8 +238,8 @@ class RingAttentionTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
         dtype = torch.bfloat16
         bs = 8
-        query_tokens = 64
-        context_tokens = 64
+        seq_length = 1024
+        seq_dim = 2
         dim = 32
         nheads = 8
         torch.manual_seed(10)
@@ -136,26 +250,15 @@ class RingAttentionTest(DTensorTestBase):
             else torch.float32
         )
 
-        _cp_options.enable_load_balance = load_balance
-
-        q = torch.rand(
-            (bs, nheads, self.world_size * query_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        k = torch.rand(
-            (bs, nheads, self.world_size * context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        v = torch.rand(
-            (bs, nheads, self.world_size * context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
+        q, k, v = [
+            torch.rand(
+                (bs, nheads, seq_length * self.world_size, dim),
+                device=self.device_type,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        ]
 
         # Ensure all ranks have the same initialization data.
         with torch.no_grad():
@@ -166,81 +269,49 @@ class RingAttentionTest(DTensorTestBase):
         with sdpa_kernel(backend):
             out = fn_eval(F.scaled_dot_product_attention, q, k, v, is_causal=is_causal)
 
-        cp_q = q.detach().clone()
-        cp_k = k.detach().clone()
-        cp_v = v.detach().clone()
-        # Theoretically, context_parallel() should not be used to shard
-        # parameters because when require_grad is True, resize_ is not
-        # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
-        # now. So we can just use context_parallel() to shard q, k, v.
-        # In reality, context_paralle() should be used to shard the input.
-        with context_parallel(
-            device_mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(2, 2, 2)
-        ):
-            cp_q.requires_grad = True
-            cp_k.requires_grad = True
-            cp_v.requires_grad = True
-            with CommDebugMode() as comm_mode:
-                with sdpa_kernel(backend):
-                    if compiled:
-                        fn = torch.compile(
-                            F.scaled_dot_product_attention,
-                            fullgraph=True,
-                            backend="aot_eager",
-                        )
-                    else:
-                        fn = F.scaled_dot_product_attention
-
-                    cp_out = fn_eval(fn, cp_q, cp_k, cp_v, is_causal=is_causal)
-
-                    if not compiled and rotater == _RotateMethod.ALL_TO_ALL:
-                        # Compiler and CommDebugMode do not work well together.
-                        expect_all2all_count = (
-                            self.world_size - 1
-                            if test_forward_only
-                            else self.world_size * 3 - 2
-                        )
-                        self.assertDictEqual(
-                            comm_mode.get_comm_counts(),
-                            {c10d_functional.all_to_all_single: expect_all2all_count},
-                        )
-
-            # Due to numerical error, we need to choose different atol for different
-            # attention kernels
-            (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [2])
-            atol = (
-                1e-08
-                if backend == SDPBackend.EFFICIENT_ATTENTION
-                else 1e-3 * self.world_size
-            )
-            self.assertTrue(torch.allclose(out, cp_out, atol=atol))
-
-            if not test_forward_only:
-                cp_dq, cp_dk, cp_dv = context_parallel_unshard(
-                    device_mesh,
-                    [cp_q.grad, cp_k.grad, cp_v.grad],
-                    [2, 2, 2],
-                )
-                atol = (
-                    2e-06
-                    if backend == SDPBackend.EFFICIENT_ATTENTION
-                    else 8e-3 * self.world_size
-                )
-                self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
-                self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
-                self.assertTrue(torch.allclose(v.grad, cp_dv, atol=atol))
-
-                cp_q.grad = None
-                cp_k.grad = None
-                cp_v.grad = None
-
-            cp_q.requires_grad = False
-            cp_k.requires_grad = False
-            cp_v.requires_grad = False
-
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.MONKEY_PATCH
+        cp_q, cp_k, cp_v = [target.detach().clone() for target in [q, k, v]]
+        cp_out, cp_dq, cp_dk, cp_dv = self._ring_attention_sdpa(
+            cp_q,
+            cp_k,
+            cp_v,
+            fn_eval=fn_eval,
+            mesh=device_mesh,
+            seq_dim=seq_dim,
+            is_causal=is_causal,
+            compiled=compiled,
+            backend=backend,
+            rotater=rotater,
+            test_forward_only=test_forward_only,
+            load_balance=load_balance,
+            use_context=use_context,
         )
+
+        # Due to numerical error, we need to choose different atol for different
+        # attention kernels
+        (cp_out,) = context_parallel_unshard(device_mesh, [cp_out], [seq_dim])
+        atol = (
+            2e-06
+            if backend == SDPBackend.EFFICIENT_ATTENTION
+            else 8e-3 * self.world_size
+        )
+        rtol = (
+            1e-05
+            if backend == SDPBackend.EFFICIENT_ATTENTION
+            else 1e-3 * self.world_size
+        )
+        torch.testing.assert_close(out, cp_out, atol=atol, rtol=rtol)
+
+        if test_forward_only:
+            return
+
+        cp_dq, cp_dk, cp_dv = context_parallel_unshard(
+            device_mesh,
+            [cp_dq, cp_dk, cp_dv],
+            [seq_dim] * 3,
+        )
+        torch.testing.assert_close(q.grad, cp_dq, atol=atol, rtol=rtol)
+        torch.testing.assert_close(k.grad, cp_dk, atol=atol, rtol=rtol)
+        torch.testing.assert_close(v.grad, cp_dv, atol=atol, rtol=rtol)
 
     def test_is_causal_behavior(self) -> None:
         _cp_options.enable_load_balance = False
@@ -272,180 +343,6 @@ class RingAttentionTest(DTensorTestBase):
                     behavior,
                 )
 
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
-    )
-    @with_comms
-    def test_ring_attention_native_transformer(self) -> None:
-        self.run_subtests(
-            {
-                "is_causal": [True, False],
-                "rotater": [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL],
-            },
-            self._test_ring_attention_native_transformer,
-        )
-
-    @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
-    def _test_ring_attention_native_transformer(
-        self, is_causal: bool, rotater: _RotateMethod
-    ) -> None:
-        _cp_options.enable_load_balance = is_causal
-        set_rotate_method(rotater_enum_to_str[rotater])
-        self.assertEqual(_cp_options.rotate_method, rotater)
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, self.world_size),
-        )
-        dtype = torch.bfloat16
-        bs = 8
-        ntokens = 8
-        dim = 32
-        nheads = 8
-        num_layers = 2
-
-        encoder_layer = nn.TransformerEncoderLayer(
-            d_model=dim,
-            nhead=nheads,
-            dim_feedforward=dim,
-            batch_first=True,
-        ).to(dtype)
-        encoder_layer = parallelize_module(
-            module=encoder_layer,
-            device_mesh=device_mesh,
-            parallelize_plan={
-                "self_attn": _AttentionContextParallel(),
-            },
-        )
-        model = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        model = model.to(self.device_type).to(dtype)
-
-        mask = (
-            nn.Transformer.generate_square_subsequent_mask(
-                ntokens, device=self.device_type, dtype=dtype
-            )
-            if is_causal
-            else None
-        )
-        seq = torch.rand((bs, ntokens, dim), device=self.device_type, dtype=dtype)
-
-        with CommDebugMode() as comm_mode:
-            out = model(seq, mask=mask, is_causal=is_causal)
-
-        if rotater == _RotateMethod.ALL_TO_ALL:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_to_all_single: (self.world_size - 1)
-                    * num_layers,
-                },
-            )
-        else:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_gather_into_tensor: num_layers,
-                },
-            )
-
-        with CommDebugMode() as comm_mode:
-            out.sum().backward()
-
-        if rotater == _RotateMethod.ALL_TO_ALL:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_to_all_single: (self.world_size * 2 - 1)
-                    * num_layers,
-                },
-            )
-        else:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_gather_into_tensor: num_layers,
-                    c10d_functional.all_to_all_single: self.world_size * num_layers,
-                },
-            )
-
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
-    )
-    @with_comms
-    @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
-    def test_ring_attention_custom_transformer(self) -> None:
-        self.run_subtests(
-            {"rotater": [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL]},
-            self._test_ring_attention_custom_transformer,
-        )
-
-    def _test_ring_attention_custom_transformer(self, rotater: _RotateMethod) -> None:
-        set_rotate_method(rotater_enum_to_str[rotater])
-        self.assertEqual(_cp_options.rotate_method, rotater)
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, self.world_size),
-        )
-        # early init DTensor RNG tracker to avoid broadcast be captuured in comm_mode
-        torch.distributed.tensor._random.manual_seed(10, device_mesh)
-
-        dtype = torch.bfloat16
-        bs = 2
-        args = ModelArgs()
-
-        model = Transformer(args).to(dtype).to(self.device_type)
-
-        model = parallelize_module(
-            module=model,
-            device_mesh=device_mesh,
-            parallelize_plan={
-                f"layers.{i}.attention": _AttentionContextParallel()
-                for i in range(args.n_layers)
-            },
-        )
-
-        seq = torch.randint(
-            args.vocab_size, (bs, args.max_seq_len), device=self.device_type
-        )
-
-        with CommDebugMode() as comm_mode:
-            out = model(seq)
-
-        if rotater == _RotateMethod.ALL_TO_ALL:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_to_all_single: (self.world_size - 1)
-                    * args.n_layers,
-                },
-            )
-        else:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {c10d_functional.all_gather_into_tensor: args.n_layers},
-            )
-
-        with CommDebugMode() as comm_mode:
-            out.sum().backward()
-
-        if rotater == _RotateMethod.ALL_TO_ALL:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_to_all_single: (self.world_size * 2 - 1)
-                    * args.n_layers,
-                },
-            )
-        else:
-            self.assertDictEqual(
-                comm_mode.get_comm_counts(),
-                {
-                    c10d_functional.all_gather_into_tensor: args.n_layers,
-                    c10d_functional.all_to_all_single: self.world_size * args.n_layers,
-                },
-            )
-
 
 # Compile the flex_attention function
 compiled_flex_attention = torch.compile(flex_attention, dynamic=False, fullgraph=True)
@@ -459,7 +356,7 @@ def causal_mask(b, h, q_idx, kv_idx):
 
 
 # copied from https://github.com/meta-pytorch/attention-gym/blob/main/attn_gym/masks/document_mask.py
-def generate_random_lengths(total_length, num_documents):
+def generate_random_lengths(total_length, num_documents) -> list[int]:
     # Initialize all lengths to 1 to ensure each document has at least one token
     lengths = [1] * num_documents
     remaining_length = total_length - num_documents
@@ -470,6 +367,26 @@ def generate_random_lengths(total_length, num_documents):
         lengths[index] += 1
 
     return lengths
+
+
+def generate_random_lengths_in_chunks(
+    total_length, num_documents, chunk_size
+) -> list[int]:
+    # Generate a list of random document lengths so that each document contains
+    # some number of chunks of size `chunk_size`. This means each document's length
+    # must be a multiple of `chunk_size`. Besides, the lengths of all the documents
+    # sum up to `total_length`.
+    num_chunks = total_length // chunk_size
+    assert total_length % chunk_size == 0 and num_chunks >= num_documents
+
+    num_chunks_per_document = [1] * num_documents
+    remaining_chunks = num_chunks - num_documents
+    # Randomly distribute the remaining chunks
+    for _ in range(remaining_chunks):
+        index = random.randint(0, num_documents - 1)  # document_id
+        num_chunks_per_document[index] += 1
+
+    return [num_chunks * chunk_size for num_chunks in num_chunks_per_document]
 
 
 def length_to_offsets(
@@ -531,51 +448,69 @@ def generate_doc_mask_mod(
     return doc_mask_mod
 
 
-class RingFlexAttentionTest(DTensorTestBase):
+class FlexAttentionWrapper(torch.nn.Module):
+    _flex_attn: ClassVar[Callable] = torch.compile(flex_attention)
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(
+        self, *args: object, **kwargs: object
+    ) -> [
+        torch.Tensor | tuple[torch.Tensor, torch.Tensor],
+        tuple[torch.Tensor, AuxOutput],
+    ]:
+        return FlexAttentionWrapper._flex_attn(*args, **kwargs)
+
+
+class CPFlexAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
         return 2
 
-    def _test_ring_flex_attention(
-        self, qkv_size, B=1, mask_func=causal_mask, atol=1e-6, rtol=1e-2
+    def _test_cp_flex_attention(
+        self,
+        *,
+        qkv_size: int,
+        B: int = 1,
+        mask_func: _mask_mod_signature = causal_mask,
+        lb: Optional[_LoadBalancer] = None,
+        atol: float = 1e-6,
+        rtol: float = 1e-2,
     ) -> None:
-        torch.cuda.manual_seed(10)
+        # TODO: Reverify atol and rtol after
+        # https://github.com/pytorch/pytorch/pull/163185 is landed. The accuracy
+        # issue happens on the gradients.
+        torch.use_deterministic_algorithms(True)
+        torch.cuda.manual_seed(1234)
+
         dtype = torch.float32
         bs = B if B > 1 else 8
-        query_tokens = context_tokens = qkv_size
         dim = 32
         nheads = 8
+        seq_dim = 2
 
-        q = torch.rand(
-            (bs, nheads, query_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        k = torch.rand(
-            (bs, nheads, context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        v = torch.rand(
-            (bs, nheads, context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
+        qkv = [
+            torch.rand(
+                (bs, nheads, qkv_size, dim),
+                device=self.device_type,
+                dtype=dtype,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        ]
 
         block_mask = compiled_create_block_mask(
             mask_func,
             B=B,
             H=1,
-            Q_LEN=query_tokens,
-            KV_LEN=context_tokens,
+            Q_LEN=qkv_size,
+            KV_LEN=qkv_size,
             device=self.device_type,
         )
 
-        expect_out, expect_lse = compiled_flex_attention(
-            q, k, v, block_mask=block_mask, return_lse=True
+        expect_out, expect_aux = compiled_flex_attention(
+            *qkv, block_mask=block_mask, return_aux=AuxRequest(lse=True)
         )
         expect_out.sum().backward()
 
@@ -585,113 +520,90 @@ class RingFlexAttentionTest(DTensorTestBase):
             mesh_shape=(self.world_size,),
             mesh_dim_names=("cp",),
         )
-        # NOTE: cp needs to know the sharding dimension
-        # TODO: see if this can be moved to the cp context
-        from torch.distributed.tensor.experimental._attention import _set_cp_global_var
 
-        _set_cp_global_var("cp_shard_dim", 2)
-        self.assertEqual(
-            torch.distributed.tensor.experimental._attention._cp_global_vars.cp_shard_dim,
-            2,
+        flex_attention_wrapper_module = FlexAttentionWrapper()
+        cp_plan = _ContextParallel(
+            seq_dim=seq_dim,
+            attention_type=_ContextParallel.AttentionType.FLEX,
         )
-
-        # NOTE: we do not test load balance here
-        _cp_options.enable_load_balance = False
-
-        # set CP context dispatch mode to use TORCH_FUNCTION for flex_attention
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.TORCH_FUNCTION
-        )
-
-        # prepare input buffer
-        cp_q = q.detach().clone()
-        cp_k = k.detach().clone()
-        cp_v = v.detach().clone()
-
-        # create block_mask for CP
-        from torch.distributed.tensor.experimental._attention import (
-            create_cp_block_mask,
-        )
-
-        # NOTE: call create_block_mask() within TorchFunctionMode would cause error in create_fw_bw_graph
-        cp_block_mask = create_cp_block_mask(
-            mask_func,
-            B=B,
-            H=1,
-            Q_LEN=query_tokens,
-            KV_LEN=context_tokens,
-            device_mesh=device_mesh,
-        )
-
-        # shard qkv on seq_dim
-        shard_dim = 2
-
-        with context_parallel(
+        parallelize_module(
+            flex_attention_wrapper_module,
             device_mesh,
-            buffers=[cp_q, cp_k, cp_v],
-            buffer_seq_dims=[shard_dim] * 3,
-        ):
-            cp_q.requires_grad = True
-            cp_k.requires_grad = True
-            cp_v.requires_grad = True
+            cp_plan,
+        )
 
-            cp_out, cp_lse = compiled_flex_attention(
-                cp_q,
-                cp_k,
-                cp_v,
-                block_mask=cp_block_mask,
-                return_lse=True,
-            )
+        *cp_qkv, cp_block_mask = _context_parallel_shard(
+            device_mesh,
+            [t.detach().clone() for t in qkv] + [block_mask],
+            [seq_dim] * 4,
+            load_balancer=lb,
+        )
+        for t in cp_qkv:
+            t.requires_grad = True
 
-            # check block_mask rewrite doesn't escape to the outside
-            assert cp_block_mask.seq_lengths == (
-                cp_q.size(dim=shard_dim),
-                cp_k.size(dim=shard_dim),
-            )
+        cp_out, cp_aux = flex_attention_wrapper_module(
+            *cp_qkv,
+            block_mask=cp_block_mask,
+            return_aux=AuxRequest(lse=True),
+        )
 
-            # backward run
-            cp_out.sum().backward()
-
-            cp_q.requires_grad = False
-            cp_k.requires_grad = False
-            cp_v.requires_grad = False
+        # backward run
+        cp_out.sum().backward()
 
         # unshard the output
-        cp_out, cp_lse = context_parallel_unshard(device_mesh, [cp_out, cp_lse], [2, 2])
+        cp_out, cp_lse = context_parallel_unshard(
+            device_mesh,
+            buffers=[cp_out, cp_aux.lse],
+            seq_dims=[seq_dim] * 2,
+            load_balancer=lb,
+        )
         torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_lse, expect_lse, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
 
         # unshard the gradient
-        cp_q_grad, cp_k_grad, cp_v_grad = context_parallel_unshard(
+        cp_qkv_grad = context_parallel_unshard(
             device_mesh,
-            [cp_q.grad, cp_k.grad, cp_v.grad],
-            [2, 2, 2],
+            buffers=[t.grad for t in cp_qkv],
+            seq_dims=[seq_dim] * 3,
+            load_balancer=lb,
         )
-        torch.testing.assert_close(cp_q_grad, q.grad, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_k_grad, k.grad, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_v_grad, v.grad, atol=atol, rtol=rtol)
 
-        # reset CP context dispatch mode to default
-        torch.distributed.tensor.experimental._attention._dispatch_mode = (
-            _DispatchMode.MONKEY_PATCH
-        )
+        qkv_grad = [t.grad for t in qkv]
+        for grad, cp_grad in zip(qkv_grad, cp_qkv_grad):
+            torch.testing.assert_close(grad, cp_grad, atol=atol, rtol=rtol)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    def test_ring_flex_attention(self) -> None:
-        self.run_subtests(
-            {"qkv_size": [128 * self.world_size, 2048]},
-            self._test_ring_flex_attention,
-        )
+    def test_cp_flex_attention_causal_mask(self) -> None:
+        restore_enable_load_balance = _cp_options.enable_load_balance
+
+        for enable_load_balance in [
+            False,  # test w/o load-balancing
+            True,  # test w/ the default load-balancing
+        ]:
+            _cp_options.enable_load_balance = enable_load_balance
+            self.run_subtests(
+                {
+                    "qkv_size": [
+                        (256 if enable_load_balance else 128) * self.world_size,
+                        2048,
+                    ],
+                },
+                self._test_cp_flex_attention,
+            )
+
+        _cp_options.enable_load_balance = restore_enable_load_balance
 
         # NOTE: Context Parallel should not be used for small attentions (block_size < 128)
-        with self.assertRaisesRegex(AssertionError, "Tensor-likes are not close"):
+        with self.assertRaisesRegex(
+            NotImplementedError, "Q_LEN 128 is not divisible by CP mesh world size"
+        ):
             self.run_subtests(
                 {"qkv_size": [64 * self.world_size]},
-                self._test_ring_flex_attention,
+                self._test_cp_flex_attention,
             )
 
     # TODO: merge with the above test
@@ -700,18 +612,14 @@ class RingFlexAttentionTest(DTensorTestBase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
-    def test_ring_flex_attention_document_mask(self) -> None:
+    def test_cp_flex_attention_document_mask(self) -> None:
+        restore_enable_load_balance = _cp_options.enable_load_balance
+
         random.seed(10)
 
-        # NOTE: Each (batch_size, seq_len) tuple introduces 2 create_block_mask
-        # compilations: 1 for single-rank flex_attention and 1 for CP flex_attention.
-        # In order to avoid the "exceeds_recompile_limit" error, we need to increase
-        # the cache_size_limit to 12 which is the total number of compilations in our
-        # test case.
-        torch._dynamo.config.cache_size_limit = 12
-
-        # initialize document mask
+        # parameters for testing
         doc_count = 28
+        enable_load_balance_list = [True, False]
         batch_size_list = [2, 4, 8]
         max_seq_len_list = [
             256 * self.world_size,
@@ -719,30 +627,63 @@ class RingFlexAttentionTest(DTensorTestBase):
             # 128 * self.world_size  # NOTE: Mismatched elements: 8 / 131072 (0.0%),
         ]
 
+        # NOTE: Each (enable_load_balance, batch_size, seq_len) tuple introduces 2
+        # create_block_mask compilations: 1 for single-rank flex_attention and 1 for
+        # CP flex_attention. In order to avoid the "exceeds_recompile_limit" error,
+        # we need to increase the cache_size_limit to 12 which is the total number
+        # of compilations in our test case.
+        torch._dynamo.config.cache_size_limit = (
+            2
+            * len(enable_load_balance_list)
+            * len(batch_size_list)
+            * len(max_seq_len_list)
+        )
+
         # TODO: change this for-loop to run_subtests
         # Use a for-loop instead of run_subtests because we need to intialize the mask
-        # for each subtest. This can be baked into self._test_ring_flex_attention as
+        # for each subtest. This can be baked into self._test_cp_flex_attention as
         # a str argument denoting mask type.
-        for batch_size, max_seq_len in itertools.product(
-            batch_size_list, max_seq_len_list
+        for enable_load_balance, batch_size, max_seq_len in itertools.product(
+            enable_load_balance_list, batch_size_list, max_seq_len_list
         ):
+            _cp_options.enable_load_balance = enable_load_balance
+
+            # initialize document mask
             lengths = [
-                generate_random_lengths(max_seq_len, doc_count)
+                (
+                    generate_random_lengths_in_chunks(
+                        max_seq_len, doc_count, chunk_size=2 * self.world_size
+                    )
+                    if enable_load_balance
+                    else generate_random_lengths(max_seq_len, doc_count)
+                )
                 for _ in range(batch_size)
             ]
             offsets = length_to_offsets(lengths, self.device_type)
             document_causal_mask = generate_doc_mask_mod(causal_mask, offsets)
 
+            # generate load balancer
+            load_balancer = (
+                _PerDocumentHeadTailLoadBalancer(
+                    lengths, self.world_size, torch.device(self.device_type)
+                )
+                if enable_load_balance
+                else None
+            )
+
             # construct testing function
             test_func = functools.partial(
-                self._test_ring_flex_attention,
+                self._test_cp_flex_attention,
                 qkv_size=max_seq_len,
                 B=batch_size,
+                lb=load_balancer,
                 mask_func=document_causal_mask,
                 atol=1e-6,
             )
 
             test_func()
+
+        _cp_options.enable_load_balance = restore_enable_load_balance
 
 
 if __name__ == "__main__":

@@ -1,6 +1,4 @@
 #include <ATen/native/SpectralOpsUtils.h>
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -10,20 +8,6 @@
 #include <ATen/ops/_fft_c2c_native.h>
 #include <ATen/ops/_fft_c2r_native.h>
 #include <ATen/ops/_fft_r2c_native.h>
-#endif
-
-#if !defined(__MAC_14_0) && (!defined(MAC_OS_X_VERSION_14_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_14_0))
-@implementation FakeMPSGraphFFTDescriptor
-+ (nullable instancetype)descriptor {
-  // Redispatch the constructor to the actual implementation
-  id desc = NSClassFromString(@"MPSGraphFFTDescriptor");
-  return (FakeMPSGraphFFTDescriptor*)[desc descriptor];
-}
-
-- (nonnull id)copyWithZone:(nullable NSZone*)zone {
-  return self;
-}
-@end
 #endif
 
 namespace at::native {

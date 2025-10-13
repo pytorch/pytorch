@@ -585,6 +585,16 @@ if __name__ == "__main__":
         for arch in arch_list:
             self.assertTrue(arch in flags)
 
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_can_device_access_peer(self):
+        device_count = torch.xpu.device_count()
+        for device in range(device_count):
+            for peer in range(device_count):
+                self.assertEqual(
+                    torch.xpu.can_device_access_peer(device, peer),
+                    torch.xpu.can_device_access_peer(peer, device),
+                )
+
     def test_torch_version_xpu(self):
         self.assertEqual(len(torch.version.xpu), 8)
         compiler_version = int(torch.version.xpu)
@@ -765,6 +775,10 @@ class TestXPUAPISanity(TestCase):
             torch.xpu.is_bf16_supported(including_emulation=True),
             torch.xpu.is_available(),
         )
+
+    def test_is_tf32_supported(self):
+        if not torch.xpu.is_available():
+            self.assertFalse(torch.xpu.is_tf32_supported())
 
     def test_get_arch_list(self):
         if not torch.xpu._is_compiled():
