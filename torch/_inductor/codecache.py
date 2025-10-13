@@ -146,7 +146,7 @@ if TYPE_CHECKING:
 
 
 _IS_WINDOWS = sys.platform == "win32"
-LOCK_TIMEOUT = 600
+LOCK_TIMEOUT = config.file_lock_timeout
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")

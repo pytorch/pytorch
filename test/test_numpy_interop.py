@@ -596,7 +596,7 @@ class TestNumPyInterop(TestCase):
                 if (
                     dtype == torch.complex64
                     and torch.is_tensor(t)
-                    and type(a) == np.complex64
+                    and type(a) is np.complex64
                 ):
                     # TODO: Imaginary part is dropped in this case. Need fix.
                     # https://github.com/pytorch/pytorch/issues/43579

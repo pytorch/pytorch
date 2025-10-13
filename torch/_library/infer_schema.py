@@ -9,7 +9,7 @@ import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
-from .opaque_object import OpaqueType, OpaqueTypeStr
+from .opaque_object import _OPAQUE_TYPES, is_opaque_type, OpaqueType, OpaqueTypeStr
 
 
 # This is used as a negative test for
@@ -125,8 +125,11 @@ def infer_schema(
         # we convert it to the actual type.
         annotation_type, _ = unstringify_type(param.annotation)
 
+        schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if annotation_type == torch._C.ScriptObject:
+            if is_opaque_type(annotation_type):
+                schema_type = _OPAQUE_TYPES[annotation_type]
+            elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
                     "as it is a ScriptObject. Please manually specify the schema "
@@ -149,8 +152,11 @@ def infer_schema(
                     f"Parameter {name} has unsupported type {param.annotation}. "
                     f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
                 )
+        else:
+            schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
 
-        schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
+        assert schema_type is not None
+
         if type(mutates_args) is str:
             if mutates_args != UNKNOWN_MUTATES:
                 raise ValueError(
