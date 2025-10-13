@@ -2979,7 +2979,8 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         return SymNodeVariable(proxy, example_value, **options)
     elif (
         isinstance(example_value, torch.Stream)
-        and proxy.node.target == get_external_object_by_index
+        and proxy.node.target
+        in (get_external_object_by_index, torch.accelerator.current_stream)
     ) or proxy.node.target in [
         device_interface.current_stream
         for _, device_interface in get_registered_device_interfaces()
