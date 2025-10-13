@@ -9,9 +9,9 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
-    DTensor, 
-    Partial, 
-    Replicate, 
+    DTensor,
+    Partial,
+    Replicate,
     Shard,
 )
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
