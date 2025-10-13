@@ -12279,7 +12279,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @skip_if_not_triton
-    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
     @config.patch(implicit_fallbacks=True)
     def test_generated_code_has_size_stride_assert(self):
         def foo(x):
@@ -14244,6 +14244,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         out, (code,) = run_and_get_code(compiled, a, b)
         self.assertTrue("'enable_fp_fusion': False" in code)
         torch.testing.assert_close(out, fn(a, b), atol=0, rtol=0)
+
+    @skip_if_cpp_wrapper("skip cpp wrapper")
+    @requires_cuda_and_triton
+    def test_repeat_interleave_decomposition_has_clamp(self):
+        repeat = torch.ones(2560, dtype=torch.int64, device=GPU_TYPE)
+        output_size = 505450
+        data = torch.arange(2560, device=GPU_TYPE)
+
+        @torch.compile
+        def fn(repeat, output_size, data):
+            indices = torch.ops.aten.repeat_interleave.Tensor(
+                repeat, output_size=output_size
+            )
+            return data[indices]
+
+        result, code = run_and_get_code(fn, repeat, output_size, data)
+
+        self.assertEqual(result.shape[0], output_size)
+        self.assertTrue(torch.all(result >= 0).item())
+        self.assertTrue(torch.all(result < 2560).item())
+
+        code_str = "\n".join(code)
+        self.assertIn(
+            "triton_helpers.minimum",
+            code_str,
+            "Generated Triton code should use triton_helpers.minimum for clamping",
+        )
 
     # end of class CommonTemplate - add new tests here
 
