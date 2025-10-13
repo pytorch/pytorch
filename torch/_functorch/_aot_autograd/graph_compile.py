@@ -1902,6 +1902,7 @@ def _aot_stage2b_bw_compile(
                     # tensor which is wrong.
 
                     ph_size = ph_arg.size()
+                    # pyrefly: ignore  # bad-argument-type
                     if len(ph_size) == 0 and len(real_stride) > 0:
                         # Fix for 0-dimensional tensors: When a tensor becomes 0-d
                         # (e.g., via squeeze), its stride should be () not (1,).
