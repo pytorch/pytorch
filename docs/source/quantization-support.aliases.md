@@ -1,7 +1,7 @@
 # Aliases in ttorch.ao
 The following are aliases to their counterparts in ``torch.ao`` in nested namespaces.
 
-### torch.ao.nn.intrinsic.qat.modules.conv_fused (Aliases)
+## torch.ao.nn.intrinsic.qat.modules.conv_fused (Aliases)
 The following are aliases to their counterparts in the ``torch.ao.nn.intrinsic.qat.modules`` namespace.
 
 ```{eval-rst}
@@ -18,7 +18,7 @@ The following are aliases to their counterparts in the ``torch.ao.nn.intrinsic.q
     ConvReLU3d
 ```
 
-### torch.ao.nn.intrinsic.quantized.modules.conv_relu (Aliases)
+## torch.ao.nn.intrinsic.quantized.modules.conv_relu (Aliases)
 The following are aliases to their counterparts in the ``torch.ao.nn.intrinsic.quantized.modules`` namespace.
 
 ```{eval-rst}
