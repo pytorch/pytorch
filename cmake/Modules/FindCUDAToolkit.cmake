@@ -905,6 +905,7 @@ if(CUDAToolkit_FOUND)
         endif()
       endif()
       set_property(TARGET CUDA::${lib_name} PROPERTY IMPORTED_LOCATION "${CUDA_${lib_name}_LIBRARY}")
+      set_property(TARGET CUDA::${lib_name} PROPERTY SYSTEM TRUE)
       foreach(dep ${arg_DEPS})
         if(TARGET CUDA::${dep})
           set_property(TARGET CUDA::${lib_name} APPEND PROPERTY
