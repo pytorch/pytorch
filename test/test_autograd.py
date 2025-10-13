@@ -6657,10 +6657,41 @@ Done""",
         self.assertTrue(gradcheck(fn2, (c)))
 
     def test_gradcheck_adjusted_atol_complex_inputs(self):
-        # FIXME implement as regression test
-        # a certain input (proably large-min) with certain atol should fail the projection-specific check ('fast gradcheck') but
-        # pass the comprehensive check ('slow gradcheck').
-        pass
+        # Regression test for adjusted atol with complex inputs near the origin
+        # This tests a function with high dimensional complex inputs (z1, z2, ..., zn) -> 1/z1^2 + 1/z2^2 + ... + 1/zn^2
+        # With zi values all near the origin, the function has large derivatives
+
+        # FIXME havne't yet triggered an atol that fails fast gradcheck but
+        # passes slow gradcheck.
+        # Fixed seed for reproducibility
+        torch.manual_seed(42)
+
+        def complex_inv_square_sum(*zs):
+            # Compute sum of 1/z_i^2 for each complex input
+            result = torch.zeros(1, dtype=zs[0].dtype, device=zs[0].device)
+            for z in zs:
+                result = result + 1.0 / (z ** 2)
+            return result
+
+        # Create high dimensional complex inputs near the origin
+        # Use varied values to stress test gradcheck with challenging numerics
+        n = 100  # Number of complex inputs
+        inputs = []
+        for i in range(n):
+            # Vary the values slightly, all VERY close to origin for numerical challenges
+            real_part = 1e-4 + 1e-5 * (i % 10)
+            imag_part = 1e-4 + 1e-5 * ((i + 5) % 10)
+            z = torch.tensor(complex(real_part, imag_part), dtype=torch.complex128, requires_grad=True)
+            inputs.append(z)
+
+        # Test with reduced atol - use a small value that challenges the numerical precision
+        atol = 1e-9
+
+        # Fast gradcheck (with projection) should pass with reduced atol
+        self.assertTrue(gradcheck(complex_inv_square_sum, tuple(inputs), fast_mode=True, atol=atol))
+
+        # Slow gradcheck (comprehensive check) should also pass with reduced atol
+        self.assertTrue(gradcheck(complex_inv_square_sum, tuple(inputs), fast_mode=False, atol=atol))
 
     def test_gradcheck_get_numerical_jacobian(self):
         # get_numerical_jacobian is deprecated and no longer used internally by gradcheck
