@@ -298,6 +298,11 @@ def create_hop_fw_bw(
             *[example_grads[i] for i in filtered_grads_idx],
         ]
         joint_hop_gm = make_fx(joint_f)(*primals_and_tangents)
+        from torch._functorch._aot_autograd.graph_capture import (
+            copy_fwd_metadata_to_bw_nodes,
+        )
+
+        copy_fwd_metadata_to_bw_nodes(joint_hop_gm)
 
         from torch._functorch._aot_autograd.graph_compile import prepare_for_partitioner
         from torch._inductor.compile_fx import partition_fn
@@ -442,6 +447,7 @@ def autograd_key(
             fw_gm, bw_gm, num_fw_ins, num_fw_outs, filtered_grads_idx, *args, **kwargs
         )
 
+    # TODO: get rid of this when we can install as a subgraph
     return torch.fx.Interpreter(fw_gm).run(*args, **kwargs)
 
 
