@@ -1573,6 +1573,7 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'test/dynamo/cpython/**',
+    'test/test_torchfuzz_repros.py',
     'scripts/**',
     'third_party/**',
     'fb/**',

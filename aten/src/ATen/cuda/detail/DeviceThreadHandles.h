@@ -122,7 +122,7 @@ struct DeviceThreadHandlePool : public std::enable_shared_from_this<DeviceThread
 
     // Called by the destructor.  Releases this thread's handles back into the pool.
     void release() {
-        if(my_handles.size() > 0) {
+        if(!my_handles.empty()) {
             auto parent = weak_parent.lock();
             if (!parent) {
                 // If this thread exits after atexit handlers have completed, the
