@@ -3839,6 +3839,47 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertTrue(torch.allclose(f(x), fn(x)))
         y = torch.zeros(3, 4)
         self.assertTrue(torch.allclose(f(y), fn(y)))
+    
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    def test_as_strided_slice(self) -> None:
+        # See https://github.com/pytorch/pytorch/issues/164875 for full error
+        # and minimization
+        def f(arg_0: torch.Tensor) -> torch.Tensor:
+            _x_nz = torch.zeros((), dtype=torch.bool).reshape(-1)
+            _x_nz[:20] = True
+            return torch.add(arg_0, torch.nonzero(_x_nz))
+
+        x = torch.as_strided(torch.randint(5, 30, (20,)).to(torch.int64), (20, 0), (1, 20))
+        fn = torch.compile(f, fullgraph=True, dynamic=True, backend="inductor")
+        self.assertTrue(torch.allclose(f(x), fn(x)))
+        y = torch.zeros(3, 4)
+        self.assertTrue(torch.allclose(f(y), fn(y)))
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    def test_unbacked_sym_matmul(self) -> None:
+        def f():
+            _uniq_wide = torch.unique(torch.arange(1)).float()
+            return torch.matmul(_uniq_wide, torch.full((1, 18), 0.5))
+
+        fn = torch.compile(f, fullgraph=True, dynamic=True, backend="inductor")
+        self.assertTrue(torch.allclose(f(), fn()))
+    
+        def f2():
+            # Now, when we have 2, unique > 1 so we should
+            # not be able to broadcase this matmul
+            _uniq_wide = torch.unique(torch.arange(2)).float()
+            return torch.matmul(_uniq_wide, torch.full((1, 18), 0.5))
+        
+        fn2 = torch.compile(f2, fullgraph=True, dynamic=True, backend="inductor")
+        with self.assertRaises(Exception) as exc1:
+            f2()
+        with self.assertRaises(Exception) as exc2:
+            fn2()
+        self.assertEqual(type(exc1.exception), type(exc2.exception))
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
