@@ -159,6 +159,7 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
         grad_scale[i] = grad_scale_i
         grad_zero_point[i] = grad_zp_i
 
+    # if dtype is torch.bfloat16, we downcast before returning the gradients to mimic autograd's downcasting
     if dtype is torch.bfloat16:
         grad_X = grad_X.to(torch.bfloat16)
         grad_scale = grad_scale.to(torch.bfloat16)
@@ -945,6 +946,8 @@ class TestFakeQuantizeOps(TestCase):
                 dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
 
                 # increasing tolerance for bf16 due to differences in python's x.to(torch.bfloat16) and cpp's x.to(at::kBFloat16)
+                # for example, -0.16749558 gets downcast to -1.68 (after applying grad_factor) in python
+                # in CPP, -1.6752 gets downcast to -1.67
                 tolerance = 1e-2 if dtype is torch.bfloat16 else 1e-4
 
                 self.assertTrue(
