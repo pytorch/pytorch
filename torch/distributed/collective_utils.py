@@ -105,7 +105,9 @@ def broadcast(
         broadcast_list = [sync_obj]
         dist.broadcast_object_list(broadcast_list, src=rank, group=pg)
         if len(broadcast_list) != 1:
-            raise AssertionError(f"Expected broadcast_list to have exactly 1 element, got {len(broadcast_list)}")
+            raise AssertionError(
+                f"Expected broadcast_list to have exactly 1 element, got {len(broadcast_list)}"
+            )
         sync_obj = broadcast_list[0]
 
     # failure in any rank will trigger a throw in every rank.

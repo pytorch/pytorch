@@ -410,7 +410,9 @@ def reduce_scatter_tensor_coalesced(
     group_size = c10d._get_group_size_by_name(group_name)
 
     if len(scatter_dim) != len(inputs):
-        raise AssertionError(f"Length of scatter_dim ({len(scatter_dim)}) must equal length of inputs ({len(inputs)})")
+        raise AssertionError(
+            f"Length of scatter_dim ({len(scatter_dim)}) must equal length of inputs ({len(inputs)})"
+        )
     for idx, (dim, tensor) in enumerate(zip(scatter_dim, inputs)):
         if tensor.size(dim) % group_size != 0:
             raise AssertionError(
@@ -471,11 +473,17 @@ def all_to_all_single(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     if output_split_sizes is not None:
-        if not all(isinstance(size, (int, torch.SymInt)) for size in output_split_sizes):
-            raise AssertionError(f"All output_split_sizes must be int or SymInt, got {output_split_sizes}")
+        if not all(
+            isinstance(size, (int, torch.SymInt)) for size in output_split_sizes
+        ):
+            raise AssertionError(
+                f"All output_split_sizes must be int or SymInt, got {output_split_sizes}"
+            )
     if input_split_sizes is not None:
         if not all(isinstance(size, (int, torch.SymInt)) for size in input_split_sizes):
-            raise AssertionError(f"All input_split_sizes must be int or SymInt, got {input_split_sizes}")
+            raise AssertionError(
+                f"All input_split_sizes must be int or SymInt, got {input_split_sizes}"
+            )
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
     if output_split_sizes is None or input_split_sizes is None:
@@ -506,11 +514,17 @@ def all_to_all_single_autograd(
     Same as all_to_all_single but supports autograd.
     """
     if output_split_sizes is not None:
-        if not all(isinstance(size, (int, torch.SymInt)) for size in output_split_sizes):
-            raise AssertionError(f"All output_split_sizes must be int or SymInt, got {output_split_sizes}")
+        if not all(
+            isinstance(size, (int, torch.SymInt)) for size in output_split_sizes
+        ):
+            raise AssertionError(
+                f"All output_split_sizes must be int or SymInt, got {output_split_sizes}"
+            )
     if input_split_sizes is not None:
         if not all(isinstance(size, (int, torch.SymInt)) for size in input_split_sizes):
-            raise AssertionError(f"All input_split_sizes must be int or SymInt, got {input_split_sizes}")
+            raise AssertionError(
+                f"All input_split_sizes must be int or SymInt, got {input_split_sizes}"
+            )
 
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
@@ -603,7 +617,9 @@ class AsyncCollectiveTensor(torch.Tensor):
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         if meta is not None:
-            raise AssertionError("meta must be None for AsyncCollectiveTensor unflatten")
+            raise AssertionError(
+                "meta must be None for AsyncCollectiveTensor unflatten"
+            )
         elem = inner_tensors["elem"]
         return AsyncCollectiveTensor(elem)
 
@@ -654,7 +670,9 @@ class AsyncCollectiveTensor(torch.Tensor):
         def wrap(e: torch.Tensor):
             # wait_tensor is idepotent and will do stream sync only once
             if isinstance(e, AsyncCollectiveTensor):
-                raise AssertionError("Cannot wrap an AsyncCollectiveTensor inside another AsyncCollectiveTensor")
+                raise AssertionError(
+                    "Cannot wrap an AsyncCollectiveTensor inside another AsyncCollectiveTensor"
+                )
             res = AsyncCollectiveTensor(e)
             return res
 
@@ -1168,9 +1186,7 @@ def all_gather_inplace(
             "Can't remap async version of inplace op to functional collective"
         )
     if tensor.dim() != 0 and not all(t.size(0) == tensor.size(0) for t in tensor_list):
-        raise AssertionError(
-            "Remapping variable size all_gather is not yet supported"
-        )
+        raise AssertionError("Remapping variable size all_gather is not yet supported")
 
     group = group or dist.group.WORLD
     if group is None:

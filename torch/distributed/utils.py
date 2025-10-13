@@ -70,9 +70,7 @@ def _unpack_kwargs(
 ) -> tuple[tuple[Any, ...], dict[str, Any]]:
     """See _pack_kwargs."""
     if len(kwarg_keys) > len(flat_args):
-        raise AssertionError(
-            f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
-        )
+        raise AssertionError(f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}")
     if len(kwarg_keys) == 0:
         return flat_args, {}
     args = flat_args[: -len(kwarg_keys)]

@@ -185,13 +185,17 @@ def _iterate_state_dict(
             if companion_obj is not None:
                 if isinstance(companion_obj, DTensor):
                     if not isinstance(ret, DTensor):
-                        raise AssertionError("ret must be a DTensor when companion_obj is a DTensor")
+                        raise AssertionError(
+                            "ret must be a DTensor when companion_obj is a DTensor"
+                        )
                     companion_obj._local_tensor.copy_(
                         ret._local_tensor, non_blocking=non_blocking
                     )
                 elif isinstance(companion_obj, ShardedTensor):
                     if not isinstance(ret, ShardedTensor):
-                        raise AssertionError("ret must be a ShardedTensor when companion_obj is a ShardedTensor")
+                        raise AssertionError(
+                            "ret must be a ShardedTensor when companion_obj is a ShardedTensor"
+                        )
                     for idx, shard in enumerate(companion_obj.local_shards()):
                         shard.tensor.copy_(
                             ret.local_shards()[idx].tensor, non_blocking=non_blocking

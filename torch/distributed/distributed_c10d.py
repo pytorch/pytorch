@@ -2071,10 +2071,8 @@ def _new_process_group_helper(
             )
             backend_type = ProcessGroup.BackendType.XCCL
         else:
-            if not backend_str.upper() in Backend._plugins:
-                raise AssertionError(
-                    f"Unknown c10d backend type {backend_str.upper()}"
-                )
+            if backend_str.upper() not in Backend._plugins:
+                raise AssertionError(f"Unknown c10d backend type {backend_str.upper()}")
 
             backend_plugin = Backend._plugins[backend_str.upper()]
             creator_fn = backend_plugin.creator_fn
@@ -3611,9 +3609,7 @@ def recv_object_list(
     else:
         rank_objects = recv(object_tensor, group=group, group_src=group_src)
     if rank_sizes != rank_objects:
-        raise AssertionError(
-            "Mismatch in return ranks for object sizes and objects."
-        )
+        raise AssertionError("Mismatch in return ranks for object sizes and objects.")
     # Deserialize objects using their stored sizes.
     offset = 0
     for i, obj_size in enumerate(object_sizes_tensor):

@@ -596,7 +596,9 @@ else:
                     else mesh_dim
                 )
                 if not isinstance(mesh_dim, int):
-                    raise AssertionError(f"mesh_dim must be an int, got {type(mesh_dim)}")
+                    raise AssertionError(
+                        f"mesh_dim must be an int, got {type(mesh_dim)}"
+                    )
                 return not_none(_resolve_process_group(self._dim_group_names[mesh_dim]))
 
         def get_all_groups(self) -> list[ProcessGroup]:
@@ -1054,7 +1056,9 @@ else:
 
             mesh_dim_group = not_none(self.get_group(mesh_dim))
             if not isinstance(mesh_dim_group, ProcessGroup):
-                raise AssertionError("We expect ProcessGroup before calling `get_rank`!")
+                raise AssertionError(
+                    "We expect ProcessGroup before calling `get_rank`!"
+                )
             return not_none(get_rank(mesh_dim_group))
 
         def get_coordinate(self) -> Optional[list[int]]:

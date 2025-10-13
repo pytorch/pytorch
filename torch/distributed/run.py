@@ -793,7 +793,9 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
     if not (0 < min_nodes <= max_nodes):
-        raise AssertionError(f"min_nodes must be > 0 and <= max_nodes, got min_nodes={min_nodes}, max_nodes={max_nodes}")
+        raise AssertionError(
+            f"min_nodes must be > 0 and <= max_nodes, got min_nodes={min_nodes}, max_nodes={max_nodes}"
+        )
     if args.max_restarts < 0:
         raise AssertionError("max_restarts must be >= 0")
 
