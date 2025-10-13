@@ -1619,6 +1619,12 @@ Tensor& logsumexp_out_default(const Tensor& self, OptionalIntArrayRef opt_dim, b
   return result;
 }
 
+// .out variant for logsumexp(Tensor self) - no dim argument
+Tensor& logsumexp_out_simple(const Tensor& self, Tensor& result) {
+  // Delegate to the structured kernel with empty dims (reduce all dimensions)
+  return at::logsumexp_outf(self, IntArrayRef{}, /*keepdim=*/false, result);
+}
+
 static void impl_func_norm(
     const Tensor& self,
     const OptionalScalarRef& opt_p,

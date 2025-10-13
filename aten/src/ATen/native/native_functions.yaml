@@ -3805,6 +3805,11 @@
   dispatch:
     CompositeExplicitAutograd: logsumexp
 
+- func: logsumexp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CompositeExplicitAutograd: logsumexp_out_simple
+
 - func: logsumexp.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False) -> Tensor
   structured_delegate: logsumexp.IntList_out
   device_check: NoCheck   # TensorIterator

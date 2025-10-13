@@ -288,9 +288,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("logical_xor.out", CppFunction::makeFallthrough());
   m.impl("logical_xor_", CppFunction::makeFallthrough());
   m.impl("logsumexp", CppFunction::makeFallthrough());
+  m.impl("logsumexp.out", CppFunction::makeFallthrough());
   m.impl("logsumexp.names", CppFunction::makeFallthrough());
   m.impl("logsumexp.names_out", CppFunction::makeFallthrough());
-  m.impl("logsumexp.out", CppFunction::makeFallthrough());
   m.impl("lt.Scalar", CppFunction::makeFallthrough());
   m.impl("lt.Scalar_out", CppFunction::makeFallthrough());
   m.impl("lt.Tensor", CppFunction::makeFallthrough());

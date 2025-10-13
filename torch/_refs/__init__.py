@@ -897,7 +897,7 @@ def log_softmax(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def logsumexp(
-    self: TensorLikeType, dim: DimsType, keepdim: bool = False
+    self: TensorLikeType, dim: Optional[DimsType] = None, keepdim: bool = False
 ) -> TensorLikeType:
     # Handle None (reduce over all dimensions)
     if dim is None:

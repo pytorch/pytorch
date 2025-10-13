@@ -343,7 +343,6 @@ aten::logical_xor.out
 aten::logical_xor_
 aten::logsumexp.IntList_out
 aten::logsumexp.dim_IntList
-aten::logsumexp.out
 aten::lt.Scalar
 aten::lt.Scalar_out
 aten::lt.Tensor
