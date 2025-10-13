@@ -336,7 +336,9 @@ def _write_item(
         transform_to.write(data.getbuffer())
     else:
         if not isinstance(data, torch.Tensor):
-            raise AssertionError("Data must be torch.Tensor for non-BYTE_IO write items")
+            raise AssertionError(
+                "Data must be torch.Tensor for non-BYTE_IO write items"
+            )
         if data.device != torch.device("cpu"):
             raise AssertionError("Tensor must be on CPU device")
         if serialization_format == SerializationFormat.TORCH_SAVE:

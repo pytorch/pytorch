@@ -194,9 +194,7 @@ def _cast_tensor(tensor: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
     the differences in striding.
     """
     if type(tensor) is not torch.Tensor:
-        raise AssertionError(
-            f"can only cast standard tensors not {type(tensor)}"
-        )
+        raise AssertionError(f"can only cast standard tensors not {type(tensor)}")
     storage = tensor.untyped_storage()
     ret = torch.tensor(storage, dtype=dtype, device=tensor.device)
     if ret.untyped_storage() is not storage:
@@ -320,9 +318,7 @@ class PGTransport:
                     inplace = inplace._local_tensor
                 t = _cast_tensor(inplace, torch.uint8)
                 if t.nbytes != v.nbytes:
-                    raise AssertionError(
-                        "inplace tensor storage must be the same size"
-                    )
+                    raise AssertionError("inplace tensor storage must be the same size")
             else:
                 t = torch.empty(v.nbytes, dtype=torch.uint8, device=self._device)
 

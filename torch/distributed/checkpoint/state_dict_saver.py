@@ -292,9 +292,7 @@ def async_save(
 
     if dist.is_available() and dist.is_initialized():
         pg = process_group or _get_default_group()
-        if not (
-            torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
-        ):
+        if torch.device("cpu") not in pg._device_types:
             raise AssertionError(
                 "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
             )

@@ -217,7 +217,9 @@ class DefaultStager(AsyncStager):
         """
         if self._config.use_async_staging:
             if self._staging_executor is None:
-                raise AssertionError("staging_executor should not be None for async staging")
+                raise AssertionError(
+                    "staging_executor should not be None for async staging"
+                )
             self._staging_future = self._staging_executor.submit(
                 self._stage,
                 state_dict,

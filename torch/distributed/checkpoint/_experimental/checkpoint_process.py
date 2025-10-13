@@ -229,9 +229,7 @@ class CheckpointProcess:
     def _send(self, request_type: RequestType, payload: dict[str, Any]) -> None:
         try:
             if self._parent_end is None:
-                raise AssertionError(
-                    "Parent end of pipe should be initialized"
-                )
+                raise AssertionError("Parent end of pipe should be initialized")
             self._parent_end.send(
                 WorkerRequest(
                     request_type=request_type,
@@ -248,9 +246,7 @@ class CheckpointProcess:
     def _recv(self) -> Optional[dict[str, Any]]:
         try:
             if self._parent_end is None:
-                raise AssertionError(
-                    "Parent end of pipe should be initialized"
-                )
+                raise AssertionError("Parent end of pipe should be initialized")
             response = self._parent_end.recv()
             if response.success is False:
                 error_msg = (

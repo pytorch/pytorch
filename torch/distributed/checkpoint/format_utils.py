@@ -85,7 +85,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         # TODO: read on each host, instead of only the coordinator
         if self.is_coordinator:
             if self.checkpoint_id is None:
-                raise AssertionError()
+                raise AssertionError
             torch_state_dict = torch.load(
                 self.checkpoint_id, map_location="cpu", weights_only=False
             )
@@ -131,10 +131,10 @@ class BroadcastingTorchSaveReader(StorageReader):
         self.is_coordinator = is_coordinator
         if self.is_coordinator:
             if not dist.get_rank() == self.coordinator_rank:
-                raise AssertionError()
+                raise AssertionError
 
         if self.checkpoint_id is None:
-            raise AssertionError()
+            raise AssertionError
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         """Implementation of the StorageReader method"""

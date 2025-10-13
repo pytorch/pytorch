@@ -151,9 +151,7 @@ class DistBarrier(Barrier):
             AssertionError: If the distributed process group is not initialized.
         """
         if not dist.is_initialized():
-            raise AssertionError(
-                "DistBarrier requires an initialized process group."
-            )
+            raise AssertionError("DistBarrier requires an initialized process group.")
 
     def execute_barrier(self) -> None:
         """

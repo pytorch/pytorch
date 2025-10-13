@@ -138,13 +138,9 @@ def _get_state_dict_2d_layout(
         specs[key] = (None, value.size())
         if _is_nested_tensor(value):
             if not len(value.local_shards()) == 1:
-                raise AssertionError(
-                    "Cannot handle ST with multiple shards"
-                )
+                raise AssertionError("Cannot handle ST with multiple shards")
             if not isinstance(value, ShardedTensor):
-                raise AssertionError(
-                    "Can only handle nested ShardedTensor"
-                )
+                raise AssertionError("Can only handle nested ShardedTensor")
             shard = value.local_shards()[0]
             specs[key] = (
                 shard.metadata.shard_offsets,
@@ -187,7 +183,7 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             offset = self.fqn_to_offset[fqn]
 
             if not len(obj.local_shards()) == 1:
-                raise AssertionError()
+                raise AssertionError
             original_shard = obj.local_shards()[0]
             local_chunks = [
                 ChunkStorageMetadata(
@@ -205,7 +201,7 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             # TODO: we should change _create_sharded_read_items to have more ergonomic API
             for ri in reqs:
                 if ri.dest_index.offset is None:
-                    raise AssertionError()
+                    raise AssertionError
                 original_offset = _element_wise_sub(ri.dest_index.offset, offset)
                 original_index = dataclasses.replace(
                     ri.dest_index, offset=torch.Size(original_offset)

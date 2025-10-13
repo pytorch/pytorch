@@ -248,7 +248,9 @@ class _AsyncCheckpointProcess:
                     logger.info("Terminating the checkpoint background process.")
                     return
                 if not isinstance(obj, _AsyncCheckpointRequest):
-                    raise AssertionError(f"Expected _AsyncCheckpointRequest, got {type(obj)}")
+                    raise AssertionError(
+                        f"Expected _AsyncCheckpointRequest, got {type(obj)}"
+                    )
                 logger.info(
                     f"Received async checkpoint request with id={obj.checkpoint_request_id.checkpoint_id}"  # noqa: G004
                 )
@@ -300,7 +302,9 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
         global _CHECKPOINT_PROCESS
         if _CHECKPOINT_PROCESS is None:
             if pg_init_info is None:
-                raise AssertionError("pg_init_info must not be None when _CHECKPOINT_PROCESS is None")
+                raise AssertionError(
+                    "pg_init_info must not be None when _CHECKPOINT_PROCESS is None"
+                )
             ckpt_kwargs = {}
             if (ckpt_id := getattr(storage_writer, "checkpoint_id", None)) is not None:
                 ckpt_kwargs["checkpoint_id"] = ckpt_id
@@ -315,7 +319,9 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             create_checkpoint_daemon_process()
 
         if _CHECKPOINT_PROCESS is None:
-            raise AssertionError("_CHECKPOINT_PROCESS must not be None after initialization")
+            raise AssertionError(
+                "_CHECKPOINT_PROCESS must not be None after initialization"
+            )
         staged_state_dict = (
             staging_future_or_state_dict.result()
             if isinstance(staging_future_or_state_dict, Future)

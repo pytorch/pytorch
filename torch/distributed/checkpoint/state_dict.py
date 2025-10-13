@@ -488,7 +488,9 @@ def _get_model_state_dict(
     for key in list(state_dict.keys()):
         fqns = _get_fqns(model, key)
         if len(fqns) != 1:
-            raise AssertionError(f"Expected 1 FQN for key '{key}', got {len(fqns)}: {fqns}")
+            raise AssertionError(
+                f"Expected 1 FQN for key '{key}', got {len(fqns)}: {fqns}"
+            )
         fqn = next(iter(fqns))
         if fqn != key:
             # As we only support FSDP, DDP, and TP, the only cases are
@@ -815,7 +817,9 @@ def _get_optim_state_dict(
             for key, param in model.named_parameters():
                 fqns = _get_fqns(model, key)
                 if len(fqns) != 1:
-                    raise AssertionError(f"Expected 1 FQN for key '{key}', got {len(fqns)}")
+                    raise AssertionError(
+                        f"Expected 1 FQN for key '{key}', got {len(fqns)}"
+                    )
                 fqn = next(iter(fqns))
                 if param not in param_pid_mapping:
                     continue
@@ -974,7 +978,9 @@ def _load_optim_state_dict(
                     continue
 
                 if len(fqns) != 1:
-                    raise AssertionError(f"Expected 1 FQN for '{original_fqn}', got {len(fqns)}")
+                    raise AssertionError(
+                        f"Expected 1 FQN for '{original_fqn}', got {len(fqns)}"
+                    )
                 fqn = fqns.pop()
                 fqn_with_compiler = fqns_with_compiler.pop()
                 for g in optim_state_dict[_PG]:
@@ -1023,7 +1029,9 @@ def _load_optim_state_dict(
             for optim_key in flatten_osd.keys():
                 if optim_key not in flatten_local_osd:
                     if optim_key not in osd_mapping:
-                        raise AssertionError(f"Expected key '{optim_key}' in osd_mapping")
+                        raise AssertionError(
+                            f"Expected key '{optim_key}' in osd_mapping"
+                        )
                     flatten_local_osd[optim_key] = flatten_osd[optim_key]
                     local_osd_mapping[optim_key] = osd_mapping[optim_key]
             optim_state_dict = _unflatten_state_dict(
@@ -1237,7 +1245,9 @@ def _unflatten_model_state_dict(
 
                 fqns = _get_fqns(model, name)
                 if len(fqns) != 1:
-                    raise AssertionError("FQNs for a submodule should only have 1 element")
+                    raise AssertionError(
+                        "FQNs for a submodule should only have 1 element"
+                    )
                 prefix = f"{next(iter(fqns))}."
                 new_state_dict.update(
                     {prefix + subfqn: value for subfqn, value in sub_state_dict.items()}
