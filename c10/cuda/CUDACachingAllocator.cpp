@@ -2502,8 +2502,6 @@ class DeviceCachingAllocator {
       auto divisions = CUDAAllocatorConfig::roundup_power2_divisions(size);
       if (divisions > 1 && size > (kMinBlockSize * divisions)) {
         return roundup_power2_next_division(size, divisions);
-      } else if (divisions == 1) {
-        return llvm::PowerOf2Ceil(size);
       } else {
         return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
       }
