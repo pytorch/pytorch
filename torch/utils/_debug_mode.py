@@ -92,7 +92,9 @@ def _arg_to_str(arg, attributes, tensor_memo=None) -> str:
 def _op_to_str(op, attributes, *args, output=None, tensor_memo=None, **kwargs) -> str:
     if op == REDISTRIBUTE_FUNC:
         if len(args) == 2:
-            args_str = f"{_arg_to_str(args[0], attributes, tensor_memo)}, trace: {args[1]}"
+            args_str = (
+                f"{_arg_to_str(args[0], attributes, tensor_memo)}, trace: {args[1]}"
+            )
         elif len(args) == 3:
             _args = [_arg_to_str(arg, attributes, tensor_memo) for arg in args]
             args_str = f"{_args[0]}, {_args[1]} -> {_args[2]}"
