@@ -3913,6 +3913,21 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
         for _ in range(unsqueeze_dims):
             bias = bias.unsqueeze(1)
 
+    # Manage padding as a string
+    ndim = weight.dim() - 2
+    slices = [slice(None)] * (ndim + 2)
+    is_asymmetric_pad = False
+    if isinstance(padding, str):
+        if padding == "valid":
+            padding = 0
+        elif padding == "same":
+            padding, asymmetric_pads = _compute_same_padding_crop(ndim, weight.size(), dilation, stride)
+            if any(pad != slice(None) for pad in asymmetric_pads):
+                is_asymmetric_pad = True
+                slices[2:] = asymmetric_pads
+        else:
+            raise ValueError(f"Invalid padding argument '{padding}'")
+
     grad_output = input
     # Get the input shape for grad_fn.
     conv_transpose_output = fn(grad_output.to('meta'), weight.to('meta'), None,
@@ -3929,7 +3944,42 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
     if bias is not None:
         out = out + bias
 
+    # This is for asymmetric convolution when using padding="same"
+    if is_asymmetric_pad:
+        out = out[tuple(slices)]
+
     return out.squeeze(0) if not is_batched else out
+
+def _compute_same_padding_crop(ndim: int,
+                               weight_sizes: Sequence[int],
+                               dilation: Sequence[int] | int,
+                               stride: Sequence[int] | int) -> tuple[list[int], list[slice]]:
+    """Computes the padding required so that the output size is the same as the input size.
+    It returns a tuple with 2 elements.
+    The first element is the padding to perform on both sides,
+    the second element is used for asymmetric padding,
+    containing the slices for the correct output shape."""
+    # Adapted from [convolution_transpose_same] in aten/src/ATen/native/Convolution.cpp
+    common_pad_lr: list[int] = [0] * ndim
+    asymmetric_pads: list[slice] = [slice(None)] * ndim
+
+    for i in range(ndim):
+        dim_dilation = dilation if isinstance(dilation, int) else dilation[i]
+        dim_stride = stride if isinstance(stride, int) else stride[i]
+
+        effective_kernel = dim_dilation * (weight_sizes[i + 2] - 1) + 1
+        total_padding = effective_kernel + dim_stride - 2
+        left_pad = math.ceil(total_padding / 2) if (dim_stride < effective_kernel) else effective_kernel - 1
+        right_pad = total_padding - left_pad
+
+        common_pad_lr[i] = min(left_pad, right_pad)
+        epl = left_pad - right_pad
+        if epl > 0:
+            asymmetric_pads[i] = slice(epl, None)
+        elif epl < 0:
+            asymmetric_pads[i] = slice(0, epl)
+
+    return common_pad_lr, asymmetric_pads
 
 
 def sample_inputs_conv_transpose1d(op_info, device, dtype, requires_grad, **kwargs):
