@@ -396,12 +396,13 @@ def create_joint(
                         allow_unused=True,
                     )
                 else:
-                    backward_out = torch.autograd.grad(
-                        needed_outs,
-                        grad_primals,
-                        grad_outputs=needed_tangents,
-                        allow_unused=True,
-                    )
+                    with set_partitioner_tag("during_backward"):
+                        backward_out = torch.autograd.grad(
+                            needed_outs,
+                            grad_primals,
+                            grad_outputs=needed_tangents,
+                            allow_unused=True,
+                        )
         backward_out_iter = iter(backward_out)
         final_outs = (
             outs,

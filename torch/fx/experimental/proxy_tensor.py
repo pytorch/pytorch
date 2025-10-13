@@ -63,6 +63,7 @@ from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
+    autograd_would_have_decomposed,
     TorchDispatchMode,
 )
 from torch.utils._stats import count
@@ -907,18 +908,6 @@ def proxy_call(
         _maybe_record_pointwise_barrier(func, proxy_mode)
         return r
 
-    def should_decompose(func, flat_args):
-        has_backend_registration = False
-        for a in flat_args:
-            if isinstance(a, torch.Tensor):
-                backend_key = torch._C._dispatch_key_for_device(a.device.type)
-                has_backend_registration = func.has_kernel_for_dispatch_key(backend_key)
-                # in theory we should take all backend keys and take the highest priority one
-                # to properly mimic the disaptcher,
-                # this just grabs the first tensor and takes its device key
-                break
-        return not has_backend_registration
-
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
     if (
         not pre_dispatch
@@ -928,7 +917,7 @@ def proxy_call(
             torch.ops.aten.stride.default,
             torch.ops.aten.storage_offset.default,
         ]
-        and should_decompose(func, flat_args_kwargs)
+        and autograd_would_have_decomposed(func, flat_args_kwargs)
     ):
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
@@ -1810,17 +1799,14 @@ class _ModuleStackTracer(PythonKeyTracer):
         self.enable_attr_proxy = False
         self.submodule_paths = {}
         for name, m in self.scope_root.named_modules(remove_duplicate=False):
-            # pyrefly: ignore  # unsupported-operation
             if m in self.submodule_paths:
                 log.info(
                     "Shared module found between %s and %s, AttrProxy is enabled.",
-                    # pyrefly: ignore  # unsupported-operation
                     self.submodule_paths[m],
                     name,
                 )
                 self.enable_attr_proxy = True
             else:
-                # pyrefly: ignore  # unsupported-operation
                 self.submodule_paths[m] = name
 
         self.proxy_paths: WeakKeyDictionary[_AttrProxy, str] = WeakKeyDictionary()
@@ -2249,9 +2235,9 @@ class _MakefxTracer:
             self.fake_tensor_mode = parent_tracer.fake_tensor_mode
 
             def _create_sub_fx_tracer(parent_tracer: _ProxyTracer) -> PythonKeyTracer:
-                if type(parent_tracer) == PythonKeyTracer:
+                if type(parent_tracer) is PythonKeyTracer:
                     return PythonKeyTracer()
-                elif type(parent_tracer) == _ModuleStackTracer:
+                elif type(parent_tracer) is _ModuleStackTracer:
                     return _ModuleStackTracer(parent_tracer.scope_root)
                 else:
                     raise RuntimeError(
@@ -2382,6 +2368,7 @@ class _MakefxTracer:
         ):
             from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
+            # pyrefly: ignore  # unbound-name
             insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
             t.recompile()
         # TODO: kind of a bad way to do it, should maybe figure out a better way

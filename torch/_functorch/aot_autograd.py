@@ -723,6 +723,7 @@ def aot_function(
     # Whether or not to trace with dynamic shapes
     dynamic=False,
     enable_log=True,
+    disable_functionalization=False,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -790,6 +791,7 @@ def aot_function(
         is_export=False,
         no_tangents=False,
         enable_log=enable_log,
+        disable_functionalization=disable_functionalization,
     )
     cached_res = None
 
@@ -993,7 +995,7 @@ def prepare_aot_module_simplified(
         ignore_shape_env=ignore_shape_env,
         precompile_backend_id=getattr(mod, "_backend_id", None),
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
-        disable_functionalization=disable_functionalization,
+        disable_functionalization=False,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
@@ -1030,6 +1032,7 @@ def aot_module_simplified(
     cudagraphs: Optional[BoxedBool] = None,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     ignore_shape_env: bool = False,
+    disable_functionalization: bool = False,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1068,7 +1071,7 @@ def aot_module_simplified(
             ignore_shape_env,
             flatten=False,
             force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
-            disable_functionalization=config._test_disable_functionalization,
+            disable_functionalization=disable_functionalization,
         )
 
         compiled_fn = None

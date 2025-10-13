@@ -2278,7 +2278,9 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     select = torch.ops.aten.select.int(mul, 0, 0)
     detach = torch.ops.aten.detach.default(select);  select = None
-    return (view, mul, detach)""",
+    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
+    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+    return (view, mul, detach_2)""",
         )
 
     def test_output_aliases_intermediate_inplace_view(self):
@@ -5136,12 +5138,23 @@ class <lambda>(torch.nn.Module):
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  detach = None
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
+        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
+        detach_4: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_3);  detach_3 = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
-        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_5: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_6: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_5);  detach_5 = None
+        detach_7: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_6);  detach_6 = None
+        detach_8: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_7);  detach_7 = None
+        detach_9: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_8);  detach_8 = None
+        detach_10: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_9);  detach_9 = None
         ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
         expand: "f32[1, 3, 3, 3]" = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_3, 0);  expand = detach_3 = None
+        detach_11: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
+        detach_12: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_11);  detach_11 = None
+        detach_13: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_12);  detach_12 = None
+        detach_14: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_13);  detach_13 = None
+        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_14, 0);  expand = detach_14 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
         getitem_5: "f32[1, 3, 3, 3]" = native_batch_norm_backward[0]
         getitem_6: "f32[3]" = native_batch_norm_backward[1]
@@ -5150,7 +5163,7 @@ class <lambda>(torch.nn.Module):
         getitem_8 = convolution_backward[0];  getitem_8 = None
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
-        return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
+        return (getitem_3, getitem_4, add, sum_1, detach_10, getitem_9, getitem_10, getitem_6, getitem_7)
         """,  # noqa: B950
         )
 
@@ -5218,12 +5231,14 @@ class <lambda>(torch.nn.Module):
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
+        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
+        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
         return (
             getitem_3,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=4))
             getitem_4,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=5))
             add,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=6))
             sum_1,  # PlainAOTOutput(idx=0)
-            detach,  # PlainAOTOutput(idx=1)
+            detach_2,  # PlainAOTOutput(idx=1)
         )
         """,  # noqa: B950
         )
@@ -7192,7 +7207,6 @@ metadata incorrectly.
         aot_eager = torch.compile(backend="aot_eager")(fn)(x)
         self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
-    @unittest.expectedFailure
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_rms_norm(self):
         # Only CUDA rms norm fails to be decomposed
@@ -8045,7 +8059,9 @@ symbolic_aot_autograd_failures = {
 }
 
 
-def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
+def _test_aot_autograd_helper(
+    self, device, dtype, op, dynamic=False, disable_functionalization=False
+):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
@@ -8076,6 +8092,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
                 skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
+                disable_functionalization=disable_functionalization,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -8175,6 +8192,29 @@ class TestEagerFusionOpInfo(AOTTestCase):
     )
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op, dynamic=True)
+
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @skipOps(
+        "TestEagerFusionOpInfo", "test_aot_autograd_exhaustive", aot_autograd_failures
+    )
+    def test_aot_autograd_disable_functionalization_exhaustive(self, device, dtype, op):
+        _test_aot_autograd_helper(
+            self, device, dtype, op, disable_functionalization=True
+        )
+
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @patch("functorch.compile.config.debug_assert", True)
+    @skipOps(
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_symbolic_exhaustive",
+        aot_autograd_failures | symbolic_aot_autograd_failures,
+    )
+    def test_aot_autograd_disable_functionalization_symbolic_exhaustive(
+        self, device, dtype, op
+    ):
+        _test_aot_autograd_helper(
+            self, device, dtype, op, dynamic=True, disable_functionalization=True
+        )
 
 
 aot_autograd_module_failures = set(
