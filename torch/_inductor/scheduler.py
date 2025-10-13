@@ -4224,6 +4224,11 @@ class Scheduler:
         if node1 is node2:
             return False
 
+        if V.graph.is_backward and node1.is_reduction() and node2.is_reduction():
+            breakpoint()
+            print(f"{node1} v.s. {node2}")
+            # breakpoint()
+
         why = WhyNoFuse(node1, node2)
 
         if node1.is_template() and self.get_backend(
