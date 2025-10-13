@@ -2,8 +2,8 @@ import ast
 import contextlib
 import inspect
 import threading
-from collections.abc import Generator, Iterable
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Generator, Iterable
+from typing import Any, Optional, Union
 
 from torch.utils._exposed_in import exposed_in
 

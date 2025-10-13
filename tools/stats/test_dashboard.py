@@ -151,7 +151,7 @@ def get_invoking_file_summary(
     for tests in grouped_tests:
         build_name = tests[0]["build_name"]
         test_config = tests[0]["test_config"]
-        short_job_name = f"{build_name} / ({test_config})"
+        short_job_name = f"{build_name} / test ({test_config})"
         file = tests[0].get("file", "NoFile")
 
         key = (build_name, test_config, file)
@@ -211,7 +211,7 @@ def get_test_status(test_cases: list[list[dict[str, Any]]]) -> list[dict[str, An
     for tests in test_cases:
         build_name = tests[0]["build_name"]
         test_config = tests[0]["test_config"]
-        short_job_name = f"{build_name} / ({test_config})"
+        short_job_name = f"{build_name} / test ({test_config})"
         file = tests[0].get("file", "NoFile")
 
         statuses = []
