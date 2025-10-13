@@ -9,7 +9,7 @@ if LOG_INTERNAL:
     os.environ["NCCL_DEBUG"] = "INFO"
     os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
     os.environ["TORCH_LOGS"] = "+torch.distributed.tensor"
-LOG_DEBUG = True
+LOG_DEBUG = False
 LOG_RANK = [0]
 
 import torch
@@ -25,6 +25,7 @@ from torch.distributed._tensor import (
     DTensor,
     Replicate,
     Shard,
+    Partial,
 )
 
 def init_distributed():
@@ -42,27 +43,28 @@ def init_distributed():
     return rank, world_size, local_rank, device
 
 class TinyNet(nn.Module):
-    def __init__(self, d_in=8, d_hidden=16, d_out=1, mesh=None):
+    def __init__(self, d_in=8, d_hidden=16, d_out=1, mesh=None, grad_placements=None):
         super().__init__()
         self.fc1 = nn.Linear(d_in, d_hidden, bias=False) #8x16
         self.fc2 = nn.Linear(d_hidden, d_out, bias=False) #16x1
         self.mesh = mesh
+        self.grad_placements = grad_placements
         if self.mesh:
-            print(f"[Rank {dist.get_rank()}]: ==== DTensor Mixed Local Ops Testing ====")
+            print(f"[Rank {dist.get_rank()}]: ==== DTensor Mixed Local Ops Testing {grad_placements=} ====")
         else:
             print(f"[Rank {dist.get_rank()}]: ==== DTensor Testing ====")
 
     def forward(self, x):
-        #x = 16x8 [8x8], [8x8]
-        #w1 = 8x16 [8x8 @ 8x16 = 8x16 act]
-        #w2 = 16x1 [8x16 @ 16x1 = 8x1 act]
+        #x = 24x8 [12x8], [12x8]
+        #w1 = 12x16 [12x8 @ 8x16 = 12x16 act]
+        #w2 = 16x1 [12x16 @ 16x1 = 12x1 act]
         if not self.mesh:
             x = self.fc1(x)
             x = F.relu(x)
             x = self.fc2(x)
             return x
 
-        w1_local = self.fc1.weight.to_local()
+        w1_local = self.fc1.weight.to_local(grad_placements=self.grad_placements)
         x_local = x.to_local()
         x_local = F.linear(x_local, w1_local)
         x_local = F.relu(x_local)
@@ -70,7 +72,7 @@ class TinyNet(nn.Module):
         x2 = self.fc2(x2)
         return x2
 
-def data_parallel_dtensor(local_ops=False):
+def data_parallel_dtensor(local_ops=False, grad_placements=None):
     rank, world_size, local_rank, device = init_distributed()
 
     # 1) Data-parallel mesh across all ranks
@@ -80,10 +82,10 @@ def data_parallel_dtensor(local_ops=False):
 
     # 2) Build model and distribute (replicate params for DP)
     torch.manual_seed(0)
-    base_model = TinyNet(mesh=(mesh if local_ops else None)).to(device)
+    base_model = TinyNet(mesh=(mesh if local_ops else None), grad_placements=grad_placements).to(device)
     
     # 3) Global batch -> shard along batch dim across dp mesh
-    global_batch_size = 16
+    global_batch_size = 24
     d_in = 8
     x_global = torch.randn(global_batch_size, d_in, device=device)
     y_global = torch.randn(global_batch_size, 1, device=device)
@@ -129,8 +131,12 @@ def data_parallel_dtensor(local_ops=False):
     if LOG_DEBUG and rank in LOG_RANK:
         print(f"[Rank {dist.get_rank()}]: === DebugMode: Optimizer step === \n {debug_mode.debug_string()}")
 
+    print(f"[Rank {dist.get_rank()}]: {local_ops=} {model.fc1.weight.norm()=} {model.fc2.weight.norm()=}")
+    torch.testing.assert_close(model.fc1.weight.norm().to_local().item(), 2.326361656188965, msg=f"fc1 weights different from pure DTensor implementation {model.fc1.weight.norm()=}")
+
     dist.destroy_process_group()
 
 if __name__ == "__main__":
-    data_parallel_dtensor()
-    data_parallel_dtensor(local_ops=True)
+    # data_parallel_dtensor()
+    # data_parallel_dtensor(local_ops=True)
+    data_parallel_dtensor(local_ops=True, grad_placements=[Partial()])
