@@ -128,7 +128,7 @@ def run(rank, world_size):
             _print("Reloading model from last checkpoint!")
             if f is not None:
                 if not isinstance(f, Future):
-                    raise AssertionError("f should be a Future instance")
+                    raise AssertionError("f should be a Future instance") from None
                 f.result()
             dcp.load(state_dict)
 
