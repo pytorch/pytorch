@@ -1018,7 +1018,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 expected_total_combination += (
                     device_combination_count * tensor_dim_order_permutation
                 )
-            # multiple by total possible permutation of device order
+            # multiply by total possible permutation of device order
             expected_total_combination *= math.factorial(N)
             self.assertEqual(len(all_combinations), expected_total_combination)
 
@@ -1136,7 +1136,10 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             (_MaskPartial(offset_shape=torch.Size([10, 20]), offset_dim=0),)
         ]
         sharded_dt = self.distribute_tensor(
-            input_data.clone(), mesh, src_placement, shard_order=((1, 0),)
+            input_data.clone(),
+            mesh,
+            src_placement,
+            shard_order=(ShardOrderEntry(tensor_dim=1, mesh_dims=(0,)),),
         )
         sharded_dt = self.redistribute(
             sharded_dt, mesh, tgt_placement, shard_order=None
