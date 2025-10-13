@@ -7,7 +7,6 @@ for custom operations by registering multiple decompositions and tuning knobs.
 """
 
 import functools
-import itertools
 from typing import Any, Callable, Optional, Union
 
 import torch
@@ -357,20 +356,14 @@ def register_parametric_op_autotuning(
     if name is None:
         name = f"{custom_op._name}_parametric_autotuned"
 
-    # Automatically generate decomposition functions for each parameter value
-    def create_parametric_decomposition(value):
-        def parametric_decomposition(*args, **kwargs):
-            kwargs[parameter_name] = value
-            return implementation_fn(*args, **kwargs)
+    # Generate specialized functions for each parameter value using functools.partial
+    def make_variant(value):
+        """Create a specialized variant that fixes the parameter to a specific value."""
+        variant = functools.partial(implementation_fn, **{parameter_name: value})
+        variant.__name__ = f"{implementation_fn.__name__}_{parameter_name}_{value}"
+        return variant
 
-        parametric_decomposition.__name__ = (
-            f"{implementation_fn.__name__}_{parameter_name}_{value}"
-        )
-        return parametric_decomposition
-
-    decompositions = []
-    for param_value in parameter_values:
-        decompositions.append(create_parametric_decomposition(param_value))
+    decompositions = [make_variant(value) for value in parameter_values]
 
     register_custom_op_autotuning(
         custom_op=custom_op,
