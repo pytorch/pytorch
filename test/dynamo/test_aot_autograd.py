@@ -816,6 +816,9 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="aot_eager")
         self.assertTrue(torch._dynamo.testing.same(fn(x), opt_fn(x)))
 
+    @unittest.skip(
+        "Unstable test because of https://github.com/pytorch/pytorch/pull/164691"
+    )
     def test_aot_sequence_nr(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
