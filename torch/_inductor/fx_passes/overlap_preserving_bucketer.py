@@ -4,10 +4,10 @@ import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
+    bucket_key,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
     is_wait_tensor,
-    bucket_key,
 )
 from torch._inductor.fx_passes.overlap_scheduling import CollBucket, CollectiveInfo
 from torch.utils._ordered_set import OrderedSet

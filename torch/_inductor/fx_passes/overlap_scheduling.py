@@ -32,7 +32,7 @@ from ..pattern_matcher import stable_topological_sort
 def get_group_name(n: fx.Node) -> str:
     """Extract the group name from a collective operation node."""
     opt_args_kwargs = normalize_function(
-        n.target,
+        n.target,  # type: ignore[arg-type]
         args=n.args,
         kwargs=n.kwargs,
         normalize_to_only_use_kwargs=True,
@@ -72,6 +72,10 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
 
 
 def is_compute_node(n: fx.Node) -> bool:
+    """
+    Should we consider this node computationally expensive ?
+    Currently uses flop registration, but we could expand more generally.
+    """
     return (
         getattr(n.target, "overloadpacket", None)
         in torch.utils.flop_counter.flop_registry
@@ -201,7 +205,7 @@ class OverlapScheduler:
     The reordering is done as a scheduling pass. We maintain a priority queue of
     schedulable nodes. The nodes are ranked by:
 
-    1) the compute node depth they dominate. this allows reordering locally, such as with
+    1) the compute node index they dominate. this allows reordering locally, such as with
     parallel mms, and also allows overlapping reduce scatter nodes outputs in the backward
     with compute by deferring their waits.
 
@@ -253,9 +257,9 @@ class OverlapScheduler:
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
         self._identify_collectives()
 
-        self.compute_depth = self._calculate_compute_node_domination_index()
+        self.compute_index_domination = self._calculate_compute_node_domination_index()
         self.compute_nodes = [n for n in self.nodes if is_compute_node(n)]
-        self.current_compute_depth = 0
+        self.current_compute_index = 0
 
         # Scheduling state
         self.potentially_hidden_collectives = (
@@ -286,7 +290,7 @@ class OverlapScheduler:
 
     def off_compute_path(self, n: fx.Node) -> bool:
         """Check if a node is off the compute path (doesn't block any compute)."""
-        return self.compute_depth[n] == sys.maxsize
+        return self.compute_index_domination[n] == sys.maxsize
 
     def _identify_collectives(self) -> None:
         """Identify all collective operations."""
@@ -465,7 +469,7 @@ class OverlapScheduler:
             overlappable = self.in_overlappable_collective_unary_chain(node)
 
         return (
-            self.compute_depth[node],  # what depth compute it blocks
+            self.compute_index_domination[node],  # what index compute it blocks
             overlappable,  # Defer hideable collective ops
             self.node_idx[node],  # Original order for stability
         )
@@ -511,7 +515,7 @@ class OverlapScheduler:
         """Handle scheduling a collective start."""
         info = self.collective_info[node]
 
-        if self._is_bucketable_in_flight_collective(node):
+        if self.should_assume_bucketed(node):
             latency = estimate_collective_time(node, 0)
             assert latency <= info.exposed_time_ms
             info.exposed_time_ms = info.exposed_time_ms - latency
@@ -551,6 +555,7 @@ class OverlapScheduler:
         compute_time = benchmark_node(node)
         available_compute = compute_time * self.compute_overlap_multipler
 
+        # TODO: separate overlap time per process group
         # First reduce exposed time of in-flight collectives
         for info in self.in_flight.values():
             if info.exposed_time_ms == 0:
@@ -568,7 +573,7 @@ class OverlapScheduler:
             self._schedule_collectives_for_overlap(node, available_compute)
 
         self._schedule(node)
-        self.current_compute_depth += 1
+        self.current_compute_index += 1
 
     def _schedule_collectives_for_overlap(
         self, compute_node: fx.Node, available_compute_time: float
@@ -576,20 +581,21 @@ class OverlapScheduler:
         """Opportunistically schedule collectives that can be hidden by compute."""
         compute_ancestors = self.node_ancestors[compute_node]
 
-        # Filter collectives by distance and compute depth
+        # Filter collectives by distance and compute index domination
         possible_collectives = []
         for collective in self.unscheduled_collectives:
             distance = abs(self.node_idx[compute_node] - self.node_idx[collective])
             if distance > self.max_node_distance:
                 break
 
-            # Skip collectives that are too far ahead in compute depth, but allow scheduling
+            # Skip collectives that are too far ahead in compute index, but allow scheduling
             # collectives which are off compute path (which typically release memory)
             # TODO: we could potentially be more strict about limiting the amount of
             # pre-fetched memory before memory peak, and adjust allowed collective mem.
             if not self.off_compute_path(collective):
                 if (
-                    self.compute_depth[collective] - self.current_compute_depth
+                    self.compute_index_domination[collective]
+                    - self.current_compute_index
                 ) > self.max_compute_pre_fetch:
                     continue
 
@@ -597,7 +603,7 @@ class OverlapScheduler:
 
         possible_collectives = sorted(
             possible_collectives,
-            key=lambda n: (self.compute_depth[n], self.node_idx[n]),
+            key=lambda n: (self.compute_index_domination[n], self.node_idx[n]),
         )
 
         log.debug(
@@ -640,8 +646,8 @@ class OverlapScheduler:
                 "Overlapping collective %s with compute %s: coll_domination=%d, current_depth=%d",
                 collective.name,
                 compute_node.name,
-                self.compute_depth[collective],
-                self.current_compute_depth,
+                self.compute_index_domination[collective],
+                self.current_compute_index,
             )
 
             # Schedule path to this collective
@@ -689,9 +695,10 @@ class OverlapScheduler:
 
         return unscheduled_ancestors
 
-    def _is_bucketable_in_flight_collective(self, node: fx.Node) -> bool:
+    def should_assume_bucketed(self, node: fx.Node) -> bool:
         """
-        Check if there's an in-flight collective that can be bucketed/overlapped with the given node.
+        Check if there's an in-flight collective that can be bucketed with the given node. If so, assume they will bucket.
+        This is a optimistic heuristic to account for latency reduction with bucketing. The two nodes may not get bucketed.
         """
         key = bucket_key(node)
         if key is None:
