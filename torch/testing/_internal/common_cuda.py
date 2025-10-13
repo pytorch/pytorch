@@ -82,6 +82,8 @@ def evaluate_platform_supports_cudnn_attention():
     return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
 
 def evaluate_platform_supports_green_context():
+    if IS_WINDOWS:
+        return False
     if not _get_torch_cuda_version() >= (12, 8):
         return False
     driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)

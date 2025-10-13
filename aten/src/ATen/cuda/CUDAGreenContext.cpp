@@ -1,12 +1,8 @@
 #include <ATen/cuda/CUDAGreenContext.h>
 
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-#include <c10/cuda/driver_api.h>
-#endif
-
 namespace at::cuda {
   GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
     int driver_version;
     C10_CUDA_CHECK(cudaDriverGetVersion(&driver_version));
     TORCH_CHECK(
@@ -72,7 +68,7 @@ namespace at::cuda {
   std::unique_ptr<GreenContext> GreenContext::create(
       uint32_t num_sms,
       std::optional<uint32_t> device_id) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
     if (!device_id.has_value()) {
       device_id = at::cuda::current_device();
     }
@@ -84,7 +80,7 @@ namespace at::cuda {
 
   // Implement move operations
   GreenContext::GreenContext(GreenContext&& other) noexcept{
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
     device_id_ = std::exchange(other.device_id_, -1);
     green_ctx_ = std::exchange(other.green_ctx_, nullptr);
     context_ = std::exchange(other.context_, nullptr);
@@ -95,7 +91,7 @@ namespace at::cuda {
   }
 
   GreenContext& GreenContext::operator=(GreenContext&& other) noexcept{
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
     if (this != &other) {
       // Clean up current resources
       if (green_ctx_) {
@@ -124,7 +120,7 @@ namespace at::cuda {
   }
 
   GreenContext::~GreenContext() noexcept{
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
     C10_CUDA_DRIVER_CHECK(
         c10::cuda::DriverAPI::get()->cuGreenCtxDestroy_(green_ctx_));
 #else
@@ -134,7 +130,7 @@ namespace at::cuda {
 
   // Get the underlying CUDA context
   CUcontext GreenContext::getContext() const {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
     return context_;
 #else
     TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
@@ -142,7 +138,7 @@ namespace at::cuda {
   }
 
   // Get the underlying green context
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   CUgreenCtx GreenContext::getGreenContext() const {
     return green_ctx_;
   }
@@ -150,7 +146,7 @@ namespace at::cuda {
 
   // Make this context current
   void GreenContext::setContext() {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
     auto current_stream = c10::cuda::getCurrentCUDAStream();
     parent_stream_ = current_stream.stream();
 
@@ -179,7 +175,7 @@ namespace at::cuda {
   }
 
   void GreenContext::popContext() {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
     // see above note about stream being hardcoded to the default stream
     at::cuda::CUDAEvent ev;
     ev.record(c10::cuda::getCurrentCUDAStream());

@@ -1,6 +1,6 @@
 #pragma once
 #include <ATen/cuda/CUDAEvent.h>
-#if defined(CUDA_VERSION) && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #include <cuda.h>
 #include <memory>
@@ -30,7 +30,7 @@ class TORCH_CUDA_CPP_API GreenContext {
   CUcontext getContext() const;
 
   // Get the underlying green context
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   CUgreenCtx getGreenContext() const;
 #endif
 
@@ -40,7 +40,7 @@ class TORCH_CUDA_CPP_API GreenContext {
   void popContext();
 
  private:
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12080 && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   int32_t device_id_ = -1;
   CUgreenCtx green_ctx_ = nullptr;
   CUcontext context_ = nullptr;
