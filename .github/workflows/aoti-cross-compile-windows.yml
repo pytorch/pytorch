@@ -29,7 +29,22 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  # Step 1: Cross-compile models on Linux
+  # Step 1:
+  # Build PyTorch on Windows. Cross-compile on Linux will require libtorch_cpu.dll and libtorch_cuda.dll.
+  windows-test-build:
+    name: windows-test-build
+    uses: ./.github/workflows/_win-build.yml
+    needs: get-label-type
+    with:
+      build-environment: win-vs2022-cuda12.8-py3.10
+      cuda-version: "12.8"
+      test-matrix: |
+        { include: [
+          { config: "aoti_cross_compile_run_on_windows", shard: 1, num_shards: 1, runner: "windows.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  # Build PyTorch on Linux. Using CUDA 12.8 so that we don't have to build another image.
   cross-compile-linux-build:
     name: inductor-build
     uses: ./.github/workflows/_linux-build.yml
@@ -45,32 +60,18 @@ jobs:
         ]}
     secrets: inherit
 
-  # Custom test job for cross-compilation
+  # Step 2: Cross-compile models on Linux
   cross-compile-linux-test:
     name: cross-compile-linux-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: cross-compile-linux-build
+    needs: [cross-compile-linux-build, windows-test-build]
     with:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm86
       docker-image: ${{ needs. cross-compile-linux-build.outputs.docker-image }}
       test-matrix: ${{ needs. cross-compile-linux-build.outputs.test-matrix }}
     secrets: inherit
 
-  # Step 2: Test compiled models on Windows
-  windows-test-build:
-    name: windows-test-build
-    uses: ./.github/workflows/_win-build.yml
-    needs: get-label-type
-    with:
-      build-environment: win-vs2022-cuda12.8-py3.10
-      cuda-version: "12.8"
-      test-matrix: |
-        { include: [
-          { config: "aoti_cross_compile_run_on_windows", shard: 1, num_shards: 1, runner: "windows.g5.4xlarge.nvidia.gpu" },
-        ]}
-    secrets: inherit
-
-  # Test compiled packages on Windows
+  # Step 3: Test compiled packages on Windows
   windows-test:
     name: windows-test
     runs-on: windows.g5.4xlarge.nvidia.gpu

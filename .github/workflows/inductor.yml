@@ -15,7 +15,8 @@ on:
       - main
       - release/*
     tags:
-      - ciflow/inductor/*
+      # Will revert this after this PR is finished
+      - ciflow/inductor-to-be-reverted/*
   workflow_dispatch:
 
 concurrency:

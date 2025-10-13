@@ -3,13 +3,23 @@
 
 import pathlib
 import tempfile
+import types
 import unittest
+from functools import wraps
+from typing import Optional
 
 from numpy.testing import assert_array_equal
 
 import torch
+import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
+from torch.distributed._local_tensor import (
+    LocalIntNode,
+    LocalTensorMode,
+    maybe_run_for_local_tensor,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -42,6 +52,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
+
+
+@maybe_run_for_local_tensor
+def map_tensor_for_rank(tensor, rank, func):
+    return func(tensor, rank)
 
 
 class DummyMLP(torch.nn.Module):
@@ -592,7 +607,12 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
         self.assertEqual(sharded_tensor.placements, placements)
         local_tensor = sharded_tensor.to_local()
-        self.assertEqual(local_tensor, full_tensor[range(self.rank, self.rank + 1), :])
+        self.assertEqual(
+            local_tensor,
+            map_tensor_for_rank(
+                full_tensor, self.rank, lambda ft, r: ft[range(r, r + 1), :]
+            ),
+        )
 
         # Shard by column
         placements = [Shard(1)]
@@ -600,7 +620,12 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
         self.assertEqual(sharded_tensor.placements, placements)
         local_tensor = sharded_tensor.to_local()
-        self.assertEqual(local_tensor, full_tensor[:, range(self.rank, self.rank + 1)])
+        self.assertEqual(
+            local_tensor,
+            map_tensor_for_rank(
+                full_tensor, self.rank, lambda ft, r: ft[:, range(r, r + 1)]
+            ),
+        )
 
         # assert full tensor is not changed
         self.assertEqual(full_tensor, torch.arange(ws * ws).reshape(ws, ws))
@@ -618,6 +643,105 @@ class DTensorTest(DTensorTestBase):
         self.assertEqual(sharded_tensor.placements, placements)
         local_tensor = sharded_tensor.to_local()
         self.assertEqual(local_tensor.item(), self.rank)
+
+
+class LocalDTensorTest(DTensorTest):
+    def get_local_tensor_mode(self):
+        return LocalTensorMode(frozenset(range(0, self.world_size)))
+
+    @property
+    def rank(self):
+        return torch.SymInt(LocalIntNode({r: r for r in range(self.world_size)}))
+
+    @rank.setter
+    def rank(self, rank):
+        pass
+
+    def join_or_run(self, fn):
+        @wraps(fn)
+        def wrapper(self):
+            fn()
+
+        return types.MethodType(wrapper, self)
+
+    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+        dist.init_process_group("fake", rank=0, world_size=self.world_size)
+        self._pg = c10d._get_default_group()
+
+    def destroy_pg(self, device_id: Optional[int] = None) -> None:
+        dist.destroy_process_group(self._pg)
+        self._pg = None
+
+    def _spawn_processes(self) -> None:
+        pass
+
+    def test_dtensor_constructor(self):
+        pass
+
+    def test_meta_dtensor(self):
+        pass
+
+    def test_modules_w_meta_dtensor(self):
+        pass
+
+    def test_dtensor_stride(self):
+        pass
+
+    def test_from_local(self):
+        pass
+
+    def test_from_local_uneven_sharding(self):
+        pass
+
+    def test_from_local_uneven_sharding_raise_error(self):
+        pass
+
+    def test_from_local_negative_dim(self):
+        pass
+
+    def test_to_local(self):
+        pass
+
+    def test_to_local_grad_hint(self):
+        pass
+
+    def test_full_tensor_sync(self):
+        pass
+
+    def test_full_tensor_grad_hint(self):
+        pass
+
+    def test_dtensor_new_empty_strided(self):
+        pass
+
+    def test_dtensor_async_output(self):
+        pass
+
+    def test_from_local_then_to_local(self):
+        pass
+
+    def test_dtensor_spec_read_only_after_set(self):
+        pass
+
+    def test_dtensor_spec_hash(self):
+        pass
+
+    def test_dtensor_properties(self):
+        pass
+
+    def test_dtensor_save_load(self):
+        pass
+
+    def test_dtensor_save_load_import(self):
+        pass
+
+    def test_shard_tensor_2d(self):
+        with self.get_local_tensor_mode():
+            super().test_shard_tensor_2d()
+
+    def test_shard_tensor(self):
+        with self.get_local_tensor_mode():
+            super().test_shard_tensor()
 
 
 class DTensorMeshTest(DTensorTestBase):
