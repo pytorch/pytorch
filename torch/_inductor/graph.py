@@ -2093,7 +2093,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
         # Create autotuning_wrapper_code for full graph autotuning if needed
-        if config.triton.autotune_full_graph and config.triton.autotune_at_compile_time:
+        if V.aot_compilation and config.triton.autotune_full_graph and config.triton.autotune_at_compile_time:
             if self.cpp_wrapper:
                 # If we're using cpp wrapper, create a separate Python wrapper for autotuning
                 python_wrapper_code_gen_cls = get_wrapper_codegen_for_device(
@@ -2125,6 +2125,13 @@ class GraphLowering(torch.fx.Interpreter):
                 original_wrapper_code, self.autotuning_wrapper_code
             )
             self.wrapper_code = dual_wrapper
+
+        self.wrapper_code = wrapper_code_gen_cls.create(
+            is_subgraph,
+            subgraph_name,
+            parent_wrapper_code,
+            partition_signatures,
+        )
 
         if self.const_module:
             if hasattr(self.wrapper_code, "original_wrapper_code"):
