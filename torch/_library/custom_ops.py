@@ -3,9 +3,9 @@ import collections
 import inspect
 import logging
 import weakref
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Literal, Optional, overload, Union
+from typing import Any, Optional, overload, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 @overload
 def custom_op(
     name: str,
-    fn: Literal[None] = None,
+    fn: None = None,
     /,
     *,
     mutates_args: Union[str, Iterable[str]],
@@ -348,13 +348,15 @@ class CustomOpDef:
                             fn = self._backend_fns[device_type]
                             return inspect.getmodule(fn)
 
-                        utils._c_check_aliasing_constraint(
-                            self._name,
-                            args,
-                            kwargs,
-                            result,
-                            get_module,
-                        )
+                        schema = self._opoverload._schema
+                        if not schema._is_view_op():
+                            utils._c_check_aliasing_constraint(
+                                self._name,
+                                args,
+                                kwargs,
+                                result,
+                                get_module,
+                            )
                         return result
 
                     if device_type is None:
@@ -587,7 +589,7 @@ class CustomOpDef:
 
         """
         schema = self._opoverload._schema
-        if not utils.is_functional_schema(schema):
+        if not utils.is_functional_schema(schema, allow_valid_view=True):
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
                 f"{self} with schema {schema}. Please create "
@@ -632,20 +634,27 @@ class CustomOpDef:
 
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
         lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
-
         schema = self._opoverload._schema
+
+        if schema._is_view_op() or schema.is_mutable:
+            lib.m.register_ad_inplace_or_view_fallback(self._name)  # type: ignore[union-attr]
+
         if schema.is_mutable:
             mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
 
+            original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+                f"{lib.ns}::{self._name}", "ADInplaceOrView"
+            )
+
             def adinplaceorview_impl(keyset, *args, **kwargs):
+                # Handle the mutated idx the user gave us explicitly
+
                 for idx in mutated_idxs:
                     increment_version(args[idx])
                 for key in mutated_keys:
                     increment_version(kwargs[key])
-                with _C._AutoDispatchBelowADInplaceOrView():
-                    return self._opoverload.redispatch(
-                        keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
-                    )
+                # Handle view + mutation that are in the schema
+                return original_kernel.call_boxed(keyset, *args, **kwargs)
 
             lib.impl(
                 self._name,

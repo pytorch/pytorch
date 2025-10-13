@@ -3,8 +3,8 @@ import copy as copymodule
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from collections.abc import Iterator, Sized
-from typing import Any, Callable, Literal, Optional, TypeVar
+from collections.abc import Callable, Iterator, Sized
+from typing import Any, Literal, Optional, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -59,6 +59,7 @@ class ConcaterIterDataPipe(IterDataPipe):
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):
+            # pyrefly: ignore  # bad-argument-type
             return sum(len(dp) for dp in self.datapipes)
         else:
             raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
@@ -179,6 +180,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         self._child_stop: list[bool] = [True for _ in range(num_instances)]
 
     def __len__(self):
+        # pyrefly: ignore  # bad-argument-type
         return len(self.main_datapipe)
 
     def get_next_element_by_instance(self, instance_id: int):
@@ -238,6 +240,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         return self.end_ptr is not None and all(self._child_stop)
 
     def get_length_by_instance(self, instance_id: int) -> int:
+        # pyrefly: ignore  # bad-argument-type
         return len(self.main_datapipe)
 
     def reset(self) -> None:
@@ -323,6 +326,7 @@ class _ChildDataPipe(IterDataPipe):
     def __init__(self, main_datapipe: IterDataPipe, instance_id: int):
         assert isinstance(main_datapipe, _ContainerTemplate)
 
+        # pyrefly: ignore  # bad-assignment
         self.main_datapipe: IterDataPipe = main_datapipe
         self.instance_id = instance_id
 
@@ -449,6 +453,7 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
         drop_none: bool,
         buffer_size: int,
     ):
+        # pyrefly: ignore  # invalid-type-var
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
@@ -460,7 +465,9 @@ class _DemultiplexerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 UserWarning,
             )
         self.current_buffer_usage = 0
+        # pyrefly: ignore  # invalid-type-var
         self.child_buffers: list[deque[_T_co]] = [deque() for _ in range(num_instances)]
+        # pyrefly: ignore  # invalid-type-var
         self.classifier_fn = classifier_fn
         self.drop_none = drop_none
         self.main_datapipe_exhausted = False
@@ -698,6 +705,7 @@ class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):
+            # pyrefly: ignore  # bad-argument-type
             return min(len(dp) for dp in self.datapipes)
         else:
             raise TypeError(f"{type(self).__name__} instance doesn't have valid length")
