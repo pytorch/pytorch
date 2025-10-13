@@ -368,7 +368,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 hint = (
                     "(This function exists as an attribute on the Python module, "
                     "but we failed to compile it to a TorchScript function. "
-                    f"\nThe error stack is reproduced here:\n{e}"
+                    f"\nThe error stack is reproduced here:\n{e})"
                 )
                 concrete_type_builder.add_failed_attribute(name, hint)
 
@@ -747,6 +747,7 @@ def get_overload_annotations(mod, jit_ignored_properties):
             if method_overloads is None:
                 continue
 
+            # pyrefly: ignore  # missing-attribute
             if item.__func__ in method_overloads:
                 raise RuntimeError(
                     _jit_internal.get_overload_no_implementation_error_message(
