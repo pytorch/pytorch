@@ -1494,17 +1494,6 @@ if(USE_DISTRIBUTED)
     endif()
     target_compile_definitions(torch_cpu PUBLIC USE_C10D_MPI)
   endif()
-  # Pass USE_RPC in order to reduce use of
-  # #if defined(USE_DISTRIBUTED) && !defined(_WIN32)
-  # need to be removed when RPC is supported
-  if(NOT WIN32)
-    target_compile_definitions(torch_cpu PUBLIC USE_RPC)
-  endif()
-  # Pass USE_TENSORPIPE to torch_cpu as some parts of rpc/utils.cpp
-  # can only be compiled with USE_TENSORPIPE is set.
-  if(USE_TENSORPIPE)
-    target_compile_definitions(torch_cpu PUBLIC USE_TENSORPIPE)
-  endif()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE)

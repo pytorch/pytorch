@@ -1687,11 +1687,6 @@ def main() -> None:
             if file.is_file()
         ]
         torch_package_data += aks2_files
-    if get_cmake_cache_vars()["USE_TENSORPIPE"]:
-        torch_package_data += [
-            "include/tensorpipe/*.h",
-            "include/tensorpipe/**/*.h",
-        ]
     if get_cmake_cache_vars()["USE_KINETO"]:
         torch_package_data += [
             "include/kineto/*.h",
