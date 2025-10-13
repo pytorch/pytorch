@@ -364,13 +364,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: .
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: .
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -378,18 +378,6 @@ jobs:
         with:
           name: libtorch-rocm6_4-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -491,13 +479,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          path: pytorch
+          path: .
           show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
-        working-directory: pytorch
+        working-directory: .
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
       - uses: actions/download-artifact@v4.1.7
@@ -505,18 +493,6 @@ jobs:
         with:
           name: libtorch-rocm7_0-shared-with-deps-release
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-          show-progress: false
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
