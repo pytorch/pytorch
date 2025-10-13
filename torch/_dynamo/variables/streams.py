@@ -26,6 +26,8 @@ from torch._library.custom_ops import custom_op
 
 Tensor = torch.Tensor
 
+from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
 
 @custom_op("streams::fork", mutates_args=())
 def fork_stream(
@@ -33,8 +35,8 @@ def fork_stream(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-) -> None:
-    pass
+) -> int:
+    return from_index
 
 
 @fork_stream.register_fake
@@ -43,8 +45,23 @@ def _(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-) -> None:
-    pass
+) -> int:
+    return from_index
+
+
+def fork_backward(ctx, grad_output):
+    from_index, from_device, to_index, to_device = ctx.args
+    join_stream(to_index, to_device, from_index, from_device)
+    return from_index
+
+
+def fork_setup_context(ctx, from_index, from_device, to_index, to_device):
+    ctx.args = (from_index, from_device, to_index, to_device)
+
+
+_register_effectful_op(fork_stream._opoverload, _EffectType.ORDERED)
+
+fork_stream.register_autograd(fork_backward, setup_context=fork_setup_context)
 
 
 @custom_op("streams::join", mutates_args=())
@@ -53,8 +70,8 @@ def join_stream(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-) -> None:
-    pass
+) -> int:
+    return from_index
 
 
 @join_stream.register_fake
@@ -63,8 +80,23 @@ def _(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-) -> None:
-    pass
+) -> int:
+    return from_index
+
+
+def join_backward(ctx, grad_output):
+    from_index, from_device, to_index, to_device = ctx.args
+    fork_stream(from_index, from_device, to_index, to_device)
+    return from_index
+
+
+def join_setup_context(ctx, from_index, from_device, to_index, to_device):
+    ctx.args = (from_index, from_device, to_index, to_device)
+
+
+_register_effectful_op(join_stream._opoverload, _EffectType.ORDERED)
+
+join_stream.register_autograd(join_backward, setup_context=join_setup_context)
 
 
 class SymbolicStreamState:
