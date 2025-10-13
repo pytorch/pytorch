@@ -1,7 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-from unittest import expectedFailure
-
 import torch
 import torch.nn as nn
 from torch.distributed.checkpoint.state_dict import get_state_dict
@@ -65,7 +63,6 @@ class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
     def world_size(self) -> int:
         return min(8, torch.accelerator.device_count())
 
-    @expectedFailure  # please see https://github.com/pytorch/pytorch/issues/165137
     @with_comms
     @skip_if_lt_x_gpu(8)
     @with_temp_dir
