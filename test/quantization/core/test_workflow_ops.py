@@ -101,12 +101,11 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
     - https://arxiv.org/pdf/1902.08153.pdf
     - https://arxiv.org/pdf/1903.08066.pdf
     """
-    if dtype == torch.bfloat16:
+    if dtype is torch.bfloat16:
         dY = dY.to(dtype=torch.float32)
         X = X.to(dtype=torch.float32)
-
-    per_channel_scale = per_channel_scale.to(dtype=torch.float32)
-    per_channel_zero_point = per_channel_zero_point.to(dtype=torch.float32)
+        per_channel_scale = per_channel_scale.to(dtype=torch.float32)
+        per_channel_zero_point = per_channel_zero_point.to(dtype=torch.float32)
 
     per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int32)
     grad_X = _fake_quantize_per_channel_affine_grad_reference(
@@ -160,7 +159,7 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
         grad_scale[i] = grad_scale_i
         grad_zero_point[i] = grad_zp_i
 
-    if dtype == torch.bfloat16:
+    if dtype is torch.bfloat16:
         grad_X = grad_X.to(torch.bfloat16)
         grad_scale = grad_scale.to(torch.bfloat16)
         grad_zero_point = grad_zero_point.to(torch.bfloat16)
@@ -918,6 +917,9 @@ class TestFakeQuantizeOps(TestCase):
         """
         for n_bits in (4, 8):
             quant_min, quant_max = 0, 2 ** n_bits - 1
+
+            scale_base = scale_base.to(device)
+            zero_point_base = zero_point_base.to(device=device)
 
             X_curr = X_base.clone()
             X_curr.requires_grad_()

@@ -5,7 +5,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <thrust/tuple.h>
 #include <cmath>
-#include <cstdio>
 
 /* Fake quantize a tensor
 Args:
