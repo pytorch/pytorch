@@ -1038,7 +1038,8 @@ def define_buck_targets(
         name = "generated-version-header",
         header_namespace = "torch",
         exported_headers = {
-            "version.h": ":generate-version-header[version.h]",
+            "headeronly/version.h": ":generate-version-header[version.h]",
+            "version.h": "torch/csrc/api/include/torch/version.h"
         },
         labels = labels,
     )
@@ -1050,16 +1051,24 @@ def define_buck_targets(
             "torch/headeronly/version.h.in",
             "version.txt",
         ],
-        cmd = "$(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
+        cmd = "mkdir -p $OUT/torch/headeronly && $(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
             "--template-path",
             "torch/headeronly/version.h.in",
             "--version-path",
             "version.txt",
             "--output-path",
-            "$OUT/version.h",
+            "$OUT/torch/headeronly/version.h",
+        ]),
+        cmd_exe = "md $OUT\\torch\\headeronly 2>nul & $(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
+            "--template-path",
+            "torch/headeronly/version.h.in",
+            "--version-path",
+            "version.txt",
+            "--output-path",
+            "$OUT\\torch\\headeronly\\version.h",
         ]),
         outs = {
-            "version.h": ["version.h"],
+            "version.h": ["torch/headeronly/version.h"],
         },
         default_outs = ["."],
     )
