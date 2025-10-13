@@ -1,7 +1,7 @@
 #pragma once
 #include <c10/metal/common.h>
 
-template <unsigned N = c10::metal::max_ndim, typename idx_type_t = int64_t>
+template <typename idx_type_t = int64_t, unsigned N = c10::metal::max_ndim>
 struct CatLargeSharedParams {
   int32_t ndim;
   int32_t cat_dim;
@@ -9,7 +9,7 @@ struct CatLargeSharedParams {
   ::c10::metal::array<idx_type_t, N> output_sizes;
 };
 
-template <unsigned N = c10::metal::max_ndim, typename idx_type_t = int64_t>
+template <typename idx_type_t = int64_t, unsigned N = c10::metal::max_ndim>
 struct CatLargeInputParams {
   idx_type_t cat_dim_offset;
   idx_type_t input_element_offset;
