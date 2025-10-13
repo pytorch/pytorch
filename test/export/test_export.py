@@ -728,6 +728,8 @@ class TestExport(TestCase):
                 self.k_proj = torch.nn.Linear(64, 64)
                 self.v_proj = torch.nn.Linear(64, 64)
                 self.use_inductor = use_inductor
+                backend = "inductor" if self.use_inductor else "eager"
+                self._flex_attention = torch.compile(flex_attention, backend=backend)
 
             def forward(self, x):
                 batch_size, seq_len, _ = x.shape
@@ -763,11 +765,7 @@ class TestExport(TestCase):
                 k = self.k_proj(processed).view(batch_size, 1, seq_len, self.dim)
                 v = self.v_proj(processed).view(batch_size, 1, seq_len, self.dim)
 
-                # Use flex_attention with the problematic block_mask
-                backend = "inductor" if self.use_inductor else "eager"
-                out = torch.compile(flex_attention, backend=backend)(
-                    q, k, v, block_mask=block_mask
-                )
+                out = self._flex_attention(q, k, v, block_mask=block_mask)
 
                 return out
 

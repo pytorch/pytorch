@@ -692,14 +692,29 @@ class ConvertFrameAssert:
             info = f"{code.co_name} {code.co_filename}:{code.co_firstlineno}"
             dynamo_tls.traced_frame_infos.append(info)
 
-        with compile_context(CompileContext(compile_id)):
+        backend = self._torchdynamo_orig_backend
+        from torch._higher_order_ops.utils import setup_compilation_env
+
+        export_ctx = (
+            setup_compilation_env()
+            if torch.compiler.is_exporting()
+            else contextlib.nullcontext()
+        )
+
+        with (
+            compile_context(CompileContext(compile_id)),
+            export_ctx as backend_for_export,
+        ):
+            if backend_for_export is not None:
+                backend = backend_for_export
+
             result = _compile(
                 frame.f_code,
                 frame.f_globals,
                 frame.f_locals,
                 frame.f_builtins,
                 frame.closure,
-                self._torchdynamo_orig_backend,
+                backend,
                 self._one_graph,
                 self._export,
                 self._export_constraints,

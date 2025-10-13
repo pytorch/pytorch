@@ -234,6 +234,7 @@ def setup_compilation_env():
     from torch._dynamo.backends.debugging import (
         make_eager_backend_with_torch_function_modes,
     )
+    from torch._dynamo.backends.registry import lookup_backend
     from torch.fx.experimental.proxy_tensor import (
         _temp_remove_pre_dispatch_torch_function_mode,
     )
@@ -250,7 +251,7 @@ def setup_compilation_env():
         if modes:
             yield make_eager_backend_with_torch_function_modes(modes)
         else:
-            yield "eager"
+            yield lookup_backend("eager")
 
 
 @contextmanager
