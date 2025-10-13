@@ -1057,7 +1057,9 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             )
             return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
 
+        # pyrefly: ignore  # missing-attribute
         mat1_meta = local_meta(mat1_strategy.strategies[0], input_specs[0].placements)
+        # pyrefly: ignore  # missing-attribute
         mat2_meta = local_meta(mat2_strategy.strategies[0], input_specs[1].placements)
 
         def check_valid_strides(meta: TensorMeta) -> bool:
@@ -1067,12 +1069,12 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             if meta.stride[end_dim - 1] == 1 and meta.stride[end_dim] >= max(
                 1, meta.shape[end_dim - 1]
             ):
-                if not meta.stride[end_dim] % alignment == 0:
+                if meta.stride[end_dim] % alignment != 0:
                     return False
             elif meta.stride[end_dim] == 1 and meta.stride[end_dim - 1] >= max(
                 1, meta.shape[end_dim]
             ):
-                if not meta.stride[end_dim - 1] % alignment == 0:
+                if meta.stride[end_dim - 1] % alignment != 0:
                     return False
             else:
                 return False

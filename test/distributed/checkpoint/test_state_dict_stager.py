@@ -3,6 +3,7 @@
 import dataclasses
 import os
 import tempfile
+import unittest
 from datetime import timedelta
 
 import torch
@@ -18,12 +19,19 @@ from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager
 from torch.distributed.checkpoint.staging import _ReplicationStager
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.testing._internal.common_distributed import (
+    HAS_ACCELERATOR,
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 def create_cpu_state_dict(state_dict):
@@ -33,16 +41,16 @@ def create_cpu_state_dict(state_dict):
     return cpu_state_dict
 
 
-def compare_state_dicts(cuda_state_dict, cpu_state_dict, rtol=1e-5, atol=1e-8):
+def compare_state_dicts(gpu_state_dict, cpu_state_dict, rtol=1e-5, atol=1e-8):
     """
-    Compare if two state dictionaries (one on CUDA, one on CPU) are otherwise the same.
+    Compare if two state dictionaries (one on GPU, one on CPU) are otherwise the same.
 
     This function checks if the tensors in both state dictionaries have the same values,
     shapes, dtypes, etc., ignoring the device difference. It also checks if tensors that
     share storage in one state dict also share storage in the other.
 
     Args:
-        cuda_state_dict: The state dictionary with tensors on CUDA
+        gpu_state_dict: The state dictionary with tensors on GPU
         cpu_state_dict: The state dictionary with tensors on CPU
         rtol: Relative tolerance for comparing tensor values
         atol: Absolute tolerance for comparing tensor values
@@ -52,65 +60,65 @@ def compare_state_dicts(cuda_state_dict, cpu_state_dict, rtol=1e-5, atol=1e-8):
         str: Error message if the state dictionaries are not equivalent, empty string otherwise
     """
     # Track storage data pointers to check storage sharing
-    cuda_storage_ptrs = {}
+    gpu_storage_ptrs = {}
     cpu_storage_ptrs = {}
 
-    def compare_objects(cuda_obj, cpu_obj, path=""):
+    def compare_objects(gpu_obj, cpu_obj, path=""):
         # If objects are tensors, compare them
-        if isinstance(cuda_obj, torch.Tensor) and isinstance(cpu_obj, torch.Tensor):
+        if isinstance(gpu_obj, torch.Tensor) and isinstance(cpu_obj, torch.Tensor):
             # Check if devices are as expected
-            if cuda_obj.device.type != "cuda":
+            if gpu_obj.device.type != device_type:
                 return (
                     False,
-                    f"Expected CUDA tensor, got {cuda_obj.device.type} tensor at {path}",
+                    f"Expected accelerator tensor, got {gpu_obj.device.type} tensor at {path}",
                 )
             if cpu_obj.device.type != "cpu":
                 return (
                     False,
                     f"Expected CPU tensor, got {cpu_obj.device.type} tensor at {path}",
                 )
-            if cuda_obj.storage_offset() != cpu_obj.storage_offset():
+            if gpu_obj.storage_offset() != cpu_obj.storage_offset():
                 return (
                     False,
-                    f"Storage offset mismatch at {path}: {cuda_obj.storage_offset()} vs {cpu_obj.storage_offset()}",
+                    f"Storage offset mismatch at {path}: {gpu_obj.storage_offset()} vs {cpu_obj.storage_offset()}",
                 )
 
-            if not torch.equal(cuda_obj.cpu(), cpu_obj):
+            if not torch.equal(gpu_obj.cpu(), cpu_obj):
                 return (
                     False,
                     f"Tensors are not same at {path}",
                 )
 
             # Track storage sharing
-            cuda_storage_ptr = cuda_obj.storage().data_ptr()
+            gpu_storage_ptr = gpu_obj.storage().data_ptr()
             cpu_storage_ptr = cpu_obj.storage().data_ptr()
 
-            if cuda_storage_ptr in cuda_storage_ptrs:
-                # This CUDA tensor shares storage with another tensor
+            if gpu_storage_ptr in gpu_storage_ptrs:
+                # This GPU tensor shares storage with another tensor
                 # Check if the corresponding CPU tensors also share storage
-                if cpu_storage_ptr != cuda_storage_ptrs[cuda_storage_ptr]:
+                if cpu_storage_ptr != gpu_storage_ptrs[gpu_storage_ptr]:
                     return (
                         False,
-                        f"Storage sharing mismatch: CUDA tensors share storage but CPU tensors don't at {path}",
+                        f"Storage sharing mismatch: GPU tensors share storage but CPU tensors don't at {path}",
                     )
             else:
                 # First time seeing this storage
-                cuda_storage_ptrs[cuda_storage_ptr] = cpu_storage_ptr
-                cpu_storage_ptrs[cpu_storage_ptr] = cuda_storage_ptr
+                gpu_storage_ptrs[gpu_storage_ptr] = cpu_storage_ptr
+                cpu_storage_ptrs[cpu_storage_ptr] = gpu_storage_ptr
 
             return True, ""
 
         # If objects are dictionaries, compare them recursively
-        elif isinstance(cuda_obj, dict) and isinstance(cpu_obj, dict):
-            if cuda_obj.keys() != cpu_obj.keys():
+        elif isinstance(gpu_obj, dict) and isinstance(cpu_obj, dict):
+            if gpu_obj.keys() != cpu_obj.keys():
                 return (
                     False,
-                    f"Dictionary keys mismatch at {path}: {cuda_obj.keys()} vs {cpu_obj.keys()}",
+                    f"Dictionary keys mismatch at {path}: {gpu_obj.keys()} vs {cpu_obj.keys()}",
                 )
 
-            for key in cuda_obj:
+            for key in gpu_obj:
                 result, error = compare_objects(
-                    cuda_obj[key], cpu_obj[key], f"{path}.{key}" if path else key
+                    gpu_obj[key], cpu_obj[key], f"{path}.{key}" if path else key
                 )
                 if not result:
                     return False, error
@@ -118,37 +126,37 @@ def compare_state_dicts(cuda_state_dict, cpu_state_dict, rtol=1e-5, atol=1e-8):
             return True, ""
 
         # If objects are lists, tuples, or sets, compare them recursively
-        elif isinstance(cuda_obj, (list, tuple, set)) and isinstance(
+        elif isinstance(gpu_obj, (list, tuple, set)) and isinstance(
             cpu_obj, (list, tuple, set)
         ):
-            if len(cuda_obj) != len(cpu_obj):
+            if len(gpu_obj) != len(cpu_obj):
                 return (
                     False,
-                    f"Collection length mismatch at {path}: {len(cuda_obj)} vs {len(cpu_obj)}",
+                    f"Collection length mismatch at {path}: {len(gpu_obj)} vs {len(cpu_obj)}",
                 )
-            if type(cuda_obj) != type(cpu_obj):
+            if type(gpu_obj) != type(cpu_obj):
                 return (
                     False,
-                    f"Collection type mismatch at {path}: {type(cuda_obj)} vs {type(cpu_obj)}",
+                    f"Collection type mismatch at {path}: {type(gpu_obj)} vs {type(cpu_obj)}",
                 )
 
-            for i, (cuda_item, cpu_item) in enumerate(zip(cuda_obj, cpu_obj)):
-                result, error = compare_objects(cuda_item, cpu_item, f"{path}[{i}]")
+            for i, (gpu_item, cpu_item) in enumerate(zip(gpu_obj, cpu_obj)):
+                result, error = compare_objects(gpu_item, cpu_item, f"{path}[{i}]")
                 if not result:
                     return False, error
 
             return True, ""
 
         # If objects are custom classes, compare their attributes
-        elif hasattr(cuda_obj, "__dict__") and hasattr(cpu_obj, "__dict__"):
-            if type(cuda_obj) != type(cpu_obj):
+        elif hasattr(gpu_obj, "__dict__") and hasattr(cpu_obj, "__dict__"):
+            if type(gpu_obj) != type(cpu_obj):
                 return (
                     False,
-                    f"Object type mismatch at {path}: {type(cuda_obj)} vs {type(cpu_obj)}",
+                    f"Object type mismatch at {path}: {type(gpu_obj)} vs {type(cpu_obj)}",
                 )
 
             result, error = compare_objects(
-                cuda_obj.__dict__, cpu_obj.__dict__, f"{path}.__dict__"
+                gpu_obj.__dict__, cpu_obj.__dict__, f"{path}.__dict__"
             )
             if not result:
                 return False, error
@@ -157,18 +165,18 @@ def compare_state_dicts(cuda_state_dict, cpu_state_dict, rtol=1e-5, atol=1e-8):
 
         # For other types, use direct equality comparison
         else:
-            if type(cuda_obj) != type(cpu_obj):
+            if type(gpu_obj) != type(cpu_obj):
                 return (
                     False,
-                    f"Type mismatch at {path}: {type(cuda_obj)} vs {type(cpu_obj)}",
+                    f"Type mismatch at {path}: {type(gpu_obj)} vs {type(cpu_obj)}",
                 )
-            if cuda_obj != cpu_obj:
-                return False, f"Value mismatch at {path}: {cuda_obj} vs {cpu_obj}"
+            if gpu_obj != cpu_obj:
+                return False, f"Value mismatch at {path}: {gpu_obj} vs {cpu_obj}"
 
             return True, ""
 
     # Start the recursive comparison
-    result, error = compare_objects(cuda_state_dict, cpu_state_dict)
+    result, error = compare_objects(gpu_state_dict, cpu_state_dict)
     return result, error
 
 
@@ -198,7 +206,7 @@ class FrozenDataClass:
 
 
 class TestStateDictStager(TestCase):
-    @requires_cuda
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_views(self):
         test_configs = [
             (False, False),  # pin_memory=False, share_memory=False,
@@ -208,9 +216,9 @@ class TestStateDictStager(TestCase):
         ]
         for pin_memory, share_memory in test_configs:
             with self.subTest(pin_memory=pin_memory, share_memory=share_memory):
-                tensor1 = torch.randn(4, 4).cuda()
+                tensor1 = torch.randn(4, 4).to(device_type)
                 tensor2 = tensor1.view(16)
-                tensor3 = torch.randn(4, 4).cuda()
+                tensor3 = torch.randn(4, 4).to(device_type)
                 state_dict = {
                     "tensor1": tensor1,
                     "tensor2": tensor2,
@@ -253,7 +261,7 @@ class TestStateDictStager(TestCase):
                 assert num_bytes == expected_bytes, (
                     f"Expected {expected_bytes} bytes, got {num_bytes}"
                 )
-                # Verify that the CPU state dict is equivalent to the original CUDA state dict
+                # Verify that the CPU state dict is equivalent to the original GPU state dict
                 result, error = compare_state_dicts(state_dict, cpu_state_dict)
                 assert result, f"State dicts are not equivalent: {error}"
 
@@ -273,7 +281,7 @@ class TestStateDictStager(TestCase):
                     == recursive["type"].tensor1.storage().data_ptr()
                 )
 
-    @requires_cuda
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_caching(self):
         """
         Test that the StateDictStager correctly caches and reuses storages.
@@ -287,9 +295,9 @@ class TestStateDictStager(TestCase):
         for pin_memory, share_memory in test_configs:
             with self.subTest(pin_memory=pin_memory, share_memory=share_memory):
                 # Create test tensors and state dict
-                tensor1 = torch.randn(4, 4).cuda()
+                tensor1 = torch.randn(4, 4).to(device_type)
                 tensor2 = tensor1.view(16)
-                tensor3 = torch.randn(4, 4).cuda()
+                tensor3 = torch.randn(4, 4).to(device_type)
                 state_dict = {
                     "tensor1": tensor1,
                     "tensor2": tensor2,
@@ -365,14 +373,14 @@ class TestStateDictStager(TestCase):
                     "Updated values should be reflected in the cached state dict"
                 )
 
-    @requires_cuda
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_tensor_attrs(self):
         """
         Test that tensor attributes are preserved during stage with StateDictStager.
         """
-        tensor1 = torch.randn(4, 4).cuda()
+        tensor1 = torch.randn(4, 4).to(device_type)
         tensor2 = tensor1.view(16)
-        tensor3 = torch.randn(4, 4).cuda()
+        tensor3 = torch.randn(4, 4).to(device_type)
 
         # Add custom attributes to tensors
         tensor1.a = 42
@@ -411,18 +419,22 @@ class TestStateDictStager(TestCase):
             "Tensor attribute 'c' has incorrect value"
         )
 
-    @requires_cuda
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_different_dtypes(self):
         """
         Test that StateDictStager works correctly with tensors of different data types.
         """
         # Create tensors with different dtypes
         tensors = {
-            "float32": torch.randn(4, 4, dtype=torch.float32).cuda(),
-            "float64": torch.randn(4, 4, dtype=torch.float64).cuda(),
-            "int32": torch.randint(-100, 100, (4, 4), dtype=torch.int32).cuda(),
-            "int64": torch.randint(-100, 100, (4, 4), dtype=torch.int64).cuda(),
-            "bool": torch.randint(0, 2, (4, 4), dtype=torch.bool).cuda(),
+            "float32": torch.randn(4, 4, dtype=torch.float32).to(device_type),
+            "float64": torch.randn(4, 4, dtype=torch.float64).to(device_type),
+            "int32": torch.randint(-100, 100, (4, 4), dtype=torch.int32).to(
+                device_type
+            ),
+            "int64": torch.randint(-100, 100, (4, 4), dtype=torch.int64).to(
+                device_type
+            ),
+            "bool": torch.randint(0, 2, (4, 4), dtype=torch.bool).to(device_type),
         }
 
         # Create a state dict with these tensors
@@ -447,7 +459,7 @@ class TestStateDictStager(TestCase):
                 f"Tensor {dtype_name} has incorrect values",
             )
 
-    @requires_cuda
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_empty_tensors(self):
         """
         Test that StateDictStager works correctly with empty tensors.
@@ -462,15 +474,17 @@ class TestStateDictStager(TestCase):
             with self.subTest(pin_memory=pin_memory, share_memory=share_memory):
                 # Create empty tensors with different shapes
                 tensors = {
-                    "empty_0d": torch.tensor([], dtype=torch.float32).cuda(),
-                    "empty_1d": torch.tensor([], dtype=torch.float32).reshape(0).cuda(),
+                    "empty_0d": torch.tensor([], dtype=torch.float32).to(device_type),
+                    "empty_1d": torch.tensor([], dtype=torch.float32)
+                    .reshape(0)
+                    .to(device_type),
                     "empty_2d": torch.tensor([], dtype=torch.float32)
                     .reshape(0, 0)
-                    .cuda(),
+                    .to(device_type),
                     "empty_3d": torch.tensor([], dtype=torch.float32)
                     .reshape(0, 0, 0)
-                    .cuda(),
-                    "zero_dim": torch.tensor(0.0).cuda(),  # scalar tensor
+                    .to(device_type),
+                    "zero_dim": torch.tensor(0.0).to(device_type),  # scalar tensor
                 }
 
                 # Create a state dict with these tensors
@@ -500,13 +514,13 @@ class TestStateDictStager(TestCase):
                         f"Tensor {tensor_name} has incorrect dtype",
                     )
 
-    @requires_cuda
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_complex_storage_sharing(self):
         """
         Test that StateDictStager correctly handles complex storage sharing scenarios.
         """
         # Create a base tensor
-        base_tensor = torch.randn(10, 10).cuda()
+        base_tensor = torch.randn(10, 10).to(device_type)
 
         # Create various views and slices that share storage
         view1 = base_tensor.view(100)
@@ -582,13 +596,13 @@ class TestStateDictStager(TestCase):
             "slice3 should reflect changes to base",
         )
 
-    @requires_cuda
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_dataclasses(self):
         # Create tensors
-        tensor1 = torch.randn(4, 4).cuda()
-        tensor2 = torch.randn(8, 8).cuda()
-        tensor3 = torch.randn(2, 6).cuda()
-        tensor4 = torch.randn(3, 5).cuda()
+        tensor1 = torch.randn(4, 4).to(device_type)
+        tensor2 = torch.randn(8, 8).to(device_type)
+        tensor3 = torch.randn(2, 6).to(device_type)
+        tensor4 = torch.randn(3, 5).to(device_type)
 
         # Create dataclass instances
         nested = NestedTensorStruct(tensor=tensor3)
@@ -695,14 +709,14 @@ class TestStateDictStager(TestCase):
             "CPU tensor should have the same values as the original tensor",
         )
 
-    @requires_cuda
+    @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_tensor_pinned_and_shared(self):
         """
         Test that verifies tensors are actually pinned and shared using tensor.is_pinned() and tensor.is_shared() methods.
         """
         # Create test tensors
-        tensor1 = torch.randn(4, 4).cuda()
-        tensor2 = torch.randn(8, 8).cuda()
+        tensor1 = torch.randn(4, 4).to(device_type)
+        tensor2 = torch.randn(8, 8).to(device_type)
 
         # Create a state dict with these tensors
         state_dict = {
@@ -797,15 +811,17 @@ class TestStateDictStager(TestCase):
 
 class TestDTensorStateDictStager(DTensorTestBase):
     @with_comms
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(2)
     def test_dtensor(self):
         """
         Test that StateDictStager works correctly with DTensors.
         """
         # Create a DTensor
-        device_mesh = dist.DeviceMesh("cuda", list(range(dist.get_world_size())))
-        tensor = torch.randn(3, 3, device="cuda")
+        device_mesh = dist.DeviceMesh(
+            self.device_type, list(range(dist.get_world_size()))
+        )
+        tensor = torch.randn(3, 3, device=self.device_type)
         dtensor = DTensor.from_local(tensor, device_mesh, [Shard(0)])
 
         dtensor = dtensor + 1
