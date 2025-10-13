@@ -61,7 +61,7 @@ def register_graph_created_object(
         from .exc import unimplemented_v2
 
         unimplemented_v2(
-            gb_type="Failed to make weakref to User Object",
+            gb_type="Failed to make weakref to graph-created external object",
             context=f"user_object: {example_value}",
             explanation="Object does not allow us to make a weakref to it",
             hints=[],
