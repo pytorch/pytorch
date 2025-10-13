@@ -96,11 +96,18 @@ def _quantize_per_tensor(x, scale, zero_point, quant_min, quant_max):
 
 # Reference method for the per channel gradients of the learnable fake quantize operator
 def _fake_quantize_learnable_per_channel_affine_grad_reference(
-        dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max, device):
+        dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max, device, dtype):
     r"""This method references the following literatures for back propagation on scale and zero point.
     - https://arxiv.org/pdf/1902.08153.pdf
     - https://arxiv.org/pdf/1903.08066.pdf
     """
+    if dtype == torch.bfloat16:
+        dY = dY.to(dtype=torch.float32)
+        X = X.to(dtype=torch.float32)
+
+    per_channel_scale = per_channel_scale.to(dtype=torch.float32)
+    per_channel_zero_point = per_channel_zero_point.to(dtype=torch.float32)
+
     per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int32)
     grad_X = _fake_quantize_per_channel_affine_grad_reference(
         dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max).to(device)
@@ -152,6 +159,12 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
 
         grad_scale[i] = grad_scale_i
         grad_zero_point[i] = grad_zp_i
+
+    if dtype == torch.bfloat16:
+        grad_X = grad_X.to(torch.bfloat16)
+        grad_scale = grad_scale.to(torch.bfloat16)
+        grad_zero_point = grad_zero_point.to(torch.bfloat16)
+
     return grad_X, grad_scale, grad_zero_point
 
 def _get_tensor_min_max(
@@ -900,15 +913,11 @@ class TestFakeQuantizeOps(TestCase):
     def test_backward_per_channel_cachemask_cuda(self):
         self._test_backward_per_channel_cachemask_impl('cuda')
 
-    def _test_learnable_backward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
+    def _test_learnable_backward_per_channel(self, X_base, device, scale_base, zero_point_base, axis, dtype):
         r"""Tests the backward path of the learnable FakeQuantizePerTensorAffine op.
         """
         for n_bits in (4, 8):
             quant_min, quant_max = 0, 2 ** n_bits - 1
-
-            X_base = X_base.to(dtype=torch.float32)
-            scale_base = scale_base.to(device, dtype=torch.float32)
-            zero_point_base = zero_point_base.to(device=device, dtype=torch.float32)
 
             X_curr = X_base.clone()
             X_curr.requires_grad_()
@@ -923,8 +932,7 @@ class TestFakeQuantizeOps(TestCase):
 
                 dout = torch.rand(X_curr.shape, dtype=torch.float).to(device)
                 dX, dScale, dZeroPoint = _fake_quantize_learnable_per_channel_affine_grad_reference(
-                    dout, X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, device)
-
+                    dout, X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, device, dtype)
                 Y_prime.backward(dout)
 
                 dX_expected = dX.to(device).detach()
@@ -933,7 +941,7 @@ class TestFakeQuantizeOps(TestCase):
                 dScale_actual = scale_curr.to(device).grad.detach()
                 dZeroPoint_expected = dZeroPoint.to(device).detach()
                 dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
-                tolerance = 1e-4
+                tolerance = 1e-2 if dtype == torch.bfloat16 else 1e-4
 
                 self.assertTrue(
                     torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
@@ -976,7 +984,7 @@ class TestFakeQuantizeOps(TestCase):
             scale_base = torch.randn(scale_shape, dtype=dtype, device='cuda')
             zero_point_base = torch.randint(0, 10, zero_point_shape, device='cuda').to(dtype=dtype)
             self._test_learnable_backward_per_channel(
-                X_base, 'cuda', scale_base, zero_point_base, axis
+                X_base, 'cuda', scale_base, zero_point_base, axis, dtype
             )
 
     def test_numerical_consistency_per_tensor(self):

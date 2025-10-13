@@ -4,6 +4,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/FakeQuantAffine.h>
+#include <iostream>
 
 #include <c10/util/irange.h>
 
