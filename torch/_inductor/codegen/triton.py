@@ -345,6 +345,10 @@ class BlockDescriptorOptions:
     # Can we safely lift the constructor
     # to the top of the kernel?
     can_lift: bool = False
+    # If the BlockParameters have been sorted by descending stride order,
+    # transpose load / store blocks at runtime using the information in
+    # desc_stride_sorter.
+    desc_stride_sorter: Optional[BlockParameters.DescStrideSorter] = None
 
     @property
     def shape(self) -> list[sympy.Expr]:
@@ -385,14 +389,18 @@ class BlockDescriptorOptions:
         params.shape = lookup_size(params.shape)
         params.strides = lookup_size(params.strides)
 
-        # Strip out dimensions of stride 0.
-        # These will be restored with tl.broadcast_to.
-        broadcasting_dims = [
-            sizevars.statically_known_equals(stride, 0) for stride in params.strides
-        ]
+        def remove_dims(it, removable_dims: list[bool]):
+            """Removes `removable_dims` from a given sequence"""
+            return [
+                item
+                for item, is_removable in zip(it, removable_dims)
+                if not is_removable
+            ]
 
         # Strip out dimensions of size 1.
-        # These will be restored by tl.reshape.
+        # Size 1 dimensions are redundant since the triton kernel shape
+        # will be e.g. [YBLOCK, XBLOCK], so tl.reshape would just remove these
+        # dimensions anyway
         singleton_dims = [
             sizevars.statically_known_equals(dim, 1) for dim in params.block_shape
         ]
@@ -400,56 +408,51 @@ class BlockDescriptorOptions:
             # Handle a pure singletons, e.g. [1, 1]
             singleton_dims[-1] = False
 
+        # Drop singleton dimensions from the block descriptor.
+        params = BlockParameters(
+            **{
+                key: remove_dims(val, singleton_dims) for key, val in dataclasses.asdict(params).items()
+            },
+        )
+
+        if issubclass(cls, TensorDescriptorOptions):
+            # Tensor descriptors require a dimension with stride 1
+            # so add a dummy dimension if needed.
+            if not any(sizevars.statically_known_equals(stride, sympy.S.One) for stride in params.strides):
+                params += BlockParameters(
+                    shape=[sympy.S.One],
+                    strides=[sympy.S.One],
+                    block_shape=[sympy.S.One],
+                    offsets=[sympy.S.Zero],
+                )
+
+        desc_stride_sorter: Optional[TritonSymbols.DescStrideSorter] = None
+        if transpose_contiguous:
+            params, desc_stride_sorter = params.maybe_sort_by_desc_stride_order()
+
+        # Strip out dimensions of stride 0.
+        # These will be restored with tl.broadcast_to.
+        broadcasting_dims = [
+            sizevars.statically_known_equals(stride, 0) for stride in params.strides
+        ]
+
         # Record the post-broadcast shape before broadcasting dims are removed.
         # The pre-broadcast shape is identical to this, except broadcasting dims are
         # replaced with 1.
-        broadcast_shape = [
-            dim
-            for dim, is_singleton in zip(params.block_shape, singleton_dims)
-            if not is_singleton
-        ]
+        broadcast_shape = params.block_shape
 
-        # Combine all removable dims.
-        removable_dims = [any(dims) for dims in zip(singleton_dims, broadcasting_dims)]
-
-        # Remove singleton_dims from broadcasting_dims so that
-        # broadcast_shape and broadcasting_dims have the same length
-        broadcasting_dims = [
-            dim
-            for dim, is_singleton in zip(broadcasting_dims, singleton_dims)
-            if not is_singleton
-        ]
-
-        def remove_dims(it):
-            """Removes any broadcasting or singleton dims from a given sequence"""
-            return [
-                item
-                for item, is_removable in zip(it, removable_dims)
-                if not is_removable
-            ]
-
-        # Drop removable dimensions from the input.
+        # Drop broadcasting dims from the block descriptor.
         params = BlockParameters(
             **{
-                key: remove_dims(val) for key, val in dataclasses.asdict(params).items()
+                key: remove_dims(val, broadcasting_dims) for key, val in dataclasses.asdict(params).items()
             },
         )
-        # TODO: Generalize to ND tensors.
-        transpose = transpose_contiguous and params.strides[-1] != 1
-        if transpose:
-            params = params.transpose()
 
         # Compute the final shape, adjusting for special kernel types.
         final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
         if V.kernel.no_x_dim:
             assert range_trees[0].prefix == "x"
             final_shape.pop(0)
-
-        # Check for when BlockParams have been transposed.
-        order = list(reversed(range(len(params.shape))))
-        if transpose:
-            final_shape.reverse()
-            order.reverse()
 
         reduction_ndim = V.kernel.num_reduction_dims
         if (
@@ -463,12 +466,13 @@ class BlockDescriptorOptions:
         result = cls(
             params=params,
             constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
-            order=order,
+            order=list(reversed(range(len(params.shape)))),
             mask_vars=mask_vars,
             final_shape=final_shape,
             broadcast_shape=broadcast_shape,
             broadcasting_dims=broadcasting_dims,
             can_lift=can_lift,
+            desc_stride_sorter=desc_stride_sorter
         )
         result.compute_boundary_check(get_max_block, range_trees)
         return result
@@ -567,20 +571,46 @@ class BlockDescriptorOptions:
         initial_shape: Sequence[sympy.Expr],
         final_shape: Sequence[sympy.Expr],
         allow_implicit: bool,
+        for_store: bool
     ) -> str:
         """
         Generate a broadcast and a reshape for the block descriptor.
         This restores stride-0 dimensions which were removed from the block descriptor.
+
+        Transposes are also applied to the input if self.desc_stride_sorter is not None.
+        if for_store is True:
+            - First Broadcast the value. Since self.broadcast_shape is stored in
+            descending stride order, it must must be reverted to the original order
+            since the input value is in the original non-descending order.
+            - After, transpose the value broadcasted value so that dimensions are in
+            descending stride order.
+            - Finally reshape to the block shape
+        else (for load):
+            - First broadcast the value to self.broadcast_shape (which is in descending order)
+            - Then transpose the value so that dimensions no longer have descending strides
+            - Finally rehspae the block to the final kernel tile shape
         """
+        broadcast_shape = self.broadcast_shape
+        broadcasting_dims = self.broadcasting_dims
+
+        # If the block parameters have been sorted by descending strides,
+        # permute the broadcasting parameters so that they are compatible
+        # with the value being stored. This is because the dimensions
+        # of the value being stored are not sorted in descending stride order,
+        # but the broadcasting parameters are based on the dims in sorted order
+        if for_store and self.desc_stride_sorter is not None:
+            broadcast_shape = self.desc_stride_sorter.revert(self.broadcast_shape)
+            broadcasting_dims = self.desc_stride_sorter.revert(self.broadcasting_dims)
 
         # Reshape to add singletons.
         pre_broadcast_shape = [
             sympy.S.One if is_broadcasting else dim
             for dim, is_broadcasting in zip(
-                self.broadcast_shape, self.broadcasting_dims
+                broadcast_shape, broadcasting_dims
             )
         ]
         value = triton_reshape(value, initial_shape, pre_broadcast_shape)
+
 
         # Broadcast singletons.
         # For loads, we can often implicitly broadcast singleton dimensions.
@@ -599,8 +629,18 @@ class BlockDescriptorOptions:
         if any(self.broadcasting_dims) and not supports_implicit_broadcast:
             value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
 
+        old_shape = self.broadcast_shape
+        if self.desc_stride_sorter is not None:
+            # if for_store the transform is
+            #   (non-descending strides) broadcasted kernel tile shape -> (descending strides) block descriptor shape
+            # o/w if loading the transform is
+            #   (descending strides) broadcasted block shape -> (non-descending) broadcasted kernel tile shape
+            permute_dims = self.desc_stride_sorter.sort_idx if for_store else self.desc_stride_sorter.revert_sort_idx
+            value = f"tl.trans({value}, {permute_dims})"
+            old_shape = self.broadcast_shape if for_store else self.desc_stride_sorter.revert(self.broadcast_shape)
+
         # Reshape to the final shape.
-        value = triton_reshape(value, self.broadcast_shape, final_shape)
+        value = triton_reshape(value, old_shape, final_shape)
 
         return value
 
@@ -1984,6 +2024,43 @@ class BlockParameters:
     strides: list[sympy.Expr] = dataclasses.field(default_factory=list)
     offsets: list[sympy.Expr] = dataclasses.field(default_factory=list)
 
+    @dataclasses.dataclass
+    class DescStrideSorter:
+        original_strides: list[int]
+        sort_idx: list[int] = dataclasses.field(default_factory=list)
+        revert_sort_idx: list[int] = dataclasses.field(default_factory=list)
+
+        @classmethod
+        def create(cls, original_strides: list[Union[int, sympy.Expr]]) -> Optional[DescStrideSorter]:
+            """
+            create a `DescStrideSorter` which can be used to sort block parameters.
+            if the strides are not all known constants or if the strides are already
+            sorted in descending order, return None
+            """
+            if not all(isinstance(s, (int, sympy.Integer)) for s in original_strides):
+                return None
+
+            sorted_dims_by_strides_map = {
+                k: i for i, k in enumerate(sorted(range(len(original_strides)), key=lambda x: original_strides[x], reverse=True))
+            }
+            sort_idx = list(sorted_dims_by_strides_map.keys())
+            # Check if strides are already in descending order
+            if sort_idx == list(range(len(original_strides))):
+                return None
+            revert_sort_idx = [sorted_dims_by_strides_map[i] for i in range(len(sorted_dims_by_strides_map))]
+            return cls(
+                original_strides=original_strides,
+                sort_idx=sort_idx,
+                revert_sort_idx=revert_sort_idx,
+            )
+
+        def sort(self, attr: list[Union[int, sympy.Expr]]) -> list[Union[int, sympy.Expr]]:
+            return [attr[i] for i in self.sort_idx]
+
+        def revert(self, attr: list[Union[int, sympy.Expr]]) -> list[Union[int, sympy.Expr]]:
+            return [attr[i] for i in self.revert_sort_idx]
+
+
     def __add__(self, other: BlockParameters) -> BlockParameters:
         """
         Concatenates block parameters.
@@ -1992,13 +2069,24 @@ class BlockParameters:
         a, b = tuple(dataclasses.asdict(x) for x in (self, other))
         return cls(**{key: a[key] + b[key] for key in a})
 
-    def transpose(self) -> BlockParameters:
-        return BlockParameters(
-            self.shape[::-1],
-            self.block_shape[::-1],
-            self.strides[::-1],
-            self.offsets[::-1],
+    def maybe_sort_by_desc_stride_order(self) -> tuple[BlockParameters, Optional[DescStrideSorter]]:
+        """
+        If the strides are known constants, returns block parameters sorted by strides in descending
+        order as well as `DescStrideSorter` which contains information on how the sort can be reverted.
+        If the strides are not known constants, returns unmodified BlockParameters and None.
+
+        For example if block_shape @ strides is [ZBLOCK, XBLOCK, YBLOCK] @ [8, 1, 16]
+        The indices to sort the strides in descending order will be [2, 0, 1].
+        The indices to revert back to the original order will be [1, 2, 0].
+        """
+        desc_stride_sorter = self.DescStrideSorter.create(self.strides)
+        if desc_stride_sorter is None:
+            return self, None
+
+        params = BlockParameters(
+            **{key: desc_stride_sorter.sort(val) for key, val in dataclasses.asdict(self).items()}
         )
+        return params, desc_stride_sorter
 
 
 class CooperativeReductionWorkspaceCache:
@@ -2742,7 +2830,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     can_lift = tma_compatibility_checker.can_lift()
                     # Only try transpose if we know the output shape
                     # in case we need to transpose the data.
-                    transpose_contiguous = copy_shape is not None
+                    # transpose_contiguous = copy_shape is not None
+                    transpose_contiguous = True
 
                 options = options_class.create(
                     params=block_params,
@@ -3001,30 +3090,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return block_descriptor, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        def stringify_shape(shape):
-            return tuple(
-                symt.name if isinstance(symt, sympy.Symbol) else str(symt)
-                for symt in shape
-            )
-
-        if value.shape:
-            value_forward_shape = stringify_shape(value.shape)
-            value_reverse_shape = stringify_shape(value.shape[::-1])
-        else:
-            value_forward_shape = None
-            value_reverse_shape = None
-        final_shape = stringify_shape(indexing.final_shape)
-        # TODO: Generalize to N Dimensions
-        if (
-            value_forward_shape != final_shape
-            and value_reverse_shape == final_shape
-            and len(final_shape) == 2
-        ):
-            # TMA stores may require transposing the data to ensure we are contiguous along
-            # the final dimension. This applies to Block-pointers generally, but should only practically
-            # be reached with TMA.
-            value = f"tl.trans({value})"
-
+        breakpoint()
         # Stores require an explicit broadcast. We do this in two phases:
         #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
         #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
@@ -3040,7 +3106,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 indexing.broadcasting_dims[idx] = False
 
         value = indexing.codegen_broadcast_and_reshape(
-            value, indexing.final_shape, indexing.block_shape, False
+            value, indexing.final_shape, indexing.block_shape, allow_implicit=False, for_store=True
         )
 
         # workaround https://github.com/triton-lang/triton/issues/2814
@@ -3232,7 +3298,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 else:
                     line = f"{block_descriptor}.load({V.kernel.index_to_str(indexing.offsets)})"
                 line = indexing.codegen_broadcast_and_reshape(
-                    line, indexing.block_shape, indexing.final_shape, True
+                    line, indexing.block_shape, indexing.final_shape, allow_implicit=True, for_store=False
                 )
                 shape = indexing.final_shape
             elif is_sympy_integer_like(original_index):
