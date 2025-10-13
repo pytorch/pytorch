@@ -1770,6 +1770,33 @@ class TestUnaryUfuncs(TestCase):
             ),
         )
 
+        # Test device-specific stride behavior
+        # https://github.com/pytorch/pytorch/issues/152634
+        L = 5
+        eye = torch.eye(L, device=device)
+        nonzero_static = eye.nonzero_static(size=L)
+
+        # Verify shapes
+        self.assertEqual(nonzero_static.shape, (L, 2))
+
+        # Verify device-specific stride behavior
+        if device == 'cpu':
+            # CPU uses C-contiguous layout: strides (ndim, 1)
+            self.assertEqual(nonzero_static.stride(), (2, 1))
+        else:
+            # CUDA uses F-contiguous layout: strides (1, size)
+            self.assertEqual(nonzero_static.stride(), (1, L))
+
+        # Verify values are correct regardless of strides
+        expected = torch.tensor([[0, 0], [1, 1], [2, 2], [3, 3], [4, 4]], device=device)
+        self.assertEqual(nonzero_static, expected)
+
+        # Verify slicing works correctly
+        i_static = nonzero_static[:, 0]
+        j_static = nonzero_static[:, 1]
+        self.assertEqual(i_static, torch.arange(L, device=device))
+        self.assertEqual(j_static, torch.arange(L, device=device))
+
     @onlyCUDA
     def test_nonzero_static_large(self, device):
         # large enough to have multiple iters per SM even on H100
