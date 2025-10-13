@@ -6,7 +6,14 @@ import torch.distributed as dist
 from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor, Partial, Replicate, Shard
+from torch.distributed.tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    DTensor, 
+    Partial, 
+    Replicate, 
+    Shard,
+)
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -364,7 +371,7 @@ class TestDTensorDebugMode(TestCase):
 
         inputs = torch.rand(20, 10, device=self.device_type)
         inputs = distribute_tensor(inputs, mesh["tp"], placements=[Replicate()])
-        
+
         with torch._dynamo.config.patch(install_free_tensors=True):
             gm = _dynamo_graph_capture_for_export(tp_model)(inputs)
 
@@ -431,7 +438,7 @@ class TestDTensorDebugMode(TestCase):
       redistribute_input(t: f32[20, 10], trace: P->R)
         _c10d_functional::all_reduce(t: f32[20, 10], sum, 5)
   [node] hook_result_3: call_function[torch._dynamo.variables.tensor.prim_to_local](outputs_3)
-  [node] output: output""",
+  [node] output: output""",  # NOQA: B950
         )
 
 

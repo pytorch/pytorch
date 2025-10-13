@@ -88,6 +88,7 @@ def _op_to_str(op) -> str:
 
 class _DebugCall:
     """Base class for tracking operator calls in DebugMode"""
+
     def __init__(self, call_depth: int):
         self.call_depth = call_depth
 
@@ -97,13 +98,14 @@ class _DebugCall:
 
 class _OpCall(_DebugCall):
     """Normal operator call"""
+
     def __init__(self, op, args: tuple, kwargs: dict, call_depth: int):
         super().__init__(call_depth)
         self.op = op
         self.args = args
         self.kwargs = kwargs
 
-    def render(self, attributes: list[str] = []) -> str:
+    def render(self, attributes: list[str]) -> str:
         args_str = ", ".join(_arg_to_str(arg, attributes) for arg in self.args)
 
         if self.kwargs:
@@ -118,14 +120,17 @@ class _OpCall(_DebugCall):
 
 class _RedistributeCall(_DebugCall):
     """Redistribute call from DTensor dispatch"""
-    def __init__(self, arg, src_placement, dst_placement, transform_info_str, call_depth):
+
+    def __init__(
+        self, arg, src_placement, dst_placement, transform_info_str, call_depth
+    ):
         super().__init__(call_depth)
         self.arg = arg
         self.src_placement = src_placement
         self.dst_placement = dst_placement
         self.transform_info_str = transform_info_str
 
-    def render(self, attributes: list[str] = []) -> str:
+    def render(self, attributes: list[str]) -> str:
         arg_str = f"{_arg_to_str(self.arg, attributes)}"
         if self.transform_info_str is not None:  # prioritize over src/dst placements
             placement_str = f"trace: {self.transform_info_str}"
@@ -138,11 +143,12 @@ class _RedistributeCall(_DebugCall):
 
 class _FXNodeCall(_DebugCall):
     """FX graph node call"""
+
     def __init__(self, node, call_depth: int):
         super().__init__(call_depth)
         self.node = node
 
-    def render(self, attributes: list[str] = []) -> str:
+    def render(self, attributes: list[str]) -> str:
         # Format the node operation
         node = self.node
 
@@ -151,15 +157,20 @@ class _FXNodeCall(_DebugCall):
         else:
             args_str = ", ".join(str(n) for n in node.args)
             if node.kwargs:
-                kwargs_str = ", " + ", ".join(f"{k}={n}" for k, n in node.kwargs.items())
+                kwargs_str = ", " + ", ".join(
+                    f"{k}={n}" for k, n in node.kwargs.items()
+                )
             else:
                 kwargs_str = ""
             target_str = _op_to_str(node.target)
-            return f"[node] {node.name}: {node.op}[{target_str}]({args_str}{kwargs_str})"
+            return (
+                f"[node] {node.name}: {node.op}[{target_str}]({args_str}{kwargs_str})"
+            )
 
 
 class _DebugInterpreter(torch.fx.Interpreter):
     """Custom FX Interpreter that logs node execution to DebugMode"""
+
     def __init__(self, module, mode: "DebugMode"):
         super().__init__(module)
         self.parent = mode
@@ -232,7 +243,9 @@ class DebugMode(TorchDispatchMode):
         ):
             if self.record_faketensor:
                 if func != torch.ops.prim.device.default:
-                    self.operators.append(_OpCall(func, args, kwargs, self.call_depth + 1))
+                    self.operators.append(
+                        _OpCall(func, args, kwargs, self.call_depth + 1)
+                    )
         elif len(types) == 0:
             if self.record_realtensor:
                 self.operators.append(_OpCall(func, args, kwargs, self.call_depth + 1))
@@ -289,9 +302,7 @@ class DebugMode(TorchDispatchMode):
         with torch._C.DisableTorchFunction():
             result = ""
             result += "\n".join(
-                "  "
-                + "  " * op.call_depth
-                + op.render(self.record_tensor_attributes)
+                "  " + "  " * op.call_depth + op.render(self.record_tensor_attributes)
                 for op in self.operators
             )
         return result
