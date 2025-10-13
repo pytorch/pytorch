@@ -15,7 +15,10 @@ The tests cover:
 
 import torch
 from torch._inductor import config
-from torch._inductor.kernel.custom_op import register_custom_op_autotuning
+from torch._inductor.kernel.custom_op import (
+    register_custom_op_autotuning,
+    register_parametric_op_autotuning,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -168,8 +171,35 @@ class TestCustomOpAutoTune(TestCase):
         def rmsnorm_decomposition2(
             x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
         ) -> torch.Tensor:
-            """Single expression approach: combine operations in one line."""
-            return x * torch.rsqrt((x * x).mean(dim=-1, keepdim=True) + eps) * weight
+            """vLLM-style RMSNorm implementation - variance computation first approach."""
+            hidden_size = x.shape[-1]
+            x_var = x  # In vLLM, this could be sliced for variance_size_override
+
+            variance = x_var.pow(2).mean(dim=-1, keepdim=True)
+
+            x = x * torch.rsqrt(variance + eps)
+
+            if weight is not None:
+                x = x * weight
+            return x
+
+        def rmsnorm_decomposition3(
+            x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8
+        ) -> torch.Tensor:
+            """vLLM-style RMSNorm with extended variance computation pattern."""
+            # Get hidden size (following vLLM pattern)
+            hidden_size = x.shape[-1]
+
+            x_squared = x.pow(2)
+            variance = x_squared.mean(dim=-1, keepdim=True)
+
+            rstd = torch.rsqrt(variance + eps)
+            normalized = x * rstd
+
+            # Apply weight scaling
+            if weight is not None:
+                normalized = normalized * weight
+            return normalized
 
         @torch.library.custom_op(test_op_name, mutates_args=())
         def test_rmsnorm_op(
@@ -189,6 +219,7 @@ class TestCustomOpAutoTune(TestCase):
         decompositions = [
             rmsnorm_decomposition1,
             rmsnorm_decomposition2,
+            rmsnorm_decomposition3,
         ]
 
         # Example of user-friendly input generation functions
@@ -426,6 +457,174 @@ class TestCustomOpAutoTune(TestCase):
         # Test autotuning - autotune will benchmark all decompositions and choose the fastest
         expected = a @ b
         self._run_autotune_test(op_object, (a, b), expected, "DecomposeK")
+
+    @skipIfXpu
+    def test_parametric_op_autotune_basic(self):
+        """Test parametric autotuning API with equivalent implementation variants."""
+        op_name = f"test_lib::parametric_basic_{id(self)}"
+
+        def elementwise_multiply_variants(
+            x: torch.Tensor, weight: torch.Tensor, method: int = 0
+        ) -> torch.Tensor:
+            """Elementwise multiplication with different implementation strategies."""
+            if method == 0:
+                return x * weight
+            elif method == 1:
+                return torch.mul(x, weight)
+            elif method == 2:
+                return x * weight.expand_as(x)
+            else:
+                raise ValueError(f"Invalid method: {method}")
+
+        @torch.library.custom_op(op_name, mutates_args=())
+        def parametric_basic_op(
+            x: torch.Tensor, weight: torch.Tensor, method: int = 0
+        ) -> torch.Tensor:
+            return elementwise_multiply_variants(x, weight, method)
+
+        @parametric_basic_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor, method: int = 0):
+            return torch.empty_like(x)
+
+        lib_name, op_suffix = op_name.split("::")
+        op_object = getattr(getattr(torch.ops, lib_name), op_suffix)
+
+        register_parametric_op_autotuning(
+            custom_op=op_object.default,
+            implementation_fn=elementwise_multiply_variants,
+            parameter_name="method",
+            parameter_values=[0, 1, 2],
+            name="parametric_basic_autotuned",
+            input_gen_fns={
+                0: lambda t: torch.randn_like(t, device=self.device) * 0.1,
+                1: lambda t: torch.ones_like(t, device=self.device),
+            },
+        )
+
+        # Validate numerical equivalence across methods - using larger sizes for meaningful perf differences
+        test_input = torch.randn(32, 2048, 4096, device=self.device, dtype=self.dtype)
+        test_weight = torch.ones(4096, device=self.device, dtype=self.dtype)
+
+        baseline_result = elementwise_multiply_variants(
+            test_input, test_weight, method=0
+        )
+        for method in [1, 2]:
+            result = elementwise_multiply_variants(test_input, test_weight, method)
+            torch.testing.assert_close(
+                result,
+                baseline_result,
+                rtol=1e-6,
+                atol=1e-6,
+                msg=f"Method {method} not equivalent to baseline",
+            )
+
+        self._run_autotune_test(
+            op_object, (test_input, test_weight), baseline_result, "ParametricBasic"
+        )
+
+    @skipIfXpu
+    def test_parametric_op_autotune_normalization(self):
+        """Test parametric autotuning with different normalization algorithms."""
+        op_name = f"test_lib::parametric_norm_{id(self)}"
+        eps = 1e-5
+
+        def normalization_variants(
+            x: torch.Tensor, weight: torch.Tensor, method: int = 0
+        ) -> torch.Tensor:
+            """Weighted normalization with different mathematical approaches."""
+            if method == 0:
+                # Layer normalization
+                mean = x.mean(dim=-1, keepdim=True)
+                var = x.var(dim=-1, keepdim=True, unbiased=False)
+                return (x - mean) / torch.sqrt(var + eps) * weight
+
+            elif method == 1:
+                # RMS normalization
+                rms = torch.sqrt(torch.mean(x * x, dim=-1, keepdim=True) + eps)
+                return x / rms * weight
+
+            elif method == 2:
+                # Reshaped layer normalization for different memory patterns
+                batch_size, seq_len, hidden_dim = x.shape
+                x_flat = x.reshape(batch_size * seq_len, hidden_dim)
+                weight_flat = weight.expand(batch_size * seq_len, -1)
+
+                mean = x_flat.mean(dim=-1, keepdim=True)
+                var = x_flat.var(dim=-1, keepdim=True, unbiased=False)
+                normalized = (x_flat - mean) / torch.sqrt(var + eps) * weight_flat
+
+                return normalized.reshape(batch_size, seq_len, hidden_dim)
+
+            elif method == 3:
+                # Einstein summation approach
+                mean = x.mean(dim=-1, keepdim=True)
+                centered = x - mean
+                var = torch.mean(centered * centered, dim=-1, keepdim=True)
+                normalized = centered / torch.sqrt(var + eps)
+                return torch.einsum("bsh,h->bsh", normalized, weight)
+
+            elif method == 4:
+                # Chunked processing
+                batch_size, seq_len, hidden_dim = x.shape
+                chunk_size = hidden_dim // 4
+
+                mean = x.mean(dim=-1, keepdim=True)
+                var = x.var(dim=-1, keepdim=True, unbiased=False)
+                normalized = (x - mean) / torch.sqrt(var + eps)
+
+                chunks = []
+                for start in range(0, hidden_dim, chunk_size):
+                    end = min(start + chunk_size, hidden_dim)
+                    chunk = normalized[:, :, start:end] * weight[start:end]
+                    chunks.append(chunk)
+
+                return torch.cat(chunks, dim=-1)
+            else:
+                raise ValueError(f"Invalid method: {method}")
+
+        @torch.library.custom_op(op_name, mutates_args=())
+        def parametric_norm_op(
+            x: torch.Tensor, weight: torch.Tensor, method: int = 0
+        ) -> torch.Tensor:
+            return normalization_variants(x, weight, method)
+
+        @parametric_norm_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor, method: int = 0):
+            return torch.empty_like(x)
+
+        lib_name, op_suffix = op_name.split("::")
+        op_object = getattr(getattr(torch.ops, lib_name), op_suffix)
+
+        register_parametric_op_autotuning(
+            custom_op=op_object.default,
+            implementation_fn=normalization_variants,
+            parameter_name="method",
+            parameter_values=[0, 1, 2, 3, 4],
+            name="parametric_norm_autotuned",
+            input_gen_fns={
+                0: lambda t: torch.randn_like(t, device=self.device) * 0.1,
+                1: lambda t: torch.ones_like(t, device=self.device),
+            },
+        )
+
+        # Validate all methods produce finite results with correct shapes - large workload for perf differences
+        test_input = torch.randn(16, 4096, 8192, device=self.device, dtype=self.dtype)
+        test_weight = torch.ones(8192, device=self.device, dtype=self.dtype)
+
+        for method in range(5):
+            result = normalization_variants(test_input, test_weight, method)
+            self.assertTrue(
+                torch.isfinite(result).all(),
+                f"Method {method} produced non-finite values",
+            )
+            self.assertEqual(
+                result.shape, test_input.shape, f"Method {method} changed tensor shape"
+            )
+
+        baseline_result = normalization_variants(test_input, test_weight, method=0)
+        self._run_autotune_test(
+            op_object, (test_input, test_weight), baseline_result, "ParametricNorm"
+        )
 
 
 if __name__ == "__main__":
