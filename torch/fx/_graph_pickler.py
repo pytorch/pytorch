@@ -4,7 +4,6 @@ import io
 import pickle
 from abc import abstractmethod
 from typing import Any, Callable, NewType, Optional, TypeVar, Union
-from typing_extensions import override, Self
 
 import torch
 import torch.utils._pytree as pytree
@@ -18,6 +17,7 @@ from torch._subclasses.meta_utils import (
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._mode_utils import no_dispatch
+from typing_extensions import override, Self
 
 
 _SymNodeT = TypeVar("_SymNodeT", torch.SymInt, torch.SymFloat)
@@ -253,9 +253,9 @@ class _TensorPickleData:
         for k in MetaTensorDesc._UNSERIALIZABLE:
             if k in ("fake_mode", "view_func"):
                 continue
-            assert getattr(self.metadata, k) is None, (
-                f"not None: {k}: {getattr(self.metadata, k)}"
-            )
+            assert (
+                getattr(self.metadata, k) is None
+            ), f"not None: {k}: {getattr(self.metadata, k)}"
 
     def unpickle(self, unpickle_state: _UnpickleState) -> FakeTensor:
         # TODO: make common w/ _output_from_cache_entry() in fake_tensor.py?
@@ -340,9 +340,7 @@ class _TorchNumpyPickleData:
 
 class _GraphModulePickleData:
     @classmethod
-    def reduce_helper(
-        cls, pickler: GraphPickler, obj: torch.fx.GraphModule
-    ) -> tuple[
+    def reduce_helper(cls, pickler: GraphPickler, obj: torch.fx.GraphModule) -> tuple[
         Callable[[Self, _UnpickleState], torch.fx.GraphModule],
         tuple[Self, _UnpickleStateToken],
     ]:
@@ -432,6 +430,9 @@ class _OpPickleData:
         elif name.startswith("operator."):
             _, detail = name.split(".", 1)
             return _OpOperatorPickleData(detail)
+        elif name.startswith("einops."):
+            _, detail = name.split(".", 1)
+            return _OpEinopsPickleData(detail)
         else:
             # TODO: raise a BypassFxGraphCache so we will just bypass this one...
             raise NotImplementedError(f"TARGET: {type(op)} {op} {name}")
@@ -531,6 +532,16 @@ class _OpOperatorPickleData(_OpPickleData):
         import operator
 
         return self._getattr_by_name(operator, self.name)
+
+
+class _OpEinopsPickleData(_OpPickleData):
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> object:
+        import einops
+
+        return self._getattr_by_name(einops, self.name)
 
 
 class _GraphPickleData:
