@@ -914,6 +914,7 @@ class TorchLogsFormatter(logging.Formatter):
             and (trace_id := torch._guards.CompileContext.current_trace_id())
             is not None
         ):
+            # pyrefly: ignore  # unbound-name
             record.traceid = f" [{trace_id}]"
 
         glog_level_to_abbr = {
@@ -1207,7 +1208,7 @@ def safe_grad_filter(message, category, filename, lineno, file=None, line=None) 
 def user_warning_filter(
     message, category, filename, lineno, file=None, line=None
 ) -> bool:
-    return not category == UserWarning
+    return category != UserWarning
 
 
 @contextlib.contextmanager
