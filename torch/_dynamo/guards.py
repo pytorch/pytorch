@@ -3604,7 +3604,8 @@ class CheckFunctionManager:
                     CompileContext.current_compile_id(),
                 )
                 raise AssertionError(
-                    f"Guard failed on the same frame it was created. This is a bug - please create an issue. Guard fail reason: {reasons}"
+                    "Guard failed on the same frame it was created. This is a bug - please create an issue."
+                    f"Guard fail reason: {reasons}"
                 )
 
             if guard_manager_testing_hook_fn is not None:

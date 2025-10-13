@@ -7398,9 +7398,10 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 torch.compile(model)(x)
 
         msg = str(e.exception)
-        assert (
-            "Guard failed on the same frame it was created. This is a bug - please create an issue. Guard fail reason: "
-            in msg
+        self.assertIn(
+            "Guard failed on the same frame it was created. This is a bug - please create an issue."
+            "Guard fail reason: ",
+            msg,
         )
 
 
