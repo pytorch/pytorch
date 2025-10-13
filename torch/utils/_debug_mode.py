@@ -40,6 +40,12 @@ def _stringify_attributes(tensor, attributes) -> str:
     return f"{{{', '.join([f'{k}={v}' for k, v in pairs.items()])}}}"
 
 
+def _stringify_dtensor_spec(spec) -> str:
+    from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+    return DTensorSpec.format_shard_order_str(spec.placements, spec.shard_order)
+
+
 def _tensor_debug_string(tensor, attributes) -> str:
     """Convert tensor to debug string representation."""
 
@@ -48,7 +54,7 @@ def _tensor_debug_string(tensor, attributes) -> str:
 
         if isinstance(tensor, torch.distributed.tensor.DTensor):
             # omitted device mesh
-            return f"dt: {tensor_debug_str}{_stringify_placement(tensor.placements)}"
+            return f"dt: {tensor_debug_str}| {_stringify_dtensor_spec(tensor._spec)}"
         elif isinstance(tensor, FakeTensor):
             return f"ft: {tensor_debug_str}"
         else:
@@ -64,7 +70,7 @@ def _arg_to_str(arg, attributes) -> str:
         if isinstance(x, torch.Tensor):
             return _tensor_debug_string(x, attributes)
         elif isinstance(x, DTensorSpec):
-            return _stringify_placement(x.placements)
+            return _stringify_dtensor_spec(x)
         return x
 
     arg = tree_map(to_str, arg)
@@ -73,9 +79,13 @@ def _arg_to_str(arg, attributes) -> str:
 
 def _op_to_str(op, attributes, *args, **kwargs) -> str:
     if op == REDISTRIBUTE_FUNC:
-        assert len(args) == 3
-        _args = [_arg_to_str(arg, attributes) for arg in args]
-        args_str = f"{_args[0]}, {_args[1]} -> {_args[2]}"
+        if len(args) == 2:
+            args_str = f"{_arg_to_str(args[0], attributes)}, trace: {args[1]}"
+        elif len(args) == 3:
+            _args = [_arg_to_str(arg, attributes) for arg in args]
+            args_str = f"{_args[0]}, {_args[1]} -> {_args[2]}"
+        else:
+            raise RuntimeError(f"Unsupported args for {REDISTRIBUTE_FUNC}: {args}")
     else:
         args_str = ", ".join(_arg_to_str(arg, attributes) for arg in args)
 
@@ -175,12 +185,23 @@ class DebugMode(TorchDispatchMode):
             torch._C._pop_torch_function_stack()
 
     @contextlib.contextmanager
-    def record_redistribute_calls(self, arg_idx, src_placement, dst_placement):
+    def record_redistribute_calls(
+        self,
+        arg_idx,
+        src_placement,
+        dst_placement,
+        transform_info_str: Optional[str] = None,
+    ):
         try:
+            arg_list = (
+                [arg_idx, transform_info_str]
+                if transform_info_str
+                else [arg_idx, src_placement, dst_placement]
+            )
             self.operators.append(
                 (
                     REDISTRIBUTE_FUNC,
-                    [arg_idx, src_placement, dst_placement],
+                    arg_list,
                     {},
                     self.call_depth + 1,
                 )
