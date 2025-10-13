@@ -123,6 +123,9 @@ class CUDACombinedScheduling(BaseScheduling):
                 template_node, epilogue_nodes, prologue_nodes
             )
 
+    def codegen_mix_order_reduction(self, node):
+        return self._triton_scheduling.codegen_mix_order_reduction(node)
+
     def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]) -> None:
         return self._triton_scheduling.codegen_node(node)
 

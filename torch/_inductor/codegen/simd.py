@@ -1189,6 +1189,10 @@ class SIMDScheduling(BaseScheduling):
         if node1.is_reduction() and node2.is_reduction():
             reduction_can_fuse = numel1 == numel2 and rnumel1 == rnumel2
             if not reduction_can_fuse:
+                from torch._inductor.scheduler import MixOrderReduction
+                reduction_can_fuse = MixOrderReduction.can_fuse(node1, node2)
+
+            if not reduction_can_fuse:
                 why(
                     "numel/rnumel mismatch (reduce) (%s, %s), (%s, %s)",
                     numel1,
@@ -1391,6 +1395,10 @@ class SIMDScheduling(BaseScheduling):
                 )
 
         return node_schedule
+
+    def codegen_mix_order_reduction(self, node):
+        breakpoint()
+        raise RuntimeError("NYI")
 
     def codegen_node(
         self, node: Union[scheduler.FusedSchedulerNode, scheduler.SchedulerNode]

@@ -116,6 +116,64 @@ def register_should_partition_rule(
     _custom_should_partition_fns[op] = func
 
 
+class MixOrderReduction:
+    @staticmethod
+    def has_mix_reduction_orders(node1, node2) -> bool:
+        g1 = node1.group[1]
+        g2 = node2.group[1]
+
+        if len(g1) != 2 or len(g2) != 2 or g1 == g2:
+            return False
+
+        return tuple(g1) == tuple(reversed(g2))
+
+    @classmethod
+    def _is_full_access(cls, buf: str, node: BaseSchedulerNode) -> bool:
+        """
+        The access to 'buf' is not a broadcast access.
+        """
+        found_dep = None
+        for dep in node.read_writes.reads:
+            if isinstance(dep, MemoryDep) and dep.name == buf:
+                found_dep = dep
+                break
+
+        if not found_dep:
+            return False
+
+        index = found_dep.index
+        var_ranges = node.read_writes.var_ranges
+
+        return not (set(var_ranges) - set(index.free_symbols))
+
+    @classmethod
+    def has_common_read(cls, node1, node2):
+        common_reads = node1.used_buffer_names() & node2.used_buffer_names()
+        for buf in common_reads:
+            if cls._is_full_access(buf, node1) and cls._is_full_access(buf, node2):
+                return True
+        return False
+     
+    # TODO add a cache
+    @classmethod
+    def can_fuse(cls, node1, node2):
+        if not node1.is_reduction() or not node2.is_reduction():
+            return False
+
+        # check for mix reduction orders
+        if not cls.has_mix_reduction_orders(node1, node2):
+            return False
+
+        # check common buffer accesses
+        if not cls.has_common_read(node1, node2):
+            return False
+
+        return True
+   
+    @classmethod
+    def are_mix_order_reductions(cls, node1, node2):
+        return cls.can_fuse(node1, node2)
+
 @dataclasses.dataclass
 class SchedulerBuffer:
     scheduler: Scheduler
@@ -1741,6 +1799,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
             return any(node.has_side_effects() for node in self.snodes)
         return super().has_side_effects()
 
+class FusedMixOrderReductions(FusedSchedulerNode):
+    def __init__(self, node1, node2):
+        # TODO: node1, node2 can themself be FusedSchedulerNode
+        assert isinstance(node1, SchedulerNode)
+        assert isinstance(node2, SchedulerNode)
+        super().__init__(node1.scheduler, [node1, node2])
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
     """
@@ -4224,11 +4288,6 @@ class Scheduler:
         if node1 is node2:
             return False
 
-        if V.graph.is_backward and node1.is_reduction() and node2.is_reduction():
-            breakpoint()
-            print(f"{node1} v.s. {node2}")
-            # breakpoint()
-
         why = WhyNoFuse(node1, node2)
 
         if node1.is_template() and self.get_backend(
@@ -4362,6 +4421,7 @@ class Scheduler:
                 shared_data_score,
             )
 
+        print(f"==> {MixOrderReduction.can_fuse(node1, node2)=}")
         if not V.choices.can_fuse(self, node1, node2, shared_data_score):
             return False
 
@@ -5503,6 +5563,8 @@ class Scheduler:
                 else:
                     raise AssertionError(f"{type(self)=}")
                 backend.codegen_combo_kernel(node)
+            elif isinstance(node, FusedMixOrderReductions):
+                self.get_backend(device).codegen_mix_order_reduction(node)
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
                 # pyrefly: ignore  # unbound-name
                 self.get_backend(device).codegen_node(node)
@@ -5698,6 +5760,8 @@ class BaseScheduling:  # noqa: docstring_linter
         """
         if node1.is_foreach() or node2.is_foreach():
             return ForeachKernelSchedulerNode.fuse(node1, node2)
+        elif MixOrderReduction.are_mix_order_reductions(node1, node2):
+            return FusedMixOrderReductions(node1, node2)
         else:
             return FusedSchedulerNode.fuse(node1, node2)
 
@@ -5738,6 +5802,9 @@ class BaseScheduling:  # noqa: docstring_linter
         """
         Generate a kernel given a list of pre-fused nodes.
         """
+        raise NotImplementedError
+
+    def codegen_mix_order_reduction(self, node):
         raise NotImplementedError
 
     def codegen_sync(self) -> None:

@@ -16,6 +16,7 @@ from .kernel_template_choice import make_ktc_generator
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
+from torch._inductor.scheduler import MixOrderReduction
 from .select_algorithm import ExternKernelChoice
 from .template_heuristics import get_template_heuristic
 from .template_heuristics.triton import (
@@ -487,7 +488,7 @@ class InductorChoices:
             - config.triton.tiling_prevents_reduction_fusion
             - config.aggressive_fusion (will cause this function to be called more times)
         """
-        if shared_data_score == 0 and (
+        if (shared_data_score == 0 and not MixOrderReduction.can_fuse(node1, node2)) and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
@@ -547,7 +548,7 @@ class InductorChoices:
         shared_data_score: int,
     ) -> bool:
         """Hook for heuristics to prevent horizontal (consumer/consumer) fusions"""
-        if shared_data_score < config.score_fusion_memory_threshold:
+        if (shared_data_score < config.score_fusion_memory_threshold) and not MixOrderReduction.can_fuse(node1, node2):
             WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
             return False
         if scheduler.are_long_distant_nodes(node1, node2):
