@@ -1075,7 +1075,15 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def truediv(x, y):
-        out = f"({x} / {y})"
+        x_dtype = getattr(x, "dtype", None)
+        y_dtype = getattr(y, "dtype", None)
+
+        if x_dtype == torch.float32 and y_dtype == torch.float32:
+            # x / y in Triton is lowered to div.full which is approx
+            # we want div_rn to adhere with eager
+            out = f"triton.language.div_rn({x}, {y})"
+        else:
+            out = f"({x} / {y})"
         if low_precision_fp_var(x) or low_precision_fp_var(y):
             out_dtype = get_dtype_handler().truediv(x, y)
             if out_dtype in (torch.float16, torch.float32):
@@ -4286,7 +4294,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def inductor_meta_common():
         inductor_meta = {
             "backend_hash": torch.utils._triton.triton_hash_with_backend(),
-            "are_deterministic_algorithms_enabled": torch.are_deterministic_algorithms_enabled(),
             "assert_indirect_indexing": config.assert_indirect_indexing,
             "autotune_local_cache": config.autotune_local_cache,
             "autotune_pointwise": config.triton.autotune_pointwise,
@@ -4300,6 +4307,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             "store_cubin": config.triton.store_cubin,
             "deterministic": config.deterministic,
         }
+
+        if config.write_are_deterministic_algorithms_enabled:
+            inductor_meta["are_deterministic_algorithms_enabled"] = (
+                torch.are_deterministic_algorithms_enabled()
+            )
+
         if torch.version.hip is not None:
             inductor_meta["is_hip"] = True
         if config.is_fbcode():
