@@ -497,25 +497,32 @@ inline c10::complex<scalar_t> _nan_to_num_replace(
     c10::complex<scalar_t> nan_replacement,
     c10::complex<scalar_t> pos_inf_replacement,
     c10::complex<scalar_t> neg_inf_replacement) {
-  if (at::_isnan(a)) {
-    return static_cast<c10::complex<scalar_t>>(nan_replacement);
-  }
   if (!std::isfinite(a.real()) || !std::isfinite(a.imag())) {
     scalar_t new_real = 0;
     scalar_t new_imag = 0;
-    if (a.real() == std::numeric_limits<scalar_t>::infinity()) {
+    if (at::_isnan(a.real())) {
+      new_real += nan_replacement.real();
+      new_imag += nan_replacement.imag();
+    } else if (a.real() == std::numeric_limits<scalar_t>::infinity()) {
       new_real += pos_inf_replacement.real();
       new_imag += pos_inf_replacement.imag();
     } else if (a.real() == -std::numeric_limits<scalar_t>::infinity()) {
       new_real += neg_inf_replacement.real();
       new_imag += neg_inf_replacement.imag();
+    } else {
+      new_real += a.real();
     }
-    if (a.imag() == std::numeric_limits<scalar_t>::infinity()) {
-      new_real += -pos_inf_replacement.imag();
+    if (at::_isnan(a.imag())) {
+      new_real -= nan_replacement.imag();
+      new_imag += nan_replacement.real();
+    } else if (a.imag() == std::numeric_limits<scalar_t>::infinity()) {
+      new_real -= pos_inf_replacement.imag();
       new_imag += pos_inf_replacement.real();
     } else if (a.imag() == -std::numeric_limits<scalar_t>::infinity()) {
-      new_real += -neg_inf_replacement.imag();
+      new_real -= neg_inf_replacement.imag();
       new_imag += neg_inf_replacement.real();
+    } else {
+      new_imag += a.imag();
     }
     return c10::complex<scalar_t> {new_real, new_imag};
   }
