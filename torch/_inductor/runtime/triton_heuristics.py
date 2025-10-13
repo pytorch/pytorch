@@ -185,14 +185,6 @@ def autotune_hints_to_configs(
     return configs
 
 
-def disable_pointwise_autotuning(inductor_meta):
-    # Autotuning can give different benchmarking results from run to run, and
-    # therefore we disable autotuning when use_deterministic flag is on.
-    if inductor_meta.get("are_deterministic_algorithms_enabled"):
-        return True
-    return not inductor_meta.get("autotune_pointwise", True)
-
-
 def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
     call_args = []
     call_kwargs = {}
@@ -1583,7 +1575,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             return None
 
         def check_can_launch() -> StaticallyLaunchedCudaKernel:
-            if triton_meta.get("device_type", None) != "cuda":
+            if triton_meta.get("device_type") != "cuda":
                 # Only cuda kernels
                 raise CannotStaticallyLaunchKernel("Non-cuda device")
 
@@ -1600,7 +1592,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                 # Don't support user defined triton kernels yet
                 raise CannotStaticallyLaunchKernel("User defined triton kernel")
 
-            if inductor_meta.get("store_cubin", None):
+            if inductor_meta.get("store_cubin"):
                 # Requires storing the entire binary
                 raise CannotStaticallyLaunchKernel("store_cubin is enabled")
 
@@ -2399,6 +2391,7 @@ def triton_config_reduction(
     num_warps=None,
     register_intensive=False,
     dynamic_scale_rblock=True,
+    reduction_hint=None,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2426,7 +2419,13 @@ def triton_config_reduction(
             rnumels[prefix] *= 2
 
     if num_warps is None:
-        num_warps = total_numel() // 128
+        if reduction_hint == ReductionHint.INNER and not is_fbcode():
+            # r is contiguous, so ensure that each thread has 8 elements for
+            # vectorized loads, assuming bf16/fp16
+            # xblock is usually 1-2, default to giving each thread more work
+            num_warps = r // 128
+        else:
+            num_warps = total_numel() // 128
 
     max_num_warps = 16 if r <= 8192 else 32
     num_warps = _num_warps(
@@ -2576,7 +2575,7 @@ def pointwise(
 
     configs = None
     if len(size_hints) == 1:
-        if disable_pointwise_autotuning(inductor_meta) and not (
+        if not inductor_meta.get("autotune_pointwise", True) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
         ):
@@ -2591,7 +2590,8 @@ def pointwise(
             ]
     if len(size_hints) == 2:
         if (
-            disable_pointwise_autotuning(inductor_meta) or tile_hint == TileHint.SQUARE
+            not inductor_meta.get("autotune_pointwise", True)
+            or tile_hint == TileHint.SQUARE
         ) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -2608,7 +2608,7 @@ def pointwise(
                 *hinted_configs,
             ]
     if len(size_hints) == 3:
-        if disable_pointwise_autotuning(inductor_meta):
+        if not inductor_meta.get("autotune_pointwise", True):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
@@ -2640,7 +2640,7 @@ def pointwise(
 def _reduction_configs(
     *, size_hints: dict[str, int], inductor_meta: dict[str, Any], num_dynamic=0
 ) -> list[Config]:
-    reduction_hint = inductor_meta.get("reduction_hint", None)
+    reduction_hint = inductor_meta.get("reduction_hint")
 
     # Convert reductions to 1D, to simplify heuristics.
     rnumel = get_total_reduction_numel(size_hints)
@@ -2696,6 +2696,7 @@ def _reduction_configs(
                 num_stages=num_stages,
                 register_intensive=register_intensive,
                 dynamic_scale_rblock=dynamic_scale_rblock,
+                reduction_hint=reduction_hint,
             )
 
     def outer_config_opt():
@@ -2747,7 +2748,7 @@ def _reduction_configs(
         )
 
     contiguous_config = make_config(
-        1,
+        2 if rnumel <= 2048 and not is_fbcode() else 1,  # 1024 or less is persistent
         min(rnumel, MAX_R0_BLOCK),
         register_intensive=register_intensive,
     )
@@ -2788,8 +2789,6 @@ def _reduction_configs(
         return configs + [outer_config]
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return configs + [tiny_config]
-    if disable_pointwise_autotuning(inductor_meta):
-        return configs + [make_config(32, 128)]
 
     return configs + [
         contiguous_config,
@@ -2900,7 +2899,7 @@ def filter_reduction_configs_for_determinism(
         return (
             inductor_meta.get("deterministic", False)
             or torch._inductor.config.test_configs.force_filter_reduction_configs
-        )
+        ) or inductor_meta.get("are_deterministic_algorithms_enabled")
 
     if not _do_filter_due_to_inductor_config() or len(configs) == 1:
         # no filtering happening if NOT in deterministic mode
@@ -3012,6 +3011,7 @@ def reduction(
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+
     return cached_autotune(
         size_hints,
         configs=configs,
@@ -3085,7 +3085,13 @@ def _persistent_reduction_configs(
 
     if "y" not in size_hints:
         configs = [
-            triton_config_reduction(size_hints, xblock, rnumel, register_intensive=True)
+            triton_config_reduction(
+                size_hints,
+                xblock,
+                rnumel,
+                register_intensive=True,
+                reduction_hint=reduction_hint,
+            )
             for xblock in (1, 8, 32, 128)
             if xblock == 1
             or (rnumel * xblock <= MAX_PERSISTENT_BLOCK_NUMEL and xblock <= xnumel)
@@ -3125,6 +3131,7 @@ def _persistent_reduction_configs(
                     x_block,
                     rnumel,
                     register_intensive=True,
+                    reduction_hint=reduction_hint,
                 )
             ]
 
@@ -3136,6 +3143,7 @@ def _persistent_reduction_configs(
                 size_hints,
                 2 * (256 // rnumel) if rnumel <= 256 else 1,
                 rnumel,
+                reduction_hint=reduction_hint,
             )
         ]
     for c in configs:
@@ -3143,9 +3151,6 @@ def _persistent_reduction_configs(
         for prefix in size_hints:
             if prefix_is_reduction(prefix):
                 c.kwargs.pop(f"{prefix.upper()}BLOCK")
-
-    if disable_pointwise_autotuning(inductor_meta):
-        configs = configs[:1]
 
     return configs
 
