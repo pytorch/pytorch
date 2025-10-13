@@ -919,10 +919,6 @@ class TestFakeQuantizeOps(TestCase):
         for n_bits in (4, 8):
             quant_min, quant_max = 0, 2 ** n_bits - 1
 
-            X_base = X_base.to(dtype=torch.float32)
-            scale_base = scale_base.to(device, dtype=torch.float32)
-            zero_point_base = zero_point_base.to(device=device, dtype=torch.float32)
-
             X_curr = X_base.clone()
             X_curr.requires_grad_()
             scale_curr = scale_base.clone()
