@@ -12279,7 +12279,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @requires_gpu()
     @skip_if_not_triton
-    @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    @skip_if_cpp_wrapper("skip cpp_wrapper tests")
     @config.patch(implicit_fallbacks=True)
     def test_generated_code_has_size_stride_assert(self):
         def foo(x):
