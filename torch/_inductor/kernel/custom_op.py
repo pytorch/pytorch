@@ -3,10 +3,11 @@
 Custom operation autotuning for PyTorch Inductor.
 
 Enables automatic selection of the best performing implementation variant
-for custom operations by registering multiple decompositions.
+for custom operations by registering multiple decompositions and tuning knobs.
 """
 
 import functools
+import itertools
 from typing import Any, Callable, Optional, Union
 
 import torch
@@ -20,7 +21,11 @@ from torch._inductor.select_algorithm import (
 from torch._inductor.virtualized import V
 
 
-__all__ = ["autotune_custom_op", "register_custom_op_autotuning"]
+__all__ = [
+    "autotune_custom_op",
+    "register_custom_op_autotuning",
+    "register_parametric_op_autotuning",
+]
 
 
 def _create_fallback_choice(
@@ -182,7 +187,6 @@ def autotune_custom_op(
     if not inputs:
         raise RuntimeError(f"Custom op '{name}' requires tensor inputs for autotuning")
 
-    # Generate decomposition choices using SubgraphTemplate
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
         name=name,
@@ -235,30 +239,22 @@ def register_custom_op_autotuning(
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[int, Callable[[torch.Tensor], torch.Tensor]]] = None,
 ) -> None:
-    """Register a custom operation for autotuning with multiple implementation choices.
+    """Register custom operation for autotuning with multiple implementations.
 
-    This is the main entry point for users to enable autotuning on their custom operations.
-    It integrates with the existing @torch.library.custom_op and @op.register_fake
-    infrastructure, requiring only the decomposition implementations.
-
-    The default implementation from @torch.library.custom_op is automatically included
-    as a fallback choice and will be used if all decomposition variants fail.
+    Integrates with torch.library.custom_op and register_fake infrastructure.
+    The default implementation is automatically included as a fallback.
 
     Args:
-        custom_op: The custom operation OpOverload to register (e.g., torch.ops.mylib.myop.default)
-        decompositions: List of alternative implementation functions to benchmark.
-                       Each function should have the same signature as the custom op.
-        name: Optional operation name for identification. Defaults to "{op_name}_autotuned".
-        input_gen_fns: Optional custom input generators for realistic benchmarking.
-                      Maps input argument indices to functions that take fake tensors
-                      (with shape/dtype but no real data) and return real tensors.
+        custom_op: Custom operation to register (e.g., torch.ops.mylib.myop.default)
+        decompositions: Alternative implementations to benchmark
+        name: Operation name for identification (default: "{op_name}_autotuned")
+        input_gen_fns: Custom input generators for benchmarking
 
     Raises:
-        TypeError: If decompositions is not a list or tuple of callables
-        ValueError: If no decompositions are provided
+        TypeError: If decompositions is not a list/tuple
+        ValueError: If no decompositions provided
 
     Example:
-        # Define custom op with standard PyTorch custom op API
         @torch.library.custom_op("mylib::rmsnorm", mutates_args=())
         def rmsnorm_op(x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
             return torch.nn.functional.rms_norm(x, x.shape[-1:], weight, eps=eps)
@@ -306,3 +302,79 @@ def register_custom_op_autotuning(
         return result
 
     lowerings[custom_op] = autotuning_lowering
+
+
+def register_parametric_op_autotuning(
+    custom_op: torch._ops.OpOverload,
+    implementation_fn: Callable[..., Any],
+    parameter_name: str,
+    parameter_values: list[Any],
+    name: Optional[str] = None,
+    input_gen_fns: Optional[dict[int, Callable[[torch.Tensor], torch.Tensor]]] = None,
+) -> None:
+    """Register custom operation for autotuning with parameter-based variants.
+
+    This function addresses use case 2: autotuning hyperparameters for a custom operator.
+    Instead of providing explicit decompositions, users provide a single implementation
+    function and specify which parameter should be autotuned with which values.
+
+    Args:
+        custom_op: Custom operation to register (e.g., torch.ops.mylib.myop.default)
+        implementation_fn: Base implementation function that takes the parameter
+        parameter_name: Name of the parameter to autotune
+        parameter_values: List of values to try for the parameter
+        name: Operation name for identification (default: "{op_name}_parametric_autotuned")
+        input_gen_fns: Custom input generators for benchmarking
+
+    Example:
+        def parametric_algorithm(x: torch.Tensor, weight: torch.Tensor, method: int = 0) -> torch.Tensor:
+            if method == 0:
+                return x * weight  # Simple multiplication
+            elif method == 1:
+                return x / x.norm(dim=-1, keepdim=True) * weight  # Normalized
+            elif method == 2:
+                return x / torch.sqrt((x*x).mean(dim=-1, keepdim=True)) * weight  # RMS normalized
+
+        @torch.library.custom_op("mylib::parametric_op", mutates_args=())
+        def parametric_op(x: torch.Tensor, weight: torch.Tensor, method: int = 0) -> torch.Tensor:
+            return parametric_algorithm(x, weight, method)
+
+        register_parametric_op_autotuning(
+            torch.ops.mylib.parametric_op.default,
+            implementation_fn=parametric_algorithm,
+            parameter_name="method",
+            parameter_values=[0, 1, 2],
+        )
+    """
+    if not isinstance(parameter_values, (list, tuple)):
+        raise TypeError(
+            f"parameter_values must be a list or tuple, got {type(parameter_values)}"
+        )
+
+    if not parameter_values:
+        raise ValueError("At least one parameter value must be provided")
+
+    if name is None:
+        name = f"{custom_op._name}_parametric_autotuned"
+
+    # Automatically generate decomposition functions for each parameter value
+    def create_parametric_decomposition(value):
+        def parametric_decomposition(*args, **kwargs):
+            kwargs[parameter_name] = value
+            return implementation_fn(*args, **kwargs)
+
+        parametric_decomposition.__name__ = (
+            f"{implementation_fn.__name__}_{parameter_name}_{value}"
+        )
+        return parametric_decomposition
+
+    decompositions = []
+    for param_value in parameter_values:
+        decompositions.append(create_parametric_decomposition(param_value))
+
+    register_custom_op_autotuning(
+        custom_op=custom_op,
+        decompositions=decompositions,
+        name=name,
+        input_gen_fns=input_gen_fns,
+    )
