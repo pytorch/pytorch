@@ -6656,6 +6656,12 @@ Done""",
         c = torch.ones(2, 2, requires_grad=True, dtype=torch.complex128)
         self.assertTrue(gradcheck(fn2, (c)))
 
+    def test_gradcheck_adjusted_atol_complex_inputs(self):
+        # FIXME implement as regression test
+        # a certain input (proably large-min) with certain atol should fail the projection-specific check ('fast gradcheck') but
+        # pass the comprehensive check ('slow gradcheck').
+        pass
+
     def test_gradcheck_get_numerical_jacobian(self):
         # get_numerical_jacobian is deprecated and no longer used internally by gradcheck
         from torch.autograd.gradcheck import get_numerical_jacobian
