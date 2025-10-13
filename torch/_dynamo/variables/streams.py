@@ -12,6 +12,7 @@ from ..source import AttrSource, CallFunctionNoArgsSource, TorchSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
+from .lazy import LazyVariableTracker
 from .misc import GetAttrVariable
 
 
@@ -70,7 +71,15 @@ class SymbolicStreamState:
     """Track the currently entered stream if any"""
 
     def __init__(self) -> None:
-        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque()
+        from ..source import CurrentStreamSource
+
+        stream_var = LazyVariableTracker.create(
+            torch.accelerator.current_stream(),
+            source=CurrentStreamSource(torch.accelerator.current_stream().device),
+        )
+        self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
+            [stream_var]  # type: ignore[list-item]
+        )
 
     def enter_stream(self, stream: "StreamVariable") -> None:
         self.cur_stream_stack.append(stream)
@@ -119,7 +128,6 @@ class StreamContextVariable(ContextWrappingVariable):
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.device = device
-        self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
 
     def enter(self, tx: "InstructionTranslator") -> "VariableTracker":
         # to stream, from stream is the order of the arguments

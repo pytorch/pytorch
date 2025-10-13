@@ -1241,7 +1241,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_current_stream(self, tx: "InstructionTranslator", *args, **kwargs):
             if len(args) + len(kwargs) > 1 or (kwargs and "device" not in kwargs):
                 unimplemented_v2(
-                    gb_type="improper torch.get_device_module arguments",
+                    gb_type="unsupported arguments to torch.accelerator.current_stream",
                     context=f"args={args}, kwargs={kwargs}",
                     explanation="torch.accelerator.current_stream accepts one optional argument `device`",
                     hints=[
