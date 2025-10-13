@@ -164,11 +164,11 @@ class TorchTensor(ir.Tensor):
         """Get a ctypes byte array pointing to the tensor data."""
         import torch._subclasses.fake_tensor
 
-        with torch._subclasses.fake_tensor.unset_fake_temporarily():  # pylint: disable=protected-access
+        with torch._subclasses.fake_tensor.unset_fake_temporarily():
             # Disable any fake mode so calling detach() etc. will return a real tensor
             tensor = self.raw.detach().cpu().contiguous()
 
-        if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):  # pylint: disable=protected-access
+        if isinstance(tensor, torch._subclasses.fake_tensor.FakeTensor):
             raise TypeError(
                 f"Cannot take content out from the FakeTensor ('{self.name}'). Please replace the tensor "
                 "with a tensor backed by real data using ONNXProgram.apply_weights() "
