@@ -6,10 +6,10 @@ import functools
 import math
 import traceback
 import warnings
-from collections.abc import Generator, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import contextmanager
 from enum import auto, Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -699,12 +699,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             state_dict_config = state_dict_config_type()
         if optim_state_dict_config is None:
             optim_state_dict_config = optim_state_dict_config_type()
-        if state_dict_config_type != type(state_dict_config):
+        if state_dict_config_type is not type(state_dict_config):
             raise RuntimeError(
                 f"Expected state_dict_config of type {state_dict_config_type} "
                 f"but got {type(state_dict_config)}"
             )
-        if optim_state_dict_config_type != type(optim_state_dict_config):
+        if optim_state_dict_config_type is not type(optim_state_dict_config):
             raise RuntimeError(
                 f"Expected optim_state_dict_config of type {optim_state_dict_config_type} "
                 f"but got {type(optim_state_dict_config)}"
