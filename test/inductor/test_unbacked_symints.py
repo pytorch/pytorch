@@ -13,7 +13,8 @@ from torch.testing._internal.common_device_type import (
     skipGPUIf,
 )
 from torch.testing._internal.common_utils import parametrize, skipIfXpu
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.inductor_utils import HAS_GPU, skipCUDAIf
 
 
 class TestUnbackedSymints(InductorTestCase):
@@ -502,6 +503,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdpfa(self, device):
@@ -528,6 +530,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.compile(fn, fullgraph=True)(x)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @skipCUDAIf(not SM80OrLater, "Requires sm80 or later.")
     @skipIfXpu(msg="scaled_dot_product_attention is not supported on XPU yet")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_sdfpa_unbacked_strides(self, device):

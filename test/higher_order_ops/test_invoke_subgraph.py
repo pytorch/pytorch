@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 
@@ -557,6 +558,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x.grad, x_clone.grad)
 
     @requires_cuda_and_triton
+    @unittest.skipIf(not SM80OrLater, "Requires sm80 or later.")
     def test_sdpa(self):
         @nested_compile_region
         def gn(q, k, v):
