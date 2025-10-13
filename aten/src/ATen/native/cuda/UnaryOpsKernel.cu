@@ -315,7 +315,7 @@ void nan_to_num_kernel_cuda(
   }
 }
 
-void nan_to_num_complex_kernel_cuda(
+void nan_to_num_complex_args_kernel_cuda(
     TensorIteratorBase& iter,
     std::optional<complex<double>> nan,
     std::optional<complex<double>> pos_inf,
@@ -323,13 +323,13 @@ void nan_to_num_complex_kernel_cuda(
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
       using value_t = scalar_t::value_type;
-      auto nan_replacement = static_cast<c10::complex<value_t>>(nan.value_or(c10::complex<double>(0.0, 0.0)));
-      auto pos_inf_replacement = static_cast<c10::complex<value_t>>(pos_inf.has_value()
-          ? pos_inf.value()
-          : c10::complex<double>(std::numeric_limits<double>::max(), 0.0));
-      auto neg_inf_replacement = static_cast<c10::complex<value_t>>(neg_inf.has_value()
-          ? neg_inf.value()
-          : c10::complex<double>(std::numeric_limits<double>::lowest(), 0.0));
+      auto nan_replacement = static_cast<scalar_t>(nan.value_or(scalar_t(0.0, 0.0)));
+      auto pos_inf_replacement = pos_inf.has_value()
+          ? static_cast<scalar_t>(pos_inf.value())
+          : scalar_t(std::numeric_limits<value_t>::max(), 0.0);
+      auto neg_inf_replacement = neg_inf.has_value()
+          ? static_cast<scalar_t>(neg_inf.value())
+          : scalar_t(std::numeric_limits<value_t>::lowest(), 0.0);
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
         value_t res_real = _nan_to_num_replace_real(
           a.real(), a.imag(), nan_replacement.real(), nan_replacement.imag(), pos_inf_replacement.real(), pos_inf_replacement.imag(), neg_inf_replacement.real(), neg_inf_replacement.imag());
@@ -363,7 +363,7 @@ REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda)
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda)
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda)
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda)
-REGISTER_DISPATCH(nan_to_num_complex_stub, &nan_to_num_complex_kernel_cuda)
+REGISTER_DISPATCH(nan_to_num_complex_stub, &nan_to_num_complex_args_kernel_cuda)
 REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda)
 
 } // namespace at::native
