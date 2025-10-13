@@ -376,9 +376,11 @@ def _do_annotate_conv_relu(
             input_qspec_map[bias] = get_bias_qspec(quantization_config)
             partition.append(bias)
 
+        # pyrefly: ignore  # bad-argument-type
         if _is_annotated(partition):
             continue
 
+        # pyrefly: ignore  # bad-argument-type
         if filter_fn and any(not filter_fn(n) for n in partition):
             continue
 
@@ -389,6 +391,7 @@ def _do_annotate_conv_relu(
             output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
             _annotated=True,
         )
+        # pyrefly: ignore  # bad-argument-type
         _mark_nodes_as_annotated(partition)
         annotated_partitions.append(partition)
     return annotated_partitions
