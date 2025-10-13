@@ -19,7 +19,7 @@ _reverse_repeat_padding = nnq.modules.conv._reverse_repeat_padding
 
 # TODO: factor out the common parts to ConvNd
 class ConvReLU1d(nnq.Conv1d):
-    __doc__ = (r"""
+    r"""
     A ConvReLU1d module is a fused module of Conv1d and ReLU
 
     We adopt the same interface as :class:`torch.ao.nn.quantized.Conv1d`.
@@ -27,7 +27,7 @@ class ConvReLU1d(nnq.Conv1d):
     Attributes:
         Same as torch.ao.nn.quantized.Conv1d
 
-    """)
+    """
 
     _FLOAT_MODULE = torch.ao.nn.intrinsic.ConvReLU1d  # type: ignore[assignment]
 
