@@ -244,6 +244,12 @@ init_command = [
     'optree==0.13.0',
     'dataclasses-json==0.6.7',
     'pandas==2.2.3',
+    'pandas-stubs==2.3.3',
+    'types-psutil==7.0.0',
+    'types-Pygments==2.19.0',
+    'types-openpyxl==3.1.5',
+    'types-python-dateutil==2.9.0'
+
 ]
 
 [[linter]]
