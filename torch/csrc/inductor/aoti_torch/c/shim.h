@@ -515,6 +515,14 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl(
     const char* name,
     void (*fn)(StableIValue*, uint64_t, uint64_t));
 
+// Version-aware variant of aoti_torch_library_impl that takes an
+// extension_build_version parameter for backward compatibility
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_library_impl_v2(
+    TorchLibraryHandle self,
+    const char* name,
+    void (*fn)(StableIValue*, uint64_t, uint64_t),
+    uint64_t extension_build_version);
+
 // stable corollary to torch::Library method m.def(), should be
 // called from StableLibrary
 AOTI_TORCH_EXPORT AOTITorchError
