@@ -2634,6 +2634,10 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::alltoall(
   assertDense(invalidArgument, inputTensors);
   assertDense(invalidArgument, outputTensors);
 
+  // Check that all tensors are on the same device
+  assertSameDevice(invalidArgument, inputTensors);
+  assertSameDevice(invalidArgument, outputTensors);
+
   // Check that all input tensors have the same type and size
   const auto& options = inputTensors[0].options();
   const auto& sizes = inputTensors[0].sizes();

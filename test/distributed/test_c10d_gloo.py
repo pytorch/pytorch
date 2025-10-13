@@ -1894,13 +1894,16 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             result = future_handle.value()
 
             # Verify correctness: output_tensors[j] should contain the value
-            # that was in input_tensors[rank] from rank j
+            # that rank j sent at position self.rank.
+            # Since inputs[i][k] = tensor([i + k]) for all ranks,
+            # rank j sends inputs[i][self.rank] = tensor([i + self.rank])
+            # to this rank at position j in the output.
             for j in range(self.world_size):
-                expected_value = torch.tensor([i + j])
+                expected_value = torch.tensor([i + self.rank])
                 self.assertEqual(
                     expected_value,
                     outputs[i][j],
-                    msg=(f"Mismatch in iteration {i:d} for rank {j:d}"),
+                    msg=(f"Mismatch in iteration {i:d} from rank {j:d}"),
                 )
 
     @requires_gloo()
@@ -1920,6 +1923,54 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             for i in range(1000)
         ]
         self._test_alltoall_stress(inputs, lambda t: t.clone().cuda())
+
+    def _test_alltoall_data_routing(self, fn):
+        """
+        Test that data routing is correct: rank i sends inputTensors[j]
+        to rank j
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+
+        # Each rank sends unique values to every other rank
+        # Rank i sends tensor with value (i * 100 + j) to rank j
+        input_tensors = []
+        for j in range(self.world_size):
+            value = self.rank * 100 + j
+            input_tensors.append(fn(torch.tensor([value], dtype=torch.float32)))
+
+        output_tensors = [
+            fn(torch.tensor([-1], dtype=torch.float32)) for _ in range(self.world_size)
+        ]
+
+        # Perform all-to-all
+        fut = pg.alltoall(output_tensors, input_tensors).get_future()
+        fut.wait()
+
+        # Verify: rank i should receive tensor with value (j * 100 + i)
+        # from rank j in output_tensors[j]
+        for j in range(self.world_size):
+            expected_value = j * 100 + self.rank
+            actual_value = output_tensors[j].item()
+            self.assertEqual(
+                expected_value,
+                actual_value,
+                msg=(
+                    f"Rank {self.rank}: output_tensors[{j}] = "
+                    f"{actual_value}, expected {expected_value}"
+                ),
+            )
+
+    @requires_gloo()
+    def test_alltoall_data_routing(self):
+        self._test_alltoall_data_routing(lambda t: t.clone())
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_alltoall_data_routing_cuda(self):
+        self._test_alltoall_data_routing(lambda t: t.clone().cuda())
 
 
 class DistributedDataParallelTest(
