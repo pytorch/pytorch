@@ -9,7 +9,6 @@
 
 #include <cuda_runtime_api.h>
 #include <future>
-#include <unordered_map>
 
 namespace at::cuda {
 namespace {
@@ -72,9 +71,20 @@ using Block = HostBlock<CUDAStream>;
 struct CUDACachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<CUDAStream, EventPool::Event> {
  private:
-  std::unordered_map<void*, bool> use_host_register;
+  ska::flat_hash_map<void*, bool> use_host_register;
 
   void allocate_host_memory(size_t size, void** ptr) override {
+    // try allocating from reserve segment first before calling into expensive APIs
+    if (get_reserve_segment().initialized()) {
+      *ptr = get_reserve_segment().allocate(size);
+      if (*ptr != nullptr) {
+        return;
+      }
+    }
+    allocate_host_memory_slowpath(size, ptr);
+  }
+
+  void allocate_host_memory_slowpath(size_t size, void** ptr) {
     // Pinned memory pointers allocated by any device can be directly used by
     // any other device, regardless of the current device at the time of
     // allocation, since we assume unified addressing. So we grab any existing
@@ -113,6 +123,18 @@ struct CUDACachingHostAllocatorImpl
   }
 
   void free_block(Block* block) override {
+    // We never free blocks from the reserve segment
+    if (get_reserve_segment().initialized()) {
+      // Check if the block is from the reserve segment
+      if (get_reserve_segment().owns(block->ptr_)) {
+        return;
+      }
+    }
+
+    free_block_slowpath(block);
+  }
+
+  void free_block_slowpath(Block* block) {
     auto start = std::chrono::steady_clock::now();
     // Users may change the allocator config at will. torch unit tests do this.
     // However, allocations using cudaHostRegister should use corresonding
@@ -172,6 +194,20 @@ struct CUDACachingHostAllocatorImpl
     return event_pool->get(idx);
   }
 
+  PinnedReserveSegment& get_reserve_segment() {
+    static auto reserve_segment = [&]() {
+      if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_reserve_segment_size_mb() > 0) {
+        void *ptr;
+        size_t sz = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_reserve_segment_size_mb() * 1024 * 1024;
+        allocate_host_memory_slowpath(sz, &ptr);
+        return PinnedReserveSegment(ptr, sz);
+      } else {
+        return PinnedReserveSegment();
+      }
+    } ();
+    return reserve_segment;
+  }
+
   TaskThreadPool* getThreadPool() {
     static TaskThreadPool* pool = new TaskThreadPool(
         static_cast<int>(c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
@@ -186,15 +222,15 @@ struct CUDACachingHostAllocatorImpl
       size_t numThreads,
       size_t pageSize) {
     uintptr_t start = (uintptr_t)ptr + (size * i / numThreads);
-    uintptr_t end = (uintptr_t)start + (size / numThreads);
+    uintptr_t end = start + (size / numThreads);
     if (i == (numThreads - 1)) {
       end = (uintptr_t)ptr + size;
     }
 
     // pre-fault/map the pages by setting the first byte of the page
     uintptr_t alignedStart =
-        (((uintptr_t)start + pageSize - 1) & ~(pageSize - 1));
-    for (uintptr_t p = alignedStart; p < ((uintptr_t)end); p += pageSize) {
+        ((start + pageSize - 1) & ~(pageSize - 1));
+    for (uintptr_t p = alignedStart; p < (end); p += pageSize) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
       memset((void*)p, 0, 1);
     }
