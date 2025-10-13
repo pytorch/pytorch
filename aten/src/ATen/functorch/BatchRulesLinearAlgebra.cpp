@@ -39,7 +39,7 @@ Tensor vdot_decomp(const Tensor& A, const Tensor& B) {
 // NB: I wrote this like this because we *might* want its for a future matmul
 // batch rule that isn't decomposed...
 // "tv" = tensor @ vector
-static std::tuple<Tensor, std::optional<int64_t>> tv_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> tv_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   if (self_bdim && other_bdim) {
@@ -66,7 +66,7 @@ static std::tuple<Tensor, std::optional<int64_t>> tv_batch_rule(
   TORCH_INTERNAL_ASSERT(false, "can't get here");
 }
 
-static std::tuple<Tensor, std::optional<int64_t>> mv_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> mv_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -79,7 +79,7 @@ static std::tuple<Tensor, std::optional<int64_t>> mv_batch_rule(
   return tv_batch_rule(self, self_bdim, other, other_bdim);
 }
 
-static std::tuple<Tensor, std::optional<int64_t>> mm_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> mm_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -94,7 +94,7 @@ static std::tuple<Tensor, std::optional<int64_t>> mm_batch_rule(
   return std::make_tuple( at::matmul(self_, other_), 0 );
 }
 
-static std::tuple<Tensor, std::optional<int64_t>> bmm_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> bmm_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -176,7 +176,7 @@ struct LinalgCheckMatrixUnaryRuleHelper;
 
 template <char const *op_name, typename F, F Func, typename A, typename... T>
 struct LinalgCheckMatrixUnaryRuleHelper<op_name, F, Func, typelist<A, T...>> {
-  static inline Tensor check_and_reshape_input(const Tensor& tensor, std::optional<int64_t> batch_dim) {
+  static Tensor check_and_reshape_input(const Tensor& tensor, std::optional<int64_t> batch_dim) {
     TORCH_CHECK(rankWithoutBatchDim(tensor, batch_dim) >= 2, op_name, ": The input tensor A must have at least 2 dimensions.");
     return moveBatchDimToFront(tensor, batch_dim);
   }
@@ -222,7 +222,7 @@ struct LinalgCheckMatrixBinaryRuleHelper;
 
 template <char const *op_name, typename F, F Func, typename A, typename B, typename... T>
 struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>> {
-  static inline std::tuple<Tensor, Tensor> check_inputs_and_reshape_inputs(
+  static std::tuple<Tensor, Tensor> check_inputs_and_reshape_inputs(
       const Tensor& first, std::optional<int64_t> first_bdim,
       const Tensor& second, std::optional<int64_t> second_bdim) {
     TORCH_CHECK(rankWithoutBatchDim(first, first_bdim) >= 2,
@@ -250,7 +250,7 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
   }
 };
 
-static void expect_at_least_rank(
+void expect_at_least_rank(
     const Tensor& tensor,
     std::optional<int64_t> tensor_bdim,
     int64_t expected_rank,
@@ -472,7 +472,7 @@ atol_rtol_tensor_batch_rule(
   return std::make_tuple(Func(input_, atol_, rtol_, hermitian), 0);
 }
 
-static std::tuple<Tensor, std::optional<int64_t>>
+std::tuple<Tensor, std::optional<int64_t>>
 pinv_batch_rule(
     const Tensor& input, std::optional<int64_t> input_bdim, const std::optional<Tensor>& atol,
     const std::optional<int64_t> atol_bdim, const std::optional<Tensor>& rtol,

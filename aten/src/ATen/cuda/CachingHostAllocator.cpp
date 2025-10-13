@@ -222,15 +222,15 @@ struct CUDACachingHostAllocatorImpl
       size_t numThreads,
       size_t pageSize) {
     uintptr_t start = (uintptr_t)ptr + (size * i / numThreads);
-    uintptr_t end = (uintptr_t)start + (size / numThreads);
+    uintptr_t end = start + (size / numThreads);
     if (i == (numThreads - 1)) {
       end = (uintptr_t)ptr + size;
     }
 
     // pre-fault/map the pages by setting the first byte of the page
     uintptr_t alignedStart =
-        (((uintptr_t)start + pageSize - 1) & ~(pageSize - 1));
-    for (uintptr_t p = alignedStart; p < ((uintptr_t)end); p += pageSize) {
+        ((start + pageSize - 1) & ~(pageSize - 1));
+    for (uintptr_t p = alignedStart; p < (end); p += pageSize) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
       memset((void*)p, 0, 1);
     }
