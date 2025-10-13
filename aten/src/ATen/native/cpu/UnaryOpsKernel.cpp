@@ -553,21 +553,21 @@ static void nan_to_num_kernel(
   });
 }
 
-static void nan_to_num_complex_kernel(
+static void nan_to_num_complex_args_kernel(
     TensorIteratorBase& iter,
     std::optional<complex<double>> nan,
     std::optional<complex<double>> pos_inf,
     std::optional<complex<double>> neg_inf) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
-      using value_t = scalar_t::value_type;
-      auto nan_replacement = static_cast<scalar_t>(nan.value_or(scalar_t(0.0, 0.0)));
-      auto pos_inf_replacement = static_cast<scalar_t>(pos_inf.has_value()
-          ? pos_inf.value()
-          : scalar_t(std::numeric_limits<value_t>::max(), 0.0));
-      auto neg_inf_replacement = static_cast<scalar_t>(neg_inf.has_value()
-          ? neg_inf.value()
-          : scalar_t(std::numeric_limits<value_t>::lowest(), 0.0));
+      using value_t = c10::scalar_value_type<scalar_t>::type;
+      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(scalar_t(0.0, 0.0)));
+      scalar_t pos_inf_replacement = pos_inf.has_value()
+          ? static_cast<scalar_t>(pos_inf.value())
+          : scalar_t(std::numeric_limits<value_t>::max(), 0.0);
+      scalar_t neg_inf_replacement = neg_inf.has_value()
+          ? static_cast<scalar_t>(neg_inf.value())
+          : scalar_t(std::numeric_limits<value_t>::lowest(), 0.0);
       cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
         return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
       });
@@ -881,7 +881,7 @@ REGISTER_DISPATCH(sinc_stub, &CPU_CAPABILITY::sinc_kernel)
 REGISTER_DISPATCH(bitwise_not_stub, &CPU_CAPABILITY::bitwise_not_kernel)
 REGISTER_DISPATCH(logical_not_stub, &CPU_CAPABILITY::logical_not_kernel)
 REGISTER_DISPATCH(nan_to_num_stub, &CPU_CAPABILITY::nan_to_num_kernel)
-REGISTER_DISPATCH(nan_to_num_complex_stub, &CPU_CAPABILITY::nan_to_num_complex_kernel)
+REGISTER_DISPATCH(nan_to_num_complex_stub, &CPU_CAPABILITY::nan_to_num_complex_args_kernel)
 REGISTER_DISPATCH(conj_physical_stub, &CPU_CAPABILITY::conj_kernel)
 REGISTER_DISPATCH(rsqrt_stub, &CPU_CAPABILITY::rsqrt_kernel)
 REGISTER_DISPATCH(frac_stub, &CPU_CAPABILITY::frac_kernel)
