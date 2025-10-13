@@ -1,4 +1,4 @@
-# Owner(s): ["module: nn"]
+# Owner(s): ["module: sdpa"]
 import unittest
 from collections import namedtuple
 
