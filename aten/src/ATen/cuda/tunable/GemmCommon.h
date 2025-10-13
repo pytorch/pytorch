@@ -29,7 +29,7 @@
 
 namespace at::cuda::tunable {
 
-using at::cuda::blas::ScalingType;
+using at::blas::ScalingType;
 
 enum class BlasOp {
   N = 0,

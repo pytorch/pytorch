@@ -311,7 +311,7 @@ class ScriptMeta(type):
             original_init(self, *args, **kwargs)
             added_methods_in_init = len(cls._methods) > num_methods
 
-            if type(self) == cls:
+            if type(self) is cls:
 
                 def make_stubs(module):
                     cls = type(module)
@@ -804,7 +804,7 @@ if _enabled:
 
         @property
         def original_name(self):
-            if type(self) == str(self._c._type().name()):
+            if type(self) is str(self._c._type().name()):
                 return ""
             return str(self._c._type().name())
 

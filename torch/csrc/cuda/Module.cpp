@@ -4,6 +4,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
+#include <c10/util/Exception.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -23,7 +24,6 @@
 #include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <torch/csrc/cuda/green_context.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #ifdef USE_NCCL
@@ -862,7 +862,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
     }
-    throw std::runtime_error("unreachable");
+    TORCH_CHECK(false, "unreachable");
   };
 
   for (const auto& traceInfo : snapshot.device_traces) {
@@ -1490,13 +1490,6 @@ static void registerCudaPluggableAllocator(PyObject* module) {
 
         addStorageDeleterFns(storages_to_add_deleters_to, delta);
       });
-}
-static void initGreenContext(PyObject* module) {
-  auto m = py::handle(module).cast<py::module>();
-  py::class_<GreenContext>(m, "GreenContext")
-      .def_static("create", &GreenContext::create)
-      .def("make_current", &GreenContext::makeCurrent)
-      .def("pop_current", &GreenContext::popCurrent);
 }
 
 static void bindGetDeviceProperties(PyObject* module) {
@@ -2222,7 +2215,6 @@ void initModule(PyObject* module) {
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
   initCudaMethodBindings(module);
-  initGreenContext(module);
 }
 
 } // namespace torch::cuda
