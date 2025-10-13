@@ -352,6 +352,14 @@ class TransformerEncoder(Module):
     ) -> None:
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
+        
+        # Validate num_layers parameter
+        if num_layers <= 0:
+            raise ValueError(
+                f"num_layers must be a positive integer, but got {num_layers}. "
+                f"TransformerEncoder requires at least 1 layer to function properly."
+            )
+        
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
@@ -438,6 +446,14 @@ class TransformerEncoder(Module):
 
         output = src
         convert_to_nested = False
+        
+        # Validate that layers list is not empty before accessing first layer
+        if not self.layers:
+            raise RuntimeError(
+                f"TransformerEncoder has no layers. Expected at least 1 layer, "
+                f"but got {len(self.layers)} layers. Please ensure num_layers > 0."
+            )
+        
         first_layer = self.layers[0]
         src_key_padding_mask_for_layers = src_key_padding_mask
         why_not_sparsity_fast_path = ""
