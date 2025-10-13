@@ -886,7 +886,7 @@ from user code:
             # Split the string into lines
             lines = long_string.split("\n")
             # More comprehensive pattern to capture LazyVariableTracker info
-            pattern = r"LazyVariableTracker\([^)]*\)"
+            pattern = r"LazyVariableTracker\((.*?)\)"
             # Find all lines containing the pattern
             result = [line for line in lines if re.search(pattern, line)]
             return result
@@ -895,11 +895,11 @@ from user code:
         all_messages = []
         for record in records:
             msg = munge_exc(record.getMessage(), skip=0)
+
             all_messages.append(msg)
 
         # Combine all messages to search through
         combined_msg = "\n".join(all_messages)
-
         all_lines = find_trace_bytecode_lines(combined_msg)
 
         # For now, just check that we found some lines
