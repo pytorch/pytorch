@@ -444,11 +444,11 @@ def skip_if_rocm_arch_multiprocess(arch: tuple[str, ...]):
     """Skips a test for given ROCm archs - multiprocess UTs"""
 
     def decorator(func):
-        prop = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
-        arch_match = prop in arch
         reason = None
-        if TEST_WITH_ROCM and arch_match:
-            reason = f"skip_if_rocm_arch_multiprocess: test skipped on {arch}"
+        if TEST_WITH_ROCM:
+            prop = torch.cuda.get_device_properties(0).gcnArchName.split(":")[0]
+            if prop in arch:
+                reason = f"skip_if_rocm_arch_multiprocess: test skipped on {arch}"
 
         return unittest.skipIf(reason is not None, reason)(func)
 
@@ -1432,7 +1432,7 @@ class MultiThreadedTestCase(TestCase):
                 logger.error("Caught exception: \n%s exiting thread %s", msg, rank)
                 error_msg += f"Thread {rank} exited with exception:\n{msg}\n"
             elif isinstance(exc, SystemExit):
-                if type(exc.code) == int and skip_code < 0:
+                if type(exc.code) is int and skip_code < 0:
                     skip_code = exc.code
 
         # check exceptions
