@@ -990,6 +990,8 @@ if HAS_CUDA_AND_TRITON:
             self.assertIsNone(self.get_manager())
 
         def test_sparsity(self):
+            # Sparsity is not supported in inductor, so should
+            # raise error
             def foo(view_6, buf31):
                 return aten._sparse_coo_tensor_with_dims_and_tensors(
                     1,
@@ -1003,13 +1005,11 @@ if HAS_CUDA_AND_TRITON:
                     pin_memory=None,
                 )
 
-            foo_opt = torch.compile(foo)
-
             view_6 = torch.zeros([1, 102397], dtype=torch.int64, device="cuda")
             buf31 = torch.rand([102397, 64], device="cuda")
 
-            for _ in range(3):
-                self.assertEqual(foo_opt(view_6, buf31), foo(view_6, buf31))
+            with self.assertRaises(torch._dynamo.exc.BackendCompilerFailed):
+                torch.compile(foo)(view_6, buf31)
 
         def test_accumulate_multiple_recordings(self):
             def foo(x):
