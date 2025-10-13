@@ -715,6 +715,42 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         out = compiled_fn(x, y)
         out.sum().backward()
 
+    def test_joint_custom_pass(self):
+        is_called = False
+
+        def joint_custom_pass(joint_gm: torch.fx.GraphModule, joint_inputs):
+            nonlocal is_called
+            is_called = True
+
+            self.assertTrue(isinstance(joint_gm, torch.fx.GraphModule))
+
+            self.assertTrue(isinstance(joint_inputs, tuple))
+            # first input is list of primals
+            self.assertTrue(isinstance(joint_inputs[0], list))
+            # second input is list of tangents
+            self.assertTrue(isinstance(joint_inputs[1], list))
+
+            return joint_gm
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        x = torch.randn(10, requires_grad=False)
+        compiled_fn = torch.compile(M(), backend="aot_eager")
+
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
+            _ = compiled_fn(x)
+        # x doesn't require grad, shouldn't trigger joint graph compiler
+        self.assertFalse(is_called)
+
+        y = torch.randn(10, requires_grad=True)
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
+            out = compiled_fn(y)
+        # y requires grad, should trigger joint graph compiler
+        self.assertTrue(is_called)
+        out.sum().backward()
+
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     @patch("torch._functorch.config.debug_assert", True)
@@ -910,7 +946,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 7|aten.view.default||l__self___fc1
 6|aten.t.default||l__self___fc1
 5|aten.view.default||l__self___fc1
-4|aten.view.default||
+4|aten.view.default||flatten
 2|aten.detach.default||l__self___relu1
 2|aten.detach.default||l__self___relu1
 2|aten.threshold_backward.default||l__self___relu1

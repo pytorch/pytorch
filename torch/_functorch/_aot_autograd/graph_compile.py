@@ -17,8 +17,9 @@ import operator
 import time
 import traceback
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import nullcontext
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
@@ -237,7 +238,21 @@ def sanitize_aot_config(input: AOTConfig) -> AOTConfig:
 def aot_stage2_compile(
     aot_state: AOTState,
     aot_graph_capture: AOTGraphCapture,
+    partition_fn: Callable,
+    fw_compiler: Callable,
+    bw_compiler: Optional[Callable] = None,
+    inference_compiler: Optional[Callable] = None,
 ) -> DispatchReturn:
+    if bw_compiler is None:
+        bw_compiler = fw_compiler
+    if inference_compiler is None:
+        inference_compiler = fw_compiler
+    # Update the AOTState with the provided compilers
+    aot_state.aot_config.partition_fn = partition_fn
+    aot_state.aot_config.fw_compiler = fw_compiler
+    aot_state.aot_config.bw_compiler = bw_compiler
+    aot_state.aot_config.inference_compiler = inference_compiler
+
     if aot_state.needs_autograd and not aot_state.aot_config.pre_dispatch:
         return aot_stage2_autograd(aot_state, aot_graph_capture)
     else:
@@ -290,7 +305,7 @@ def aot_stage2_inference(
                 "name": "torch._functorch.config",
                 "encoding": "string",
             },
-            payload_fn=lambda: torch._functorch.config.get_config_copy(),
+            payload_fn=lambda: torch._functorch.config.get_serializable_config_copy(),
         )
 
     disable_amp = torch._C._is_any_autocast_enabled()
@@ -316,21 +331,48 @@ def aot_stage2_inference(
                 tensorify_python_scalars(fw_module, fake_mode.shape_env, fake_mode)
             compiled_fw = compiler(fw_module, updated_flat_args)
 
-        if fakified_out_wrapper.needs_post_compile:
-            fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
-
-    make_runtime_safe(fw_metadata, maybe_subclass_meta)
-
     # However, RuntimeWrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
     # a result, we have to account for not boxed_call compilers as well.
     if not getattr(compiled_fw, "_boxed_call", False):
         compiled_fw = make_boxed_func(compiled_fw)
 
+    if fakified_out_wrapper.needs_post_compile:
+        fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
+
+    compiled_fw = EffectTokensWrapper().post_compile(
+        compiled_fw,
+        aot_config,
+        runtime_metadata=fw_metadata,
+    )
+
+    # Why do we need to pass in num_fw_outs_saved_for_bw?
+    # See Note: [Partitioner handling for Subclasses, Part 2]
+    compiled_fw = AOTDispatchSubclassWrapper(
+        trace_joint=False,
+        # TODO: once we use pre_compile this will be flat_fn at the top of this function
+        fw_only=None,
+        maybe_subclass_meta=maybe_subclass_meta,
+        num_fw_outs_saved_for_bw=None,
+    ).post_compile(
+        compiled_fw,
+        aot_config,  # not used
+        runtime_metadata=fw_metadata,
+    )
+
     # Create a wrapper to set up the rng functionalize and fakified out bits
     compiled_fw = functionalized_rng_wrapper.post_compile(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
+
+    compiled_fw = fakified_out_wrapper.post_compile(
+        compiled_fw,
+        aot_config,
+        runtime_metadata=fw_metadata,
+    )
+
+    make_runtime_safe(fw_metadata, maybe_subclass_meta)
+
     cache_info = aot_config.cache_info
 
     def should_save_cache():
@@ -367,35 +409,6 @@ def aot_stage2_inference(
             )
             compiled_fw = SerializableCompiledFunction(compiled_fw, lambda: entry)
 
-    compiled_fw = fakified_out_wrapper.post_compile(
-        compiled_fw,
-        aot_config,
-        runtime_metadata=fw_metadata,
-    )
-
-    compiled_fw = EffectTokensWrapper().post_compile(
-        compiled_fw,
-        aot_config,
-        runtime_metadata=fw_metadata,
-    )
-
-    # Why do we need to pass in num_fw_outs_saved_for_bw?
-    # See Note: [Partitioner handling for Subclasses, Part 2]
-    compiled_fw = AOTDispatchSubclassWrapper(
-        trace_joint=False,
-        # TODO: once we use pre_compile this will be flat_fn at the top of this function
-        fw_only=None,
-        maybe_subclass_meta=maybe_subclass_meta,
-        num_fw_outs_saved_for_bw=None,
-    ).post_compile(
-        compiled_fw,
-        aot_config,  # not used
-        runtime_metadata=fw_metadata,
-    )
-
-    if not getattr(compiled_fw, "_boxed_call", False):
-        compiled_fw = make_boxed_func(compiled_fw)
-
     compiled_fn = RuntimeWrapper(
         indices_of_inps_to_detach=[],
         trace_joint=False,
@@ -424,6 +437,7 @@ def collect_fw_donated_buffer_idxs(
     """
 
     storage_refs = set()
+
     for t in itertools.chain(fw_ins, user_fw_outs, bw_outs):
         # Only access storage if a tensor has storage (not sparse)
         if t is not None and isinstance(t, FakeTensor) and not is_sparse_any(t):
@@ -493,6 +507,7 @@ def collect_bw_donated_buffer_idxs(
         fw_ins,
         user_fw_outs,
         bw_outs,
+        # pyrefly: ignore  # bad-argument-type
         saved_tensors,
     )
 
@@ -1393,6 +1408,10 @@ def aot_stage2_autograd(
             if fake_mode is not None and fake_mode.shape_env is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
 
+            # apply joint_gm callback here
+            if callable(torch._functorch.config.joint_custom_pass):
+                fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
+
             static_lifetime_input_indices = fw_metadata.static_input_indices
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g,
@@ -1474,7 +1493,7 @@ def aot_stage2_autograd(
                     "name": "torch._functorch.config",
                     "encoding": "string",
                 },
-                payload_fn=lambda: torch._functorch.config.get_config_copy(),
+                payload_fn=lambda: torch._functorch.config.get_serializable_config_copy(),
             )
             aot_graphs_log.info(
                 "aot_config id: %s, fw_metadata=%s, inner_meta=%s",
@@ -1761,6 +1780,7 @@ def aot_stage2_autograd(
                     # (2408448, 1, 21504, 192). The solution mentioned will
                     # decide a stride of (802816, 1, 7168, 64) for this
                     # tensor which is wrong.
+                    # pyrefly: ignore  # bad-argument-type
                     placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
             compiled_bw_func = None

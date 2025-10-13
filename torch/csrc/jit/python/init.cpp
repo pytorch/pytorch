@@ -121,9 +121,6 @@
 #include <tuple>
 #include <utility>
 
-TORCH_MAKE_PYBIND_ENUM_FASTER(MobileOptimizerType)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10::SchemaArgType)
-
 namespace torch::jit {
 
 using c10::AliasInfo;
@@ -1256,11 +1253,6 @@ void initJITBindings(PyObject* module) {
           "expect_true",
           [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->expect_true(file, line);
-          })
-      .def(
-          "expect_size",
-          [](const c10::SymNode& a, const char* file, int64_t line) {
-            return a->expect_size(file, line);
           })
       .def(
           "guard_size_oblivious",

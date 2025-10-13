@@ -54,6 +54,7 @@ class ConvReLU1d(nnq.Conv1d):
             dilation=dilation,
             groups=groups,
             bias=bias,
+            # pyrefly: ignore  # bad-argument-type
             padding_mode=padding_mode,
             device=device,
             dtype=dtype,
