@@ -1531,14 +1531,14 @@ class OutputGraph(OutputGraphCommon):
             tmp_vars = []
             for constructor in reversed(index_to_bytecode_constructor.values()):
                 constructor(codegen)
-                var = (
+                var_name = (
                     self.new_var()
                 )  # keep alive any temp objects for the rest of the frame
-                codegen.store(var)
-                tmp_vars.append(var)
+                codegen.store(var_name)
+                tmp_vars.append(var_name)
 
-            for var in tmp_vars:
-                codegen.append_output(codegen.create_load(var))
+            for var_name in tmp_vars:
+                codegen.append_output(codegen.create_load(var_name))
 
             codegen.call_function(len(index_to_bytecode_constructor), False)
             codegen.pop_top()
