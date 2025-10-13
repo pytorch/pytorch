@@ -18,17 +18,6 @@ def checkpoint_wrapper(fn):
 
 
 class AnnotateTests(torch._dynamo.test_case.TestCase):
-    # TODO - should not need this because we should turn this on in Dynamo but
-    # for some reasons, test fail.
-    def setUp(self):
-        super().setUp()
-        self.cm = torch.fx.traceback.preserve_node_meta()
-        self.cm.__enter__()
-
-    def tearDown(self):
-        super().tearDown()
-        self.cm.__exit__(None, None, None)
-
     def get_custom_metadata(self, gm):
         def helper(gm):
             custom_metadata = []
