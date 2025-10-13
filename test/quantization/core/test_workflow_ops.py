@@ -921,8 +921,7 @@ class TestFakeQuantizeOps(TestCase):
                 Y_prime = torch._fake_quantize_learnable_per_channel_affine(
                     X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, grad_factor).to(device)
 
-                # dout = torch.rand(X_curr.shape, dtype=torch.float).to(device)
-                dout = torch.rand(X_curr.shape, dtype=X_curr.dtype).to(device)
+                dout = torch.rand(X_curr.shape, dtype=torch.float).to(device)
                 dX, dScale, dZeroPoint = _fake_quantize_learnable_per_channel_affine_grad_reference(
                     dout, X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, device)
 
