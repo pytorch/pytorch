@@ -499,7 +499,6 @@ class DTensorRedistributePlanner:
         for cur_state, nxt_state in itertools.pairwise(state_path):
             # find the mesh_dim that is different between cur_state and nxt_state
             if cur_state.placements != nxt_state.placements:
-                # skip the transition of device order permutation (no-op)
                 update_mesh_dim = -1
                 for mesh_dim, (cur_placement, nxt_placement) in enumerate(
                     zip(cur_state.placements, nxt_state.placements)
@@ -536,7 +535,7 @@ class DTensorRedistributePlanner:
         This would detect if there're mis-aligned/nested shardings between src/dst placements.
         E.g. Suppose the redistribution to perform is (Shard(0), Shard(0)) -> (Replicate(), Shard(0)),
         in this case Shard(0) -> Shard(0) for mesh dimension 1 actually needs resharding, because in
-        the former is a nested-sharding of a tensor already already sharded dimension 0, whereras
+        the former is a nested-sharding of a tensor already already sharded dimension 0, whereas
         the latter is the first sharding on tensor dimension 0.
         """
         # logical shape records the logic tensor shape on the mesh dimension
@@ -774,6 +773,7 @@ def redistribute_local_tensor(
                     raise RuntimeError(
                         f"redistribute from {current} to {target} not supported yet"
                     )
+
             elif target.is_shard():
                 # Case 2: target is Shard
                 target_placement = cast(Shard, target)
