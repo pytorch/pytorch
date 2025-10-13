@@ -67,7 +67,8 @@ Symbol InternedStrings::_symbol(const std::string& s) {
   if (it != string_to_sym_.end())
     return it->second;
 
-  TORCH_CHECK(s.find("::") != std::string::npos, "all symbols must have a namespace, <namespace>::<string>, but found: ", s);
+  auto pos = s.find("::");
+  TORCH_CHECK(pos != std::string::npos, "all symbols must have a namespace, <namespace>::<string>, but found: ", s);
   Symbol ns = _symbol("namespaces::" + s.substr(0, pos));
 
   Symbol sym(sym_to_info_.size());
