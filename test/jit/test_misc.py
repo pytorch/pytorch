@@ -433,6 +433,7 @@ class TestMisc(JitTestCase):
         self.assertTrue(ret.numel() == 1)
         self.assertTrue(len(ret.size()) == 1)
 
+    @unittest.skipIf(os.environ.get("PYTORCH_TEST_WITH_DYNAMO") == "1", "Not supported with TorchDynamo")
     def test_parse_ir_single_inf(self):
         ir = """
         graph():
@@ -444,6 +445,7 @@ class TestMisc(JitTestCase):
         ret = func()
         self.assertTrue(ret == float("inf"))
 
+    @unittest.skipIf(os.environ.get("PYTORCH_TEST_WITH_DYNAMO") == "1", "Not supported with TorchDynamo")
     def test_parse_ir_single_minus_inf(self):
         ir = """
         graph():
@@ -455,6 +457,7 @@ class TestMisc(JitTestCase):
         ret = func()
         self.assertTrue(ret == float("-inf"))
 
+    @unittest.skipIf(os.environ.get("PYTORCH_TEST_WITH_DYNAMO") == "1", "Not supported with TorchDynamo")
     def test_parse_ir_bool_true(self):
         ir = """
         graph():
@@ -466,6 +469,7 @@ class TestMisc(JitTestCase):
         ret = func()
         self.assertTrue(ret == True) # noqa: E712
 
+    @unittest.skipIf(os.environ.get("PYTORCH_TEST_WITH_DYNAMO") == "1", "Not supported with TorchDynamo")
     def test_parse_ir_bool_false(self):
         ir = """
         graph():
