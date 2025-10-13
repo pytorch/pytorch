@@ -260,10 +260,6 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   auto dScale = dScale_vec.sum(at::IntArrayRef(axis_for_reduction.data(), numElements));
   auto dZeroPoint = dZeroPoint_vec.sum(at::IntArrayRef(axis_for_reduction.data(), numElements));
 
-  at::Tensor dX_ =  is_bfloat16 ? dX.to(at::kBFloat16) : dX;
-  at::Tensor dScale_ = is_bfloat16 ? dScale.to(at::kBFloat16) : dScale;
-  at::Tensor dZeroPoint_ = is_bfloat16 ? dZeroPoint.to(at::kBFloat16) : dZeroPoint;
-
-  return std::make_tuple(dX_, dScale_, dZeroPoint_);
+  return std::make_tuple(dX, dScale, dZeroPoint);
 }
 } // namespace at::native

@@ -943,7 +943,7 @@ class TestFakeQuantizeOps(TestCase):
                 dScale_actual = scale_curr.to(device).grad.detach()
                 dZeroPoint_expected = dZeroPoint.to(device).detach()
                 dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
-                tolerance = 1e-2 if dtype == torch.bfloat16 else 1e-4
+                tolerance = 1e-2 if dtype is torch.bfloat16 else 1e-4
 
                 self.assertTrue(
                     torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
