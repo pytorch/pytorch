@@ -6725,6 +6725,7 @@ def scaled_grouped_mm(
     bias: Optional[Tensor] = None,
     offs: Optional[Tensor] = None,
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
+    contraction_dim: list[int] | tuple[int] = (),
     use_fast_accum: bool = False,
 ) -> Tensor:
     r"""
@@ -6744,6 +6745,7 @@ def scaled_grouped_mm(
         bias: optional bias term to be added to the output
         offs: optional offsets into the source tensors denoting group start indices
         output_dtype: dtype used for the output tensor
+        contraction_dim: describe which dimensions are :math:`K` in the matmul.
         use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
     """
 
@@ -6791,6 +6793,7 @@ def scaled_grouped_mm(
         offs,
         bias,
         output_dtype,
+        contraction_dim,
         use_fast_accum,
     )
 

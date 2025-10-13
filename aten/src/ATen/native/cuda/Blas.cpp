@@ -2819,6 +2819,7 @@ _scaled_grouped_mm_cuda_v2(
           const std::optional<Tensor>& offs,
           const std::optional<Tensor>& bias,
           const std::optional<c10::ScalarType> out_dtype,
+          IntArrayRef contraction_dim,
           bool use_fast_accum) {
   bool allowed_device = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true);
   TORCH_CHECK_VALUE(allowed_device, "torch._scaled_grouped_mm is only supported on CUDA devices with compute capability = [9.0, 10.0], or ROCm MI300+");
@@ -2832,7 +2833,16 @@ _scaled_grouped_mm_cuda_v2(
 
   // NOTE(slayton): For sub-1B formats want contraction_dim argument?
   if (!a_is_2d || !b_is_2d) {
-    TORCH_CHECK_VALUE(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
+    if (contraction_dim.size() > 0) {
+      const int dim_a = contraction_dim[0], dim_b = mat_b.size(contraction_dim[1]);
+      TORCH_CHECK_VALUE(mat_a.size(dim_a) == mat_b.size(dim_b),
+          "Contraction dimensions (", dim_a, ",", dim_b, ") of mat_a and mat_b must match, got: ", mat_a.size(dim_a), " and ",
+          mat_b.size(dim_b));
+      // Note: only (-1, -2) is currently supported
+      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Curently contraction dims must be (-1, -2) only");
+    } else {
+      TORCH_CHECK_VALUE(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
+    }
   }
   TORCH_CHECK_VALUE(
     mat_a.size(-1) % 16 == 0,
