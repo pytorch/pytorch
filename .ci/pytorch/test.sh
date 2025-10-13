@@ -486,12 +486,33 @@ test_inductor_aoti() {
 }
 
 test_inductor_aoti_cross_compile_for_windows() {
-  apt-get update
-  apt-get install -y g++-mingw-w64-x86-64-win32
+  sudo apt-get update
+  sudo apt-get install -y g++-mingw-w64-x86-64-win32
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR"
+
+  # Download Windows torch libs if WIN_TORCH_LIBS_ARTIFACT is set
+  if [[ -n "$WIN_TORCH_LIBS_ARTIFACT" ]]; then
+    echo "Downloading Windows torch libs from artifact: $WIN_TORCH_LIBS_ARTIFACT"
+    WIN_TORCH_LIBS_DIR=/tmp/win-torch-libs
+    mkdir -p "$WIN_TORCH_LIBS_DIR"
+
+    # Download the artifact (this assumes it's available in S3)
+    aws s3 cp "s3://gha-artifacts/${GITHUB_REPOSITORY}/${GITHUB_RUN_ID}/artifacts/${WIN_TORCH_LIBS_ARTIFACT}/" "$WIN_TORCH_LIBS_DIR" --recursive || echo "Failed to download Windows torch libs"
+
+    # Set WINDOWS_CUDA_HOME environment variable
+    export WINDOWS_CUDA_HOME="$WIN_TORCH_LIBS_DIR"
+
+    echo "WINDOWS_CUDA_HOME is set to: $WINDOWS_CUDA_HOME"
+    echo "Contents of Windows torch libs:"
+    ls -lah "$WIN_TORCH_LIBS_DIR/lib/" || true
+    ls -lah "$WIN_TORCH_LIBS_DIR/lib/x64/" || true
+
+    python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR" --win-torch-lib-dir "$WIN_TORCH_LIBS_DIR"
+  else
+    python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR"
+  fi
 }
 
 test_inductor_cpp_wrapper_shard() {

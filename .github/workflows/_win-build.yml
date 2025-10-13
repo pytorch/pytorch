@@ -168,6 +168,52 @@ jobs:
         run: |
           .ci/pytorch/win-build.sh
 
+      # Collect Windows torch libs and CUDA libs for cross-compilation
+      - name: Collect Windows torch libs for cross-compilation
+        if: steps.build.outcome != 'skipped' && inputs.cuda-version != 'cpu'
+        shell: bash
+        run: |
+          set -ex
+
+          # Create directory structure
+          mkdir -p /c/${{ github.run_id }}/win-torch-libs/lib
+          mkdir -p /c/${{ github.run_id }}/win-torch-libs/lib/x64
+
+          # Copy PyTorch libs from build/lib
+          cp build/lib/torch.lib /c/${{ github.run_id }}/win-torch-libs/lib/
+          cp build/lib/torch_cuda.lib /c/${{ github.run_id }}/win-torch-libs/lib/
+          cp build/lib/torch_cpu.lib /c/${{ github.run_id }}/win-torch-libs/lib/
+          cp build/lib/c10.lib /c/${{ github.run_id }}/win-torch-libs/lib/
+          cp build/lib/c10_cuda.lib /c/${{ github.run_id }}/win-torch-libs/lib/
+
+          # Copy CUDA libs
+          CUDA_VERSION_MAJOR_MINOR=$(echo "${{ inputs.cuda-version }}" | sed 's/\.//')
+          CUDA_PATH="/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ inputs.cuda-version }}"
+
+          if [ -f "${CUDA_PATH}/lib/x64/cuda.lib" ]; then
+            cp "${CUDA_PATH}/lib/x64/cuda.lib" /c/${{ github.run_id }}/win-torch-libs/lib/x64/
+          fi
+
+          if [ -f "${CUDA_PATH}/lib/x64/cudart.lib" ]; then
+            cp "${CUDA_PATH}/lib/x64/cudart.lib" /c/${{ github.run_id }}/win-torch-libs/lib/x64/
+          fi
+
+          # List collected files
+          echo "Collected Windows torch libs:"
+          ls -lah /c/${{ github.run_id }}/win-torch-libs/lib/
+          echo "Collected CUDA libs:"
+          ls -lah /c/${{ github.run_id }}/win-torch-libs/lib/x64/
+
+      # Upload Windows torch libs for cross-compilation
+      - name: Upload Windows torch libs to S3
+        if: steps.build.outcome != 'skipped' && inputs.cuda-version != 'cpu'
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          retention-days: 14
+          if-no-files-found: error
+          name: ${{ inputs.build-environment }}-win-torch-libs
+          path: C:\${{ github.run_id }}\win-torch-libs
+
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
         if: steps.build.outcome != 'skipped'
