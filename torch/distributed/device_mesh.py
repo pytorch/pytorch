@@ -1169,7 +1169,7 @@ else:
             mesh_dim_names: tuple[str, ...],
             backend_override: Optional[
                 dict[
-                    Union[int, str],
+                    str,
                     Union[str, C10dBackend.Options, tuple[str, C10dBackend.Options]],
                 ]
             ] = None,
@@ -1211,7 +1211,9 @@ else:
             if backend_override is not None:
                 backend_override_tuple = tuple(
                     _normalize_backend_override(
-                        backend_override, len(mesh_sizes), mesh_dim_names
+                        backend_override,  # type: ignore[arg-type]
+                        len(mesh_sizes),
+                        mesh_dim_names,
                     )
                 )
             else:
