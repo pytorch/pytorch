@@ -930,7 +930,7 @@ class ParameterDict(Module):
             key (str): key to get from the ParameterDict
             default (Parameter, optional): value to return if key not present
         """
-        return self[key] if key in self else default
+        return self[key] if key in self else default  # noqa: SIM401
 
     def fromkeys(
         self, keys: Iterable[str], default: Optional[Any] = None
