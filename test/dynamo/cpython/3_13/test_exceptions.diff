@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_exceptions.py b/test/dynamo/cpython/3_13/test_exceptions.py
-index c91f6662948..19bba620a8f 100644
+index c91f6662948..3a62dec411c 100644
 --- a/test/dynamo/cpython/3_13/test_exceptions.py
 +++ b/test/dynamo/cpython/3_13/test_exceptions.py
 @@ -1,3 +1,59 @@
@@ -78,7 +78,7 @@ index c91f6662948..19bba620a8f 100644
 -        class BadException(Exception):
 -            def __init__(self_):
 -                raise RuntimeError("can't instantiate BadException")
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class BadException(Exception):
 +                def __init__(self_):
 +                    raise RuntimeError("can't instantiate BadException")
@@ -96,7 +96,7 @@ index c91f6662948..19bba620a8f 100644
  
 -        class MyException(Exception):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class MyException(Exception):
 +                pass
  
@@ -108,7 +108,7 @@ index c91f6662948..19bba620a8f 100644
  
 -        class MyException(OSError):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class MyException(OSError):
 +                pass
  
@@ -122,7 +122,7 @@ index c91f6662948..19bba620a8f 100644
 -            def __init__(self, fancy_arg):
 -                BaseException.__init__(self)
 -                self.fancy_arg = fancy_arg
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class DerivedException(BaseException):
 +                def __init__(self, fancy_arg):
 +                    BaseException.__init__(self)
@@ -139,7 +139,7 @@ index c91f6662948..19bba620a8f 100644
 -                self.obj = obj
 -        class MyObj:
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class MyException(Exception):
 +                def __init__(self, obj):
 +                    self.obj = obj
@@ -157,7 +157,7 @@ index c91f6662948..19bba620a8f 100644
 -                return self
 -            def __exit__ (self, exc_type, exc_value, exc_tb):
 -                return True
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class Context:
 +                def __enter__(self):
 +                    return self
@@ -175,7 +175,7 @@ index c91f6662948..19bba620a8f 100644
 -                self.obj = obj
 -        class MyObj:
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class MyException(Exception):
 +                def __init__(self, obj):
 +                    self.obj = obj
@@ -192,7 +192,7 @@ index c91f6662948..19bba620a8f 100644
 -            def __del__(self):
 -                nonlocal e
 -                e = sys.exception()
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class MyObject:
 +                def __del__(self):
 +                    nonlocal e
@@ -210,7 +210,7 @@ index c91f6662948..19bba620a8f 100644
 -            pass
 -        class C(Exception):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class A(Exception):
 +                pass
 +            class B(Exception):
@@ -230,7 +230,7 @@ index c91f6662948..19bba620a8f 100644
 -            pass
 -        class C(Exception):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class A(Exception):
 +                pass
 +            class B(Exception):
@@ -254,7 +254,7 @@ index c91f6662948..19bba620a8f 100644
 -            pass
 -        class E(Exception):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class A(Exception):
 +                pass
 +            class B(Exception):
@@ -277,7 +277,7 @@ index c91f6662948..19bba620a8f 100644
 -                raise ValueError()
 -        class MyException(Exception, metaclass=Meta):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class Meta(type):
 +                def __subclasscheck__(cls, subclass):
 +                    raise ValueError()
@@ -292,7 +292,7 @@ index c91f6662948..19bba620a8f 100644
          # test with explicit base tuple
 -        class C(object):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class C(object):
 +                pass
          error4 = _testcapi.make_exception_with_doc("_testcapi.error4", doc4,
@@ -304,7 +304,7 @@ index c91f6662948..19bba620a8f 100644
          from _testcapi import raise_memoryerror
 -        class C:
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class C:
 +                pass
          wr = None
@@ -316,7 +316,7 @@ index c91f6662948..19bba620a8f 100644
          # Same test as above, but with "recursion exceeded" errors
 -        class C:
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class C:
 +                pass
          wr = None
@@ -331,7 +331,7 @@ index c91f6662948..19bba620a8f 100644
 -                exc = ValueError("del is broken")
 -                # The following line is included in the traceback report:
 -                raise exc
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class BrokenDel:
 +                def __del__(self):
 +                    exc = ValueError("del is broken")
@@ -346,7 +346,7 @@ index c91f6662948..19bba620a8f 100644
          #Issue #25612
 -        class MainError(Exception):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class MainError(Exception):
 +                pass
  
@@ -363,7 +363,7 @@ index c91f6662948..19bba620a8f 100644
  
 -        class TestException(MemoryError):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class TestException(MemoryError):
 +                pass
  
@@ -384,7 +384,7 @@ index c91f6662948..19bba620a8f 100644
          def f():
 -            class TestClass:
 -                TestClass
-+            with torch._dynamo.set_fullgraph(fullgraph=False):
++            with torch._dynamo.error_on_graph_break(False):
 +                class TestClass:
 +                    TestClass
  
@@ -404,7 +404,7 @@ index c91f6662948..19bba620a8f 100644
      def test_getattr_has_name_and_obj(self):
 -        class A:
 -            blech = None
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class A:
 +                blech = None
  
@@ -417,7 +417,7 @@ index c91f6662948..19bba620a8f 100644
 -        class A:
 -            def blech(self):
 -                return
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class A:
 +                def blech(self):
 +                    return
@@ -457,7 +457,7 @@ index c91f6662948..19bba620a8f 100644
      def test_subclass(self):
 -        class MySyntaxError(SyntaxError):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class MySyntaxError(SyntaxError):
 +                pass
  
@@ -498,7 +498,7 @@ index c91f6662948..19bba620a8f 100644
 -                return self
 -            def __exit__(self, *args):
 -                pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class Noop:
 +                def __enter__(self):
 +                    return self
@@ -516,7 +516,7 @@ index c91f6662948..19bba620a8f 100644
 -                return self
 -            def __exit__(self, *args):
 -                raise ValueError
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class ExitFails:
 +                def __enter__(self):
 +                    return self

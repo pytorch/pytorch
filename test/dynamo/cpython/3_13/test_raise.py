@@ -175,7 +175,7 @@ class TestRaise(__TestCase):
         self.assertRaises(StopIteration, lambda: next(g))
 
     def test_erroneous_exception(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyException(Exception):
                 def __init__(self):
                     raise RuntimeError()
@@ -189,7 +189,7 @@ class TestRaise(__TestCase):
 
     def test_new_returns_invalid_instance(self):
         # See issue #11627.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyException(Exception):
                 def __new__(cls, *args):
                     return object()
@@ -243,7 +243,7 @@ class TestCause(__TestCase):
             self.fail("No exception raised")
 
     def test_class_cause_nonexception_result(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class ConstructsNone(BaseException):
                 @classmethod
                 def __new__(*args, **kwargs):
@@ -267,7 +267,7 @@ class TestCause(__TestCase):
             self.fail("No exception raised")
 
     def test_erroneous_cause(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyException(Exception):
                 def __init__(self):
                     raise RuntimeError()
@@ -451,7 +451,7 @@ class TestContext(__TestCase):
             self.fail("No exception raised")
 
     def test_context_manager(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class ContextManager:
                 def __enter__(self):
                     pass
@@ -531,7 +531,7 @@ class TestContext(__TestCase):
         import gc
         # A re-raised exception in a __del__ caused the __context__
         # to be cleared
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class C:
                 def __del__(self):
                     try:
