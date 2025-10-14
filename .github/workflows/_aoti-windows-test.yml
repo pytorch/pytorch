@@ -93,8 +93,4 @@ jobs:
           USE_CUDA: 1
         run: |
           # Run Windows load tests with downloaded packages
-          WIN_TORCH_LIB_ARG=""
-          if [ -n "${{ inputs.win-torch-lib-dir }}" ]; then
-            WIN_TORCH_LIB_ARG="--win-torch-lib-dir ${{ inputs.win-torch-lib-dir }}"
-          fi
-          python test/inductor/test_aoti_cross_compile_windows.py -k load --package-dir ${{ inputs.package-dir }} $WIN_TORCH_LIB_ARG
+          python test/inductor/test_aoti_cross_compile_windows.py -k load --package-dir "${{ inputs.package-dir }}"

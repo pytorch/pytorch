@@ -54,6 +54,7 @@ jobs:
       build-environment: win-vs2022-cuda12.8-py3
       cuda-version: "12.8"
       runner: "${{ needs.get-default-label-prefix.outputs.label-type }}windows.4xlarge.nonephemeral"
+      upload-win-torch-libs-for-cross-compile: true
     secrets: inherit
 
   # Custom test job for cross-compilation

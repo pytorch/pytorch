@@ -58,9 +58,9 @@ class WindowsCrossCompilationTestFramework:
         return cls._base_path
 
     @classmethod
-    def set_base_path(cls, path: Optional[Path] = None) -> None:
+    def set_base_path(cls, path: Optional[Path | str] = None) -> None:
         """Set the base path for package files."""
-        cls._base_path = path
+        cls._base_path = Path(path) if path else None
 
     @classmethod
     def set_win_torch_libs_path(cls, path: Optional[str] = None) -> None:
@@ -375,15 +375,14 @@ if __name__ == "__main__":
             test_file = package_path / ".test_write"
             test_file.touch()
             test_file.unlink()
-            WindowsCrossCompilationTestFramework.set_base_path(package_dir)
+            WindowsCrossCompilationTestFramework.set_base_path(package_path)
         except Exception:
             print("Error: --package-dir requires a valid directory path")
             sys.exit(1)
 
-    # Set Windows torch libs path if provided
-    if win_torch_lib_dir is None:
-        raise RuntimeError("Windows torch libs path not set")
-    WindowsCrossCompilationTestFramework.set_win_torch_libs_path(win_torch_lib_dir)
+    # Set Windows torch libs path if provided (only needed for compile tests)
+    if win_torch_lib_dir:
+        WindowsCrossCompilationTestFramework.set_win_torch_libs_path(win_torch_lib_dir)
 
     # Update sys.argv to remove our custom arguments
     sys.argv = filtered_argv

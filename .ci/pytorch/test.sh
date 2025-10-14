@@ -492,14 +492,17 @@ test_inductor_aoti_cross_compile_for_windows() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  # Download Windows torch libs if WIN_TORCH_LIBS_ARTIFACT is set
+  # Check if Windows torch libs artifact was downloaded by GitHub Actions
   if [[ -n "$WIN_TORCH_LIBS_ARTIFACT" ]]; then
-    echo "Downloading Windows torch libs from artifact: $WIN_TORCH_LIBS_ARTIFACT"
-    WIN_TORCH_LIBS_DIR=/tmp/win-torch-libs
-    mkdir -p "$WIN_TORCH_LIBS_DIR"
+    echo "Using Windows torch libs from artifact: $WIN_TORCH_LIBS_ARTIFACT"
+    # The artifact is downloaded to win-torch-libs in the workspace by GitHub Actions
+    WIN_TORCH_LIBS_DIR="$(pwd)/win-torch-libs"
 
-    # Download the artifact (this assumes it's available in S3)
-    aws s3 cp "s3://gha-artifacts/${GITHUB_REPOSITORY}/${GITHUB_RUN_ID}/artifacts/${WIN_TORCH_LIBS_ARTIFACT}/" "$WIN_TORCH_LIBS_DIR" --recursive || echo "Failed to download Windows torch libs"
+    if [[ ! -d "$WIN_TORCH_LIBS_DIR" ]]; then
+      echo "ERROR: Windows torch libs directory not found at $WIN_TORCH_LIBS_DIR"
+      echo "The artifact should have been downloaded by GitHub Actions before running the docker container"
+      exit 1
+    fi
 
     # Set WINDOWS_CUDA_HOME environment variable
     export WINDOWS_CUDA_HOME="$WIN_TORCH_LIBS_DIR"

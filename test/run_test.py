@@ -394,6 +394,8 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
+# Cross-compilation tests require special setup and should only run in their dedicated workflow
+WIN_CROSS_COMPILE_TESTS = ["inductor/test_aoti_cross_compile_windows"]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
 AOT_DISPATCH_TESTS = [
@@ -1655,6 +1657,11 @@ def get_selected_tests(options) -> list[str]:
 
     if options.exclude_quantization_tests:
         options.exclude.extend(QUANTIZATION_TESTS)
+
+    # Exclude cross-compilation tests by default - they require special setup (MinGW, Windows libs)
+    # and should only run in their dedicated CI workflow
+    if not options.run_WIN_CROSS_COMPILE_TESTS:
+        options.exclude.extend(WIN_CROSS_COMPILE_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:

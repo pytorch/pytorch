@@ -50,6 +50,13 @@ on:
         default: "windows.4xlarge.nonephemeral"
         description: |
           Label of the runner this job should run on.
+      upload-win-torch-libs-for-cross-compile:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          If set, collect and upload Windows torch libs and CUDA libs for cross-compilation.
+          This is only needed for AOTI cross-compilation workflows.
 
     outputs:
       test-matrix:
@@ -170,7 +177,7 @@ jobs:
 
       # Collect Windows torch libs and CUDA libs for cross-compilation
       - name: Collect Windows torch libs for cross-compilation
-        if: steps.build.outcome != 'skipped' && inputs.cuda-version != 'cpu'
+        if: steps.build.outcome != 'skipped' && inputs.cuda-version != 'cpu' && inputs.upload-win-torch-libs-for-cross-compile
         shell: bash
         run: |
           set -ex
@@ -187,7 +194,6 @@ jobs:
           cp build/lib/c10_cuda.lib /c/${{ github.run_id }}/win-torch-libs/lib/
 
           # Copy CUDA libs
-          CUDA_VERSION_MAJOR_MINOR=$(echo "${{ inputs.cuda-version }}" | sed 's/\.//')
           CUDA_PATH="/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v${{ inputs.cuda-version }}"
 
           if [ -f "${CUDA_PATH}/lib/x64/cuda.lib" ]; then
@@ -206,7 +212,7 @@ jobs:
 
       # Upload Windows torch libs for cross-compilation
       - name: Upload Windows torch libs to S3
-        if: steps.build.outcome != 'skipped' && inputs.cuda-version != 'cpu'
+        if: steps.build.outcome != 'skipped' && inputs.cuda-version != 'cpu' && inputs.upload-win-torch-libs-for-cross-compile
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         with:
           retention-days: 14
@@ -216,7 +222,7 @@ jobs:
 
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
-        if: steps.build.outcome != 'skipped'
+        if: steps.build.outcome != 'skipped' && inputs.upload-win-torch-libs-for-cross-compile
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
         with:
           retention-days: 14

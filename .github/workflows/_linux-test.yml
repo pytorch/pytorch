@@ -224,6 +224,13 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
 
+      - name: Download Windows torch libs for cross-compilation
+        if: matrix.win_torch_libs_artifact != ''
+        uses: seemethere/download-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          name: ${{ matrix.win_torch_libs_artifact }}
+          path: win-torch-libs
+
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
