@@ -429,7 +429,7 @@ class LocalBufferContext:
         `local_buf`. This helps the fused loops to work on smaller-sized local buffers
         for better data locality.
 
-        The the data access of `local_buf` is assumed to be contiguous with the
+        The data access of `local_buf` is assumed to be contiguous with the
         same order as the `global_buf`.
         """
         assert len(nodes) > 0
