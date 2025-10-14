@@ -1229,7 +1229,9 @@ def forward(self, primals, tangents):
     t = torch.ops.aten.t.default(primals_1);  primals_1 = None
     addmm = torch.ops.aten.addmm.default(primals_2, primals_5, t);  primals_2 = None
     relu = torch.ops.aten.relu.default(addmm);  addmm = None
-    detach_3 = torch.ops.aten.detach.default(relu)
+    detach_9 = torch.ops.aten.detach.default(relu)
+    detach_10 = torch.ops.aten.detach.default(detach_9);  detach_9 = None
+    detach_11 = torch.ops.aten.detach.default(detach_10);  detach_10 = None
     t_1 = torch.ops.aten.t.default(primals_3);  primals_3 = None
     addmm_1 = torch.ops.aten.addmm.default(primals_4, relu, t_1);  primals_4 = None
     t_2 = torch.ops.aten.t.default(t_1);  t_1 = None
@@ -1240,8 +1242,9 @@ def forward(self, primals, tangents):
     sum_1 = torch.ops.aten.sum.dim_IntList(tangents_1, [0], True);  tangents_1 = None
     view = torch.ops.aten.view.default(sum_1, [128]);  sum_1 = None
     t_5 = torch.ops.aten.t.default(t_4);  t_4 = None
-    detach_6 = torch.ops.aten.detach.default(detach_3);  detach_3 = None
-    threshold_backward = torch.ops.aten.threshold_backward.default(mm, detach_6, 0);  mm = detach_6 = None
+    detach_18 = torch.ops.aten.detach.default(detach_11);  detach_11 = None
+    detach_19 = torch.ops.aten.detach.default(detach_18);  detach_18 = None
+    threshold_backward = torch.ops.aten.threshold_backward.default(mm, detach_19, 0);  mm = detach_19 = None
     t_6 = torch.ops.aten.t.default(t);  t = None
     mm_2 = torch.ops.aten.mm.default(threshold_backward, t_6);  t_6 = None
     t_7 = torch.ops.aten.t.default(threshold_backward)
@@ -10299,9 +10302,13 @@ graph():
     %x : [num_users=2] = placeholder[target=x]
     %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
+    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach,), kwargs = {})
+    %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
     %clone : [num_users=1] = call_function[target=torch.ops.aten.clone.default](args = (%c_lifted_tensor_0,), kwargs = {})
-    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_1), kwargs = {})
+    %detach_3 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%clone,), kwargs = {})
+    %detach_4 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_3,), kwargs = {})
+    %detach_5 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_4,), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach_2, %detach_5), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
     return (mul_1,)""",
