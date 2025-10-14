@@ -1,5 +1,8 @@
 # mypy: ignore-errors
 
+from torch._dynamo.exc import InternalTorchDynamoError
+
+
 """
 Function-related variable tracking classes for Dynamo's symbolic execution.
 
@@ -320,7 +323,8 @@ def fn_var_getattr(tx, fn, source, name):
         # so we can safely assume that this attribute is absent
         raise_observed_exception(AttributeError, tx)
 
-    # special handling for __dict__ - return fn's __dict__, but do not allow mutations
+    # Special handling for __dict__ - return fn's __dict__, but do not allow mutations.
+    # This should be safe because modifications to __dict__ result in graph breaks.
     if name == "__dict__":
         return variables.ConstDictVariable(fn.__dict__, dict, source=source)
 
@@ -350,11 +354,7 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
     ) -> VariableTracker:
-        result = False
-        try:
-            result = hasattr(self.get_function(), name)
-        except NotImplementedError:
-            pass
+        result = hasattr(self.get_function(), name)
         return variables.ConstantVariable.create(result)
 
     def inspect_parameter_names(self):
@@ -569,6 +569,17 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
             fn = fn_var.fn
             return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
+        elif (
+            self.fn is torch._dynamo.polyfills.functools._torchdynamo_dict_keys
+            and len(args) == 1
+            and isinstance(args[0], NestedUserFunctionVariable)
+        ):
+            # Hacky way to iterate through __dict__ keys within Dynamo - we guarantee that
+            # __dict__ won't be modified as we iterate through.
+            generic_dict_keys = args[0].get_generic_dict_keys(tx)
+            return variables.ListVariable(
+                [ConstantVariable.create(key) for key in generic_dict_keys]
+            )
 
         if self.is_constant:
             return invoke_and_store_as_constant(
@@ -1236,6 +1247,10 @@ def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kw
     )
 
 
+def _dummy_fn_for_nested_user_function_variable(*args, **kwargs):
+    raise InternalTorchDynamoError("This function should never be called")
+
+
 class NestedUserFunctionVariable(BaseUserFunctionVariable, UserDefinedObjectVariable):
     _nonvar_fields = {
         "f_globals",
@@ -1254,7 +1269,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable, UserDefinedObjectVari
         annotations,
         closure,
     ) -> None:
-        UserDefinedObjectVariable.__init__(self, lambda: None)
+        # Hack: UserDefinedObjectVariable requires an example_value, but this is not (yet)
+        # constructible in general (e.g. we may not have an example closure).
+        # So we pass a dummy function to UserDefinedObjectVariable that represents what a
+        # a function should look like.
+        UserDefinedObjectVariable.__init__(
+            self, _dummy_fn_for_nested_user_function_variable
+        )
         assert isinstance(fn_name.as_python_constant(), str)
         assert isinstance(code.as_python_constant(), types.CodeType)
         assert isinstance(f_globals, dict)
@@ -1384,7 +1405,6 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
         kwargs.pop("kwdefaults", None)
         kwargs.pop("annotations", None)
         kwargs.pop("closure", None)
-        kwargs.pop("wrapped_fn", None)
         super().__init__(
             wrapped.fn_name,
             wrapped.code,
@@ -1393,7 +1413,6 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
             wrapped.kwdefaults,
             wrapped.annotations,
             wrapped.closure,
-            wrapped.wrapped_fn,
         )
         self.wrapped = wrapped
         self.context = context

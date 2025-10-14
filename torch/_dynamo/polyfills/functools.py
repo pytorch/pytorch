@@ -1,10 +1,13 @@
+from torch._dynamo.exc import InternalTorchDynamoError
+
+
 """
 Python polyfills for functools
 """
 
 import functools
 from collections.abc import Iterable
-from typing import Callable, TypeVar
+from typing import Any, Callable, TypeVar
 
 import torch
 
@@ -49,6 +52,17 @@ def reduce(
     return value
 
 
+# Dynamo has special handling for this function
+def _torchdynamo_dict_keys(obj: Any) -> list[Any]:
+    if not torch.compiler.is_compiling():
+        raise InternalTorchDynamoError(
+            "_torchdynamo_dict_keys should only be traced - never run"
+        )
+    # NOTE: for functions defined within the compiled region (NestedUserFunctionVariable), Dynamo will directly
+    # extract the keys list of the object without actually tracing this function below.
+    return list(obj.__dict__.keys())
+
+
 # Reference: https://github.com/python/cpython/blob/56072f9c050b8dd960bb5630eb924eb02a889f9b/Lib/functools.py#L35
 # NOTE: DOES NOT support updated != functools.WRAPPER_UPDATES
 # NOTE: do not add to __all__ since we do not use substitute_in_graph (dynamo does some additional checks)
@@ -69,6 +83,11 @@ def update_wrapper(
         torch._dynamo.graph_break(
             "functools.update_wrapper/wraps does not support `updated` != functools.WRAPPER_UPDATES, i.e. ('__dict__',)"
         )
-    for attr in wrapped.__dict__.keys():
+    dict_keys = (
+        _torchdynamo_dict_keys(wrapped)
+        if torch.compiler.is_compiling()
+        else list(wrapper.__dict__.keys())
+    )
+    for attr in dict_keys:
         setattr(wrapper, attr, getattr(wrapped, attr))
     return wrapper
