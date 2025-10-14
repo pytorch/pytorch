@@ -9,7 +9,6 @@ import torch.fx.traceback as fx_traceback
 from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
-from torch._guards import tracing, TracingContext
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import distribute_tensor, Partial, Replicate, Shard
 from torch.distributed.tensor._api import DTensor
@@ -100,9 +99,9 @@ def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
     with torch._dynamo.config.patch(install_free_tensors=True):
         # TODO: switch to use the official graph_capture API once it is ready
         gm = _dynamo_graph_capture_for_export(model)(inputs)
-        fake_mode = gm.meta.get("fake_mode", None)
-    with tracing(TracingContext(fake_mode)):
-        return aot_export_joint_with_descriptors_alone(gm, inputs)
+        # fake_mode = gm.meta.get("fake_mode", None)
+    # with tracing(TracingContext(fake_mode)):
+    return aot_export_joint_with_descriptors_alone(gm, inputs)
 
 
 def aot_export_joint_with_descriptors_alone(model, inputs):
@@ -375,6 +374,44 @@ class DTensorExportTest(TestCase):
             )
         output_gm = gm(x_dtensor, y_dtensor, z_dtensor)
         self.assertEqual(output, output_gm)
+
+    def test_graph_export_state_dict(self):
+        # TODO: move this into torch.export
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.randn(2, 2))
+                self.unused_p2 = torch.nn.Parameter(torch.randn(2, 2))
+                self.register_buffer("b1", torch.randn(2, 2))
+                self.register_buffer("unused_b2", torch.randn(2, 2))
+
+                self.constant1 = torch.randn(2, 2)
+                self.unused_constant1 = torch.randn(2, 2)
+
+            def forward(self, x):
+                constant2 = torch.tensor(1.0)
+                return x + constant2 + self.p1 + self.b1 + self.constant1
+
+        mod = M()
+        inp = torch.randn(2, 2)
+
+        # from torch._export import aot_export_partitioned_graphs, aot_export_partitioned_graphs_v2
+        from torch._export import aot_export_partitioned_graphs_v2
+
+        # jm = aot_export_partitioned_graphs(mod, args=(inp,), transforms=[])
+        exporter = aot_export_partitioned_graphs_v2(
+            mod, args=(inp,), transforms=[], use_dynamo=True
+        )
+        print(exporter.joint_graph_module)
+
+        opt_mod = exporter.compile()
+        print(opt_mod(inp))
+
+        for param_a, param_b in zip(mod.parameters(), opt_mod.parameters()):
+            self.assertTrue(torch.allclose(param_a, param_b))
+
+        for buffer_a, buffer_b in zip(mod.buffers(), opt_mod.buffers()):
+            self.assertTrue(torch.allclose(buffer_a, buffer_b))
 
 
 instantiate_parametrized_tests(DTensorExportTest)

@@ -50,6 +50,14 @@ from .wrappers import _wrap_submodules
 from .utils import _materialize_cpp_cia_ops
 from . import config
 
+import contextlib
+import operator
+
+import torch
+
+
+
+
 if TYPE_CHECKING:
     from torch._C._aoti import AOTIModelContainerRunner
 
@@ -186,3 +194,107 @@ def aot_load(so_path: str, device: str) -> Callable:
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return optimized
+
+
+class ModuleWrapper(torch.nn.Module):
+    """
+    Similar to OptimizedModule in eval_frame.py so that users can find the
+    parameters and buffers of the original module.
+    """
+    def __init__(self, orig_mod, dynamo_gm, jd, optimized_callable):
+        super().__init__()
+        self._orig_mod = orig_mod
+        self.optimized_callable = optimized_callable
+        self.jd = jd
+        self.dynamo_gm = dynamo_gm
+        params_and_buffers = []
+        for name in self.jd.params_spec + self.jd.buffers_spec:
+            params_and_buffers.append(getattr(dynamo_gm, name))
+        self.params_and_buffers = tuple(params_and_buffers)
+
+    def __call__(self, *args, **kwargs):
+        # get the params and buffers from the dynamo_gm because that's the input
+        # to the aot_export_joint_with_descriptors
+        return self.optimized_callable(*self.params_and_buffers, *args, **kwargs)
+
+    # Passthrough for all the methods that make the returned module have same
+    # behavior as the original module.
+    def __getattr__(self, name: str) -> Any:
+        if name == "_orig_mod":
+            return self._modules["_orig_mod"]
+        return getattr(self._orig_mod, name)
+
+
+class AotTrainerExport:
+
+    def __init__(self, use_dynamo: bool = False):
+        self.orig_mod = None
+        self.use_dynamo = use_dynamo
+        self.optimized_callable = None
+
+    def generate_joint_graph(self, module: torch.nn.Module, *, args, kwargs):
+        self.orig_mod = module
+        from torch._functorch.aot_autograd import (
+            aot_export_joint_with_descriptors,
+            JointWithDescriptors,
+        )
+        kwargs = kwargs or {}
+
+        # EXPORT_USE_DYNAMO=0 to disable dynamo
+        use_dynamo = self.use_dynamo and os.getenv("EXPORT_USE_DYNAMO", "1") == "1"
+
+        if use_dynamo:
+            # Remove this once install_free_tensors is on by default
+            with torch._dynamo.config.patch(install_free_tensors=True):
+                assert isinstance(module, torch.nn.Module)
+                from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+                dynamo_gm = _dynamo_graph_capture_for_export(module.__call__)(*args, **kwargs)
+        else:
+            dynamo_gm = module
+
+        # Set the dynamo_gm because we will use it for the joint graph
+        self.dynamo_gm = dynamo_gm
+
+
+        with contextlib.ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack,
+                self.dynamo_gm,
+                args=args,
+                kwargs=kwargs,
+            )
+            self.jd = joint_with_descriptors
+            self.joint_graph_module = joint_with_descriptors.graph_module
+
+        return self.joint_graph_module
+
+    def compile(self, partition_fn=None, fw_compiler=None, bw_compiler=None):
+        from torch._functorch.partitioners import default_partition
+        from torch._functorch.aot_autograd import boxed_nop_preserve_node_meta
+        from torch._functorch.aot_autograd import aot_compile_joint_with_descriptors
+
+        partition_fn = partition_fn or default_partition
+        fw_compiler = fw_compiler or boxed_nop_preserve_node_meta
+        bw_compiler = bw_compiler or boxed_nop_preserve_node_meta
+        self.optimized_callable = aot_compile_joint_with_descriptors(
+            self.jd,
+            partition_fn=partition_fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler
+        )
+        return ModuleWrapper(self.orig_mod, self.dynamo_gm, self.jd, self.optimized_callable)
+
+
+def aot_export_partitioned_graphs_v2(
+    module: torch.nn.Module,
+    *,
+    args: tuple = (),
+    kwargs: dict[str, Any] | None = None,
+    transforms: Any,
+    num_fwd_outputs: int = 1,
+    use_dynamo: bool = False,
+):
+    exporter = AotTrainerExport(use_dynamo=use_dynamo)
+
+    exporter.generate_joint_graph(module, args=args, kwargs=kwargs)
+    return exporter
