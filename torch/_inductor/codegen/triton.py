@@ -1142,7 +1142,11 @@ class TritonOverrides(OpOverrides):
         x_dtype = getattr(x, "dtype", None)
         y_dtype = getattr(y, "dtype", None)
 
-        if x_dtype == torch.float32 and y_dtype == torch.float32:
+        if (
+            x_dtype == torch.float32
+            and y_dtype == torch.float32
+            and not config.is_fbcode()
+        ):
             # x / y in Triton is lowered to div.full which is approx
             # we want div_rn to adhere with eager
             out = f"triton.language.div_rn({x}, {y})"
