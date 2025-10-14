@@ -2,12 +2,13 @@
 name: "⚠️ CI SEV"
 about: Tracking incidents for PyTorch's CI infra.
 title: ''
-labels: ''
+labels: 'ci: sev, ci: disable-autorevert'
 assignees: ''
 
 ---
 
-> NOTE: Remember to label this issue with "`ci: sev`"
+> NOTE: - Remember to keep this issue with "`ci: sev`" label
+>.      - If you want autorevert to be disabled, keep the ci: disable-autorevert label
 
  <!-- Add the `merge blocking` label to this PR to prevent PRs from being merged while this issue is open -->
 
