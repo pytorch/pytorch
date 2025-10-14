@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import traceback
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -13,6 +13,9 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._pytree import tree_map
 from torch.utils._traceback import CapturedTraceback
+
+if TYPE_CHECKING:
+    from torch.distributed._tools.mod_tracker import ModTracker
 
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
@@ -205,6 +208,17 @@ class _FXNodeCall(_DebugCall):
         return f"{node_str}{log_str}"
 
 
+class _NNModuleCall(_DebugCall):
+    """Designates entering an nn.Module's forward method"""
+
+    def __init__(self, module_name: str, call_depth: int):
+        super().__init__(call_depth, record=None, log=None)
+        self.module_name = module_name
+
+    def render(self, attributes: list[str]) -> str:
+        return f"[nn.Mod] {self.module_name}"
+
+
 def _run_hook(hook, *args):
     out = hook(*args)
     assert isinstance(out, dict) and all(isinstance(k, str) for k in out.keys())
@@ -291,6 +305,7 @@ class DebugMode(TorchDispatchMode):
         record_faketensor=False,
         record_realtensor=True,
         record_tensor_attributes=None,
+        record_nn_module=False,
     ):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
@@ -300,6 +315,12 @@ class DebugMode(TorchDispatchMode):
         self.record_faketensor = record_faketensor
         self.record_realtensor = record_realtensor
         self.record_tensor_attributes = record_tensor_attributes or []
+
+        self.record_nn_module = record_nn_module
+
+        self.module_tracker: Optional["ModTracker"] = None
+        if self.record_nn_module:
+            self.module_tracker_setup()
 
         self.operators = []
         self.call_depth = 0
@@ -360,13 +381,34 @@ class DebugMode(TorchDispatchMode):
             torch._C._push_on_torch_function_stack(self)
 
         super().__enter__()
+        if self.record_nn_module:
+            self.module_tracker.__enter__()  # type: ignore[attribute]
         return self
 
     # pyrefly: ignore  # bad-override
     def __exit__(self, *args):
         super().__exit__(*args)
+        if self.record_nn_module:
+            self.module_tracker.__exit__()  # type: ignore[attribute]
         if self.record_torchfunction:
             torch._C._pop_torch_function_stack()
+
+    def module_tracker_setup(self):
+        from torch.distributed._tools.mod_tracker import ModTracker
+
+        self.module_tracker = ModTracker()
+
+        # module pre-fw hook: record module call
+        def pre_fw_hook(module, input):
+            fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute]
+            self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
+            self.call_depth += 1
+
+        # module post-fw hook: decrement call depth
+        def post_fw_hook(module, input, output):
+            self.call_depth -= 1
+
+        self.module_tracker.register_user_hooks(pre_fw_hook, post_fw_hook)
 
     @staticmethod
     @contextlib.contextmanager
