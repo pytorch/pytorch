@@ -5682,14 +5682,14 @@ def _find_or_create_pg_by_ranks_and_tag(
     if stride == len(ranks):
         my_ranks = ranks.copy()
         if my_rank not in my_ranks:
-            raise RuntimeError("rankset doesn't include the current node")
+            raise AssertionError("rankset doesn't include the current node")
     else:
         for i in range(0, len(ranks), stride):
             rank_set = ranks[i : i + stride]
             if my_rank in rank_set:
                 my_ranks = rank_set
         if my_ranks is None:
-            raise RuntimeError("rankset doesn't include the current node")
+            raise AssertionError("rankset doesn't include the current node")
 
     my_ranks = sorted(my_ranks)
 
