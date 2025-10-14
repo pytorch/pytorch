@@ -119,7 +119,7 @@ def check_file(
                         "linking anything to verify that the symbol is in "
                         "fact header-only. If you already have a test but it's"
                         " not found, please add the .cpp file to CPP_TEST_GLOBS"
-                        " in tools/linter/adapters/header_only_linter.py."
+                        " in tools/linters/adapters/header_only_linter.py."
                     ),
                 )
             )
