@@ -4,11 +4,11 @@
 import functools
 import warnings
 from collections import defaultdict, OrderedDict
-from collections.abc import Hashable, Iterable, Sequence
+from collections.abc import Callable, Hashable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
-from typing import Any, Callable, cast, Optional, overload, TypeVar, Union
-from typing_extensions import ParamSpec, Self, TypeAlias
+from typing import Any, cast, Optional, overload, TypeAlias, TypeVar, Union
+from typing_extensions import ParamSpec, Self
 
 import torch
 import torch.utils.hooks as hooks
@@ -62,6 +62,7 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
+        # pyrefly: ignore  # unsupported-operation
         self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
@@ -135,11 +136,13 @@ def _disable_dynamo_if_unsupported(
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
+                # pyrefly: ignore  # unsupported-operation
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
                 and arg[0].is_cuda
                 or (
                     "state_steps" in kwargs
+                    # pyrefly: ignore  # unsupported-operation
                     and (kwarg := kwargs["state_steps"])
                     and isinstance(kwarg, Sequence)
                     and kwarg[0].is_cuda
@@ -227,7 +230,7 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     return capturable_supported_devices
 
 
-def _to_scalar(x):
+def _to_scalar(x: Union[float, torch.Tensor]):
     r"""This function converts a hyperparameter to a 0-dimension (scalar) tensor
     if it is a nonzero-dimensions 1-element tensor. If it is not a tensor, it is
     kept as is.
@@ -359,14 +362,18 @@ class Optimizer:
 
     _optimizer_step_pre_hooks: dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: dict[int, OptimizerPostHook]
+    # pyrefly: ignore  # not-a-type
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
     _optimizer_state_dict_post_hooks: (
+        # pyrefly: ignore  # not-a-type
         'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     )
     _optimizer_load_state_dict_pre_hooks: (
+        # pyrefly: ignore  # not-a-type
         'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     )
     _optimizer_load_state_dict_post_hooks: (
+        # pyrefly: ignore  # not-a-type
         'OrderedDict[int, Callable[["Optimizer"], None]]'
     )
 
@@ -391,6 +398,7 @@ class Optimizer:
         self.state: defaultdict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: list[dict[str, Any]] = []
 
+        # pyrefly: ignore  # no-matching-overload
         param_groups = list(params)
         if len(param_groups) == 0:
             raise ValueError("optimizer got an empty parameter list")
@@ -514,6 +522,7 @@ class Optimizer:
                                 f"{func} must return None or a tuple of (new_args, new_kwargs), but got {result}."
                             )
 
+                # pyrefly: ignore  # invalid-param-spec
                 out = func(*args, **kwargs)
                 self._optimizer_step_code()
 
@@ -774,8 +783,8 @@ class Optimizer:
         assert param_groups is not None
         for pg in param_groups:
             if param_id in pg["params"]:
-                fused = pg["fused"] if "fused" in pg else False
-                capturable = pg["capturable"] if "capturable" in pg else False
+                fused = pg.get("fused", False)
+                capturable = pg.get("capturable", False)
                 break
         if key == "step":
             if capturable or fused:
@@ -949,7 +958,13 @@ class Optimizer:
             r"""Make a deep copy of value, casting all tensors to device of param."""
             if isinstance(value, torch.Tensor):
                 return Optimizer._process_value_according_to_param_policy(
-                    param, value, param_id, param_groups, key
+                    param,
+                    value,
+                    # pyrefly: ignore  # bad-argument-type
+                    param_id,
+                    # pyrefly: ignore  # bad-argument-type
+                    param_groups,
+                    key,
                 )
             elif isinstance(value, dict):
                 return {
@@ -960,6 +975,7 @@ class Optimizer:
                 }
             elif isinstance(value, Iterable):
                 return type(value)(
+                    # pyrefly: ignore  # bad-argument-count
                     _cast(param, v, param_id=param_id, param_groups=param_groups)
                     for v in value
                 )  # type: ignore[call-arg]

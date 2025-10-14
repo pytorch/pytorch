@@ -67,7 +67,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._export.utils import _compiling_state_context
 from torch._subclasses.fake_tensor import unset_fake_temporarily
-from torch._utils_internal import justknobs_check, log_export_usage
+from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
     _combine_args,
     _DimHint,
@@ -145,16 +145,20 @@ cached_backends: dict[int, CompilerFn] = {}
 unset = Unset.token
 
 
-def _maybe_set_eval_frame(callback: DynamoCallback) -> DynamoCallback:
-    # A wrapper on set_eval_frame that is guarded by a Justknob.
-    # Users can disable torchDynamo by setting the JK to False.
-    if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
-        torch._dynamo.utils.warn_once(
-            "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
-        )
-        return callback
-    else:
-        return set_eval_frame(callback)
+if DISABLE_JUSTKNOBS:
+    _maybe_set_eval_frame = set_eval_frame
+else:
+
+    def _maybe_set_eval_frame(callback: DynamoCallback) -> DynamoCallback:
+        # A wrapper on set_eval_frame that is guarded by a Justknob.
+        # Users can disable torchDynamo by setting the JK to False.
+        if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
+            torch._dynamo.utils.warn_once(
+                "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
+            )
+            return callback
+        else:
+            return set_eval_frame(callback)
 
 
 @dataclass
@@ -413,6 +417,57 @@ class OptimizedModule(torch.nn.Module):
             )
         return super().__call__(*args, **kwargs)
 
+    def _aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> None:
+        """
+        Experimental: AOT Compile a set of inputs and use that as the forward function
+        """
+        model = self._orig_mod
+        hooks = self.dynamo_ctx._hooks
+        assert hooks is not None
+        if not config.enable_aot_compile:
+            raise RuntimeError(
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+            )
+        if not self.dynamo_ctx.fullgraph:
+            raise RuntimeError(
+                "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
+            )
+
+        if not callable(self.dynamo_ctx.callback):
+            raise RuntimeError("aot compile requires a callable dynamo callback.")
+
+        backend = innermost_fn(
+            self.dynamo_ctx.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+        )
+        from torch._dynamo.aot_compile import aot_compile_module
+
+        self.forward = aot_compile_module(model, inputs, hooks, backend)
+
+    def _save_aot_compiled_module(self, path: Optional[str] = None) -> bytes:
+        if not config.enable_aot_compile:
+            raise RuntimeError(
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+            )
+        from torch._dynamo.aot_compile import AOTCompiledModel
+
+        assert isinstance(self.forward, AOTCompiledModel)
+        result: bytes = self.forward.serialize()
+        if path is not None:
+            with open(path, "wb") as f:
+                f.write(result)
+        return result
+
+    def _load_aot_compiled_module(self, data: bytes) -> None:
+        if not config.enable_aot_compile:
+            raise RuntimeError(
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+            )
+        from torch._dynamo.aot_compile import AOTCompiledModel
+
+        compiled_forward = AOTCompiledModel.deserialize(self._orig_mod, data)
+        assert isinstance(compiled_forward, AOTCompiledModel)
+        self.forward = compiled_forward
+
     def __reduce__(
         self,
     ) -> tuple[type[OptimizedModule], tuple[torch.nn.Module, _TorchDynamoContext]]:
@@ -429,6 +484,7 @@ class OptimizedModule(torch.nn.Module):
         self._initialize()
 
     @property
+    # pyrefly: ignore  # bad-override
     def training(self) -> bool:
         return self._orig_mod.training
 
@@ -692,12 +748,11 @@ class _TorchDynamoContext:
                     # Create a fresh CompilePackage
                     self._package.initialize(fn, None, ignore_inlined_sources=False)
                 else:
-                    cache_entry, backends = result
                     try:
                         self._package.initialize(
-                            fn, cache_entry, ignore_inlined_sources=False
+                            fn, result.dynamo, ignore_inlined_sources=False
                         )
-                        self._package.install(backends)
+                        self._package.install(result.backends)
                     except RuntimeError as e:
                         log.warning("Failed to load entry from dynamo cache: %s", e)
                         self._package.initialize(fn, None, ignore_inlined_sources=False)
@@ -838,6 +893,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
+                    # pyrefly: ignore  # invalid-inheritance
                     raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
@@ -966,7 +1022,10 @@ class OptimizeContext(_TorchDynamoContext):
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=_dynamic, ignore_active_disable_ctx=False
+                    compiler_fn,
+                    # pyrefly: ignore  # bad-argument-type
+                    dynamic=_dynamic,
+                    ignore_active_disable_ctx=False,
                 )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
@@ -1029,6 +1088,7 @@ class DisableContext(_TorchDynamoContext):
             cls_obj.__call__ = self(cls_obj.__call__)
             if issubclass(cls_obj, torch.nn.Module):
                 # NN module variable tracker directly inlines the _call_impl. Disable it.
+                # pyrefly: ignore  # missing-attribute
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
@@ -1934,6 +1994,7 @@ def export(
                         path: KeyPath, t: Union[torch.Tensor, _IntWrapper, Any]
                     ) -> Any:
                         if isinstance(t, torch.Tensor):
+                            # pyrefly: ignore  # missing-attribute
                             return ambient_fake_mode.from_tensor(t, static_shapes=True)
                         elif isinstance(t, _IntWrapper):
                             if (
@@ -1984,6 +2045,7 @@ def export(
                 automatic_dynamic_shapes=False,
                 capture_dynamic_output_shape_ops=True,
                 capture_scalar_outputs=True,
+                constant_fold_autograd_profiler_enabled=True,
                 prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
             ),
             _compiling_state_context(),
@@ -2013,8 +2075,11 @@ def export(
             )
             and not trace_rules.check(call_to_inspect)
         ):
+            # pyrefly: ignore  # unbound-name
             dim_constraints.solve()
+            # pyrefly: ignore  # unbound-name
             forced_specializations = dim_constraints.forced_specializations()
+            # pyrefly: ignore  # unbound-name
             msg = dim_constraints.prettify_results(
                 original_signature,
                 dynamic_shapes,
@@ -2035,9 +2100,11 @@ def export(
                     )
 
             # Error if we have any constraints on static values
+            # pyrefly: ignore  # unbound-name
             for k in shape_env.var_to_range.keys():
                 if isinstance(k, sympy.Integer):
                     constraint_violation_error = ConstraintViolationError(
+                        # pyrefly: ignore  # unbound-name
                         f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
                         "It appears that you're trying to set a constraint on a "
                         f"value which we evaluated to have a static value of {k}. "
