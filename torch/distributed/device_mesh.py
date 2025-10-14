@@ -353,6 +353,10 @@ else:
                         -1, self.mesh.size(dim)
                     )
                     backend, pg_options = backend_override[dim]
+                    # We need to explicitly pass in timeout when specified in option, otherwise
+                    # the default timeout will be used to override the timeout set in option.
+                    # TODO: remove this once we have fixed inside c10d level.
+                    timeout = pg_options._timeout if pg_options else None
 
                     # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
                     # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
@@ -390,6 +394,7 @@ else:
                     ):
                         dim_group = split_group(
                             parent_pg=default_group,
+                            timeout=timeout,
                             pg_options=pg_options,
                             split_ranks=pg_ranks_by_dim.tolist(),
                             group_desc=group_desc,
@@ -410,6 +415,7 @@ else:
                         if bound_device_id is None or not has_split_group:
                             dim_group = new_group(
                                 ranks=subgroup_ranks,
+                                timeout=timeout,
                                 backend=backend,
                                 pg_options=pg_options,
                                 group_desc=group_desc,
@@ -1138,6 +1144,7 @@ else:
                     unflatten_pg_ranks_by_dim,
                     cur_rank,
                     mesh_dim_names,
+                    backend_override=backend_override,
                 )
                 dim_group_names = []
                 for idx in range(0, res_mesh.ndim):
@@ -1202,17 +1209,19 @@ else:
                 dim = not_none(self.mesh_dim_names).index(dim)
 
             if backend_override is not None:
-                (backend_override_tuple,) = _normalize_backend_override(
-                    backend_override, len(mesh_sizes), mesh_dim_names
+                backend_override_tuple = tuple(
+                    _normalize_backend_override(
+                        backend_override, len(mesh_sizes), mesh_dim_names
+                    )
                 )
             else:
-                backend_override_tuple = ((None, None),) * len(mesh_dim_names)  # type: ignore[assignment]
+                backend_override_tuple = ((None, None),) * len(mesh_dim_names)
 
             return self._create_unflatten_mesh(
                 dim,
                 mesh_sizes,
                 mesh_dim_names,
-                backend_override_tuple,  # type: ignore[arg-type]
+                backend_override_tuple,
             )
 
     def _normalize_backend_override(
