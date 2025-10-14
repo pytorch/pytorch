@@ -13,11 +13,11 @@ import importlib
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 import torch
 import torch.distributed as dist
@@ -104,7 +104,10 @@ def broadcast(
     if pg is not None:
         broadcast_list = [sync_obj]
         dist.broadcast_object_list(broadcast_list, src=rank, group=pg)
-        assert len(broadcast_list) == 1
+        if len(broadcast_list) != 1:
+            raise AssertionError(
+                f"Expected broadcast_list to have exactly 1 element, got {len(broadcast_list)}"
+            )
         sync_obj = broadcast_list[0]
 
     # failure in any rank will trigger a throw in every rank.
@@ -114,6 +117,7 @@ def broadcast(
             error_msg += f": stage {sync_obj.stage_name}"
         if sync_obj.exception is not None:
             error_msg += f": exception {sync_obj.exception}"
+        # pyrefly: ignore  # invalid-inheritance
         raise RuntimeError(error_msg) from sync_obj.exception
 
     return cast(T, sync_obj.payload)
@@ -183,13 +187,16 @@ def all_gather(
 
         if len(exception_list) > 0:
             raise RuntimeError(  # type: ignore[misc]
-                error_msg, exception_list
+                error_msg,
+                exception_list,
+                # pyrefly: ignore  # invalid-inheritance
             ) from exception_list[0]
         return ret_list
     else:
         if not sync_obj.success:
             raise RuntimeError(
                 f"all_gather failed with exception {sync_obj.exception}",
+                # pyrefly: ignore  # invalid-inheritance
             ) from sync_obj.exception
         return [sync_obj.payload]  # type: ignore[list-item]
 
@@ -204,7 +211,7 @@ def all_gather_object_enforce_type(
     # pyre-fixme[2]: Parameter must have a type other than `Any`
     obj: Any,
     # pyre-fixme[2]: Parameter must have a type that does not contain `Any`
-    type_checker: Callable[[Any, Any], bool] = lambda x, y: type(x) == type(y),
+    type_checker: Callable[[Any, Any], bool] = lambda x, y: type(x) is type(y),
 ) -> None:
     """
     Similar to plain all_gather_object but with additional type checking
@@ -234,24 +241,50 @@ def all_gather_object_enforce_type(
             )
 
 
-def _summarize_ranks(numbers: Iterable[int]) -> str:
-    numbers = sorted(numbers)
-    result = []
-    current_range_start = numbers[0]
-    for i in range(1, len(numbers)):
-        if numbers[i] == numbers[i - 1] + 1:
-            pass
-        else:
-            if current_range_start == numbers[i - 1]:
-                result.append(str(current_range_start))
+def _summarize_ranks(ranks: Iterable[int]) -> str:
+    ranks = sorted(ranks)
+    if min(ranks) < 0:
+        raise AssertionError("ranks should all be positive")
+    if len(set(ranks)) != len(ranks):
+        raise AssertionError("ranks should not contain duplicates")
+    curr: Optional[Union[int, range]] = None
+    ranges = []
+    while ranks:
+        x = ranks.pop(0)
+        if curr is None:
+            curr = x
+        elif isinstance(curr, int):
+            if x == curr + 1:
+                curr = range(curr, x + 1, 1)
             else:
-                result.append(f"{current_range_start}-{numbers[i - 1]}")
-            current_range_start = numbers[i]
-    if current_range_start == numbers[-1]:
-        result.append(str(current_range_start))
-    else:
-        result.append(f"{current_range_start}-{numbers[-1]}")
-    return ", ".join(result)
+                step = x - curr
+                curr = range(curr, x + step, step)
+        else:
+            if not isinstance(curr, range):
+                raise AssertionError("curr must be an instance of range")
+            if x == curr.stop:
+                curr = range(curr.start, curr.stop + curr.step, curr.step)
+            else:
+                ranges.append(curr)
+                curr = x
+
+    if isinstance(curr, int):
+        ranges.append(range(curr, curr + 1, 1))
+    elif isinstance(curr, range):
+        ranges.append(curr)
+
+    result = []
+    for r in ranges:
+        if len(r) == 1:
+            # pyrefly: ignore  # bad-argument-type
+            result.append(f"{r.start}")
+        elif r.step == 1:
+            # pyrefly: ignore  # bad-argument-type
+            result.append(f"{r.start}:{r.stop}")
+        else:
+            # pyrefly: ignore  # bad-argument-type
+            result.append(f"{r.start}:{r.stop}:{r.step}")
+    return ",".join(result)
 
 
 def _check_philox_rng_sync(

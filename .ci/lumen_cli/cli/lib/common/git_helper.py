@@ -45,7 +45,7 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
 
         # Checkout pinned commit
         commit = get_post_build_pinned_commit(target)
-        logger.info("Checking out pinned commit %s", commit)
+        logger.info("Checking out pinned %s commit %s", target, commit)
         r.git.checkout(commit)
 
         # Update submodules if requested
@@ -55,7 +55,7 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
                 sm.update(init=True, recursive=True, progress=PrintProgress())
 
         logger.info("Successfully cloned %s", target)
-        return r
+        return r, commit
 
     except GitCommandError as e:
         logger.error("Git operation failed: %s", e)

@@ -66,6 +66,7 @@ ENV NCCL_LIB_DIR="/usr/local/cuda/lib64/"
 # (optional) Install UCC
 ARG UCX_COMMIT
 ARG UCC_COMMIT
+ARG CUDA_VERSION
 ENV UCX_COMMIT $UCX_COMMIT
 ENV UCC_COMMIT $UCC_COMMIT
 ENV UCX_HOME /usr
@@ -181,7 +182,6 @@ COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 RUN if [ -n "${SKIP_LLVM_SRC_BUILD_INSTALL}" ]; then set -eu; rm -rf /opt/llvm; fi
 
 # AWS specific CUDA build guidance
-ENV TORCH_CUDA_ARCH_LIST Maxwell
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
 ENV CUDA_PATH /usr/local/cuda
 

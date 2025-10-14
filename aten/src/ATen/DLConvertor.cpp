@@ -65,14 +65,24 @@ DLDataType getDLDataType(const Tensor& t) {
       break;
     // TODO(#146647): use macro here instead of spelling out each shell dtype
     case ScalarType::Float8_e5m2:
+      dtype.code = DLDataTypeCode::kDLFloat8_e5m2;
+      break;
     case ScalarType::Float8_e5m2fnuz:
+      dtype.code = DLDataTypeCode::kDLFloat8_e5m2fnuz;
+      break;
     case ScalarType::Float8_e4m3fn:
+      dtype.code = DLDataTypeCode::kDLFloat8_e4m3fn;
+      break;
     case ScalarType::Float8_e4m3fnuz:
+      dtype.code = DLDataTypeCode::kDLFloat8_e4m3fnuz;
+      break;
     case ScalarType::Float8_e8m0fnu:
-      TORCH_CHECK_BUFFER(false, "float8 types are not supported by dlpack");
+      dtype.code = DLDataTypeCode::kDLFloat8_e8m0fnu;
       break;
     case ScalarType::Float4_e2m1fn_x2:
-      TORCH_CHECK_BUFFER(false, "float4 types are not supported by dlpack");
+      dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn;
+      dtype.lanes = 2;
+      dtype.bits = 4;
       break;
     case ScalarType::QInt8:
     case ScalarType::QUInt8:
@@ -177,7 +187,11 @@ static Device getATenDevice(DLDeviceType type, c10::DeviceIndex index, void* dat
 
 ScalarType toScalarType(const DLDataType& dtype) {
   ScalarType stype = ScalarType::Undefined;
-  TORCH_CHECK_BUFFER(dtype.lanes == 1, "ATen does not support lanes != 1");
+  if (dtype.code != DLDataTypeCode::kDLFloat4_e2m1fn) {
+    TORCH_CHECK_BUFFER(
+        dtype.lanes == 1,
+        "ATen does not support lanes != 1 for dtype code", std::to_string(dtype.code));
+  }
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
       switch (dtype.bits) {
@@ -269,6 +283,73 @@ ScalarType toScalarType(const DLDataType& dtype) {
               false, "Unsupported kDLBool bits ", std::to_string(dtype.bits));
       }
       break;
+    case DLDataTypeCode::kDLFloat8_e5m2:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e5m2;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat8_e5m2 bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e5m2fnuz:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e5m2fnuz;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat8_e5m2fnuz bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e4m3fn:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e4m3fn;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat8_e4m3fn bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e4m3fnuz:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e4m3fnuz;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat8_e4m3fnuz bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat8_e8m0fnu:
+      switch (dtype.bits) {
+        case 8:
+          stype = ScalarType::Float8_e8m0fnu;
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat8_e8m0fnu bits ", std::to_string(dtype.bits));
+      }
+      break;
+    case DLDataTypeCode::kDLFloat4_e2m1fn:
+      switch (dtype.bits) {
+        case 4:
+          switch (dtype.lanes) {
+            case 2:
+              stype = ScalarType::Float4_e2m1fn_x2;
+              break;
+            default:
+              TORCH_CHECK_BUFFER(
+                false, "Unsupported kDLFloat4_e2m1fn lanes ", std::to_string(dtype.lanes));
+          }
+          break;
+        default:
+          TORCH_CHECK_BUFFER(
+              false, "Unsupported kDLFloat4_e2m1fn bits ", std::to_string(dtype.bits));
+      }
+      break;
     default:
       TORCH_CHECK_BUFFER(false, "Unsupported code ", std::to_string(dtype.code));
   }
@@ -308,17 +389,27 @@ void fillVersion<DLManagedTensorVersioned>(
 // constructed out of ATen tensor
 template <class T>
 T* toDLPackImpl(const Tensor& src) {
-  // create a new tensor with possibly normalized strides
-  // gh-83069
-  auto shape = src.sizes();
-  auto strides = src.strides().vec();
-  for (int i = 0; i < src.dim(); i++) {
-    if (shape[i] < 2) {
-      strides[i] = 1;
-    }
+  auto view = src;
+
+  // Detect whether there is need to normalize the strides
+  // Background: gh-83069
+  //
+  // However, normalizing strides can come at a high-cost
+  // to slow down toDLPack conversion 3x, so we
+  // only normalize if needed.
+  //
+  // The following code detects whether the src follows
+  // a continuous pattern. If the src follows such pattern (common-case)
+  // then we do not need to normalize the strides.
+  bool need_normalize_strides = src.dim() == 1 && src.size(0) == 1 && src.stride(0) != 1;
+  // less common case, try normalizing the strides
+  if (need_normalize_strides) {
+    // create a new tensor with possibly normalized strides
+    // gh-83069
+    auto shape = src.sizes();
+    view = src.as_strided(shape, {1}, src.storage_offset());
   }
 
-  auto view = src.as_strided(shape, strides, src.storage_offset());
   ATenDLMTensor<T>* atDLMTensor(new ATenDLMTensor<T>);
   atDLMTensor->handle = view;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
@@ -327,8 +418,8 @@ T* toDLPackImpl(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.device = torchDeviceToDLDevice(src.device());
   atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
-  atDLMTensor->tensor.dl_tensor.shape = view.sizes().data();
-  atDLMTensor->tensor.dl_tensor.strides = view.strides().data();
+  atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(view.sizes().data());
+  atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(view.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   fillVersion(&atDLMTensor->tensor);
 

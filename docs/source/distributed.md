@@ -221,6 +221,16 @@ inconsistent 'UUID' assignment across ranks, and to prevent races during initial
 
 ```{eval-rst}
 .. autofunction:: torch.distributed.distributed_c10d.is_xccl_available
+.. autofunction:: torch.distributed.distributed_c10d.batch_isend_irecv
+.. autofunction:: torch.distributed.distributed_c10d.destroy_process_group
+.. autofunction:: torch.distributed.distributed_c10d.is_backend_available
+.. autofunction:: torch.distributed.distributed_c10d.irecv
+.. autofunction:: torch.distributed.distributed_c10d.is_gloo_available
+.. autofunction:: torch.distributed.distributed_c10d.is_initialized
+.. autofunction:: torch.distributed.distributed_c10d.is_mpi_available
+.. autofunction:: torch.distributed.distributed_c10d.is_nccl_available
+.. autofunction:: torch.distributed.distributed_c10d.is_torchelastic_launched
+.. autofunction:: torch.distributed.distributed_c10d.is_ucc_available
 ```
 
 ```{eval-rst}
@@ -1137,6 +1147,10 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.hf_storage
+```
+
+```{eval-rst}
+.. py:module:: torch.distributed.checkpoint.quantized_hf_storage
 ```
 
 ```{eval-rst}

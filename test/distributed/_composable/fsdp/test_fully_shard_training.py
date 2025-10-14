@@ -27,7 +27,10 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_rocm_arch_multiprocess,
+)
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
@@ -40,9 +43,12 @@ from torch.testing._internal.common_fsdp import (
 )
 from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
+    MI200_ARCH,
     run_tests,
     TEST_HPU,
+    TEST_XPU,
     wrapSwapTensorsTest,
+    xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -324,7 +330,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "Sleep kernel not supported for HPU")
+    @unittest.skipIf(TEST_HPU or TEST_XPU, "Sleep kernel not supported for HPU/XPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group(self):
         """
@@ -335,7 +341,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.run_subtests(
             {
                 "reshard_after_forward": [True, False, 2],
-                "device_type": [device_type.type],
+                "test_device_type": [device_type.type],
                 "offload_policy": [OffloadPolicy()],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
@@ -347,7 +353,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "sleep kernel not supported on HPU")
+    @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
     def test_train_parity_multi_group_cpu_offload_eager(self):
         """
         Tests train parity against DDP when using multiple parameter groups for
@@ -360,7 +366,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     CPUOffloadPolicy(pin_memory=True),
                     CPUOffloadPolicy(pin_memory=False),
                 ],
-                "device_type": [device_type.type],
+                "test_device_type": [device_type.type],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
@@ -371,7 +377,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "sleep kernel not supported on HPU")
+    @unittest.skipIf(TEST_HPU or TEST_XPU, "sleep kernel not supported on HPU/XPU")
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
     def test_train_parity_multi_group_unshard_async_op(self):
         """
@@ -381,7 +387,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self.run_subtests(
             {
                 "reshard_after_forward": [True],
-                "device_type": [device_type.type],
+                "test_device_type": [device_type.type],
                 "offload_policy": [OffloadPolicy()],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
@@ -396,7 +402,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         self,
         reshard_after_forward: Union[bool, int],
         offload_policy: OffloadPolicy,
-        device_type: str,
+        test_device_type: str,
         delay_after_forward: bool,
         delay_before_all_gather: bool,
         delay_before_reduce_scatter: bool,
@@ -412,7 +418,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             in (2, 3)
         ):
             return
-        assert device_type in ("cuda", "hpu", "xpu", "cpu"), f"{device_type}"
+        assert test_device_type in ("cuda", "hpu", "xpu", "cpu"), f"{test_device_type}"
         torch.manual_seed(42)
         vocab_size = 1024
         model_args = ModelArgs(
@@ -424,7 +430,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
         model = Transformer(model_args)
         ref_model = copy.deepcopy(model)
-        if device_type == device_type:
+        if test_device_type == device_type.type:
             replicate(
                 ref_model.to(device_type),
                 device_ids=[self.rank],
@@ -433,7 +439,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             gloo_pg = dist.new_group(backend="gloo")
             replicate(ref_model, process_group=gloo_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-        mesh = init_device_mesh(device_type, (self.world_size,))
+        mesh = init_device_mesh(test_device_type, (self.world_size,))
         fully_shard_fn = functools.partial(
             fully_shard,
             mesh=mesh,
@@ -483,18 +489,19 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                     _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
                     losses.append(_model(inp).sum())
                     if _model is model and delay_after_forward:
-                        torch.get_device_module(device_type)._sleep(
+                        torch.get_device_module(test_device_type)._sleep(
                             int(delay_in_ms * get_cycles_per_ms())
                         )
                     losses[-1].backward()
                     if _model is model and delay_before_optim:
-                        torch.get_device_module(device_type)._sleep(
+                        torch.get_device_module(test_device_type)._sleep(
                             int(delay_in_ms * get_cycles_per_ms())
                         )
                     _optim.step()
                 self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(TEST_XPU, "Sleep is not supported on XPU")
     def test_non_root_forward_backward(self):
         """
         Tests running forward/backward through the root and then through a
@@ -625,7 +632,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
+    @unittest.skipIf(TEST_HPU or TEST_XPU, "Sleep is not supported on HPU/XPU")
     def test_post_optim_event(self):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
@@ -678,6 +685,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @compiled_fsdp_test(compile_compute_on_module=Transformer)
+    @xfailIf(TEST_XPU)  # https://github.com/intel/torch-xpu-ops/issues/1661
     def test_train_parity_with_activation_checkpointing(self):
         """
         Tests train parity against DDP when composing with activation
@@ -1194,6 +1202,7 @@ class TestFullyShardNDTraining(FSDPTest):
             mesh_dim_names=("pp", "dp", "tp"),
         )
 
+    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_2d_mlp_with_nd_mesh(self):
         global_mesh = self.init_global_mesh()
@@ -1360,6 +1369,10 @@ class TestFullyShardHSDPTraining(FSDPTest):
                 "use_activation_checkpointing": [False, True],
                 "mlp_dim": [3, 16, 17],
                 "sync_gradients_at_last_batch": [True, False],
+                "offload_policy": [
+                    CPUOffloadPolicy(pin_memory=True),
+                    CPUOffloadPolicy(pin_memory=False),
+                ],
             },
             functools.partial(self._test_train_parity_hsdp, global_mesh),
         )
@@ -1371,6 +1384,7 @@ class TestFullyShardHSDPTraining(FSDPTest):
         use_activation_checkpointing: bool,
         mlp_dim: int,
         sync_gradients_at_last_batch: bool,
+        offload_policy: CPUOffloadPolicy,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
@@ -1389,10 +1403,16 @@ class TestFullyShardHSDPTraining(FSDPTest):
             if use_activation_checkpointing:
                 checkpoint(mlp)
             fully_shard(
-                mlp, mesh=global_mesh, reshard_after_forward=reshard_after_forward
+                mlp,
+                mesh=global_mesh,
+                reshard_after_forward=reshard_after_forward,
+                offload_policy=offload_policy,
             )
         fully_shard(
-            model, mesh=global_mesh, reshard_after_forward=reshard_after_forward
+            model,
+            mesh=global_mesh,
+            reshard_after_forward=reshard_after_forward,
+            offload_policy=offload_policy,
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         check_sharded_parity(self, ref_model, model)
@@ -1475,8 +1495,8 @@ class TestFullyShardWorldSize1(FSDPTest):
     @skip_if_lt_x_gpu(1)
     def test_train_parity_single_worldsize1(self):
         """
-        Tests train parity with DDP for a single FSDP group when sharding
-        parameters on dim-0.
+        Tests train parity with DDP for a single FSDP group
+        when sharding parameters on dim-0.
         """
         self.run_subtests(
             {
@@ -1524,9 +1544,7 @@ class TestFullyShardWorldSize1(FSDPTest):
                 losses.append(model(*inp).sum())
                 losses[-1].backward()
 
-            # Before there was 1 all-gather and 1 reduce-scatter
-            # Now therre is 1 reduce-scatter
-            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
             optim.step()
 
             self.assertEqual(losses[0], losses[1])

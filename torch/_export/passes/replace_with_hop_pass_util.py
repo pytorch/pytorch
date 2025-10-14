@@ -4,7 +4,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import operator
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch
 
@@ -12,6 +12,8 @@ from ..utils import node_replace_, nodes_map
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._ops import HigherOrderOperator
     from torch.export.graph_signature import ExportGraphSignature
 
@@ -33,6 +35,7 @@ def _replace_with_hop_helper(
         )
         call_func_node.meta["torch_fn"] = (
             f"{wrap_hoo.__name__}",
+            # pyrefly: ignore  # missing-attribute
             f"{wrap_hoo.__class__.__name__}.{wrap_hoo.__name__}",
         )
         if isinstance(output_args, (tuple, list)):

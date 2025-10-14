@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, NamedTuple, Optional
+from collections.abc import Callable
+from typing import Any, cast, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -30,6 +31,7 @@ from ._fsdp_common import (
     compiled_autograd_enabled,
     FSDPMeshInfo,
     HSDPMeshInfo,
+    is_bw,
     TrainingState,
 )
 from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
@@ -149,6 +151,7 @@ class FSDPParamGroup:
         ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
+        # pyrefly: ignore  # read-only
         self.device = device
         self.device_handle = _get_device_handle(device.type)
         self.mp_policy = mp_policy
@@ -271,7 +274,7 @@ class FSDPParamGroup:
         the staging buffers for collective comms.
         """
         assert isinstance(
-            self._all_gather_comm, (DefaultAllGather, ProcessGroupAllocAllGather)
+            self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
         ), (
             "cannot call set_allocate_memory_from_process_group() "
             f"when all gather comm is custom: {self._all_gather_comm.__class__.__name__}"
@@ -284,7 +287,7 @@ class FSDPParamGroup:
 
         assert isinstance(
             self._reduce_scatter_comm,
-            (DefaultReduceScatter, ProcessGroupAllocReduceScatter),
+            (DefaultReduceScatter | ProcessGroupAllocReduceScatter),
         ), (
             "cannot call set_allocate_memory_from_process_group() "
             f"when reduce scatter comm is custom: {self._reduce_scatter_comm.__class__.__name__}"
@@ -444,8 +447,15 @@ class FSDPParamGroup:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
-            self.reshard()
-            self._record_post_forward()
+            if not compiled_autograd_enabled():
+                # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
+                # it shouldn't change post_forward_order
+                if not is_bw():
+                    self.reshard()
+                    self._record_post_forward()
+            else:
+                self.reshard()
+                self._record_post_forward()
             self._training_state = TrainingState.IDLE
             return output
 
@@ -607,6 +617,7 @@ class FSDPParamGroup:
             # Prefetch naively using the reverse post-forward order, which may
             # have mistargeted prefetches if not all modules used in forward
             # are used in this backward
+            # pyrefly: ignore  # unbound-name
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
             self._prefetch_unshard(target_fsdp_param_group, "backward")
 
@@ -843,6 +854,7 @@ compile the forward part if you want to use Traceable FSDP2."""
             raise RuntimeError(msg)
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
         RegisterPostBackwardFunction._assert_not_tracing_fsdp()

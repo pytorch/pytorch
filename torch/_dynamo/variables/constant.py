@@ -43,7 +43,7 @@ class ConstantVariable(VariableTracker):
         NOTE: the caller must install the proper guards if needed; most often
         the guard will be `CONSTANT_MATCH`.
         """
-        source = kwargs.get("source", None)
+        source = kwargs.get("source")
 
         # Routing for supported collection literals.
         if isinstance(value, set):
@@ -52,6 +52,10 @@ class ConstantVariable(VariableTracker):
         elif isinstance(value, frozenset):
             items = [ConstantVariable.create(x) for x in value]
             return variables.FrozensetVariable(items, **kwargs)
+        elif isinstance(value, slice):
+            slice_args = (value.start, value.stop, value.step)
+            slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
+            return variables.SliceVariable(slice_args_vars, **kwargs)
         elif isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
@@ -125,7 +129,7 @@ its type to `common_constant_types`.
 
     def const_getattr(self, tx: "InstructionTranslator", name):
         if not hasattr(self.value, name):
-            raise NotImplementedError
+            raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
@@ -206,6 +210,12 @@ its type to `common_constant_types`.
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
+        elif type(self.value) is complex and name in complex.__dict__.keys():
+            method = getattr(self.value, name)
+            try:
+                return ConstantVariable.create(method(*const_args, **const_kwargs))
+            except Exception as e:
+                raise_observed_exception(type(e), tx)
 
         if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
