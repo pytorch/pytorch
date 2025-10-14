@@ -296,13 +296,23 @@ def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
 
 
 def _must_be_in_forward(node: fx.Node) -> bool:
-    return _has_tag_must_be_in_forward(node)
+    if _has_tag_must_be_in_forward(node):
+        return True
+    is_mutable = is_with_effects(node) or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and node.target._schema.is_mutable
+    )
+    return not _has_tag_is_backward(node) and is_mutable
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
-    return _has_tag_must_be_in_backward(node) or (
-        _has_tag_is_backward(node) and is_with_effects(node)
+    if _has_tag_must_be_in_backward(node):
+        return True
+    is_mutable = is_with_effects(node) or (
+        isinstance(node.target, torch._ops.OpOverload)
+        and node.target._schema.is_mutable
     )
+    return _has_tag_is_backward(node) and is_mutable
 
 
 def _extract_fwd_bwd_outputs(

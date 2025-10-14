@@ -2607,6 +2607,105 @@ def forward(self, primals_1, primals_2):
         ]
         self.verify_aot_autograd(f, inp_grad, test_mutation=True)
 
+    def test_fw_bw_mutation_no_functionalization1(self):
+        class FwBwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b):
+                # input mutation
+                torch._foreach_mul_([b], [2])
+                x = b + 1
+                # intermediate mutation
+                torch._foreach_mul_([x], [3])
+                ctx.save_for_backward(x)
+                return x * a
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                # bw mutation
+                torch._foreach_mul_([x], [4])
+                return grad_output * x, grad_output * x
+
+        def f(a, b):
+            return FwBwMutation.apply(a, b)
+
+        inps = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+        inps_ref = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        compiled_f = compiled_function(
+            f,
+            nop,
+            nop,
+            dynamic=False,
+            partition_fn=default_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=True,
+        )
+
+        out_ref = f(*inps_ref)
+        out = compiled_f(*inps)
+        self.assertEqual(out, out_ref)
+
+        out_ref.sum().backward()
+        out.sum().backward()
+        self.assertEqual(inps_ref[0].grad, inps[0].grad)
+
+    def test_fw_bw_mutation_no_functionalization2(self):
+        class FwBwMutation(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                # input mutation
+                torch._foreach_mul_([x], [2])
+                x = x + 1
+                # intermediate mutation
+                torch._foreach_mul_([x], [3])
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                # bw mutation
+                torch._foreach_mul_([x], [4])
+                return grad_output * x
+
+        def f(a, b):
+            out = FwBwMutation.apply(b)
+            return out * a
+
+        inps = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+        inps_ref = [
+            torch.ones(3, 3, requires_grad=True),
+            torch.ones(3, 3, requires_grad=False),
+        ]
+
+        compiled_f = compiled_function(
+            f,
+            nop,
+            nop,
+            dynamic=False,
+            partition_fn=default_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=True,
+        )
+
+        out_ref = f(*inps_ref)
+        out = compiled_f(*inps)
+        self.assertEqual(out, out_ref)
+
+        out_ref.sum().backward()
+        out.sum().backward()
+        self.assertEqual(inps_ref[0].grad, inps[0].grad)
+
     def test_backward_mutation_metadata(self):
         class BwMutation(torch.autograd.Function):
             @staticmethod
