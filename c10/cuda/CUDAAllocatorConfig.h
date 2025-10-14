@@ -112,7 +112,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
       // Note: keep the parsing order and logic stable to avoid potential
       // performance regressions in internal tests.
       if (!env.has_value()) {
-        auto env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+        env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
       }
       if (env.has_value()) {
         inst->parseArgs(env.value());
