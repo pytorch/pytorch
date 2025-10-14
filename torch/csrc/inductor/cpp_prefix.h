@@ -868,8 +868,7 @@ void atomic_add_vec(
   __at_align__ std::array<int64_t, len> tmpidx;
   offset.store(tmpbuf.data(), len);
   index.store(tmpidx.data(), len);
-  int size = tail_size.has_value() ? tail_size.value()
-                                   : at::vec::VectorizedN<int64_t, NI>::size();
+  int size = tail_size.has_value() ? tail_size.value() : len;
   for (int i = 0; i < size; i++) {
     atomic_add(addr + tmpidx[i], tmpbuf[i]);
   }
