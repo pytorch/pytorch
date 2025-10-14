@@ -870,8 +870,8 @@ class SizeVarAllocator:
                     # We're ignoring other relationals for now. If you need to
                     # account for relationals, then you may need a solver solution.
                     continue
-                lhs = sympy.expand(assertion.expr.lhs)
-                rhs = sympy.expand(assertion.expr.rhs)
+                lhs = sympy.sympify(assertion.expr.lhs)  # sympify helps with ints
+                rhs = sympy.sympify(assertion.expr.rhs)
                 self.equality_graph[lhs].add(rhs)
                 self.equality_graph[rhs].add(lhs)
 
