@@ -2590,8 +2590,13 @@ _mx8_mx8_bf16_grouped_mm_fbgemm(
     // MXFP8 expects float8_e8m0fnu scales.
     TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e8m0fnu && scale_b.scalar_type() == at::kFloat8_e8m0fnu,
         "For MXFP8 grouped gemm, both scales must be float8_e8m0fnu tensors.");
+#ifdef USE_ROCM
+    TORCH_CHECK_VALUE(swizzle_a == SwizzleType::NO_SWIZZLE && swizzle_b == SwizzleType::NO_SWIZZLE,
+        "For ROCM MXFP8 grouped gemm, both scale swizzle types must be SWIZZLE_NONE");
+#else
     TORCH_CHECK_VALUE(swizzle_a == SwizzleType::SWIZZLE_32_4_4 && swizzle_b == SwizzleType::SWIZZLE_32_4_4,
-        "For MXFP8 grouped gemm, both scale swizzle types must be SWIZZLE_32_4_4");
+        "For CUDA MXFP8 grouped gemm, both scale swizzle types must be SWIZZLE_32_4_4");
+#endif
 
 #if defined(USE_FBGEMM_GENAI) and !defined(USE_ROCM)
     fbgemm_gpu::mx8mx8bf16_grouped_mm(
