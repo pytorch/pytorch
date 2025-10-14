@@ -46,15 +46,15 @@ def _shape_to_offset(size, device: torch.device) -> int:
 
     threads_per_round = prop.multi_processor_count * prop.max_threads_per_multi_processor
     rounds_per_thread = (nelem + threads_per_round * UNROLL - 1) // (threads_per_round * UNROLL)
-    used_32 = rounds_per_thread * UNROLL
-    return used_32
+    used_offset = rounds_per_thread * UNROLL
+    return used_offset
 
 #@torch._dynamo.disable
-def _reserve_offset(device: torch.device, used_32: int) -> int:    
+def _reserve_offset(device: torch.device, used_offset: int) -> int:    
     dev_index = device.index if isinstance(device, torch.device) else int(device)
     gen = torch.cuda.default_generators[dev_index]
     old_off = int(gen.get_offset())
-    gen.set_offset(old_off + used_32) 
+    gen.set_offset(old_off + used_offset) 
     return old_off // 4
 
 @custom_op("my_ops::rand_eager_offset", mutates_args={})
@@ -231,8 +231,15 @@ def replace_random(
     if mode == "rand" and config.align_random_eager:
         def replacement(size):
             offset = _shape_to_offset(size, device)
+
+            align_dtype = dtype
+            if isinstance(align_dtype, (tuple, list)):
+                align_dtype = align_dtype[0] if len(align_dtype) else None
+            if align_dtype is None:
+                align_dtype = torch.float32
+
             result = inductor_prims.random(
-                size, torch.ops.my_ops.rand_eager_offset(offset, device), mode, **default_kwargs(device)
+                size, torch.ops.my_ops.rand_eager_offset(offset, device), mode, **default_kwargs(device), align_dtype=align_dtype,
             )
             if dtype is not None:
                 result = result.to(dtype)

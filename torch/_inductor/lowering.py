@@ -2299,26 +2299,18 @@ def inductor_lookup_seed(seeds, index):
         ranges=[],
     )
 
-
-def _compute_grid_x(nelem: int, block: int, device_index: int) -> int:
-    prop = torch.cuda.get_device_properties(device_index)
-    blocks_per_sm = prop.max_threads_per_multi_processor // block
-    max_blocks = prop.multi_processor_count * blocks_per_sm
-    need_blocks = (nelem + block - 1) // block
-    return min(max_blocks, need_blocks)
-
-    
-
 def get_seed_and_threads_per_round(x_device_index: int, nelem: int):
-    block = 256
+    UNROLL = 4
+    prop = torch.cuda.get_device_properties(x_device_index)
+    threads_per_round = prop.multi_processor_count * prop.max_threads_per_multi_processor
+    #rounds_per_thread = (nelem + threads_per_round * UNROLL - 1) // (threads_per_round * UNROLL)
+    #used_offset = rounds_per_thread * UNROLL
     gen = torch.cuda.default_generators[x_device_index]
     seed = int(gen.initial_seed())
-    grid_x = _compute_grid_x(nelem, block, x_device_index)
-    old_off = int(gen.get_offset())
-    return seed, block * grid_x
+    return seed, threads_per_round
 
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0):
+def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0, align_dtype: torch.dtype = torch.float32):
     assert not config.fallback_random
     assert mode in ("rand", "randn")
     size = [*size]
@@ -2332,12 +2324,19 @@ def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int 
     if config.align_random_eager:
         nelem = math.prod(size)
         seed_val, threads_per_round = get_seed_and_threads_per_round(device.index, nelem)
+        def _vec_from_dtype(dt: torch.dtype) -> int:
+            if dt in (torch.float16, torch.bfloat16): return 8
+            if dt is torch.float64: return 2
+            return 4 
+        vec = _vec_from_dtype(align_dtype)
+
         def inner_fn(index):
             return getattr(ops, "rand_eager")(
                 seed_val,
                 seed_loader([]),
                 threads_per_round,
                 ops.index_expr(random_pos(index), torch.int32),
+                vec=int(vec),
             )
     else:
         def inner_fn(index):

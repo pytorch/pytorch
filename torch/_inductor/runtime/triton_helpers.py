@@ -242,14 +242,24 @@ def device_assert_then(cond, msg, r):
     tl.device_assert(cond, msg)
     return r
 
+
 @triton.jit
-def rand_eager(seed, offset_blocks, threads_per_round, tid):
-    inv  = 1.0 / 4294967296.0  # 2^-32
+def rand_eager(
+    seed: tl.int32,
+    offset_blocks,
+    tid: tl.tensor, 
+    VEC: tl.constexpr  
+):
+    inv  = 1.0 / 4294967296.0 
     half = inv * 0.5
 
-    subseq = (tid.to(tl.uint64) // 4)
+    tid_u64 = tid.to(tl.uint64)
 
-    offblk = offset_blocks.to(tl.uint64) + tl.full(subseq.shape, 0, tl.uint64)
+    subseq  = (tid_u64 // VEC)
+    which4  = ((tid_u64 % VEC) // 4)
+    lane    = (tid_u64 % 4).to(tl.int32)
+
+    offblk = offset_blocks.to(tl.uint64) + which4
 
     u0, u1, u2, u3 = tl.philox(
         seed,
@@ -258,8 +268,6 @@ def rand_eager(seed, offset_blocks, threads_per_round, tid):
         (subseq & 0xFFFFFFFF).to(tl.uint32),
         ((subseq >> 32) & 0xFFFFFFFF).to(tl.uint32),
     )
-
-    lane = (tid.to(tl.uint64) % 4).to(tl.int32)
 
     v01 = tl.where(lane == 0, u0, u1)
     v23 = tl.where(lane == 2, u2, u3)
