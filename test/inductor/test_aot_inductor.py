@@ -615,6 +615,9 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(32, 64, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @unittest.skip(
+        "install_free_tensors leads to OOM - https://github.com/pytorch/pytorch/issues/164062"
+    )
     def test_large_weight(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1663,6 +1666,82 @@ class AOTInductorTestsTemplate:
             torch.randn((1, 32), dtype=torch.float16, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
+
+    @skipIfMPS
+    @config.patch({"unbacked_symint_fallback": 12})
+    @parametrize("shift_k", [0, 1, 2, 3])
+    @parametrize("use_static_size", [True, False])
+    def test_unbacked_expr_replacements(self, shift_k, use_static_size):
+        """
+        Test parameters
+        - shift_k: Validates that torch._check assertion order doesn't affect
+        results by shifting the order of torch._checks
+        - use_static_size: Tests torch._check compatibility between unbacked
+        symbolic expressions and static shapes
+        """
+
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Need triton for user-defined triton kernel")
+
+        def realize_out_tensor_with_size(size):
+            STATIC_DIM = 256  # large enough to hit IMA w/o compute-sanitizer
+            tensor = torch.ones((size, STATIC_DIM), device=self.device)
+            # Realize the tensor as an intermediate buffer
+            nrows, ncols = tensor.shape
+            numel = tensor.numel()
+            add_kernel[nrows,](
+                in_ptr0=tensor,
+                in_ptr1=tensor,
+                out_ptr=tensor,
+                n_elements=numel,
+                BLOCK_SIZE=ncols,
+            )
+            return tensor
+
+        class Repro(torch.nn.Module):
+            def forward(self, x, y, lst):
+                STATIC_SIZE = 300
+                s0, s1 = x.shape
+                s2, s3 = y.shape
+                u0, u1, u2, u3, u100 = lst.tolist()
+
+                expr1 = s0 + u0
+                expr2 = s1 + u1
+                expr3 = (s2 * s3) + (u2 // u3)  # make this one a lil complicated
+                expr4 = STATIC_SIZE if use_static_size else u100
+
+                t1 = realize_out_tensor_with_size(expr1)
+                t2 = realize_out_tensor_with_size(expr2)
+                t3 = realize_out_tensor_with_size(expr3)
+                t4 = realize_out_tensor_with_size(expr4)
+
+                # shift tensors to change up the torch._check order
+                tensors = [t1, t2, t3, t4]
+                shifted_tensors = tensors[shift_k:] + tensors[:shift_k]
+
+                # torch.cat implicitly runs torch._check(lhs == rhs)
+                cat = torch.cat(shifted_tensors, dim=1)
+
+                return cat * cat
+
+        # Disable cuda caching allocator to check for IMA
+        torch.cuda.caching_allocator_enable(False)
+        model = Repro()
+        example_inputs = (
+            # s0, s1
+            torch.randn((100, 200), device=self.device),
+            # s2, s3
+            torch.randn((100, 3), device=self.device),
+            # u0, u1, u2, u3, u100
+            torch.tensor([200, 100, 0, 1, 300], device=self.device, dtype=torch.int),
+        )
+        spec = {
+            "x": (Dim.DYNAMIC, Dim.DYNAMIC),
+            "y": (Dim.DYNAMIC, Dim.DYNAMIC),
+            "lst": (Dim.STATIC,),
+        }
+        self.check_model(model, example_inputs, dynamic_shapes=spec)
+        torch.cuda.caching_allocator_enable(True)
 
     @skipIfMPS
     @config.patch({"unbacked_symint_fallback": 12})
