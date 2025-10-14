@@ -888,51 +888,38 @@ class inner_f(torch.nn.Module):
         gm = graph_capture(model, inputs, with_export=True)
 
         custom_metadata = fx_traceback._get_custom_metadata(gm)
-        self.assertExpectedInline(
-            str(custom_metadata),
-            """\
-('get_attr', 'sdpa_score0', {'compile_with_inductor': 'flex_attention'})
-[('placeholder', 'arg0_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg1_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg2_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg3_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg4_1', {'compile_with_inductor': 'flex_attention'}), ('output', 'output', {'compile_with_inductor': 'flex_attention'})]
-('get_attr', '_tensor_constant0', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant1', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant2', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant3', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant4', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant5', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant6', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant7', {'compile_with_inductor': 'flex_attention'})
-('get_attr', 'sdpa_mask0', {'compile_with_inductor': 'flex_attention'})
-[('placeholder', 'arg0_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg1_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg2_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg3_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg4_1', {'compile_with_inductor': 'flex_attention'}), ('call_function', 'index', {'compile_with_inductor': 'flex_attention'}), ('call_function', 'index_1', {'compile_with_inductor': 'flex_attention'}), ('call_function', 'eq', {'compile_with_inductor': 'flex_attention'}), ('call_function', 'ge', {'compile_with_inductor': 'flex_attention'}), ('call_function', 'bitwise_and', {'compile_with_inductor': 'flex_attention'}), ('output', 'output', {'compile_with_inductor': 'flex_attention'})]
-('get_attr', '_tensor_constant8', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'flex_attention', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'getitem', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'getitem_1', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'detach', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'detach_1', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'zeros', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'detach_2', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'detach_3', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'detach_4', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'detach_5', {'compile_with_inductor': 'flex_attention'})
-('get_attr', 'fw_graph0', {'compile_with_inductor': 'flex_attention'})
-[('placeholder', 'arg0_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg1_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg2_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg3_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg4_1', {'compile_with_inductor': 'flex_attention'}), ('output', 'output', {'compile_with_inductor': 'flex_attention'})]
-('get_attr', 'joint_graph0', {'compile_with_inductor': 'flex_attention'})
-[('placeholder', 'arg0_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg1_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg2_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg3_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg4_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg5_1', {'compile_with_inductor': 'flex_attention'}), ('output', 'output', {'compile_with_inductor': 'flex_attention'})]
-('get_attr', '_tensor_constant0_1', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant1_1', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant2_1', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant3_1', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant4_1', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant5_1', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant6_1', {'compile_with_inductor': 'flex_attention'})
-('get_attr', '_tensor_constant7_1', {'compile_with_inductor': 'flex_attention'})
-('get_attr', 'mask_graph0', {'compile_with_inductor': 'flex_attention'})
-[('placeholder', 'arg0_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg1_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg2_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg3_1', {'compile_with_inductor': 'flex_attention'}), ('placeholder', 'arg4_1', {'compile_with_inductor': 'flex_attention'}), ('call_function', 'index', {'compile_with_inductor': 'flex_attention'}), ('call_function', 'index_1', {'compile_with_inductor': 'flex_attention'}), ('call_function', 'eq', {'compile_with_inductor': 'flex_attention'}), ('call_function', 'ge', {'compile_with_inductor': 'flex_attention'}), ('call_function', 'bitwise_and', {'compile_with_inductor': 'flex_attention'}), ('output', 'output', {'compile_with_inductor': 'flex_attention'})]
-('get_attr', '_tensor_constant8_1', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'flex_attention_backward', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'getitem_3', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'getitem_4', {'compile_with_inductor': 'flex_attention'})
-('call_function', 'getitem_5', {'compile_with_inductor': 'flex_attention'})""",  # noqa: B950
+
+        # not using assertExpectedInline because some CI runs has fewer detach nodes in graph
+        # than other CI runs, so we can't use a fixed string to compare against
+
+        self.assertTrue(
+            "('get_attr', 'sdpa_score0', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+        self.assertTrue(
+            "('get_attr', 'sdpa_mask0', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+        self.assertTrue(
+            "('call_function', 'flex_attention', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+
+        self.assertTrue(
+            "('get_attr', 'fw_graph0', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+        self.assertTrue(
+            "('get_attr', 'joint_graph0', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+        self.assertTrue(
+            "('get_attr', 'mask_graph0', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+        self.assertTrue(
+            "('call_function', 'flex_attention_backward', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
         )
 
 
