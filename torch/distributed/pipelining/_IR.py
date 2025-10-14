@@ -4,10 +4,11 @@ import copy
 import logging
 import operator
 from collections import defaultdict
+from collections.abc import Callable
 from enum import Enum
 from inspect import Parameter, Signature, signature
 from types import MethodType
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -33,6 +34,16 @@ logger = logging.getLogger(__name__)
 # TODO:
 # 1. investigate gradient sync for shared parameters. how does DDP do it?
 # 2. Add parameter movement to split_module
+
+
+PP_SUBMOD_PREFIX = "submod_pp"
+
+
+def get_submod_name(stage_idx: int):
+    """Returns the name of the submod for a given stage index.
+    For example, "submod_pp_0", "submod_pp_1", etc.
+    """
+    return "_".join([PP_SUBMOD_PREFIX, str(stage_idx)])
 
 
 def _find_loss_from_output_and_spec(output_val, spec_val):
@@ -178,7 +189,7 @@ def _insert_stage_symbolic_backward(
                 output_grads: Union[tuple[Optional[fx.Node], ...], Optional[fx.Node]]
                 if node in tuples:
                     stage_output = tuples[node]
-                    output_grads = tuple(val_to_grad.get(n, None) for n in tuples[node])
+                    output_grads = tuple(val_to_grad.get(n) for n in tuples[node])
                     outputs_with_grads_idxs = [
                         i for i, n in enumerate(tuples[node]) if n in live_nodes
                     ]
@@ -271,6 +282,7 @@ class LossWrapper(torch.nn.Module):
 
 
 class TrivialLossWrapper(LossWrapper):
+    # pyrefly: ignore  # bad-override
     def forward(self, x, targets):
         model_out = self.module(x)
         return self.loss_fn(model_out, targets)
@@ -379,7 +391,7 @@ class DetachExecutor(fx.Interpreter):
 
         """
         def dont_traverse_size(a):
-            return type(a) != torch.Size
+            return type(a) is not torch.Size
         """
 
         args = map_aggregate(
@@ -593,7 +605,7 @@ class Pipe(torch.nn.Module):
         i = 0
         while True:
             try:
-                name = f"submod_{i}"
+                name = get_submod_name(i)
                 submod = getattr(self.split_gm, name)
                 submod.__class__.__reduce__ = _direct_serialization_reduce
                 i += 1
@@ -639,15 +651,17 @@ class Pipe(torch.nn.Module):
         """
         if stage_idx < 0 or stage_idx >= self.num_stages:
             raise ValueError(f"Invalid stage index {stage_idx}!")
-        return getattr(self.split_gm, f"submod_{stage_idx}")
+
+        submod_name = get_submod_name(stage_idx)
+        return getattr(self.split_gm, submod_name)
 
     @staticmethod
     def _number_and_count_forward_stages(gm: fx.GraphModule):
         num_stages = 0
         found_idxs: dict[int, None] = {}
         for node in gm.graph.nodes:
-            if node.op == "call_module" and node.target.startswith("submod_"):
-                node.meta["stage_idx"] = int(node.target[len("submod_") :])
+            if node.op == "call_module" and node.target.startswith(PP_SUBMOD_PREFIX):
+                node.meta["stage_idx"] = int(node.target[len(PP_SUBMOD_PREFIX) + 1 :])
                 found_idxs.setdefault(node.meta["stage_idx"])
                 num_stages += 1
 
@@ -729,7 +743,7 @@ class Pipe(torch.nn.Module):
 
         # TODO: what does split do with module invocations? does it move the modules
         # into the submodules?
-        split = split_module(traced, mod, split_callback)  # type: ignore[arg-type]
+        split = split_module(traced, mod, split_callback, partition_affix="pp")  # type: ignore[arg-type]
         # a (custom) tracer can produce dead code like orphan get_attr nodes
         split.graph.eliminate_dead_code()
 
@@ -1002,7 +1016,7 @@ class Pipe(torch.nn.Module):
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
         try:
-            ep = torch.export.export(mod, example_args, example_kwargs, strict=True)
+            ep = torch.export.export(mod, example_args, example_kwargs)
         except Exception as e:
             raise RuntimeError(
                 "It seems that we cannot capture your model as a full graph. "

@@ -4,23 +4,18 @@ import math
 import os
 import socket
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
-from torch.distributed._distributed_c10d import (
-    _register_work,
-    _SymmetricMemory,
-    ProcessGroup,
-    Work as _Work,
-)
+from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -322,6 +317,7 @@ def _pipelined_produce_and_all2all(
     chunk_producer: Callable[[int, torch.Tensor], None],
     output: torch.Tensor,
     group_name: str,
+    out_chunk_dim: int = 0,
 ) -> None:
     """
     Perform the following logic with micro-pipelined computation and
@@ -333,7 +329,9 @@ def _pipelined_produce_and_all2all(
         ]
         dist.all_to_all_single(output=output, input=torch.cat(chunks))
     """
-    out_chunks = output.chunk(c10d._get_group_size_by_name(group_name))
+    out_chunks = output.chunk(
+        c10d._get_group_size_by_name(group_name), dim=out_chunk_dim
+    )
     p2p_workspace_size_req = out_chunks[0].numel() * out_chunks[0].element_size() * 2
     symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
     group_size = symm_mem.world_size
@@ -455,7 +453,7 @@ lib.define(
 lib.define(
     "fused_scaled_matmul_reduce_scatter("
     "Tensor A, Tensor B, Tensor A_scale, Tensor B_scale, "
-    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, int[]? output_shape, "
+    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, SymInt[]? output_shape, "
     "Tensor? bias = None, "
     "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
@@ -1070,10 +1068,39 @@ def _fused_matmul_reduce_scatter_impl(
         reduce_fn = partial(torch.mean, dim=0)
     else:
         raise ValueError("reduce_op must be sum or avg")
-
     group = c10d._resolve_process_group(group_name)
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
+
+    if scatter_dim == A.ndim - 1:
+        B_shards = B.chunk(group.size(), dim=B.ndim - 1)
+        A_flat = A.flatten(0, -2)
+
+        def _chunk_producer(rank: int, out: torch.Tensor) -> None:
+            mm_out_op(A_flat, B_shards[rank], **kwargs, out=out)
+
+        leading_dims = list(A.shape[:-1])
+
+        stacked_partials = torch.empty(
+            (A_flat.shape[0], B.shape[1]),
+            dtype=out_dtype or A.dtype,
+            device=A.device,
+        )
+
+        _pipelined_produce_and_all2all(
+            _chunk_producer,
+            stacked_partials,
+            group_name,
+            out_chunk_dim=1,
+        )
+
+        stacked_partials_view = stacked_partials.reshape(
+            *leading_dims, group.size(), -1
+        )
+        return reduce_fn(
+            stacked_partials_view,
+            dim=-2,
+        )
 
     # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
     x = A.movedim(scatter_dim, 0)
@@ -1289,7 +1316,7 @@ def _fused_scaled_matmul_reduce_scatter_impl(
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
         mm_out_op(A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out)
 
-    # Stacked partials will be the 2D outputs of the the pipelined scaled mm, and will
+    # Stacked partials will be the 2D outputs of the pipelined scaled mm, and will
     # have the shape (A_with_scatter_dim_0_tensor.shape[0], B.shape[1]) to align with the formula:
     # (a*b,c) @ (c,d) = (a*b,d)
     stacked_partials = A_with_scatter_dim_0.new_empty(
@@ -1394,7 +1421,7 @@ def _maybe_convert_scalar_types_to_dtypes(
         if scalar_type is None:
             dtypes.append(scalar_type)
         elif scalar_type not in _SCALAR_TYPE_TO_DTYPE:
-            raise ValueError("Unrecognized scalar type {scalar_type}")
+            raise ValueError(f"Unrecognized scalar type {scalar_type}")
         else:
             dtypes.append(_SCALAR_TYPE_TO_DTYPE[scalar_type])
     return dtypes
@@ -1493,7 +1520,7 @@ def _low_contention_all_gather(
             src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
             chunks[remote_rank].copy_(src_buf)
         symm_mem.barrier()
-        _register_work(output, Work())
+        torch._C._distributed_c10d._register_work(output, Work())
         return output
 
 
@@ -1541,7 +1568,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
             ret = ret.mean(dim=0)
         else:
             raise ValueError(f"reduce_op ({reduce_op}) is not supported")
-        _register_work(ret, Work())
+        torch._C._distributed_c10d._register_work(ret, Work())
         return ret
 
 
@@ -1576,7 +1603,7 @@ def _low_contention_reduce_scatter_with_workspace(
             ret = ret.mean(dim=0)
         else:
             raise ValueError(f"reduce_op ({reduce_op}) is not supported")
-        _register_work(ret, Work())
+        torch._C._distributed_c10d._register_work(ret, Work())
         return ret
 
 
@@ -1654,6 +1681,7 @@ from typing import overload, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
+    from torch._C._distributed_c10d import ProcessGroup
     from torch.types import _device, _dtype, _int
 
 
@@ -1664,6 +1692,7 @@ def empty(
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def empty(
     size: Sequence[_int],
     *,
@@ -1731,6 +1760,8 @@ def rendezvous(
         group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
             participating processes. This can be either a group name or a process group object.
     """
+    from torch._C._distributed_c10d import ProcessGroup
+
     if isinstance(group, str):
         group_name = group
     elif isinstance(group, ProcessGroup):
@@ -1748,7 +1779,11 @@ def is_nvshmem_available() -> bool:
 
     Check if NVSHMEM is available in current build and on current system.
     """
-    from torch.distributed._distributed_c10d import _is_nvshmem_available
+    try:
+        from torch._C._distributed_c10d import _is_nvshmem_available
+    except ImportError:
+        # Not all builds have NVSHMEM support.
+        return False
 
     # Check if NVSHMEM is available on current system.
     return _is_nvshmem_available()
