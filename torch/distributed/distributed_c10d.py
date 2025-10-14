@@ -5017,7 +5017,7 @@ def _create_process_group_wrapper(
     timeout: timedelta = default_pg_timeout,
 ):
     if not _GLOO_AVAILABLE:
-        raise RuntimeError("ProcessGroupWrapper unsupported without GLOO backend.")
+        raise AssertionError("ProcessGroupWrapper unsupported without GLOO backend.")
 
     # (whc) this appears to be just for the gloo backend? if so, `default_pg_timeout` is appropriate...
 
