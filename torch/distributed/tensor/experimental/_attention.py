@@ -6,11 +6,13 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from enum import auto, Enum
+from functools import partial
 from typing import Any, Optional, Protocol
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
@@ -18,12 +20,12 @@ from torch.distributed.tensor.experimental._load_balancer import (
     _create_default_load_balancer,
     _LoadBalancer,
 )
+from torch.distributed.tensor.parallel import ParallelStyle
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     BlockMask,
     create_block_mask,
 )
-from torch.overrides import TorchFunctionMode
 
 
 __all__ = ["context_parallel", "set_rotate_method"]
@@ -46,8 +48,7 @@ logger = logging.getLogger(__name__)
 
 class _DispatchMode(Enum):
     MONKEY_PATCH = auto()
-    TORCH_FUNCTION = auto()
-    TORCH_DISPATCH = auto()
+    MODULE_WRAPPER = auto()
 
 
 _dispatch_mode: _DispatchMode = _DispatchMode.MONKEY_PATCH
@@ -64,21 +65,6 @@ class _ContextParallelOptions:
 
 
 _cp_options = _ContextParallelOptions()
-
-
-@dataclass
-class _ContextParallelGlobalVars:
-    # This variable stores the TorchFunctionMode singleton because using multiple TF
-    # instances for dispatching may trigger recompilations
-    torch_function_mode: Optional[TorchFunctionMode] = None
-
-
-_cp_global_vars = _ContextParallelGlobalVars()
-
-
-def _set_cp_global_var(name: str, value: Any) -> None:
-    """Set a global variable for context parallelism."""
-    setattr(_cp_global_vars, name, value)
 
 
 def _is_causal_behavior(
@@ -936,6 +922,11 @@ customized_ops = {
 }
 
 
+ArgsType = tuple[Any, ...]
+KwargsType = dict[str, Any]
+InputFnType = Callable[[Optional[nn.Module], ArgsType, KwargsType, DeviceMesh], Any]
+OutputFnType = Callable[[Optional[nn.Module], Any, Any, DeviceMesh], Any]
+
 _replaced_functions: dict[Callable, tuple[str, Callable]] = {}
 
 
@@ -943,38 +934,23 @@ def _distribute_function(
     fn: Callable,
     fn_module: types.ModuleType,
     device_mesh: DeviceMesh,
-    input_fn: Optional[Callable] = None,
-    output_fn: Optional[Callable] = None,
+    input_fn: InputFnType,
+    output_fn: OutputFnType,
 ) -> None:
     """
     A helper function to replace a function with a distributed version by
     using the monkey patching approach.
 
     This function is for the CP internal usage only.
-
-    Args:
-        fn (Callable): the function to be distributed.
-        fn_module (types.ModuleType): the Python module that the function is declared.
-            e.g., if ``fn`` is ``torch.nn.functional.scaled_dot_product_attention``,
-            ``fn_module`` is ``torch.nn.functional``.
-        device_mesh (:class:`DeviceMesh`): the device mesh that will be used by the
-            input and output hooks to distribute the tensors.
-        input_fn (Optional[Callable]): the hook to distribute or convert the input
-            arguments of ``fn``.
-        output_fn (Optional[Callable]): the hook to distribute or convert the output
-            arguments of ``fn``.
     """
 
     def wrapper(
-        target_fn: Callable, input_fn: Optional[Callable], output_fn: Optional[Callable]
+        target_fn: Callable, input_fn: InputFnType, output_fn: OutputFnType
     ) -> Callable:
-        def inner_fn(*args: tuple[Any, ...], **kwargs: dict[str, Any]) -> Any:
-            if input_fn is not None:
-                args, kwargs = input_fn(device_mesh, *args, **kwargs)
-            output = target_fn(*args, **kwargs)
-            if output_fn is not None:
-                output = output_fn(device_mesh, output)
-            return output
+        def inner_fn(*args: ArgsType, **kwargs: KwargsType) -> Any:
+            args, kwargs = input_fn(None, args, kwargs, device_mesh)
+            outputs = target_fn(*args, **kwargs)
+            return output_fn(None, (args, kwargs), outputs, device_mesh)
 
         return inner_fn
 
@@ -1017,125 +993,25 @@ def _enable_cp_dtensor_dispatcher() -> Generator[None, None, None]:
 def _context_parallel_dispatcher(
     seq_dim: int, mesh: DeviceMesh
 ) -> Generator[None, None, None]:
-    """Replace SDPA with the CP-wrapped version and enable DTensor CP dispatcher."""
-
-    def attention_input_fn(
-        mesh: DeviceMesh, *args: tuple[Any, ...], **kwargs: dict[str, Any]
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
-        placement = [Shard(seq_dim)]
-        all_args = []
-
-        # pyrefly: ignore  # bad-assignment, bad-argument-type
-        for arg in itertools.chain(args, kwargs.values()):
-            if isinstance(arg, torch.Tensor) and not isinstance(arg, DTensor):
-                arg = DTensor.from_local(arg, mesh, placement, run_check=False)
-
-            all_args.append(arg)
-
-        new_args = tuple(all_args[0 : len(args)])
-        new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
-        return new_args, new_kwargs
-
-    def attention_output_fn(mesh: DeviceMesh, outputs: Any) -> Any:
-        new_outputs = []
-        for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
-            output = output.to_local() if isinstance(output, DTensor) else output
-            new_outputs.append(output)
-
-        if isinstance(outputs, torch.Tensor):
-            return new_outputs[0]
-
-        return tuple(new_outputs)
-
-    class DistributeFunction(TorchFunctionMode):
-        def __init__(
-            self,
-            fn: Callable,
-            device_mesh: DeviceMesh,
-            input_fn: Optional[Callable] = None,
-            output_fn: Optional[Callable] = None,
-        ):
-            self._device_mesh = device_mesh
-            self._input_fn = input_fn
-            self._output_fn = output_fn
-            self._fn = fn
-
-        def __torch_function__(
-            self,
-            func: Callable,
-            types: Any,
-            args: tuple[Any, ...] = (),
-            kwargs: Optional[dict[str, Any]] = None,
-        ) -> Any:
-            kwargs = kwargs or {}
-
-            # special handler for flex_attention
-            if func == torch._higher_order_ops.flex_attention:
-                query, key, value, score_mod, block_mask = args[:5]
-                assert isinstance(query, torch.Tensor)
-                assert isinstance(key, torch.Tensor)
-                assert isinstance(value, torch.Tensor)
-                assert isinstance(block_mask, tuple)
-
-                global_key = ft_c.all_gather_tensor_autograd(
-                    key, seq_dim, self._device_mesh
-                )
-                global_value = ft_c.all_gather_tensor_autograd(
-                    value, seq_dim, self._device_mesh
-                )
-
-                # shape rewrite: because torch.nn.flex_attention() checks
-                # the QKV shape against the block_mask object, we need to
-                # manually rewrite the shape info in block_mask tuple to
-                # make it compatible with q_shard, k_global, v_global
-                if block_mask[1] != global_key.size(-2):
-                    block_mask = (block_mask[0], global_key.size(-2), *block_mask[2:])
-
-                return func(
-                    query,
-                    global_key,
-                    global_value,
-                    score_mod,
-                    block_mask,
-                    *args[5:],
-                    **kwargs,
-                )
-
-            if func != self._fn:
-                return func(*args, **kwargs)
-
-            if self._input_fn is not None:
-                args, kwargs = self._input_fn(self._device_mesh, *args, **kwargs)
-            output = func(*args, **kwargs)
-            if self._output_fn is not None:
-                output = self._output_fn(self._device_mesh, output)
-            return output
+    sdpa_cp = _ContextParallel(
+        seq_dim=seq_dim,
+        attention_type=_ContextParallel.AttentionType.SDPA,
+    )
 
     if _dispatch_mode == _DispatchMode.MONKEY_PATCH:
         _distribute_function(
             F.scaled_dot_product_attention,
             F,
             mesh,
-            attention_input_fn,
-            attention_output_fn,
+            sdpa_cp.sdpa_input_fn,
+            sdpa_cp.sdpa_output_fn,
         )
         with _enable_cp_dtensor_dispatcher():
             yield
         _restore_function(F.scaled_dot_product_attention, F)
-    elif _dispatch_mode == _DispatchMode.TORCH_FUNCTION:
-        tf_mode = _cp_global_vars.torch_function_mode
-        if tf_mode is None:
-            tf_mode = DistributeFunction(
-                F.scaled_dot_product_attention,
-                mesh,
-                attention_input_fn,
-                attention_output_fn,
-            )
-            _cp_global_vars.torch_function_mode = tf_mode
-
-        with tf_mode:
-            with _enable_cp_dtensor_dispatcher():
-                yield
+    elif _dispatch_mode == _DispatchMode.MODULE_WRAPPER:
+        with _enable_cp_dtensor_dispatcher():
+            yield
     else:
         raise NotImplementedError("torch dispatch mode is not supported yet.")
 
@@ -1199,6 +1075,246 @@ def _context_parallel_buffers(
         new_buffers.append(sharded_buffer)
 
     return new_buffers
+
+
+def _create_cp_block_mask(
+    mask_mod: _mask_mod_signature,
+    B: int,
+    H: int,
+    Q_LEN: int,
+    KV_LEN: int,
+    device_mesh: DeviceMesh,
+    load_balancer: Optional[_LoadBalancer] = None,
+) -> BlockMask:
+    """
+    Create a specialized BlockMask for Context Parallel FlexAttention.
+
+    This function creates a BlockMask that enables computation of attention results
+    for sharded Q attending to global KV. The mask appropriately handles the query
+    index offset required when each rank operates on a shard of the query sequence
+    while accessing the full key-value sequence.
+
+    The function internally rewrites the provided mask_mod function to translate local
+    query indices to global query indices, ensuring that the masking logic is applied
+    correctly across the distributed computation.
+
+    Args:
+        mask_mod (Callable): Mask function that operates on global attention indices.
+        B (int): Batch size.
+        H (int): Number of query heads.
+        Q_LEN (int): Global sequence length of the query.
+        KV_LEN (int): Global sequence length of the key/value.
+        device_mesh (DeviceMesh): Device mesh used for context parallelism.
+        load_balancer (optional[:class:`_LoadBalancer`]): The load-balancer used to rearrange
+            QKV before sharding. This will be used to modify the block_mask generated.
+
+    Returns:
+        BlockMask: A block mask configured for the local query shard that can be used
+            with flex_attention() for the given cp_mesh.
+
+    Raises:
+        NotImplementedError: If Q_LEN is not divisible by (CP world size * BLOCK_SIZE).
+
+    Warning:
+        Currently requires Q_LEN to be divisible by CP mesh world size * BLOCK_SIZE
+        (BLOCK_SIZE defaults to 128). This constraint exists because the BlockMask
+        must handle both padding and offsets correctly. For example, if Q_LEN is 384,
+        CP world size is 2, and BLOCK_SIZE is 128, the local Q_LEN would be 192. In
+        such cases, both rank0 and rank1 would have paddings in their local BlockMasks.
+        Support for padding in this scenario is planned for future work.
+
+    """
+
+    from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
+
+    if Q_LEN % (device_mesh.size() * _DEFAULT_SPARSE_BLOCK_SIZE) != 0:
+        raise NotImplementedError(
+            f"Q_LEN {Q_LEN} is not divisible by CP mesh world size {device_mesh.size()} * "
+            f"BLOCK_SIZE {_DEFAULT_SPARSE_BLOCK_SIZE}. This is not supported yet. "
+        )
+
+    compiled_create_block_mask = torch.compile(
+        create_block_mask, dynamic=False, fullgraph=True
+    )
+
+    def _rewrite_mask_mod(
+        mask_mod: _mask_mod_signature,
+        rank: int,
+        block_size: int,
+        local_q_size: int,
+        qkv_rearrange_indices: Optional[torch.Tensor] = None,
+    ) -> _mask_mod_signature:
+        assert qkv_rearrange_indices is None or qkv_rearrange_indices.ndim == 2, (
+            "load balance index expects shape (1, seq_len) or (B, seq_len) "
+            f"but got {qkv_rearrange_indices.shape}."
+        )
+
+        def qkv_idx_restore(
+            b: torch.Tensor, idx_post_rearrange: torch.Tensor
+        ) -> torch.Tensor:
+            if qkv_rearrange_indices is not None:
+                if (
+                    qkv_rearrange_indices.size(0) == 1
+                ):  # identical load-balance in batch
+                    idx_pre_rearrange = qkv_rearrange_indices[0][idx_post_rearrange]
+                else:
+                    idx_pre_rearrange = qkv_rearrange_indices[b][idx_post_rearrange]
+            else:
+                idx_pre_rearrange = idx_post_rearrange
+
+            return idx_pre_rearrange
+
+        def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
+            # calculate local block_idx and block_offset
+            local_blk_idx, local_blk_offset = (
+                local_q_idx // block_size,
+                local_q_idx % block_size,
+            )
+            # NOTE: load balancing is not used
+            local_num_blocks = local_q_size // block_size
+            blk_idx = local_num_blocks * rank + local_blk_idx
+            return blk_idx * block_size + local_blk_offset
+
+        return lambda b, h, q_idx, kv_idx: mask_mod(
+            b,
+            h,
+            qkv_idx_restore(b, local_q_idx_to_q_idx(q_idx)),
+            qkv_idx_restore(b, kv_idx),
+        )
+
+    cp_rank = device_mesh.get_local_rank()
+    cp_group_size = device_mesh.size()
+    load_balancer = load_balancer or _create_default_load_balancer(
+        Q_LEN, cp_group_size, device_mesh.device_type
+    )
+    Q_SHARD_LEN = Q_LEN // cp_group_size
+    block_size = _DEFAULT_SPARSE_BLOCK_SIZE
+
+    rearrange_indices = (
+        load_balancer._generate_indices(restore=False) if load_balancer else None
+    )
+    block_mask = compiled_create_block_mask(
+        _rewrite_mask_mod(
+            mask_mod,
+            cp_rank,
+            block_size,
+            Q_SHARD_LEN,
+            qkv_rearrange_indices=rearrange_indices,
+        ),
+        B,
+        H,
+        Q_SHARD_LEN,
+        KV_LEN,
+        device=device_mesh.device_type,
+        BLOCK_SIZE=(block_size, block_size),
+    )
+    return block_mask
+
+
+#####################
+# Experimental APIs
+#####################
+
+
+class _ContextParallel(ParallelStyle):
+    class AttentionType(Enum):
+        FLEX = "flex_attention"
+        SDPA = "scaled_dot_product_attention"
+
+    def __init__(self, seq_dim: int, attention_type: AttentionType) -> None:
+        super().__init__()
+        self.seq_dim = seq_dim
+        self.attention_type = attention_type
+
+    def _apply(self, module: nn.Module, mesh: DeviceMesh) -> nn.Module:
+        if self.attention_type == self.AttentionType.FLEX:
+            module.register_forward_pre_hook(
+                partial(self.flex_input_fn, mesh=mesh), with_kwargs=True
+            )
+            return module
+        elif self.attention_type == self.AttentionType.SDPA:
+            module.register_forward_pre_hook(
+                partial(self.sdpa_input_fn, mesh=mesh), with_kwargs=True
+            )
+            module.register_forward_hook(partial(self.sdpa_output_fn, mesh=mesh))
+            return module
+        else:
+            raise ValueError(f"Unknown attention type: {self.attention_type}")
+
+    def flex_input_fn(
+        self, module: Optional[nn.Module], args: Any, kwargs: Any, mesh: DeviceMesh
+    ) -> Any:
+        args_list = list(args)
+        for idx, name in enumerate(
+            ("query", "key", "value", "score_mod", "block_mask")
+        ):
+            if idx >= len(args):
+                args_list.append(kwargs.pop(name, None))
+
+        query, key, value, score_mod, block_mask = args_list[:5]
+        assert isinstance(query, torch.Tensor)
+        assert isinstance(key, torch.Tensor)
+        assert isinstance(value, torch.Tensor)
+        assert isinstance(block_mask, BlockMask | tuple)
+
+        key = key.contiguous()
+        value = value.contiguous()
+        """
+        TODO: the autograd collectives are not sound. The following warning can
+        appear. We should use custom ops.
+
+        UserWarning: _c10d_functional::wait_tensor: an autograd kernel was not
+        registered to the Autograd key(s) but we are trying to backprop through it.
+        This may lead to silently incorrect behavior. This behavior is deprecated and
+        will be removed in a future version of PyTorch. If your operator is differentiable,
+        please ensure you have registered an autograd kernel to the correct Autograd key
+        (e.g. DispatchKey::Autograd, DispatchKey::CompositeImplicitAutograd).  If your
+        operator is not differentiable, or to squash this warning and use the previous
+        behavior, please register torch::CppFunction::makeFallthrough() to DispatchKey::Autograd.
+        """
+        global_key = ft_c.all_gather_tensor_autograd(key, self.seq_dim, mesh)
+        global_value = ft_c.all_gather_tensor_autograd(value, self.seq_dim, mesh)
+        args_list[1] = global_key
+        args_list[2] = global_value
+
+        return tuple(args_list), kwargs
+
+    def sdpa_input_fn(
+        self,
+        module: Optional[nn.Module],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        mesh: DeviceMesh,
+    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        placement = [Shard(self.seq_dim)]
+        all_args = []
+
+        # pyrefly: ignore  # bad-assignment, bad-argument-type
+        for arg in itertools.chain(args, kwargs.values()):
+            if isinstance(arg, torch.Tensor):
+                if isinstance(arg, DTensor):
+                    assert arg._spec.placements == placement
+                else:
+                    arg = DTensor.from_local(arg, mesh, placement, run_check=False)
+
+            all_args.append(arg)
+
+        new_args = tuple(all_args[0 : len(args)])
+        new_kwargs = dict(zip(kwargs.keys(), all_args[len(args) :]))
+        return new_args, new_kwargs
+
+    def sdpa_output_fn(
+        self, module: Optional[nn.Module], inputs: Any, outputs: Any, mesh: DeviceMesh
+    ) -> Any:
+        new_outputs = []
+        for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
+            output = output.to_local() if isinstance(output, DTensor) else output
+            new_outputs.append(output)
+
+        if isinstance(outputs, torch.Tensor):
+            return new_outputs[0]
+
+        return tuple(new_outputs)
 
 
 #####################################################
@@ -1375,6 +1491,7 @@ def set_rotate_method(rotate_method: str) -> None:
     Returns:
         None
     """
+    logger.info("Note that FlexAttention CP doesn't support alltoall yet.")
     if rotate_method == "allgather":
         _cp_options.rotate_method = _RotateMethod.ALL_GATHER
     elif rotate_method == "alltoall":
@@ -1384,127 +1501,3 @@ def set_rotate_method(rotate_method: str) -> None:
             "Context Parallel does not support "
             f"using {rotate_method} for kv shards rotation"
         )
-
-
-def create_cp_block_mask(
-    mask_mod: _mask_mod_signature,
-    B: int,
-    H: int,
-    Q_LEN: int,
-    KV_LEN: int,
-    device_mesh: DeviceMesh,
-    load_balancer: Optional[_LoadBalancer] = None,
-) -> BlockMask:
-    """
-    This API creates a special BlockMask for Context Parallel FlexAttention:
-    1. This BlockMask is masking on the attention of Q shard and KV global views, by
-    mapping the local q_idx to the global q_idx before sending to mask_mod.
-    2. The kv_seq_length (i.e. seq_lengths[1]) of this blockMask is tailored to match
-    the sequence length of KV shard instead of KV global. This is to pass the shape check
-    in flex_atttention(). The correct value (i.e. the sequence length of KV global) will be
-    used in flex_attention once the shape check passes.
-
-    Args:
-        mask_mod (Callable): Function to modify the mask over the global attention result.
-        B (int): Batch size.
-        H (int): Number of query heads.
-        Q_LEN (int): Sequence length of query (global view).
-        KV_LEN (int): Sequence length of key/value (global view).
-        device_mesh (:class:`DeviceMesh`): The device mesh for the context parallelism.
-        load_balancer (optional[:class:`_LoadBalancer`]): The load-balancer used to rearrange
-            QKV before sharding. This will be used to modify the block_mask generated.
-
-    Return:
-        :class:`BlockMask`: the block_mask to be used in flex_attention() within the
-        context_parallel() context.
-
-    .. warning::
-        This function cannot generate correct block_mask if the BLOCK_SIZE is not
-        ``_DEFAULT_SPARSE_BLOCK_SIZE`` which usually happens when the attention
-        size is smaller than 128. Please do not use context_parallel() when the
-        FlexAttention size is small.
-    """
-    from torch.nn.attention.flex_attention import _DEFAULT_SPARSE_BLOCK_SIZE
-
-    compiled_create_block_mask = torch.compile(
-        create_block_mask, dynamic=False, fullgraph=True
-    )
-
-    def _rewrite_mask_mod(
-        mask_mod: _mask_mod_signature,
-        rank: int,
-        world_size: int,
-        block_size: int,
-        local_q_size: int,
-        qkv_rearrange_indices: Optional[torch.Tensor] = None,
-    ) -> _mask_mod_signature:
-        assert qkv_rearrange_indices is None or qkv_rearrange_indices.ndim == 2, (
-            "load balance index expects shape (1, seq_len) or (B, seq_len) "
-            f"but got {qkv_rearrange_indices.shape}."
-        )
-
-        def qkv_idx_restore(
-            b: torch.Tensor, idx_post_rearrange: torch.Tensor
-        ) -> torch.Tensor:
-            if qkv_rearrange_indices is not None:
-                if (
-                    qkv_rearrange_indices.size(0) == 1
-                ):  # identical load-balance in batch
-                    idx_pre_rearrange = qkv_rearrange_indices[0][idx_post_rearrange]
-                else:
-                    idx_pre_rearrange = qkv_rearrange_indices[b][idx_post_rearrange]
-            else:
-                idx_pre_rearrange = idx_post_rearrange
-
-            return idx_pre_rearrange
-
-        def local_q_idx_to_q_idx(local_q_idx: torch.Tensor) -> torch.Tensor:
-            # calculate local block_idx and block_offset
-            local_blk_idx, local_blk_offset = (
-                local_q_idx // block_size,
-                local_q_idx % block_size,
-            )
-            # NOTE: load balancing is not used
-            local_num_blocks = local_q_size // block_size
-            blk_idx = local_num_blocks * rank + local_blk_idx
-            return blk_idx * block_size + local_blk_offset
-
-        return lambda b, h, q_idx, kv_idx: mask_mod(
-            b,
-            h,
-            qkv_idx_restore(b, local_q_idx_to_q_idx(q_idx)),
-            qkv_idx_restore(b, kv_idx),
-        )
-
-    cp_rank = device_mesh.get_local_rank()
-    cp_group_size = device_mesh.size()
-    load_balancer = load_balancer or _create_default_load_balancer(
-        Q_LEN, cp_group_size, device_mesh.device_type
-    )
-    Q_SHARD_LEN = Q_LEN // cp_group_size
-    block_size = _DEFAULT_SPARSE_BLOCK_SIZE
-
-    rearrange_indices = (
-        load_balancer._generate_indices(restore=False) if load_balancer else None
-    )
-    block_mask = compiled_create_block_mask(
-        _rewrite_mask_mod(
-            mask_mod,
-            cp_rank,
-            cp_group_size,
-            block_size,
-            Q_SHARD_LEN,
-            qkv_rearrange_indices=rearrange_indices,
-        ),
-        B,
-        H,
-        Q_SHARD_LEN,
-        KV_LEN,
-        device=device_mesh.device_type,
-        BLOCK_SIZE=(block_size, block_size),
-    )
-    # flex_attention function checks the following shape so we need to rewrite:
-    # key.size(-2) == block_mask.seq_lengths[1]
-    seq_lengths = block_mask.seq_lengths
-    block_mask.seq_lengths = (seq_lengths[0], seq_lengths[1] // cp_group_size)
-    return block_mask
