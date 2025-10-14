@@ -1894,12 +1894,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             result = future_handle.value()
 
             # Verify correctness: output_tensors[j] should contain the value
-            # that rank j sent at position self.rank.
-            # Since inputs[i][k] = tensor([i + k]) for all ranks,
-            # rank j sends inputs[i][self.rank] = tensor([i + self.rank])
-            # to this rank at position j in the output.
+            # that rank j sent to this rank (self.rank) at position self.rank in rank j's input.
+            # All ranks construct inputs[i] = [tensor([i * world_size + 0]), ..., tensor([i * world_size + world_size-1])]
+            # So rank j sends inputs[i][self.rank] = tensor([i * world_size + self.rank]) to this rank.
+            # This rank receives that in output_tensors[j].
             for j in range(self.world_size):
-                expected_value = torch.tensor([i + self.rank])
+                expected_value = torch.tensor([i * self.world_size + self.rank])
                 self.assertEqual(
                     expected_value,
                     outputs[i][j],
@@ -1909,7 +1909,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_alltoall_stress(self):
         inputs = [
-            [torch.tensor([i + rank]) for rank in range(self.world_size)]
+            [torch.tensor([i * self.world_size + j]) for j in range(self.world_size)]
             for i in range(1000)
         ]
         self._test_alltoall_stress(inputs, lambda t: t.clone())
@@ -1919,7 +1919,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @skipIfRocm
     def test_alltoall_stress_cuda(self):
         inputs = [
-            [torch.tensor([i + rank]) for rank in range(self.world_size)]
+            [torch.tensor([i * self.world_size + j]) for j in range(self.world_size)]
             for i in range(1000)
         ]
         self._test_alltoall_stress(inputs, lambda t: t.clone().cuda())
