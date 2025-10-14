@@ -106,9 +106,7 @@ class LazyVariableTracker(VariableTracker):
     def __str__(self) -> str:
         variable_info = "LazyVariableTracker("
         if self.is_realized():
-            variable_info += (
-                f"realized:{type(self.original_value)}, {repr(self.unwrap())})"
-            )
+            variable_info += f"realized: {repr(self.unwrap())})"
         else:
             variable_info += f"Unrealized: {self.peek_type()})"
 
