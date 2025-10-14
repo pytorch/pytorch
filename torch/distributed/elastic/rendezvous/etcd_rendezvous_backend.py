@@ -96,10 +96,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
         def get_state():
             result = self.get_state()
             if result is not None:
-                tmp = *result, False
-                # Python 3.6 does not support tuple unpacking in return
-                # statements.
-                return tmp
+                return *result, False
             return None
 
         if token:
@@ -129,6 +126,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
         return tmp
 
     def _decode_state(self, result: etcd.EtcdResult) -> tuple[bytes, Token]:
+        # pyrefly: ignore  # missing-attribute
         base64_state = result.value.encode()
 
         try:
@@ -138,6 +136,7 @@ class EtcdRendezvousBackend(RendezvousBackend):
                 "The state object is corrupt. See inner exception for details."
             ) from exc
 
+        # pyrefly: ignore  # missing-attribute
         return state, result.modifiedIndex
 
 

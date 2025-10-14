@@ -97,6 +97,7 @@ def should_pad_common(
             if isinstance(x, int):
                 continue
             elif utils.is_symbolic(x):
+                # pyrefly: ignore  # missing-attribute
                 if not x.node.has_hint():
                     return False
                 symbolic_cnt += 1
@@ -106,6 +107,7 @@ def should_pad_common(
         if symbolic_cnt == len(t.size()):
             return False
         return all(
+            # pyrefly: ignore  # missing-attribute
             isinstance(x, int) or (utils.is_symbolic(x) and x.node.has_hint())
             for x in t.stride()
         )
@@ -399,6 +401,7 @@ def should_pad_bench(*args: Any, **kwargs: Any) -> bool:
 def get_do_bench() -> Callable[[Callable[[], Any]], float]:
     with dynamo_timed("pad_mm_benchmark_get_do_bench"):
         return functools.partial(
+            # pyrefly: ignore  # bad-argument-type
             torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
             warmup=5,
         )
@@ -452,6 +455,14 @@ def _should_pad_bench(
         if torch._inductor.config.force_shape_pad:
             return True
 
+        if torch._inductor.config.deterministic:
+            # In deterministic mode, don't benchmark for pad-mm and assumes
+            # no padding.
+            #
+            # Check the deterministic mode after 'force_shape_pad'
+            # so unit test relying on force_shape_pad should still pass
+            return False
+
         if (
             "pad_aten_mm_pass" in torch._inductor.config.post_grad_fusion_options
             and should_pad_mm_bf16(mat1.dtype, m, n, k)
@@ -475,6 +486,7 @@ def _should_pad_bench(
         def realize_tensor(t):
             if isinstance(t, FakeTensor):
                 size_hints = realize_symbols(t.size())
+                # pyrefly: ignore  # bad-argument-type
                 stride_hint = realize_symbols(t.stride())
                 real_size = (
                     sum((d - 1) * s for d, s in zip(size_hints, stride_hint)) + 1
@@ -615,6 +627,8 @@ def _should_pad_bench(
             set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
 
         pad_time = do_bench(pad_bench_fn)
+
+        counters["inductor"]["pad_mm_bench"] += 1
         return should_pad(key, ori_time, pad_time)
 
 
@@ -705,7 +719,7 @@ def run_autoheuristic(
     )
     choice = autoheuristic.get_choice()
     choice2should_pad = {orig_choice: False, pad_choice: True, "autotune": None}
-    ah_should_pad = choice2should_pad.get(choice, None)
+    ah_should_pad = choice2should_pad.get(choice)
 
     if torch._inductor.config.collect_autoheuristic(name):
         ah_ori_time = autoheuristic.get_collected_feedback(orig_choice)
@@ -908,6 +922,7 @@ def _pad_mm_init() -> None:
             replacement,
             args,
             joint_fwd_bwd,
+            # pyrefly: ignore  # bad-argument-type
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,
@@ -919,6 +934,7 @@ def _pad_mm_init() -> None:
             replacement,
             args,
             fwd_only,
+            # pyrefly: ignore  # bad-argument-type
             patterns,
             extra_check=extra_check,
             scalar_workaround=workaround,

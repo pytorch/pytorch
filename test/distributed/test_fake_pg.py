@@ -7,6 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
+from torch._C._distributed_c10d import FakeProcessGroup
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor import DeviceMesh, Shard
@@ -22,6 +23,7 @@ from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import run_tests, skipIfHpu, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 if not dist.is_available():
@@ -215,6 +217,95 @@ class TestFakePG(TestCase):
                 loss = x.sum()
                 loss.backward()
                 optim.step()
+
+    def test_error_on_collective(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        # Test with error_on_collective=False (default behavior)
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+
+        # These should work normally
+        tensor = torch.ones(3, 3)
+        dist.all_reduce(tensor)
+        self.assertEqual(tuple(tensor.shape), (3, 3))
+
+        dist.destroy_process_group()
+
+        # Test with error_on_collective=True
+        from torch._C._distributed_c10d import FakeProcessGroup
+
+        options = FakeProcessGroup.Options()
+        options.error_on_collective = True
+
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=2, store=store, pg_options=options
+        )
+
+        # These should now raise errors
+        tensor = torch.ones(3, 3)
+        with self.assertRaisesRegex(
+            RuntimeError, "FakeProcessGroup collective operation error"
+        ):
+            dist.all_reduce(tensor)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "FakeProcessGroup collective operation error"
+        ):
+            output_tensors = [torch.empty_like(tensor) for _ in range(2)]
+            dist.all_gather(output_tensors, tensor)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "FakeProcessGroup collective operation error"
+        ):
+            dist.broadcast(tensor, src=0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "FakeProcessGroup collective operation error"
+        ):
+            dist.barrier()
+
+    def test_fake_process_group_direct_usage_error(self):
+        class SimpleTensorMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"FakeProcessGroup cannot be constructed directly\. "
+            r"Use torch\.distributed\.init_process_group\(backend='fake'\) instead to ensure "
+            r"proper dispatch system integration\.",
+        ):
+            fake_pg = FakeProcessGroup(rank=0, world_size=3)
+
+            with SimpleTensorMode():
+                tensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+                dist.all_reduce(tensor, group=fake_pg)
+
+    def test_fake_process_group_proper_usage_dispatch(self):
+        class SimpleTensorMode(TorchDispatchMode):
+            def __init__(self):
+                self.ops = []
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                self.ops.append(str(func))
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=0, world_size=3)
+
+        with SimpleTensorMode() as mode:
+            tensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+            dist.all_reduce(tensor)
+
+        op_names = [str(op) for op in mode.ops]
+        self.assertIn("aten.lift_fresh.default", op_names)
+        self.assertIn("c10d.allreduce_.default", op_names)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import types
 from collections import OrderedDict
 from collections.abc import Hashable, Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
+from operator import eq, ne
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
@@ -106,13 +107,24 @@ def accumulate_grad(x, new_grad):
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
     """emulate `(1,2,3) > (1,2)` etc"""
+
+    # Optimization: For equality, short-circuit if lengths differ
+    # This avoids iterating through elements and triggering guards on SymInts
+    left_len = len(left)
+    right_len = len(right)
+
+    if op is eq and left_len != right_len:
+        return False
+    if op is ne and left_len != right_len:
+        return True
+
     # Apply `op` to the first pair that differ
     for a, b in zip(left, right):
         if a != b:
             return op(a, b)
 
     # No more pairs to compare, so compare sizes.
-    return op(len(left), len(right))
+    return op(left_len, right_len)
 
 
 def dict___eq__(d, other):
@@ -288,18 +300,22 @@ def construct_dict(cls, /, *args, **kwargs):
     if args:
         src = args[0]
 
-        if not isinstance(src, Iterable):
-            raise TypeError(f"{type(src)} object is not iterable")
-
-        # Ensure that the overridden __iter__ method is invoked
-        if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):
-            for key in src:
-                # This will inline the __getitem__ of the src object
+        if isinstance(src, Iterable):
+            # Ensure that the overridden __iter__ method is invoked
+            if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):
+                for key in src:
+                    # This will inline the __getitem__ of the src object
+                    dst[key] = src[key]
+            else:
+                # likely a sequence like tuple of pairs
+                for key, value in src:
+                    dst[key] = value
+        elif hasattr(src, "keys"):
+            # This is for objects that implement the mapping protocol
+            for key in src.keys():
                 dst[key] = src[key]
         else:
-            # likely a sequence like tuple of pairs
-            for key, value in src:
-                dst[key] = value
+            raise TypeError("Object is not iterable or subscriptable")
 
     if kwargs:
         for key in kwargs:
