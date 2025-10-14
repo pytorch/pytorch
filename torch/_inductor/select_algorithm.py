@@ -3622,10 +3622,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
             ),
-            V.graph.sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-                hint_override=hint_override,
+            tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    stride,
+                    fallback=config.unbacked_symint_fallback,
+                    hint_override=hint_override,
+                )
+                for stride in node.get_stride()
             ),
             node.get_device(),
             node.get_dtype(),
@@ -3677,9 +3680,12 @@ class AlgorithmSelectorCache(PersistentCache):
                 node.get_size(),
                 fallback=config.unbacked_symint_fallback,
             ),
-            *sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
+            *tuple(
+                V.graph.sizevars.atomically_apply_size_hint(
+                    stride,
+                    fallback=config.unbacked_symint_fallback,
+                )
+                for stride in node.get_stride()
             ),
             sizevars.size_hint(
                 node.get_layout().offset,
