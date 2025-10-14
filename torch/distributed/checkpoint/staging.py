@@ -57,7 +57,7 @@ class AsyncStager(Protocol):
 
     3. If AsyncStager.should_synchronize_after_execute is True, this method will be called immediately after
         the serialization thread starts and before returning from dcp.async_save. If this is set to False,
-        the assumption is the user has defined a custom synchronization point for the the purpose of further
+        the assumption is the user has defined a custom synchronization point for the purpose of further
         optimizing save latency in the training loop (for example, by overlapping staging with the
         forward/backward pass), and it is the respondsibility of the user to call `AsyncStager.synchronize_staging`
         at the appropriate time.
@@ -182,12 +182,14 @@ class DefaultStager(AsyncStager):
         self._staging_executor = None
         self._staging_stream = None
         if self._config.use_async_staging:
+            # pyrefly: ignore  # bad-assignment
             self._staging_executor = ThreadPoolExecutor(max_workers=1)
             if torch.accelerator.is_available():
                 # Note: stream needs to be initialized on the main thread after default cuda
                 # stream is setup/used to avoid the risk of accidentally reusing the main
                 # compute stream or in other cases kernels actually launching from the
                 # main thread.
+                # pyrefly: ignore  # bad-assignment
                 self._staging_stream = torch.Stream()
 
         if self._config.use_non_blocking_copy:
@@ -348,6 +350,7 @@ class _ReplicationStager(AsyncStager):
     ):
         self._pg = pg
         self._timeout = timeout
+        # pyrefly: ignore  # read-only
         self._device = device
         self._transport = PGTransport(pg, timeout, device, None)
 
