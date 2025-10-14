@@ -274,8 +274,8 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
 
     for x, y in reversed(tuple(zip(sizes, strides))):
         # Skips checking strides when a dimension has length 1.
-        if maybe_guard_or_false(x == 1):
-            continue
+        # if maybe_guard_or_false(x == 1):
+        #     continue
 
         if maybe_guard_or_true(y != expected_stride) and maybe_guard_or_true(
             y != expected_stride_max
@@ -497,18 +497,15 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
             # for unbacked, we return True if < is statically known,
             # then try to answer this symbolically, with stride ordering semantics
             # (e.g. u0 < u0 is False, u0 < u1 is False with no axioms, u0 < 2 * u0 is True)
-            return (
-                guard_or_false(
-                    self.stride < other.stride
-                )  # checks statically known inequality
-                or (
-                    (
-                        guard_or_false(self.stride == 0)
-                        or guard_or_false(other.stride % self.stride == 0)
-                    )
-                    and guard_or_true(self.stride != other.stride)
-                )  # checks symbolic inequality (e.g. u0 < 2048 * u0)
-            )
+            return guard_or_false(
+                self.stride < other.stride
+            ) or (  # checks statically known inequality
+                (
+                    guard_or_false(self.stride == 0)
+                    or guard_or_false(other.stride % self.stride == 0)
+                )
+                and guard_or_true(self.stride != other.stride)
+            )  # checks symbolic inequality (e.g. u0 < 2048 * u0)
 
     lengths_and_strides = sorted(map(K, sizes, strides))
 
