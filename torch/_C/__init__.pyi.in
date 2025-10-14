@@ -1254,17 +1254,19 @@ def _get_float32_matmul_precision() -> str: ...  # THPModule_float32MatmulPrecis
 def _set_float32_matmul_precision(
     arg: str,
 ) -> None: ...  # THPModule_setFloat32MatmulPrecision
-def _get_cublas_allow_fp16_reduced_precision_reduction() -> (
-    _bool
-): ...  # THPModule_allowFP16ReductionCuBLAS
+def _get_cublas_allow_fp16_reduced_precision_reduction() -> tuple[
+    _bool, _bool
+]: ...  # THPModule_allowFP16ReductionCuBLAS
 def _set_cublas_allow_fp16_reduced_precision_reduction(
     arg: _bool,
+    allow_splitk: _bool = ...,
 ) -> None: ...  # THPModule_setAllowFP16ReductionCuBLAS
-def _get_cublas_allow_bf16_reduced_precision_reduction() -> (
-    _bool
-): ...  # THPModule_allowBF16ReductionCuBLAS
+def _get_cublas_allow_bf16_reduced_precision_reduction() -> tuple[
+    _bool, _bool
+]: ...  # THPModule_allowBF16ReductionCuBLAS
 def _set_cublas_allow_bf16_reduced_precision_reduction(
     arg: _bool,
+    allow_splitk: _bool = ...,
 ) -> None: ...  # THPModule_setAllowBF16ReductionCuBLAS
 def _get_cublas_allow_fp16_accumulation() -> (
     _bool
@@ -1625,6 +1627,8 @@ def _jit_pass_lint(Graph) -> None: ...
 def _make_opaque_object(payload: Any) -> ScriptObject: ...
 def _get_opaque_object_payload(obj: ScriptObject) -> Any: ...
 def _set_opaque_object_payload(obj: ScriptObject, payload: Any) -> None: ...
+def _register_opaque_type(type_name: str) -> None: ...
+def _is_opaque_type_registered(type_name: str) -> _bool: ...
 
 # Defined in torch/csrc/jit/python/python_custom_class.cpp
 def _get_custom_class_python_wrapper(name: str, attr: str) -> Any: ...
@@ -1917,6 +1921,7 @@ class TensorBase(metaclass=_TensorMeta):
     names: list[str]
     device: _device
     dtype: _dtype
+    grad_dtype: _dtype | None
     layout: _layout
     real: Tensor
     imag: Tensor
@@ -2775,18 +2780,4 @@ class _StaticCudaLauncher:
         arg_types: str,
         args: tuple[Any, ...],
         stream: _int,
-    ) -> None: ...
-
-# Defined in torch/csrc/cuda/green_context.h
-class GreenContext:
-    @staticmethod
-    def create(
-        num_sms: _int,
-        device_id: _int,
-    ) -> GreenContext: ...
-    def make_current(
-        self,
-    ) -> None: ...
-    def pop_current(
-        self,
     ) -> None: ...

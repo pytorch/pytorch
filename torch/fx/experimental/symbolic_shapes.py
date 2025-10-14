@@ -620,11 +620,13 @@ def rebind_unbacked(
             ):
                 # This is what the pattern match above is testing
                 repacked = _sympy_cast_symbool_to_symint_guardless(
+                    # pyrefly: ignore  # unbound-name
                     sympy.Eq(new_raw_u1, 1)
                 )
                 assert repacked == raw_u1, f"{repacked} != {raw_u1}"
                 # Cancel the to_int(to_bool(x)). This is sound because x in
                 # [0, 1]
+                # pyrefly: ignore  # unbound-name
                 raw_u1 = new_raw_u1
 
             if not isinstance(raw_u1, sympy.Symbol):
@@ -839,6 +841,7 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
         factor = functools.reduce(math.gcd, map(integer_coefficient, atoms))
         if factor == 1:
             return expr
+        # pyrefly: ignore  # bad-argument-type
         atoms = [div_by_factor(x, factor) for x in atoms]
         return _sympy_from_args(
             sympy.Add, atoms, sort=True, is_commutative=expr.is_commutative
@@ -1024,6 +1027,7 @@ def find_symbol_binding_fx_nodes(
     # NB: Prefer first occurrence of symbol
     for node in graph.nodes:
         if (s := is_symbol_binding_fx_node(node)) is not None and s not in r:
+            # pyrefly: ignore  # unbound-name
             r[s] = node
     return r
 
@@ -1194,10 +1198,13 @@ def _free_unbacked_symbols_with_path(
         and isinstance(s := expr(a), sympy.Symbol)
         and s in pending
     ):
+        # pyrefly: ignore  # unbound-name
         r[s] = path
         if shape_env and real is not None:
             assert isinstance(real, (int, float))
+            # pyrefly: ignore  # unbound-name
             shape_env.set_unbacked_var_to_val(s, real)
+        # pyrefly: ignore  # unbound-name
         pending.remove(s)
     # When an unbacked SymInt is perfectly divisible by an integer
     # constant, we replace it with the integer constant to improve
@@ -1227,19 +1234,27 @@ def _free_unbacked_symbols_with_path(
                 source=shape_env.var_to_sources.get(s, [None])[0],  # type: ignore[union-attr]
             )
 
+        # pyrefly: ignore  # unbound-name
         unbacked = lhs if lhs in pending else rhs
         divisor: IntLikeType = (
+            # pyrefly: ignore  # unbound-name
             int(coeff)
+            # pyrefly: ignore  # unbound-name
             if shape_env and isinstance(coeff, sympy.Integer)
+            # pyrefly: ignore  # unbound-name
             else _symint_wrap(coeff)
         )
         # TODO: DivideByKey needs to test divisibility at runtime!
+
         r[unbacked] = path + (DivideByKey(divisor),)
         if real is not None:
             assert isinstance(real, int)
             val = (
+                # pyrefly: ignore  # unbound-name
                 real // int(coeff)
+                # pyrefly: ignore  # unbound-name
                 if isinstance(coeff, sympy.Integer)
+                # pyrefly: ignore  # unbound-name
                 else CleanDiv(real, coeff)
             )
             if shape_env:
@@ -1256,11 +1271,14 @@ def _free_unbacked_symbols_with_path(
         and s.rhs == 1
         and s.lhs in pending
     ):
+        # pyrefly: ignore  # unsupported-operation
         r[s.lhs] = path + (ConvertIntKey(),)
         if real is not None:
             assert type(real) is bool
             if shape_env:
+                # pyrefly: ignore  # unbound-name
                 shape_env.set_unbacked_var_to_val(s, int(real))
+        # pyrefly: ignore  # unbound-name
         pending.remove(s.lhs)
 
     return r
@@ -1336,6 +1354,7 @@ def compute_unbacked_bindings(
             ):
                 if (
                     isinstance(old_sym, SymTypes)
+                    # pyrefly: ignore  # unbound-name
                     and (old_s := old_sym.node.expr) != new_s
                 ):
                     # If old_s is not an unbacked_symbol,
@@ -1345,11 +1364,15 @@ def compute_unbacked_bindings(
                     # and the original symbol gets replaced by the backed symbol.
                     # When this happens we just replace new_s by the old_s
                     # because we know the value is the same.
+                    # pyrefly: ignore  # unbound-name
                     if isinstance(old_s, sympy.Symbol) and free_unbacked_symbols(old_s):
+                        # pyrefly: ignore  # unbound-name
                         shape_env._rename_unbacked_to(new_s, old_s)
                     else:
+                        # pyrefly: ignore  # unbound-name
                         shape_env._eliminate_unbacked(new_s, old_s)
                 elif not isinstance(old_sym, SymTypes):
+                    # pyrefly: ignore  # unbound-name
                     shape_env._eliminate_unbacked(new_s, sympy.sympify(old_sym))
 
     return symbol_to_path
@@ -2172,6 +2195,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     def __post_init__(self) -> None:
         super().__post_init__()
         if self.inner_contexts is None:
+            # pyrefly: ignore  # bad-assignment
             self.inner_contexts = {}
 
 
@@ -2260,9 +2284,12 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
     # only re-create the objects if any of the args changed to avoid expensive
     # checks when re-creating objects.
     new_args = [_fast_expand(arg) for arg in expr.args]  # type: ignore[arg-type]
+    # pyrefly: ignore  # missing-attribute
     if any(arg is not new_arg for arg, new_arg in zip(expr.args, new_args)):
+        # pyrefly: ignore  # missing-attribute
         return _fast_expand(expr.func(*new_args))
 
+    # pyrefly: ignore  # missing-attribute
     if expr.is_Pow:
         base: sympy.Expr
         exp: sympy.Expr
@@ -2272,9 +2299,11 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
                 return sympy.expand_multinomial(expr, deep=False)
             elif exp < 0:
                 return S.One / sympy.expand_multinomial(S.One / expr, deep=False)
+    # pyrefly: ignore  # missing-attribute
     elif expr.is_Mul:
         num: list[sympy.Expr] = []
         den: list[sympy.Expr] = []
+        # pyrefly: ignore  # missing-attribute
         for arg in expr.args:
             if arg.is_Pow and arg.args[1] == -1:
                 den.append(S.One / arg)  # type: ignore[operator, arg-type]
@@ -2396,6 +2425,7 @@ def _maybe_evaluate_static_worker(
 
     # TODO: remove this try catch (esp for unbacked_only)
     try:
+        # pyrefly: ignore  # missing-attribute
         new_expr = expr.xreplace(new_shape_env)
     except RecursionError:
         log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
@@ -2933,13 +2963,19 @@ class DimConstraints:
             # is_integer tests though haha
             return (base - mod_reduced) / divisor
 
+        # pyrefly: ignore  # missing-attribute
         if expr.has(Mod):
+            # pyrefly: ignore  # missing-attribute
             expr = expr.replace(Mod, mod_handler)
         # 7 // -3 is -3, 7 % -3 is -2, and 7 - (-2) / -3 is -3.0 so negative
         # arguments should be OK.
+        # pyrefly: ignore  # missing-attribute
         if expr.has(PythonMod):
+            # pyrefly: ignore  # missing-attribute
             expr = expr.replace(PythonMod, mod_handler)
+        # pyrefly: ignore  # missing-attribute
         if expr.has(FloorDiv):
+            # pyrefly: ignore  # missing-attribute
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
 
@@ -3301,6 +3337,7 @@ class DimConstraints:
                     and str(symbol := next(iter(c["eq"].free_symbols))) == old_root
                 ):  # derived dim with root = old_root
                     new_root_expr = results[str(old_root)]["eq"]  # dx=3*_dx+1
+                    # pyrefly: ignore  # unbound-name
                     new_expr = c["eq"].subs({symbol: new_root_expr})  # dy=(3*_dx+1)+1
                     c["eq"] = new_expr
 
@@ -4377,7 +4414,7 @@ class ShapeEnv:
         size = []
         for i, val in enumerate(tensor_size):
             sym = self.create_symbol(
-                val if i not in hint_overrides else hint_overrides[i],
+                hint_overrides.get(i, val),
                 TensorPropertySource(source, TensorProperty.SIZE, i),
                 dynamic_dims[i],
                 constraint_dims[i],
@@ -4578,7 +4615,7 @@ class ShapeEnv:
         sym_sizes = [
             self.create_symintnode(
                 sym,
-                hint=hint if i not in hint_overrides else hint_overrides[i],
+                hint=hint_overrides.get(i, hint),
                 source=TensorPropertySource(source, TensorProperty.SIZE, i),
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
@@ -5057,6 +5094,7 @@ class ShapeEnv:
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
+                # pyrefly: ignore  # unsupported-operation
                 self.val_to_var[val] = sympy_expr
 
             if isinstance(val, int):
@@ -5288,15 +5326,19 @@ class ShapeEnv:
 
         # Expand optional inputs, or verify invariants are upheld
         if input_contexts is None:
+            # pyrefly: ignore  # bad-assignment
             input_contexts = [
+                # pyrefly: ignore  # bad-argument-type
                 _create_no_constraints_context(t) if isinstance(t, Tensorlike) else None
                 for t in placeholders
             ]
         else:
             assert len(input_contexts) == len(placeholders)
+
             for i, (t, context) in enumerate(zip(placeholders, input_contexts)):
                 if isinstance(t, Tensorlike):
                     if context is None:
+                        # pyrefly: ignore  # bad-argument-type
                         input_contexts[i] = _create_no_constraints_context(t)
                 else:
                     assert isinstance(t, (SymInt, int, SymFloat, float))
@@ -5582,6 +5624,7 @@ class ShapeEnv:
                 s = sympy.Float(val)
                 input_guards.append((source, s))
 
+        # pyrefly: ignore  # no-matching-overload
         for t, source, context in zip(placeholders, sources, input_contexts):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
@@ -5646,6 +5689,7 @@ class ShapeEnv:
                             src, TensorProperty.SIZE, i
                         )
                         track_symint(property_source, ss, constraint_size[i])
+
                     for i, ss in enumerate(curr_t.stride()):
                         property_source = TensorPropertySource(
                             src, TensorProperty.STRIDE, i
@@ -5943,6 +5987,7 @@ class ShapeEnv:
                 else:
                     str_msg = f"  - {msg_cb()}"
                     error_msgs.append(str_msg)
+                    # pyrefly: ignore  # bad-argument-type
                     debug_names.add(debug_name)
             if len(error_msgs) > 0:
                 debug_names_str = ", ".join(sorted(debug_names))
@@ -6076,6 +6121,7 @@ class ShapeEnv:
         Get a list of guards, but pruned so it only provides guards that
         reference symints from the passed in input
         """
+        # pyrefly: ignore  # bad-assignment
         symints = {
             s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)
         }
@@ -6338,6 +6384,7 @@ class ShapeEnv:
         Apply symbol replacements to any symbols in the given expression.
         """
         replacements = {}
+        # pyrefly: ignore  # missing-attribute
         for s in expr.free_symbols:
             r = self._find(s)
 
@@ -6347,6 +6394,7 @@ class ShapeEnv:
             if not r.is_Symbol or r != s:
                 replacements[s] = r
         if replacements:
+            # pyrefly: ignore  # missing-attribute
             return safe_expand(expr.xreplace(replacements))
         else:
             return expr
@@ -7121,6 +7169,7 @@ class ShapeEnv:
         instructions = list(dis.Bytecode(frame.f_code))
         co_lines, offset = inspect.getsourcelines(frame.f_code)
         start, end, cur = None, None, None
+        # pyrefly: ignore  # bad-assignment
         for i, instr in enumerate(instructions):
             if instr.starts_line is not None:
                 cur = instr.starts_line
@@ -7553,8 +7602,10 @@ class ShapeEnv:
                         log.info(
                             "oblivious_size %s -> %s (passed counterfactual)",
                             orig_expr,
+                            # pyrefly: ignore  # unbound-name
                             correct_hint,
                         )
+                        # pyrefly: ignore  # unbound-name
                         concrete_val = correct_hint
                         # NB: do NOT transmute into runtime assert
                         ok = True
@@ -7571,8 +7622,10 @@ class ShapeEnv:
                             ).xreplace(self.var_to_val)
                         ).free_symbols
                     ):
+                        # pyrefly: ignore  # unbound-name
                         self._log_real_tensor_propagation(orig_expr, unsound_result)
                         transmute_into_runtime_assert = True
+                        # pyrefly: ignore  # unbound-name
                         concrete_val = unsound_result
                         ok = True
 
@@ -7817,13 +7870,13 @@ class ShapeEnv:
             # sympy.Eq may update both lower and upper bounds.
             # sympy.G{t,e} may update the lower bound, only.
             # sympy.L{t,e} may update the upper bound, only.
-            if lower < rhs_vr.lower and isinstance(
+            if lower <= rhs_vr.lower and isinstance(
                 r_expr, (sympy.Eq, sympy.Ge, sympy.Gt)
             ):
                 # Strictly greater relations allow us to refine a bit more, since
                 # x < y implies that the lower bound for x is: y + 1.
                 lower = rhs_vr.lower + int(isinstance(r_expr, sympy.Gt))
-            if upper > rhs_vr.upper and isinstance(
+            if upper >= rhs_vr.upper and isinstance(
                 r_expr, (sympy.Eq, sympy.Le, sympy.Lt)
             ):
                 upper = rhs_vr.upper - int(isinstance(r_expr, sympy.Lt))

@@ -1,59 +1,71 @@
-# TODO(elainwy): remove this file after the torch nightly dockerfile is in sync in vllm repo
-# The vLLM Dockerfile is used to construct vLLM image against torch nightly and torch main that can be directly used for testing
-
 ARG CUDA_VERSION=12.8.1
 ARG PYTHON_VERSION=3.12
 
 # BUILD_BASE_IMAGE: used to setup python build xformers, and vllm wheels, It can be replaced with a different base image from local machine,
 # by default, it uses the torch-nightly-base stage from this docker image
 ARG BUILD_BASE_IMAGE=torch-nightly-base
-
-# FINAL_BASE_IMAGE: used to set up vllm-instaled environment and build flashinfer,
-# by default, it uses devel-ubuntu22.04 official image.
 ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
 
 # The logic is copied from https://github.com/vllm-project/vllm/blob/main/docker/Dockerfile
 ARG GET_PIP_URL="https://bootstrap.pypa.io/get-pip.py"
 
-
 #################### TORCH NIGHTLY BASE IMAGE ####################
-# A base image for building vLLM with devel ubuntu 22.04, this is mainly used to build vllm in vllm builtkite ci
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04 as torch-nightly-base
 
 ARG CUDA_VERSION
 ARG PYTHON_VERSION
 ARG GET_PIP_URL
 
-# Install Python and other dependencies
+# Install system dependencies and uv, then create Python virtual environment
 RUN apt-get update -y \
-    && apt-get install -y ccache software-properties-common git curl wget sudo vim \
-    && add-apt-repository -y ppa:deadsnakes/ppa \
-    && apt-get update -y \
-    && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-    && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
-    && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
-    && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION} \
+    && apt-get install -y ccache software-properties-common git curl sudo vim python3-pip \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && $HOME/.local/bin/uv venv /opt/venv --python ${PYTHON_VERSION} \
+    && rm -f /usr/bin/python3 /usr/bin/python3-config /usr/bin/pip \
+    && ln -s /opt/venv/bin/python3 /usr/bin/python3 \
+    && ln -s /opt/venv/bin/python3-config /usr/bin/python3-config \
+    && ln -s /opt/venv/bin/pip /usr/bin/pip \
     && python3 --version && python3 -m pip --version
 
 # Upgrade to GCC 10 to avoid https://gcc.gnu.org/bugzilla/show_bug.cgi?id=92519
 # as it was causing spam when compiling the CUTLASS kernels
-# Ensure gcc >= 10 to avoid CUTLASS issues (bug 92519)
-RUN current_gcc_version=$(gcc -dumpversion | cut -f1 -d.) && \
-    if command -v apt-get >/dev/null; then \
-        if [ "$current_gcc_version" -lt 10 ]; then \
-            echo "GCC version is $current_gcc_version, installing gcc-10..."; \
-            apt-get update \
-            && apt-get install -y gcc-10 g++-10 \
-            && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 \
-            && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100; \
-        else \
-            echo "GCC version is $current_gcc_version, no need to install gcc-10."; \
-        fi \
-    fi \
-    && gcc --version && g++ --version
+RUN apt-get install -y gcc-10 g++-10
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 110 --slave /usr/bin/g++ g++ /usr/bin/g++-10
+RUN <<EOF
+gcc --version
+EOF
 
-# install uv for faster pip installs
+# Install uv for faster pip installs
+RUN --mount=type=cache,target=/root/.cache/uv \
+    python3 -m pip install uv==0.8.4
+
+ENV UV_HTTP_TIMEOUT=500
+ENV UV_INDEX_STRATEGY="unsafe-best-match"
+# Use copy mode to avoid hardlink failures with Docker cache mounts
+ENV UV_LINK_MODE=copy
+#################### TORCH NIGHTLY  BASE IMAGE ####################
+
+
+#################### BASE BUILD IMAGE ####################
+FROM ${BUILD_BASE_IMAGE} AS base
+USER root
+
+ARG CUDA_VERSION
+ARG PYTHON_VERSION
+
+# Only work with PyTorch manylinux builder
+ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
+
+# Install some system dependencies and double check python version
+RUN if command -v apt-get >/dev/null; then \
+        apt-get update -y \
+        && apt-get install -y ccache software-properties-common git wget sudo vim; \
+    else \
+        dnf install -y git wget sudo; \
+    fi \
+    && python3 --version && python3 -m pip --version
+
+# Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
     python3 -m pip install uv==0.8.4
 
@@ -62,51 +74,17 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # Use copy mode to avoid hardlink failures with Docker cache mounts
 ENV UV_LINK_MODE=copy
 
-#################### TORCH NIGHTLY  BASE IMAGE ####################
-
-
-#################### BASE BUILD IMAGE ####################
-# A base image for building vLLM with torch nightly or torch wheels
-# prepare basic build environment
-FROM ${BUILD_BASE_IMAGE} AS base
-USER root
-
-ARG CUDA_VERSION
-ARG PYTHON_VERSION
-
-# TODO (huydhn): Only work with PyTorch manylinux builder
-ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
-
-# Install some system dependencies and double check python version
-RUN if command -v apt-get >/dev/null; then \
-        apt-get update -y \
-        && apt-get install -y ccache software-properties-common git curl wget sudo vim; \
-    else \
-        dnf install -y git curl wget sudo; \
-    fi \
-    && python3 --version && python3 -m pip --version
-
-# Install uv for faster pip installs if not existed
-RUN --mount=type=cache,target=/root/.cache/uv \
-    if ! python3 -m uv --version >/dev/null 2>&1; then \
-        python3 -m pip install uv==0.8.4; \
-    fi
-ENV UV_HTTP_TIMEOUT=500
-ENV UV_INDEX_STRATEGY="unsafe-best-match"
-# Use copy mode to avoid hardlink failures with Docker cache mounts
-ENV UV_LINK_MODE=copy
-
 WORKDIR /workspace
 
-# install build and runtime dependencies
+# Install build and runtime dependencies
 COPY requirements/common.txt requirements/common.txt
 COPY use_existing_torch.py use_existing_torch.py
 COPY pyproject.toml pyproject.toml
 
-# install build and runtime dependencies without stable torch version
+# Install build and runtime dependencies without stable torch version
 RUN python3 use_existing_torch.py
 
-# default mount file as placeholder, this just avoid the mount error
+# Default mount file as placeholder, this just avoid the mount error
 # change to a different vllm folder if this does not exist anymore
 ARG TORCH_WHEELS_PATH="./requirements"
 ARG PINNED_TORCH_VERSION
@@ -138,56 +116,36 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/common.txt
 
-# Must put before installing xformers, so it can install the correct version of xfomrers.
-ARG xformers_cuda_arch_list='7.5;8.0+PTX;9.0a'
-ENV TORCH_CUDA_ARCH_LIST=${xformers_cuda_arch_list}
-
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
 
-RUN echo ${TORCH_CUDA_ARCH_LIST}
-RUN echo ${MAX_JOBS}
-RUN pip freeze | grep -E 'ninja'
+RUN --mount=type=cache,target=/root/.cache/uv bash - <<'BASH'
+    export TORCH_CUDA_ARCH_LIST='7.5 8.0+PTX 9.0a'
+    git clone https://github.com/facebookresearch/xformers.git
 
-# Build xformers with cuda and torch nightly/wheel
-# following official xformers guidance: https://github.com/facebookresearch/xformers#build
-# sha for https://github.com/facebookresearch/xformers/tree/v0.0.32.post2
-ARG XFORMERS_COMMIT=5d4b92a5e5a9c6c6d4878283f47d82e17995b468
-ENV CCACHE_DIR=/root/.cache/ccache
+    pushd xformers
+    git checkout v0.0.32.post2
+    git submodule update --init --recursive
+    python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose
+    popd
 
-RUN --mount=type=cache,target=/root/.cache/ccache \
-    --mount=type=cache,target=/root/.cache/uv \
-    echo 'git clone xformers...' \
-    && git clone https://github.com/facebookresearch/xformers.git --recursive \
-    && cd xformers \
-    && git checkout ${XFORMERS_COMMIT} \
-    && git submodule update --init --recursive \
-    && echo 'finish git clone xformers...' \
-    && rm -rf build \
-    && python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose \
-    && cd .. \
-    && rm -rf xformers
+    rm -rf xformers
+BASH
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system xformers-dist/*.whl --verbose
+    uv pip install --system xformers-dist/*.whl
 
-# Build can take a long time, and the torch nightly version fetched from url can be different in next docker stage.
-# track the nightly torch version used in the build, when we set up runtime environment we can make sure the version is the same
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
-
 RUN cat torch_build_versions.txt
 RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
-
 #################### BASE BUILD IMAGE ####################
 
 
 #################### WHEEL BUILD IMAGE ####################
-# Image used to build vllm wheel
 FROM base AS build
 ARG TARGETPLATFORM
 
 COPY . .
-
 RUN python3 use_existing_torch.py
 
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -197,20 +155,17 @@ ARG GIT_REPO_CHECK=0
 RUN --mount=type=bind,source=.git,target=.git \
     if [ "$GIT_REPO_CHECK" != "0" ]; then bash tools/check_repo.sh ; fi
 
-# Max jobs used by Ninja to build extensions
 ARG max_jobs=16
 ENV MAX_JOBS=${max_jobs}
-ARG nvcc_threads=4
+ARG nvcc_threads=8
 ENV NVCC_THREADS=$nvcc_threads
-ARG torch_cuda_arch_list='8.0 8.6 8.9 9.0'
-ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
 
 ARG USE_SCCACHE
 ARG SCCACHE_BUCKET_NAME=vllm-build-sccache
 ARG SCCACHE_REGION_NAME=us-west-2
 ARG SCCACHE_S3_NO_CREDENTIALS=0
 
-# if USE_SCCACHE is set, use sccache to speed up compilation
+# Use sccache to speed up compilation
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=.git,target=.git \
     if [ "$USE_SCCACHE" = "1" ]; then \
@@ -235,6 +190,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         && sccache --show-stats; \
     fi
 
+ARG torch_cuda_arch_list='8.0 8.6 8.9 9.0'
+ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
+
 ARG vllm_target_device="cuda"
 ENV VLLM_TARGET_DEVICE=${vllm_target_device}
 ENV CCACHE_DIR=/root/.cache/ccache
@@ -248,17 +206,10 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
         export VLLM_DOCKER_BUILD_CONTEXT=1 && \
         python3 setup.py bdist_wheel --dist-dir=vllm-dist --py-limited-api=cp38; \
     fi
-
-RUN echo "[INFO] Listing current directory:" && \
-    ls -al && \
-    echo "[INFO] Showing torch_build_versions.txt content:" && \
-    cat torch_build_versions.txt
-
 #################### WHEEL BUILD IMAGE ####################
 
 
 ################### VLLM INSTALLED IMAGE ####################
-# Setup clean environment for vLLM for test and api server using ubuntu22.04 with AOT flashinfer
 FROM ${FINAL_BASE_IMAGE} AS vllm-base
 USER root
 
@@ -266,7 +217,7 @@ ARG CUDA_VERSION
 ARG PYTHON_VERSION
 ARG GET_PIP_URL
 
-# TODO (huydhn): Only work with PyTorch manylinux builder
+# Only work with PyTorch manylinux builder
 ENV PATH="/opt/python/cp312-cp312/bin:${PATH}"
 
 # prepare for environment starts
@@ -275,20 +226,19 @@ WORKDIR /workspace
 # Install Python and other dependencies
 RUN if command -v apt-get >/dev/null; then \
         apt-get update -y \
-        && apt-get install -y ccache software-properties-common git curl wget sudo vim \
-        && add-apt-repository -y ppa:deadsnakes/ppa \
-        && apt-get update -y \
-        && apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python${PYTHON_VERSION}-venv \
-        && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python${PYTHON_VERSION} 1 \
-        && update-alternatives --set python3 /usr/bin/python${PYTHON_VERSION} \
-        && ln -sf /usr/bin/python${PYTHON_VERSION}-config /usr/bin/python3-config \
-        && curl -sS ${GET_PIP_URL} | python${PYTHON_VERSION}; \
+        && apt-get install -y ccache software-properties-common git sudo vim python3-pip; \
     else \
-        dnf install -y git curl wget sudo; \
+        dnf install -y git wget sudo; \
     fi \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && $HOME/.local/bin/uv venv /opt/venv --python ${PYTHON_VERSION} \
+    && rm -f /usr/bin/python3 /usr/bin/python3-config /usr/bin/pip \
+    && ln -s /opt/venv/bin/python3 /usr/bin/python3 \
+    && ln -s /opt/venv/bin/python3-config /usr/bin/python3-config \
+    && ln -s /opt/venv/bin/pip /usr/bin/pip \
     && python3 --version && python3 -m pip --version
 
-# Get the torch versions, and whls used in previous stagtes for consistency
+# Get the torch versions, and whls used in previous stage
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
 COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
@@ -297,33 +247,29 @@ RUN echo "[INFO] Listing current directory before torch install step:" && \
     echo "[INFO] Showing torch_build_versions.txt content:" && \
     cat torch_build_versions.txt
 
-# Install build and runtime dependencies, this is needed for flashinfer install
-COPY requirements/build.txt requirements/build.txt
-COPY use_existing_torch.py use_existing_torch.py
-RUN python3 use_existing_torch.py
-RUN cat requirements/build.txt
-
 # Install uv for faster pip installs if not existed
 RUN --mount=type=cache,target=/root/.cache/uv \
-    if ! python3 -m uv --version > /dev/null 2>&1; then \
-        python3 -m pip install uv==0.8.4; \
-    fi
+    python3 -m pip install uv==0.8.4
 
 ENV UV_HTTP_TIMEOUT=500
 ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # Use copy mode to avoid hardlink failures with Docker cache mounts
 ENV UV_LINK_MODE=copy
 
+# Install build and runtime dependencies, this is needed for flashinfer install
+COPY requirements/build.txt requirements/build.txt
+COPY use_existing_torch.py use_existing_torch.py
+RUN python3 use_existing_torch.py
+RUN cat requirements/build.txt
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/build.txt
 
-
 # Default mount file as placeholder, this just avoid the mount error
 ARG TORCH_WHEELS_PATH="./requirements"
-# Install torch, torchaudio and torchvision
-# if TORCH_WHEELS_PATH is default "./requirements", it will pull the nightly versions using pip using torch_build_versions.txt
-# otherwise, it will use the whls from TORCH_WHEELS_PATH from the host machine
+# Install torch, torchaudio and torchvision. If TORCH_WHEELS_PATH is default
+# to ./requirements, it will pull the nightly versions using pip. Otherwise,
+# it will use the local wheels from TORCH_WHEELS_PATH
 RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
     --mount=type=cache,target=/root/.cache/uv \
     if [ -n "$TORCH_WHEELS_PATH" ] && [ "$TORCH_WHEELS_PATH" != "./requirements" ] && [ -d "/dist" ] && ls /dist/torch*.whl >/dev/null 2>&1; then \
@@ -344,18 +290,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Install xformers wheel from previous stage
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/xformers/*.whl --verbose
-# Build flashinfer from source.
+
+# Build FlashInfer from source
 ARG torch_cuda_arch_list='8.0;8.9;9.0a;10.0a;12.0'
-# install package for build flashinfer
-# see issue: https://github.com/flashinfer-ai/flashinfer/issues/738
-
-RUN pip freeze | grep -E 'setuptools|packaging|build'
-
 ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
-# Build flashinfer for torch nightly from source around 10 mins
+
 ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
-# Keep this in sync with https://github.com/vllm-project/vllm/blob/main/requirements/cuda.txt
 ARG FLASHINFER_GIT_REF="v0.2.14.post1"
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     git clone --depth 1 --recursive --shallow-submodules \
         --branch ${FLASHINFER_GIT_REF} \
@@ -367,7 +309,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     && cd .. \
     && rm -rf flashinfer
 
-# install flashinfer python
+# Install FlashInfer
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system wheels/flashinfer/*.whl --verbose
 
@@ -376,49 +318,6 @@ RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio\|^xformers\|^vllm\|^flashinfer' > build_summary.txt
 ################### VLLM INSTALLED IMAGE ####################
 
-
-#################### UNITTEST IMAGE #############################
-FROM vllm-base as test
-
-ENV UV_HTTP_TIMEOUT=500
-ENV UV_INDEX_STRATEGY="unsafe-best-match"
-# Use copy mode to avoid hardlink failures with Docker cache mounts
-ENV UV_LINK_MODE=copy
-
-COPY tests/ tests/
-COPY examples examples
-COPY benchmarks benchmarks
-COPY ./vllm/collect_env.py .
-COPY requirements/common.txt requirements/common.txt
-COPY use_existing_torch.py use_existing_torch.py
-COPY pyproject.toml pyproject.toml
-# Install build and runtime dependencies without stable torch version
-COPY requirements/nightly_torch_test.txt requirements/nightly_torch_test.txt
-
-RUN python3 use_existing_torch.py
-
-# install packages
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -r requirements/common.txt
-# enable fast downloads from hf (for testing)
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system hf_transfer
-ENV HF_HUB_ENABLE_HF_TRANSFER 1
-
-# install development dependencies (for testing)
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -e tests/vllm_test_utils
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -r requirements/nightly_torch_test.txt
-
-# Logging to confirm the torch versions
-RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
-
-# Logging to confirm all the packages are installed
-RUN pip freeze
-
-#################### UNITTEST IMAGE #############################
 
 #################### EXPORT STAGE ####################
 FROM scratch as export-wheels

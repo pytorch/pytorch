@@ -1219,6 +1219,7 @@ def originate_pairs(
     else:
         for pair_type in pair_types:
             try:
+                # pyrefly: ignore  # bad-instantiation
                 return [pair_type(actual, expected, id=id, **options)]
             # Raising an `UnsupportedInputs` during origination indicates that the pair type is not able to handle the
             # inputs. Thus, we try the next pair type.

@@ -544,7 +544,8 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
     """
     # At the moment, some PyTorch source files are HIPified in place.  The predicate
     # is_out_of_place tells us if this is the case or not.
-    assert not os.path.isabs(rel_filepath)
+    if os.path.isabs(rel_filepath):
+        raise AssertionError("rel_filepath must be a relative path")
     if not is_pytorch_extension and not is_out_of_place(rel_filepath):
         return rel_filepath
 
@@ -611,7 +612,8 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
 
 
 def is_out_of_place(rel_filepath):
-    assert not os.path.isabs(rel_filepath)
+    if os.path.isabs(rel_filepath):
+        raise AssertionError("rel_filepath must be a relative path")
     if rel_filepath.startswith("torch/"):
         return False
     if rel_filepath.startswith("third_party/nvfuser/"):
@@ -623,7 +625,8 @@ def is_out_of_place(rel_filepath):
 
 def is_pytorch_file(rel_filepath):
     _deprecated("is_pytorch_file")
-    assert not os.path.isabs(rel_filepath)
+    if os.path.isabs(rel_filepath):
+        raise AssertionError("rel_filepath must be a relative path")
     if rel_filepath.startswith("aten/"):
         if rel_filepath.startswith("aten/src/ATen/core/"):
             return False
@@ -658,11 +661,13 @@ def is_special_file(rel_filepath):
 
 def is_caffe2_gpu_file(rel_filepath):
     _deprecated("is_caffe2_gpu_file")
-    assert not os.path.isabs(rel_filepath)
+    if os.path.isabs(rel_filepath):
+        raise AssertionError("rel_filepath must be a relative path")
     if rel_filepath.startswith("c10/cuda"):
         return True
     filename = os.path.basename(rel_filepath)
     _, ext = os.path.splitext(filename)
+    # pyrefly: ignore  # unsupported-operation
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
 
@@ -773,7 +778,8 @@ PYTORCH_TRIE = Trie()
 PYTORCH_MAP: dict[str, object] = {}
 
 for mapping in CUDA_TO_HIP_MAPPINGS:
-    assert isinstance(mapping, Mapping)
+    if not isinstance(mapping, Mapping):
+        raise TypeError("Expected each mapping in CUDA_TO_HIP_MAPPINGS to be a Mapping")
     for src, dst in mapping.items():
         PYTORCH_TRIE.add(src)
         PYTORCH_MAP[src] = dst
@@ -1101,6 +1107,7 @@ def hipify(
                                         out_of_place_only=out_of_place_only,
                                         is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
+    # pyrefly: ignore  # bad-assignment
     for f in extra_files:
         if not os.path.isabs(f):
             f = os.path.join(output_directory, f)
