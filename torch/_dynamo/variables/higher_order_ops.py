@@ -718,11 +718,7 @@ def validate_args_and_maybe_create_graph_inputs(
                     new_proxy = tracer.create_graph_input(
                         arg_name, a.python_type(), example_value
                     )
-                    example_value = (
-                        node.meta["example_value"]
-                        if "example_value" in node.meta
-                        else None
-                    )
+                    example_value = node.meta.get("example_value", None)
                     a = wrap_fx_proxy_cls(
                         target_cls=type(a),
                         tx=tx,
@@ -760,9 +756,7 @@ def validate_args_and_maybe_create_graph_inputs(
             # If `a` can be put into a graph
             elif a.maybe_fx_node() is not None:
                 node = a.maybe_fx_node()
-                example_value = (
-                    node.meta["example_value"] if "example_value" in node.meta else None
-                )
+                example_value = node.meta.get("example_value", None)
                 arg_name = node.name if sub_args_names is None else sub_args_names[idx]
                 new_proxy = tracer.create_graph_input(
                     arg_name, a.python_type(), example_value
@@ -2075,9 +2069,16 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
             unimplemented(
                 "executorch_call_delegate: kwargs arguments were not enabled."
             )
-        lowered_module = tx.output.get_submodule(args[0].module_key)
-
-        lowered_node = make_attr(tx, args[0].module_key)
+        if isinstance(args[0], variables.NNModuleVariable):
+            lowered_module = tx.output.get_submodule(args[0].module_key)
+            lowered_node = make_attr(tx, args[0].module_key)
+        elif isinstance(args[0], variables.UnspecializedNNModuleVariable):
+            # This nn module is special sa delegated by executorch. Just
+            # install it as a attr in the graph.
+            lowered_module = args[0].value
+            lowered_node = tx.output.register_static_attr_and_return_proxy(
+                "delegate", lowered_module
+            )
 
         p_args = tuple(arg.as_proxy() for arg in args[1:])
         real_sub_args = pytree.tree_map_only(

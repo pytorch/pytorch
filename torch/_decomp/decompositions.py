@@ -1775,9 +1775,9 @@ def _fused_rms_norm(
     # computation_dtype would be one of [Double, Float, ComplexFloat, ComplexDouble]
     if eps is None:
         if computation_dtype in (torch.float32, torch.complex64):
-            eps_val = sys.float_info.epsilon
+            eps_val = torch.finfo(torch.float32).eps
         else:
-            eps_val = sys.float_info.epsilon
+            eps_val = torch.finfo(torch.float64).eps
     else:
         eps_val = eps
 
@@ -2842,7 +2842,7 @@ def _index_add(
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         torch._check(
-            python_type == bool
+            python_type is bool
             or utils.is_weakly_lesser_type(type(alpha), python_type),
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )

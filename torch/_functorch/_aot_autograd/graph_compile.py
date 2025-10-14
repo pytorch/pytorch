@@ -854,6 +854,7 @@ def run_joint_graph_passes_on_hops(
         with joint_gm.graph.inserting_after(fw_node):
             new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, f"fw{identifier}")
             new_fw_mod_attr = joint_gm.graph.get_attr(new_fw_mod_attr_name)
+            new_fw_mod_attr.meta = copy.copy(fw_node.args[0].meta)
 
         # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
         with joint_gm.graph.inserting_after(new_fw_mod_attr):
@@ -906,6 +907,7 @@ def run_joint_graph_passes_on_hops(
         with joint_gm.graph.inserting_after(bw_node):
             new_bw_mod_attr_name = add_new_hop_gm(new_bw_hop_gm, bw_node.args[1])
             new_bw_mod_attr = joint_gm.graph.get_attr(new_bw_mod_attr_name)
+            new_bw_mod_attr.meta = copy.copy(bw_node.args[0].meta)
 
         with joint_gm.graph.inserting_after(new_bw_mod_attr):
             new_bw_node = joint_gm.graph.call_function(
@@ -1899,9 +1901,18 @@ def _aot_stage2b_bw_compile(
                     # (2408448, 1, 21504, 192). The solution mentioned will
                     # decide a stride of (802816, 1, 7168, 64) for this
                     # tensor which is wrong.
-                    # pyrefly: ignore  # bad-argument-type
-                    placeholder_list[i] = ph_arg.as_strided(ph_arg.size(), real_stride)
 
+                    ph_size = ph_arg.size()
+                    if len(ph_size) == 0 and len(real_stride) > 0:
+                        # Fix for 0-dimensional tensors: When a tensor becomes 0-d
+                        # (e.g., via squeeze), its stride should be () not (1,).
+                        # This mismatch can occur when dynamic shape operations produce
+                        # tensors that are later squeezed to 0-d. The stride metadata
+                        # may get preserved causing a dimension mismatch (#164814)
+                        real_stride = ()
+
+                    # pyrefly: ignore  # bad-argument-type
+                    placeholder_list[i] = ph_arg.as_strided(ph_size, real_stride)
             compiled_bw_func = None
             if (
                 num_symints_saved_for_bw > 0
