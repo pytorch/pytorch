@@ -132,7 +132,6 @@ def aoti_compile_and_package(
         )
         or (
             isinstance(package_path, (str, os.PathLike))
-            # pyrefly: ignore  # no-matching-overload
             and os.fspath(package_path).endswith(".pt2")
         )
     ), (
