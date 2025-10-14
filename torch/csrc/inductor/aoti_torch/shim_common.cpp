@@ -1358,17 +1358,6 @@ AOTITorchError aoti_torch_proxy_executor_call_function(
   });
 }
 
-void aoti_torch_check(
-    bool cond,
-    const char* func,
-    const char* file,
-    uint32_t line,
-    const char* msg) {
-  if (C10_UNLIKELY_OR_CONST(!cond)) {
-    ::c10::detail::torchCheckFail(func, file, line, msg);
-  }
-}
-
 void aoti_torch_warn(
     const char* func,
     const char* file,
