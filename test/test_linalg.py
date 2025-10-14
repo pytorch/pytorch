@@ -5192,8 +5192,7 @@ class TestLinalg(TestCase):
 
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
-            # enable tunableop numeric check via env variable.
-            # os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
+            # enable tunableop numeric check via API.
             torch.cuda.tunable.set_numerical_check_tolerances(True, 0.1, 0.1)
 
             ordinal = torch.cuda.current_device()
