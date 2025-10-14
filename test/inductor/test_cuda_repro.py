@@ -2441,6 +2441,42 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
                 )
 
+    def test_identity_load(self):
+        device = "cuda"
+
+        def f(x, y):
+            y2 = torch.cat(
+                [
+                    x[:, 1:],
+                    y[:, None] + 32 * 2048,
+                ],
+                dim=1,
+            )
+
+            x2 = x[:, 1:, None]
+            y3 = y2[:, -1:, None]
+
+            return (
+                torch.cat([x2, y3], dim=1)
+                + torch.arange(-2048, 0, device=device)[None, None, :]
+            ).reshape(1, 32 * 2048)
+
+        # This succeeds
+        eager_out = f(
+            torch.zeros(1, 32, dtype=torch.int64, device=device),
+            torch.zeros(1, dtype=torch.int32, device=device),
+        )
+        # This crashes
+        compile_out, code = run_and_get_code(
+            torch.compile(f),
+            torch.zeros(1, 32, dtype=torch.int64, device=device),
+            torch.zeros(1, dtype=torch.int32, device=device),
+        )
+        # make sure the identity is maintained
+        FileCheck().check("(1 + ((31)").run(code[0])
+
+        self.assertEqual(eager_out, compile_out)
+
     def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
         # SDPA constraints ensures inputs have alignment (8).
         device = "cuda"
@@ -2543,6 +2579,31 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         correct = forward(*example_inputs)
         actual = compiled(*example_inputs)
         self.assertEqual(actual, correct)
+
+    def test_truediv_numerics_with_eager(self):
+        from decimal import Decimal
+
+        y, x = 7.0, 11.0
+
+        @torch.compile
+        def compiled_divide(x, y):
+            return x / y
+
+        for y_dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64]:
+            for x_dtype in [
+                torch.float16,
+                torch.bfloat16,
+                torch.float32,
+                torch.float64,
+            ]:
+                y_ten = torch.tensor([y], dtype=y_dtype, device="cuda")
+                x_ten = torch.tensor([x], dtype=x_dtype, device="cuda")
+
+                torch._dynamo.reset()
+                compiled_div = Decimal(compiled_divide(x, y_ten).item())
+                eager_div = Decimal((x / y_ten).item())
+
+                self.assertEqual(eager_div, compiled_div)
 
 
 if __name__ == "__main__":
