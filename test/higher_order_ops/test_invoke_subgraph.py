@@ -354,6 +354,7 @@ class GraphModule(torch.nn.Module):
         getitem_14: "f32[8]" = invoke_subgraph_6[2]
         getitem_13: "f32[8]" = invoke_subgraph_6[1]
         getitem_1: "f32[8]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
+
         add: "f32[8]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return (add, getitem_12, getitem_11, getitem_10, getitem_15, getitem_14, getitem_13)
 
@@ -2563,7 +2564,6 @@ class GraphModule(torch.nn.Module):
         repeated_subgraph0 = self.repeated_subgraph0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', x, y);  repeated_subgraph0 = x = None
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
-
         repeated_subgraph0_1 = self.repeated_subgraph0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', getitem, y);  repeated_subgraph0_1 = getitem = y = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
