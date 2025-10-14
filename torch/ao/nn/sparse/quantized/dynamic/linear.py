@@ -140,7 +140,7 @@ class Linear(torch.nn.Module):
 
         We only care about the convert at this stage, no need for observers just yet.
         """
-        assert type(mod) == cls._FLOAT_MODULE, (
+        assert type(mod) is cls._FLOAT_MODULE, (
             " nnq."
             + cls.__name__
             + ".from_float only works for "

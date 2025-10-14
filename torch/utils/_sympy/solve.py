@@ -21,7 +21,7 @@ INEQUALITY_TYPES = (sympy.Gt, sympy.Ge, sympy.Lt, sympy.Le)
 
 
 def mirror_rel_op(type: type) -> Optional[type[sympy.Rel]]:
-    return _MIRROR_REL_OP.get(type)
+    return _MIRROR_REL_OP.get(type, None)
 
 
 # Tries to simplify 'expr', so as to leave only 'thing' in the left-hand side.

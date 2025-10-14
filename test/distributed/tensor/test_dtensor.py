@@ -10,6 +10,7 @@ from numpy.testing import assert_array_equal
 import torch
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -19,7 +20,11 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor._api import _shard_tensor
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._dtensor_spec import (
+    DTensorSpec,
+    ShardOrderEntry,
+    TensorMeta,
+)
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import (
@@ -27,6 +32,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -1053,6 +1059,185 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
+
+
+class TestDTensorSpec(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    def test_dtensor_spec_print(self):
+        self.assertExpectedInline(
+            DTensorSpec.format_shard_order_str((Shard(2), Shard(1), Shard(0)), None),
+            """S(2)S(1)S(0)""",
+        )
+        self.assertExpectedInline(
+            DTensorSpec.format_shard_order_str(
+                (Shard(2), Shard(1), Shard(0)),
+                (
+                    ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                    ShardOrderEntry(tensor_dim=1, mesh_dims=(1,)),
+                    ShardOrderEntry(tensor_dim=2, mesh_dims=(0,)),
+                ),
+            ),
+            """S(2)S(1)S(0)""",
+        )
+        self.assertExpectedInline(
+            DTensorSpec.format_shard_order_str(
+                (Shard(1), Shard(1), Shard(1)),
+                (ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0, 1)),),
+            ),
+            """S(1)[1]S(1)[2]S(1)[0]""",
+        )
+        self.assertExpectedInline(
+            DTensorSpec.format_shard_order_str(
+                (Replicate(), Replicate(), Replicate()), None
+            ),
+            """RRR""",
+        )
+        self.assertExpectedInline(
+            DTensorSpec.format_shard_order_str(
+                (Replicate(), Replicate(), Shard(1)), None
+            ),
+            """RRS(1)""",
+        )
+
+    @with_comms
+    def test_dtensor_spec_with_invalid_shard_order(self):
+        mesh_shape = (2, 2, self.world_size // 4)
+        mesh = init_device_mesh(self.device_type, mesh_shape)
+        tensor_local = torch.randn(8, 6, 5, device=self.device_type)
+        tensor_global = DTensor.from_local(
+            tensor_local, mesh, [Shard(1), Shard(1), Shard(0)]
+        )
+        tensor_global._spec.shard_order = (
+            ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+            ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+        )
+        with self.assertRaisesRegex(
+            AssertionError, r"shard_order .* has empty mesh dim"
+        ):
+            tensor_global._spec.shard_order = (
+                ShardOrderEntry(tensor_dim=1, mesh_dims=()),
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+            )
+        with self.assertRaisesRegex(
+            AssertionError, "tensor dim should be sorted in shard_order"
+        ):
+            tensor_global._spec.shard_order = (
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+            )
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"placement\[\d+\] doesn't have a matching shard in shard_order",
+        ):
+            tensor_global._spec.shard_order = (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(1,)),
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+            )
+        with self.assertRaisesRegex(
+            AssertionError, r"shard_order .* has invalid mesh dim \([\d,]+\)"
+        ):
+            tensor_global._spec.shard_order = (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(3,)),
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+            )
+        with self.assertRaisesRegex(
+            AssertionError, r"shard_order .* has invalid tensor dim -?\d+"
+        ):
+            tensor_global._spec.shard_order = (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                ShardOrderEntry(tensor_dim=-1, mesh_dims=(1, 0)),
+            )
+
+    @with_comms
+    def test_dtensor_spec_update(self):
+        mesh_shape = (2, 2, self.world_size // 4)
+        mesh = init_device_mesh(self.device_type, mesh_shape)
+        tensor_local = torch.randn(8, 6, 5, device=self.device_type)
+        tensor_global_1 = DTensor.from_local(
+            tensor_local, mesh, [Shard(1), Shard(1), Shard(0)]
+        )
+        tensor_global_2 = DTensor.from_local(
+            tensor_local, mesh, [Shard(1), Shard(1), Shard(0)]
+        )
+        self.assertNotEqual(id(tensor_global_1), id(tensor_global_2))
+        self.assertEqual(hash(tensor_global_1._spec), hash(tensor_global_2._spec))
+        self.assertEqual(tensor_global_1._spec, tensor_global_2._spec)
+        # not using the default shard_order
+        tensor_global_1._spec.shard_order = (
+            ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+            ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+        )
+        # hash should be recomputed in DTensorSpec.__setattr__()
+        self.assertNotEqual(hash(tensor_global_1._spec), hash(tensor_global_2._spec))
+        self.assertNotEqual(tensor_global_1._spec, tensor_global_2._spec)
+
+    @with_comms
+    def test_dtensor_spec_default_shard_order_generation(self):
+        mesh_shape = (2, 2, self.world_size // 4)
+        mesh = init_device_mesh(self.device_type, mesh_shape)
+        tensor_local = torch.randn(8, 6, 5, device=self.device_type)
+
+        tensor_global = DTensor.from_local(
+            tensor_local, mesh, [Shard(1), Shard(1), Shard(0)]
+        )
+        self.assertEqual(
+            tensor_global._spec.shard_order,
+            (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 1)),
+            ),
+        )
+
+        tensor_global = DTensor.from_local(
+            tensor_local, mesh, [Replicate(), Replicate(), Replicate()]
+        )
+        self.assertEqual(tensor_global._spec.shard_order, ())
+
+        # shard order omit partial
+        tensor_global = DTensor.from_local(
+            tensor_local, mesh, [Partial(), Replicate(), Replicate()]
+        )
+        self.assertEqual(tensor_global._spec.shard_order, ())
+
+        # shard_order doesn't work with _StridedShard
+        tensor_global = DTensor.from_local(
+            tensor_local,
+            mesh,
+            [Replicate(), _StridedShard(0, split_factor=2), Shard(0)],
+        )
+        self.assertEqual(tensor_global._spec.shard_order, ())
+
+    @with_comms
+    def test_default_shard_order(self):
+        mesh_shape = (2, 2, self.world_size // 4)
+        mesh = init_device_mesh(self.device_type, mesh_shape)
+        tensor_local = torch.randn(8, 6, 5, device=self.device_type)
+
+        tensor_global = DTensor.from_local(
+            tensor_local, mesh, [Shard(1), Shard(2), Shard(1)]
+        )
+        # DTensorSpec automatically builds the default left-to-right order
+        self.assertEqual(
+            tensor_global._spec.shard_order,
+            (
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 2)),
+                ShardOrderEntry(tensor_dim=2, mesh_dims=(1,)),
+            ),
+        )
+        self.assertTrue(
+            DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
+        )
+        # manually set the shard_order by exchange mesh dim 0 and 2
+        tensor_global._spec.shard_order = (
+            ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0)),
+            ShardOrderEntry(tensor_dim=2, mesh_dims=(1,)),
+        )
+        self.assertFalse(
+            DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
+        )
 
 
 if __name__ == "__main__":
