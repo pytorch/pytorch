@@ -291,6 +291,23 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             for line in ["len(x) == 2", "len(x) == 3"]:
                 self.assertIn(line, filter_reasons())
 
+    def test_fail_on_recompile_shows_guard_details(self):
+        def f(x):
+            return x + 1
+
+        compiled_f = torch.compile(f, backend="eager", dynamic=False)
+        compiled_f(torch.ones(4))
+        with torch.compiler.set_stance("fail_on_recompile"):
+            compiled_f(torch.ones(4))
+            with self.assertRaisesRegex(
+                RuntimeError, "triggered by the following guard failure"
+            ):
+                compiled_f(torch.ones(7))
+            with self.assertRaisesRegex(
+                RuntimeError, "size mismatch.*expected 4.*actual 7"
+            ):
+                compiled_f(torch.ones(7))
+
     @torch._dynamo.config.patch(recompile_limit=1)
     def test_recompile_child_run_only(self):
         def f(x, n):
