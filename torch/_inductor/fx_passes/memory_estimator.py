@@ -352,6 +352,9 @@ class MemoryTracker:
 
         Args:
             graph: FX graph to track memory for under alternative scheduling
+            is_releaseable: do we consider this input to the graph to release memory
+            upon final use, or is allocated for the duration of the graph ?
+            by default, we assume all nodes but those that start with "primals" to be releasable
             device_filter: Function to determine which devices to track (default: non-CPU)
         """
 
