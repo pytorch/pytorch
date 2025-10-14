@@ -68,6 +68,7 @@ def get_hint(x: Union[int, torch.SymInt]) -> Optional[int]:
 def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
     with dynamo_timed("collective_compute_do_bench"):
         return functools.partial(
+            # pyrefly: ignore  # bad-argument-type
             torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
             warmup=5,
         )
@@ -679,6 +680,7 @@ class OverlapScheduler:
             node_ancestors=self.node_ancestors,
             scheduled=self.scheduled,
             max_bucket_memory_gb=1.0,  # Could make this configurable
+            max_coll_distance=self.max_node_distance,
         )
         bucketer.bucket_collectives()
 

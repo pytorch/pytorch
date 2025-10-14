@@ -342,7 +342,7 @@ void boxed_my_narrow(
 
 Tensor my_new_empty_dtype_variant(Tensor t) {
   // Still using a std::vector below even though people can just pass in an
-  // initializer list (which will be implicitly converted to an HOArrayRef)
+  // initializer list (which will be implicitly converted to an HeaderOnlyArrayRef)
   // directly.
   std::vector<int64_t> sizes = {2, 5};
   auto dtype = std::make_optional(torch::headeronly::ScalarType::BFloat16);
