@@ -12,7 +12,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
-from torch.distributed._pycute import flatten, is_int, is_tuple, suffix_product
+from torch.distributed._pycute import IntTuple, is_int
 from torch.utils._typing_utils import not_none
 
 
@@ -78,6 +78,7 @@ else:
                 raise RuntimeError("No device mesh is currently active!")
             return self.mesh_stack[-1]
 
+        # TODO: to remove it once we move all use cases into new API.
         def get_root_mesh(self, device_mesh: "DeviceMesh") -> "DeviceMesh":
             # If a mesh could not be found in the child_to_root_mapping, it is a root mesh itself.
             # A root mesh is not created through slicing.
@@ -352,6 +353,10 @@ else:
                         -1, self.mesh.size(dim)
                     )
                     backend, pg_options = backend_override[dim]
+                    # We need to explicitly pass in timeout when specified in option, otherwise
+                    # the default timeout will be used to override the timeout set in option.
+                    # TODO: remove this once we have fixed inside c10d level.
+                    timeout = pg_options._timeout if pg_options else None
 
                     # If we have a 2D mesh with mesh_dim_names ("dp", "tp"), the group description
                     # of the subgroups would be `mesh_dim_dp` and `mesh_name_tp`.
@@ -389,6 +394,7 @@ else:
                     ):
                         dim_group = split_group(
                             parent_pg=default_group,
+                            timeout=timeout,
                             pg_options=pg_options,
                             split_ranks=pg_ranks_by_dim.tolist(),
                             group_desc=group_desc,
@@ -409,6 +415,7 @@ else:
                         if bound_device_id is None or not has_split_group:
                             dim_group = new_group(
                                 ranks=subgroup_ranks,
+                                timeout=timeout,
                                 backend=backend,
                                 pg_options=pg_options,
                                 group_desc=group_desc,
@@ -1102,31 +1109,18 @@ else:
             ] = ((None, None),),
         ) -> "DeviceMesh":
             root_mesh = self._get_root_mesh()
-            unflatten_length = len(mesh_sizes)
-            original_sizes = [self._layout[i].sizes for i in range(len(self._layout))]
-            original_strides = [
-                self._layout[i].strides for i in range(len(self._layout))
-            ]
-            orig_mesh_dim_names = list(not_none(self.mesh_dim_names))
-            unflatten_layout = self._layout[dim].composition(
-                _MeshLayout(tuple(mesh_sizes), suffix_product(mesh_sizes))
-            )
             cur_rank = self.get_rank()
-            original_sizes[dim : dim + 1] = list(unflatten_layout.sizes)  # type: ignore[arg-type]
-            original_strides[dim : dim + 1] = list(unflatten_layout.strides)  # type: ignore[arg-type]
-            unflattened_layout = _MeshLayout(
-                tuple(original_sizes),
-                tuple(original_strides),
-            )
+            unflattened_layout = self._layout.unflatten(dim, mesh_sizes)
             pg_ranks_by_dim = unflattened_layout.remap_to_tensor(
                 root_mesh.mesh,
             )
-            orig_mesh_dim_names[dim : dim + 1] = list(mesh_dim_names)
+            unflattened_mesh_dim_names = list(not_none(self.mesh_dim_names))
+            unflattened_mesh_dim_names[dim : dim + 1] = list(mesh_dim_names)
             res_mesh = DeviceMesh._create_mesh_from_ranks(
                 self.device_type,
                 pg_ranks_by_dim,
                 cur_rank,
-                tuple(orig_mesh_dim_names),  # mesh_dim_names
+                tuple(unflattened_mesh_dim_names),
                 _init_backend=False,
                 _layout=unflattened_layout,
                 _root_mesh=root_mesh,
@@ -1137,6 +1131,11 @@ else:
             # TODO: To make backend init more efficient with cute layout representation and support
             # per dim backend init.
             if hasattr(self, "_dim_group_names"):
+                unflatten_length = len(mesh_sizes)
+                unflatten_layout = _MeshLayout(
+                    tuple(unflattened_layout.sizes[dim : dim + unflatten_length]),  # type: ignore[index]
+                    tuple(unflattened_layout.strides[dim : dim + unflatten_length]),  # type: ignore[index]
+                )
                 unflatten_pg_ranks_by_dim = unflatten_layout.remap_to_tensor(
                     root_mesh.mesh,
                 )
@@ -1145,6 +1144,7 @@ else:
                     unflatten_pg_ranks_by_dim,
                     cur_rank,
                     mesh_dim_names,
+                    backend_override=backend_override,
                 )
                 dim_group_names = []
                 for idx in range(0, res_mesh.ndim):
@@ -1209,57 +1209,57 @@ else:
                 dim = not_none(self.mesh_dim_names).index(dim)
 
             if backend_override is not None:
-                (backend_override_tuple,) = _normalize_backend_override(
-                    backend_override, len(mesh_sizes), mesh_dim_names
+                backend_override_tuple = tuple(
+                    _normalize_backend_override(
+                        backend_override, len(mesh_sizes), mesh_dim_names
+                    )
                 )
             else:
-                backend_override_tuple = ((None, None),) * len(mesh_dim_names)  # type: ignore[assignment]
+                backend_override_tuple = ((None, None),) * len(mesh_dim_names)
 
             return self._create_unflatten_mesh(
                 dim,
                 mesh_sizes,
                 mesh_dim_names,
-                backend_override_tuple,  # type: ignore[arg-type]
+                backend_override_tuple,
             )
 
         @staticmethod
         def _concatenate(device_mesh_list: list["DeviceMesh"]) -> "DeviceMesh":
-            concatenate_dim_names: list[str] = []
-            concatenate_sizes: list[int] = []
-            concatenate_strides: list[int] = []
-            concatenate_dim_group_name: list[str] = []
-            root_mesh = _mesh_resources.get_root_mesh(device_mesh_list[0])
-            for mesh in device_mesh_list:
-                concatenate_dim_names.extend(not_none(mesh.mesh_dim_names))
-                concatenate_sizes.extend(list(flatten(mesh._layout.sizes)))
-                concatenate_strides.extend(list(flatten(mesh._layout.strides)))
-                concatenate_dim_group_name.extend(not_none(mesh._dim_group_names))
+            concat_dim_names: list[str] = []
+            concat_sizes: list[IntTuple] = []
+            concat_strides: list[IntTuple] = []
+            concat_dim_group_name: list[str] = []
+            root_mesh = device_mesh_list[0]._get_root_mesh()
+            for dm in device_mesh_list:
+                concat_dim_names.extend(not_none(dm.mesh_dim_names))
+                concat_sizes.append(dm._layout.sizes)
+                concat_strides.append(dm._layout.strides)
+                concat_dim_group_name.extend(not_none(dm._dim_group_names))
                 # Concatenate device mesh having different root mesh tensors are meaningless
                 # because the concatenated indices should be indexed by the same root mesh tensor.
-                if id(root_mesh.mesh) != id(_mesh_resources.get_root_mesh(mesh).mesh):
+                if root_mesh != dm._get_root_mesh():
                     raise RuntimeError(
                         "Cannot concatenate DeviceMeshes with different root mesh tensors"
                     )
-            concatenate_mesh_layout = _MeshLayout(
-                tuple(concatenate_sizes), tuple(concatenate_strides)
-            )
-            if not concatenate_mesh_layout.check_non_overlap():
+            concat_mesh_layout = _MeshLayout(tuple(concat_sizes), tuple(concat_strides))
+            if not concat_mesh_layout.check_non_overlap():
                 raise RuntimeError(
                     f"Cannot concatenate overlapping meshes: {device_mesh_list}"
                 )
             cur_rank = root_mesh.get_rank()
-            pg_ranks_by_dim = concatenate_mesh_layout.remap_to_tensor(
+            pg_ranks_by_dim = concat_mesh_layout.remap_to_tensor(
                 root_mesh.mesh,
             )
             res_submesh = DeviceMesh._create_mesh_from_ranks(
                 root_mesh.device_type,
                 pg_ranks_by_dim,
                 cur_rank,
-                tuple(concatenate_dim_names),
+                tuple(concat_dim_names),
                 _init_backend=False,
-                _layout=concatenate_mesh_layout,
+                _layout=concat_mesh_layout,
             )
-            res_submesh._dim_group_names = concatenate_dim_group_name
+            res_submesh._dim_group_names = concat_dim_group_name
             return res_submesh
 
     def _normalize_backend_override(

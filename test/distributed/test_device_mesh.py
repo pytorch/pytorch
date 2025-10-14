@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 import os
 import unittest
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -1001,6 +1002,40 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(mesh_3d["tp"].get_group(), unflatten_mesh["tp"].get_group())
         self.assertEqual(mesh_3d["cp"].mesh, unflatten_mesh["cp"].mesh)
         self.assertEqual(mesh_3d["cp"].get_group(), unflatten_mesh["cp"].get_group())
+
+        # Test unflatten with backend override set.
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=30)
+        mesh_2d = global_mesh._unflatten(
+            0, (1, 8), ("pp", "spmd"), backend_override={0: "fake", 1: ("nccl", opts)}
+        )
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=60)
+        mesh_4d = mesh_2d._unflatten(
+            1,
+            (2, 2, 2),
+            ("dp", "cp", "tp"),
+            backend_override={0: "nccl", 1: "nccl", 2: ("nccl", opts)},
+        )
+        self.assertEqual(mesh_4d["pp"].get_group()._get_backend_name(), "custom")
+        spmd_pg = mesh_2d["spmd"].get_group()
+        self.assertEqual(spmd_pg._get_backend_name(), "nccl")
+        w = spmd_pg.allreduce(torch.rand(10).cuda(self.rank))
+        self.assertTrue(
+            spmd_pg._get_backend(
+                torch.device(f"cuda:{self.rank}")
+            )._verify_work_timeout(w, timedelta(seconds=30))
+        )
+        w.wait()
+        tp_pg = mesh_4d["tp"].get_group()
+        self.assertEqual(tp_pg._get_backend_name(), "nccl")
+        w = tp_pg.allreduce(torch.rand(10).cuda(self.rank))
+        self.assertTrue(
+            tp_pg._get_backend(torch.device(f"cuda:{self.rank}"))._verify_work_timeout(
+                w, timedelta(seconds=60)
+            )
+        )
+        w.wait()
 
     @with_comms
     def test_concatenate_2d(self):
