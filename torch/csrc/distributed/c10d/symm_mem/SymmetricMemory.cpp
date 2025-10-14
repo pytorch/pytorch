@@ -152,8 +152,7 @@ static at::Tensor empty_strided_p2p_persistent(
   auto allocated = at::from_blob(dev_ptr, size, stride, options);
 
   // Track the allocation's activeness
-  alloc_id_to_storage.erase(alloc_id);
-  alloc_id_to_storage.emplace(
+  alloc_id_to_storage.insert_or_assign(
       alloc_id, allocated.storage().getWeakStorageImpl());
   return allocated;
 }
