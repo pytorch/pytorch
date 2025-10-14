@@ -516,6 +516,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "_all_to_all_get(Tensor input, Tensor(a!) out, Tensor src_offsets, Tensor out_splits, Tensor dst_offsets, str group_name) -> ()");
   m.def(
       "_make_a2a_2d_exchange_plan(Tensor in_splits, Tensor(a!) src_offsets, Tensor(a!) out_splits, Tensor(a!) dst_offsets, str group_name) -> ()");
+  m.def(
+      "_all_to_all_v_2d_index_push(Tensor input, Tensor(a!) out, Tensor topk_indices, Tensor occurrences, Tensor dst_offsets, str group_name, Tensor b_start, Tensor b_len, Tensor b_head) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

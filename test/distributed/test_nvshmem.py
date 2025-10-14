@@ -231,6 +231,36 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             dist.barrier()
 
 
+def get_occurrence_numbers(tensor):
+    """
+    Transform tensor to show which occurrence each element is.
+
+    Example: tensor([1, 2, 1, 3, 1, 2]) -> tensor([1, 1, 2, 1, 3, 2])
+    """
+    device = tensor.device
+    # Get unique values and their inverse mapping
+    unique_vals, inverse = torch.unique(tensor, return_inverse=True)
+
+    # Create a tensor to count occurrences for each unique value
+    n_unique = len(unique_vals)
+    n_elements = len(tensor)
+
+    # Create a matrix where each row corresponds to a unique value
+    # and columns correspond to positions in the original tensor
+    indicator_matrix = torch.zeros(
+        n_unique, n_elements, dtype=torch.float, device=device
+    )
+    indicator_matrix[inverse, torch.arange(n_elements)] = 1.0
+
+    # Cumulative sum along columns gives us occurrence numbers
+    occurrence_counts = torch.cumsum(indicator_matrix, dim=1) - indicator_matrix
+
+    # Extract the occurrence number for each position
+    result = occurrence_counts[inverse, torch.arange(n_elements, device=device)]
+
+    return result.long()
+
+
 @instantiate_parametrized_tests
 @requires_nvshmem()
 @requires_cuda_p2p_access()
@@ -756,6 +786,114 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
             Got
             {plan.dst_offsets}""",
         )
+
+    @skipIfRocm
+    def test_all_to_all_v_2d_index_push(self) -> None:
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        # Number of experts per rank
+        ne = 4
+        tot_experts = ne * self.world_size
+
+        # Create topk indices of shape (n_tokens, topk)
+        topk = 2
+        n_tokens = 128
+        topk_indices = torch.randint(
+            tot_experts, (n_tokens, topk), dtype=torch.int64, device=self.device
+        )
+
+        # Convert indices to splits
+        orig_inp_splits = torch.histc(
+            topk_indices,
+            bins=tot_experts,
+        )
+
+        # Create symm_mem tensors
+        in_splits = symm_mem.empty(
+            tot_experts, dtype=torch.int64, device=self.device
+        ).copy_(orig_inp_splits)
+        src_offsets = symm_mem.empty(tot_experts, dtype=torch.int64, device=self.device)
+        out_splits = symm_mem.empty(
+            tot_experts, dtype=torch.int64, device=self.device
+        ).fill_(0)
+        dst_offsets = symm_mem.empty(
+            tot_experts, dtype=torch.int64, device=self.device
+        ).fill_(0)
+
+        # Sync all ranks to ensure remote tensors are allocated
+        dist.barrier()
+
+        plan = symm_mem.make_a2a_2d_exchange_plan(
+            in_splits, src_offsets, out_splits, dst_offsets, group_name
+        )
+
+        # Create data
+        max_out_tokens = n_tokens * self.world_size
+        dtype = torch.float
+        hid_dim = 1024
+        inp = symm_mem.empty(n_tokens, hid_dim, dtype=dtype, device=self.device).copy_(
+            torch.randn(n_tokens, hid_dim, dtype=dtype, device=self.device)
+        )
+        out = symm_mem.empty(
+            max_out_tokens, hid_dim, dtype=dtype, device=self.device
+        ).fill_(-1)
+
+        # Figure out rank of each token in its expert chunk
+        occurrences = get_occurrence_numbers(topk_indices.view(-1))
+
+        # Number of CUDA blocks (random choice)
+        n_blocks = 2
+        # Evenly spread token to CUDA blocks
+        tokens_per_block = n_tokens // n_blocks
+        # Start offset of each CUDA block
+        b_start = torch.arange(
+            0, n_tokens, tokens_per_block, dtype=torch.int64, device=self.device
+        )
+        # Number of tokens for each CUDA block
+        b_len = torch.full(
+            (n_blocks,), tokens_per_block, dtype=torch.int64, device=self.device
+        )
+        # Ready signal for each CUDA block. In this test we set all tokens as ready in one shot
+        b_head = b_start + b_len
+
+        dist.barrier()
+
+        torch.ops.symm_mem._all_to_all_v_2d_index_push(
+            inp,
+            out,
+            topk_indices,
+            occurrences,
+            plan.dst_offsets,
+            group_name,
+            b_start,
+            b_len,
+            b_head,
+        )
+
+        # Check data using all_to_all_vdev_2d
+        # Token sequence is inflated topk times
+        expanded_seqlen = n_tokens * topk
+        sorted_indices = torch.argsort(topk_indices.view(-1))
+        expanded_inp = symm_mem.empty(
+            expanded_seqlen, hid_dim, dtype=dtype, device=self.device
+        ).copy_(inp[sorted_indices // topk])
+        overflow = 2
+        expected_out = symm_mem.empty(
+            expanded_seqlen * overflow, hid_dim, dtype=dtype, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, tot_experts), dtype=torch.int64, device=self.device
+        )
+        dist.barrier()
+        torch.ops.symm_mem.all_to_all_vdev_2d(
+            expanded_inp, expected_out, in_splits, out_splits_offsets, group_name
+        )
+
+        # Check data
+        out_len = out_splits_offsets[1][-1] + out_splits_offsets[0][-1]
+        torch.testing.assert_close(out[:out_len], expected_out[:out_len])
 
 
 # Help function used by multiple tests

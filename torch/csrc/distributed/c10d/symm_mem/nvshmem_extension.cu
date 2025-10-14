@@ -1151,6 +1151,133 @@ void _make_a2a_2d_exchange_plan(
       stream);
 }
 
+/* ld.volatile.global: This refers to a volatile load from global memory. This
+ * ensures that the data is read directly from memory every time, preventing the
+ * compiler from optimizing the access by referring to a cached value. */
+__device__ __forceinline__ int64_t ld_volatile_global(int64_t *ptr) {
+  int64_t ans;
+  asm volatile("ld.volatile.global.s64 %0, [%1];" : "=l"(ans) : "l"((uintptr_t)__cvta_generic_to_global(ptr)) : "memory");
+  return ans;
+}
+
+/* This function ensures that no memory access instruction that appears after the
+ * ld.acquire in the program can be reordered to execute before it. Scope: within
+ * the GPU itself. */
+__device__ __forceinline__ void fence_acquire_gpu() {
+  static __device__ int dummy;
+  int tmp;
+  asm volatile("ld.acquire.gpu.s32 %0,[%1];" : "=r"(tmp) : "l"(&dummy) : "memory");
+  dummy = tmp;
+}
+
+__global__ void _allToAllV_2d_index_push_kernel(
+    void *send_data, void *recv_data,
+    int64_t* topk_indices, int64_t* occurrences, int64_t* dst_offsets,
+    int topk, int n_local_experts, size_t stride, nvshmem_team_t team,
+    int64_t* b_start, int64_t* b_len, int64_t* b_head) {
+  /* Args:
+   * send_data: the data to be sent
+   * recv_data: the data to be received
+   * topk_indices: (n_tokens, topk), the experts to send current token to
+   * dst_offsets: (n_experts), the destination offsets of the expert chunk to be sent, within the destination rank
+   * occurrences: (n_tokens, topk), the rank of current token within the tokens to be sent to an expert
+   * stride: the stride of the data to be sent, i.e. token hidden size * element size, in bytes
+   * b_start: the start offsets of the data to be sent by each CUDA block (equivalent to offset of data received from each rail)
+   * b_len: the length of the data to be sent by each CUDA block
+   * b_head: the most recent ready-to-send token index, plus 1, for each CUDA block
+  */
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  auto bid = blockIdx.x;
+  auto tail = b_start[bid];
+  auto end = b_start[bid] + b_len[bid];
+  // Use volatile bc we need to re-read its value
+  volatile auto head_ptr = b_head + bid;
+  while (tail < end) {
+    while (tail >= ld_volatile_global(head_ptr)) {
+      // Wait for producer kernel to mark newer ready tokens
+    }
+    // Ready signal has been provided by producer kernel (on the same GPU).
+    // To make sure the token data is readily written by the producer kernel, we
+    // use an acquire fence here, with scope of the same GPU.
+    fence_acquire_gpu();
+
+    // New token has arrived
+    auto send_ptr = (char*)send_data + tail * stride;
+    // Loop over the topk experts
+    for (int k = 0; k < topk; k++) {
+      auto expert = topk_indices[tail * topk + k];
+      // Get the destination rank
+      auto dst_rank = expert / n_local_experts;
+      auto dst_rank_global = nvshmem_team_translate_pe(team, dst_rank, NVSHMEM_TEAM_WORLD);
+      // Get the destination offset
+      auto dst_offset = dst_offsets[expert] + occurrences[tail * topk + k];
+      // Get the destination pointer
+      auto dst_ptr = (char*)recv_data + dst_offset * stride;
+      // Send the data, i.e. 1 token
+      nvshmemx_putmem_nbi_block(dst_ptr, send_ptr, stride, dst_rank_global);
+    }
+    tail++;
+  }
+  // Make sure all data has been sent
+  nvshmem_quiet();
+#endif
+}
+
+void _all_to_all_v_2d_index_push(
+    at::Tensor& input,
+    at::Tensor& out,
+    at::Tensor& topk_indices,
+    at::Tensor& occurrences,
+    at::Tensor& dst_offsets,
+    std::string group_name,
+    at::Tensor& b_start,
+    at::Tensor& b_len,
+    at::Tensor& b_head) {
+  auto input_hdl = c10d::symmetric_memory::rendezvous(input, group_name);
+  c10d::symmetric_memory::rendezvous(out, group_name);
+  c10d::symmetric_memory::rendezvous(dst_offsets, group_name);
+
+  auto input_ptr = input.data_ptr();
+  auto out_ptr = out.data_ptr();
+  auto topk_indices_ptr = topk_indices.data_ptr<int64_t>();
+  auto occurrences_ptr = occurrences.data_ptr<int64_t>();
+  auto dst_offsets_ptr = dst_offsets.data_ptr<int64_t>();
+  auto b_start_ptr = b_start.data_ptr<int64_t>();
+  auto b_len_ptr = b_len.data_ptr<int64_t>();
+  auto b_head_ptr = b_head.data_ptr<int64_t>();
+
+  auto topk = topk_indices.size(1);
+  auto n_local_experts = dst_offsets.size(0) / input_hdl->get_world_size();
+  auto stride_bytes = input.stride(0) * input.element_size();
+
+  auto device = input.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto& team_manager = TeamManager::get(device);
+  auto team = team_manager.get_team(group_name, input_hdl->get_rank_to_global_rank());
+  auto stream = at::cuda::getCurrentCUDAStream(device.index());
+
+  TORCH_CHECK(
+      b_start.size(0) == b_len.size(0) && b_start.size(0) == b_head.size(0),
+      "Block start, len and head should have same size");
+
+  int nblocks = b_start.size(0);
+  void* args[] = {
+      &input_ptr, &out_ptr,
+      &topk_indices_ptr, &occurrences_ptr, &dst_offsets_ptr,
+      &topk, &n_local_experts, &stride_bytes, &team,
+      &b_start_ptr, &b_len_ptr, &b_head_ptr
+  };
+  C10_CUDA_CHECK(cudaLaunchKernel(
+      (const void*)_allToAllV_2d_index_push_kernel,
+      dim3(nblocks),
+      dim3(THREADS_PER_BLOCK),
+      args,
+      0,
+      stream));
+}
+
 } // namespace c10d::nvshmem_extension
 
 
@@ -1167,4 +1294,5 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("_make_a2a_exchange_plan", c10d::nvshmem_extension::_make_a2a_exchange_plan);
   m.impl("_all_to_all_get", c10d::nvshmem_extension::_all_to_all_get);
   m.impl("_make_a2a_2d_exchange_plan", c10d::nvshmem_extension::_make_a2a_2d_exchange_plan);
+  m.impl("_all_to_all_v_2d_index_push", c10d::nvshmem_extension::_all_to_all_v_2d_index_push);
 }
