@@ -120,4 +120,5 @@ COMPILE_TIME_MAX_DEVICE_TYPES
 NumScalarTypes
 ScalarType
 toString
+<<
 # dummy_int1_7_t, dummy_uint1_7_t tested through ScalarType
