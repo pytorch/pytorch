@@ -2093,7 +2093,11 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
         # Create autotuning_wrapper_code for full graph autotuning if needed
-        if V.aot_compilation and config.triton.autotune_full_graph and config.triton.autotune_at_compile_time:
+        if (
+            V.aot_compilation
+            and config.triton.autotune_full_graph
+            and config.triton.autotune_at_compile_time
+        ):
             if self.cpp_wrapper:
                 # If we're using cpp wrapper, create a separate Python wrapper for autotuning
                 python_wrapper_code_gen_cls = get_wrapper_codegen_for_device(
@@ -2125,13 +2129,6 @@ class GraphLowering(torch.fx.Interpreter):
                 original_wrapper_code, self.autotuning_wrapper_code
             )
             self.wrapper_code = dual_wrapper
-
-        self.wrapper_code = wrapper_code_gen_cls.create(
-            is_subgraph,
-            subgraph_name,
-            parent_wrapper_code,
-            partition_signatures,
-        )
 
         if self.const_module:
             if hasattr(self.wrapper_code, "original_wrapper_code"):
@@ -2256,15 +2253,13 @@ class GraphLowering(torch.fx.Interpreter):
             elif isinstance(x, FakeTensor):
                 return defake(x)
             else:
-                assert isinstance(x, torch.Tensor), (
-                    "Unknown type when creating real inputs" + str(type(x))
-                )
+                assert isinstance(
+                    x, torch.Tensor
+                ), "Unknown type when creating real inputs" + str(type(x))
                 return x
 
         tracing_context = torch._guards.TracingContext.try_get()
-        if tracing_context is not None and not isinstance(
-            V.real_inputs, NullHandler
-        ):
+        if tracing_context is not None and not isinstance(V.real_inputs, NullHandler):
             if tracing_context.output_strides:
                 tracing_context.output_strides.clear()
 
@@ -2274,8 +2269,7 @@ class GraphLowering(torch.fx.Interpreter):
                 if param is not None
             ]
             real_inputs = [
-                materialize(x)
-                for x in itertools.chain(params_flat, V.real_inputs)
+                materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
             ]
         else:
             # In the backward pass, V.real_inputs is not OrderedSet.
@@ -2393,7 +2387,11 @@ class GraphLowering(torch.fx.Interpreter):
                 V.graph.all_codegen_kernel_names,
             )
 
-            if V.aot_compilation and config.triton.autotune_full_graph and config.triton.autotune_at_compile_time:
+            if (
+                V.aot_compilation
+                and config.triton.autotune_full_graph
+                and config.triton.autotune_at_compile_time
+            ):
                 # If we're doing full graph autotuning, we need to generate the autotuning wrapper code
                 # and the autotuning kernels
                 original_wrapper_code = self.wrapper_code.original_wrapper_code
