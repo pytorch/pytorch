@@ -1588,10 +1588,12 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
     // For ROCm, match behavior of f8f8bf16_rowwise type checking, for unit test purposes.
     Tensor b = mat2;
     if (_scaled_mm_is_fnuz()) {
-      TORCH_CHECK_VALUE(b.dtype() == at::kFloat8_e4m3fnuz);
+      TORCH_CHECK_VALUE(b.dtype() == at::kFloat8_e4m3fnuz,
+          "Expected b.dtype() == at::kFloat8_e4m3fnuz, got: ", b.dtype());
     }
     else {
-      TORCH_CHECK_VALUE(b.dtype() == at::kFloat8_e4m3fn);
+      TORCH_CHECK_VALUE(b.dtype() == at::kFloat8_e4m3fn,
+          "Expected b.dtype() == at::kFloat8_e4m3fn, got: ", b.dtype());
     }
     // Until more than bf16 is supported.
     TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16,
