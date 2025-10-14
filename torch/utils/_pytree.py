@@ -476,7 +476,8 @@ def _is_constant_holder(spec: "TreeSpec") -> bool:
 
 def _retrieve_constant(spec: "TreeSpec") -> Any:
     """Given a spec from a pytree registered with register_constant, retrieves the constant"""
-    assert _is_constant_holder(spec)
+    if not _is_constant_holder(spec):
+        raise AssertionError("spec does not correspond to a registered constant pytree")
     return tree_unflatten([], spec)
 
 
@@ -899,17 +900,25 @@ def _defaultdict_serialize(context: Context) -> DumpableContext:
 
 
 def _defaultdict_deserialize(dumpable_context: DumpableContext) -> Context:
-    assert isinstance(dumpable_context, dict)
-    assert set(dumpable_context) == {
+    if not isinstance(dumpable_context, dict):
+        raise AssertionError("dumpable_context must be a dict")
+
+    expected_keys = {
         "default_factory_module",
         "default_factory_name",
         "dict_context",
     }
+    if set(dumpable_context) != expected_keys:
+        raise AssertionError(
+            f"dumpable_context keys must be {expected_keys}, got {set(dumpable_context)}"
+        )
 
     default_factory_module = dumpable_context["default_factory_module"]
     default_factory_name = dumpable_context["default_factory_name"]
-    assert isinstance(default_factory_module, str)
-    assert isinstance(default_factory_name, str)
+    if not isinstance(default_factory_module, str):
+        raise AssertionError("default_factory_module must be a string")
+    if not isinstance(default_factory_name, str):
+        raise AssertionError("default_factory_name must be a string")
     module = importlib.import_module(default_factory_module)
     default_factory = getattr(module, default_factory_name)
 
@@ -1733,7 +1742,8 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
 ) -> Optional[list[Any]]:
-    assert isinstance(treespec, TreeSpec)
+    if not isinstance(treespec, TreeSpec):
+        raise AssertionError("treespec must be a TreeSpec")
 
     if tree_is_leaf(tree, is_leaf=is_leaf):
         return [tree] * treespec.num_leaves
