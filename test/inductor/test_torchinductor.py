@@ -14252,6 +14252,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         output_size = 505450
         data = torch.arange(2560, device=GPU_TYPE)
 
+        if is_dynamic_shape_enabled():
+            raise unittest.SkipTest(
+                "repeat_interleave decomp doesn't support dynamic output size"
+            )
+
         @torch.compile
         def fn(repeat, output_size, data):
             indices = torch.ops.aten.repeat_interleave.Tensor(
