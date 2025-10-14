@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/AllocatorConfig.h>
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
@@ -144,37 +145,36 @@ class C10_CUDA_API CUDAAllocatorConfig {
   void parseArgs(const std::string& env);
 
  private:
-  CUDAAllocatorConfig();
+  CUDAAllocatorConfig() = default;
 
-  static void lexArgs(const std::string& env, std::vector<std::string>& config);
-  static void consumeToken(
-      const std::vector<std::string>& config,
-      size_t i,
-      const char c);
   size_t parseAllocatorConfig(
-      const std::vector<std::string>& config,
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i,
       bool& used_cudaMallocAsync);
   size_t parsePinnedUseCudaHostRegister(
-      const std::vector<std::string>& config,
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
   size_t parsePinnedNumRegisterThreads(
-      const std::vector<std::string>& config,
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
   size_t parsePinnedReserveSegmentSize(
-      const std::vector<std::string>& config,
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
   size_t parseGraphCaptureRecordStreamReuse(
-      const std::vector<std::string>& config,
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
 
-  std::atomic<size_t> m_pinned_num_register_threads;
-  std::atomic<size_t> m_pinned_reserve_segment_size_mb;
-  std::atomic<Expandable_Segments_Handle_Type>
-      m_expandable_segments_handle_type;
-  std::atomic<bool> m_release_lock_on_cudamalloc;
-  std::atomic<bool> m_pinned_use_cuda_host_register;
-  std::atomic<bool> m_graph_capture_record_stream_reuse;
+  std::atomic<size_t> m_pinned_num_register_threads{1};
+  std::atomic<size_t> m_pinned_reserve_segment_size_mb{0};
+  std::atomic<Expandable_Segments_Handle_Type> m_expandable_segments_handle_type
+#if CUDA_VERSION >= 12030
+      {Expandable_Segments_Handle_Type::UNSPECIFIED};
+#else
+      {Expandable_Segments_Handle_Type::POSIX_FD};
+#endif
+  std::atomic<bool> m_release_lock_on_cudamalloc{false};
+  std::atomic<bool> m_pinned_use_cuda_host_register{false};
+  std::atomic<bool> m_graph_capture_record_stream_reuse{false};
 };
 
 // Keep this for backwards compatibility
