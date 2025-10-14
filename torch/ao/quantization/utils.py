@@ -7,8 +7,9 @@ import functools
 import sys
 import warnings
 from collections import OrderedDict
+from collections.abc import Callable
 from inspect import getfullargspec, signature
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
@@ -501,9 +502,9 @@ def calculate_qmin_qmax(
                 quant_min, quant_max = 0, 255
         elif dtype in [torch.qint32, torch.int32]:
             quant_min, quant_max = -1 * (2**31), (2**31) - 1
-        elif dtype in [torch.uint16]:
+        elif dtype == torch.uint16:
             quant_min, quant_max = 0, 2**16 - 1
-        elif dtype in [torch.int16]:
+        elif dtype == torch.int16:
             quant_min, quant_max = -(2**15), 2**15 - 1
         else:
             quant_min, quant_max = 0, 15

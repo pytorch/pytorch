@@ -10,6 +10,7 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -126,7 +127,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 x = torch.sigmoid(x)
                 try:
                     x = torch.cos(x)
-                    raise AssertionError
+                    raise AssertionError  # noqa: B904
                 except AssertionError:
                     x = torch.cos(x)
 
@@ -630,7 +631,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ZeroDivisionError
             except ZeroDivisionError:
                 try:
-                    raise ValueError
+                    raise ValueError  # noqa: B904
                 except ValueError:
                     pass
                 raise
@@ -680,7 +681,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 yield 1
             except ValueError:
                 try:
-                    raise TypeError
+                    raise TypeError  # noqa: B904
                 finally:
                     pass
 
@@ -710,7 +711,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ValueError
             except ValueError:
                 try:
-                    raise TypeError
+                    raise TypeError  # noqa: B904
                 finally:
                     pass
 
@@ -933,6 +934,13 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             exc2 = e
 
         assert exc2.__context__ is None
+
+    def test_exception_kwargs(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            raise AttributeError(name="a")
+
+        self.assertRaises(Unsupported, fn)
 
 
 instantiate_parametrized_tests(ExceptionTests)

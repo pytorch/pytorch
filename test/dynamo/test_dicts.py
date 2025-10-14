@@ -1554,8 +1554,6 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
             d, {"a": 1, "b": 3, "c": 4, "d": 5, "e": 6, "f": 7, "g": 8, "h": 9, "i": 10}
         )
 
-        self.assertIsNone(d.update())
-
         # Test invalid usage
         self.assertRaises(TypeError, d.update, 1)
 

@@ -41,11 +41,11 @@ from .int_tuple import (
     IntTuple,
     is_int,
     is_tuple,
-    prefix_product,
     product,
     shape_div,
     signum,
     slice_,
+    suffix_product,
     tuple_max,
 )
 from .layout import (

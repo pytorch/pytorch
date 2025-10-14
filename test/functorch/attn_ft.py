@@ -6,7 +6,7 @@
 import math
 
 import torch
-from functorch.dim import cat, dimlists, dims, softmax
+from functorch.dim import cat, dimlists, dims
 from torch import nn
 
 
@@ -142,7 +142,7 @@ class BertSelfAttention(nn.Module):
 
         attention_probs = attention_scores
         # Normalize the attention scores to probabilities.
-        attention_probs = softmax(attention_scores, dim=key_sequence)
+        attention_probs = torch.softmax(attention_scores, dim=key_sequence)
         # # This is actually dropping out entire tokens to attend to, which might
         # # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = torch.nn.functional.dropout(

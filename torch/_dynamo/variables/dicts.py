@@ -68,7 +68,9 @@ def raise_unhashable(arg, tx=None):
 
         tx = InstructionTranslator.current_tx()
     raise_observed_exception(
-        TypeError, tx, args=[ConstantVariable(f"unhashable type: {type(arg)}")]
+        TypeError,
+        tx,
+        args=[ConstantVariable(f"unhashable type: {type(arg.realize())}")],
     )
 
 
@@ -195,7 +197,7 @@ class ConstDictVariable(VariableTracker):
         @staticmethod
         def _eq_impl(a, b):
             # TODO: Put this in utils and share it between variables/builtin.py and here
-            if type(a) != type(b):
+            if type(a) is not type(b):
                 return False
             elif isinstance(a, tuple):
                 Hashable = ConstDictVariable._HashableTracker
@@ -607,7 +609,9 @@ class ConstDictVariable(VariableTracker):
                         for k, v in kwargs.items()
                     }
                     self.items.update(kwargs)
-            return ConstantVariable.create(None)
+                return ConstantVariable.create(None)
+            else:
+                return super().call_method(tx, name, args, kwargs)
         elif name == "__contains__":
             if not len(args):
                 raise_args_mismatch(tx, name)

@@ -50,7 +50,7 @@ bool SymInt::has_hint() const {
   return toSymNodeImplUnowned()->has_hint();
 }
 
-#define DEFINE_BINARY(API, OP, METHOD, RET)                          \
+#define DEFINE_BINARY(API, METHOD, RET)                              \
   RET SymInt::API(const SymInt& sci) const {                         \
     if (auto ma = maybe_as_int()) {                                  \
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(                              \
@@ -68,19 +68,19 @@ bool SymInt::has_hint() const {
     }                                                                \
   }
 
-DEFINE_BINARY(operator_add_slow_path, std::plus<>(), add, SymInt)
-DEFINE_BINARY(operator_sub_slow_path, std::minus<>(), sub, SymInt)
-DEFINE_BINARY(operator_mul_slow_path, std::multiplies<>(), mul, SymInt)
-DEFINE_BINARY(operator_div_slow_path, std::divides<>(), floordiv, SymInt)
-DEFINE_BINARY(operator_mod_slow_path, std::modulus<>(), mod, SymInt)
-DEFINE_BINARY(sym_eq_slow_path, std::equal_to<>(), eq, SymBool)
-DEFINE_BINARY(sym_ne_slow_path, std::not_equal_to<>(), ne, SymBool)
-DEFINE_BINARY(sym_lt_slow_path, std::less<>(), lt, SymBool)
-DEFINE_BINARY(sym_le_slow_path, std::less_equal<>(), le, SymBool)
-DEFINE_BINARY(sym_gt_slow_path, std::greater<>(), gt, SymBool)
-DEFINE_BINARY(sym_ge_slow_path, std::greater_equal<>(), ge, SymBool)
-DEFINE_BINARY(min_slow_path, std::min, sym_min, SymInt)
-DEFINE_BINARY(max_slow_path, std::max, sym_max, SymInt)
+DEFINE_BINARY(operator_add_slow_path, add, SymInt)
+DEFINE_BINARY(operator_sub_slow_path, sub, SymInt)
+DEFINE_BINARY(operator_mul_slow_path, mul, SymInt)
+DEFINE_BINARY(operator_div_slow_path, floordiv, SymInt)
+DEFINE_BINARY(operator_mod_slow_path, mod, SymInt)
+DEFINE_BINARY(sym_eq_slow_path, eq, SymBool)
+DEFINE_BINARY(sym_ne_slow_path, ne, SymBool)
+DEFINE_BINARY(sym_lt_slow_path, lt, SymBool)
+DEFINE_BINARY(sym_le_slow_path, le, SymBool)
+DEFINE_BINARY(sym_gt_slow_path, gt, SymBool)
+DEFINE_BINARY(sym_ge_slow_path, ge, SymBool)
+DEFINE_BINARY(min_slow_path, sym_min, SymInt)
+DEFINE_BINARY(max_slow_path, sym_max, SymInt)
 
 SymInt::operator SymFloat() const {
   if (auto ma = maybe_as_int()) {
@@ -127,14 +127,6 @@ int64_t SymInt::guard_int(const char* file, int64_t line) const {
     return *ma;
   } else {
     return toSymNodeImplUnowned()->guard_int(file, line);
-  }
-}
-
-bool SymInt::expect_size(const char* file, int64_t line) const {
-  if (auto ma = maybe_as_int()) {
-    return *ma >= 0;
-  } else {
-    return toSymNodeImplUnowned()->expect_size(file, line);
   }
 }
 
