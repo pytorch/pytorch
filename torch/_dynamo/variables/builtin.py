@@ -1930,11 +1930,23 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator", user_cls, *args, **kwargs
     ):
-        assert user_cls in {dict, OrderedDict, defaultdict}
+        if user_cls not in {dict, OrderedDict, defaultdict}:
+            msg = ConstantVariable.create(
+                f"{user_cls.__name__}.fromkeys() is not supported"
+            )
+            raise_observed_exception(TypeError, tx, args=[msg])
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
-            assert user_cls is OrderedDict
-            assert len(args) == 1 and len(kwargs) == 1 and "value" in kwargs
+            if user_cls is not OrderedDict:
+                msg = ConstantVariable.create(
+                    f"{user_cls.__name__}.fromkeys() takes no keyword arguments"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+            if len(args) != 1 or len(kwargs) != 1 or "value" not in kwargs:
+                msg = ConstantVariable.create(
+                    f"{user_cls.__name__}.fromkeys() takes no keyword arguments"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
             args = (*args, kwargs.pop("value"))
         if len(args) == 0:
             msg = ConstantVariable.create(
@@ -1943,7 +1955,11 @@ class BuiltinVariable(VariableTracker):
             raise_observed_exception(TypeError, tx, args=[msg])
         if len(args) == 1:
             args = (*args, ConstantVariable.create(None))
-        assert len(args) == 2
+        if len(args) != 2:
+            msg = ConstantVariable.create(
+                f"fromkeys expected at most 2 arguments, got {len(args)}"
+            )
+            raise_observed_exception(TypeError, tx, args=[msg])
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
@@ -2039,7 +2055,11 @@ class BuiltinVariable(VariableTracker):
 
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
         if kwargs:
-            assert len(kwargs) == 1 and "strict" in kwargs
+            if len(kwargs) != 1 or "strict" not in kwargs:
+                msg = ConstantVariable.create(
+                    f"zip() should only have 'strict' keyword argument, but ({len(kwargs)} given)"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
         strict = kwargs.pop("strict", False)
         args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(

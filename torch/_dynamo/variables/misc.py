@@ -1218,7 +1218,11 @@ class MethodWrapperVariable(VariableTracker):
         if is_tensor_base_attr_getter(self.method_wrapper) and isinstance(
             args[0], variables.TensorVariable
         ):
-            assert len(args) == 1 and len(kwargs) == 0
+            if len(args) != 1 or len(kwargs) != 0:
+                msg = ConstantVariable.create(
+                    "tensor attribute getter takes exactly one argument"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
 
             return args[0].var_getattr(tx, self.method_wrapper.__self__.__name__)
 

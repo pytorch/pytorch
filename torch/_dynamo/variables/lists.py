@@ -153,7 +153,9 @@ class BaseListVariable(VariableTracker):
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
 
-            assert not kwargs and len(args) == 1
+            if kwargs:
+                msg = ConstantVariable.create(f"{name} takes no keyword arguments")
+                raise_observed_exception(TypeError, tx, args=[msg])
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
                 if value.constant is not None and value.constant.numel() == 1:
@@ -1115,11 +1117,20 @@ class SizeVariable(TupleVariable):
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__getitem__":
-            assert not kwargs and len(args) == 1
+            if len(args) != 1:
+                msg = ConstantVariable.create(
+                    f"{name} takes exactly one argument ({len(args)} given)"
+                )
+                raise_observed_exception(TypeError, tx, args=[msg])
+            if kwargs:
+                msg = ConstantVariable.create(f"{name} takes no keyword arguments")
+                raise_observed_exception(TypeError, tx, args=[msg])
             out = self.get_item_dyn(tx, args[0])
             return out
         elif name == "numel":
-            assert not args and not kwargs
+            if args or kwargs:
+                msg = ConstantVariable.create(f"{name} takes no arguments")
+                raise_observed_exception(TypeError, tx, args=[msg])
             return self.numel(tx)
 
         return super().call_method(tx, name, args, kwargs)

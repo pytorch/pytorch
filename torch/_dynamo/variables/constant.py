@@ -149,7 +149,9 @@ its type to `common_constant_types`.
                 tx, [self, *args], kwargs
             )
         elif name == "join" and istype(self.value, str):
-            assert len(args) == 1 and len(kwargs) == 0
+            if len(args) != 1 or len(kwargs) != 0:
+                msg = ConstantVariable.create("str.join() takes exactly one argument")
+                raise_observed_exception(TypeError, tx, args=[msg])
             arg_unpacked = args[0].force_unpack_var_sequence(tx)
             try:
                 arg_const = [x.as_python_constant() for x in arg_unpacked]
