@@ -426,7 +426,7 @@ class BlockDescriptorOptions:
                     offsets=[sympy.S.Zero],
                 )
 
-        desc_stride_sorter: Optional[TritonSymbols.DescStrideSorter] = None
+        desc_stride_sorter: Optional[BlockParameters.DescStrideSorter] = None
         if transpose_contiguous:
             params, desc_stride_sorter = params.maybe_sort_by_desc_stride_order()
 
@@ -3090,7 +3090,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return block_descriptor, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        breakpoint()
         # Stores require an explicit broadcast. We do this in two phases:
         #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
         #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
