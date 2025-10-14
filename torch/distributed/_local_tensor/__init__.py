@@ -53,7 +53,7 @@ from typing import Any, Callable, Generator, Optional, Union
 
 import torch
 from torch import Size, SymBool, SymInt, Tensor
-from torch._C import DispatchKey, DispatchKeySet
+from torch._C import DispatchKey, DispatchKeySet, ScriptObject
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed import DeviceMesh
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -597,6 +597,9 @@ class LocalTensorMode(TorchDispatchMode):
                 return func._op_dk(
                     DispatchKey.CompositeExplicitAutograd, *args, **kwargs
                 )
+
+        if func.namespace == "profiler":
+            return func(*args, **kwargs)
 
         if func.namespace == "_c10d_functional_autograd":
             raise NotImplementedError(f"{func} not implemented")

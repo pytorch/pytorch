@@ -324,7 +324,8 @@ class _ChildDataPipe(IterDataPipe):
     _is_child_datapipe: bool = True
 
     def __init__(self, main_datapipe: IterDataPipe, instance_id: int):
-        assert isinstance(main_datapipe, _ContainerTemplate)
+        if not isinstance(main_datapipe, _ContainerTemplate):
+            raise AssertionError("main_datapipe must implement _ContainerTemplate")
 
         # pyrefly: ignore  # bad-assignment
         self.main_datapipe: IterDataPipe = main_datapipe
