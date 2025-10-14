@@ -411,14 +411,18 @@ class BlockDescriptorOptions:
         # Drop singleton dimensions from the block descriptor.
         params = BlockParameters(
             **{
-                key: remove_dims(val, singleton_dims) for key, val in dataclasses.asdict(params).items()
+                key: remove_dims(val, singleton_dims)
+                for key, val in dataclasses.asdict(params).items()
             },
         )
 
         if issubclass(cls, TensorDescriptorOptions):
             # Tensor descriptors require a dimension with stride 1
             # so add a dummy dimension if needed.
-            if not any(sizevars.statically_known_equals(stride, sympy.S.One) for stride in params.strides):
+            if not any(
+                sizevars.statically_known_equals(stride, sympy.S.One)
+                for stride in params.strides
+            ):
                 params += BlockParameters(
                     shape=[sympy.S.One],
                     strides=[sympy.S.One],
@@ -444,7 +448,8 @@ class BlockDescriptorOptions:
         # Drop broadcasting dims from the block descriptor.
         params = BlockParameters(
             **{
-                key: remove_dims(val, broadcasting_dims) for key, val in dataclasses.asdict(params).items()
+                key: remove_dims(val, broadcasting_dims)
+                for key, val in dataclasses.asdict(params).items()
             },
         )
 
@@ -472,7 +477,7 @@ class BlockDescriptorOptions:
             broadcast_shape=broadcast_shape,
             broadcasting_dims=broadcasting_dims,
             can_lift=can_lift,
-            desc_stride_sorter=desc_stride_sorter
+            desc_stride_sorter=desc_stride_sorter,
         )
         result.compute_boundary_check(get_max_block, range_trees)
         return result
@@ -571,7 +576,7 @@ class BlockDescriptorOptions:
         initial_shape: Sequence[sympy.Expr],
         final_shape: Sequence[sympy.Expr],
         allow_implicit: bool,
-        for_store: bool
+        for_store: bool,
     ) -> str:
         """
         Generate a broadcast and a reshape for the block descriptor.
@@ -605,12 +610,9 @@ class BlockDescriptorOptions:
         # Reshape to add singletons.
         pre_broadcast_shape = [
             sympy.S.One if is_broadcasting else dim
-            for dim, is_broadcasting in zip(
-                broadcast_shape, broadcasting_dims
-            )
+            for dim, is_broadcasting in zip(broadcast_shape, broadcasting_dims)
         ]
         value = triton_reshape(value, initial_shape, pre_broadcast_shape)
-
 
         # Broadcast singletons.
         # For loads, we can often implicitly broadcast singleton dimensions.
@@ -635,9 +637,17 @@ class BlockDescriptorOptions:
             #   (non-descending strides) broadcasted kernel tile shape -> (descending strides) block descriptor shape
             # o/w if loading the transform is
             #   (descending strides) broadcasted block shape -> (non-descending) broadcasted kernel tile shape
-            permute_dims = self.desc_stride_sorter.sort_idx if for_store else self.desc_stride_sorter.revert_sort_idx
+            permute_dims = (
+                self.desc_stride_sorter.sort_idx
+                if for_store
+                else self.desc_stride_sorter.revert_sort_idx
+            )
             value = f"tl.trans({value}, {permute_dims})"
-            old_shape = self.broadcast_shape if for_store else self.desc_stride_sorter.revert(self.broadcast_shape)
+            old_shape = (
+                self.broadcast_shape
+                if for_store
+                else self.desc_stride_sorter.revert(self.broadcast_shape)
+            )
 
         # Reshape to the final shape.
         value = triton_reshape(value, old_shape, final_shape)
@@ -2031,7 +2041,9 @@ class BlockParameters:
         revert_sort_idx: list[int] = dataclasses.field(default_factory=list)
 
         @classmethod
-        def create(cls, original_strides: list[Union[int, sympy.Expr]]) -> Optional[DescStrideSorter]:
+        def create(
+            cls, original_strides: list[Union[int, sympy.Expr]]
+        ) -> Optional[DescStrideSorter]:
             """
             create a `DescStrideSorter` which can be used to sort block parameters.
             if the strides are not all known constants or if the strides are already
@@ -2041,25 +2053,38 @@ class BlockParameters:
                 return None
 
             sorted_dims_by_strides_map = {
-                k: i for i, k in enumerate(sorted(range(len(original_strides)), key=lambda x: original_strides[x], reverse=True))
+                k: i
+                for i, k in enumerate(
+                    sorted(
+                        range(len(original_strides)),
+                        key=lambda x: original_strides[x],
+                        reverse=True,
+                    )
+                )
             }
             sort_idx = list(sorted_dims_by_strides_map.keys())
             # Check if strides are already in descending order
             if sort_idx == list(range(len(original_strides))):
                 return None
-            revert_sort_idx = [sorted_dims_by_strides_map[i] for i in range(len(sorted_dims_by_strides_map))]
+            revert_sort_idx = [
+                sorted_dims_by_strides_map[i]
+                for i in range(len(sorted_dims_by_strides_map))
+            ]
             return cls(
                 original_strides=original_strides,
                 sort_idx=sort_idx,
                 revert_sort_idx=revert_sort_idx,
             )
 
-        def sort(self, attr: list[Union[int, sympy.Expr]]) -> list[Union[int, sympy.Expr]]:
+        def sort(
+            self, attr: list[Union[int, sympy.Expr]]
+        ) -> list[Union[int, sympy.Expr]]:
             return [attr[i] for i in self.sort_idx]
 
-        def revert(self, attr: list[Union[int, sympy.Expr]]) -> list[Union[int, sympy.Expr]]:
+        def revert(
+            self, attr: list[Union[int, sympy.Expr]]
+        ) -> list[Union[int, sympy.Expr]]:
             return [attr[i] for i in self.revert_sort_idx]
-
 
     def __add__(self, other: BlockParameters) -> BlockParameters:
         """
@@ -2069,7 +2094,9 @@ class BlockParameters:
         a, b = tuple(dataclasses.asdict(x) for x in (self, other))
         return cls(**{key: a[key] + b[key] for key in a})
 
-    def maybe_sort_by_desc_stride_order(self) -> tuple[BlockParameters, Optional[DescStrideSorter]]:
+    def maybe_sort_by_desc_stride_order(
+        self,
+    ) -> tuple[BlockParameters, Optional[DescStrideSorter]]:
         """
         If the strides are known constants, returns block parameters sorted by strides in descending
         order as well as `DescStrideSorter` which contains information on how the sort can be reverted.
@@ -2084,7 +2111,10 @@ class BlockParameters:
             return self, None
 
         params = BlockParameters(
-            **{key: desc_stride_sorter.sort(val) for key, val in dataclasses.asdict(self).items()}
+            **{
+                key: desc_stride_sorter.sort(val)
+                for key, val in dataclasses.asdict(self).items()
+            }
         )
         return params, desc_stride_sorter
 
@@ -2287,17 +2317,44 @@ class TMACompatibilityChecker:
             # then the TMA API can only be used if the dtype has an 8 byte element
             # size so that 16 bytes of data can be loaded in the innermost dimension
             try:
+
+                def indexing_div_rep(
+                    x: sympy.Expr,
+                    y: sympy.Expr,
+                    z: Optional[sympy.Expr] = None,
+                ) -> sympy.Expr:
+                    div = x / y
+                    if z:
+                        div = div % z
+                    return div
+
+                solve_expr = innermost_block_shape * element_size - 16
+                # Sympy cannot handle FloorDiv and ModularIndexing well, so simplify
+                solve_expr_simplified = solve_expr.replace(
+                    FloorDiv, indexing_div_rep
+                ).replace(ModularIndexing, indexing_div_rep)
                 min_block_size = next_power_of_2(
                     int(
                         sympy.nsolve(
-                            innermost_block_shape * element_size - 16,
+                            solve_expr_simplified,
                             innermost_block_type,
                             1,
                         )
                     )
                 )
 
-                block_type_str = V.kernel.index_to_str(innermost_block_type)
+                if min_block_size > min(
+                    self.kernel.max_block(prefix_str[innermost_block_symt]),
+                    block_params.shape[-1],
+                ):
+                    log.debug(
+                        "%s the minimum block size for %s is too large: %d",
+                        self.failed_debug_prefix,
+                        min_block_size,
+                    )
+                    return False
+
+                block_type_str = self.kernel.index_to_str(innermost_block_type)
                 # Check block sizes if the user has provided a fixed triton config
                 if self.kernel.fixed_config:
                     if min_block_size > self.kernel.fixed_config[block_type_str]:
@@ -2830,8 +2887,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     can_lift = tma_compatibility_checker.can_lift()
                     # Only try transpose if we know the output shape
                     # in case we need to transpose the data.
-                    # transpose_contiguous = copy_shape is not None
-                    transpose_contiguous = True
+                    transpose_contiguous = (
+                        copy_shape is not None
+                        or config.triton.transpose_discontiguous_tensor_descriptor
+                    )
 
                 options = options_class.create(
                     params=block_params,
@@ -3105,7 +3164,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 indexing.broadcasting_dims[idx] = False
 
         value = indexing.codegen_broadcast_and_reshape(
-            value, indexing.final_shape, indexing.block_shape, allow_implicit=False, for_store=True
+            value,
+            indexing.final_shape,
+            indexing.block_shape,
+            allow_implicit=False,
+            for_store=True,
         )
 
         # workaround https://github.com/triton-lang/triton/issues/2814
@@ -3297,7 +3360,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 else:
                     line = f"{block_descriptor}.load({V.kernel.index_to_str(indexing.offsets)})"
                 line = indexing.codegen_broadcast_and_reshape(
-                    line, indexing.block_shape, indexing.final_shape, allow_implicit=True, for_store=False
+                    line,
+                    indexing.block_shape,
+                    indexing.final_shape,
+                    allow_implicit=True,
+                    for_store=False,
                 )
                 shape = indexing.final_shape
             elif is_sympy_integer_like(original_index):

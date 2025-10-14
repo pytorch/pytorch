@@ -168,8 +168,6 @@ class BlockDescriptorTestBase(InductorTestCase):
         self.assertEqual(len(code), expected_num_programs)
         count_code("@triton.jit", expected_num_triton_kernels)
         count_code(self.block_descriptor_constructor_str, expected_num_block_pointers)
-        # Verify that 1D shapes aren't being transposed for the TMA store.
-        count_code("tl.trans", 0)
 
         return result, code
 
@@ -1412,9 +1410,54 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
+@instantiate_parametrized_tests
 class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
+
+    @config.patch({"triton.transpose_discontiguous_tensor_descriptor": True})
+    @parametrize(
+        "view_size,permute_order,num_tensor_descriptors,expect_transpose",
+        [
+            ((128, 128), (0, 1), 3, False),
+            ((128, 64), (1, 0), 3, True),
+            ((256, 32, 16), (2, 0, 1), 3, True),
+            # After reordering strides for the second input, the innermost block type
+            # needs to be large in order to load 16 bytes:
+            # require 4*((YBLOCK + 31)//32) - 16 >= 0 (element_bytes = 4),
+            # min_block_size = 128 but dim size=16, so there would be redundancy
+            ((16, 32, 256), (2, 0, 1), 2, False),
+        ],
+    )
+    def test_match_with_transpose(
+        self,
+        view_size: tuple[int],
+        permute_order: tuple[int],
+        num_tensor_descriptors: int,
+        expect_transpose: bool,
+    ):
+        a = self._discontiguous_tensor(view_size, self.device)
+        pre_permute_size = [1] * len(view_size)
+        for i, value in zip(permute_order, view_size):
+            pre_permute_size[i] = value
+        b = self._discontiguous_tensor(pre_permute_size, self.device)
+        b = b.permute(permute_order)
+
+        def fn(a, b):
+            return a * b
+
+        result, (code,) = self._run_and_compare(
+            fn,
+            a,
+            b,
+            expected_num_block_pointers=num_tensor_descriptors,
+            expected_num_triton_kernels=1,
+            config_patches=tiled_reduction_config,
+        )
+
+        if expect_transpose:
+            count = code.count("tl.trans")
+            self.assertEqual(count, 1)
 
 
 test_torchinductor.copy_tests(
