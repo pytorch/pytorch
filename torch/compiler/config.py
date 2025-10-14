@@ -28,8 +28,6 @@ __all__ = [
     "verbose",
     "capture_scalar_outputs",
     "capture_dynamic_output_shape_ops",
-    "suppress_errors",
-    "verify_correctness",
     "log_file_name",
     "fail_on_recompile_limit_hit",
     "allow_unspec_int_on_nn_module",
@@ -213,20 +211,6 @@ Controls whether TorchDynamo captures operations with dynamic output shapes (lik
 nonzero, unique) into the FX graph. When disabled, these operations cause graph breaks.
 This is a TorchDynamo-specific setting for handling operations with unpredictable
 output shapes during tracing.
-"""
-
-suppress_errors: bool = Config(alias="torch._dynamo.config.suppress_errors")
-"""
-Suppresses TorchDynamo errors and forces fallback to eager execution when compilation
-fails. This is a TorchDynamo-specific error handling mechanism that can mask
-compilation issues but ensures the program continues running.
-"""
-
-verify_correctness: bool = Config(alias="torch._dynamo.config.verify_correctness")
-"""
-Enables correctness verification by comparing compiled and eager execution results.
-This internal validation mechanism helps detect bugs in TorchDynamo's tracing and
-compilation process by running both versions and checking for differences.
 """
 
 log_file_name: Optional[str] = Config(alias="torch._dynamo.config.log_file_name")
