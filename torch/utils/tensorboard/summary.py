@@ -370,8 +370,9 @@ def scalar(name, tensor, collections=None, new_style=False, double_precision=Fal
       ValueError: If tensor has the wrong shape or type.
     """
     tensor = make_np(tensor).squeeze()
-    if tensor.dim != 0:
-        raise AssertionError(f"Tensor should contain one element (0 dimensions). Was given size: {tensor.size} and {tensor.ndim} dimensions.")
+    if tensor.ndim != 0:
+        raise AssertionError(f"Tensor should contain one element (0 dimensions). \
+            Was given size: {tensor.size} and {tensor.ndim} dimensions.")
     # python float is double precision in numpy
     scalar = float(tensor)
     if new_style:
