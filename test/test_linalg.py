@@ -7134,6 +7134,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             _test(row_major, incx, incy, lda_tail)
 
     def _test_addmm_impl(self, func, activation, device, dtype):
+        # Test vector-shaped bias with m2 having 1 row or 1 col
+        for m, k, n in ((10, 1, 25), (10, 25, 1), (10, 1, 1)):
+            V = torch.randn(n, device=device).to(dtype)
+            m1 = torch.randn(m, k, device=device).to(dtype)
+            m2 = torch.randn(k, n, device=device).to(dtype)
+            # vector-shaped bias and beta=1 result in epilogue fusion in CUDA
+            self._test_addmm_addmv(func, V, m1, m2, beta=1, activation=activation)
+
         M = torch.randn(10, 25, device=device).to(dtype)
         m1 = torch.randn(10, 50, device=device).to(dtype)
         m2 = torch.randn(50, 25, device=device).to(dtype)
@@ -9795,10 +9803,15 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         m, n , k = 1, 8, 32
         A = gen_mat(m, k, transpose_a)
         B = gen_mat(k, n, transpose_b)
-        C = torch.ones(m, n, dtype=dtype, device=device)
-        rc = torch.addmm(C, A, B, alpha=alpha, beta=beta)
-        ref = alpha * A @ B + beta * C
-        self.assertEqual(rc, ref)
+
+        # Check when C is 1-D or 2-D
+        # NOTE: 1-D and beta == 1 should imply Lt when on CUDA
+        C_shapes = ((m, n), (n,))
+        for C_shape in C_shapes:
+            C = torch.ones(*C_shape, dtype=dtype, device=device)
+            rc = torch.addmm(C, A, B, alpha=alpha, beta=beta)
+            ref = alpha * A @ B + beta * C
+            self.assertEqual(rc, ref)
 
     @dtypes(torch.float, torch.half, torch.bfloat16)
     @largeTensorTest('16GB')
