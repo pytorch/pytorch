@@ -40,6 +40,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import FakeOpaqueObject, is_opaque_type, OpaqueTypeStr
 from torch._logging import trace_structured
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
@@ -2293,6 +2294,8 @@ class _MakefxTracer:
                     return torch._library.fake_class_registry.maybe_to_fake_obj(
                         self.fake_tensor_mode, x
                     )
+                elif is_opaque_type(type(x)):
+                    return FakeScriptObject(FakeOpaqueObject(), OpaqueTypeStr, x)  # type: ignore[arg-type]
 
                 assert not isinstance(x, FakeScriptObject), (
                     f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
