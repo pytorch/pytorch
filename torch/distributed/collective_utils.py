@@ -104,10 +104,7 @@ def broadcast(
     if pg is not None:
         broadcast_list = [sync_obj]
         dist.broadcast_object_list(broadcast_list, src=rank, group=pg)
-        if len(broadcast_list) != 1:
-            raise AssertionError(
-                f"Expected broadcast_list to have exactly 1 element, got {len(broadcast_list)}"
-            )
+        assert len(broadcast_list) == 1
         sync_obj = broadcast_list[0]
 
     # failure in any rank will trigger a throw in every rank.
@@ -243,10 +240,8 @@ def all_gather_object_enforce_type(
 
 def _summarize_ranks(ranks: Iterable[int]) -> str:
     ranks = sorted(ranks)
-    if min(ranks) < 0:
-        raise AssertionError("ranks should all be positive")
-    if len(set(ranks)) != len(ranks):
-        raise AssertionError("ranks should not contain duplicates")
+    assert min(ranks) >= 0, "ranks should all be positive"
+    assert len(set(ranks)) == len(ranks), "ranks should not contain duplicates"
     curr: Optional[Union[int, range]] = None
     ranges = []
     while ranks:
@@ -260,8 +255,7 @@ def _summarize_ranks(ranks: Iterable[int]) -> str:
                 step = x - curr
                 curr = range(curr, x + step, step)
         else:
-            if not isinstance(curr, range):
-                raise AssertionError("curr must be an instance of range")
+            assert isinstance(curr, range)
             if x == curr.stop:
                 curr = range(curr.start, curr.stop + curr.step, curr.step)
             else:
