@@ -2099,7 +2099,7 @@ class FakeTensorMode(TorchDispatchMode):
             elif a is None:
                 assert b is None
             elif isinstance(a, py_sym_types):
-                assert type(a) == type(b) and a.node is b.node
+                assert type(a) is type(b) and a.node is b.node
             elif isinstance(a, torch.Tensor):
                 assert isinstance(b, torch.Tensor)
                 assert_metadata_eq(assert_eq, a, b)
@@ -2652,7 +2652,7 @@ class FakeTensorMode(TorchDispatchMode):
                 if (
                     not isinstance(fake_out, Tensor)
                     and not isinstance(real_out, Tensor)
-                    and type(fake_out) != type(real_out)
+                    and type(fake_out) is not type(real_out)
                 ):
                     # This can happen when decompositions have different return types,
                     # e.g. namedtuple vs. tuple vs. list.
