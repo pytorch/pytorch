@@ -187,9 +187,9 @@ performance issues that could affect the entire program.
 
 verbose: bool = Config(alias="torch._dynamo.config.verbose")
 """
-Enables verbose debugging output for Dynamo. When enabled, provides detailed 
-information about Dynamo's compilation decisions, optimizations, and potential 
-issues. 
+Enables verbose debugging output for Dynamo. When enabled, provides detailed
+information about Dynamo's compilation decisions, optimizations, and potential
+issues.
 """
 
 
