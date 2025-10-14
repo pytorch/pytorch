@@ -13,12 +13,8 @@ if [[ ! $(python -c "import torch; print(int(torch.backends.openmp.is_available(
 fi
 popd
 
-python -mpip install -r requirements.txt
-
 # enable debug asserts in serialization
 export TORCH_SERIALIZATION_DEBUG=1
-
-python -mpip install --no-input -r requirements.txt
 
 setup_test_python() {
   # The CircleCI worker hostname doesn't resolve to an address.
@@ -260,7 +256,7 @@ test_torchbench_smoketest() {
   local device=mps
   local dtypes=(undefined float16 bfloat16 notset)
   local dtype=${dtypes[$1]}
-  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam sam_fast pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor timm_resnet timm_vovnet vgg16)
+  local models=(llama BERT_pytorch dcgan yolov3 resnet152 sam sam_fast pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor vgg16)
 
   for backend in eager inductor; do
 
@@ -323,7 +319,7 @@ test_aoti_torchbench_smoketest() {
   local device=mps
   local dtypes=(undefined float16 bfloat16 notset)
   local dtype=${dtypes[$1]}
-  local models=(hf_T5 llama BERT_pytorch dcgan hf_GPT2 yolov3 resnet152 sam sam_fast pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor timm_resnet timm_vovnet vgg16)
+  local models=(llama BERT_pytorch dcgan yolov3 resnet152 sam sam_fast pytorch_unet stable_diffusion_text_encoder speech_transformer Super_SloMo doctr_det_predictor doctr_reco_predictor vgg16)
 
   echo "Launching torchbench inference performance run for AOT Inductor and dtype ${dtype}"
   local dtype_arg="--${dtype}"

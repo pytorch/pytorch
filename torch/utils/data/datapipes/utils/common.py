@@ -4,9 +4,9 @@ import functools
 import inspect
 import os
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from io import IOBase
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 from torch.utils._import_utils import dill_available
 
@@ -196,6 +196,7 @@ def get_file_pathnames_from_root(
         if match_masks(fname, masks):
             yield path
     else:
+        # pyrefly: ignore  # bad-assignment
         for path, dirs, files in os.walk(root, onerror=onerror):
             if abspath:
                 path = os.path.abspath(path)

@@ -125,6 +125,7 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.autograd.graph.disable_saved_tensors_hooks,
         torch.cpu.amp.autocast_mode.autocast,
         torch.cuda.amp.autocast_mode.autocast,
+        torch.fx.traceback.annotate,
         # We'll let Dynamo inline into the contextlib part of these context
         # manager instances, all the way till it invokes the wrapped function
         # itself (at which point we wrap it back to special context manager
@@ -203,7 +204,9 @@ def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
         torch.compiler.is_compiling: True,
         torch.compiler.is_dynamo_compiling: True,
         torch.compiler.is_exporting: True,
-        torch.nn.modules.activation._is_make_fx_tracing: False,
+        # Look into https://github.com/pytorch/pytorch/pull/164721 why this is
+        # turned to True for Dynamo.
+        torch.nn.modules.activation._is_make_fx_tracing: True,
     }
 
 
@@ -270,6 +273,26 @@ class BaseTorchVariable(VariableTracker):
     def can_constant_fold_through(self):
         if self.value in constant_fold_functions:
             return True
+
+        if (
+            self.value is torch.autograd._profiler_enabled
+            and config.constant_fold_autograd_profiler_enabled
+        ):
+            # The relevant flag is enabled only for export. One might wonder
+            # why?
+            #
+            # Actually we would like to not graph break even in the case of
+            # Dynamo. But there is a weird-unsolved bug with Kineto + Dynamo
+            # when there are distributed jobs that lead to NCCL timeouts. This
+            # bug is a rare edege case, but we have not been able to root cause
+            # it yet. See https://www.internalfb.com/sevmanager/view/560336 for
+            # more details.
+            #
+            # So is this safe for export? Yes, for export, we do not anticipate
+            # JIT tracing in distributed job training, and the weird edge-case
+            # interaction with Kineto is not a valid usecase. So, this is ok.
+            return True
+
         return getattr(self.value, "__module__", None) == "math"
 
 
@@ -305,6 +328,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
             FSDPParamGroupUseTrainingStateVariable,
+            FxTracebackAnnotateVariable,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
@@ -339,6 +363,11 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             assert len(args) <= 1 and len(kwargs) == 0
             inf_mode = args[0].as_python_constant() if len(args) == 1 else True
             return InferenceModeVariable.create(tx, inf_mode)
+        elif self.value is torch.fx.traceback.annotate:
+            assert len(args) <= 1 and len(kwargs) == 0
+            return FxTracebackAnnotateVariable(
+                args[0].as_python_constant(), source=self.source
+            )
         elif inspect.isclass(self.value) and issubclass(self.value, torch.Stream):
             from torch._dynamo.variables.builder import wrap_fx_proxy_cls
 
@@ -497,7 +526,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             self, tx: "InstructionTranslator", *args, **kwargs
         ):
             assert not kwargs
-            if self.value in (torch._C._dispatch_keys,):
+            if self.value is torch._C._dispatch_keys:
                 assert len(args) == 1
                 assert isinstance(args[0], variables.TensorVariable)
                 example_value = args[0].proxy.node.meta["example_value"]
@@ -631,6 +660,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_use_deterministic_algorithms(
             self, tx: "InstructionTranslator", mode, warn_only=False
         ):
+            # pyrefly: ignore  # missing-attribute
             if warn_only and warn_only.as_python_constant():
                 unimplemented_v2(
                     gb_type="Attempted to use torch.use_deterministic_algorithms(warn_only=True)",
@@ -1015,6 +1045,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 raise torch._dynamo.exc.Unsupported("branch not supported")
             return variables.ConstantVariable.create(
+                # pyrefly: ignore  # bad-argument-type
                 torch.fx.experimental.symbolic_shapes.guard_scalar(val)
             )
 
@@ -1061,6 +1092,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return
 
             return variables.ConstantVariable.create(
+                # pyrefly: ignore  # bad-argument-type
                 torch.fx.experimental.symbolic_shapes.has_static_value(val)
             )
 
@@ -1192,13 +1224,17 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
             # need to guard only on no-arg get_device_module
+            # pyrefly: ignore  # unbound-name
             if device is None:
                 source = CallFunctionNoArgsSource(self.source)
                 install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             # assumes `module` is in the form `torch.xyz`
             new_source = AttrSource(
-                TorchSource(), module.__name__.rsplit(".", maxsplit=1)[-1]
+                TorchSource(),
+                # pyrefly: ignore  # unbound-name
+                module.__name__.rsplit(".", maxsplit=1)[-1],
             )
+            # pyrefly: ignore  # unbound-name
             return VariableTracker.build(tx, module, new_source)
 
         @register(torch.set_default_device)
@@ -1353,9 +1389,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 f"{fn.__name__}_spec", f_spec
             )
             input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-                fn.__name__ + "_input_spec", input_spec
+                fn.__name__ + "_input_spec",
+                # pyrefly: ignore  # unbound-name
+                input_spec,
             )
             f_spec_proxy.node.type = type(f_spec)
+            # pyrefly: ignore  # unbound-name
             input_spec_proxy.node.type = type(input_spec)
             all_args = (f_spec_proxy, input_spec_proxy, *proxified_flat_args)
 
@@ -1696,6 +1735,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         # this results in cleaner graphs, but only works for inputs
+        # pyrefly: ignore  # missing-attribute
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
@@ -1714,7 +1754,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # TODO[@lucaskabela]: Remove the behavior below since it is deprecated
         if isinstance(
-            data, TensorWithTFOverrideVariable
+            data,
+            TensorWithTFOverrideVariable,
+            # pyrefly: ignore  # missing-attribute
         ) or is_traceable_wrapper_subclass_type(data.class_type):
             unimplemented_v2(
                 gb_type="Attempted to use torch.nn.Parameter constructor with tensor subclass",
@@ -1737,8 +1779,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         try:
+            # pyrefly: ignore  # missing-attribute
             shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
+            # pyrefly: ignore  # missing-attribute
             dtype = data.var_getattr(tx, "dtype").as_python_constant()
+            # pyrefly: ignore  # missing-attribute
             device = data.var_getattr(tx, "device").as_python_constant()
         except NotImplementedError as e:
             unimplemented_v2(
@@ -1753,9 +1798,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             )
 
         placeholder = tx.output.synthetic_graph_input(
-            new_parameter_placeholder, [shape, dtype, device, requires_grad]
+            new_parameter_placeholder,
+            # pyrefly: ignore  # unbound-name
+            [shape, dtype, device, requires_grad],
         )
+        # pyrefly: ignore  # missing-attribute
         if data.requires_grad:
+            # pyrefly: ignore  # missing-attribute
             data = data.call_method(tx, "detach", [], {})
 
         from .builder import wrap_fx_proxy
@@ -1765,6 +1814,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             tx.output.create_proxy(
                 "call_function",
                 tracable_create_parameter,
+                # pyrefly: ignore  # missing-attribute
                 (data.as_proxy(), placeholder.as_proxy()),
                 {},
             ),
@@ -1862,7 +1912,7 @@ class DispatchKeySetVariable(BaseTorchVariable):
         return cls(value, source=source)
 
     def is_constant_fold_method(self, name):
-        return name in ["has"]
+        return name == "has"
 
     def call_method(
         self,

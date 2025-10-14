@@ -13,6 +13,7 @@ from torch.distributed.tensor._utils import (
     compute_global_tensor_info,
     compute_global_tensor_shape,
     compute_local_shape_and_global_offset,
+    compute_local_tensor_info,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import (
@@ -494,6 +495,60 @@ class UtilSingleDeviceTest(TestCase):
         self.assertEqual(global_stride[1], local_tensor.stride()[1])
         self.assertEqual(global_stride[2], local_tensor.stride()[2] * 3)
 
+    def test_compute_tensor_info(self):
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        world_size = 256
+        fake_store = FakeStore()
+        torch.distributed.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=world_size
+        )
+        mesh = torch.distributed.device_mesh.init_device_mesh(
+            "cpu",
+            (8, 8, 4),
+            mesh_dim_names=(
+                "dp",
+                "tp",
+                "cp",
+            ),
+        )
+        assert world_size == mesh.shape[0] * mesh.shape[1] * mesh.shape[2]
+
+        # Add Partial() when we are allowed to redistribute to it
+        options = [Shard(0), Shard(1), Shard(2), Replicate()]
+        all_placements = [tuple(p) for p in itertools.product(options, repeat=3)]
+        for placements in all_placements:
+            local_tensor = torch.empty_strided(
+                (4, 4, 4),
+                (16, 4, 1),
+            )
+            local_dt = DTensor.from_local(local_tensor, mesh, placements)
+
+            global_shape, global_stride = compute_global_tensor_info(
+                local_tensor, mesh, placements
+            )
+            global_dt = local_dt.redistribute(mesh, [Replicate()] * mesh.ndim)
+            self.assertEqual(global_shape, global_dt.size())
+            self.assertEqual(global_stride, global_dt.stride())
+
+            global_tensor = torch.empty_strided(
+                global_shape,
+                global_stride,
+            )
+            new_local_shape, new_local_stride = compute_local_tensor_info(
+                global_tensor,
+                mesh,
+                placements,
+            )
+            self.assertEqual(new_local_shape, local_tensor.size())
+            self.assertEqual(new_local_stride, local_tensor.stride())
+
+            new_local_dt = global_dt.redistribute(mesh, placements)
+            self.assertEqual(new_local_shape, new_local_dt.to_local().size())
+            self.assertEqual(new_local_stride, new_local_dt.to_local().stride())
+
+        torch.distributed.destroy_process_group()
+
 
 class TestStridedSharding(DTensorTestBase):
     @property
@@ -690,6 +745,25 @@ class TestStridedSharding(DTensorTestBase):
             current_logical_shape=list(x.shape),
         )
         self.assertEqual(full_tensor, x)
+
+    @with_comms
+    def test_2d_mesh_uneven_strided_shard(self):
+        mesh = init_device_mesh(
+            self.device_type,
+            (self.world_size // 2, 2),
+            mesh_dim_names=("fsdp", "tp"),
+        )
+
+        for size in (2, 3, 5, 11):
+            tensor = torch.arange(size, device=self.device_type).view(1, -1)
+            dtensor = distribute_tensor(
+                tensor,
+                device_mesh=mesh,
+                placements=(Replicate(), Replicate()),
+            ).redistribute(
+                mesh, placements=(_StridedShard(dim=1, split_factor=2), Shard(1))
+            )
+            self.assertEqual(dtensor.full_tensor(), tensor)
 
 
 class Test2DStridedLocalShard(DTensorTestBase):
