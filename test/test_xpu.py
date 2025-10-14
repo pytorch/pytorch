@@ -1,5 +1,6 @@
 # Owner(s): ["module: intel"]
 
+import gc
 import re
 import subprocess
 import sys
@@ -133,6 +134,10 @@ class TestXpu(TestCase):
                 device_properties.architecture,
                 device_capability["architecture"],
             )
+        self.assertEqual(
+            len(str(device_properties.uuid)), 36
+        )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        self.assertEqual(len(device_properties.uuid.bytes), 16)
 
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
@@ -520,6 +525,42 @@ if __name__ == "__main__":
         )
         del a
 
+    def test_memory_stats(self):
+        gc.collect()
+        torch.xpu.empty_cache()
+        torch.xpu.reset_peak_memory_stats()
+        torch.xpu.reset_accumulated_memory_stats()
+        prev_allocated = torch.accelerator.memory_allocated()
+        prev_reserved = torch.accelerator.memory_reserved()
+        prev_max_allocated = torch.accelerator.max_memory_allocated()
+        prev_max_reserved = torch.accelerator.max_memory_reserved()
+        self.assertEqual(prev_allocated, prev_max_allocated)
+        self.assertEqual(prev_reserved, prev_max_reserved)
+        # Activate 1kB memory
+        prev_active_current = torch.accelerator.memory_stats()[
+            "active_bytes.all.current"
+        ]
+        tmp = torch.randn(256, device="xpu")
+        # Detect if the current active memory is 1kB
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            1024 + prev_active_current,
+        )
+        self.assertEqual(torch.accelerator.memory_stats()["active_bytes.all.freed"], 0)
+        del tmp
+        gc.collect()
+        torch.accelerator.empty_cache()
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            prev_active_current,
+        )
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.freed"], 1024
+        )
+        torch.accelerator.reset_peak_memory_stats()
+        self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
+        self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
+
     @skipXPUIf(
         int(torch.version.xpu) < 20250000,
         "Test requires SYCL compiler version 2025.0.0 or newer.",
@@ -543,6 +584,16 @@ if __name__ == "__main__":
         flags = torch.xpu.get_gencode_flags()
         for arch in arch_list:
             self.assertTrue(arch in flags)
+
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_can_device_access_peer(self):
+        device_count = torch.xpu.device_count()
+        for device in range(device_count):
+            for peer in range(device_count):
+                self.assertEqual(
+                    torch.xpu.can_device_access_peer(device, peer),
+                    torch.xpu.can_device_access_peer(peer, device),
+                )
 
     def test_torch_version_xpu(self):
         self.assertEqual(len(torch.version.xpu), 8)
@@ -724,6 +775,10 @@ class TestXPUAPISanity(TestCase):
             torch.xpu.is_bf16_supported(including_emulation=True),
             torch.xpu.is_available(),
         )
+
+    def test_is_tf32_supported(self):
+        if not torch.xpu.is_available():
+            self.assertFalse(torch.xpu.is_tf32_supported())
 
     def test_get_arch_list(self):
         if not torch.xpu._is_compiled():

@@ -63,7 +63,8 @@ was launched a :class:`api.SubprocessContext` is returned. Both are specific
 implementations of the parent :class:`api.PContext` class.
 """
 
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     _validate_full_rank,
@@ -80,7 +81,7 @@ from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     to_map,
 )
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.distributed.numa.binding import NumaOptions
+from torch.numa.binding import NumaOptions
 
 
 __all__ = [
@@ -141,8 +142,8 @@ def start_processes(
     For each process, the ``log_dir`` will contain:
 
     #. ``{local_rank}/error.json``: if the process failed, a file with the error info
-    #. ``{local_rank}/stdout.json``: if ``redirect & STDOUT == STDOUT``
-    #. ``{local_rank}/stderr.json``: if ``redirect & STDERR == STDERR``
+    #. ``{local_rank}/stdout.log``: if ``redirect & STDOUT == STDOUT``
+    #. ``{local_rank}/stderr.log``: if ``redirect & STDERR == STDERR``
 
     .. note:: It is expected that the ``log_dir`` exists, is empty, and is a directory.
 
@@ -227,6 +228,7 @@ def start_processes(
             log_line_prefixes=log_line_prefixes,
             start_method=start_method,
             logs_specs=logs_specs,
+            numa_options=numa_options,
         )
 
     try:

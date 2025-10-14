@@ -1,13 +1,270 @@
 #pragma once
-
 #ifdef _WIN32
-#include <Windows.h>
+#include <windows.h>
 #include <functional> // std::function
-#else
+#ifdef USE_MMAP_SELF
+#include <errno.h>
+#include <fcntl.h>
+#include <io.h>
+#include <sys/stat.h>
+
+#define PROT_READ 0x1
+#define PROT_WRITE 0x2
+#define PROT_EXEC 0x4
+
+#define MAP_SHARED 0x01
+#define MAP_PRIVATE 0x02
+#define MAP_FAILED ((void*)-1)
+
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
+struct Dl_info {
+  char dli_fname[MAX_PATH]; /**< Filename of defining object */
+  void* dli_fbase; /**< Load address of that object */
+  const char* dli_sname; /**< Name of nearest lower symbol */
+  void* dli_saddr; /**< Exact value of nearest symbol */
+};
+typedef struct Dl_info Dl_info;
+
+int dladdr(const void* addr, Dl_info* info) {
+  // only returns filename, FWIW.
+  CHAR tpath[MAX_PATH];
+  MEMORY_BASIC_INFORMATION mbi;
+  char* path;
+  char* tmp;
+  size_t length;
+  int ret = 0;
+
+  if (!info)
+    return 0;
+
+  HMODULE hModule;
+  if (!GetModuleHandleExA(
+          GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+              GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+          (LPCSTR)addr,
+          &hModule) ||
+      hModule == NULL)
+    return 0;
+
+  ret = GetModuleFileNameA(hModule, (LPSTR)&tpath, MAX_PATH);
+  if (!ret)
+    return 0;
+
+  path = tpath;
+
+  length = strlen(path);
+  if (length >= MAX_PATH) {
+    length = MAX_PATH - 1;
+    path[MAX_PATH - 1] = '\0';
+  }
+
+  tmp = path;
+  while (*tmp) {
+    if (*tmp == '\\')
+      *tmp = '/';
+    tmp++;
+  }
+
+  memcpy(info->dli_fname, path, length + 1);
+  info->dli_fbase = hModule;
+  info->dli_sname = NULL;
+  info->dli_saddr = NULL;
+  return 1;
+}
+
+static DWORD get_creation_disposition(int flags) {
+  if (flags & O_CREAT) {
+    if (flags & O_EXCL)
+      return CREATE_NEW;
+    if (flags & O_TRUNC)
+      return CREATE_ALWAYS;
+    return OPEN_ALWAYS;
+  }
+  if (flags & O_TRUNC)
+    return TRUNCATE_EXISTING;
+  return OPEN_EXISTING;
+}
+
+#define O_ACCMODE 03
+#define O_RDONLY 00
+#define O_WRONLY 01
+#define O_RDWR 02
+
+static DWORD get_access_mode(int flags) {
+  switch (flags & O_ACCMODE) {
+    case O_RDONLY:
+      return GENERIC_READ;
+    case O_WRONLY:
+      return GENERIC_WRITE;
+    case O_RDWR:
+      return GENERIC_READ | GENERIC_WRITE;
+    default:
+      return GENERIC_READ;
+  }
+}
+#ifndef O_DSYNC
+#define O_DSYNC 00010000 /* used to be O_SYNC, see below */
+#endif
+
+#ifndef O_SYNC
+#define __O_SYNC 04000000
+#define O_SYNC (__O_SYNC | O_DSYNC)
+#endif
+
+int open(char* pathname, int flags) {
+  DWORD dwDesiredAccess = get_access_mode(flags);
+  DWORD dwCreationDisposition = get_creation_disposition(flags);
+  DWORD dwShareMode = FILE_SHARE_READ | FILE_SHARE_WRITE;
+  DWORD dwFlagsAndAttributes = FILE_ATTRIBUTE_NORMAL;
+
+  if (flags & O_SYNC) {
+    dwFlagsAndAttributes |= FILE_FLAG_WRITE_THROUGH;
+  }
+
+  if (flags & O_SEQUENTIAL) {
+    dwFlagsAndAttributes |= FILE_FLAG_SEQUENTIAL_SCAN;
+  }
+
+  if (flags & O_RANDOM) {
+    dwFlagsAndAttributes |= FILE_FLAG_RANDOM_ACCESS;
+  }
+
+  HANDLE hFile = CreateFileA(
+      pathname,
+      dwDesiredAccess,
+      dwShareMode,
+      NULL,
+      dwCreationDisposition,
+      dwFlagsAndAttributes,
+      NULL);
+
+  if (hFile == INVALID_HANDLE_VALUE) {
+    switch (GetLastError()) {
+      case ERROR_FILE_NOT_FOUND:
+        errno = ENOENT;
+        break;
+      case ERROR_PATH_NOT_FOUND:
+        errno = ENOTDIR;
+        break;
+      case ERROR_ACCESS_DENIED:
+        errno = EACCES;
+        break;
+      case ERROR_FILE_EXISTS:
+        errno = EEXIST;
+        break;
+      case ERROR_TOO_MANY_OPEN_FILES:
+        errno = EMFILE;
+        break;
+      default:
+        errno = EIO;
+    }
+    return -1;
+  }
+
+  int fd = _open_osfhandle((intptr_t)hFile, flags);
+  if (fd == -1) {
+    CloseHandle(hFile);
+    errno = EMFILE;
+    return -1;
+  }
+
+  if (flags & O_APPEND) {
+    lseek(fd, 0, SEEK_END);
+  }
+
+  return fd;
+}
+
+int close(int fd) {
+  return _close(fd);
+}
+
+void* mmap(
+    void* addr,
+    size_t length,
+    int prot,
+    int flags,
+    int fd,
+    off_t offset) {
+  HANDLE hFile = (HANDLE)_get_osfhandle(fd);
+  if (hFile == INVALID_HANDLE_VALUE) {
+    errno = EBADF;
+    return MAP_FAILED;
+  }
+
+  DWORD flProtect;
+  if (prot & PROT_WRITE) {
+    flProtect = PAGE_READWRITE;
+  } else if (prot & PROT_READ) {
+    flProtect = PAGE_READONLY;
+  } else {
+    flProtect = PAGE_NOACCESS;
+  }
+
+  flProtect = PAGE_READONLY;
+
+  DWORD dwDesiredAccess = 0;
+  if (prot & PROT_READ)
+    dwDesiredAccess |= FILE_MAP_READ;
+  if (prot & PROT_WRITE)
+    dwDesiredAccess |= FILE_MAP_WRITE;
+  if (prot & PROT_EXEC)
+    dwDesiredAccess |= FILE_MAP_EXECUTE;
+
+  dwDesiredAccess = FILE_MAP_READ;
+
+  SYSTEM_INFO SysInfo;
+  GetSystemInfo(&SysInfo);
+  DWORD dwSysGran = SysInfo.dwAllocationGranularity;
+
+  DWORD dwFileMapStart = (offset / dwSysGran) * dwSysGran;
+  DWORD dwMapViewSize = (offset % dwSysGran) + length;
+  DWORD dwFileMapSize = offset + length;
+  int iViewDelta = offset - dwFileMapStart;
+
+  HANDLE hMapping =
+      CreateFileMapping(hFile, NULL, flProtect, 0, dwFileMapSize, NULL);
+
+  if (!hMapping) {
+    DWORD dwErrCode = GetLastError();
+    errno = EACCES;
+    return MAP_FAILED;
+  }
+
+  void* lpMapAddress = MapViewOfFileEx(
+      hMapping, dwDesiredAccess, 0, dwFileMapStart, dwMapViewSize, addr);
+  if (!lpMapAddress) {
+    DWORD dwErrCode = GetLastError();
+    errno = EINVAL;
+  }
+
+  void* pData = (char*)lpMapAddress + iViewDelta;
+
+  CloseHandle(hMapping);
+
+  if (!lpMapAddress) {
+    return MAP_FAILED;
+  }
+
+  return pData;
+}
+
+int munmap(void* addr, size_t length) {
+  if (!UnmapViewOfFile(addr)) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
+}
+#endif // USE_MMAP_SELF
+#else // !_WIN32
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#endif
+#endif // _WIN32
 
 #include <fcntl.h>
 #include <optional>
@@ -68,10 +325,23 @@ using RAIIDataPtr = std::unique_ptr<void, std::function<void(void*)>>;
 
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 RAIIDataPtr RAII_gpuMalloc(size_t num_bytes) {
+#ifdef AOT_INDUCTOR_USE_CACHING_ALLOCATOR
+  // Use caching allocator for allocating GPU memory
+  void* data_ptr = nullptr;
+  AOTI_TORCH_ERROR_CODE_CHECK(
+      aoti_torch_cuda_caching_allocator_raw_alloc(num_bytes, &data_ptr));
+  auto deleter = [](void* ptr) {
+    AOTI_TORCH_ERROR_CODE_CHECK(
+        aoti_torch_cuda_caching_allocator_raw_delete(ptr));
+  };
+  return RAIIDataPtr(data_ptr, deleter);
+#else
+  // Use cudaMalloc directly for allocating GPU memory
   void* data_ptr = nullptr;
   AOTI_RUNTIME_CUDA_CHECK(cudaMalloc((void**)&data_ptr, num_bytes));
   auto deleter = [](void* ptr) { AOTI_RUNTIME_CUDA_CHECK(cudaFree(ptr)); };
   return RAIIDataPtr(data_ptr, deleter);
+#endif
 }
 
 #elif defined(USE_XPU)
@@ -311,7 +581,14 @@ class AOTInductorModelBase {
     return folded_constants;
   }
 
-  void load_constants() {
+  void update_constants_from_blob(const uint8_t* weight_blob_ptr) {
+#if defined(USE_MMAP_EXTERNAL)
+    user_managed_mmap = const_cast<uint8_t*>(weight_blob_ptr);
+    load_constants(true);
+#endif
+  }
+
+  void load_constants(bool force = false) {
     size_t num_constants = this->num_constants();
     size_t num_folded_constants = this->num_folded_constants();
     constants_map_->reserve(num_constants);
@@ -320,7 +597,7 @@ class AOTInductorModelBase {
         num_constants - num_folded_constants);
     size_t blob_size = 0;
     compute_constant_blob(blob_size, constants_internal_offset);
-    if (!include_weights) {
+    if (!force && !include_weights) {
       return;
     }
 #if defined(USE_CUDA) || defined(USE_XPU) || defined(USE_MPS)
@@ -330,6 +607,7 @@ class AOTInductorModelBase {
 #endif
 
     size_t bytes_read = 0;
+    size_t non_folded_idx = 0; // Separate index for non-folded constants
     for (size_t i = 0; i < num_constants; i++) {
       bool from_folded = this->constant_from_folded(i);
       if (from_folded) {
@@ -339,12 +617,13 @@ class AOTInductorModelBase {
       size_t data_size = this->constant_data_size(i);
       uint8_t* internal_ptr = (data_size != 0)
           ? constant_ptr(
-                constants_internal_offset[i],
+                constants_internal_offset[non_folded_idx],
                 bytes_read,
                 data_size,
                 /* skip_copy = */ false)
           : nullptr;
       bytes_read += data_size;
+      non_folded_idx++; // Increment the non-folded index
 
       // Create at::Tensor from copied memory.
       auto dtype = this->constant_dtype(i);
@@ -545,6 +824,17 @@ class AOTInductorModelBase {
     return out_spec_.c_str();
   }
 
+  uint64_t constant_blob_size() const {
+#if defined(USE_MMAP_SELF) || defined(USE_MMAP_EXTERNAL)
+    const uint64_t weights_size =
+        reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
+    return weights_size;
+#else
+    throw std::runtime_error{
+        "constant blob size is only available for mmap'd weights"};
+#endif
+  }
+
   void update_constants_array_from_map() {
     if (!constants_map_) {
       throw std::runtime_error{
@@ -631,6 +921,15 @@ class AOTInductorModelBase {
 
  protected:
   uint8_t* _get_constants_start() {
+#if defined(USE_MMAP_EXTERNAL)
+    if (!user_managed_mmap) {
+      throw std::runtime_error{
+          "Constants are not mmap'd. Use AOTInductorModelUpdateConstantsBlob to initialize the constants first."};
+    }
+    // Mapped memory for weights
+    return user_managed_mmap;
+#endif
+
 #ifndef USE_MMAP_SELF
     // NOLINTNEXTLINE(*const-cast*)
     return const_cast<uint8_t*>(_binary_constants_bin_start);
@@ -670,6 +969,7 @@ class AOTInductorModelBase {
     return self_mmap;
 #endif
   }
+
   struct ParamInfo {
     const char* name = nullptr;
   };
@@ -701,8 +1001,14 @@ class AOTInductorModelBase {
   // Holds the blob storage for constants' at::Tensor.
   RAIIDataPtr constant_blob_;
 
-#ifdef USE_MMAP_SELF
+#if defined(USE_MMAP_SELF)
+  // Mapped memory for weights
   uint8_t* self_mmap = NULL;
+#endif
+
+#if defined(USE_MMAP_EXTERNAL)
+  // Mapped memory for weights
+  uint8_t* user_managed_mmap = NULL;
 #endif
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.

@@ -1,9 +1,16 @@
 (pytorch_api)=
-# Python API
+# Reference API
+
+```{toctree}
+:maxdepth: 1
+
+C++ <https://docs.pytorch.org/cppdocs/>
+```
 
 ```{toctree}
 :glob:
 :maxdepth: 1
+:caption: Python API
 
 torch
 nn
@@ -49,6 +56,7 @@ torch.monitor <monitor>
 torch.signal <signal>
 torch.special <special>
 torch.overrides
+torch.nativert <nativert>
 torch.package <package>
 profiler
 nn.init
@@ -68,7 +76,6 @@ storage
 torch.testing <testing>
 torch.utils <utils>
 torch.utils.benchmark <benchmark_utils>
-torch.utils.bottleneck <bottleneck>
 torch.utils.checkpoint <checkpoint>
 torch.utils.cpp_extension <cpp_extension>
 torch.utils.data <data>

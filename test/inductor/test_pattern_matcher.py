@@ -3,7 +3,8 @@ import copy
 import itertools
 import os
 import unittest
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -180,8 +181,7 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
     def test_duplicate_search(self):
-        from collections.abc import Iterable
-        from typing import Callable
+        from collections.abc import Callable, Iterable
 
         import torch
         from torch._inductor.pattern_matcher import (
@@ -1429,6 +1429,41 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(counter, 1)
                 torch.testing.assert_close(actual, expected)
 
+    def test_input_output_same(self):
+        def pattern(x, y):
+            out1 = torch.add(x, y)
+            return out1, x
+
+        def replace(x, y):
+            out1 = torch.mul(x, y)
+            out2 = torch.mul(out1, y)
+            return out1, out2
+
+        my_patterns = PatternMatcherPass()
+        inputs = (torch.ones(3, 3), torch.ones(3, 3))
+        register_replacement(pattern, replace, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+            _ = my_patterns.apply(graph)
+            stable_topological_sort(graph)
+            graph.eliminate_dead_code()
+            return graph
+
+        @torch.compile(
+            options={
+                "post_grad_custom_post_pass": custom_pass,
+            }
+        )
+        def f(x, y):
+            res = torch.add(x, y)
+            sub = torch.sub(res, x)
+            return sub
+
+        test, (code,) = run_and_get_code(f, *(torch.ones(3, 3), torch.ones(3, 3)))
+
+        self.assertTrue("aten.add.default" not in code)
+        self.assertTrue("aten.mul.default" not in code)
+
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations3(self):
         counter = 0
@@ -1751,6 +1786,18 @@ class TestPatternMatcher(TestCase):
         # print(my_func_static(*inputs))
         test, (code,) = run_and_get_code(my_func_static, *inputs)
         self.assertTrue("static_scaled_int8_quant" not in code)
+
+    def test_fwd_only_generate_original_aten_meta(self):
+        def f(x):
+            return torch.ops.aten.sigmoid(x)
+
+        sample_input = torch.randn(3, 5, device=GPU_TYPE)
+        gm_with_meta = fwd_only(f, args=[sample_input])
+        sigmoid_nodes = gm_with_meta.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.sigmoid.default
+        )
+        self.assertEqual(len(sigmoid_nodes), 1)
+        self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
 
 
 if __name__ == "__main__":

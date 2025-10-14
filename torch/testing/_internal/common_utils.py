@@ -48,11 +48,11 @@ from pathlib import Path
 from statistics import mean
 from typing import (
     Any,
-    Callable,
     Optional,
     TypeVar,
     Union,
 )
+from collections.abc import Callable
 from collections.abc import Iterable, Iterator
 from unittest.mock import MagicMock
 
@@ -68,7 +68,6 @@ import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
-from torch._dynamo.trace_rules import _as_posix_path
 from torch._utils_internal import get_writable_path
 from torch._logging.scribe import open_source_signpost
 from torch.nn import (
@@ -96,14 +95,44 @@ from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 from torch.utils import cpp_extension
 try:
-    import pytest
+    import pytest  # type: ignore[import-not-found]
     has_pytest = True
 except ImportError:
     has_pytest = False
 
 
+SEED = 1234
+MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
+MI200_ARCH = ("gfx90a")
+NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
+NAVI3_ARCH = ("gfx1100", "gfx1101")
+NAVI4_ARCH = ("gfx1200", "gfx1201")
 
+class ProfilingMode(Enum):
+    LEGACY = 1
+    SIMPLE = 2
+    PROFILING = 3
+
+# Set by parse_cmd_line_args() if called
+CI_FUNCTORCH_ROOT = ""
+CI_PT_ROOT = ""
+CI_TEST_PREFIX = ""
+DISABLED_TESTS_FILE = ""
+GRAPH_EXECUTOR : Optional[ProfilingMode] = None
+LOG_SUFFIX = ""
+PYTEST_SINGLE_TEST = ""
+REPEAT_COUNT = 0
+RERUN_DISABLED_TESTS = False
+RUN_PARALLEL = 0
+SHOWLOCALS = False
+SLOW_TESTS_FILE = ""
+TEST_BAILOUTS = False
+TEST_DISCOVER = False
+TEST_IN_SUBPROCESS = False
+TEST_SAVE_XML = ""
+UNITTEST_ARGS : list[str] = []
+USE_PYTEST = False
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -839,11 +868,6 @@ class decorateIf(_TestParametrizer):
         yield (test_wrapper, test_name, {}, decorator_fn)
 
 
-class ProfilingMode(Enum):
-    LEGACY = 1
-    SIMPLE = 2
-    PROFILING = 3
-
 def cppProfilingFlagsToProfilingMode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
     old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
@@ -862,6 +886,7 @@ def cppProfilingFlagsToProfilingMode():
 def enable_profiling_mode_for_profiling_tests():
     old_prof_exec_state = False
     old_prof_mode_state = False
+    assert GRAPH_EXECUTOR
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
         old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
@@ -896,6 +921,7 @@ meth_call = torch._C.ScriptMethod.__call__
 def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
         del kwargs['profile_and_replay']
+        assert GRAPH_EXECUTOR
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             with enable_profiling_mode_for_profiling_tests():
                 callable(*args, **kwargs)
@@ -925,72 +951,91 @@ def _get_test_report_path():
     test_source = override if override is not None else 'python-unittest'
     return os.path.join('test-reports', test_source)
 
-is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
-parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
-parser.add_argument('--subprocess', action='store_true',
-                    help='whether to run each test in a subprocess')
-parser.add_argument('--seed', type=int, default=1234)
-parser.add_argument('--accept', action='store_true')
-parser.add_argument('--jit-executor', '--jit_executor', type=str)
-parser.add_argument('--repeat', type=int, default=1)
-parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
-parser.add_argument('--use-pytest', action='store_true')
-parser.add_argument('--save-xml', nargs='?', type=str,
-                    const=_get_test_report_path(),
-                    default=_get_test_report_path() if IS_CI else None)
-parser.add_argument('--discover-tests', action='store_true')
-parser.add_argument('--log-suffix', type=str, default="")
-parser.add_argument('--run-parallel', type=int, default=1)
-parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
-parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
-parser.add_argument('--rerun-disabled-tests', action='store_true')
-parser.add_argument('--pytest-single-test', type=str, nargs=1)
-parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
+def parse_cmd_line_args():
+    global CI_FUNCTORCH_ROOT
+    global CI_PT_ROOT
+    global CI_TEST_PREFIX
+    global DISABLED_TESTS_FILE
+    global GRAPH_EXECUTOR
+    global LOG_SUFFIX
+    global PYTEST_SINGLE_TEST
+    global REPEAT_COUNT
+    global RERUN_DISABLED_TESTS
+    global RUN_PARALLEL
+    global SHOWLOCALS
+    global SLOW_TESTS_FILE
+    global TEST_BAILOUTS
+    global TEST_DISCOVER
+    global TEST_IN_SUBPROCESS
+    global TEST_SAVE_XML
+    global UNITTEST_ARGS
+    global USE_PYTEST
+
+    is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
+    parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
+    parser.add_argument('--subprocess', action='store_true',
+                        help='whether to run each test in a subprocess')
+    parser.add_argument('--accept', action='store_true')
+    parser.add_argument('--jit-executor', '--jit_executor', type=str)
+    parser.add_argument('--repeat', type=int, default=1)
+    parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
+    parser.add_argument('--use-pytest', action='store_true')
+    parser.add_argument('--save-xml', nargs='?', type=str,
+                        const=_get_test_report_path(),
+                        default=_get_test_report_path() if IS_CI else None)
+    parser.add_argument('--discover-tests', action='store_true')
+    parser.add_argument('--log-suffix', type=str, default="")
+    parser.add_argument('--run-parallel', type=int, default=1)
+    parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
+    parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
+    parser.add_argument('--rerun-disabled-tests', action='store_true')
+    parser.add_argument('--pytest-single-test', type=str, nargs=1)
+    parser.add_argument('--showlocals', action=argparse.BooleanOptionalAction, default=False)
 
 # Only run when -h or --help flag is active to display both unittest and parser help messages.
-def run_unittest_help(argv):
-    unittest.main(argv=argv)
+    def run_unittest_help(argv):
+        unittest.main(argv=argv)
 
-if '-h' in sys.argv or '--help' in sys.argv:
-    help_thread = threading.Thread(target=run_unittest_help, args=(sys.argv,))
-    help_thread.start()
-    help_thread.join()
+    if '-h' in sys.argv or '--help' in sys.argv:
+        help_thread = threading.Thread(target=run_unittest_help, args=(sys.argv,))
+        help_thread.start()
+        help_thread.join()
 
-args, remaining = parser.parse_known_args()
-if args.jit_executor == 'legacy':
-    GRAPH_EXECUTOR = ProfilingMode.LEGACY
-elif args.jit_executor == 'profiling':
-    GRAPH_EXECUTOR = ProfilingMode.PROFILING
-elif args.jit_executor == 'simple':
-    GRAPH_EXECUTOR = ProfilingMode.SIMPLE
-else:
-    # infer flags based on the default settings
-    GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
+    args, remaining = parser.parse_known_args()
+    if args.jit_executor == 'legacy':
+        GRAPH_EXECUTOR = ProfilingMode.LEGACY
+    elif args.jit_executor == 'profiling':
+        GRAPH_EXECUTOR = ProfilingMode.PROFILING
+    elif args.jit_executor == 'simple':
+        GRAPH_EXECUTOR = ProfilingMode.SIMPLE
+    else:
+        # infer flags based on the default settings
+        GRAPH_EXECUTOR = cppProfilingFlagsToProfilingMode()
 
-RERUN_DISABLED_TESTS = args.rerun_disabled_tests
+    RERUN_DISABLED_TESTS = args.rerun_disabled_tests
 
-SLOW_TESTS_FILE = args.import_slow_tests
-DISABLED_TESTS_FILE = args.import_disabled_tests
-LOG_SUFFIX = args.log_suffix
-RUN_PARALLEL = args.run_parallel
-TEST_BAILOUTS = args.test_bailouts
-USE_PYTEST = args.use_pytest
-PYTEST_SINGLE_TEST = args.pytest_single_test
-TEST_DISCOVER = args.discover_tests
-TEST_IN_SUBPROCESS = args.subprocess
-TEST_SAVE_XML = args.save_xml
-REPEAT_COUNT = args.repeat
-SEED = args.seed
-SHOWLOCALS = args.showlocals
-if not getattr(expecttest, "ACCEPT", False):
-    expecttest.ACCEPT = args.accept
-UNITTEST_ARGS = [sys.argv[0]] + remaining
-torch.manual_seed(SEED)
+    SLOW_TESTS_FILE = args.import_slow_tests
+    DISABLED_TESTS_FILE = args.import_disabled_tests
+    LOG_SUFFIX = args.log_suffix
+    RUN_PARALLEL = args.run_parallel
+    TEST_BAILOUTS = args.test_bailouts
+    USE_PYTEST = args.use_pytest
+    PYTEST_SINGLE_TEST = args.pytest_single_test
+    TEST_DISCOVER = args.discover_tests
+    TEST_IN_SUBPROCESS = args.subprocess
+    TEST_SAVE_XML = args.save_xml
+    REPEAT_COUNT = args.repeat
+    SHOWLOCALS = args.showlocals
+    if not getattr(expecttest, "ACCEPT", False):
+        expecttest.ACCEPT = args.accept
+    UNITTEST_ARGS = [sys.argv[0]] + remaining
+
+    set_rng_seed()
 
 # CI Prefix path used only on CI environment
-CI_TEST_PREFIX = str(Path(os.getcwd()))
-CI_PT_ROOT = str(Path(os.getcwd()).parent)
-CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
+    CI_TEST_PREFIX = str(Path(os.getcwd()))
+    CI_PT_ROOT = str(Path(os.getcwd()).parent)
+    CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
 def wait_for_process(p, timeout=None):
     try:
@@ -1139,7 +1184,9 @@ def lint_test_case_extension(suite):
     return succeed
 
 
-def get_report_path(argv=UNITTEST_ARGS, pytest=False):
+def get_report_path(argv=None, pytest=False):
+    if argv is None:
+        argv = UNITTEST_ARGS
     test_filename = sanitize_test_filename(argv[0])
     test_report_path = TEST_SAVE_XML + LOG_SUFFIX
     test_report_path = os.path.join(test_report_path, test_filename)
@@ -1190,7 +1237,11 @@ def get_pytest_test_cases(argv: list[str]) -> list[str]:
     return test_collector_plugin.tests
 
 
-def run_tests(argv=UNITTEST_ARGS):
+def run_tests(argv=None):
+    parse_cmd_line_args()
+    if argv is None:
+        argv = UNITTEST_ARGS
+
     # import test files.
     if SLOW_TESTS_FILE:
         if os.path.exists(SLOW_TESTS_FILE):
@@ -1420,7 +1471,7 @@ TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
-TEST_HPU = True if (hasattr(torch, "hpu") and torch.hpu.is_available()) else False
+TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = is_privateuse1_backend_available()
@@ -1463,6 +1514,10 @@ TEST_WITH_UBSAN: bool = TestEnvironment.def_flag(
 TEST_WITH_ROCM: bool = TestEnvironment.def_flag(
     "TEST_WITH_ROCM",
     env_var="PYTORCH_TEST_WITH_ROCM",
+)
+TEST_WITH_MTIA: bool = TestEnvironment.def_flag(
+    "TEST_WITH_MTIA",
+    env_var="PYTORCH_TEST_WITH_MTIA",
 )
 
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
@@ -1756,6 +1811,7 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
+                assert GRAPH_EXECUTOR
                 if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                     raise unittest.SkipTest(msg)
                 else:
@@ -1920,15 +1976,20 @@ def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"
         return dec_fn(func)
     return dec_fn
 
+def getRocmArchName(device_index: int = 0):
+    return torch.cuda.get_device_properties(device_index).gcnArchName
+
+def isRocmArchAnyOf(arch: tuple[str, ...]):
+    rocmArch = getRocmArchName()
+    return any(x in rocmArch for x in arch)
+
 def skipIfRocmArch(arch: tuple[str, ...]):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
-            if TEST_WITH_ROCM:
-                prop = torch.cuda.get_device_properties(0)
-                if prop.gcnArchName.split(":")[0] in arch:
-                    reason = f"skipIfRocm: test skipped on {arch}"
-                    raise unittest.SkipTest(reason)
+            if TEST_WITH_ROCM and isRocmArchAnyOf(arch):
+                reason = f"skipIfRocm: test skipped on {arch}"
+                raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
@@ -1946,11 +2007,9 @@ def runOnRocmArch(arch: tuple[str, ...]):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
-            if TEST_WITH_ROCM:
-                prop = torch.cuda.get_device_properties(0)
-                if prop.gcnArchName.split(":")[0] not in arch:
-                    reason = f"skipIfRocm: test only runs on {arch}"
-                    raise unittest.SkipTest(reason)
+            if TEST_WITH_ROCM and not isRocmArchAnyOf(arch):
+                reason = f"skipIfRocm: test only runs on {arch}"
+                raise unittest.SkipTest(reason)
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
@@ -1991,16 +2050,6 @@ def skipIfMPS(fn):
     return wrapper
 
 
-def skipIfMPSOnMacOS13(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_MPS and int(MACOS_VERSION) == 13:
-            raise unittest.SkipTest("Test crashes MPSGraph on MacOS13")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
-
 def skipIfHpu(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -2010,15 +2059,18 @@ def skipIfHpu(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def getRocmVersion() -> tuple[int, int]:
+    from torch.testing._internal.common_cuda import _get_torch_rocm_version
+    rocm_version = _get_torch_rocm_version()
+    return (rocm_version[0], rocm_version[1])
+
 # Skips a test on CUDA if ROCm is available and its version is lower than requested.
 def skipIfRocmVersionLessThan(version=None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
             if TEST_WITH_ROCM:
-                rocm_version = str(torch.version.hip)
-                rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
-                rocm_version_tuple = tuple(int(x) for x in rocm_version.split("."))
+                rocm_version_tuple = getRocmVersion()
                 if rocm_version_tuple is None or version is None or rocm_version_tuple < tuple(version):
                     reason = f"ROCm {rocm_version_tuple} is available but {version} required"
                     raise unittest.SkipTest(reason)
@@ -2386,7 +2438,9 @@ def get_function_arglist(func):
     return inspect.getfullargspec(func).args
 
 
-def set_rng_seed(seed):
+def set_rng_seed(seed=None):
+    if seed is None:
+        seed = SEED
     torch.manual_seed(seed)
     random.seed(seed)
     if TEST_NUMPY:
@@ -3148,7 +3202,7 @@ class TestCase(expecttest.TestCase):
 
     def remove_empty_lines(self, input_string):
         lines = input_string.split('\n')
-        filtered_lines = [line for line in lines if not line.strip() == '']
+        filtered_lines = [line for line in lines if line.strip() != '']
         return '\n'.join(filtered_lines)
 
     # ignore comments will ignore lines that starts with # after being stripped
@@ -3409,7 +3463,7 @@ class TestCase(expecttest.TestCase):
 
     def setUp(self):
         check_if_enable(self)
-        set_rng_seed(SEED)
+        set_rng_seed()
 
         # Save global check sparse tensor invariants state that can be
         # restored from tearDown:
@@ -4189,7 +4243,7 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
     def assertEqualTypeString(self, x, y) -> None:
-        # This API is used simulate deprecated x.type() == y.type()
+        # This API is used simulate deprecated x.type() is y.type()
         self.assertEqual(x.device, y.device)
         self.assertEqual(x.dtype, y.dtype)
         self.assertEqual(x.is_sparse, y.is_sparse)
@@ -5071,7 +5125,7 @@ def gradcheck(fn, inputs, **kwargs):
 
     for key, value in default_values.items():
         # default value override values explicitly set to None
-        k = kwargs.get(key, None)
+        k = kwargs.get(key)
         kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
@@ -5091,7 +5145,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
 
     for key, value in default_values.items():
         # default value override values explicitly set to None
-        k = kwargs.get(key, None)
+        k = kwargs.get(key)
         kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
@@ -5606,6 +5660,8 @@ class LazyVal:
 
 
 def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=0):
+    from torch._dynamo.trace_rules import _as_posix_path
+
     if file is None:
         file = inspect.stack()[1 + skip].filename  # skip one frame
 
@@ -5705,8 +5761,7 @@ def install_cpp_extension(extension_root):
             shutil.rmtree(d)
 
     # Build the extension
-    setup_py_path = os.path.join(extension_root, "setup.py")
-    cmd = [sys.executable, setup_py_path, "install", "--root", install_dir]
+    cmd = [sys.executable, "-m", "pip", "install", extension_root, "-v", "--no-build-isolation", "--root", install_dir]
     return_code = shell(cmd, cwd=extension_root, env=os.environ)
     if return_code != 0:
         raise RuntimeError(f"build failed for cpp extension at {extension_root}")

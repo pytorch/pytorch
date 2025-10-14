@@ -76,7 +76,7 @@ class ConfigTokenizer {
     } else if (token == "False") {
       return false;
     } else {
-      TORCH_CHECK_VALUE(
+      TORCH_CHECK(
           false,
           "Expected 'True' or 'False' at index ",
           i,

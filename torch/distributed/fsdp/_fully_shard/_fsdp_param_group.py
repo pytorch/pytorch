@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, NamedTuple, Optional
+from collections.abc import Callable
+from typing import Any, cast, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -30,9 +31,10 @@ from ._fsdp_common import (
     compiled_autograd_enabled,
     FSDPMeshInfo,
     HSDPMeshInfo,
+    is_bw,
     TrainingState,
 )
-from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
 
 
 logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
@@ -149,6 +151,7 @@ class FSDPParamGroup:
         ]
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
+        # pyrefly: ignore  # read-only
         self.device = device
         self.device_handle = _get_device_handle(device.type)
         self.mp_policy = mp_policy
@@ -166,6 +169,7 @@ class FSDPParamGroup:
         self._module_to_pre_load_state_dict_hook_handle: _ModuleToHandleDict = {}
         self._all_reduce_hook: Optional[Callable[[torch.Tensor], None]] = None
         self._all_gather_comm: AllGather = DefaultAllGather()
+        self._all_gather_output = torch.empty(0, device=self.device)
         self._reduce_scatter_comm: ReduceScatter = DefaultReduceScatter()
         # Optional stream to run the user-defined all-reduce hook in
         # Saved here and not in the comm. context because we allow the user to
@@ -270,7 +274,7 @@ class FSDPParamGroup:
         the staging buffers for collective comms.
         """
         assert isinstance(
-            self._all_gather_comm, (DefaultAllGather, ProcessGroupAllocAllGather)
+            self._all_gather_comm, (DefaultAllGather | ProcessGroupAllocAllGather)
         ), (
             "cannot call set_allocate_memory_from_process_group() "
             f"when all gather comm is custom: {self._all_gather_comm.__class__.__name__}"
@@ -283,7 +287,7 @@ class FSDPParamGroup:
 
         assert isinstance(
             self._reduce_scatter_comm,
-            (DefaultReduceScatter, ProcessGroupAllocReduceScatter),
+            (DefaultReduceScatter | ProcessGroupAllocReduceScatter),
         ), (
             "cannot call set_allocate_memory_from_process_group() "
             f"when reduce scatter comm is custom: {self._reduce_scatter_comm.__class__.__name__}"
@@ -310,6 +314,22 @@ class FSDPParamGroup:
             # used in the all-gather streams
             self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
+
+        world_size = self._all_gather_process_group.size()
+        if world_size == 1:
+            # can't skip due to early return in wait_for_unshard if
+            # no self._all_gather_result
+            self._all_gather_result = AllGatherResult(
+                all_gather_output=self._all_gather_output,
+                all_gather_event=self.device_handle.Event().record(),
+                all_gather_work=None,
+                param_all_gather_input_dtypes=[],
+                param_all_gather_input_numels=[],
+                all_gather_input_split_sizes=[],
+            )
+
+            return
+
         with record_function(self._with_fqn("FSDP::all_gather")):
             self._all_gather_result = foreach_all_gather(
                 self.fsdp_params,
@@ -336,18 +356,52 @@ class FSDPParamGroup:
             if prev_all_gather_state := self.comm_ctx.all_gather_state:
                 self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
                 self.comm_ctx.all_gather_state = None  # free the all-gather result
-        with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
-            foreach_all_gather_copy_out(
-                self._all_gather_result,
-                self.fsdp_params,
-                self._all_gather_process_group,
-            )
+        world_size = self._all_gather_process_group.size()
+        if world_size == 1:
+            # directly initialize unsharded parameters from sharded parameters
+
+            for fsdp_param in self.fsdp_params:
+                # Use all_gather_inputs which already handles conversion to param_dtype
+                # This is consistent with the world_size > 1 path
+                all_gather_input = fsdp_param.all_gather_inputs[0]
+
+                # Make sure the all_gather_outputs has proper storage size before using it
+                # First ensure we have at least one tensor in all_gather_outputs
+                fsdp_param.init_all_gather_outputs(
+                    [all_gather_input.numel()],
+                    [all_gather_input.dtype],
+                    world_size,
+                    self.device,
+                    force_recreate=False,
+                )
+
+                tensor = fsdp_param.all_gather_outputs[0]
+                alloc_storage(tensor)
+
+                # find alternative way to check if tensor.is_inference
+                with torch.autograd._unsafe_preserve_version_counter(tensor):
+                    tensor.copy_(all_gather_input)
+
+        else:
+            with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
+                foreach_all_gather_copy_out(
+                    self._all_gather_result,
+                    self.fsdp_params,
+                    self._all_gather_process_group,
+                )
+
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()
+
         self._to_unsharded()
         all_gather_copy_out_event = self.device_handle.Event()
         all_gather_copy_out_event.record()
-        if not async_op and self._training_state == TrainingState.FORWARD:
+
+        if (
+            not async_op
+            and self._training_state == TrainingState.FORWARD
+            and world_size > 1
+        ):
             # Defer free to allow for overlap of this copy-out with next
             # all-gather collective
             self.comm_ctx.all_gather_state = AllGatherState(
@@ -355,6 +409,7 @@ class FSDPParamGroup:
             )
         else:
             self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
+
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
     def _wait_all_gather_streams_on_event(self, event: Optional[torch.Event]):
@@ -392,8 +447,15 @@ class FSDPParamGroup:
         if not compiled_autograd_enabled():
             logger.debug("%s", self._with_fqn("FSDP::post_forward"))
         with record_function(self._with_fqn("FSDP::post_forward")):
-            self.reshard()
-            self._record_post_forward()
+            if not compiled_autograd_enabled():
+                # for AC(fully_shard(model)), AC runs fsdp's _pre_forward
+                # it shouldn't change post_forward_order
+                if not is_bw():
+                    self.reshard()
+                    self._record_post_forward()
+            else:
+                self.reshard()
+                self._record_post_forward()
             self._training_state = TrainingState.IDLE
             return output
 
@@ -555,6 +617,7 @@ class FSDPParamGroup:
             # Prefetch naively using the reverse post-forward order, which may
             # have mistargeted prefetches if not all modules used in forward
             # are used in this backward
+            # pyrefly: ignore  # unbound-name
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
             self._prefetch_unshard(target_fsdp_param_group, "backward")
 
@@ -791,6 +854,7 @@ compile the forward part if you want to use Traceable FSDP2."""
             raise RuntimeError(msg)
 
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, param_group: FSDPParamGroup, *inputs: torch.Tensor):
         # All tensors in `inputs` should require gradient
         RegisterPostBackwardFunction._assert_not_tracing_fsdp()

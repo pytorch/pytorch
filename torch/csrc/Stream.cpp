@@ -102,7 +102,7 @@ static PyObject* THPStream_pynew(
 
 PyObject* THPStream_Wrap(const c10::Stream& stream) {
   HANDLE_TH_ERRORS
-  auto type = (PyTypeObject*)THPStreamClass;
+  auto type = THPStreamClass;
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
     throw python_error();

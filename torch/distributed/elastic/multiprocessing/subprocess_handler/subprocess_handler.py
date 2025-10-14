@@ -11,6 +11,11 @@ import sys
 from subprocess import Popen
 from typing import Any, Optional
 
+from torch.numa.binding import (
+    maybe_temporarily_apply_numa_binding_to_current_thread,
+    NumaOptions,
+)
+
 
 __all__ = ["SubprocessHandler"]
 
@@ -39,6 +44,7 @@ class SubprocessHandler:
         stdout: Optional[str],
         stderr: Optional[str],
         local_rank_id: int,
+        numa_options: Optional[NumaOptions],
     ):
         self._stdout = open(stdout, "w") if stdout else None
         self._stderr = open(stderr, "w") if stderr else None
@@ -47,13 +53,20 @@ class SubprocessHandler:
         env_vars.update(env)
 
         args_str = (entrypoint, *[str(e) for e in args])
+
         self.local_rank_id = local_rank_id
-        self.proc: Popen = self._popen(args_str, env_vars)
+
+        # See HACK [NUMA inheritance] in spawn.py for context.
+        with maybe_temporarily_apply_numa_binding_to_current_thread(
+            gpu_index=local_rank_id, numa_options=numa_options
+        ):
+            self.proc: Popen = self._popen(args_str, env_vars)
 
     def _popen(self, args: tuple, env: dict[str, str]) -> Popen:
         kwargs: dict[str, Any] = {}
         if not IS_WINDOWS:
             kwargs["start_new_session"] = True
+
         return Popen(
             # pyre-fixme[6]: Expected `Union[typing.Sequence[Union[_PathLike[bytes],
             #  _PathLike[str], bytes, str]], bytes, str]` for 1st param but got

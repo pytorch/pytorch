@@ -71,6 +71,24 @@ _reduce_ops = {
 }
 
 
+# Note [Hide collectives mutation from autograd]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Threaded PG is intended to closely simulate the behavior of regular process
+# groups.  However, our regular PG implementations perform a dispatch through
+# c10d, whereas Threaded PG does not for some reason (some superficial
+# but not very convincing reasons include that Threaded PG is implemented
+# in Python but you can't override Backend in Python, you can only override
+# ProcessGroup in Python), thereby bypassing the dispatch step.  Now we have
+# a problem: c10d's signatures are LIES, they mutate their (output) tensor
+# arguments but their annotations don't have mutations on them so we don't
+# actually update any view metadata if you do differentiation.  This
+# ordinarily "doesn't matter" because distributed collectives aren't
+# differentiable anyway, but it's possible to tickle this in testing if
+# someone tries to touch the grad_fn of a Tensor.  There a few ways to
+# fix this, but the easiest way was to use the .detach() trick to hide
+# the mutations from autograd.
+
+
 class AllToAll:
     @torch.no_grad()
     def work(self, data):
@@ -79,7 +97,10 @@ class AllToAll:
             output_tensor_list, _ = data[dest_rank]
             for src_rank in range(world_size):
                 _, input_tensor_list = data[src_rank]
-                output_tensor_list[src_rank].copy_(input_tensor_list[dest_rank])
+                # See Note [Hide collectives mutation from autograd]
+                output_tensor_list[src_rank].detach().copy_(
+                    input_tensor_list[dest_rank]
+                )
 
 
 class AllToAllBase:
@@ -99,9 +120,10 @@ class AllToAllBase:
                     input_buffer.size(0), input_split_sizes, world_size
                 )
 
+                # See Note [Hide collectives mutation from autograd]
                 output_buffer[
                     output_indexes[src_rank] : output_indexes[src_rank + 1]
-                ].copy_(
+                ].detach().copy_(
                     input_buffer[
                         input_indexes[dest_rank] : input_indexes[dest_rank + 1]
                     ]
@@ -152,7 +174,8 @@ class AllReduce:
 
             # copy all the reduced value to each rank
             for src_rank in range(len(data)):
-                data[src_rank][i].copy_(res.to(data[src_rank][i].device))
+                # See Note [Hide collectives mutation from autograd]
+                data[src_rank][i].detach().copy_(res.to(data[src_rank][i].device))
 
 
 class AllGather:
@@ -166,7 +189,8 @@ class AllGather:
 
             for dest in data:
                 dest_tensor = dest[0][0][src_rank]
-                dest_tensor.copy_(src_tensor)
+                # See Note [Hide collectives mutation from autograd]
+                dest_tensor.detach().copy_(src_tensor)
 
 
 class Scatter:
@@ -185,7 +209,8 @@ class Scatter:
             # Can't handle scatter with multiple output tensor
             assert len(out_tensor_list) == 1
             dest_tensor = out_tensor_list[0]
-            dest_tensor.copy_(src_in_tensors[rank])
+            # See Note [Hide collectives mutation from autograd]
+            dest_tensor.detach().copy_(src_in_tensors[rank])
 
 
 class Gather:
@@ -202,7 +227,8 @@ class Gather:
             # Can't handle gather with multiple tensor lists
             assert len(src_in_tensor_list) == 1
             dest_tensor = out_tensor_list[rank]
-            dest_tensor.copy_(src_in_tensor_list[0])
+            # See Note [Hide collectives mutation from autograd]
+            dest_tensor.detach().copy_(src_in_tensor_list[0])
 
 
 class ReduceScatter:
@@ -224,14 +250,21 @@ class ReduceScatter:
                 assert len(dest_tensor_on_rank_i) == 1
                 dst_tensor_device = dest_tensor_on_rank_i[0].device
                 if not start_reduction[i]:
-                    dest_tensor_on_rank_i[0].copy_(to_scatter[i].to(dst_tensor_device))
+                    # See Note [Hide collectives mutation from autograd]
+                    dest_tensor_on_rank_i[0].detach().copy_(
+                        to_scatter[i].to(dst_tensor_device)
+                    )
                     start_reduction[i] = True
                 else:
-                    dest_tensor_on_rank_i[0].add_(to_scatter[i].to(dst_tensor_device))
+                    # See Note [Hide collectives mutation from autograd]
+                    dest_tensor_on_rank_i[0].detach().add_(
+                        to_scatter[i].to(dst_tensor_device)
+                    )
         if self.op == dist.ReduceOp.AVG:
             num_ranks = len(data)
             for each_rank_data in data:
-                each_rank_data[0][0] /= num_ranks
+                # See Note [Hide collectives mutation from autograd]
+                each_rank_data[0][0].detach().div_(num_ranks)
 
 
 class Broadcast:
@@ -242,9 +275,12 @@ class Broadcast:
     def work(self, data):
         in_tensor_list = flatten_list(data[self.src])
         for i in range(len(data)):
+            if i == self.src:
+                continue
             out_tensor_list = flatten_list(data[i])
             for j in range(len(in_tensor_list)):
-                out_tensor_list[j].copy_(in_tensor_list[j])
+                # See Note [Hide collectives mutation from autograd]
+                out_tensor_list[j].detach().copy_(in_tensor_list[j])
 
 
 class Collective:

@@ -840,6 +840,7 @@ class BatchLayernormFusion(BatchFusion):
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
+                    # pyrefly: ignore  # missing-attribute
                     stack_weight.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.mul,
@@ -850,28 +851,33 @@ class BatchLayernormFusion(BatchFusion):
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
+                    # pyrefly: ignore  # missing-attribute
                     stack_bias.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.add,
                 )
             elif group_weights is not None and group_biases is None:
                 previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
+                # pyrefly: ignore  # not-callable
                 batch_layer_norm = graph.call_function(
                     torch.mul, args=(stack_weight, batch_layer_norm)
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
+                    # pyrefly: ignore  # missing-attribute
                     stack_weight.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.mul,
                 )
             elif group_weights is None and group_biases is not None:
                 previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
+                # pyrefly: ignore  # not-callable
                 batch_layer_norm = graph.call_function(
                     torch.add, args=(stack_bias, batch_layer_norm)
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
+                    # pyrefly: ignore  # missing-attribute
                     stack_bias.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.add,
@@ -1141,6 +1147,12 @@ class BatchClampPreGradFusion(BatchMathOpsPreGradFusion):
         super().__init__(torch.clamp, **kwargs)
 
 
+@register_fusion("batch_dropout")
+class BatchDropoutPreGradFusion(BatchMathOpsPreGradFusion):
+    def __init__(self, **kwargs):
+        super().__init__(torch.nn.functional.dropout, **kwargs)
+
+
 @register_fusion("batch_aten_tanh", pre_grad=False)
 class BatchTanhPostGradFusion(BatchPointwiseOpsPostGradFusion):
     def __init__(self, **kwargs) -> None:
@@ -1365,10 +1377,13 @@ def apply_group_batch_fusion(graph: torch.fx.GraphModule, rule: GroupBatchFusion
             print_output=False, include_stride=True, include_device=True
         )
 
+        name = f"optimus_{str(rule.__class__.__name__)}"
+        if "MTIA" in name:
+            name = f"cff_{str(rule.__class__.__name__)}"
         trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": f"optimus_{str(rule.__class__.__name__)}",
+                "name": name,
                 "encoding": "string",
             },
             payload_fn=lambda: graph_str,

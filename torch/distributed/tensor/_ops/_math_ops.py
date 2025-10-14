@@ -22,6 +22,7 @@ from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     is_tensor_evenly_shardable,
+    is_tensor_evenly_shardable_on_dim,
     normalize_dim,
     normalize_dims,
     register_op_strategy,
@@ -130,6 +131,7 @@ class _NormPartial(Partial):
         if self.reduce_op == "sum":
             assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
             if self.norm_type != 0 and self.norm_type != 1:
+                # pyrefly: ignore  # unsupported-operation
                 return tensor**self.norm_type
         return tensor
 
@@ -137,6 +139,7 @@ class _NormPartial(Partial):
         if self.reduce_op == "sum":
             assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
             if self.norm_type != 0 and self.norm_type != 1:
+                # pyrefly: ignore  # unsupported-operation
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 
@@ -268,6 +271,15 @@ def common_reduction_strategy(
     reduction_strategy = OpStrategy([])
 
     for op_spec in input_strategy.strategies:
+        if reduction_op == "avg":
+            output_spec = op_spec.output_spec
+            local_shape = list(output_spec.tensor_meta.shape)  # type:ignore[union-attr]
+            for dim in reduce_dims:
+                if not is_tensor_evenly_shardable_on_dim(local_shape, output_spec, dim):
+                    # reduce(avg) is not linear for unevenly sharded tensors
+                    reduction_linear = False
+                    break
+
         if not reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
@@ -307,9 +319,14 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.all.dim: "sum",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
+    aten.any.default: "sum",
+    aten.any.dim: "sum",
+    aten.any.out: "sum",
+    # These are only valid when there is no padding
     aten.prod.default: "product",
     aten.prod.dim_int: "product",
     aten.prod.int_out: "product",
+    # avg is only linear when there is no padding
     aten.mean.default: "avg",
     aten.mean.dim: "avg",
     aten.mean.out: "avg",
@@ -319,9 +336,6 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.min.default: "min",
     aten.min.dim: "min",
     aten.min.out: "min",
-    aten.any.default: "sum",
-    aten.any.dim: "sum",
-    aten.any.out: "sum",
     aten.amax.default: "max",
     aten.amax.out: "max",
     aten.amin.default: "min",
@@ -818,27 +832,38 @@ def nll_loss_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     return grad_in_strategy
 
 
-@register_op_strategy(
-    [aten.native_layer_norm.default],
-    schema_info=RuntimeSchemaInfo(1),
-)
-def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+def _common_norm_forward_strategy(
+    op_schema: OpSchema,
+    rms_norm: bool = False,
+) -> OpStrategy:
+    """Common forward strategy logic for layer_norm and rms_norm."""
     mesh = op_schema.get_mesh_from_args()
 
-    # args must be: input, normalized_shape, weight, bias, eps
-    # for None weight and bias, their corresponding objects will
-    # be None as well. layer_norm_strategy returns one OpStrategy
-    # for the triple return values (out, mean, rstd).
-    assert len(op_schema.args_schema) == 5
-    (
-        input_strategy,
-        normalized_shape,
-        weight_strategy,
-        bias_strategy,
-        _,
-    ) = op_schema.args_schema
+    if not rms_norm:
+        # layer_norm args: input, normalized_shape, weight, bias, eps
+        # for None weight and bias, their corresponding objects will
+        # be None as well. layer_norm_strategy returns one OpStrategy
+        # for the triple return values (out, mean, rstd).
+        assert len(op_schema.args_schema) == 5
+        (
+            input_strategy,
+            normalized_shape,
+            weight_strategy,
+            bias_strategy,
+            _,
+        ) = op_schema.args_schema
+    else:
+        # rms_norm args: input, normalized_shape, weight, eps
+        assert len(op_schema.args_schema) == 4
+        (
+            input_strategy,
+            normalized_shape,
+            weight_strategy,
+            _,
+        ) = op_schema.args_schema
+        bias_strategy = None
 
-    # the current layer norm implementation requires that all
+    # the current norm implementation requires that all
     # input DTensor's sharding must be in form of OpStrategy
     assert isinstance(input_strategy, OpStrategy)
     assert isinstance(normalized_shape, (int, Sequence, torch.Size))
@@ -847,7 +872,7 @@ def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     input_ndim = input_strategy.ndim
     axis = input_ndim - len(normalized_size)
 
-    # we use OpStrategy because the output (out, mean, rstd)
+    # we use OpStrategy because the output values (out, mean, rstd)
     # should have the same placements
     output_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
@@ -913,6 +938,22 @@ def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     return output_strategy
+
+
+@register_op_strategy(
+    [aten.native_layer_norm.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_forward_strategy(op_schema)
+
+
+@register_op_strategy(
+    [aten._fused_rms_norm.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def fused_rms_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_forward_strategy(op_schema, rms_norm=True)
 
 
 def _common_norm_backward_strategy(
@@ -1194,4 +1235,37 @@ def histc_strategy(op_schema: OpSchema) -> OpStrategy:
 
     return expand_to_full_mesh_op_strategy(
         input_strategy.mesh, op_schema, single_mesh_dim_strategies
+    )
+
+
+@register_op_strategy(
+    [aten.logsumexp.default],
+    schema_info=RuntimeSchemaInfo(
+        # static_argnum is the position where non-Tensor args beings.
+        static_argnum=1,
+        # static_kwargkey is the name of kwargs to hash (which determines
+        # whether sharding prop can be cached).
+        static_kwargkey=["keepdim"],
+    ),
+)
+def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
+    """Implements the sharding propagation strategy for logsumexp."""
+
+    # args_schema contains all but the DTensor args (e.g., dim, keepdim).
+    args_schema = op_schema.args_schema
+    assert len(args_schema) > 1  # input and dim are required.
+
+    input_strategy = args_schema[0]
+    assert isinstance(input_strategy, OpStrategy)
+
+    dims_arg = args_schema[1]
+    reduce_dims = _infer_reduction_dims(dims_arg, input_strategy.ndim)
+    assert reduce_dims is not None
+
+    keep_dim = cast(bool, op_schema.kwargs_schema.get("keepdim", False))
+    return common_reduction_strategy(
+        input_strategy,
+        reduce_dims,
+        keep_dim=keep_dim,
+        reduction_linear=False,
     )

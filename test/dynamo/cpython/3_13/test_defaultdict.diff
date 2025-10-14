@@ -1,0 +1,98 @@
+diff --git a/test/dynamo/cpython/3_13/test_defaultdict.py b/test/dynamo/cpython/3_13/test_defaultdict.py
+index bdbe9b81e8f..d55f1dc54c6 100644
+--- a/test/dynamo/cpython/3_13/test_defaultdict.py
++++ b/test/dynamo/cpython/3_13/test_defaultdict.py
+@@ -1,3 +1,60 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_defaultdict.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import (
++    run_tests,
++)
++
++__TestCase = CPythonTestCase
++
++
++# redirect import statements
++import sys
++import importlib.abc
++
++redirect_imports = (
++    "test.mapping_tests",
++    "test.typinganndata",
++    "test.test_grammar",
++    "test.test_math",
++    "test.test_iter",
++    "test.typinganndata.ann_module",
++)
++
++class RedirectImportFinder(importlib.abc.MetaPathFinder):
++    def find_spec(self, fullname, path, target=None):
++        # Check if the import is the problematic one
++        if fullname in redirect_imports:
++            try:
++                # Attempt to import the standalone module
++                name = fullname.removeprefix("test.")
++                r = importlib.import_module(name)
++                # Redirect the module in sys.modules
++                sys.modules[fullname] = r
++                # Return a module spec from the found module
++                return importlib.util.find_spec(name)
++            except ImportError:
++                return None
++        return None
++
++# Add the custom finder to sys.meta_path
++sys.meta_path.insert(0, RedirectImportFinder())
++
++
++# ======= END DYNAMO PATCH =======
++
++
+ """Unit tests for collections.defaultdict."""
+
+ import copy
+@@ -9,7 +66,7 @@ from collections import defaultdict
+ def foobar():
+     return list
+
+-class TestDefaultDict(unittest.TestCase):
++class TestDefaultDict(__TestCase):
+
+     def test_basic(self):
+         d1 = defaultdict()
+@@ -127,11 +184,12 @@ class TestDefaultDict(unittest.TestCase):
+
+     def test_recursive_repr(self):
+         # Issue2045: stack overflow when default_factory is a bound method
+-        class sub(defaultdict):
+-            def __init__(self):
+-                self.default_factory = self._factory
+-            def _factory(self):
+-                return []
++        with torch._dynamo.error_on_graph_break(False):
++            class sub(defaultdict):
++                def __init__(self):
++                    self.default_factory = self._factory
++                def _factory(self):
++                    return []
+         d = sub()
+         self.assertRegex(repr(d),
+             r"sub\(<bound method .*sub\._factory "
+@@ -187,4 +245,4 @@ class TestDefaultDict(unittest.TestCase):
+             i |= None
+
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

@@ -42,10 +42,84 @@ using DeleterFnPtr = void (*)(void*);
 
 inline void noop_deleter(void*) {}
 
+inline void delete_record_function_object(void* ptr) {
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_record_function_end(
+      reinterpret_cast<AtenRecordFunctionHandle>(ptr)));
+}
+
 inline void delete_tensor_object(void* ptr) {
   AOTI_TORCH_ERROR_CODE_CHECK(
       aoti_torch_delete_tensor_object(reinterpret_cast<AtenTensorHandle>(ptr)));
 }
+
+inline void delete_c10_value_object(void* ptr) {
+  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_delete_c10_value_object(
+      reinterpret_cast<C10IValueHandle>(ptr)));
+}
+
+class RAIIAtenRecordFunctionHandle {
+ public:
+  RAIIAtenRecordFunctionHandle() : handle_(nullptr, noop_deleter) {}
+  RAIIAtenRecordFunctionHandle(const RAIIAtenRecordFunctionHandle& other) =
+      delete;
+  RAIIAtenRecordFunctionHandle& operator=(
+      const RAIIAtenRecordFunctionHandle& other) = delete;
+
+  // Initiate an RAII RecordFunction without Inputs
+  RAIIAtenRecordFunctionHandle(const char* name, IValueMapHandle kwargs)
+      : handle_(nullptr, delete_record_function_object) {
+    AtenRecordFunctionHandle tmp_handle = nullptr;
+    aoti_record_function_start(name, kwargs, nullptr, 0, &tmp_handle);
+    handle_.reset(tmp_handle);
+  }
+
+  // Initiate an RAII RecordFunction with Inputs
+  RAIIAtenRecordFunctionHandle(
+      const char* name,
+      IValueMapHandle kwargs,
+      std::vector<C10IValueHandle> inputs)
+      : handle_(nullptr, delete_record_function_object) {
+    AtenRecordFunctionHandle tmp_handle = nullptr;
+    aoti_record_function_start(
+        name, kwargs, inputs.data(), inputs.size(), &tmp_handle);
+    handle_.reset(tmp_handle);
+  }
+
+  // Steal the ownership from another RAIIAtenRecordFunctionHandle using
+  // std::move
+  RAIIAtenRecordFunctionHandle(RAIIAtenRecordFunctionHandle&& other) = default;
+  RAIIAtenRecordFunctionHandle& operator=(
+      RAIIAtenRecordFunctionHandle&& other) = default;
+
+  // Steal the ownership from raw AtenRecordFunctionHandle
+  RAIIAtenRecordFunctionHandle(AtenRecordFunctionHandle handle)
+      : handle_(handle, delete_record_function_object) {}
+
+  ~RAIIAtenRecordFunctionHandle() {
+    handle_.reset();
+  }
+
+  // Return a raw AtenRecordFunctionHandle to be used by aoti_torch functions
+  // Note: this function does NOT transfer the ownership of the handle
+  operator AtenRecordFunctionHandle() const {
+    return handle_.get();
+  }
+
+  AtenRecordFunctionHandle release() {
+    return handle_.release();
+  }
+
+  AtenRecordFunctionHandle get() const {
+    return handle_.get();
+  }
+
+  void reset() {
+    handle_.reset();
+  }
+
+ private:
+  std::unique_ptr<AtenRecordFunctionOpaque, DeleterFnPtr> handle_;
+};
 
 // RAIIAtenTensorHandle steals the tensor objects created by the libtorch C ABI
 class RAIIAtenTensorHandle {
@@ -127,9 +201,50 @@ class RAIIAtenTensorHandle {
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
 
+// RAIIC10IValueHandle steals the IValue objects created by the libtorch C ABI
+class RAIIC10IValueHandle {
+ public:
+  RAIIC10IValueHandle() : handle_(nullptr, noop_deleter) {}
+  RAIIC10IValueHandle(const RAIIC10IValueHandle& other) = delete;
+  RAIIC10IValueHandle& operator=(const RAIIC10IValueHandle& other) = delete;
+
+  // Steal the ownership from another RAIIC10IValueHandle using std::move
+  RAIIC10IValueHandle(RAIIC10IValueHandle&& other) = default;
+  RAIIC10IValueHandle& operator=(RAIIC10IValueHandle&& other) = default;
+
+  // Steal the ownership from raw C10IValueHandle
+  RAIIC10IValueHandle(C10IValueHandle handle)
+      : handle_(handle, delete_c10_value_object) {}
+
+  ~RAIIC10IValueHandle() {
+    handle_.reset();
+  }
+
+  // Return a raw C10IValueHandle to be used by aoti_torch functions
+  // Note: this function does NOT transfer the ownership of the handle
+  operator C10IValueHandle() const {
+    return handle_.get();
+  }
+
+  C10IValueHandle release() {
+    return handle_.release();
+  }
+
+  C10IValueHandle get() const {
+    return handle_.get();
+  }
+
+  void reset() {
+    handle_.reset();
+  }
+
+ private:
+  std::unique_ptr<C10IValueOpaque, DeleterFnPtr> handle_;
+};
+
 class MaybeOwningAtenTensorHandle {
  public:
-  MaybeOwningAtenTensorHandle() : handle_(nullptr), raii_handle_() {}
+  MaybeOwningAtenTensorHandle() : handle_(nullptr) {}
   // We skip copy constructor as MaybeOwningAtenTensorHandle might be RAII which
   // makes it undefined.
   MaybeOwningAtenTensorHandle(const MaybeOwningAtenTensorHandle& other) =

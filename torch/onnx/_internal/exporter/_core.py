@@ -12,8 +12,8 @@ import pathlib
 import textwrap
 import traceback
 import typing
-from collections.abc import Mapping, Sequence
-from typing import Any, Callable, Literal
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, Literal
 
 import onnxscript
 import onnxscript.evaluator
@@ -79,7 +79,7 @@ _STEP_ONE_ERROR_MESSAGE = textwrap.dedent(
     f"""\
     Failed to export the model with torch.export. {_BLUE}This is step 1/3{_END} of exporting the model to ONNX. Next steps:
     - Modify the model code for `torch.export.export` to succeed. Refer to https://pytorch.org/docs/stable/generated/exportdb/index.html for more information.
-    - Debug `torch.export.export` and summit a PR to PyTorch.
+    - Debug `torch.export.export` and submit a PR to PyTorch.
     - Create an issue in the PyTorch GitHub repository against the {_BLUE}*torch.export*{_END} component and attach the full error stack as well as reproduction scripts."""
 )
 
@@ -94,7 +94,7 @@ _STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
     f"""\
     Failed to convert the exported program to an ONNX model. {_BLUE}This is step 3/3{_END} of exporting the model to ONNX. Next steps:
     - If there is a missing ONNX function, implement it and register it to the registry.
-    - If there is an internal error during ONNX conversion, debug the error and summit a PR to PyTorch.
+    - If there is an internal error during ONNX conversion, debug the error and submit a PR to PyTorch.
     - Create an error report with `torch.onnx.export(..., report=True)`, and save the ExportedProgram as a pt2 file. Create an issue in the PyTorch GitHub repository against the {_BLUE}*onnx*{_END} component. Attach the error report and the pt2 model."""
 )
 
@@ -132,8 +132,10 @@ class TorchTensor(ir.Tensor):
         # view the tensor as that dtype so that it is convertible to NumPy,
         # and then view it back to the proper dtype (using ml_dtypes obtained by
         # calling dtype.numpy()).
+        # pyrefly: ignore  # missing-attribute
         if self.dtype == ir.DataType.BFLOAT16:
             return (
+                # pyrefly: ignore  # missing-attribute
                 self.raw.view(torch.uint16).numpy(force=True).view(self.dtype.numpy())
             )
         if self.dtype in {
@@ -142,9 +144,11 @@ class TorchTensor(ir.Tensor):
             ir.DataType.FLOAT8E5M2,
             ir.DataType.FLOAT8E5M2FNUZ,
         }:
+            # pyrefly: ignore  # missing-attribute
             return self.raw.view(torch.uint8).numpy(force=True).view(self.dtype.numpy())
         if self.dtype == ir.DataType.FLOAT4E2M1:
             return _type_casting.unpack_float4x2_as_uint8(self.raw).view(
+                # pyrefly: ignore  # missing-attribute
                 self.dtype.numpy()
             )
 
@@ -156,10 +160,8 @@ class TorchTensor(ir.Tensor):
             return self.numpy()
         return self.numpy().__array__(dtype)
 
-    def tobytes(self) -> bytes:
-        # Implement tobytes to support native PyTorch types so we can use types like bloat16
-        # Reading from memory directly is also more efficient because
-        # it avoids copying to a NumPy array
+    def _get_cbytes(self):
+        """Get a ctypes byte array pointing to the tensor data."""
         import torch._subclasses.fake_tensor
 
         with torch._subclasses.fake_tensor.unset_fake_temporarily():
@@ -173,11 +175,21 @@ class TorchTensor(ir.Tensor):
                 "or save the model without initializers by setting include_initializers=False."
             )
 
-        return bytes(
-            (ctypes.c_ubyte * tensor.element_size() * tensor.numel()).from_address(
-                tensor.data_ptr()
-            )
-        )
+        # Return the tensor to ensure it is not garbage collected while the ctypes array is in use
+        return tensor, (
+            ctypes.c_ubyte * tensor.element_size() * tensor.numel()
+        ).from_address(tensor.data_ptr())
+
+    def tobytes(self) -> bytes:
+        # Implement tobytes to support native PyTorch types so we can use types like bloat16
+        # Reading from memory directly is also more efficient because
+        # it avoids copying to a NumPy array
+        _, data = self._get_cbytes()
+        return bytes(data)
+
+    def tofile(self, file) -> None:
+        _, data = self._get_cbytes()
+        return file.write(data)
 
 
 # https://github.com/pytorch/pytorch/blob/ee6cb6daa173896f8ea1876266a19775aaa4f610/torch/export/graph_signature.py#L56C1-L62C19
@@ -238,6 +250,7 @@ def _set_shape_type(
             if isinstance(dim, int):
                 dims.append(dim)
             else:
+                # pyrefly: ignore  # bad-argument-type
                 dims.append(str(dim.node))
 
         # If the dtype is set already (e.g. by the onnx_symbolic ops),
@@ -270,8 +283,6 @@ def _set_shape_type(
     elif isinstance(meta_val, (float, torch.SymFloat)):
         value.dtype = ir.DataType.FLOAT
         value.shape = ir.Shape([])
-    else:
-        pass
 
 
 def _get_qualified_module_name(cls: Any) -> str:
@@ -726,6 +737,12 @@ def _handle_output_node(
     # node.args[0] can be a tuple with more than one elements. This happens when,
     # for example, a subgraph has multiple outputs. We flatten them all as ONNX graph outputs
     for output in node.args[0]:  # type: ignore[index,union-attr]
+        if output is None:
+            logger.warning(
+                "Output node %s has None output. The output is ignored in the exported graph. Please ensure the graph output order is expected",
+                node.name,
+            )
+            continue
         output_value_name = output.name  # type: ignore[union-attr]
         assert isinstance(output_value_name, str), (
             f"Bug: Expected {output_value_name!r} to be a string"
@@ -1208,6 +1225,7 @@ def _exported_program_to_onnx_program(
     # so we need to get them from the name_* apis.
     for name, torch_tensor in itertools.chain(
         exported_program.named_parameters(),
+        # pyrefly: ignore  # bad-argument-type
         exported_program.named_buffers(),
         exported_program.constants.items(),
     ):
