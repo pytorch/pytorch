@@ -8045,7 +8045,13 @@ symbolic_aot_autograd_failures = {
 
 
 def _test_aot_autograd_helper(
-    self, device, dtype, op, dynamic=False, use_min_cut=False, disable_functionalization=False
+    self,
+    device,
+    dtype,
+    op,
+    dynamic=False,
+    use_min_cut=False,
+    disable_functionalization=False,
 ):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
@@ -8181,7 +8187,9 @@ class TestEagerFusionOpInfo(AOTTestCase):
 
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        "TestEagerFusionOpInfo", "test_aot_autograd_disable_functionalization_exhaustive", aot_autograd_failures
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_disable_functionalization_exhaustive",
+        aot_autograd_failures,
     )
     def test_aot_autograd_disable_functionalization_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(
@@ -8199,7 +8207,13 @@ class TestEagerFusionOpInfo(AOTTestCase):
         self, device, dtype, op
     ):
         _test_aot_autograd_helper(
-            self, device, dtype, op, dynamic=True, use_min_cut=False, disable_functionalization=True
+            self,
+            device,
+            dtype,
+            op,
+            dynamic=True,
+            use_min_cut=False,
+            disable_functionalization=True,
         )
 
 

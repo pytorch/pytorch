@@ -68,10 +68,24 @@ def aot_autograd_check(
     # cannot use the min cut partitioner without functionalization
     if disable_functionalization:
         compiled_f = compiled_function(
-            func_no_tensors, nop, nop, dynamic=dynamic, partition_fn=default_partition, keep_inference_input_mutations=True, disable_functionalization=True)
+            func_no_tensors,
+            nop,
+            nop,
+            dynamic=dynamic,
+            partition_fn=default_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=True
+        )
     else:
         compiled_f = compiled_function(
-            func_no_tensors, nop, nop, dynamic=dynamic, partition_fn=min_cut_rematerialization_partition, keep_inference_input_mutations=True, disable_functionalization=False)
+            func_no_tensors,
+            nop,
+            nop,
+            dynamic=dynamic,
+            partition_fn=min_cut_rematerialization_partition,
+            keep_inference_input_mutations=True,
+            disable_functionalization=False
+        )
 
     out = wrapper_set_seed(func_no_tensors, args)
     if check_gradients == "auto":

@@ -74,7 +74,7 @@ def _create_graph(
     if aot_config.disable_functionalization:
         ctx = contextlib.nullcontext()
     else:
-        ctx = FunctionalTensorMode(
+        ctx = FunctionalTensorMode(  # type: ignore[assignment]
             pre_dispatch=aot_config.pre_dispatch,
             export=aot_config.is_export,
             # Allow token discovery for joint fn tracing as tokens can be used in backward.
