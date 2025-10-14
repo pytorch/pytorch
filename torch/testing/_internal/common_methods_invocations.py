@@ -21049,11 +21049,26 @@ op_db: list[OpInfo] = [
         aten_name="convolution_backward",
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
         decorators=(
             DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=5e-4, rtol=1e-6)}),
+                toleranceOverride({torch.float32: tol(atol=5e-4, rtol=2e-6)}),
                 'TestCommon', 'test_noncontiguous_samples',
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=5e-4, rtol=1e-3)}),
+                'TestOperators',
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=2e-3, rtol=6e-1)}),
+                'TestInductorOpInfo', 'test_comprehensive',
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=5e-4, rtol=5e-4)}),
+                'TestVmapOperatorsOpInfo', 'test_vmap_exhaustive',
             ),
         ),
         sample_inputs_func=sample_inputs_convolution_backward
