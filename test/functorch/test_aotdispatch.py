@@ -8223,7 +8223,9 @@ symbolic_aot_autograd_failures = {
         "nn.functional.fractional_max_pool3d", ""
     ),  # rand() received an invalid combination of arguments - g...
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail("convolution_backward", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail(
+        "convolution_backward", ""
+    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     decorate(
         "linalg.householder_product",
         decorator=unittest.skipIf(IS_MACOS and IS_X86, "flaky"),

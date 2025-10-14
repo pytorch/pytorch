@@ -254,27 +254,27 @@ std::vector<Shape> compute_shape_convolution_backward(
     int64_t groups,
     ::std::array<bool, 3> output_mask) {
   Shape s0, s1, s2;
-  if (output_mask[0]){
+  if (output_mask[0]) {
     s0 = Shape(input.scalar_type(), input.sizes().vec());
-  } else{
+  } else {
     s0 = Shape();
   }
-  if (output_mask[1]){
+  if (output_mask[1]) {
     s1 = Shape(weight.scalar_type(), weight.sizes().vec());
-  } else{
+  } else {
     s1 = Shape();
   }
-  if (output_mask[2]){
+  if (output_mask[2]) {
     if (bias_sizes.has_value()) {
       s2 = Shape(grad_output.scalar_type(), bias_sizes.value().vec());
-    } else{
-      if (transposed){
+    } else {
+      if (transposed) {
         s2 = Shape(grad_output.scalar_type(), weight.size(1) * groups);
-      } else{
+      } else {
         s2 = Shape(grad_output.scalar_type(), weight.size(0));
       }
     }
-  } else{
+  } else {
     s2 = Shape();
   }
   return {s0, s1, s2};
