@@ -1628,6 +1628,24 @@ graph():
         ep = export(M(), (torch.ones(3),))
         self.assertEqual(len(ep.constants), 0)
 
+        class M(torch.nn.Module):
+            def __init__(self, num_features: int = 1) -> None:
+                super().__init__()
+                self.num_features = num_features
+
+            def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
+                res = [torch.Tensor([])] * self.num_features
+                for i in range(self.num_features):
+                    res[i] = x * (i + 1)
+                return res
+
+        inp = torch.ones(3)
+        ep = export(M(), (inp,))
+        self.assertEqual(len(ep.constants), 0)
+
+        unf = unflatten(ep)
+        self.assertTrue(torch.allclose(M()(inp)[0], unf(inp)[0]))
+
     def test_unbacked_bincount(self):
         class Foo(torch.nn.Module):
             def forward(self, xs):
