@@ -1238,6 +1238,7 @@ _tunable_scaled_gemm_rocm(
           const ScalingType scaling_choice_a, const ScalingType scaling_choice_b,
           const std::optional<Tensor>& bias,
           const bool use_fast_accum,
+          const at::ScalarType out_dtype,
           Tensor& out) {
 #ifdef USE_ROCM
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
@@ -1297,7 +1298,7 @@ _tunable_scaled_gemm_rocm(
           scaledgemm(&params);                                        \
         }                                                             \
       }
-  AT_DISPATCH_V2(out_dtype_, "_tunable_scaled_gemm", AT_WRAP([&] {
+  AT_DISPATCH_V2(out_dtype, "_tunable_scaled_gemm", AT_WRAP([&] {
     bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
     bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
     at::cuda::tunable::ScaledGemmParams<scalar_t> params;
@@ -1321,11 +1322,11 @@ _tunable_scaled_gemm_rocm(
     params.b_scale_dtype = args.scale_matb_dtype.value();
     params.b_scaling_type = args.scaling_matb_type.value();
     params.bias_ptr = bias ? bias->data_ptr(): nullptr;
-    params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype_) ? at::ScalarType::Half : out_dtype_;
+    params.bias_dtype = bias ? bias->scalar_type() : isFloat8Type(out_dtype) ? at::ScalarType::Half : out_dtype;
     params.c = args.result->data_ptr();
     params.c_scale_ptr = args.scale_result_ptr;
     params.ldc = args.result_ld;
-    params.c_dtype = out_dtype_;
+    params.c_dtype = out_dtype;
     params.use_fast_accum = use_fast_accum;
     if (transa_ && transb_) {
       TUNABLE_DISPATCH(at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T)
@@ -1380,6 +1381,7 @@ _scaled_gemm(
           scaling_choice_a, scaling_choice_b,
           bias,
           use_fast_accum,
+          out_dtype_,
           out);
   }
   else
