@@ -251,7 +251,6 @@ dtensor_fails = {
     xfail("masked_fill"),
     xfail("masked_scatter"),
     xfail("masked_select"),
-    xfail("masked.logsumexp"),
     xfail("masked.median"),
     xfail("matrix_exp"),
     xfail("max", "reduction_with_dim"),
