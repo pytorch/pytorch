@@ -32,22 +32,8 @@ CUDAAllocatorConfig::CUDAAllocatorConfig()
 }
 
 size_t CUDAAllocatorConfig::roundup_power2_divisions(size_t size) {
-  size_t log_size = (63 - llvm::countLeadingZeros(size));
-
-  // Our intervals start at 1MB and end at 64GB
-  const size_t interval_start =
-      63 - llvm::countLeadingZeros(static_cast<size_t>(1048576));
-  const size_t interval_end =
-      63 - llvm::countLeadingZeros(static_cast<size_t>(68719476736));
-  TORCH_CHECK(
-      (interval_end - interval_start == kRoundUpPowerOfTwoIntervals),
-      "kRoundUpPowerOfTwoIntervals mismatch");
-
-  int index = static_cast<int>(log_size) - static_cast<int>(interval_start);
-
-  index = std::max(0, index);
-  index = std::min(index, static_cast<int>(kRoundUpPowerOfTwoIntervals) - 1);
-  return instance().m_roundup_power2_divisions[index];
+  return c10::CachingAllocator::AcceleratorAllocatorConfig::
+      roundup_power2_divisions(size);
 }
 
 void CUDAAllocatorConfig::lexArgs(

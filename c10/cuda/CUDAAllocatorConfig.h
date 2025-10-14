@@ -17,20 +17,23 @@ enum class Expandable_Segments_Handle_Type : int {
 class C10_CUDA_API CUDAAllocatorConfig {
  public:
   static size_t max_split_size() {
-    return instance().m_max_split_size;
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::max_split_size();
   }
   static double garbage_collection_threshold() {
-    return instance().m_garbage_collection_threshold;
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
+        garbage_collection_threshold();
   }
 
   static bool expandable_segments() {
+    bool enabled = c10::CachingAllocator::AcceleratorAllocatorConfig::
+        use_expandable_segments();
 #ifndef PYTORCH_C10_DRIVER_API_SUPPORTED
-    if (instance().m_expandable_segments) {
+    if (enabled) {
       TORCH_WARN_ONCE("expandable_segments not supported on this platform")
     }
     return false;
 #else
-    return instance().m_expandable_segments;
+    return enabled;
 #endif
   }
 
@@ -61,7 +64,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
   }
 
   static bool pinned_use_background_threads() {
-    return instance().m_pinned_use_background_threads;
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
+        pinned_use_background_threads();
   }
 
   static size_t pinned_reserve_segment_size_mb() {
@@ -82,17 +86,17 @@ class C10_CUDA_API CUDAAllocatorConfig {
   static size_t roundup_power2_divisions(size_t size);
 
   static std::vector<size_t> roundup_power2_divisions() {
-    return instance().m_roundup_power2_divisions;
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
+        roundup_power2_divisions();
   }
 
   static size_t max_non_split_rounding_size() {
-    return instance().m_max_non_split_rounding_size;
+    return c10::CachingAllocator::AcceleratorAllocatorConfig::
+        max_non_split_rounding_size();
   }
 
   static std::string last_allocator_settings() {
-    std::lock_guard<std::mutex> lock(
-        instance().m_last_allocator_settings_mutex);
-    return instance().m_last_allocator_settings;
+    return c10::CachingAllocator::getAllocatorSettings();
   }
 
   static CUDAAllocatorConfig& instance() {
