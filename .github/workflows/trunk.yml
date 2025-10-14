@@ -188,6 +188,7 @@ jobs:
       build-environment: win-vs2022-cuda12.8-py3
       cuda-version: "12.8"
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+      upload-win-cuda-libs-for-cross-compile: true
     secrets: inherit
 
   inductor-build:
@@ -198,6 +199,27 @@ jobs:
       build-environment: linux-jammy-cuda12.8-py3.12-gcc9-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
+      test-matrix: |
+        { include: [
+          { config: "aoti_cross_compile", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  # Test cross-compiled models with Windows libs extracted from wheel
+  cross-compile-linux-test:
+    name: cross-compile-linux-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - inductor-build
+      - get-label-type
+      - win-vs2022-cuda12_8-py3-build
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
+      docker-image: ${{ needs.inductor-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "aoti_cross_compile_for_windows", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu", win_torch_wheel_artifact: "win-vs2022-cuda12.8-py3" },
+        ]}
     secrets: inherit
 
   verify-cachebench-cpu-build:

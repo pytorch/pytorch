@@ -495,8 +495,8 @@ test_inductor_aoti_cross_compile_for_windows() {
   # Check if Windows torch libs artifact was downloaded by GitHub Actions
   if [[ -n "$WIN_TORCH_LIBS_ARTIFACT" ]]; then
     echo "Using Windows torch libs from artifact: $WIN_TORCH_LIBS_ARTIFACT"
-    # The artifact is downloaded to win-torch-libs in the workspace by GitHub Actions
-    WIN_TORCH_LIBS_DIR="$(pwd)/win-torch-libs"
+    # The artifact is downloaded to win-cuda-libs in the workspace by GitHub Actions
+    WIN_TORCH_LIBS_DIR="$(pwd)/win-cuda-libs"
 
     if [[ ! -d "$WIN_TORCH_LIBS_DIR" ]]; then
       echo "ERROR: Windows torch libs directory not found at $WIN_TORCH_LIBS_DIR"
@@ -511,6 +511,7 @@ test_inductor_aoti_cross_compile_for_windows() {
     echo "Contents of Windows torch libs:"
     ls -lah "$WIN_TORCH_LIBS_DIR/lib/" || true
     ls -lah "$WIN_TORCH_LIBS_DIR/lib/x64/" || true
+    ls -lah "$(pwd)/win-torch-wheel-extracted/torch/lib" || true
 
     # Fix CUDA lib paths - move from x64 subdirectory to lib directory
     # The files have backslashes in their names due to Windows path handling
@@ -524,7 +525,7 @@ test_inductor_aoti_cross_compile_for_windows() {
     echo "Contents after fixing CUDA lib paths:"
     ls -lah "$WIN_TORCH_LIBS_DIR/lib/" || true
 
-    python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR" --win-torch-lib-dir "$WIN_TORCH_LIBS_DIR/lib/"
+    python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR" --win-torch-lib-dir "$(pwd)/win-torch-wheel-extracted/torch/lib"
   else
     python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR"
   fi
