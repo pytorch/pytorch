@@ -8,8 +8,9 @@ from torch._dynamo.testing import make_test_cls_with_patches
 
 
 try:
-    from . import test_ctx_manager
+    from . import test_activation_checkpointing, test_ctx_manager
 except ImportError:
+    import test_activation_checkpointing
     import test_ctx_manager
 
 
@@ -49,6 +50,7 @@ def make_nested_cls(cls, strong):
 
 
 tests = [
+    test_activation_checkpointing.ActivationCheckpointingViaTagsTestsCUDA,
     test_ctx_manager.CtxManagerTests,
 ]
 

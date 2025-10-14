@@ -114,7 +114,7 @@ def get_param_groups(
             "intermediates": intersected,
         }
         for input_node in intersected:
-            existing = param_groups.get(input_node, None)
+            existing = param_groups.get(input_node)
             if existing is not None:
                 existing["params"] = existing["params"].union(param_group["params"])
                 existing["intermediates"] = existing["intermediates"].union(
@@ -245,6 +245,7 @@ def stage_backward_weight(
             if non_none_grads:
                 summed_grad = sum(non_none_grads)
                 valid_edges.append(GradientEdge(intermediate, 0))
+                # pyrefly: ignore  # bad-argument-type
                 valid_grad_outputs.append(summed_grad)
 
         # Break a reference cycle caused inside stage_backward_input->get_hook->hook
@@ -366,6 +367,13 @@ def stage_backward(
         for val in input_values:
             if isinstance(val, torch.Tensor):
                 grad_inputs.append(val.grad)
+                # Since gradients that will pass back to previous stages do not require gradient accumulation,
+                # by decrementing the gradients' reference count at this point, the memory of gradients will be
+                # returned to the allocator as soon as the next micro batch's get_bwd_send_ops comes and current
+                # asynchronous send completes.
+                # This prevents the gradients from persisting in GPU memory for the entire duration of step_microbatches
+                # until clear_runtime_states() is called.
+                val.grad = None
             else:
                 grad_inputs.append(None)
 
