@@ -183,7 +183,7 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             offset = self.fqn_to_offset[fqn]
 
             if not len(obj.local_shards()) == 1:
-                raise AssertionError
+                raise AssertionError("Expected exactly one local shard")
             original_shard = obj.local_shards()[0]
             local_chunks = [
                 ChunkStorageMetadata(

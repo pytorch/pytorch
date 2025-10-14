@@ -85,7 +85,7 @@ class BroadcastingTorchSaveReader(StorageReader):
         # TODO: read on each host, instead of only the coordinator
         if self.is_coordinator:
             if self.checkpoint_id is None:
-                raise AssertionError
+                raise AssertionError("checkpoint_id must be set before reading data")
             torch_state_dict = torch.load(
                 self.checkpoint_id, map_location="cpu", weights_only=False
             )
@@ -134,7 +134,9 @@ class BroadcastingTorchSaveReader(StorageReader):
                 raise AssertionError
 
         if self.checkpoint_id is None:
-            raise AssertionError
+            raise AssertionError(
+                "checkpoint_id must be set before setting up storage reader"
+            )
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         """Implementation of the StorageReader method"""
