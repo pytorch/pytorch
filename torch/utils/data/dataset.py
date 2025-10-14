@@ -198,9 +198,8 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
     tensors: tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
-        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors), (
-            "Size mismatch between tensors"
-        )
+        if all(tensors[0].size(0) != tensor.size(0) for tensor in tensors):
+            raise AssertionError("Size mismatch between tensors")
         self.tensors = tensors
 
     def __getitem__(self, index):
@@ -321,11 +320,11 @@ class ConcatDataset(Dataset[_T_co]):
     def __init__(self, datasets: Iterable[Dataset]) -> None:
         super().__init__()
         self.datasets = list(datasets)
-        assert len(self.datasets) > 0, "datasets should not be an empty iterable"
+        if len(self.datasets) == 0:
+            raise AssertionError("datasets should not be an empty iterable")
         for d in self.datasets:
-            assert not isinstance(d, IterableDataset), (
-                "ConcatDataset does not support IterableDataset"
-            )
+            if isinstance(d, IterableDataset):
+                raise AssertionError("ConcatDataset does not support IterableDataset")
         self.cumulative_sizes = self.cumsum(self.datasets)
 
     def __len__(self):
@@ -371,17 +370,15 @@ class ChainDataset(IterableDataset):
 
     def __iter__(self):
         for d in self.datasets:
-            assert isinstance(d, IterableDataset), (
-                "ChainDataset only supports IterableDataset"
-            )
+            if not isinstance(d, IterableDataset):
+                raise AssertionError("ChainDataset only supports IterableDataset")
             yield from d
 
     def __len__(self):
         total = 0
         for d in self.datasets:
-            assert isinstance(d, IterableDataset), (
-                "ChainDataset only supports IterableDataset"
-            )
+            if not isinstance(d, IterableDataset):
+                raise AssertionError("ChainDataset only supports IterableDataset")
             total += len(d)  # type: ignore[arg-type]
         return total
 
