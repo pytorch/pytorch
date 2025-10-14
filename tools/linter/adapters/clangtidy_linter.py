@@ -174,6 +174,8 @@ def check_file(
         for match in RESULTS_RE.finditer(proc.stdout.decode()):
             # Convert the reported path to an absolute path.
             abs_path = str(Path(match["file"]).resolve())
+            if not abs_path.startswith(PYTORCH_ROOT):
+                continue
             message = LintMessage(
                 path=abs_path,
                 name=match["code"],

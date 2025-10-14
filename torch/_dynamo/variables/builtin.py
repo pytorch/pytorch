@@ -28,7 +28,6 @@ import itertools
 import logging
 import math
 import operator
-import sys
 import types
 import typing
 import unittest
@@ -84,7 +83,6 @@ from ..utils import (
 )
 from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
@@ -102,6 +100,7 @@ from .lists import (
     TupleIteratorVariable,
     TupleVariable,
 )
+from .streams import EventVariable, StreamVariable
 from .tensor import (
     FakeItemVariable,
     supported_comparison_ops,
@@ -990,7 +989,7 @@ class BuiltinVariable(VariableTracker):
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
 
-                return variables.ExceptionVariable(fn, args, **kwargs)
+                return variables.ExceptionVariable(fn, args, kwargs)
 
             return create_exception_class_object
 
@@ -1029,6 +1028,7 @@ class BuiltinVariable(VariableTracker):
 
             def call_self_handler(tx: "InstructionTranslator", args, kwargs):
                 try:
+                    # pyrefly: ignore  # not-callable
                     result = self_handler(tx, *args, **kwargs)
                     if result is not None:
                         return result
@@ -1036,6 +1036,7 @@ class BuiltinVariable(VariableTracker):
                     # Check if binding is bad. inspect signature bind is expensive.
                     # So check only when handler call fails.
                     try:
+                        # pyrefly: ignore  # bad-argument-type
                         inspect.signature(self_handler).bind(tx, *args, **kwargs)
                     except TypeError as e:
                         has_constant_handler = obj.has_constant_handler(args, kwargs)
@@ -1088,6 +1089,7 @@ class BuiltinVariable(VariableTracker):
                             hints=[*graph_break_hints.DYNAMO_BUG],
                             from_exc=exc,
                         )
+                    # pyrefly: ignore  # unbound-name
                     return VariableTracker.build(tx, res)
 
             else:
@@ -1116,6 +1118,7 @@ class BuiltinVariable(VariableTracker):
                                 tx,
                                 args=list(map(ConstantVariable.create, exc.args)),
                             )
+                        # pyrefly: ignore  # unbound-name
                         return VariableTracker.build(tx, res)
 
             handlers.append(constant_fold_handler)
@@ -1248,7 +1251,7 @@ class BuiltinVariable(VariableTracker):
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
             if check_numpy_ndarray_args(args, kwargs) and not any(
-                type(arg) == variables.TensorVariable for arg in args
+                type(arg) is variables.TensorVariable for arg in args
             ):
                 proxy = tx.output.create_proxy(
                     "call_function",
@@ -1438,6 +1441,7 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in dict_methods:
                 if isinstance(args[0], variables.UserDefinedDictVariable):
+                    # pyrefly: ignore  # missing-attribute
                     return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.ConstDictVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1446,6 +1450,7 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in set_methods:
                 if isinstance(args[0], variables.UserDefinedSetVariable):
+                    # pyrefly: ignore  # missing-attribute
                     return args[0]._set_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.SetVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1515,11 +1520,11 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, UserDefinedObjectVariable):
             # for user defined objects, first try __bool__ if defined, else
             # __len__. If neither is defined, then any instance is considered True
-            if arg.call_obj_hasattr(tx, "__bool__").value:
+            if arg.call_obj_hasattr(tx, "__bool__").value:  # type: ignore[attr-defined]
                 return arg.call_method(tx, "__bool__", [], {})
-            elif arg.call_obj_hasattr(tx, "__len__").value:
+            elif arg.call_obj_hasattr(tx, "__len__").value:  # type: ignore[attr-defined]
                 length = arg.call_method(tx, "__len__", [], {})
-                return ConstantVariable.create(length.value > 0)
+                return ConstantVariable.create(length.value > 0)  # type: ignore[attr-defined]
             else:
                 return ConstantVariable.create(True)
         # TODO handle more cases and merge this with this with `generic_jump`.
@@ -1546,10 +1551,12 @@ class BuiltinVariable(VariableTracker):
             if type(arg.value).__str__ is object.__str__:
                 # Rely on the object str method
                 try:
+                    # pyrefly: ignore  # unbound-name
                     return variables.ConstantVariable.create(value=str_method())
                 except AttributeError:
                     # Graph break
                     return
+            # pyrefly: ignore  # unbound-name
             elif is_wrapper_or_member_descriptor(str_method):
                 unimplemented_v2(
                     gb_type="Attempted to a str() method implemented in C/C++",
@@ -1666,8 +1673,10 @@ class BuiltinVariable(VariableTracker):
                 else:
                     raw_b = b.raw_value
                 if self.fn is max:
+                    # pyrefly: ignore  # missing-attribute
                     raw_res = max(a.raw_value, raw_b)
                 else:
+                    # pyrefly: ignore  # missing-attribute
                     raw_res = min(a.raw_value, raw_b)
 
                 need_unwrap = any(
@@ -1834,6 +1843,8 @@ class BuiltinVariable(VariableTracker):
             ret = obj
         elif isinstance(obj, variables.RangeVariable):
             ret = obj.call_method(tx, "__iter__", [], {})
+        elif isinstance(obj, variables.LocalGeneratorObjectVariable):
+            ret = obj  # type: ignore[assignment]
         else:
             # Handle the case where we are iterating over a tuple, list or iterator
             ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
@@ -2119,6 +2130,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if isinstance(arg, variables.UserDefinedExceptionClassVariable):
+            # pyrefly: ignore  # unbound-name
             return ConstantVariable.create(isinstance(arg_type, isinstance_type))
 
         isinstance_type_tuple: tuple[type, ...]
@@ -2127,9 +2139,7 @@ class BuiltinVariable(VariableTracker):
             getattr(isinstance_type, "__instancecheck__", None)
         ):
             isinstance_type_tuple = (isinstance_type,)
-        elif sys.version_info >= (3, 10) and isinstance(
-            isinstance_type, types.UnionType
-        ):
+        elif isinstance(isinstance_type, types.UnionType):
             isinstance_type_tuple = isinstance_type.__args__
         elif isinstance(isinstance_type, tuple) and all(
             isinstance(tp, type) or callable(getattr(tp, "__instancecheck__", None))
@@ -2153,8 +2163,10 @@ class BuiltinVariable(VariableTracker):
             # through it. This is a limitation of the current implementation.
             # Usually `__subclasscheck__` and `__instancecheck__` can be constant fold through, it
             # might not be a big issue and we trade off it for performance.
+            # pyrefly: ignore  # unbound-name
             val = issubclass(arg_type, isinstance_type_tuple)
         except TypeError:
+            # pyrefly: ignore  # unbound-name
             val = arg_type in isinstance_type_tuple
         return variables.ConstantVariable.create(val)
 
@@ -2176,6 +2188,7 @@ class BuiltinVariable(VariableTracker):
 
         # WARNING: This might run arbitrary user code `__subclasscheck__`.
         # See the comment in call_isinstance above.
+        # pyrefly: ignore  # unbound-name
         return variables.ConstantVariable(issubclass(left_ty_py, right_ty_py))
 
     def call_super(self, tx: "InstructionTranslator", a, b):
@@ -2221,7 +2234,9 @@ class BuiltinVariable(VariableTracker):
                 value = getattr(self.fn, name)
             except AttributeError:
                 raise_observed_exception(AttributeError, tx)
+            # pyrefly: ignore  # unbound-name
             if not callable(value):
+                # pyrefly: ignore  # unbound-name
                 return VariableTracker.build(tx, value, source)
         return variables.GetAttrVariable(self, name, source=source)
 

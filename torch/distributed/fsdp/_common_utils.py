@@ -7,11 +7,11 @@ import logging
 import traceback
 import warnings
 import weakref
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from enum import auto, Enum
 from functools import partial
 from itertools import chain
-from typing import Any, Callable, cast, no_type_check, Optional, TYPE_CHECKING
+from typing import Any, cast, no_type_check, Optional, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -65,6 +65,7 @@ class _FSDPDeviceHandle:
         if backend is None:
             try:
                 self.__backend = getattr(torch, device.type)
+                # pyrefly: ignore  # read-only
                 self.__device = device
             except AttributeError as exc:
                 raise AttributeError(
