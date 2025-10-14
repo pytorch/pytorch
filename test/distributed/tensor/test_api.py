@@ -437,8 +437,16 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
             [(Shard(1), Shard(2)), {1: [0], 2: [1]}, True],
             [(Replicate(), Shard(2)), {2: [1]}, True],
             [(Replicate(), Replicate()), {}, True],
-            [(Shard(0), Shard(0)), {}, False],
             [(Shard(0), Shard(0)), None, True],
+            # not mention every Shard() from `placements` in `shard_order` but it still works
+            [(Shard(0), Shard(0)), {}, True],
+            [
+                (Shard(0), Shard(0)),
+                {0: [0]},
+                False,
+            ],  # need to specify all mesh dims for Shard(0)
+            [(Shard(1), Shard(0)), {0: [1]}, True],
+            [(Shard(1), Shard(0)), {1: [0]}, True],
         ],
     )
     def test_conflict_placements_and_shard_order(
@@ -451,8 +459,9 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
             contextlib.nullcontext()
             if should_pass
             else self.assertRaisesRegex(
-                AssertionError,
-                "Conflict sharding annotation",
+                ValueError,
+                r"`shard_order` for tensor dim \d+ must include ALL mesh dimensions "
+                r"that shard this tensor dimension in `placements`",
             )
         )
         with test_context:
