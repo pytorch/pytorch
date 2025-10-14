@@ -4173,7 +4173,6 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
             # (x) + (y)
             # ~~^~~~~~~
             while (ch := lines[cur_lineno][cur_col]).isspace() or ch in ")\\#":
-                # pyrefly: ignore  # unbound-name
                 if ch in "\\#":
                     cur_lineno, cur_col = nextline(cur_lineno, cur_col)
                 else:

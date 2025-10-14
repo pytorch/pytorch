@@ -375,6 +375,7 @@ class LocalTensor(torch.Tensor):
     def __repr__(self) -> str:  # type: ignore[override]
         parts = []
         for k, v in self._local_tensors.items():
+            # pyrefly: ignore  # bad-argument-type
             parts.append(f"  {k}: {v}")
         tensors_str = ",\n".join(parts)
         return f"LocalTensor(\n{tensors_str}\n)"
@@ -641,6 +642,7 @@ class LocalTensorMode(TorchDispatchMode):
     def _unpatch_device_mesh(self) -> None:
         assert self._old_get_coordinate is not None
         DeviceMesh.get_coordinate = self._old_get_coordinate
+        # pyrefly: ignore  # bad-assignment
         self._old_get_coordinate = None
 
 

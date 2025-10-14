@@ -4087,13 +4087,12 @@ class CheckFunctionManager:
             and (cache_entry := self.guard_manager.cache_entry) is not None
             and (extra_state := self.guard_manager.extra_state) is not None
         ):
-            # pyrefly: ignore  # unbound-name
             assert isinstance(cache_entry, CacheEntry)
-            # pyrefly: ignore  # unbound-name
+
             assert isinstance(extra_state, ExtraState)
             reason = f"Cache line invalidated because {obj_str} got deallocated"
             deleted_guard_manager = DeletedGuardManagerWrapper(reason)
-            # pyrefly: ignore  # unbound-name
+
             extra_state.invalidate(cache_entry, deleted_guard_manager)
             self.guard_manager = deleted_guard_manager
 

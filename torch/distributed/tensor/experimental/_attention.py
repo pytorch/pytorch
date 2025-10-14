@@ -1310,7 +1310,6 @@ class _ContextParallel(ParallelStyle):
         placement = [Shard(self.seq_dim)]
         all_args = []
 
-        # pyrefly: ignore  # bad-assignment, bad-argument-type
         for arg in itertools.chain(args, kwargs.values()):
             if isinstance(arg, torch.Tensor):
                 if isinstance(arg, DTensor):

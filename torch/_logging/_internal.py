@@ -914,7 +914,6 @@ class TorchLogsFormatter(logging.Formatter):
             and (trace_id := torch._guards.CompileContext.current_trace_id())
             is not None
         ):
-            # pyrefly: ignore  # unbound-name
             record.traceid = f" [{trace_id}]"
 
         glog_level_to_abbr = {

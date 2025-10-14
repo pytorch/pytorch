@@ -2045,9 +2045,8 @@ class OutputGraph(OutputGraphCommon):
         tx = self.root_tx
         assert tx is not None
         if (ds := tx.distributed_state) is not None and ds.all_states is None:
-            # pyrefly: ignore  # unbound-name
             compile_pg = ds.compile_pg
-            # pyrefly: ignore  # unbound-name
+
             log.info("compiler_collective %s", ds.local_state)
             torch._logging.trace_structured(
                 "artifact",
@@ -2055,7 +2054,6 @@ class OutputGraph(OutputGraphCommon):
                     "name": "compiler_collective",
                     "encoding": "string",
                 },
-                # pyrefly: ignore  # unbound-name
                 payload_fn=lambda: ds.local_state.render(),
             )
             device_types = compile_pg._device_types
@@ -2069,9 +2067,9 @@ class OutputGraph(OutputGraphCommon):
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
             ):
                 all_states: list[Any] = [None] * compile_pg.size()
-                # pyrefly: ignore  # unbound-name
+
                 dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
-                # pyrefly: ignore  # unbound-name
+
                 ds.all_states = all_states
             # Clear speculation log, because are tracing may diverge due to
             # this information from the compiler collective
@@ -2456,7 +2454,6 @@ class OutputGraph(OutputGraphCommon):
                 isinstance(b, torch.SymBool)
                 and (r := b.node.maybe_as_bool()) is not None
             ):
-                # pyrefly: ignore  # unbound-name
                 return r
             # TODO: We can also technically remove all cases when the input
             # doesn't have unbacked inputs, since it's all in the ShapeEnv

@@ -219,7 +219,7 @@ class PackageExporter:
         torch._C._log_api_usage_once("torch.package.PackageExporter")
         self.debug = debug
         if isinstance(f, (str, os.PathLike)):
-            f = os.fspath(f)  # pyrefly: ignore  # no-matching-overload
+            f = os.fspath(f)
             self.buffer: Optional[IO[bytes]] = None
         else:  # is a byte buffer
             self.buffer = f
