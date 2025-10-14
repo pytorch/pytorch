@@ -605,7 +605,7 @@ def _distribute_tensors(
     if pg is None:
         pg = dist.distributed_c10d._get_default_group()
     for key in keys:
-        _local_state = local_state_dict.get(key, None)
+        _local_state = local_state_dict.get(key)
         if _local_state is None or torch.is_tensor(_local_state):
             continue
 
