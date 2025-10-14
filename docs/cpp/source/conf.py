@@ -40,7 +40,34 @@ extensions = [
     "sphinx.ext.intersphinx",
 ] + (["breathe", "exhale"] if run_doxygen else [])
 
-intersphinx_mapping = {"pytorch": ("https://pytorch.org/docs/main", None)}
+intersphinx_mapping = {"pytorch": ("https://docs.pytorch.org/docs/main", None)}
+
+# Configure Sphinx warnings and error handling
+suppress_warnings = [
+    "ref.citation",
+    "ref.footnote",
+    "ref.doc",
+    "toc.excluded",
+    "toc.not_readable",
+    "misc.highlighting_failure",
+]
+
+# Configure Breathe
+breathe_show_define_initializer = True
+breathe_show_enumvalue_initializer = True
+breathe_default_members = ("members", "undoc-members")
+
+
+# Fix for Python 3.10+ compatibility with exhale 2.3.0
+# MutableMapping was moved from collections to collections.abc in Python 3.10
+try:
+    import collections
+    from collections.abc import MutableMapping
+
+    if not hasattr(collections, "MutableMapping"):
+        collections.MutableMapping = MutableMapping
+except ImportError:
+    pass
 
 # Setup absolute paths for communicating with breathe / exhale where
 # items are expected / should be trimmed by.
@@ -101,6 +128,21 @@ exhale_args = {
         Welcome to the developer reference for the PyTorch C++ API.
     """
     ),
+    ############################################################################
+    # Duplicate handling and error management.                                 #
+    ############################################################################
+    # Note: Using Doxyfile instead of stdin configuration
+    # "exhaleDoxygenStdin" is not compatible with "exhaleUseDoxyfile"
+    # Handle unresolved references more gracefully
+    "unabridgedOrphanKinds": {
+        "function",
+        "define",
+        "enum",
+        "enumvalue",
+        "typedef",
+        "variable",
+    },
+    "fullToctreeMaxDepth": 2,
 }
 
 # Tell sphinx what the primary language being documented is.
@@ -174,6 +216,7 @@ html_theme = "pytorch_sphinx_theme2"
 #
 html_theme_options = {
     "canonical_url": "https://pytorch.org/docs/stable/",
+    "analytics_id": "GTM-T8XT4PS",
     "collapse_navigation": False,
     "logo": {"text": "Home"},
     "icon_links": [

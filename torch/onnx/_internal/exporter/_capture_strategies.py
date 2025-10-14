@@ -9,7 +9,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.onnx import _flags
@@ -17,6 +17,7 @@ from torch.onnx import _flags
 
 if TYPE_CHECKING:
     import os
+    from collections.abc import Callable
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ def _patch_dynamo_unsupported_functions():
 
     # Replace torch.jit.isinstance with isinstance
     jit_isinstance = torch.jit.isinstance
+    # pyrefly: ignore  # bad-assignment
     torch.jit.isinstance = isinstance
     logger.info("Replaced torch.jit.isinstance with isinstance to allow dynamo tracing")
     try:

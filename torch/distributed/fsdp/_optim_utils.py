@@ -351,7 +351,7 @@ def _broadcast_state(
         if isinstance(state, torch.Tensor):
             assert state.dim() == 0, (
                 "For non-zero ranks, a tensor state should have zero dimension, "
-                "but got the state with shape {state.shape()}."
+                f"but got the state with shape {state.shape}."
             )
             return state
         elif not isinstance(state, _PosDimTensorInfo):
@@ -426,7 +426,7 @@ def _flatten_optim_state_dict(
     Note that ``_flatten_tensor_optim_state`` does not need ``optim`` to
     flatten/shard the state. However, NamedOptimizer and KeyedOptimizer require
     all the states even if the corresponding parameters are empty. To this end,
-    ``optim`` will be used to to get the initial state of the empty parameters.
+    ``optim`` will be used to get the initial state of the empty parameters.
     ``optim`` should only be non-None if the ``optim` is KeyedOptimizer or
     NamedOptimizer.
 
@@ -603,6 +603,7 @@ def _flatten_optim_state(
     ]
     # Check that the unflattened parameters have the same state names
     state_names = None
+    # pyrefly: ignore  # bad-assignment
     for unflat_param_state in unflat_param_states:
         if unflat_param_state is None:
             continue
@@ -918,6 +919,7 @@ def _rekey_sharded_optim_state_dict(
         flat_param_key = unflat_param_names_to_flat_param_key.get(
             key.unflat_param_names, key.unflat_param_names
         )
+        # pyrefly: ignore  # unsupported-operation
         rekeyed_osd_state[flat_param_key] = param_state
 
     # Only process param_groups if it exists in sharded_osd
@@ -980,6 +982,7 @@ def _get_param_id_to_param_from_optim_input(
     if optim_input is None:
         return dict(enumerate(model.parameters()))
     try:
+        # pyrefly: ignore  # no-matching-overload
         params = cast(list[nn.Parameter], list(optim_input))
     except TypeError as e:
         raise TypeError(
@@ -1267,7 +1270,7 @@ def _is_named_optimizer(optim_state_dict: dict[str, Any]) -> bool:
     (which usually are FQNs) versus integers (which usually refer to param_ids
     from a vanilla torch.optim.Optimizer).
     """
-    state = optim_state_dict.get("state", None)
+    state = optim_state_dict.get("state")
     if not state:
         # If we cannot find a state, assume it is not NamedOptimizer as
         # NamedOptimizer has eager initialization.
@@ -1508,8 +1511,7 @@ def _allgather_orig_param_states(
         return output_states
 
     has_state_params: list[bool] = [
-        True if fqn in output_states else False
-        for fqn, idx in fsdp_param_info.param_indices.items()
+        fqn in output_states for fqn, idx in fsdp_param_info.param_indices.items()
     ]
 
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,
@@ -1716,7 +1718,7 @@ def _convert_state_with_orig_params(
     # across ranks
     for optim_state_key in all_optim_state_keys:
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
-            optim_state_key, None
+            optim_state_key
         )
 
         if param_key is None and not optim_state_key.is_fsdp_managed:
@@ -1724,7 +1726,7 @@ def _convert_state_with_orig_params(
 
         if optim_state_key.is_fsdp_managed:
             fqn = optim_state_key.unflat_param_names[0]
-            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn, None)
+            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn)
             if fsdp_param_info is None:
                 # This can happen if the not all FSDP instances have all the
                 # parameters. This can happen with FSDP + some MPMD style
@@ -1802,7 +1804,7 @@ def _convert_state_with_flat_params(
     # across ranks
     for optim_state_key in all_optim_state_keys:
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
-            optim_state_key, None
+            optim_state_key
         )
 
         assert param_key is not None, (

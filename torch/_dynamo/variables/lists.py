@@ -27,6 +27,7 @@ import torch.fx
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import (
+    create_build_tuple,
     create_call_function,
     create_instruction,
     create_rot_n,
@@ -199,7 +200,7 @@ class BaseListVariable(VariableTracker):
             if kwargs or len(args) != 1:
                 raise_args_mismatch(tx, name)
 
-            if type(self) != type(args[0]):
+            if type(self) is not type(args[0]):
                 tp_name = self.python_type_name()
                 other = args[0].python_type_name()
                 msg = ConstantVariable.create(
@@ -622,9 +623,11 @@ class CommonListMethodsVariable(BaseListVariable):
                 else:
                     items = slice(
                         *[
-                            s.evaluate_expr()
-                            if isinstance(s, SymNodeVariable)
-                            else s.as_python_constant()
+                            (
+                                s.evaluate_expr()
+                                if isinstance(s, SymNodeVariable)
+                                else s.as_python_constant()
+                            )
                             for s in key.items
                         ]
                     )
@@ -966,7 +969,7 @@ class TupleVariable(BaseListVariable):
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.foreach(self.items)
-        codegen.append_output(create_instruction("BUILD_TUPLE", arg=len(self.items)))
+        codegen.append_output(create_build_tuple(len(self.items)))
 
     def call_method(
         self,
@@ -1069,7 +1072,7 @@ class SizeVariable(TupleVariable):
         codegen.add_push_null(lambda: codegen.load_import_from("torch", "Size"))
         codegen.foreach(self.items)
         build_torch_size = [
-            create_instruction("BUILD_TUPLE", arg=len(self.items)),
+            create_build_tuple(len(self.items)),
         ] + create_call_function(1, False)
         codegen.extend_output(build_torch_size)
 
@@ -1151,7 +1154,7 @@ class NamedTupleVariable(TupleVariable):
     def __init__(self, items, tuple_cls, dynamic_attributes=None, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
-        self.dynamic_attributes = {} if not dynamic_attributes else dynamic_attributes
+        self.dynamic_attributes = dynamic_attributes if dynamic_attributes else {}
 
     def is_namedtuple(self):
         return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(
@@ -1219,7 +1222,7 @@ class NamedTupleVariable(TupleVariable):
         codegen.foreach(self.items)
         codegen.extend_output(
             [
-                create_instruction("BUILD_TUPLE", arg=len(self.items)),
+                create_build_tuple(len(self.items)),
             ]
             + create_call_function(1, False)
         )
@@ -1229,6 +1232,26 @@ class NamedTupleVariable(TupleVariable):
             codegen(value)
             codegen.extend_output(create_rot_n(2))
             codegen.store_attr(name)
+
+    def _is_method_overridden(self, method_name: str) -> bool:
+        """Checks if a method is overridden in the NamedTuple subclass.
+
+        Args:
+            method_name (str): The name of the method to check.
+
+        Returns:
+            bool: True if the method is overridden in the subclass, False otherwise.
+
+        Raises:
+            ValueError: If the NamedTuple class does not inherit from both Tuple and Object.
+        """
+        if len(self.tuple_cls.__mro__) < 3:
+            raise ValueError("NamedTuple should inherit from Tuple and Object.")
+        if getattr(self.tuple_cls, method_name, None) == getattr(
+            self.tuple_cls.__mro__[-3], method_name, None
+        ):
+            return False
+        return True
 
     def call_method(
         self,
@@ -1257,7 +1280,54 @@ class NamedTupleVariable(TupleVariable):
                 tx.output.side_effects.store_attr(self, attr, value)
             self.dynamic_attributes[attr] = value
             return ConstantVariable.create(None)
+        elif name == "_replace":
+            # NamedTuple._replace should create a new instance with replaced fields
+            if args:
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        ConstantVariable.create(
+                            "_replace() takes no positional arguments"
+                        )
+                    ],
+                )
+
+            # Get the field names for validation
+            fields = self.fields()
+
+            # Start with current items (copy them)
+            new_items = list(self.items)
+
+            # Replace fields specified in kwargs
+            for field_name, new_value in kwargs.items():
+                if field_name not in fields:
+                    raise_observed_exception(
+                        ValueError,
+                        tx,
+                        args=[
+                            ConstantVariable.create(
+                                f"Got unexpected field name: '{field_name}'"
+                            )
+                        ],
+                    )
+
+                # Replace the item at the field's index
+                field_index = fields.index(field_name)
+                new_items[field_index] = new_value
+
+            return NamedTupleVariable(new_items, self.tuple_cls)
+
         return super().call_method(tx, name, args, kwargs)
+
+    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
+        if isinstance(arg, SliceVariable):
+            # slicing a namedtuple produces a tuple
+            return TupleVariable(
+                self.items[arg.as_python_constant()],
+                source=None,
+            )
+        return super().getitem_const(tx, arg)
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         def check_and_create_method():
@@ -1274,6 +1344,23 @@ class NamedTupleVariable(TupleVariable):
                 return UserMethodVariable(method, self)
             else:
                 return None
+
+        # Avoid UserMethodVariable fallback precisely when methods NamedTuple methods have not been overwritten.
+        if (
+            name == "_replace"
+            and not self._is_method_overridden("_replace")
+            and not self._is_method_overridden("__getattr__")
+        ):
+            # Return a BuiltinVariable for the _replace method
+            # Get the actual _replace method from the tuple class
+            actual_replace_method = getattr(self.tuple_cls, "_replace", None)
+            if actual_replace_method:
+                from ..source import AttrSource
+
+                source = AttrSource(self.source, name) if self.source else None
+                return variables.GetAttrVariable(self, name, source=source)
+            # Fallback if _replace doesn't exist (shouldn't happen for proper NamedTuples)
+            return super().var_getattr(tx, name)
 
         if name == "_fields":
             source = NamedTupleFieldsSource(self.source) if self.source else None
@@ -1415,7 +1502,7 @@ class ListIteratorVariable(IteratorVariable):
         codegen.foreach(remaining_items)
         codegen.extend_output(
             [
-                create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
+                create_build_tuple(len(remaining_items)),
                 create_instruction("GET_ITER"),
             ]
         )
