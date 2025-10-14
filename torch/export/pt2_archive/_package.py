@@ -6,8 +6,7 @@ import os
 import tempfile
 import zipfile
 from dataclasses import dataclass
-from typing import Any, IO, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
+from typing import Any, IO, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -32,6 +31,7 @@ from torch.export._tree_utils import reorder_kwargs
 from torch.export.pt2_archive._package_weights import (
     get_complete,
     group_weights,
+    TensorProperties,
     Weights,
 )
 from torch.export.pt2_archive.constants import (
@@ -173,8 +173,10 @@ class PT2ArchiveWriter:
             os.path.isfile, glob.glob(f"{folder_dir}/**", recursive=True)
         )
         for file_path in file_paths:
+            # pyrefly: ignore  # no-matching-overload
             filename = os.path.relpath(file_path, folder_dir)
             archive_path = os.path.join(archive_dir, filename)
+            # pyrefly: ignore  # bad-argument-type
             self.write_file(archive_path, file_path)
 
     def close(self) -> None:
@@ -346,7 +348,7 @@ def _get_raw_tensor_bytes(value: torch.Tensor) -> bytes:
     if _is_fake_tensor(value):
         value_bytes = b""
     elif value.data_ptr():
-        cpu_tensor = value.cpu().contiguous()
+        cpu_tensor = value.cpu()
         value_untyped_storage = cpu_tensor.untyped_storage()
         # we store the raw bytes the untyped storage. Tensor metadata is stored separately
         value_bytes = bytes(
@@ -361,58 +363,149 @@ def _get_raw_tensor_bytes(value: torch.Tensor) -> bytes:
     return value_bytes
 
 
+def _should_use_pickle(t: torch.Tensor) -> bool:
+    return _is_tensor_subclass(t) and not _is_fake_tensor(t)
+
+
+def _save_pickled_tensors(
+    pickled_items: list[tuple[str, torch.Tensor]],
+    archive_writer: PT2ArchiveWriter,
+    config: dict[str, schema.PayloadMeta],
+    directory: str,
+    filename_prefix: str,
+    idx: int,
+    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
+) -> int:
+    """Save pickled tensors and update config. Returns updated index."""
+    for item_fqn, tensor in pickled_items:
+        path_name = f"{filename_prefix}{idx}"
+        archive_path = os.path.join(directory, path_name)
+        buffer = io.BytesIO()
+        torch.save(tensor, buffer, pickle_protocol=pickle_protocol)
+        archive_writer.write_bytes(archive_path, buffer.getvalue())
+
+        config[item_fqn] = schema.PayloadMeta(
+            path_name=path_name,
+            is_param=isinstance(tensor, torch.nn.Parameter),
+            use_pickle=True,
+            tensor_meta=serialize_tensor_meta(tensor),
+        )
+        idx += 1
+    return idx
+
+
+def _save_raw_tensors(
+    raw_items: dict[str, tuple[torch.Tensor, TensorProperties]],
+    model_name: str,
+    archive_writer: PT2ArchiveWriter,
+    config: dict[str, schema.PayloadMeta],
+    directory: str,
+    filename_prefix: str,
+    idx: int,
+) -> int:
+    """Save deduplicated raw tensor bytes and update config. Returns updated index."""
+    if not raw_items:
+        return idx
+
+    weights_dict = {model_name: Weights(raw_items)}
+    storage_groups = group_weights(weights_dict)
+
+    for group in storage_groups:
+        # Find the complete tensor that covers all others in this storage group
+        model_name, complete_item_name = get_complete(group, weights_dict)
+        complete_tensor, _ = weights_dict[model_name].get_weight(complete_item_name)
+
+        path_name = f"{filename_prefix}{idx}"
+        archive_path = os.path.join(directory, path_name)
+        tensor_bytes = _get_raw_tensor_bytes(complete_tensor)
+        archive_writer.write_bytes(archive_path, tensor_bytes)
+        idx += 1
+
+        for _, item_fqn in group:
+            tensor, _ = weights_dict[model_name].get_weight(item_fqn)
+            config[item_fqn] = schema.PayloadMeta(
+                path_name=path_name,
+                is_param=isinstance(tensor, torch.nn.Parameter),
+                use_pickle=False,
+                tensor_meta=serialize_tensor_meta(tensor),
+            )
+
+    return idx
+
+
 def _package_state_dict(
+    model_name: str,
     exported_program: ExportedProgram,
     archive_writer: PT2ArchiveWriter,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> schema.PayloadConfig:
     weights_config: dict[str, schema.PayloadMeta] = {}
-    storage_map: dict[torch.UntypedStorage, str] = {}
 
-    idx = archive_writer.count_prefix(os.path.join(WEIGHTS_DIR, WEIGHT_FILENAME_PREFIX))
+    pickled_weights: list[tuple[str, torch.Tensor]] = []
+    raw_weights: dict[str, tuple[torch.Tensor, TensorProperties]] = {}
+
+    # Categorize weights
     for weight_fqn, weight_tensor in exported_program.state_dict.items():
         assert isinstance(weight_tensor, torch.Tensor), (
             "only torch.Tensor is allowed in state_dict"
         )
-        path_name = f"{WEIGHT_FILENAME_PREFIX}{idx}"
-        is_param = isinstance(weight_tensor, torch.nn.Parameter)
-        # use pickle for non-fake tensor subclasses
-        use_pickle = _is_tensor_subclass(weight_tensor) and not _is_fake_tensor(
-            weight_tensor
-        )
-        archive_path = os.path.join(WEIGHTS_DIR, path_name)
-        if use_pickle:
-            buffer = io.BytesIO()
-            torch.save(weight_tensor, buffer, pickle_protocol=pickle_protocol)
-            archive_writer.write_bytes(archive_path, buffer.getvalue())
-            idx += 1
+        if _should_use_pickle(weight_tensor):
+            pickled_weights.append((weight_fqn, weight_tensor))
         else:
-            tensor_storage = weight_tensor.untyped_storage()
-            if tensor_storage not in storage_map:
-                storage_map[tensor_storage] = path_name
-                tensor_bytes = _get_raw_tensor_bytes(weight_tensor)
-                archive_writer.write_bytes(archive_path, tensor_bytes)
-                idx += 1
-            else:
-                path_name = storage_map[tensor_storage]
+            raw_weights[weight_fqn] = (weight_tensor, TensorProperties(weight_tensor))
 
-        weights_config[weight_fqn] = schema.PayloadMeta(
-            path_name=path_name,
-            is_param=is_param,
-            use_pickle=use_pickle,
-            tensor_meta=serialize_tensor_meta(weight_tensor),
-        )
+    idx = archive_writer.count_prefix(os.path.join(WEIGHTS_DIR, WEIGHT_FILENAME_PREFIX))
+
+    # Save weights in pickle format
+    idx = _save_pickled_tensors(
+        pickled_weights,
+        archive_writer,
+        weights_config,
+        WEIGHTS_DIR,
+        WEIGHT_FILENAME_PREFIX,
+        idx,
+        pickle_protocol,
+    )
+
+    # Save weights in raw bytes format
+    _save_raw_tensors(
+        raw_weights,
+        model_name,
+        archive_writer,
+        weights_config,
+        WEIGHTS_DIR,
+        WEIGHT_FILENAME_PREFIX,
+        idx,
+    )
 
     return schema.PayloadConfig(config=weights_config)
 
 
 def _package_constants(
+    model_name: str,
     exported_program: ExportedProgram,
     archive_writer: PT2ArchiveWriter,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> schema.PayloadConfig:
     constants_config: dict[str, schema.PayloadMeta] = {}
-    storage_map: dict[torch.UntypedStorage, str] = {}
+
+    pickled_constants: list[tuple[str, torch.Tensor]] = []
+    raw_constants: dict[str, tuple[torch.Tensor, TensorProperties]] = {}
+    custom_objects: list[tuple[str, torch._C.ScriptObject]] = []
+
+    # Categorize constants
+    for constant_fqn, constant in exported_program.constants.items():
+        if isinstance(constant, torch.Tensor):
+            if _should_use_pickle(constant):
+                pickled_constants.append((constant_fqn, constant))
+            else:
+                raw_constants[constant_fqn] = (constant, TensorProperties(constant))
+
+        elif isinstance(constant, torch._C.ScriptObject):
+            custom_objects.append((constant_fqn, constant))
+
+        else:
+            raise RuntimeError(f"Unsupported constant type: {type(constant)}")
 
     tensor_idx = archive_writer.count_prefix(
         os.path.join(CONSTANTS_DIR, TENSOR_CONSTANT_FILENAME_PREFIX)
@@ -421,50 +514,42 @@ def _package_constants(
         os.path.join(CONSTANTS_DIR, CUSTOM_OBJ_FILENAME_PREFIX)
     )
 
-    for constant_fqn, constant in exported_program.constants.items():
-        if isinstance(constant, torch.Tensor):
-            use_pickle = _is_tensor_subclass(constant) and not _is_fake_tensor(constant)
-            path_name = f"{TENSOR_CONSTANT_FILENAME_PREFIX}{tensor_idx}"
-            archive_path = os.path.join(CONSTANTS_DIR, path_name)
-            if use_pickle:
-                buffer = io.BytesIO()
-                torch.save(constant, buffer, pickle_protocol=pickle_protocol)
-                archive_writer.write_bytes(archive_path, buffer.getvalue())
-                tensor_idx += 1
-            else:
-                # Only save once when tensors share the same storage
-                tensor_storage = constant.untyped_storage()
-                if tensor_storage not in storage_map:
-                    storage_map[tensor_storage] = path_name
-                    tensor_bytes = _get_raw_tensor_bytes(constant)
-                    archive_writer.write_bytes(archive_path, tensor_bytes)
-                    tensor_idx += 1
-                else:
-                    path_name = storage_map[tensor_storage]
+    # Save constants in pickle format
+    tensor_idx = _save_pickled_tensors(
+        pickled_constants,
+        archive_writer,
+        constants_config,
+        CONSTANTS_DIR,
+        TENSOR_CONSTANT_FILENAME_PREFIX,
+        tensor_idx,
+        pickle_protocol,
+    )
 
-            constants_config[constant_fqn] = schema.PayloadMeta(
-                path_name=path_name,
-                is_param=False,
-                use_pickle=use_pickle,
-                tensor_meta=serialize_tensor_meta(constant),
-            )
+    # Save constants in raw bytes format
+    _save_raw_tensors(
+        raw_constants,
+        model_name,
+        archive_writer,
+        constants_config,
+        CONSTANTS_DIR,
+        TENSOR_CONSTANT_FILENAME_PREFIX,
+        tensor_idx,
+    )
 
-        elif isinstance(constant, torch._C.ScriptObject):
-            # use pickle for custom objects
-            path_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
-            custom_obj_idx += 1
-            constants_config[constant_fqn] = schema.PayloadMeta(
-                path_name=path_name,
-                is_param=False,
-                use_pickle=True,
-                tensor_meta=None,
-            )
-            archive_path = os.path.join(CONSTANTS_DIR, path_name)
-            custom_obj_bytes = torch._C._pickle_save(constant)
-            archive_writer.write_bytes(archive_path, custom_obj_bytes)
+    # Handle custom objects
+    for constant_fqn, constant in custom_objects:
+        path_name = f"{CUSTOM_OBJ_FILENAME_PREFIX}{custom_obj_idx}"
+        archive_path = os.path.join(CONSTANTS_DIR, path_name)
+        custom_obj_bytes = torch._C._pickle_save(constant)
+        archive_writer.write_bytes(archive_path, custom_obj_bytes)
 
-        else:
-            raise RuntimeError(f"Unsupported constant type: {type(constant)}")
+        constants_config[constant_fqn] = schema.PayloadMeta(
+            path_name=path_name,
+            is_param=False,
+            use_pickle=True,
+            tensor_meta=None,
+        )
+        custom_obj_idx += 1
 
     return schema.PayloadConfig(config=constants_config)
 
@@ -497,11 +582,15 @@ def _package_exported_programs(
     assert isinstance(exported_programs, dict)
 
     for model_name, ep in exported_programs.items():
-        weights_config = _package_state_dict(ep, archive_writer, pickle_protocol)
+        weights_config = _package_state_dict(
+            model_name, ep, archive_writer, pickle_protocol
+        )
         weights_config_file = WEIGHTS_CONFIG_FILENAME_FORMAT.format(model_name)
         _package_payload_config(archive_writer, weights_config, weights_config_file)
 
-        constants_config = _package_constants(ep, archive_writer, pickle_protocol)
+        constants_config = _package_constants(
+            model_name, ep, archive_writer, pickle_protocol
+        )
         constants_config_file = CONSTANTS_CONFIG_FILENAME_FORMAT.format(model_name)
         _package_payload_config(archive_writer, constants_config, constants_config_file)
 
@@ -594,6 +683,7 @@ def package_pt2(
 
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.writable() and f.seekable())
+        # pyrefly: ignore  # no-matching-overload
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
         or (isinstance(f, tempfile._TemporaryFileWrapper) and f.name.endswith(".pt2"))
     ):
@@ -605,8 +695,10 @@ def package_pt2(
         )
 
     if isinstance(f, (str, os.PathLike)):
+        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
+    # pyrefly: ignore  # bad-argument-type
     with PT2ArchiveWriter(f) as archive_writer:
         _package_exported_programs(
             archive_writer, exported_programs, pickle_protocol=pickle_protocol
@@ -621,6 +713,7 @@ def package_pt2(
 
     if isinstance(f, (io.IOBase, IO)):
         f.seek(0)
+    # pyrefly: ignore  # bad-return
     return f
 
 
@@ -794,7 +887,9 @@ def _load_state_dict(
                     ),
                 )
                 if payload_meta.is_param:
-                    state_dict[weight_fqn] = torch.nn.Parameter(weight_tensor)
+                    state_dict[weight_fqn] = torch.nn.Parameter(
+                        weight_tensor, requires_grad=tensor_meta.requires_grad
+                    )
                 else:
                     state_dict[weight_fqn] = weight_tensor
 
@@ -915,6 +1010,44 @@ def _load_extra_files(
     return extra_file_contents
 
 
+def _load_aoti(
+    file: str,
+    model_name: str,
+    run_single_threaded: bool,
+    num_runners: int,
+    device_idx: int,
+) -> AOTICompiledModel:
+    loaded_metadata = torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(  # type: ignore[attr-defined]
+        file, model_name
+    )
+
+    device = loaded_metadata["AOTI_DEVICE_KEY"]
+    current_device_info = torch._inductor.codecache.get_device_information(device)
+
+    for k, v in current_device_info.items():
+        if k in loaded_metadata:
+            if v != loaded_metadata[k]:
+                logger.warning(
+                    "Device information mismatch for %s: %s vs %s. "
+                    "This could cause some issues when loading the AOTInductor compiled artifacts.",
+                    k,
+                    v,
+                    loaded_metadata[k],
+                )
+
+    aoti_compiled_model = AOTICompiledModel(
+        torch._C._aoti.AOTIModelPackageLoader(
+            file,
+            model_name,
+            run_single_threaded,
+            num_runners,
+            device_idx,
+        )
+    )
+
+    return aoti_compiled_model
+
+
 def load_pt2(
     f: FileLike,
     *,
@@ -953,6 +1086,7 @@ def load_pt2(
 
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.readable() and f.seekable())
+        # pyrefly: ignore  # no-matching-overload
         or (isinstance(f, (str, os.PathLike)) and os.fspath(f).endswith(".pt2"))
     ):
         # TODO: turn this into an error in 2.9
@@ -963,10 +1097,12 @@ def load_pt2(
         )
 
     if isinstance(f, (str, os.PathLike)):
+        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
     weights = {}
     weight_maps = {}
+    # pyrefly: ignore  # bad-argument-type
     with PT2ArchiveReader(f) as archive_reader:
         version = archive_reader.read_string(ARCHIVE_VERSION_PATH)
         if version != ARCHIVE_VERSION_VALUE:
@@ -1017,14 +1153,12 @@ def load_pt2(
                 logger.debug("Writing buffer to tmp file located at %s.", tf.name)
 
                 aoti_runners = {
-                    model_name: AOTICompiledModel(
-                        torch._C._aoti.AOTIModelPackageLoader(
-                            tf.name,
-                            model_name,
-                            run_single_threaded,
-                            num_runners,
-                            device_index,
-                        )
+                    model_name: _load_aoti(
+                        tf.name,
+                        model_name,
+                        run_single_threaded,
+                        num_runners,
+                        device_index,
                     )
                     for model_name in aoti_model_names
                 }
@@ -1032,10 +1166,13 @@ def load_pt2(
             aoti_runners = {}
     else:
         aoti_runners = {
-            model_name: AOTICompiledModel(
-                torch._C._aoti.AOTIModelPackageLoader(
-                    f, model_name, run_single_threaded, num_runners, device_index
-                )
+            model_name: _load_aoti(
+                # pyrefly: ignore  # bad-argument-type
+                f,
+                model_name,
+                run_single_threaded,
+                num_runners,
+                device_index,
             )
             for model_name in aoti_model_names
         }
