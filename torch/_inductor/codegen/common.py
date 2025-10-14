@@ -1554,7 +1554,7 @@ class KernelArgs:
             self.inplace_buffers[input_name] = buf
             self.inplace_buffers[output_name] = buf
 
-    def workspace(self, nbytes: sympy.Expr, zero_fill: bool) -> tuple[str, int]:
+    def workspace(self, nelem: sympy.Expr, zero_fill: bool, dtype=torch.uint8) -> tuple[str, int]:
         """
         Allocate or extend a workspace buffer of nbytes bytes.
 
@@ -1578,10 +1578,11 @@ class KernelArgs:
                 - offset: An integer representing the byte offset in the workspace.
         """
         arg = WorkspaceArg(
-            count=nbytes,
+            count=nelem,
             zero_mode=WorkspaceZeroMode.from_bool(zero_fill),
             device=V.graph.get_current_device_or_throw(),
             outer_name=WorkspaceArg.unique_name(),
+            dtype=dtype,
         )
         for i, existing_arg in enumerate(self.workspace_args):
             if WorkspaceArg.can_join(existing_arg, arg):

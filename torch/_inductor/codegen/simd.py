@@ -1452,13 +1452,20 @@ class SIMDScheduling(BaseScheduling):
             with V.set_kernel_handler(kernel):
                 for node in kernel_features.scheduler_nodes():
                     node.mark_run()
+                for node in node2.get_nodes():
+                    node.mark_run()
             kernel.call_kernel(kernel.kernel_name)
             V.graph.removed_buffers |= kernel.removed_buffers
             V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+
+            # a extra sum
+            V.graph.wrapper_code.writeline(
+                "buf1 = workspace_0.view(-1, 768).sum(dim=0)",
+            )
             self.free_buffers_in_scheduler()
         else:
             self.codegen_node(node1)
-        self.codegen_node(node2)
+        # breakpoint(); self.codegen_node(node2)
 
     def codegen_node(
         self, node: Union[scheduler.FusedSchedulerNode, scheduler.SchedulerNode]

@@ -4041,6 +4041,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.mix_order_reduction:
             # self.body.writeline("if True:")
             self.body.writeline(
+                f"accum = tl.full([R0_BLOCK], 0.0, tl.float32)[None, :]"
+            )
+            self.body.writeline(
                 f"for suboff in range(0, RSPLIT_SIZE, XBLOCK):"
             )
             with self.body.indent(offset=1):
@@ -4053,6 +4056,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.splice(self.compute)
                 self.body.splice(self.stores)
                 self.body.splice(self.post_loop_store)
+
+                # TODO: find the tmp0 name from cache
+                self.body.writeline(
+                    "accum += tmp0",
+                )
+            # buf2 is the intermediate buffer
+            # var = self.args.output("buf2")
+            # self.store("buf2", None, "accum")
+            self.body.writeline(
+                "tl.store(ws_ptr + tl.program_id(0) * r0_numel + r0_index, accum, r0_mask)"
+            )
 
         elif self.inside_reduction and len(loop_trees) > 0:
             # Write the loop headers.
@@ -4353,6 +4367,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         Convert the TritonKernel from Inductor SIMD IR to triton code, including inductor triton heuristics, imports,
         metadata, and benchmarking infra.
         """
+
+        self.args.workspace(self.numels["r0_"] * ((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size), False, dtype=torch.float)
 
         code = IndentedBuffer()
 
