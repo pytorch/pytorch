@@ -1211,7 +1211,7 @@ class CppVecOverrides(CppOverrides):
             return wrapper
 
         for name, method in vars(CppVecOverrides).items():
-            if getattr(method, "__class__", None) == staticmethod and name not in [
+            if getattr(method, "__class__", None) is staticmethod and name not in [
                 "masked",
                 "index_expr",
             ]:
@@ -2604,7 +2604,7 @@ class CppKernel(Kernel):
                     var_id = i
                     break
             if (
-                type(self) == CppKernel
+                type(self) is CppKernel
                 and var_id
                 and start == 0
                 and end == self.ranges[var_id]
@@ -4197,8 +4197,6 @@ class CppKernelProxy(CppKernel):
                                     to_type_node, lambda n: n is not to_type_node
                                 )
                                 metrics.cpp_to_dtype_count += 1
-                else:
-                    pass
 
             def eliminate_to_dtype(sub_graph: torch.fx.Graph):
                 def _eliminate_duplicate_to_node(sub_graph: torch.fx.Graph):
@@ -4536,7 +4534,7 @@ class CppKernelProxy(CppKernel):
             assert isinstance(main_loop_kernel, self.vec_kernel_cls)
 
             # Prefix
-            if type(tail_loop_kernel) == self.kernel_cls:
+            if type(tail_loop_kernel) is self.kernel_cls:
                 # if tail loop kernel is a scalar kernel, we need to extend tmp_acc -> tmp_acc_arr[] to
                 # hold the temporary inner loop acc result for outer tail loop
                 tail_loop_kernel.finalize_reduction_prefix(
@@ -4564,7 +4562,7 @@ class CppKernelProxy(CppKernel):
                     suffix_buf, "C10_UNLIKELY", outer_loop.var
                 ):
                     stack.enter_context(suffix_buf.indent())
-                    if type(tail_loop_kernel) == self.kernel_cls:
+                    if type(tail_loop_kernel) is self.kernel_cls:
                         reduction_vars = tail_loop_kernel.reduction_var_names
                         for name in reduction_vars:
                             new_name = f"{name}_arr[{outer_loop.var}_tail - {cexpr_index(outer_loop.tiled_size)}]"
@@ -5376,6 +5374,7 @@ class CppScheduling(BaseScheduling):
                 )
                 user.node.mark_run()
 
+        self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()
@@ -5441,17 +5440,19 @@ class CppScheduling(BaseScheduling):
             kernel_name = self.define_kernel(
                 src_code, self.kernel_group.scheduled_nodes
             )
-            # below add provenance tracing info for cpu CppKernel types
-            debug_handle: Optional[int] = None
-            if config.trace.provenance_tracking_level != 0:
-                debug_handle = set_kernel_post_grad_provenance_tracing(
-                    self.kernel_group.scheduled_nodes, kernel_name
-                )
-            self.kernel_group.call_kernel(
-                V.graph.wrapper_code, kernel_name, debug_handle=debug_handle
-            )
+            self.codegen_comment(self.kernel_group.scheduled_nodes, kernel_name)
+            self.kernel_group.call_kernel(V.graph.wrapper_code, kernel_name)
         self.reset_kernel_group()
         self._set_flush_status(False)
+
+    def codegen_comment(self, node_schedule, kernel_name=None):
+        # below add provenance tracing info for cpu CppKernel types
+        wrapper = V.graph.wrapper_code
+        debug_handle = set_kernel_post_grad_provenance_tracing(
+            node_schedule,  # type: ignore[arg-type]
+            kernel_name,
+        )
+        wrapper.write_provenance_debug_handle(kernel_name, debug_handle)
 
 
 class KernelGroup:
@@ -5524,14 +5525,13 @@ class KernelGroup:
             code.splice(self.loops_code)
         return code.getvalue()
 
-    def call_kernel(self, wrapper, kernel_name, debug_handle: Optional[int] = None):
+    def call_kernel(self, wrapper, kernel_name):
         _, call_args, arg_types = self.args.cpp_argdefs()
         wrapper.generate_kernel_call(
             kernel_name,
             call_args,
             triton=False,
             arg_types=arg_types,
-            debug_handle=debug_handle,
         )
 
 

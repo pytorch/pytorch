@@ -4,23 +4,18 @@ import math
 import os
 import socket
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch._C._autograd import DeviceType
-from torch.distributed._distributed_c10d import (
-    _register_work,
-    _SymmetricMemory,
-    ProcessGroup,
-    Work as _Work,
-)
+from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
 
 _group_name_to_store: dict[str, c10d.Store] = {}
@@ -458,7 +453,7 @@ lib.define(
 lib.define(
     "fused_scaled_matmul_reduce_scatter("
     "Tensor A, Tensor B, Tensor A_scale, Tensor B_scale, "
-    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, int[]? output_shape, "
+    "str reduce_op, int orig_scatter_dim, int scatter_dim_after_maybe_reshape, str group_name, SymInt[]? output_shape, "
     "Tensor? bias = None, "
     "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
@@ -529,7 +524,7 @@ def _fused_all_gather_matmul_impl(
 
     group = c10d._resolve_process_group(group_name)
 
-    if gather_dim == A_shard.ndim - 1:
+    if gather_dim == A_shard.ndim - 1 or gather_dim == -1:
         return _fused_all_gather_matmul_last_gather_dim_impl(
             mm_out_op,
             A_shard,
@@ -722,8 +717,8 @@ def _fused_all_gather_matmul_last_gather_dim_impl(
     group_name: str,
     return_A: bool,
 ) -> tuple[torch.Tensor | None, list[torch.Tensor]]:
-    assert gather_dim == A_shard.ndim - 1
     group = c10d._resolve_process_group(group_name)
+    group_size = group.size()
 
     B_shards = [B.chunk(group.size()) for B in Bs]
 
@@ -733,18 +728,11 @@ def _fused_all_gather_matmul_last_gather_dim_impl(
     def unflatten(t: torch.Tensor) -> torch.Tensor:
         return t.view(*leading_dims, -1)
 
-    A_out_leading_dims = list(A_shard.shape[:-1])
-    A_out_leading_dims[0] *= group.size()
-
-    def unflatten_A_out(t: torch.Tensor) -> torch.Tensor:
-        return t.view(*A_out_leading_dims, -1)
-
     A_flat_out = A_shard_flat.new_empty(
         A_shard_flat.shape[0] * group.size(),
         A_shard_flat.shape[1],
     )
 
-    # Outputs work as accumulator for output_partials
     outputs = [
         torch.empty(
             (A_shard_flat.shape[0], B.shape[1]),
@@ -753,19 +741,20 @@ def _fused_all_gather_matmul_last_gather_dim_impl(
         )
         for B, out_dtype in zip(Bs, out_dtypes)
     ]
-    # Additional allocation for partials output,
-    # That will be reduced into output.
-    output_partials = [torch.empty_like(out) for out in outputs]
 
     first = True
+    events = [torch.cuda.Event() for _ in outputs]
 
     def default_consumer(shard: torch.Tensor, rank: int) -> None:
         nonlocal first
-        for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
-            out = outputs[idx] if first else output_partials[idx]
-            mm_out_op(shard, B_shards[idx][rank], **kwargs, out=out)
-            if not first:
-                outputs[idx] += output_partials[idx]
+        for out, event, B_shard, kwargs in zip(outputs, events, B_shards, kwargs_list):
+            event.wait()
+            if first:
+                torch.ops.aten.mm.out(shard, B_shard[rank], **kwargs, out=out)
+            else:
+                out.addmm_(shard, B_shard[rank])
+            event.record()
+
         first = False
 
     _pipelined_all_gather_and_consume_last_dim(
@@ -775,9 +764,14 @@ def _fused_all_gather_matmul_last_gather_dim_impl(
         group_name,
         return_A,
     )
+    ret_A = None
+    if return_A:
+        # This path is inefficient and will be filtered out at passes stage
+        # Added only for completeness.
+        A_split_cat_out_flat = torch.cat(A_flat_out.chunk(group_size), dim=-1)
+        ret_A = unflatten(A_split_cat_out_flat)
 
-    A = unflatten_A_out(A_flat_out) if return_A else None
-    return A, [unflatten(output) for output in outputs]
+    return ret_A, [unflatten(output) for output in outputs]
 
 
 @torch.library.impl(lib, "fused_all_gather_matmul", "Meta")
@@ -794,12 +788,12 @@ def _fused_all_gather_matmul_fallback(
         A_shard.contiguous(), group_size, group_name
     )
     A = torch.ops._c10d_functional.wait_tensor(A)
-    if gather_dim == A.ndim - 1:
+    if gather_dim == A.ndim - 1 or gather_dim == -1:
         A_splits = A.chunk(group_size)
         A_mm = torch.cat(A_splits, dim=-1)
         res = [torch.matmul(A_mm, B) for B in Bs]
         if return_A:
-            return A, res
+            return A_mm, res
         else:
             return None, res
 
@@ -1586,7 +1580,7 @@ def _maybe_convert_scalar_types_to_dtypes(
         if scalar_type is None:
             dtypes.append(scalar_type)
         elif scalar_type not in _SCALAR_TYPE_TO_DTYPE:
-            raise ValueError("Unrecognized scalar type {scalar_type}")
+            raise ValueError(f"Unrecognized scalar type {scalar_type}")
         else:
             dtypes.append(_SCALAR_TYPE_TO_DTYPE[scalar_type])
     return dtypes
@@ -1685,7 +1679,7 @@ def _low_contention_all_gather(
             src_buf = symm_mem.get_buffer(remote_rank, tensor.shape, tensor.dtype)
             chunks[remote_rank].copy_(src_buf)
         symm_mem.barrier()
-        _register_work(output, Work())
+        torch._C._distributed_c10d._register_work(output, Work())
         return output
 
 
@@ -1733,7 +1727,7 @@ def _low_contention_reduce_scatter_with_symm_mem_input(
             ret = ret.mean(dim=0)
         else:
             raise ValueError(f"reduce_op ({reduce_op}) is not supported")
-        _register_work(ret, Work())
+        torch._C._distributed_c10d._register_work(ret, Work())
         return ret
 
 
@@ -1768,7 +1762,7 @@ def _low_contention_reduce_scatter_with_workspace(
             ret = ret.mean(dim=0)
         else:
             raise ValueError(f"reduce_op ({reduce_op}) is not supported")
-        _register_work(ret, Work())
+        torch._C._distributed_c10d._register_work(ret, Work())
         return ret
 
 
@@ -1846,6 +1840,7 @@ from typing import overload, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
+    from torch._C._distributed_c10d import ProcessGroup
     from torch.types import _device, _dtype, _int
 
 
@@ -1856,6 +1851,7 @@ def empty(
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def empty(
     size: Sequence[_int],
     *,
@@ -1923,6 +1919,8 @@ def rendezvous(
         group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
             participating processes. This can be either a group name or a process group object.
     """
+    from torch._C._distributed_c10d import ProcessGroup
+
     if isinstance(group, str):
         group_name = group
     elif isinstance(group, ProcessGroup):
@@ -1940,7 +1938,11 @@ def is_nvshmem_available() -> bool:
 
     Check if NVSHMEM is available in current build and on current system.
     """
-    from torch.distributed._distributed_c10d import _is_nvshmem_available
+    try:
+        from torch._C._distributed_c10d import _is_nvshmem_available
+    except ImportError:
+        # Not all builds have NVSHMEM support.
+        return False
 
     # Check if NVSHMEM is available on current system.
     return _is_nvshmem_available()

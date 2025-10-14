@@ -225,7 +225,7 @@
 #
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
-#      By default, It is only enabled on Windows.
+#      By default, It is only enabled on Windows and AArch64.
 #
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
@@ -1704,7 +1704,18 @@ def main() -> None:
     package_data = {
         "torch": torch_package_data,
     }
-    exclude_package_data = {}
+    # some win libraries are excluded
+    # these are statically linked
+    exclude_windows_libs = [
+        "lib/dnnl.lib",
+        "lib/kineto.lib",
+        "lib/libprotobuf-lite.lib",
+        "lib/libprotobuf.lib",
+        "lib/libprotoc.lib",
+    ]
+    exclude_package_data = {
+        "torch": exclude_windows_libs,
+    }
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
