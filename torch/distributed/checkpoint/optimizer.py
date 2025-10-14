@@ -201,7 +201,7 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             # TODO: we should change _create_sharded_read_items to have more ergonomic API
             for ri in reqs:
                 if ri.dest_index.offset is None:
-                    raise AssertionError
+                    raise AssertionError("dest_index.offset must not be None")
                 original_offset = _element_wise_sub(ri.dest_index.offset, offset)
                 original_index = dataclasses.replace(
                     ri.dest_index, offset=torch.Size(original_offset)

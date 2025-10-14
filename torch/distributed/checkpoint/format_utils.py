@@ -131,7 +131,10 @@ class BroadcastingTorchSaveReader(StorageReader):
         self.is_coordinator = is_coordinator
         if self.is_coordinator:
             if not dist.get_rank() == self.coordinator_rank:
-                raise AssertionError
+                raise AssertionError(
+                    f"Coordinator rank mismatch: expected {self.coordinator_rank}, "
+                    f"got {dist.get_rank()}"
+                )
 
         if self.checkpoint_id is None:
             raise AssertionError(
