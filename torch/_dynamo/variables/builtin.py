@@ -1831,6 +1831,8 @@ class BuiltinVariable(VariableTracker):
             ret = obj
         elif isinstance(obj, variables.RangeVariable):
             ret = obj.call_method(tx, "__iter__", [], {})
+        elif isinstance(obj, variables.LocalGeneratorObjectVariable):
+            ret = obj  # type: ignore[assignment]
         else:
             # Handle the case where we are iterating over a tuple, list or iterator
             ret = self._call_iter_tuple_list(tx, obj, *args, **kwargs)
