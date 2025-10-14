@@ -43,9 +43,13 @@ using c10::VarType;
 
 namespace torch::jit {
 
-static std::unordered_set<std::string> global_opaque_types;
+static std::unordered_set<std::string>& getOpaqueTypes() {
+  static std::unordered_set<std::string> global_opaque_types;
+  return global_opaque_types;
+}
 
 void registerOpaqueType(const std::string& type_name) {
+  auto& global_opaque_types = getOpaqueTypes();
   auto [_, inserted] = global_opaque_types.insert(type_name);
   if (!inserted) {
     throw std::runtime_error(
@@ -54,6 +58,7 @@ void registerOpaqueType(const std::string& type_name) {
 }
 
 bool isRegisteredOpaqueType(const std::string& type_name) {
+  auto& global_opaque_types = getOpaqueTypes();
   return global_opaque_types.find(type_name) != global_opaque_types.end();
 }
 
@@ -98,7 +103,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
 
   // Check if this type is registered as an opaque type first
   if (isRegisteredOpaqueType(text)) {
-    return c10::TypeFactory::get<c10::PyObjectType>();
+    return c10::PyObjectType::get();
   }
 
   auto it = type_map.find(text);
