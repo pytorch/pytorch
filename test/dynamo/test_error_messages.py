@@ -911,7 +911,7 @@ from user code:
             "LazyVariableTracker(Unrealized: <class 'function'>)", all_lines[0]
         )
         self.assertIn(
-            "LazyVariableTracker(realized: UserFunctionVariable())", all_lines[2]
+            "LazyVariableTracker(realized: UserFunctionVariable())", all_lines[3]
         )
 
     @make_logging_test(graph_breaks=True)
