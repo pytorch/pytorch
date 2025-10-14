@@ -63,7 +63,7 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
             self.zero_point = Parameter(torch.tensor([zero_point] * channel_len))
 
         self.activation_post_process = observer(**observer_kwargs)
-        if not torch.iinfo(self.activation_post_process.dtype).min > quant_min:
+        if torch.iinfo(self.activation_post_process.dtype).min > quant_min:
             raise AssertionError("quant_min out of bound")
         if quant_max > torch.iinfo(self.activation_post_process.dtype).max:
             raise AssertionError("quant_max out of bound")
