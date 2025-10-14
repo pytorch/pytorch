@@ -74,7 +74,7 @@ class TestEinopsPatch(TestCase):
     def test_no_eager_import(self):
         self.einops_patch_module._patch_einops()
 
-        assert "einops" not in sys.modules
+        self.assertNotIn("einops", sys.modules)
 
     @parametrize("ver", ["0.6.1", "0.6.2rc0", "0.7.0rc1"])
     def test_target_versions_are_patched(self, ver):
@@ -85,19 +85,21 @@ class TestEinopsPatch(TestCase):
         importlib.import_module("einops")  # triggers _EinopsImportInterceptor
         einops_module = importlib.import_module("einops.einops")
 
-        assert (
-            einops_module._reconstruct_from_shape
-            is einops_module._reconstruct_from_shape_uncached
+        self.assertIs(
+            einops_module._reconstruct_from_shape,
+            einops_module._reconstruct_from_shape_uncached,
         )
-        assert (
-            getattr(einops_module._prepare_transformation_recipe, "__name__", "")
-            == "_inner"
+        self.assertEqual(
+            getattr(einops_module._prepare_transformation_recipe, "__name__", ""),
+            "_inner",
         )
-        assert not any(
-            isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
-            for f in sys.meta_path
+        self.assertFalse(
+            any(
+                isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
+                for f in sys.meta_path
+            )
         )
-        assert self.einops_patch_module._EINOPS_NEEDS_PATCH is False
+        self.assertFalse(self.einops_patch_module._EINOPS_NEEDS_PATCH)
 
     def test_non_target_version_unaffected(self):
         sys.path.insert(0, str(fake_einops_package(self.temp_path, "0.7.0rc2")))
@@ -107,20 +109,22 @@ class TestEinopsPatch(TestCase):
         importlib.import_module("einops")
         einops_module = importlib.import_module("einops.einops")
 
-        assert einops_module._reconstruct_from_shape.__name__ == "A"
-        assert (
-            getattr(einops_module, "_reconstruct_from_shape_uncached", None).__name__
-            == "B"
+        self.assertEqual(einops_module._reconstruct_from_shape.__name__, "A")
+        self.assertEqual(
+            getattr(einops_module, "_reconstruct_from_shape_uncached", None).__name__,
+            "B",
         )
-        assert (
-            getattr(einops_module._prepare_transformation_recipe, "__name__", "")
-            == "_outer"
+        self.assertEqual(
+            getattr(einops_module._prepare_transformation_recipe, "__name__", ""),
+            "_outer",
         )
-        assert not any(
-            isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
-            for f in sys.meta_path
+        self.assertFalse(
+            any(
+                isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
+                for f in sys.meta_path
+            )
         )
-        assert self.einops_patch_module._EINOPS_NEEDS_PATCH is False
+        self.assertFalse(self.einops_patch_module._EINOPS_NEEDS_PATCH)
 
     def test_already_imported_target_patches_immediately(self):
         sys.path.insert(0, str(fake_einops_package(self.temp_path, "0.6.1")))
@@ -129,18 +133,21 @@ class TestEinopsPatch(TestCase):
         self.einops_patch_module._patch_einops()
         einops_module = importlib.import_module("einops.einops")
 
-        assert (
-            einops_module._reconstruct_from_shape
-            is einops_module._reconstruct_from_shape_uncached
+        self.assertIs(
+            einops_module._reconstruct_from_shape,
+            einops_module._reconstruct_from_shape_uncached,
         )
-        assert (
-            getattr(einops_module._prepare_transformation_recipe, "__name__", "")
-            == "_inner"
+        self.assertEqual(
+            getattr(einops_module._prepare_transformation_recipe, "__name__", ""),
+            "_inner",
         )
-        assert not any(
-            isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
-            for f in sys.meta_path
+        self.assertFalse(
+            any(
+                isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
+                for f in sys.meta_path
+            )
         )
+        self.assertFalse(self.einops_patch_module._EINOPS_NEEDS_PATCH)
 
     def test_already_imported_non_target_unaffected(self):
         sys.path.insert(0, str(fake_einops_package(self.temp_path, "0.8.0")))
@@ -149,15 +156,18 @@ class TestEinopsPatch(TestCase):
         self.einops_patch_module._patch_einops()
         einops_module = importlib.import_module("einops.einops")
 
-        assert einops_module._reconstruct_from_shape.__name__ == "A"
-        assert (
-            getattr(einops_module._prepare_transformation_recipe, "__name__", "")
-            == "_outer"
+        self.assertEqual(einops_module._reconstruct_from_shape.__name__, "A")
+        self.assertEqual(
+            getattr(einops_module._prepare_transformation_recipe, "__name__", ""),
+            "_outer",
         )
-        assert not any(
-            isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
-            for f in sys.meta_path
+        self.assertFalse(
+            any(
+                isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
+                for f in sys.meta_path
+            )
         )
+        self.assertFalse(self.einops_patch_module._EINOPS_NEEDS_PATCH)
 
     def test_idempotent(self):
         sys.path.insert(0, str(fake_einops_package(self.temp_path, "0.6.1")))
@@ -165,12 +175,12 @@ class TestEinopsPatch(TestCase):
         self.einops_patch_module._patch_einops()
         self.einops_patch_module._patch_einops()
 
-        assert (
+        self.assertEqual(
             sum(
                 isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
                 for f in sys.meta_path
-            )
-            == 1
+            ),
+            1,
         )
 
         importlib.import_module("einops")
@@ -189,10 +199,12 @@ class TestEinopsPatch(TestCase):
             einops_module_2._prepare_transformation_recipe,
         )
 
-        assert first == second
-        assert not any(
-            isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
-            for f in sys.meta_path
+        self.assertEqual(first, second)
+        self.assertFalse(
+            any(
+                isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
+                for f in sys.meta_path
+            )
         )
 
     @parametrize(
@@ -211,22 +223,24 @@ class TestEinopsPatch(TestCase):
         einops_module = importlib.import_module("einops.einops")
 
         if not kwargs.get("missing_uncached"):
-            assert (
-                einops_module._reconstruct_from_shape
-                is einops_module._reconstruct_from_shape_uncached
+            self.assertIs(
+                einops_module._reconstruct_from_shape,
+                einops_module._reconstruct_from_shape_uncached,
             )
 
         if not kwargs.get("missing_wrapped"):
-            assert (
-                getattr(einops_module._prepare_transformation_recipe, "__name__", "")
-                == "_inner"
+            self.assertEqual(
+                getattr(einops_module._prepare_transformation_recipe, "__name__", ""),
+                "_inner",
             )
 
-        assert not any(
-            isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
-            for f in sys.meta_path
+        self.assertFalse(
+            any(
+                isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
+                for f in sys.meta_path
+            )
         )
-        assert self.einops_patch_module._EINOPS_NEEDS_PATCH is False
+        self.assertFalse(self.einops_patch_module._EINOPS_NEEDS_PATCH)
 
     def test_cleanup_interceptor_even_on_exception(self):
         package_directory = self.temp_path / "einops"
@@ -237,11 +251,13 @@ class TestEinopsPatch(TestCase):
         self.einops_patch_module._patch_einops()
 
         importlib.import_module("einops")
-        assert not any(
-            isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
-            for f in sys.meta_path
+        self.assertFalse(
+            any(
+                isinstance(f, self.einops_patch_module._EinopsImportInterceptor)
+                for f in sys.meta_path
+            )
         )
-        assert self.einops_patch_module._EINOPS_NEEDS_PATCH is False
+        self.assertFalse(self.einops_patch_module._EINOPS_NEEDS_PATCH)
 
 
 instantiate_parametrized_tests(
