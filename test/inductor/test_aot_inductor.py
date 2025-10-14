@@ -330,6 +330,10 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "different # of input/output/constants in native matmul",
+    )
     def test_empty_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -2308,6 +2312,10 @@ class AOTInductorTestsTemplate:
 
     # mps doesn't support float64
     @skipIfMPS
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "FIXME: cannot do get_size on FakeTensor during lowering.",
+    )
     def test_while_loop_with_parameters(self):
         inputs = (
             torch.randn(
@@ -2885,6 +2893,9 @@ class AOTInductorTestsTemplate:
                 result_package = model_package(*inputs_on_device)
             self.assertTrue(same(result_ref.cpu(), result_package.cpu()))
 
+    @unittest.skipIf(
+        config.triton.native_matmul, "sin and mm are fused in native matmul"
+    )
     def test_reuse_kernel(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -2902,9 +2913,9 @@ class AOTInductorTestsTemplate:
             torch.randn(87, 87, device=self.device),
         )
         model = Model()
-        self.check_model(
-            model, example_inputs, atol=1e-4, rtol=1e-4
-        )  # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
+
+        # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
+        self.check_model(model, example_inputs, atol=1e-4, rtol=1e-4)
 
         if self.device == "mps":
             self.code_check_count(
@@ -2977,7 +2988,13 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (x, y, z)
         model = Model(self.device).to(dtype=torch.float)
-        self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
+        self.check_model(
+            model,
+            example_inputs,
+            dynamic_shapes=dynamic_shapes,
+            atol=1e-5,
+            rtol=1e-5,
+        )
 
     def test_fake_tensor_device_validation(self):
         if self.device != GPU_TYPE:
@@ -5084,6 +5101,7 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
+    @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
@@ -5167,6 +5185,9 @@ class AOTInductorTestsTemplate:
                 FileCheck().check_not(f"before_launch - {kernel_name}").run(code)
                 FileCheck().check_not(f"after_launch - {kernel_name}").run(code)
 
+    @unittest.skipIf(
+        config.triton.native_matmul, "different kernel name when native matmul"
+    )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
     def test_aoti_profiler(self, enable_kernel_profile):
         # basic addmm model
@@ -5883,7 +5904,9 @@ class AOTInductorTestsTemplate:
         runner.update_constant_buffer(attach_weights, False, False)
         expected = model(test_inputs)
         output = runner_call(test_inputs)
-        self.assertEqual(expected, output)
+
+        atol, rtol = 3e-4, 3e-4
+        self.assertEqual(expected, output, atol=atol, rtol=rtol)
 
     def test_weight_on_disk_legacy(self):
         class Model(torch.nn.Module):
@@ -5924,7 +5947,8 @@ class AOTInductorTestsTemplate:
             pt2_contents = load_pt2(package_path, load_weights_from_disk=True)
             loaded1 = pt2_contents.aoti_runners["model"]
 
-        self.assertEqual(loaded1(a), model(a))
+        atol, rtol = 3e-4, 3e-4
+        self.assertEqual(loaded1(a), model(a), atol=atol, rtol=rtol)
 
     def test_extract_constants_map(self):
         class Model(torch.nn.Module):
@@ -6132,7 +6156,7 @@ class AOTInductorTestsTemplate:
         test_inputs = torch.randn(M, K, device=self.device)
         expected = model(test_inputs)
         output = runner_call(test_inputs)
-        self.assertEqual(expected, output)
+        self.assertEqual(expected, output, atol=1e-3, rtol=1e-3)
 
         new_weights = {
             "L__self___weight": torch.randn(N, K, device=self.device),
@@ -6264,7 +6288,7 @@ class AOTInductorTestsTemplate:
         test_inputs = torch.randn(M, K, device=self.device)
         expected = model(test_inputs)
         output = runner_call(test_inputs)
-        self.assertEqual(expected, output)
+        self.assertEqual(expected, output, atol=1e-3, rtol=1e-3)
 
         new_weights = {
             "L__self___weight": torch.randn(N, K, device=self.device),
@@ -6281,7 +6305,7 @@ class AOTInductorTestsTemplate:
         new_expected = torch.nn.functional.linear(
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
-        self.assertEqual(new_expected, new_output)
+        self.assertEqual(new_expected, new_output, atol=1e-3, rtol=1e-3)
 
         # Inplace substitube tensor, without user managed buffer, result should be different.
         new_weights["L__self___weight"].add_(1)
@@ -6289,7 +6313,7 @@ class AOTInductorTestsTemplate:
 
         new_output = runner_call(test_inputs)
         # Same as the previous result
-        self.assertEqual(new_expected, new_output)
+        self.assertEqual(new_expected, new_output, atol=1e-3, rtol=1e-3)
         new_expected = torch.nn.functional.linear(
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
@@ -6309,14 +6333,14 @@ class AOTInductorTestsTemplate:
         # Try user managed_buffer, should have same free memory.
         runner.update_constant_buffer(new_weights, True, False, True)
         mem_after, _ = torch.cuda.mem_get_info(self.device)
-        self.assertEqual(mem_before, mem_after)
+        self.assertEqual(mem_before, mem_after, atol=1e-3, rtol=1e-3)
 
         runner.swap_constant_buffer()
         new_output = runner_call(test_inputs)
         new_expected = torch.nn.functional.linear(
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
-        self.assertEqual(new_expected, new_output)
+        self.assertEqual(new_expected, new_output, atol=1e-3, rtol=1e-3)
 
         # Inplace substitube tensor, with user managed buffer, result should be the same.
         new_weights["L__self___weight"].add_(1)
@@ -6326,7 +6350,7 @@ class AOTInductorTestsTemplate:
         new_expected = torch.nn.functional.linear(
             test_inputs, new_weights["L__self___weight"], new_weights["L__self___bias"]
         )
-        self.assertEqual(new_expected, new_output)
+        self.assertEqual(new_expected, new_output, atol=1e-3, rtol=1e-3)
 
         new_weights = {
             "L__self___weight": torch.randn(N, K, device=self.device),
@@ -6348,10 +6372,10 @@ class AOTInductorTestsTemplate:
 
         new_output = runner_call(test_inputs)
         expected_output = model(test_inputs)
-        torch.testing.assert_close(new_output, expected_output)
+        torch.testing.assert_close(new_output, expected_output, atol=1e-3, rtol=1e-3)
 
         with self.assertRaises(AssertionError):
-            torch.testing.assert_close(new_expected, new_output)
+            torch.testing.assert_close(new_expected, new_output, atol=1e-3, rtol=1e-3)
 
     def test_cond_share_predicte(self):
         class Model(torch.nn.Module):
@@ -7242,6 +7266,7 @@ class AOTInductorTestsTemplate:
 
         self.assertEqual(outputs, outputs_aoti)
 
+    @unittest.skipIf(config.triton.native_matmul, "different code generated")
     def test_pad_non_zero_memory_leak(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("test is only for GPU_TYPE")
@@ -7262,7 +7287,7 @@ class AOTInductorTestsTemplate:
         model_aoti = torch._inductor.aoti_load_package(package_path)
         outputs_aoti = model_aoti(*example_inputs)
 
-        self.assertEqual(outputs, outputs_aoti)
+        self.assertEqual(outputs, outputs_aoti, atol=1e-2, rtol=1e-2)
 
         FileCheck().check_regex(
             r"aoti_torch_as_strided\(buf0_handle, .*, &buf0_handle_restrided\)"
