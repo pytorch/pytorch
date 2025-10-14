@@ -205,7 +205,8 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
             actual_s = input_shape[p.input_dim]
             if not (actual_s == 1 or desired_s == -1 or desired_s == actual_s):
                 raise AssertionError(
-                    f"Expected actual_s == 1 or desired_s == -1 or desired_s == actual_s, got actual_s={actual_s}, desired_s={desired_s}"
+                    f"Expected actual_s == 1 or desired_s == -1 or "
+                    f"desired_s == actual_s, got actual_s={actual_s}, desired_s={desired_s}"
                 )
         mapping.append(
             p
@@ -712,7 +713,7 @@ def register_op_strategy_map(
         mesh = op_schema.get_mesh_from_args(validate=False)
 
         global_in_shape = input_strategy.shape
-        if not global_in_shape is not None:
+        if global_in_shape is None:
             raise AssertionError("Shape required.")
 
         output_strategy = OpStrategy([])

@@ -1057,12 +1057,14 @@ def _common_norm_backward_strategy(
     if not rms_norm:
         if not (isinstance(output_mask, list) and len(output_mask) == 3):
             raise AssertionError(
-                f"Expected output_mask to be list of length 3, got {type(output_mask)} of length {len(output_mask) if isinstance(output_mask, list) else 'N/A'}"
+                f"Expected output_mask to be list of length 3, got {type(output_mask)} "
+                f"of length {len(output_mask) if isinstance(output_mask, list) else 'N/A'}"
             )
     else:
         if not (isinstance(output_mask, list) and len(output_mask) == 2):
             raise AssertionError(
-                f"Expected output_mask to be list of length 2, got {type(output_mask)} of length {len(output_mask) if isinstance(output_mask, list) else 'N/A'}"
+                f"Expected output_mask to be list of length 2, got {type(output_mask)} "
+                f"of length {len(output_mask) if isinstance(output_mask, list) else 'N/A'}"
             )
 
     # output tuple: (d_input, d_weight[, d_bias])
