@@ -112,7 +112,7 @@ def unify_object(u, v, s):
     >>> unify_object(f, g, {})
     {~x: 2}
     """
-    if type(u) != type(v):
+    if type(u) is not type(v):
         return False
     if hasattr(u, "__slots__"):
         return unify(
