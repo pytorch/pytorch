@@ -907,8 +907,12 @@ from user code:
             len(all_lines), 0, "Should find at least one LazyVariableTracker line"
         )
 
-        self.assertIn("LazyVariableTracker(Unrealized: <class 'function'>)", all_lines[0])
-        self.assertIn("LazyVariableTracker(realized: UserFunctionVariable())", all_lines[2])
+        self.assertIn(
+            "LazyVariableTracker(Unrealized: <class 'function'>)", all_lines[0]
+        )
+        self.assertIn(
+            "LazyVariableTracker(realized: UserFunctionVariable())", all_lines[2]
+        )
 
     @make_logging_test(graph_breaks=True)
     def test_data_dependent_branching_gb(self, records):
