@@ -196,9 +196,9 @@ def varlen_attn(
     return out
 
 
-def setup_context(ctx, inputs, output):
-    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, attn_bias = inputs
-    out, lse, rng_state, philox_offset = output
+def _setup_context(ctx, inputs, output):
+    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
+    out, lse, rng_state = output
     ctx.query = query
     ctx.key = key
     ctx.value = value
@@ -214,7 +214,7 @@ def setup_context(ctx, inputs, output):
     ctx.philox_offset = philox_offset
 
 
-def backward(ctx, grad_out, grad_lse, grad_rng, grad_philox_offset):
+def _backward(ctx, grad_out, grad_lse, grad_rng):
     query = ctx.query
     key = ctx.key
     value = ctx.value
@@ -282,4 +282,4 @@ def backward(ctx, grad_out, grad_lse, grad_rng, grad_philox_offset):
     return dq, dk, dv, None, None, None, None, None, None
 
 
-_varlen_attn.register_autograd(backward, setup_context=setup_context)
+_varlen_attn.register_autograd(_backward, setup_context=_setup_context)
