@@ -1515,6 +1515,18 @@ class BuiltinVariable(VariableTracker):
             assert istype(arg.sym_num, (torch.SymInt, torch.SymFloat))
             return SymNodeVariable.create(tx, arg.as_proxy() != 0)
 
+        if isinstance(arg, ConstDictVariable):
+            return ConstantVariable.create(len(arg.items) > 0)
+        if isinstance(arg, UserDefinedObjectVariable):
+            # for user defined objects, first try __bool__ if defined, else
+            # __len__. If neither is defined, then any instance is considered True
+            if arg.call_obj_hasattr(tx, "__bool__").value:  # type: ignore[attr-defined]
+                return arg.call_method(tx, "__bool__", [], {})
+            elif arg.call_obj_hasattr(tx, "__len__").value:  # type: ignore[attr-defined]
+                length = arg.call_method(tx, "__len__", [], {})
+                return ConstantVariable.create(length.value > 0)  # type: ignore[attr-defined]
+            else:
+                return ConstantVariable.create(True)
         # TODO handle more cases and merge this with this with `generic_jump`.
 
     def call_str(self, tx: "InstructionTranslator", arg):
@@ -2873,7 +2885,7 @@ class BuiltinVariable(VariableTracker):
         # Unwrap the underlying ConstDictVariable
         if isinstance(a, DictViewVariable):
             a = a.dv_dict
-        if isinstance(a, (ListVariable, ConstDictVariable)):
+        if isinstance(a, (ListVariable, ConstDictVariable, UserDefinedDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
 
         return None
