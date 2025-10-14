@@ -1016,7 +1016,10 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         opts = dist.ProcessGroupNCCL.Options()
         opts._timeout = timedelta(seconds=30)
         mesh_2d = global_mesh._unflatten(
-            0, (1, 8), ("pp", "spmd"), backend_override={0: "fake", 1: ("nccl", opts)}
+            0,
+            (1, 8),
+            ("pp", "spmd"),
+            backend_override={"pp": "fake", "spmd": ("nccl", opts)},
         )
         opts = dist.ProcessGroupNCCL.Options()
         opts._timeout = timedelta(seconds=60)
@@ -1024,7 +1027,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             1,
             (2, 2, 2),
             ("dp", "cp", "tp"),
-            backend_override={0: "nccl", 1: "nccl", 2: ("nccl", opts)},
+            backend_override={"dp": "nccl", "cp": "nccl", "tp": ("nccl", opts)},
         )
         self.assertEqual(mesh_4d["pp"].get_group()._get_backend_name(), "custom")
         spmd_pg = mesh_2d["spmd"].get_group()
