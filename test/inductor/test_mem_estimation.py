@@ -234,7 +234,9 @@ class TestMemoryTracker(InductorTestCase):
             zeros = torch.zeros_like(primals_1)  # Create zeros tensor
             add_result = zeros + 1  # Use zeros (first use)
             sum_result = zeros.sum()  # Use zeros (second use)
-            return add_result, sum_result
+            cpu = torch.zeros([20], device="cpu")
+            cpu_2 = cpu + 1
+            return add_result, sum_result, cpu_2
 
         with FakeTensorMode():
             # Create input
@@ -276,7 +278,7 @@ class TestMemoryTracker(InductorTestCase):
             # Alternative schedule: change which operation is the last use of zeros
             # Original: zeros_like, add, sum (zeros freed after sum)
             # Alternative: zeros_like, sum, add (zeros freed after add)
-            assert len(compute_nodes) == 3, (
+            assert len(compute_nodes) == 5, (
                 f"Expected 3 compute nodes, got {len(compute_nodes)}"
             )
             reordered_nodes = [
@@ -285,6 +287,8 @@ class TestMemoryTracker(InductorTestCase):
                 compute_nodes[
                     1
                 ],  # add: add_result = zeros + 1 (last use, zeros freed here)
+                compute_nodes[3],  # cpu = torch.zeros([20], device="cpu")
+                compute_nodes[4],  # cpu_2 = cpu + 1
             ]
 
             for node in reordered_nodes:

@@ -9,10 +9,14 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Union
 
 import torch
-from torch._inductor.fx_passes.memory_estimator import MemoryTracker, build_memory_profile, _is_releasable
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.fx_passes.bucketing import is_wait_tensor
+from torch._inductor.fx_passes.memory_estimator import (
+    _is_releasable,
+    build_memory_profile,
+    MemoryTracker,
+)
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 
@@ -218,7 +222,9 @@ class OverlapScheduler:
         self.unscheduled_collectives: OrderedSet[fx.Node] = OrderedSet()
 
         # Memory tracking using abstracted MemoryTracker
-        self.original_peak_memory = max(build_memory_profile(self.graph, _is_releasable))
+        self.original_peak_memory = max(
+            build_memory_profile(self.graph, _is_releasable)
+        )
         self.memory_tracker = MemoryTracker(self.graph)
 
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
