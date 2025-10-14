@@ -644,6 +644,83 @@ class DTensorTest(DTensorTestBase):
         local_tensor = sharded_tensor.to_local()
         self.assertEqual(local_tensor.item(), self.rank)
 
+    @with_comms
+    def test_convolution_double_backprop(self):
+        """Test convolution double backpropagation with DTensor.
+
+        This test verifies that double backpropagation through distributed
+        convolution layers works correctly. This requires special handling in
+        the sharding propagator because convolution_backward can return None
+        for any of its three outputs (grad_input, grad_weight, grad_bias) based
+        on the output_mask parameter.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/159959
+        """
+        import torch.nn as nn
+        from torch.distributed.tensor import distribute_module
+
+        device_mesh = self.build_device_mesh()
+
+        # Helper function to distribute parameters
+        def _distribute_params(name: str, module: nn.Module, device_mesh):
+            for param_name, param in module.named_parameters():
+                dist_spec = [Replicate()]
+                dist_param = torch.nn.Parameter(
+                    distribute_tensor(param, device_mesh, dist_spec)
+                )
+                param_name_flat = "_".join(param_name.split("."))
+                module.register_parameter(param_name_flat, dist_param)
+
+        # Create a simple convolution model (bias=False to avoid unrelated issues)
+        class SimpleConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, kernel_size=1, bias=False)
+                torch.nn.init.ones_(self.conv.weight)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        # Build and distribute the model
+        model = SimpleConvModel().to(self.device_type)
+        model = distribute_module(model, device_mesh, _distribute_params)
+
+        # Create distributed input tensor
+        batch_size = 4
+        in_shape = [batch_size, 1, 8, 8]
+        x = torch.randn(*in_shape, device=self.device_type, requires_grad=True)
+        x_dist = distribute_tensor(x, device_mesh, [Shard(0)])
+
+        # Forward pass
+        y = model(x_dist)
+        self.assertIsInstance(y, DTensor)
+
+        # First backward: compute gradients w.r.t. input with create_graph=True
+        # This enables double backpropagation
+        y_grads = torch.autograd.grad(
+            outputs=[y.sum()], inputs=[x_dist], create_graph=True
+        )[0]
+        self.assertIsInstance(y_grads, DTensor)
+        self.assertTrue(y_grads.requires_grad)
+
+        # Second backward: compute gradients of gradients (double backprop)
+        # This is where the issue occurred - convolution_backward output_mask
+        # causes some outputs to be None, and the sharding propagator needs
+        # to handle this correctly
+        y_grads.sum().backward()
+
+        # Verify gradients were computed correctly
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                self.assertIsNotNone(
+                    param.grad, f"Gradient for {name} should not be None"
+                )
+                self.assertIsInstance(param.grad, DTensor)
+
+        # Verify input gradients
+        self.assertIsNotNone(x_dist.grad)
+        self.assertIsInstance(x_dist.grad, DTensor)
+
 
 class LocalDTensorTest(DTensorTest):
     def get_local_tensor_mode(self):
