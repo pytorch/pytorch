@@ -13,7 +13,15 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
-PARAM_NAMES = "query key value attn_mask dropout is_causal enable_gqa".split()
+PARAM_NAMES = [
+    "query",
+    "key",
+    "value",
+    "attn_mask",
+    "dropout",
+    "is_causal",
+    "enable_gqa",
+]
 
 
 class SDPAParamsVariable(VariableTracker):

@@ -65,6 +65,7 @@ def _dequantize_tensor(tensor, qtype, quant_loss=None):
         elif tensor.dtype == torch.float16 and quant_loss is None:
             return tensor.float()
         else:
+            # pyrefly: ignore  # unsupported-operation
             return tensor.float() / quant_loss
     elif qtype == DQuantType.BFP16:
         if tensor.dtype != torch.float16:

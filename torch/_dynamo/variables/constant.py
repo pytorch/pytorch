@@ -43,7 +43,7 @@ class ConstantVariable(VariableTracker):
         NOTE: the caller must install the proper guards if needed; most often
         the guard will be `CONSTANT_MATCH`.
         """
-        source = kwargs.get("source", None)
+        source = kwargs.get("source")
 
         # Routing for supported collection literals.
         if isinstance(value, set):
