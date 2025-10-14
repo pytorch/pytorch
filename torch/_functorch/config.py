@@ -4,6 +4,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from typing import Callable
+
+
 """
 Global flags for aot autograd
 """
@@ -13,6 +16,13 @@ import sys
 from typing import Literal, Optional, TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
+
+
+# [@compile_ignored: debug]
+_save_config_ignore = [
+    # callable not serializeable
+    "joint_custom_pass",
+]
 
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
@@ -270,7 +280,7 @@ backward_pass_autocast = "same_as_forward"
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
-donated_buffer = False if is_fbcode() else True
+donated_buffer = not is_fbcode()
 
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/
@@ -356,6 +366,10 @@ _sync_decision_cross_ranks = False
 # (this includes parameters and user marked as static)
 # "all" - no filtering, everything saved for backward.
 saved_tensors_hooks_filtering_mode = "donated"
+
+
+# This callback is invoked on the joint graph before partitioning
+joint_custom_pass: Callable = None  # type: ignore[assignment]
 
 
 if TYPE_CHECKING:
