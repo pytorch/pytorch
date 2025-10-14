@@ -89,11 +89,11 @@ __all__ = ['get_storage_info', 'hierarchical_pickle', 'get_model_info', 'get_inl
 def get_storage_info(storage):
     if not isinstance(storage, torch.utils.show_pickle.FakeObject):
         raise AssertionError(f"storage is not FakeObject: {type(storage)}")
-    if  storage.module != "pers":
+    if storage.module != "pers":
         raise AssertionError(f"storage.module is not 'pers': {storage.module!r}")
-    if  storage.name != "obj":
+    if storage.name != "obj":
         raise AssertionError(f"storage.name is not 'obj': {storage.name!r}")
-    if  storage.state is not None:
+    if storage.state is not None:
         raise AssertionError(f"storage.state is not None: {storage.state!r}")
     if not isinstance(storage.args, tuple):
         raise AssertionError(f"storage.args is not a tuple: {type(storage.args)}")
