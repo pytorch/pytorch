@@ -8,7 +8,7 @@
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
 #include <torch/headeronly/core/ScalarType.h>
-#include <torch/headeronly/util/HOArrayRef.h>
+#include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 
 namespace torch::stable {
 
@@ -60,7 +60,7 @@ inline torch::stable::Tensor narrow(
 // only dtype information.
 inline torch::stable::Tensor new_empty(
     const torch::stable::Tensor& self,
-    torch::headeronly::IntHOArrayRef size,
+    torch::headeronly::IntHeaderOnlyArrayRef size,
     std::optional<c10::ScalarType> dtype = std::nullopt) {
   int32_t device_type;
   TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &device_type));
@@ -98,7 +98,7 @@ inline torch::stable::Tensor new_empty(
 // only dtype information.
 inline torch::stable::Tensor new_zeros(
     const torch::stable::Tensor& self,
-    torch::headeronly::IntHOArrayRef size,
+    torch::headeronly::IntHeaderOnlyArrayRef size,
     std::optional<c10::ScalarType> dtype = std::nullopt) {
   int32_t device_type;
   TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &device_type));
@@ -134,10 +134,10 @@ inline torch::stable::Tensor new_zeros(
 
 // We expect this to be the stable version of the pad.default op.
 // pad.default takes in a SymInt[] as the pad argument however pad is typed as
-// torch::headeronly::IntHOArrayRef as SymInt is not yet header-only.
+// torch::headeronly::IntHeaderOnlyArrayRef as SymInt is not yet header-only.
 inline torch::stable::Tensor pad(
     const torch::stable::Tensor& self,
-    torch::headeronly::IntHOArrayRef pad,
+    torch::headeronly::IntHeaderOnlyArrayRef pad,
     const std::string& mode = "constant",
     double value = 0.0) {
   AtenTensorHandle ret0 = nullptr;
@@ -169,10 +169,10 @@ inline torch::stable::Tensor amax(
 // This function is an overload to compute the maximum value along each slice of
 // `self` reducing over all the dimensions in the vector `dims`. The
 // amax.default op takes in a SymInt[] as the dims argument, however dims is
-// typed as use IntHOArrayRef here because SymInt is not yet header-only
+// typed as use IntHeaderOnlyArrayRef here because SymInt is not yet header-only
 inline torch::stable::Tensor amax(
     const torch::stable::Tensor& self,
-    torch::headeronly::IntHOArrayRef dims,
+    torch::headeronly::IntHeaderOnlyArrayRef dims,
     bool keepdim = false) {
   AtenTensorHandle ret = nullptr;
   TORCH_ERROR_CODE_CHECK(aoti_torch_aten_amax(

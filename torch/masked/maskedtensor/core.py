@@ -198,7 +198,7 @@ class MaskedTensor(torch.Tensor):
     def _validate_members(self):
         data = self._masked_data
         mask = self.get_mask()
-        if type(data) != type(mask):
+        if type(data) is not type(mask):
             raise TypeError(
                 f"data and mask must have the same type. Got {type(data)} and {type(mask)}"
             )

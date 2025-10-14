@@ -117,7 +117,7 @@ class Linear(nnq.Linear):
             + str([float_mod.__name__ for float_mod in float_modules])
         )
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
-        if type(mod) == nni.LinearReLU:
+        if type(mod) is nni.LinearReLU:
             mod = mod[0]
         # pyrefly: ignore  # missing-attribute
         if mod.qconfig is not None and mod.qconfig.weight is not None:
