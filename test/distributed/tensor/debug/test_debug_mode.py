@@ -450,6 +450,40 @@ class TestDTensorDebugMode(TestCase):
   [node] output: output""",  # NOQA: B950
         )
 
+    def test_regional_hook(self):
+        def _clone(func, types, args, kwargs, result):
+            return {"value": result.clone()}
+
+        def _dtype(func, types, args, kwargs, result):
+            return {"dtype": result.dtype}
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 5)
+                self.l2 = torch.nn.Linear(5, 6)
+                self.l3 = torch.nn.Linear(6, 7)
+
+            def forward(self, x):
+                x0 = self.l1(x)
+                with DebugMode.dispatch_hooks(record_hook=_clone, log_hook=_dtype):
+                    x1 = self.l2(x0)
+                x2 = self.l3(x1)
+                return x2, x1, x0
+
+        x = torch.randn(4, 4, device=self.device_type)
+        mod = Foo().to(device=self.device_type)
+
+        debug_mode = DebugMode()
+        with DebugMode() as debug_mode:
+            _, x1, _ = mod(x)
+
+        print(debug_mode.debug_string())
+        self.assertTrue(debug_mode.operators[0].record is None)
+        record = debug_mode.operators[3].record["value"]
+        self.assertTrue(torch.allclose(record, x1))
+
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 
