@@ -561,7 +561,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         ):
             ret_list = ret if isinstance(ret, list) else [ret]
             for r in ret_list:
-                assert type(arg) == type(
+                assert type(arg) is type(
                     r
                 ), f"""Called {str(func)} with input of type {type(arg)}
 and output of type {type(ret)}. But expected types to match."""

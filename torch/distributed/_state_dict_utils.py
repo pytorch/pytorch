@@ -792,7 +792,7 @@ def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None
     for i in range(1, len(path)):
         prev_key = path[i - 1]
         key = path[i]
-        def_val: Union[CONTAINER_TYPE, list[Any]] = {} if type(key) == str else []
+        def_val: Union[CONTAINER_TYPE, list[Any]] = {} if type(key) is str else []
 
         if isinstance(cur_container, Mapping):
             cur_container = cast(
@@ -806,7 +806,7 @@ def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None
             cur_container = cur_container[prev_key]
 
     key = path[-1]
-    if type(key) == int:
+    if type(key) is int:
         extend_list(cast(list[Any], cur_container), key)
 
     cur_container[key] = value

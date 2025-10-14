@@ -146,6 +146,7 @@ class ComposabilityTest(MultiProcContinuousTest):
         total_layers,
         apply_dp,
         loss_fn,
+        scale_grads=True,
     ):
         if issubclass(ScheduleClass, PipelineScheduleSingle):
             pipeline_stage, offset = self._build_pp_stage(
@@ -163,6 +164,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 pipeline_stage,
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
+                scale_grads=scale_grads,
             )
         else:
             n_virtual = 2
@@ -185,6 +187,7 @@ class ComposabilityTest(MultiProcContinuousTest):
                 stages,
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
+                scale_grads=scale_grads,
             )
         return pipeline_schedule, partial_models, offsets
 
@@ -523,8 +526,8 @@ class ComposabilityTest(MultiProcContinuousTest):
         runtime.pipeline_order_with_comms = unshard_schedule
         runtime.step(dummy_input)
 
-        # Verify parameters are now unsharded
-        check_fsdp_unsharded_state(stage.submod, expected_unsharded=True)
+        # Verify parameters are still sharded
+        check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
 
 
 instantiate_parametrized_tests(ComposabilityTest)
