@@ -164,10 +164,11 @@ def remove_boolean_dispatch_from_name(p) -> Any:
         return "torch.nn.functional.adaptive_max_pool2d"
     elif p is F.adaptive_max_pool3d:
         return "torch.nn.functional.adaptive_max_pool3d"
-    assert "boolean_dispatch" not in str(p), (
-        f"{p} does not have a human readable representation in "
-        + "quantization documentation"
-    )
+    if "boolean_dispatch" in str(p):
+        raise AssertionError(
+            f"{p} does not have a human readable representation in "
+            + "quantization documentation"
+        )
     return p
 
 
@@ -300,7 +301,8 @@ def _get_fuser_method_in_reversed_nested_tuple_format(
     The first argument of a fuser method is always `is_qat` and is not affected
     in the conversion. We currently only support functions with 3 or 4 arguments.
     """
-    assert config.fuser_method is not None
+    if config.fuser_method is None:
+        raise AssertionError("config.fuser_method must be provided")
     if config._pattern_complex_format is not None:
         return config.fuser_method
     if not isinstance(config.pattern, tuple):
