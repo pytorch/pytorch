@@ -1405,9 +1405,9 @@ def _context_parallel_shard(
         if isinstance(buffer, torch.Tensor):
             assert device == buffer.device, "All buffers must be on the same device"
         else:
-            assert (
-                device == buffer.kv_num_blocks.device
-            ), "All buffers must be on the same device"
+            assert device == buffer.kv_num_blocks.device, (
+                "All buffers must be on the same device"
+            )
 
     flat_sharded_buffers = _context_parallel_buffers(
         mesh, flat_buffers, flat_seq_dims, load_balancer
