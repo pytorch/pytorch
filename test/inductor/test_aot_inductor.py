@@ -611,6 +611,9 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(32, 64, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    @unittest.skip(
+        "install_free_tensors leads to OOM - https://github.com/pytorch/pytorch/issues/164062"
+    )
     def test_large_weight(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -696,6 +699,24 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 512, device=self.device),
         )
         with config.patch({"aot_inductor.force_mmap_weights": True}):
+            self.check_model(Model(), example_inputs)
+
+    def test_large_mmaped_weights_on_disk(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(512, 250112)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(1, 250112, device=self.device),
+            torch.randn(1, 512, device=self.device),
+        )
+        with config.patch(
+            {"aot_inductor.package_constants_on_disk_format": "binary_blob"}
+        ):
             self.check_model(Model(), example_inputs)
 
     def test_with_offset(self):
@@ -5888,7 +5909,7 @@ class AOTInductorTestsTemplate:
                 {
                     "always_keep_tensor_constants": True,
                     "aot_inductor.package_constants_in_so": False,
-                    "aot_inductor.package_constants_on_disk": True,
+                    "aot_inductor.package_constants_on_disk_format": "pickle_weights",
                     "aot_inductor.package": True,
                 }
             ),
@@ -7427,6 +7448,14 @@ class TestAOTInductorConfig(TestCase):
             }
             with self.assertRaises(RuntimeError):
                 maybe_aoti_standalone_config(patches)
+
+    def test_compile_standalone_cross_compile_windows_package_format(self):
+        patches = {
+            "aot_inductor.cross_target_platform": "windows",
+            "aot_inductor.package_constants_in_so": True,
+        }
+        with self.assertRaises(RuntimeError):
+            maybe_aoti_standalone_config(patches)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)

@@ -41,7 +41,6 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
-#include <torch/headeronly/util/Exception.h>
 
 #ifdef __cplusplus
 extern "C" {
