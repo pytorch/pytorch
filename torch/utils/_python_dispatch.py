@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import functools
 import warnings
 from collections import deque
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, overload, Protocol, Union
+from typing import Optional, overload, Protocol, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -20,6 +21,10 @@ from torch._C import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
 # - We need a better user-facing api for _DisableTorchDispatch that
 #   is able to selectively disable __torch_dispatch__ of a particular class.
@@ -32,7 +37,7 @@ _is_in_non_infra_torch_dispatch_mode = False
 _is_in_any_mode_without_ignore_compile_internals = False
 
 
-def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
+def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
     return (
         _is_in_torch_dispatch_mode
         if include_infra_modes
@@ -71,7 +76,7 @@ class TorchDispatchMode:
     the next mode on the mode stack.  If you want recursively call back into
     your current ``__torch_dispatch__`` implementation, either explicitly
     invoke ``self.__torch_dispatch__(...)``, or use the context manager
-    ``__torch_dispatch__(self)`` to make PyTorch
+    ``self`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
 
@@ -200,9 +205,12 @@ class TorchDispatchMode:
         return False
 
 
-def _get_current_dispatch_mode():
+def _get_current_dispatch_mode() -> Optional[TorchDispatchMode]:
+    """
+    Return the top user mode on the stack (the next one that would be
+    executed) if there are any.
+    """
     stack_len = _len_torch_dispatch_stack()
-    # Return a user mode on the stack if there are any
     if stack_len > 0:
         return _get_dispatch_stack_at(stack_len - 1)
     return None
@@ -256,7 +264,12 @@ def _disable_infra_mode(key):
             _push_mode(mode_unset)
 
 
-def _get_current_dispatch_mode_stack():
+def _get_current_dispatch_mode_stack() -> list[TorchDispatchMode]:
+    """
+    Returns the current stack of dispatch modes, with the most recent
+    (i.e., the one that will be processed first) at the end of the
+    list (standard stack convention).
+    """
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
@@ -406,7 +419,7 @@ class TensorWithFlatten(Protocol):
     @overload
     def to(
         self,
-        device: Optional["torch._prims_common.DeviceLikeType"] = None,
+        device: Optional[torch._prims_common.DeviceLikeType] = None,
         dtype: Optional[torch.types._dtype] = None,
         non_blocking: bool = False,
         copy: bool = False,
@@ -548,7 +561,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         ):
             ret_list = ret if isinstance(ret, list) else [ret]
             for r in ret_list:
-                assert type(arg) == type(
+                assert type(arg) is type(
                     r
                 ), f"""Called {str(func)} with input of type {type(arg)}
 and output of type {type(ret)}. But expected types to match."""
@@ -672,6 +685,61 @@ def get_alias_info(func) -> SchemaInfo:
         args=arg_schemas, outs=out_schemas, int_tags=[int(x) for x in func.tags]
     )
     return schema_info
+
+
+def autograd_would_have_decomposed(
+    func: torch._ops.OpOverload, flat_args: Sequence[Union[torch.Tensor, object]]
+) -> bool:
+    """
+    Suppose that an operator has CompositeImplicitAutograd decomp registered.
+    Would autograd have used this decomposition?  It will only use it if there
+    isn't an explicit backend registration for the device as well.  This function
+    will tell if this would have occurred.
+
+    Why do we need to apply these decompositions later?  When inference mode is
+    on, the autograd key is bypassed entirely, so a lower level mode cannot rely
+    on the decomposition have been applied.  It's easy to accidentally never apply
+    the decomposition, resulting in an operator showing up in a graph that
+    is unexpected.
+
+    Why do we need to AVOID applying the decomposition when autograd wouldn't
+    have decomposed?  If autograd doesn't decompose, this means in eager mode
+    we would have run the fused kernel.  It must be possible to trace this
+    fused kernel directly into the graph for fidelity with eager (NB: a user
+    has the option of then further decomposing at proxy tensor mode via
+    decomposition table, but we must preserve it to proxy mode to have the
+    choice.)
+
+    Why does functionalization need to also perform the test here?  This is
+    because some CompositeImplicitAutograd decompositions are not functional.
+    If we are eventually going to decompose, we need to do this while we can
+    still turn functionalization back on, so those decompositions get functionalized.
+    So an early decomposition in functionalization may still be necessary.  Note that
+    if proxy tensor decomposition process could turn functionalization back on, this
+    wouldn't be necessary, and maybe that is a useful thing to do anyway because
+    the decomposition table is user specified and a user could violate the functional
+    decomp requirement with a bad decomp.  If this happened, then you could always
+    pass through functionalization.
+    """
+    has_backend_registration = False
+    for a in flat_args:
+        if isinstance(a, torch.Tensor):
+            backend_key = torch._C._parse_dispatch_key(
+                torch._C._dispatch_key_for_device(a.device.type)
+            )
+            assert backend_key is not None
+            # TODO: use func.has_kernel_for_dispatch_key(backend_key)
+            # but this one checks py_impl and CompositeImplicitAutograd
+            # incorrectly shows up as has backend reg here
+            has_backend_registration = torch._C._dispatch_has_kernel_for_dispatch_key(
+                func.name(), backend_key
+            )
+
+            # in theory we should take all backend keys and take the highest priority one
+            # to properly mimic the dispatcher,
+            # this just grabs the first tensor and takes its device key
+            break
+    return not has_backend_registration
 
 
 # See NOTE[SchemaInfo int_tags] above.

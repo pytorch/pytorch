@@ -33,7 +33,11 @@ import torch._numpy as tnp
 import torch.utils._pytree as pytree
 
 from .. import config, graph_break_hints, trace_rules, variables
-from ..bytecode_transformation import create_call_function, create_instruction
+from ..bytecode_transformation import (
+    create_call_function,
+    create_call_function_ex,
+    create_instruction,
+)
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
 from ..guards import GuardBuilder, install_guard
@@ -388,10 +392,19 @@ class SuperVariable(VariableTracker):
 
 class ExceptionVariable(VariableTracker):
     # The ExceptionVariable corresponds to the BaseException class in Python
-    def __init__(self, exc_type, args, **kwargs) -> None:
-        super().__init__(**kwargs)
+    def __init__(
+        self, exc_type, args, init_kwargs=None, source=None, mutation_type=None
+    ) -> None:
+        super().__init__(source=source, mutation_type=mutation_type)
         self.exc_type = exc_type
         self.args = args
+        if init_kwargs:
+            unimplemented_v2(
+                gb_type="Keyword args passed to exception constructor",
+                context=f"{self} with kwargs {init_kwargs}",
+                explanation="Dynamo does not know how to handle keyword args passed to an exception constructor",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         # When raising a new exception while another exception is already being
         # handled, the new exception's __context__ attribute is automatically
         # set to the handled exception.
@@ -1412,7 +1425,7 @@ class NumpyVariable(VariableTracker):
     def get_constant_collection_for_func(cls, fn):
         mod = fn.__module__.split(".")
         assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
-        return np_constant_collections_map.get(fn, None)
+        return np_constant_collections_map.get(fn)
 
     def call_function(
         self,
@@ -1566,7 +1579,7 @@ class StringFormatVariable(VariableTracker):
             variables.ConstantVariable.create(k): v for k, v in self.sym_kwargs.items()
         }
         codegen(variables.ConstDictVariable(kwargs))
-        codegen.append_output(create_instruction("CALL_FUNCTION_EX", arg=1))
+        codegen.extend_output(create_call_function_ex(True, False))
 
 
 class DebuggingVariable(VariableTracker):
@@ -1917,7 +1930,7 @@ class RandomVariable(VariableTracker):
 class WeakRefVariable(VariableTracker):
     @staticmethod
     def build(tx, weakref_value, **options):
-        source = options.get("source", None)
+        source = options.get("source")
         callback = weakref_value.__callback__
         callback_source = source and AttrSource(source, "__callback__")
         callback_vt = VariableTracker.build(tx, callback, callback_source)

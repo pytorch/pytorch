@@ -370,13 +370,16 @@ isolate_fails_code_str = None
 
         try:
             if isinstance(kernel, Autotuner):
+                # pyrefly: ignore  # missing-attribute
                 if isinstance(kernel.fn, Heuristics):
                     model_str += "ERROR: Repro will not work as intended, "
                     model_str += "triton.runtime.autotuner.Heuristics is not currently supported\n"
                     break
 
                 config_strs = []
+                # pyrefly: ignore  # missing-attribute
                 for kernel_config in kernel.configs:
+                    # pyrefly: ignore  # bad-argument-type
                     config_strs.append(f"""triton.Config(
                             {str(kernel_config.kwargs)},
                             num_warps={kernel_config.num_warps},
@@ -394,8 +397,10 @@ isolate_fails_code_str = None
                 """).strip()
 
             model_str += "\n@triton.jit\n"
+            # pyrefly: ignore  # missing-attribute
             src_code = kernel.src if isinstance(kernel, JITFunction) else kernel.fn.src
             fn_name = (
+                # pyrefly: ignore  # missing-attribute
                 kernel._fn_name
                 if isinstance(kernel, JITFunction)
                 else kernel.fn._fn_name
@@ -409,7 +414,9 @@ isolate_fails_code_str = None
             model_str += "ERROR: Repro will not work as intended, "
             model_str += f"User defined triton kernel exception: {e}\n"
 
+    # pyrefly: ignore  # unbound-name
     if len(kernel_side_table.constant_args) > 0:
+        # pyrefly: ignore  # unbound-name
         model_str += f"{kernel_side_table_prefix}.constant_args={kernel_side_table.constant_args}\n"
 
     model_str += NNModuleToString.convert(gm)
@@ -420,8 +427,10 @@ isolate_fails_code_str = None
     # Extract from graph placeholders and their corresponding arguments
     placeholder_targets = fx_placeholder_targets(gm)
     for placeholder, arg in zip(placeholder_targets, args):
+        # pyrefly: ignore  # unbound-name
         if isinstance(arg, (int, torch.SymInt)):
             writer.symint(placeholder, arg)
+        # pyrefly: ignore  # unbound-name
         elif isinstance(arg, torch.Tensor):
             # TODO: improve these names with FQN
             writer.tensor(placeholder, arg)
@@ -431,16 +440,20 @@ isolate_fails_code_str = None
             writer.unsupported(placeholder, arg)
 
         # Extract symbolic variables from the same arguments
+        # pyrefly: ignore  # unbound-name
         if isinstance(arg, torch.SymInt):
             sym_name = str(arg.node)
             if arg.node.hint is not None:
                 used_syms[sym_name] = arg.node.hint
+        # pyrefly: ignore  # unbound-name
         elif isinstance(arg, torch.Tensor):
             # Extract symbolic variables from tensor shapes and strides
             for dim in arg.shape:
+                # pyrefly: ignore  # unbound-name
                 if isinstance(dim, torch.SymInt) and dim.node.hint is not None:
                     used_syms[str(dim.node)] = dim.node.hint
             for stride in arg.stride():
+                # pyrefly: ignore  # unbound-name
                 if isinstance(stride, torch.SymInt) and stride.node.hint is not None:
                     used_syms[str(stride.node)] = stride.node.hint
 
@@ -758,6 +771,7 @@ def repro_common(
     # TODO: speed this up
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
 
+    # pyrefly: ignore  # bad-assignment
     torch._inductor.config.generate_intermediate_hooks = True
 
     return mod, args
