@@ -964,7 +964,7 @@ class TestFakeQuantizeOps(TestCase):
                 # increasing tolerance for bf16 due to differences in python's x.to(torch.bfloat16) and cpp's x.to(at::kBFloat16)
                 # for example, -0.16749558 gets downcast to -1.68 (after applying grad_factor) in python
                 # in CPP, -1.6752 gets downcast to -1.67
-                tolerance = 1e-4
+                tolerance = 1e-2 if dtype is torch.bfloat16 else 1e-4
 
                 self.assertTrue(
                     torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
