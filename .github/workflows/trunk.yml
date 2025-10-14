@@ -56,7 +56,7 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       build-generates-artifacts: false
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: "linux.4xlarge"
+      runner: "linux.c7i.4xlarge"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -180,13 +180,13 @@ jobs:
       disable-monitor: false
     secrets: inherit
 
-  win-vs2022-cuda12_6-py3-build:
-    name: win-vs2022-cuda12.6-py3
+  win-vs2022-cuda12_8-py3-build:
+    name: win-vs2022-cuda12.8-py3
     uses: ./.github/workflows/_win-build.yml
     needs: get-label-type
     with:
-      build-environment: win-vs2022-cuda12.6-py3
-      cuda-version: "12.6"
+      build-environment: win-vs2022-cuda12.8-py3
+      cuda-version: "12.8"
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
     secrets: inherit
 
