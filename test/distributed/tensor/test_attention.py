@@ -8,6 +8,7 @@ from typing import Callable, ClassVar, Optional, Union
 
 import torch
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as c10d
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributed.device_mesh import init_device_mesh
@@ -26,6 +27,7 @@ from torch.distributed.tensor.experimental._attention import (
     context_parallel_unshard,
     set_rotate_method,
 )
+from torch.distributed.tensor.experimental._cp_custom_ops import flex_cp_allgather
 from torch.distributed.tensor.experimental._load_balancer import (
     _HeadTailLoadBalancer,
     _LoadBalancer,
@@ -475,12 +477,7 @@ class CPFlexAttentionTest(DTensorTestBase):
         B: int = 1,
         mask_func: _mask_mod_signature = causal_mask,
         lb: Optional[_LoadBalancer] = None,
-        atol: float = 1e-6,
-        rtol: float = 1e-2,
     ) -> None:
-        # TODO: Reverify atol and rtol after
-        # https://github.com/pytorch/pytorch/pull/163185 is landed. The accuracy
-        # issue happens on the gradients.
         torch.use_deterministic_algorithms(True)
         torch.cuda.manual_seed(1234)
 
@@ -557,8 +554,8 @@ class CPFlexAttentionTest(DTensorTestBase):
             seq_dims=[seq_dim] * 2,
             load_balancer=lb,
         )
-        torch.testing.assert_close(cp_out, expect_out, atol=atol, rtol=rtol)
-        torch.testing.assert_close(cp_lse, expect_aux.lse, atol=atol, rtol=rtol)
+        torch.testing.assert_close(cp_out, expect_out)
+        torch.testing.assert_close(cp_lse, expect_aux.lse)
 
         # unshard the gradient
         cp_qkv_grad = context_parallel_unshard(
@@ -570,7 +567,7 @@ class CPFlexAttentionTest(DTensorTestBase):
 
         qkv_grad = [t.grad for t in qkv]
         for grad, cp_grad in zip(qkv_grad, cp_qkv_grad):
-            torch.testing.assert_close(grad, cp_grad, atol=atol, rtol=rtol)
+            torch.testing.assert_close(grad, cp_grad)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -678,12 +675,42 @@ class CPFlexAttentionTest(DTensorTestBase):
                 B=batch_size,
                 lb=load_balancer,
                 mask_func=document_causal_mask,
-                atol=1e-6,
             )
 
             test_func()
 
         _cp_options.enable_load_balance = restore_enable_load_balance
+
+
+class TestCPCustomOps(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    def test_flex_cp_custom_op(self) -> None:
+        mesh = init_device_mesh(
+            device_type=self.device_type,
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("cp",),
+        )
+        examples_k_v = [
+            (
+                torch.randn(8, 8, 8, 8, device=self.device_type),
+                torch.randn(8, 8, 8, 8, device=self.device_type),
+                2,
+                c10d._get_process_group_name(mesh.get_group()),
+            ),
+            (
+                torch.randn(8, 8, 8, 8, device=self.device_type, requires_grad=True),
+                torch.randn(8, 8, 8, 8, device=self.device_type, requires_grad=True),
+                2,
+                c10d._get_process_group_name(mesh.get_group()),
+            ),
+        ]
+        for example in examples_k_v:
+            torch.library.opcheck(flex_cp_allgather, example)
 
 
 if __name__ == "__main__":
