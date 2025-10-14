@@ -37,7 +37,30 @@ from torch._functorch.aot_autograd import (
     aot_export_joint_with_descriptors,
 )
 from torch._guards import tracing, TracingContext
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+
+
+def graph_capture(model, inputs, with_export):
+    gm = model
+    fake_mode = None
+    if with_export:
+        with (
+            torch._dynamo.config.patch(install_free_tensors=True),
+            fx_traceback.preserve_node_meta(),
+        ):
+            # TODO: switch to use the official graph_capture API once it is ready
+            gm = _dynamo_graph_capture_for_export(model)(*inputs)
+            fake_mode = gm.meta.get("fake_mode", None)
+
+    with tracing(TracingContext(fake_mode)):
+        with ExitStack() as stack:
+            joint_with_descriptors = aot_export_joint_with_descriptors(
+                stack,
+                model,
+                inputs,
+            )
+            return joint_with_descriptors.graph_module
 
 
 class TestAOTJointWithDescriptors(TestCase):
@@ -778,40 +801,128 @@ class inner_f(torch.nn.Module):
                 return y - 1
 
         inputs = (torch.randn(4, 3),)
+        model = SimpleLinear()
 
-        for with_export in [False]:  # TODO: make dynamo work for annotation
-            with ExitStack() as stack:
-                model = SimpleLinear()
-                fake_mode = None
+        for with_export in [True, False]:
+            graph_module = graph_capture(model, inputs, with_export)
+            custom_metadata = fx_traceback._get_custom_metadata(graph_module)
+            self.assertExpectedInline(
+                str(custom_metadata),
+                """\
+('call_function', 't', {'pp_stage': 0})
+('call_function', 'addmm', {'pp_stage': 0})
+('call_function', 't_1', {'pp_stage': 0})
+('call_function', 'mm', {'pp_stage': 0})
+('call_function', 't_2', {'pp_stage': 0})
+('call_function', 'sum_1', {'pp_stage': 0})
+('call_function', 'view', {'pp_stage': 0})
+('call_function', 't_3', {'pp_stage': 0})""",
+            )
 
-                stack.enter_context(fx_traceback.preserve_node_meta())
+    @requires_cuda
+    def test_preserve_annotate_flex_attention(self):
+        def score_mod(score, b, h, m, n):
+            return score
 
-                if with_export:
-                    stack.enter_context(
-                        torch._dynamo.config.patch(install_free_tensors=True)
+        def _get_block_causal_mask_mod(seq_idx):
+            def block_causal_mask(b, h, q_idx, kv_idx):
+                # must use this more complicated mask_mod so autograd seq_nr increases
+                return (seq_idx[b, q_idx] == seq_idx[b, kv_idx]) & (q_idx >= kv_idx)
+
+            return block_causal_mask
+
+        a = 12
+        b = 24
+        batch_size = 2
+        seqlen = a * b
+        device = "cuda"
+
+        # Create seq_idx tensor - maps each position to a document/sequence ID
+        # Example: Split sequence into 2 documents for each batch
+        # First half (0:384) belongs to document 0, second half (384:768) to document 1
+        seq_idx = torch.zeros(batch_size, seqlen, dtype=torch.int32, device=device)
+        seq_idx[:, seqlen // 2 :] = 1  # Second half belongs to document 1
+
+        # Get the mask_mod function with seq_idx captured in closure
+        mask_mod = _get_block_causal_mask_mod(seq_idx)
+
+        # Create block_mask with the mask_mod function (which only takes 4 args)
+        # Note: We don't compile create_block_mask itself, just flex_attention
+        block_mask = create_block_mask(mask_mod, None, None, seqlen, seqlen)
+
+        class FlexAttentionModule(torch.nn.Module):
+            """Flex attention submodule similar to the sdpa in Llama3 Attention"""
+
+            def forward(self, xq, xk, xv):
+                """
+                Args:
+                    xq: Query tensor (bs, n_heads, seqlen, head_dim)
+                    xk: Key tensor (bs, n_heads, seqlen, head_dim)
+                    xv: Value tensor (bs, n_heads, seqlen, head_dim)
+                Returns:
+                    Output tensor (bs, n_heads, seqlen, head_dim)
+                """
+                with fx_traceback.annotate({"compile_with_inductor": "flex_attention"}):
+                    output = flex_attention(
+                        xq, xk, xv, block_mask=block_mask, score_mod=score_mod
                     )
-                    # TODO: switch to use the official graph_capture API once it is ready
-                    model = _dynamo_graph_capture_for_export(model)(*inputs)
-                    fake_mode = model.meta.get("fake_mode", None)
+                return output
 
-                stack.enter_context(tracing(TracingContext(fake_mode)))
-                joint_with_descriptors = aot_export_joint_with_descriptors(
-                    stack, model, inputs, decompositions={}
-                )
+        # Model configuration
+        n_heads = 4
+        head_dim = 64
 
-                for node in joint_with_descriptors.graph_module.graph.nodes:
-                    if node.op in ("placeholder", "output"):
-                        continue
-                    if node.target != torch.ops.aten.sub.Tensor and node.op not in (
-                        "placeholder",
-                        "output",
-                    ):
-                        self.assertTrue(node.meta["custom"], {"pp_stage": 0})
-                    elif node.target == torch.ops.aten.sub.Tensor:
-                        if "custom" in node.meta:
-                            self.assertTrue(node.meta.get("custom", {}), {})
-                    else:
-                        raise AssertionError(f"Node not checked: {node}, {node.target}")
+        # Create input tensors in the shape expected by FlexAttentionModule
+        # Shape: (bs, n_heads, seqlen, head_dim)
+        xq = torch.randn(
+            batch_size, n_heads, seqlen, head_dim, requires_grad=True, device=device
+        )
+        xk = torch.randn(
+            batch_size, n_heads, seqlen, head_dim, requires_grad=True, device=device
+        )
+        xv = torch.randn(
+            batch_size, n_heads, seqlen, head_dim, requires_grad=True, device=device
+        )
+
+        model = FlexAttentionModule().to(device)
+        inputs = (xq, xk, xv)
+
+        gm = graph_capture(model, inputs, with_export=True)
+
+        custom_metadata = fx_traceback._get_custom_metadata(gm)
+
+        # not using assertExpectedInline because some CI runs has fewer detach nodes in graph
+        # than other CI runs, so we can't use a fixed string to compare against
+
+        self.assertTrue(
+            "('get_attr', 'sdpa_score0', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+        self.assertTrue(
+            "('get_attr', 'sdpa_mask0', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+        self.assertTrue(
+            "('call_function', 'flex_attention', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+
+        self.assertTrue(
+            "('get_attr', 'fw_graph0', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+        self.assertTrue(
+            "('get_attr', 'joint_graph0', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+        self.assertTrue(
+            "('get_attr', 'mask_graph0', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
+        self.assertTrue(
+            "('call_function', 'flex_attention_backward', {'compile_with_inductor': 'flex_attention'})"
+            in custom_metadata
+        )
 
 
 if __name__ == "__main__":
