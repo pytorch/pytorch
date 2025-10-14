@@ -135,6 +135,26 @@ class TestStreams(torch._dynamo.test_case.TestCase):
         s_exp = fn(*inp)
         self.assertEqual(s_act, s_exp)
 
+    def test_fork_join_backward(self):
+        def fn(x, s0):
+            cur_stream = torch.accelerator.current_stream()
+            x2 = torch.ops.streams.fork.default(
+                cur_stream.stream_id, cur_stream.device, s0.stream_id, s0.device, x
+            )
+            y = torch.add(x2, x2)
+            y2 = torch.ops.streams.join.default(
+                s0.stream_id, s0.device, cur_stream.stream_id, cur_stream.device, y
+            )
+            return y2
+
+        inp = (torch.ones(2, 2, requires_grad=True) + 1, torch.Stream(device="cuda"))
+        fn_opt = torch.compile(fn, fullgraph=True)
+        actual = fn_opt(*inp)
+        actual.sum().backward()
+        # expected = fn(*inp)
+        # expected.sum().backward()
+        # self.assertEqual(expected, actual)
+
     def test_nested_stream_enter_exit(self):
         pass
 

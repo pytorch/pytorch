@@ -35,8 +35,9 @@ def fork_stream(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-) -> int:
-    return from_index
+    t: Tensor,
+) -> Tensor:
+    return t.clone()
 
 
 @fork_stream.register_fake
@@ -45,22 +46,23 @@ def _(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-) -> int:
-    return from_index
+    t: Tensor,
+) -> Tensor:
+    return t.clone()
 
 
 def fork_backward(ctx, grad_output):
     from_index, from_device, to_index, to_device = ctx.args
-    join_stream(to_index, to_device, from_index, from_device)
-    return from_index
+    ret_val = join_stream(to_index, to_device, from_index, from_device, grad_output)
+    return None, None, None, None, ret_val, None
 
 
-def fork_setup_context(ctx, from_index, from_device, to_index, to_device):
+def fork_setup_context(ctx, inputs, output):
+    from_index, from_device, to_index, to_device, _ = inputs
     ctx.args = (from_index, from_device, to_index, to_device)
 
 
 _register_effectful_op(fork_stream._opoverload, _EffectType.ORDERED)
-
 fork_stream.register_autograd(fork_backward, setup_context=fork_setup_context)
 
 
@@ -70,8 +72,9 @@ def join_stream(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-) -> int:
-    return from_index
+    t: Tensor,
+) -> Tensor:
+    return t.clone()
 
 
 @join_stream.register_fake
@@ -80,22 +83,23 @@ def _(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-) -> int:
-    return from_index
+    t: Tensor,
+) -> Tensor:
+    return t.clone()
 
 
 def join_backward(ctx, grad_output):
     from_index, from_device, to_index, to_device = ctx.args
-    fork_stream(from_index, from_device, to_index, to_device)
-    return from_index
+    ret_val = fork_stream(from_index, from_device, to_index, to_device, grad_output)
+    return None, None, None, None, ret_val, None
 
 
-def join_setup_context(ctx, from_index, from_device, to_index, to_device):
+def join_setup_context(ctx, inputs, output):
+    from_index, from_device, to_index, to_device, _ = inputs
     ctx.args = (from_index, from_device, to_index, to_device)
 
 
 _register_effectful_op(join_stream._opoverload, _EffectType.ORDERED)
-
 join_stream.register_autograd(join_backward, setup_context=join_setup_context)
 
 
