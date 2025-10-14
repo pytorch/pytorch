@@ -512,6 +512,18 @@ test_inductor_aoti_cross_compile_for_windows() {
     ls -lah "$WIN_TORCH_LIBS_DIR/lib/" || true
     ls -lah "$WIN_TORCH_LIBS_DIR/lib/x64/" || true
 
+    # Fix CUDA lib paths - move from x64 subdirectory to lib directory
+    # The files have backslashes in their names due to Windows path handling
+    if [ -f "$WIN_TORCH_LIBS_DIR/lib/x64\\cuda.lib" ]; then
+      mv "$WIN_TORCH_LIBS_DIR/lib/x64\\cuda.lib" "$WIN_TORCH_LIBS_DIR/lib/cuda.lib"
+    fi
+    if [ -f "$WIN_TORCH_LIBS_DIR/lib/x64\\cudart.lib" ]; then
+      mv "$WIN_TORCH_LIBS_DIR/lib/x64\\cudart.lib" "$WIN_TORCH_LIBS_DIR/lib/cudart.lib"
+    fi
+
+    echo "Contents after fixing CUDA lib paths:"
+    ls -lah "$WIN_TORCH_LIBS_DIR/lib/" || true
+
     python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR" --win-torch-lib-dir "$WIN_TORCH_LIBS_DIR/lib/"
   else
     python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR"
