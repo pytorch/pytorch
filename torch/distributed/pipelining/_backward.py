@@ -114,7 +114,7 @@ def get_param_groups(
             "intermediates": intersected,
         }
         for input_node in intersected:
-            existing = param_groups.get(input_node, None)
+            existing = param_groups.get(input_node)
             if existing is not None:
                 existing["params"] = existing["params"].union(param_group["params"])
                 existing["intermediates"] = existing["intermediates"].union(

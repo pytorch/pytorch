@@ -783,8 +783,8 @@ class Optimizer:
         assert param_groups is not None
         for pg in param_groups:
             if param_id in pg["params"]:
-                fused = pg["fused"] if "fused" in pg else False
-                capturable = pg["capturable"] if "capturable" in pg else False
+                fused = pg.get("fused", False)
+                capturable = pg.get("capturable", False)
                 break
         if key == "step":
             if capturable or fused:
