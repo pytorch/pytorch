@@ -312,7 +312,7 @@ class FSDPParam:
             )
             self._spmd_placements: tuple[Placement, ...]
 
-            if not isinstance(self.mesh_info, DDPMeshInfo):
+            if isinstance(self.mesh_info, FSDPMeshInfo):  # FSDP or HSDP
                 dp_shard_tp_placement = (
                     (
                         _StridedShard(shard_dim, split_factor=split_factor)
@@ -321,7 +321,7 @@ class FSDPParam:
                     ),
                     *self._tp_spec.placements,
                 )
-            else:
+            else:  # DDP
                 dp_replicate_tp_placement = (
                     (Replicate()),
                     *self._tp_spec.placements,
@@ -363,12 +363,13 @@ class FSDPParam:
             )
         self._orig_size = param_data.size()
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
-        if isinstance(self.mesh_info, DDPMeshInfo):
-            shard_rank = 0  # this way we always access chunk[0] regardless of rank
-            shard_world_size = 1
-        else:
+        if isinstance(self.mesh_info, FSDPMeshInfo):  # FSDP or HSDP
             shard_rank = self.mesh_info.shard_mesh_rank
             shard_world_size = self.mesh_info.shard_mesh_size
+        else:  # DDP
+            shard_rank = 0  # this way we always access chunk[0] regardless of rank
+            shard_world_size = 1
+
         if shard_dim > 0 and param_data.size(shard_dim) % shard_world_size != 0:
             # If sharding on nonzero dim, require even sharding for now because
             # the uneven sharding (1) requires extra copies before/after FSDP
