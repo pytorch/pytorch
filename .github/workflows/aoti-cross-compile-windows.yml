@@ -5,16 +5,6 @@ on:
     tags:
       - ciflow/inductor/*
   workflow_dispatch:
-    inputs:
-      skip_windows_build:
-        description: 'Skip Windows build and use artifacts from a previous run'
-        required: false
-        default: false
-        type: boolean
-      windows_run_id:
-        description: 'Run ID of the workflow with Windows build artifacts (if skipping build)'
-        required: false
-        type: string
   schedule:
     # Run every 12 hours
     - cron: 30 2,14 * * *
@@ -58,7 +48,6 @@ jobs:
   # Step 2: Use Windows build from trunk
   win-vs2022-cuda12_8-py3-build:
     name: win-vs2022-cuda12.8-py3
-    if: ${{ github.event.inputs.skip_windows_build != 'true' }}
     uses: ./.github/workflows/_win-build.yml
     needs: get-default-label-prefix
     with:
@@ -68,45 +57,6 @@ jobs:
       upload-win-torch-libs-for-cross-compile: true
     secrets: inherit
 
-  # Reuse Windows build from a previous run
-  reuse-windows-build:
-    name: reuse-windows-build
-    runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.skip_windows_build == 'true' && github.repository_owner == 'pytorch' }}
-    steps:
-      - name: Validate run ID input
-        shell: bash
-        run: |
-          if [ -z "${{ github.event.inputs.windows_run_id }}" ]; then
-            echo "Error: windows_run_id must be provided when skip_windows_build is true"
-            exit 1
-          fi
-
-      - name: Download artifacts from previous run
-        uses: dawidd6/action-download-artifact@v3
-        with:
-          workflow: aoti-cross-compile-windows.yml
-          run_id: ${{ github.event.inputs.windows_run_id }}
-          name: win-vs2022-cuda12.8-py3-win-torch-libs
-          path: ./win-torch-libs
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Re-upload artifact for this run
-        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a
-        with:
-          name: win-vs2022-cuda12.8-py3-win-torch-libs
-          path: ./win-torch-libs
-          retention-days: 14
-          if-no-files-found: error
-
-      - name: Also upload standard build artifact
-        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a
-        with:
-          name: win-vs2022-cuda12.8-py3
-          path: ./win-torch-libs
-          retention-days: 14
-          if-no-files-found: error
-
   # Custom test job for cross-compilation
   cross-compile-linux-test:
     name: cross-compile-linux-test
@@ -115,12 +65,6 @@ jobs:
       - cross-compile-linux-build
       - get-default-label-prefix
       - win-vs2022-cuda12_8-py3-build
-      - reuse-windows-build
-    if: |
-      always() &&
-      needs.cross-compile-linux-build.result == 'success' &&
-      (needs.win-vs2022-cuda12_8-py3-build.result == 'success' ||
-       needs.reuse-windows-build.result == 'success')
     with:
       build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm86
       docker-image: ${{ needs.cross-compile-linux-build.outputs.docker-image }}
@@ -130,21 +74,4 @@ jobs:
         ]}
     secrets: inherit
 
-  # Test compiled packages on Windows
-  windows-test:
-    name: windows-test
-    uses: ./.github/workflows/_aoti-windows-test.yml
-    needs:
-      - win-vs2022-cuda12_8-py3-build
-      - reuse-windows-build
-      - cross-compile-linux-test
-    if: |
-      always() &&
-      needs.cross-compile-linux-test.result == 'success' &&
-      (needs.win-vs2022-cuda12_8-py3-build.result == 'success' ||
-       needs.reuse-windows-build.result == 'success')
-    with:
-      build-artifact-name: win-vs2022-cuda12.8-py3
-      cuda-version: "12.8"
-      runner: windows.g5.4xlarge.nvidia.gpu
-    secrets: inherit
+  # TODO: Test compiled packages on Windows
