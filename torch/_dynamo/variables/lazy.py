@@ -108,7 +108,7 @@ class LazyVariableTracker(VariableTracker):
         if self.is_realized():
             variable_info += f"realized: {repr(self.unwrap())})"
         else:
-            variable_info += f"Unrealized: {self.peek_type()})"
+            variable_info += f"unrealized: {self.peek_type()})"
 
         return variable_info
 
