@@ -256,6 +256,11 @@ endif()
 IF(USE_FBGEMM_GENAI)
   set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
   set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
+
+  # Add FBGEMM_GENAI include directories for torch_ops.h
+  list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
+  list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
+
   if(USE_CUDA)
     # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
     # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
@@ -334,7 +339,7 @@ IF(USE_FBGEMM_GENAI)
       set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
       target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
 
-      target_include_directories(fbgemm_genai PUBLIC
+      target_include_directories(fbgemm_genai PRIVATE
         # FBGEMM version of Composable Kernel is used due to some customizations
         ${FBGEMM_THIRD_PARTY}/composable_kernel/include
         ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
@@ -691,12 +696,6 @@ if(USE_CUDA AND NOT USE_ROCM)
   add_definitions(-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/tools/util/include)
-
-  # Add FBGEMM_GENAI include directories for torch_ops.h
-  if(USE_FBGEMM_GENAI)
-    list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
-    list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
-  endif()
 
   if($ENV{ATEN_STATIC_CUDA})
     if(CUDA_VERSION VERSION_LESS_EQUAL 12.9)
