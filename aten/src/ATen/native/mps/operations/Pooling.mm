@@ -24,6 +24,7 @@
 #include <ATen/ops/max_pool3d_with_indices_native.h>
 #include <ATen/ops/max_unpool2d_native.h>
 #include <ATen/ops/max_unpool3d_native.h>
+#include <ATen/ops/aminmax.h>
 #endif
 
 namespace at::native {
@@ -544,8 +545,9 @@ static void max_unpool_out_mps_template(const Tensor& input,
   if (indices.defined() && indices.numel() > 0) {
     auto output_image_size = c10::multiply_integers(output_size_);
 
-    int64_t min_idx = indices.min().item<int64_t>();
-    int64_t max_idx = indices.max().item<int64_t>();
+    auto [min_idx_tensor, max_idx_tensor] = indices.aminmax();
+    int64_t min_idx = min_idx_tensor.item<int64_t>();
+    int64_t max_idx = max_idx_tensor.item<int64_t>();
 
     if (min_idx < 0 || max_idx >= output_image_size) {
       int64_t error_idx = (min_idx < 0) ? min_idx : max_idx;
