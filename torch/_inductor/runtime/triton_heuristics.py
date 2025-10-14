@@ -340,6 +340,7 @@ class CachingAutotuner(KernelInterface):
         self.size_hints = size_hints
         self.coordesc_tuner = CoordescTuner(
             is_mm=False,
+            is_native_matmul=triton_meta.get("native_matmul", False),
             name=self.fn.__name__,
             size_hints=size_hints,
             inductor_meta=self.inductor_meta,
@@ -2637,8 +2638,68 @@ def pointwise(
     )
 
 
+def make_matmul_triton_config(sizes: dict[str, int], num_warps: int, num_stages: int):
+    config = {
+        "XBLOCK": sizes.get("x"),
+        "YBLOCK": sizes.get("y"),
+        "ZBLOCK": sizes.get("z"),
+        "R0_BLOCK": sizes.get("r"),
+    }
+    # Remove keys with None values (i.e., missing in sizes)
+    config = {k: v for k, v in config.items() if v is not None}
+    return Config(config, num_warps=num_warps, num_stages=num_stages)
+
+
+def _config_helper(bmm=False, persistent=False):
+    # Each entry is: (sizes_dict, num_warps, num_stages)
+    _base_mm_configs = [
+        ({"x": 32, "y": 32, "r": 16}, 2, 1),
+        ({"x": 32, "y": 32, "r": 128}, 4, 2),
+        ({"x": 32, "y": 64, "r": 32}, 8, 5),
+        ({"x": 64, "y": 32, "r": 32}, 8, 5),
+        ({"x": 64, "y": 32, "r": 128}, 4, 5),
+        ({"x": 64, "y": 64, "r": 16}, 4, 2),
+        ({"x": 64, "y": 64, "r": 32}, 4, 2),
+        ({"x": 64, "y": 64, "r": 64}, 8, 3),
+        ({"x": 64, "y": 64, "r": 128}, 4, 5),
+        ({"x": 64, "y": 128, "r": 32}, 4, 3),
+        ({"x": 64, "y": 128, "r": 32}, 8, 4),
+        ({"x": 64, "y": 128, "r": 64}, 4, 3),
+        ({"x": 64, "y": 128, "r": 128}, 4, 4),
+        ({"x": 128, "y": 64, "r": 32}, 4, 3),
+        ({"x": 128, "y": 64, "r": 32}, 8, 4),
+        ({"x": 128, "y": 128, "r": 32}, 8, 2),
+        ({"x": 128, "y": 128, "r": 32}, 4, 3),
+        ({"x": 128, "y": 128, "r": 64}, 4, 3),
+        ({"x": 128, "y": 128, "r": 64}, 8, 5),
+    ]
+    out = []
+    for sizes, w, s in _base_mm_configs:
+        d = dict(sizes)
+        if persistent:
+            d.pop("r", None)
+        if bmm:
+            d["z"] = 1
+        out.append((d, w, s))
+
+    # Deduplicate by converting dicts to immutable frozensets
+    deduped = {(frozenset(d.items()), w, s): (d, w, s) for d, w, s in out}
+
+    return list(deduped.values())
+
+
+triton_native_mm_configs = _config_helper(bmm=False, persistent=False)
+triton_native_persistent_mm_configs = _config_helper(bmm=False, persistent=True)
+triton_native_bmm_configs = _config_helper(bmm=True, persistent=False)
+triton_native_persistent_bmm_configs = _config_helper(bmm=True, persistent=True)
+
+
 def _reduction_configs(
-    *, size_hints: dict[str, int], inductor_meta: dict[str, Any], num_dynamic=0
+    *,
+    size_hints: dict[str, int],
+    inductor_meta: dict[str, Any],
+    triton_meta: dict[str, Any],
+    num_dynamic=0,
 ) -> list[Config]:
     reduction_hint = inductor_meta.get("reduction_hint")
 
@@ -2665,6 +2726,20 @@ def _reduction_configs(
         # hopefully it can be a good enough indicator.
         MAX_R0_BLOCK = 1024
         register_intensive = True
+
+    if triton_meta.get("native_matmul"):
+        if len(size_hints) == 3:
+            return [
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_mm_configs
+            ]
+        elif len(size_hints) == 4:
+            return [
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_bmm_configs
+            ]
+        else:
+            raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
     def make_config(
         x,
@@ -3006,7 +3081,10 @@ def reduction(
             num_dynamic += 1
 
     configs = _reduction_configs(
-        size_hints=size_hints, inductor_meta=inductor_meta, num_dynamic=num_dynamic
+        size_hints=size_hints,
+        inductor_meta=inductor_meta,
+        triton_meta=triton_meta,
+        num_dynamic=num_dynamic,
     )
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
@@ -3047,12 +3125,16 @@ def cooperative_reduction(
     assert split <= TRITON_MAX_RSPLIT
     if inductor_meta["persistent_reduction"]:
         configs = _persistent_reduction_configs(
-            {"x": xnumel, "r0_": rnumel // split}, reduction_hint, inductor_meta
+            {"x": xnumel, "r0_": rnumel // split},
+            reduction_hint,
+            inductor_meta,
+            triton_meta,
         )
     else:
         configs = _reduction_configs(
             size_hints={"x": xnumel, "r0_": rnumel // split},
             inductor_meta=inductor_meta,
+            triton_meta=triton_meta,
         )
     for config in configs:
         config.kwargs["RSPLIT"] = split
@@ -3074,6 +3156,7 @@ def _persistent_reduction_configs(
     size_hints,
     reduction_hint=False,
     inductor_meta=None,
+    triton_meta=None,
 ):
     xnumel = size_hints["x"]
     rnumel = get_total_reduction_numel(size_hints)
@@ -3082,6 +3165,20 @@ def _persistent_reduction_configs(
     )
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
+
+    if triton_meta.get("native_matmul"):
+        if len(size_hints) == 3:
+            return [
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
+            ]
+        elif len(size_hints) == 4:
+            return [
+                make_matmul_triton_config(sizes, num_warps, num_stages)
+                for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
+            ]
+        else:
+            raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
     if "y" not in size_hints:
         configs = [
@@ -3167,7 +3264,9 @@ def persistent_reduction(
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
 
-    configs = _persistent_reduction_configs(size_hints, reduction_hint, inductor_meta)
+    configs = _persistent_reduction_configs(
+        size_hints, reduction_hint, inductor_meta, triton_meta
+    )
 
     # This key is not added to the inductor meta as its clear from the heuristic
     # choice that it is persistent. Add it and remove it below so that persistent
@@ -3205,7 +3304,9 @@ def split_scan(
     if len(size_hints) != 2:
         raise NotImplementedError(f"size_hints: {size_hints}")
 
-    configs = _reduction_configs(size_hints=size_hints, inductor_meta=inductor_meta)
+    configs = _reduction_configs(
+        size_hints=size_hints, inductor_meta=inductor_meta, triton_meta=triton_meta
+    )
 
     # Fixup configs to enforce the minimum Rn_BLOCK size
     min_rblock = inductor_meta.get("min_split_scan_rblock", 256)
