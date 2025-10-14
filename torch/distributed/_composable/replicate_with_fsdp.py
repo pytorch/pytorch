@@ -14,6 +14,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import (
     OffloadPolicy,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
+    DDPMeshInfo,
     detect_compiled_autograd,
     FSDPMeshInfo,
     HSDPMeshInfo,
@@ -188,22 +189,19 @@ def replicate_impl(
 
     mesh = mesh or _init_default_fully_shard_mesh()
     if mesh.ndim != 1:
-        raise ValueError(f"replicate expects a 2D DeviceMesh but got {mesh}")
+        raise ValueError(f"replicate expects a 1D DeviceMesh but got {mesh}")
 
     else:
         if mesh.mesh_dim_names is None:
             raise AssertionError(
-                "Please init the 2D mesh for HSDP with mesh_dim_names specified"
+                "Please init the 1D mesh for DDP with mesh_dim_names specified"
             )
-        mesh_info = FSDPMeshInfo(mesh, shard_mesh_dim=0)
+        mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
     auto_reshard_after_forward = reshard_after_forward is None
     # If the user does not provide ``reshard_after_forward``, we set it to True.
     # During lazy_init, we identify which module is the root and override its value to False
-    post_forward_mesh_info = _get_post_forward_mesh_info(
-        reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
-        mesh_info,
-    )
+    post_forward_mesh_info = mesh_info
 
     arg_module = module
     modules = (

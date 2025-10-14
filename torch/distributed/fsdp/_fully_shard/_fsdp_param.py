@@ -23,6 +23,7 @@ from ._fsdp_common import (
     _raise_assert_with_print,
     _to_dtype_if_needed,
     compiled_autograd_enabled,
+    DDPMeshInfo,
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
@@ -310,19 +311,30 @@ class FSDPParam:
                 f"or 4 (HSDP+EP+TP) but got {self._spmd_mesh.ndim}."
             )
             self._spmd_placements: tuple[Placement, ...]
-            dp_shard_tp_placement = (
-                (
-                    _StridedShard(shard_dim, split_factor=split_factor)
-                    if split_factor > 1
-                    else fsdp_placement
-                ),
-                *self._tp_spec.placements,
-            )
-            if dp_mesh.ndim == 1:  # FSDP
-                self._spmd_placements = dp_shard_tp_placement
-            else:  # HSDP
+
+            if not isinstance(self.mesh_info, DDPMeshInfo):
+                dp_shard_tp_placement = (
+                    (
+                        _StridedShard(shard_dim, split_factor=split_factor)
+                        if split_factor > 1
+                        else fsdp_placement
+                    ),
+                    *self._tp_spec.placements,
+                )
+            else:
+                dp_replicate_tp_placement = (
+                    (Replicate()),
+                    *self._tp_spec.placements,
+                )
+
+            if isinstance(self.mesh_info, HSDPMeshInfo):  # HSDP
                 assert self.mesh_info.replicate_mesh_dim == 0
                 self._spmd_placements = (Replicate(),) + dp_shard_tp_placement
+            elif isinstance(self.mesh_info, DDPMeshInfo):  # DDP
+                self._spmd_placements = dp_replicate_tp_placement
+            else:  # FSDP
+                self._spmd_placements = dp_shard_tp_placement
+
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
@@ -333,6 +345,8 @@ class FSDPParam:
             self._spmd_mesh = self.mesh_info.mesh
             if isinstance(self.mesh_info, HSDPMeshInfo):
                 self._spmd_placements = (Replicate(), fsdp_placement)
+            elif isinstance(self.mesh_info, DDPMeshInfo):
+                self._spmd_placements = (Replicate(),)
             else:
                 self._spmd_placements = (fsdp_placement,)
             self._sharding_spec = DTensorSpec(
@@ -349,8 +363,12 @@ class FSDPParam:
             )
         self._orig_size = param_data.size()
         self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
-        shard_rank = self.mesh_info.shard_mesh_rank
-        shard_world_size = self.mesh_info.shard_mesh_size
+        if isinstance(self.mesh_info, DDPMeshInfo):
+            shard_rank = 0  # this way we always access chunk[0] regardless of rank
+            shard_world_size = 1
+        else:
+            shard_rank = self.mesh_info.shard_mesh_rank
+            shard_world_size = self.mesh_info.shard_mesh_size
         if shard_dim > 0 and param_data.size(shard_dim) % shard_world_size != 0:
             # If sharding on nonzero dim, require even sharding for now because
             # the uneven sharding (1) requires extra copies before/after FSDP
@@ -781,9 +799,9 @@ class FSDPParam:
             assert isinstance(grad, DTensor), f"{type(grad)}"
             placements = self._tp_spec.placements
             if placements != grad.placements:
-                assert len(self._tp_spec.placements) == len(grad.placements), (
-                    f"{self._tp_spec=} {grad.placements=}"
-                )
+                assert len(self._tp_spec.placements) == len(
+                    grad.placements
+                ), f"{self._tp_spec=} {grad.placements=}"
                 grad = grad.redistribute(placements=placements)
             grad = grad._local_tensor
         return grad
@@ -860,9 +878,9 @@ class FSDPParam:
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
         if local_tensor.size() != padded_sharded_size and not same_local_tensor:
-            assert shard_dim == 0, (
-                f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
-            )
+            assert (
+                shard_dim == 0
+            ), f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
             padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
             padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
                 local_tensor
