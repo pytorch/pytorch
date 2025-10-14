@@ -295,7 +295,7 @@ class PyCodegen:
             output.extend(create_call_function(2, False))
         elif (
             isinstance(value, SymNodeVariable)
-            and value.python_type() == float
+            and value.python_type() is float
             and not self.tx.export
         ):
             # This is a little unusual; force the output convention to be a
