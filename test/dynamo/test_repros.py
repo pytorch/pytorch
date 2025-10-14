@@ -46,6 +46,7 @@ from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import (
     CompileCounter,
+    EagerAndRecordGraphs,
     rand_strided,
     same,
     skipIfNotPy312,
@@ -4258,7 +4259,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         @torch.compile(fullgraph=True)
         def f(x):
             y = x.item()
-            torch._check_is_size(y)
+            torch._check(y >= 0)
             if y >= 0:
                 return x * 2
             else:
@@ -5815,6 +5816,31 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.sin(x)
 
         fn(torch.rand(4))
+
+    def test_export_vs_dynamo_for_multiheadattention(self):
+        # More details at https://github.com/pytorch/pytorch/issues/164062
+
+        # Ensure that both dynamo and export do not take the fast path.
+        with torch.no_grad():
+            inp = torch.randn(1, 2, 64)
+            mha = nn.MultiheadAttention(64, 2, dropout=0.1, batch_first=True)
+            mha.eval()
+
+            backend = EagerAndRecordGraphs()
+            mha_compile = torch.compile(mha, backend=backend, fullgraph=True)
+            mha_compile(inp, inp, inp)
+            torch.compiler.reset()
+
+            mha_export = torch._dynamo.export(mha)(inp, inp, inp)
+
+            compile_nodes = backend.graphs[0].graph.find_nodes(
+                op="call_function", target=torch._native_multi_head_attention
+            )
+            export_nodes = mha_export.graph_module.graph.find_nodes(
+                op="call_function", target=torch._native_multi_head_attention
+            )
+            self.assertEqual(len(compile_nodes), 0)
+            self.assertEqual(len(export_nodes), 0)
 
     def test_negative_floor_div_solve(self):
         class CompiledClass(nn.Module):

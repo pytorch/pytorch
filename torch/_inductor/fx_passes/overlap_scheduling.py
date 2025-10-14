@@ -68,6 +68,7 @@ def get_hint(x: Union[int, torch.SymInt]) -> Optional[int]:
 def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
     with dynamo_timed("collective_compute_do_bench"):
         return functools.partial(
+            # pyrefly: ignore  # bad-argument-type
             torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
             warmup=5,
         )
@@ -155,6 +156,16 @@ class CollectiveInfo:
     @property
     def is_exposed(self) -> bool:
         return self.exposed_time_ms != 0
+
+
+@dataclass
+class CollBucket:
+    """Track information about a bucket of collectives."""
+
+    collectives: list[fx.Node]  # Original collective starts
+    bucketed_start: Optional[fx.Node] = None  # After bucketing
+    bucketed_wait: Optional[fx.Node] = None  # After bucketing
+    total_bytes: int = 0
 
 
 class OverlapScheduler:
@@ -316,11 +327,12 @@ class OverlapScheduler:
             runtime_estimations_keys.append(key)
 
         import torch.distributed as dist
+        from torch._subclasses.fake_tensor import unset_fake_temporarily
         from torch.distributed.distributed_c10d import _get_default_group
 
         world_size = dist.get_world_size()
         pg = _get_default_group()
-        with no_dispatch():
+        with unset_fake_temporarily():
             gathered_runtime_estimations: list[list[float]] = [
                 [] for _ in range(world_size)
             ]
@@ -669,6 +681,7 @@ class OverlapScheduler:
             node_ancestors=self.node_ancestors,
             scheduled=self.scheduled,
             max_bucket_memory_gb=1.0,  # Could make this configurable
+            max_coll_distance=self.max_node_distance,
         )
         bucketer.bucket_collectives()
 

@@ -64,14 +64,14 @@ def _staged_schema():
                 )
             elif o := typing.get_origin(t):
                 # Lemme know if there's a better way to do this.
-                if o == list:
+                if o is list:
                     yaml_head, cpp_head, thrift_head, thrift_tail = (
                         "List",
                         "std::vector",
                         "list<",
                         ">",
                     )
-                elif o == dict:
+                elif o is dict:
                     yaml_head, cpp_head, thrift_head, thrift_tail = (
                         "Dict",
                         "std::unordered_map",
@@ -81,7 +81,7 @@ def _staged_schema():
                 elif o == Union:
                     assert level == 0, "Optional is only supported at the top level."
                     args = typing.get_args(t)
-                    assert len(args) == 2 and args[1] == type(None)
+                    assert len(args) == 2 and args[1] is type(None)
                     yaml_type, cpp_type, thrift_type = dump_type(args[0], level + 1)
                     return (
                         f"Optional[{yaml_type}]",

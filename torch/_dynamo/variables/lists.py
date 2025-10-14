@@ -200,7 +200,7 @@ class BaseListVariable(VariableTracker):
             if kwargs or len(args) != 1:
                 raise_args_mismatch(tx, name)
 
-            if type(self) != type(args[0]):
+            if type(self) is not type(args[0]):
                 tp_name = self.python_type_name()
                 other = args[0].python_type_name()
                 msg = ConstantVariable.create(
@@ -1154,7 +1154,7 @@ class NamedTupleVariable(TupleVariable):
     def __init__(self, items, tuple_cls, dynamic_attributes=None, **kwargs) -> None:
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
-        self.dynamic_attributes = {} if not dynamic_attributes else dynamic_attributes
+        self.dynamic_attributes = dynamic_attributes if dynamic_attributes else {}
 
     def is_namedtuple(self):
         return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(

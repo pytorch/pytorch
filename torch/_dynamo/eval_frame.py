@@ -484,6 +484,7 @@ class OptimizedModule(torch.nn.Module):
         self._initialize()
 
     @property
+    # pyrefly: ignore  # bad-override
     def training(self) -> bool:
         return self._orig_mod.training
 
@@ -819,8 +820,12 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
-        if config.debug_force_nested_calls:
+        if config.debug_force_nested_calls and filename not in DONT_WRAP_FILES:
             fn = external_utils.wrap_inline(fn)
+            # Create a new code object for `fn` so that functions have different
+            # recompilation caches.
+            # Copy hack since deepcopy doesn't actually give a new code object
+            fn.__code__ = fn.__code__.replace(co_varnames=fn.__code__.co_varnames)  # type: ignore[attr-defined]
         elif config.wrap_top_frame or (
             (filename is None or trace_rules.check(fn))
             and (
@@ -892,6 +897,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
+                    # pyrefly: ignore  # invalid-inheritance
                     raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
@@ -1020,7 +1026,10 @@ class OptimizeContext(_TorchDynamoContext):
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=_dynamic, ignore_active_disable_ctx=False
+                    compiler_fn,
+                    # pyrefly: ignore  # bad-argument-type
+                    dynamic=_dynamic,
+                    ignore_active_disable_ctx=False,
                 )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
@@ -1083,6 +1092,7 @@ class DisableContext(_TorchDynamoContext):
             cls_obj.__call__ = self(cls_obj.__call__)
             if issubclass(cls_obj, torch.nn.Module):
                 # NN module variable tracker directly inlines the _call_impl. Disable it.
+                # pyrefly: ignore  # missing-attribute
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
@@ -1988,6 +1998,7 @@ def export(
                         path: KeyPath, t: Union[torch.Tensor, _IntWrapper, Any]
                     ) -> Any:
                         if isinstance(t, torch.Tensor):
+                            # pyrefly: ignore  # missing-attribute
                             return ambient_fake_mode.from_tensor(t, static_shapes=True)
                         elif isinstance(t, _IntWrapper):
                             if (
@@ -2040,6 +2051,10 @@ def export(
                 capture_scalar_outputs=True,
                 constant_fold_autograd_profiler_enabled=True,
                 prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                # install_free_tensors ensures that params and buffers are still
+                # added as graph attributes, and makes Dynamo emits graphs that
+                # follow export pytree-able input requirements
+                install_free_tensors=config.install_free_tensors_for_export,
             ),
             _compiling_state_context(),
         ):
@@ -2068,8 +2083,11 @@ def export(
             )
             and not trace_rules.check(call_to_inspect)
         ):
+            # pyrefly: ignore  # unbound-name
             dim_constraints.solve()
+            # pyrefly: ignore  # unbound-name
             forced_specializations = dim_constraints.forced_specializations()
+            # pyrefly: ignore  # unbound-name
             msg = dim_constraints.prettify_results(
                 original_signature,
                 dynamic_shapes,
@@ -2090,9 +2108,11 @@ def export(
                     )
 
             # Error if we have any constraints on static values
+            # pyrefly: ignore  # unbound-name
             for k in shape_env.var_to_range.keys():
                 if isinstance(k, sympy.Integer):
                     constraint_violation_error = ConstraintViolationError(
+                        # pyrefly: ignore  # unbound-name
                         f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
                         "It appears that you're trying to set a constraint on a "
                         f"value which we evaluated to have a static value of {k}. "

@@ -404,28 +404,28 @@ def root_module_when_exporting_non_strict(flat_fn):
         return None
 
 
-def _copy_fwd_metadata_to_bw_nodes(fx_g):
-    def _is_forward_node_with_seq_nr(node):
-        # For now, assume that if nn_module_stack_metadata is populated, this
-        # node is from the forward. Ignore nodes without `seq_nr`.
-        # TODO(future): there is likely a less brittle way to do this by walking
-        # the descendants of graph inputs corresponding to fwd inputs, didn't
-        # seem obvious at first glance on how to partition graph inputs into
-        # fwd vs bwd without relying on string names.
-        return (
-            node.meta.get("partitioner_tag") != "is_backward" and "seq_nr" in node.meta
-        )
+def _is_forward_node_with_seq_nr(node: torch.fx.Node) -> bool:
+    # For now, assume that if nn_module_stack_metadata is populated, this
+    # node is from the forward. Ignore nodes without `seq_nr`.
+    # TODO(future): there is likely a less brittle way to do this by walking
+    # the descendants of graph inputs corresponding to fwd inputs, didn't
+    # seem obvious at first glance on how to partition graph inputs into
+    # fwd vs bwd without relying on string names.
+    return node.meta.get("partitioner_tag") != "is_backward" and "seq_nr" in node.meta
 
-    def _is_backward_node_with_seq_nr(node):
-        # For now, assume that if nn_module_stack_metadata is not populated,
-        # this node is from the backward. Ignore nodes without `seq_nr`.
-        # TODO(future): there is likely a less brittle way to do this, same
-        # as with the forward.
-        return (
-            node.meta.get("partitioner_tag") == "is_backward" and "seq_nr" in node.meta
-        )
 
-    fwd_seq_nr_to_node = {}
+def _is_backward_node_with_seq_nr(node: torch.fx.Node) -> bool:
+    # For now, assume that if nn_module_stack_metadata is not populated,
+    # this node is from the backward. Ignore nodes without `seq_nr`.
+    # TODO(future): there is likely a less brittle way to do this, same
+    # as with the forward.
+    return node.meta.get("partitioner_tag") == "is_backward" and "seq_nr" in node.meta
+
+
+def _collect_fwd_nodes_from_subgraph(
+    fx_g: torch.fx.GraphModule, fwd_seq_nr_to_node: dict[str, torch.fx.Node]
+) -> None:
+    """Collect forward nodes from a single subgraph into the global mapping."""
     for node in fx_g.graph.nodes:
         if not _is_forward_node_with_seq_nr(node):
             continue
@@ -435,11 +435,17 @@ def _copy_fwd_metadata_to_bw_nodes(fx_g):
             # that the current op did not create an autograd node, and there
             # is no corresponding backward node, so we skip.
             continue
-        fwd_seq_nr_to_node[node.meta["seq_nr"]] = node
+        fwd_seq_nr_to_node[seq_nr] = node
 
+
+def _copy_metadata_to_bw_nodes_in_subgraph(
+    fx_g: torch.fx.GraphModule, fwd_seq_nr_to_node: dict[str, torch.fx.Node]
+) -> None:
+    """Copy metadata from forward nodes to backward nodes in a single subgraph."""
     for node in fx_g.graph.nodes:
         if not _is_backward_node_with_seq_nr(node):
             continue
+
         # fwd_node should always exist, but handle non-existence just in case
         fwd_node = fwd_seq_nr_to_node.get(node.meta["seq_nr"])
         if fwd_node is not None:
@@ -449,7 +455,7 @@ def _copy_fwd_metadata_to_bw_nodes(fx_g):
             node.meta["custom"] = fwd_node.meta.get("custom")
 
 
-def copy_fwd_metadata_to_bw_nodes(fx_g):
+def copy_fwd_metadata_to_bw_nodes(fx_g: torch.fx.GraphModule) -> None:
     """
     Input: `fx_g` which contains the joint fwd+bwd FX graph created by
     aot_autograd.
@@ -458,15 +464,25 @@ def copy_fwd_metadata_to_bw_nodes(fx_g):
     to backward nodes, using the `seq_nr` field as a one-to-many mapping
     from forward node to backward node. This metadata is useful for performance
     profiling and debugging.
+
+    This function supports matching forward and backward nodes across different
+    subgraphs (e.g., in recursive submodules from HOPs), enabling backward nodes
+    in any submodule to match forward nodes in any submodule.
     """
 
-    # Copy the metadata recursively - useful for HOPs
-    for node in fx_g.graph.nodes:
-        if node.op == "get_attr":
-            submod = getattr(fx_g, node.target)
-            if isinstance(submod, torch.fx.GraphModule):
-                copy_fwd_metadata_to_bw_nodes(submod)
-    _copy_fwd_metadata_to_bw_nodes(fx_g)
+    # Build a global mapping of seq_nr to forward nodes across all subgraphs
+    fwd_seq_nr_to_node: dict[str, torch.fx.Node] = {}
+
+    # First pass: collect all forward nodes from all subgraphs
+    for submod in fx_g.modules():
+        if isinstance(submod, torch.fx.GraphModule):
+            _collect_fwd_nodes_from_subgraph(submod, fwd_seq_nr_to_node)
+
+    # Second pass: copy metadata to backward nodes in all subgraphs
+    # using the global forward mapping
+    for submod in fx_g.modules():
+        if isinstance(submod, torch.fx.GraphModule):
+            _copy_metadata_to_bw_nodes_in_subgraph(submod, fwd_seq_nr_to_node)
 
 
 def register_buffer_assignment_hook(mod, assigned_buffers):
