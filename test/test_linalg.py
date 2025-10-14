@@ -184,7 +184,7 @@ class TestLinalg(TestCase):
         torch.cuda.tunable.set_max_tuning_duration(30)
         torch.cuda.tunable.set_max_tuning_iterations(100)
         torch.cuda.tunable.set_rotating_buffer_size(-1)
-        torch.cuda.tunable.set_numerical_check_tolerances(False, 1e-5, 1e-5)
+        torch.cuda.tunable.set_numerical_check_tolerances(False)
         ordinal = torch.cuda.current_device()
 
         # Set filenames to be unique on a per test basis
@@ -5986,7 +5986,7 @@ class TestLinalg(TestCase):
     def test_numerical_check_python_binding_tunableop(self, device, dtype):
         with self._tunableop_ctx():
             torch.cuda.tunable.enable(True)
-            torch.cuda.tunable.set_numerical_check_tolerances(True, 1e-5, 1e-5)
+            torch.cuda.tunable.set_numerical_check_tolerances(True)
 
             a = torch.randn(128, 128, device='cuda')
             b = torch.randn(128, 128, device='cuda')
@@ -6013,7 +6013,7 @@ class TestLinalg(TestCase):
             a = torch.randn(m, k, device='cuda')
             b = torch.randn(k, n, device='cuda')
             torch.cuda.tunable.enable(False)
-            torch.cuda.tunable.set_numerical_check_tolerances(False, 1e-5, 1e-5)
+            torch.cuda.tunable.set_numerical_check_tolerances(False)
             C_baseline = a @ b
             with self._tunableop_ctx():
                 torch.cuda.tunable.enable(True)
