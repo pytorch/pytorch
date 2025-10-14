@@ -845,7 +845,7 @@ class Redistribute(torch.autograd.Function):
         input: "dtensor.DTensor",
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
-        shard_order: Optional[ShardOrder] = None,
+        shard_order: ShardOrder,
         async_op: bool = False,
         forward_dtype: Optional[torch.dtype] = None,
         backward_dtype: Optional[torch.dtype] = None,
@@ -871,22 +871,16 @@ class Redistribute(torch.autograd.Function):
 
         ctx.current_spec = current_spec
 
-        if current_spec.placements != placements:
-            if shard_order is not None:
-                target_spec = DTensorSpec(
-                    device_mesh,
-                    placements,
-                    shard_order=shard_order,
-                    tensor_meta=current_spec.tensor_meta,
-                )
-            else:
-                # let DTensorSpec automatically generate shard_order
-                target_spec = DTensorSpec(
-                    device_mesh,
-                    placements,
-                    tensor_meta=current_spec.tensor_meta,
-                )
-
+        if (
+            current_spec.placements != placements
+            or current_spec.shard_order != shard_order
+        ):
+            target_spec = DTensorSpec(
+                device_mesh,
+                placements,
+                shard_order=shard_order,
+                tensor_meta=current_spec.tensor_meta,
+            )
             output = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, async_op=async_op
             )
