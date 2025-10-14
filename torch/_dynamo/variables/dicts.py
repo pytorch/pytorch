@@ -197,6 +197,10 @@ class ConstDictVariable(VariableTracker):
         @staticmethod
         def _eq_impl(a, b):
             # TODO: Put this in utils and share it between variables/builtin.py and here
+            type_a, type_b = type(a), type(b)
+            if not (issubclass(type_a, type_b) or issubclass(type_b, type_a)):
+                return False
+
             if isinstance(a, tuple):
                 Hashable = ConstDictVariable._HashableTracker
                 return len(a) == len(b) and all(
