@@ -3,7 +3,7 @@ name: inductor-perf-nightly-rocm-mi300
 on:
   push:
     tags:
-      - ciflow/inductor-perf-test-nightly-rocm/*
+      - ciflow/inductor-perf-test-nightly-rocm-mi300/*
   schedule:
     - cron: 15 0 * * *
   # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
