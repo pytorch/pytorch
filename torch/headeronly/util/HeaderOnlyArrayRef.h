@@ -18,13 +18,14 @@ namespace c10 {
 /// we can keep much of the implementation shared.
 ///
 /// [HeaderOnlyArrayRef vs ArrayRef note]
-/// As HeaderOnlyArrayRef is a subset of ArrayRef, it has slightly less functionality than
-/// ArrayRef. We document the minor differences below:
+/// As HeaderOnlyArrayRef is a subset of ArrayRef, it has slightly less
+/// functionality than ArrayRef. We document the minor differences below:
 /// 1. ArrayRef has an extra convenience constructor for SmallVector.
-/// 2. ArrayRef uses TORCH_CHECK. HeaderOnlyArrayRef uses header-only STD_TORCH_CHECK,
+/// 2. ArrayRef uses TORCH_CHECK. HeaderOnlyArrayRef uses header-only
+/// STD_TORCH_CHECK,
 ///    which will output a std::runtime_error vs a c10::Error.
-/// In all other aspects, HeaderOnlyArrayRef is identical to ArrayRef, with the positive
-/// benefit of being header-only and thus independent of libtorch.so.
+/// In all other aspects, HeaderOnlyArrayRef is identical to ArrayRef, with the
+/// positive benefit of being header-only and thus independent of libtorch.so.
 template <typename T>
 class HeaderOnlyArrayRef {
  public:
@@ -55,13 +56,11 @@ class HeaderOnlyArrayRef {
 
   /// Construct a HeaderOnlyArrayRef from a pointer and length.
   constexpr HeaderOnlyArrayRef(const T* data, size_t length)
-      : Data(data), Length(length) {
-  }
+      : Data(data), Length(length) {}
 
   /// Construct a HeaderOnlyArrayRef from a range.
   constexpr HeaderOnlyArrayRef(const T* begin, const T* end)
-      : Data(begin), Length(end - begin) {
-  }
+      : Data(begin), Length(end - begin) {}
 
   template <
       typename Container,
@@ -69,8 +68,7 @@ class HeaderOnlyArrayRef {
       typename = std::enable_if_t<
           (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
   /* implicit */ HeaderOnlyArrayRef(const Container& container)
-      : Data(container.data()), Length(container.size()) {
-  }
+      : Data(container.data()), Length(container.size()) {}
 
   /// Construct a HeaderOnlyArrayRef from a std::vector.
   // The enable_if stuff here makes sure that this isn't used for
@@ -96,7 +94,8 @@ class HeaderOnlyArrayRef {
       : Data(Arr), Length(N) {}
 
   /// Construct a HeaderOnlyArrayRef from a std::initializer_list.
-  /* implicit */ constexpr HeaderOnlyArrayRef(const std::initializer_list<T>& Vec)
+  /* implicit */ constexpr HeaderOnlyArrayRef(
+      const std::initializer_list<T>& Vec)
       : Data(
             std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
                                              : std::begin(Vec)),
@@ -159,7 +158,8 @@ class HeaderOnlyArrayRef {
   /// back - Get the last element.
   constexpr const T& back() const {
     STD_TORCH_CHECK(
-        !this->empty(), "HeaderOnlyArrayRef: attempted to access back() of empty list");
+        !this->empty(),
+        "HeaderOnlyArrayRef: attempted to access back() of empty list");
     return this->Data[this->Length - 1];
   }
 
