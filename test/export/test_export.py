@@ -15193,21 +15193,31 @@ graph():
                 super().__init__()
 
             def forward(self, x):
-                if TensorDim.DDP not in set(["ddp"]):
-                    return x.sin()
-                return x.cos()
+                val = x.sin()
+                if TensorDim.DDP in set(["ddp"]):
+                    val += x.cos()
+                if "ddp" in set([TensorDim.DDP]):
+                    val += x.cos()
+                return val
 
         from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 
-        gm = _dynamo_graph_capture_for_export(Foo())(torch.randn(4, 4)).graph
+        inp = torch.randn(4, 4)
+        gm = _dynamo_graph_capture_for_export(Foo())(inp)
         self.assertExpectedInline(
-            str(gm).strip(),
+            str(gm.graph).strip(),
             """\
 graph():
-    %l_flat_args_0_ : [num_users=1] = placeholder[target=arg_0]
-    %res : [num_users=1] = call_method[target=cos](args = (%l_flat_args_0_,), kwargs = {})
-    return (res,)""",
+    %l_flat_args_0_ : [num_users=3] = placeholder[target=arg_0]
+    %val : [num_users=1] = call_method[target=sin](args = (%l_flat_args_0_,), kwargs = {})
+    %cos : [num_users=1] = call_method[target=cos](args = (%l_flat_args_0_,), kwargs = {})
+    %val_1 : [num_users=1] = call_function[target=operator.iadd](args = (%val, %cos), kwargs = {})
+    %cos_1 : [num_users=1] = call_method[target=cos](args = (%l_flat_args_0_,), kwargs = {})
+    %val_2 : [num_users=1] = call_function[target=operator.iadd](args = (%val_1, %cos_1), kwargs = {})
+    return (val_2,)""",
         )
+
+        self.assertEqual(gm(inp), Foo()(inp))
 
     def test_split_const_gm_with_lifted_constants(self):
         class Model(torch.nn.Module):
