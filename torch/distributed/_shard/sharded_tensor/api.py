@@ -8,7 +8,7 @@ import warnings
 import weakref
 from dataclasses import dataclass
 from functools import reduce
-from typing import Callable, cast, Optional, TYPE_CHECKING
+from typing import cast, Optional, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -41,7 +41,7 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.distributed._shard.metadata import ShardMetadata
 
@@ -299,7 +299,9 @@ class ShardedTensor(ShardedTensorBase):
         if self._init_rrefs:
             with _sharded_tensor_lock:
                 global _sharded_tensor_current_id, _sharded_tensor_map
+                # pyrefly: ignore  # bad-assignment
                 self._sharded_tensor_id = _sharded_tensor_current_id
+                # pyrefly: ignore  # unsupported-operation
                 _sharded_tensor_map[self._sharded_tensor_id] = weakref.ref(self)
                 _sharded_tensor_current_id += 1
 
@@ -676,7 +678,7 @@ class ShardedTensor(ShardedTensorBase):
         copy_tensor = kwargs.get("copy", False)
         non_blocking = kwargs.get("non_blocking", False)
         memory_format = kwargs.get("memory_format", torch.preserve_format)
-        process_group = kwargs.get("process_group", None)
+        process_group = kwargs.get("process_group")
 
         if (
             not copy_tensor

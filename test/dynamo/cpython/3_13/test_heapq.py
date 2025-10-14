@@ -60,7 +60,7 @@ class _TestHeap:
         data = []
         self.check_invariant(heap)
         for i in range(256):
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 item = random.random()
             data.append(item)
             self.module.heappush(heap, item)
@@ -92,7 +92,7 @@ class _TestHeap:
 
     def test_heapify(self):
         for size in list(range(30)) + [20000]:
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 heap = [random.random() for dummy in range(size)]
             self.module.heapify(heap)
             self.check_invariant(heap)
@@ -100,7 +100,7 @@ class _TestHeap:
         self.assertRaises(TypeError, self.module.heapify, None)
 
     def test_naive_nbest(self):
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             data = [randrange(2000) for i in range(1000)]
         heap = []
         for item in data:
@@ -124,7 +124,7 @@ class _TestHeap:
         # heap instead of a min heap, it could go faster still via
         # heapify'ing all of data (linear time), then doing 10 heappops
         # (10 log-time steps).
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             data = [randrange(2000) for i in range(1000)]
         heap = data[:10]
         self.module.heapify(heap)
@@ -138,7 +138,7 @@ class _TestHeap:
         self.assertRaises(IndexError, self.module.heapreplace, [], None)
 
     def test_nbest_with_pushpop(self):
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             data = [randrange(2000) for i in range(1000)]
         heap = data[:10]
         self.module.heapify(heap)
@@ -176,7 +176,7 @@ class _TestHeap:
     def test_heapsort(self):
         # Exercise everything with repeated heapsort checks
         for trial in range(100):
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 size = randrange(50)
                 data = [randrange(25) for i in range(size)]
             if trial & 1:     # Half of the time, use heapify
@@ -191,7 +191,7 @@ class _TestHeap:
 
     def test_merge(self):
         inputs = []
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             for i in range(randrange(25)):
                 row = []
                 for j in range(randrange(100)):
@@ -224,12 +224,12 @@ class _TestHeap:
             list(self.module.merge(iterable(), iterable()))
 
     def test_merge_stability(self):
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             class Int(int):
                 pass
         inputs = [[], [], [], []]
         for i in range(20000):
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 stream = randrange(4)
                 x = randrange(500)
             obj = Int(x)
@@ -241,7 +241,7 @@ class _TestHeap:
         self.assertEqual(result, sorted(result))
 
     def test_nsmallest(self):
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             data = [(randrange(2000), i) for i in range(1000)]
         for f in (None, lambda x:  x[0] * 547 % 2000):
             for n in (0, 1, 2, 10, 100, 400, 999, 1000, 1100):
@@ -251,7 +251,7 @@ class _TestHeap:
                                  sorted(data, key=f)[:n])
 
     def test_nlargest(self):
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             data = [(randrange(2000), i) for i in range(1000)]
         for f in (None, lambda x:  x[0] * 547 % 2000):
             for n in (0, 1, 2, 10, 100, 400, 999, 1000, 1100):
@@ -267,7 +267,7 @@ class _TestHeap:
             data = [comp(x) for x in data]
             self.module.heapify(data)
             return [self.module.heappop(data).x for i in range(len(data))]
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             class LT:
                 def __init__(self, x):
                     self.x = x
@@ -455,7 +455,7 @@ class _TestErrorHandling:
     def test_comparison_operator_modifiying_heap(self):
         # See bpo-39421: Strong references need to be taken
         # when comparing objects as they can alter the heap
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             class EvilClass(int):
                 def __lt__(self, o):
                     heap.clear()
@@ -467,7 +467,7 @@ class _TestErrorHandling:
 
     def test_comparison_operator_modifiying_heap_two_heaps(self):
 
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             class h(int):
                 def __lt__(self, o):
                     list2.clear()

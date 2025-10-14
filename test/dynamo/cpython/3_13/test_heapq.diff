@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_heapq.py b/test/dynamo/cpython/3_13/test_heapq.py
-index 1aa8e4e2897..b0ef9d0d535 100644
+index 1aa8e4e2897..bc177c2943e 100644
 --- a/test/dynamo/cpython/3_13/test_heapq.py
 +++ b/test/dynamo/cpython/3_13/test_heapq.py
 @@ -1,3 +1,23 @@
@@ -69,7 +69,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
          self.check_invariant(heap)
          for i in range(256):
 -            item = random.random()
-+            with torch._dynamo.set_fullgraph(False):
++            with torch._dynamo.error_on_graph_break(False):
 +                item = random.random()
              data.append(item)
              self.module.heappush(heap, item)
@@ -79,7 +79,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
      def test_heapify(self):
          for size in list(range(30)) + [20000]:
 -            heap = [random.random() for dummy in range(size)]
-+            with torch._dynamo.set_fullgraph(False):
++            with torch._dynamo.error_on_graph_break(False):
 +                heap = [random.random() for dummy in range(size)]
              self.module.heapify(heap)
              self.check_invariant(heap)
@@ -88,7 +88,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
  
      def test_naive_nbest(self):
 -        data = [random.randrange(2000) for i in range(1000)]
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            data = [randrange(2000) for i in range(1000)]
          heap = []
          for item in data:
@@ -98,7 +98,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
          # heapify'ing all of data (linear time), then doing 10 heappops
          # (10 log-time steps).
 -        data = [random.randrange(2000) for i in range(1000)]
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            data = [randrange(2000) for i in range(1000)]
          heap = data[:10]
          self.module.heapify(heap)
@@ -108,7 +108,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
  
      def test_nbest_with_pushpop(self):
 -        data = [random.randrange(2000) for i in range(1000)]
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            data = [randrange(2000) for i in range(1000)]
          heap = data[:10]
          self.module.heapify(heap)
@@ -119,7 +119,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
          for trial in range(100):
 -            size = random.randrange(50)
 -            data = [random.randrange(25) for i in range(size)]
-+            with torch._dynamo.set_fullgraph(False):
++            with torch._dynamo.error_on_graph_break(False):
 +                size = randrange(50)
 +                data = [randrange(25) for i in range(size)]
              if trial & 1:     # Half of the time, use heapify
@@ -135,7 +135,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
 -                tup = random.choice('ABC'), random.randrange(-500, 500)
 -                row.append(tup)
 -            inputs.append(row)
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            for i in range(randrange(25)):
 +                row = []
 +                for j in range(randrange(100)):
@@ -151,14 +151,14 @@ index 1aa8e4e2897..b0ef9d0d535 100644
      def test_merge_stability(self):
 -        class Int(int):
 -            pass
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class Int(int):
 +                pass
          inputs = [[], [], [], []]
          for i in range(20000):
 -            stream = random.randrange(4)
 -            x = random.randrange(500)
-+            with torch._dynamo.set_fullgraph(False):
++            with torch._dynamo.error_on_graph_break(False):
 +                stream = randrange(4)
 +                x = randrange(500)
              obj = Int(x)
@@ -169,7 +169,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
  
      def test_nsmallest(self):
 -        data = [(random.randrange(2000), i) for i in range(1000)]
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            data = [(randrange(2000), i) for i in range(1000)]
          for f in (None, lambda x:  x[0] * 547 % 2000):
              for n in (0, 1, 2, 10, 100, 400, 999, 1000, 1100):
@@ -179,7 +179,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
  
      def test_nlargest(self):
 -        data = [(random.randrange(2000), i) for i in range(1000)]
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            data = [(randrange(2000), i) for i in range(1000)]
          for f in (None, lambda x:  x[0] * 547 % 2000):
              for n in (0, 1, 2, 10, 100, 400, 999, 1000, 1100):
@@ -199,7 +199,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
 -            def __le__(self, other):
 -                return self.x >= other.x
 -        data = [random.random() for i in range(100)]
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class LT:
 +                def __init__(self, x):
 +                    self.x = x
@@ -244,7 +244,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
 -            def __lt__(self, o):
 -                heap.clear()
 -                return NotImplemented
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class EvilClass(int):
 +                def __lt__(self, o):
 +                    heap.clear()
@@ -260,7 +260,7 @@ index 1aa8e4e2897..b0ef9d0d535 100644
 -            def __lt__(self, o):
 -                list2.clear()
 -                return NotImplemented
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class h(int):
 +                def __lt__(self, o):
 +                    list2.clear()
