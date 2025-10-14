@@ -134,7 +134,7 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
         u2c = u2b.copy() # making a copy of a UserDict is special cased
         self.assertEqual(u2b, u2c)
 
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyUserDict(collections.UserDict):
                 def display(self): print(self)
 
@@ -227,7 +227,7 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
         # (E) subclass defines __missing__ method raising RuntimeError
         # (F) subclass sets __missing__ instance variable (no effect)
         # (G) subclass doesn't define __missing__ at all
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             class D(collections.UserDict):
                 def __missing__(self, key):
                     return 42
@@ -237,7 +237,7 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
         self.assertNotIn(2, d)
         self.assertNotIn(2, d.keys())
         self.assertEqual(d[2], 42)
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             class E(collections.UserDict):
                 def __missing__(self, key):
                     raise RuntimeError(key)
@@ -248,7 +248,7 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
             self.assertEqual(err.args, (42,))
         else:
             self.fail("e[42] didn't raise RuntimeError")
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             class F(collections.UserDict):
                 def __init__(self):
                     # An instance variable __missing__ should have no effect
@@ -261,7 +261,7 @@ class UserDictTest(mapping_tests.TestHashMappingProtocol):
             self.assertEqual(err.args, (42,))
         else:
             self.fail("f[42] didn't raise KeyError")
-        with torch._dynamo.set_fullgraph(False):
+        with torch._dynamo.error_on_graph_break(False):
             class G(collections.UserDict):
                 pass
         g = G()

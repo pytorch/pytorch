@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_userdict.py b/test/dynamo/cpython/3_13/test_userdict.py
-index 61e79f553e8..e16a07059a4 100644
+index 61e79f553e8..cae663b7ecf 100644
 --- a/test/dynamo/cpython/3_13/test_userdict.py
 +++ b/test/dynamo/cpython/3_13/test_userdict.py
 @@ -1,3 +1,57 @@
@@ -66,7 +66,7 @@ index 61e79f553e8..e16a07059a4 100644
  
 -        class MyUserDict(collections.UserDict):
 -            def display(self): print(self)
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class MyUserDict(collections.UserDict):
 +                def display(self): print(self)
  
@@ -79,7 +79,7 @@ index 61e79f553e8..e16a07059a4 100644
 -        class D(collections.UserDict):
 -            def __missing__(self, key):
 -                return 42
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class D(collections.UserDict):
 +                def __missing__(self, key):
 +                    return 42
@@ -92,7 +92,7 @@ index 61e79f553e8..e16a07059a4 100644
 -        class E(collections.UserDict):
 -            def __missing__(self, key):
 -                raise RuntimeError(key)
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class E(collections.UserDict):
 +                def __missing__(self, key):
 +                    raise RuntimeError(key)
@@ -108,7 +108,7 @@ index 61e79f553e8..e16a07059a4 100644
 -                # An instance variable __missing__ should have no effect
 -                self.__missing__ = lambda key: None
 -                collections.UserDict.__init__(self)
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class F(collections.UserDict):
 +                def __init__(self):
 +                    # An instance variable __missing__ should have no effect
@@ -123,7 +123,7 @@ index 61e79f553e8..e16a07059a4 100644
              self.fail("f[42] didn't raise KeyError")
 -        class G(collections.UserDict):
 -            pass
-+        with torch._dynamo.set_fullgraph(False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class G(collections.UserDict):
 +                pass
          g = G()
