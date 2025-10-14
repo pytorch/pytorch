@@ -420,6 +420,27 @@ class TritonTemplateKernel(TritonKernel):
             features=SIMDKernelFeatures([], numel),
             hint_override=hint_override,
         )
+        if tma_store:
+            # By default `construct_range_trees` will return the range_trees in the order
+            # ["z", "y", "x", "r0_", "r1_"] (see simd.py:all_prefixes)
+            # and this order defines what the kernel block shape will be. So if the template
+            # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
+            # trees in the order ["y", "x"]. This would mean that the template would need to tranpose
+            # the loaded value.
+            # The below sorts the range trees according to that required by the caller
+            pw_sorted_range_trees = []
+            reduction_idx = None
+            for i, prefix in enumerate(tiling):
+                rt = next(rt for rt in self.range_trees if rt.prefix == prefix)
+                if rt.prefix.startswith("r"):
+                    reduction_idx = i
+                    break
+                rt.index = i
+                rt.grid_dim = i
+                rt.tensor_dim = i
+                pw_sorted_range_trees.append(rt)
+            self.range_trees = pw_sorted_range_trees + self.range_trees[reduction_idx:]
+
         self.input_nodes = input_nodes
         self.output_node = output_node
         self.named_input_nodes = {}  # type: ignore[var-annotated]
@@ -1169,13 +1190,8 @@ class TritonTemplateKernel(TritonKernel):
                 intermediate_lines: list[str] = []
                 epilogue_index_symbols: list[sympy.Symbol] = []
                 if self.tma_store:
-                    # Generate the expected indexing symbols.
-                    # Note: TMA indices are expected to be in the
-                    # format (x, y), but the range_tree is always
-                    # (yindex, xindex).
-                    index_order = [1, 0]
                     val_shape_copy = list(val_shape)
-                    for i, range_tree in zip(index_order, self.range_trees[:-1]):
+                    for i, range_tree in enumerate(self.range_trees[:-1]):
                         name = range_tree.name
                         symbol = range_tree.symbol()
                         epilogue_index_symbols.append(symbol)
@@ -1196,8 +1212,8 @@ class TritonTemplateKernel(TritonKernel):
                                 index_symbols[i],
                                 val_shape[i],
                                 i,
-                                len(index_order),
-                                # pyrefly: ignore [missing-argument]
+                                len(val_shape),
+                                # pyrefly: ignore  # missing-argument
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1213,10 +1229,6 @@ class TritonTemplateKernel(TritonKernel):
                         # after the remapping.
                         # pyrefly: ignore [missing-argument]
                         val_shape_copy[i] = range_tree.symt.name
-                    # Reverse the index symbols because TMA is indexed
-                    # as (x, y) whereas the variables will naturally be indexed
-                    # as (y, x)
-                    epilogue_index_symbols.reverse()
                     val_shape = tuple(val_shape_copy)
                 else:
                     mask_vars: list[str] = []
