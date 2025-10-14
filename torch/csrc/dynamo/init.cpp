@@ -185,6 +185,20 @@ void _register_functions(PyObject* mod) {
 }
 
 struct FixedLengthArray {
+  /*
+  A fixed length stack of VariableTracker objects with fast append and pop.
+  The stack is initialized with a fixed capacity, and holds a pointer to the
+  next free slot. This allows O(1) append/pop operations without resizing the
+  underlying list. Random access is also O(1).
+
+  CPython implements the stack as a contiguous C array with a fixed capacity.
+  When the interpreter executes a PUSH operation, it writes the value to the
+  next free slot and increments the stack pointer. When it executes a POP
+  operation, it decrements the stack pointer and returns the value.
+  The capacity is computed beforehand as "co_nlocalsplus + co_stacksize" in:
+  https://github.com/python/cpython/blob/32e1e0699ffda8ec1dd5a0eb178b052352ab7d31/Objects/frameobject.c#L2122-L2139
+  */
+
   std::vector<py::object> items;
   Py_ssize_t top;
 
@@ -224,6 +238,13 @@ struct FixedLengthArray {
 
   py::iterator __iter__() {
     return py::make_iterator(items.begin(), items.begin() + top);
+  }
+
+  void clear() {
+    for (Py_ssize_t i = 0; i < top; i++) {
+      items[i] = py::none();
+    }
+    top = 0;
   }
 
   py::object pop() {
@@ -300,6 +321,7 @@ void initDynamoBindings(PyObject* torch) {
       .def(py::init<Py_ssize_t>())
       .def("append", &FixedLengthArray::append)
       .def("pop", &FixedLengthArray::pop)
+      .def("clear", &FixedLengthArray::clear)
       .def("__getitem__", &FixedLengthArray::__getitem__)
       .def("__setitem__", &FixedLengthArray::__setitem__)
       .def("__iter__", &FixedLengthArray::__iter__)
