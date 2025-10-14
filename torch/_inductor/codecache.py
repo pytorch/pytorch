@@ -2276,7 +2276,7 @@ end
             kernel_compile_cmd = kernel_builder.get_command_line()
             kernel_o = kernel_builder.get_target_file_path()
 
-            breakpoint()
+            # breakpoint()
             log.debug("aot wrapper compilation command: %s", wrapper_compile_cmd)
             log.debug("aot kernel compilation command: %s", kernel_compile_cmd)
             if config.aot_inductor.package_cpp_only:
