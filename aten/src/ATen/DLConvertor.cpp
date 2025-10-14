@@ -152,7 +152,10 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
   return ctx;
 }
 
-static Device getATenDevice(DLDeviceType type, c10::DeviceIndex index, void* data = nullptr) {
+static Device getATenDevice(
+    DLDeviceType type,
+    c10::DeviceIndex index,
+    void* data = nullptr) {
   switch (type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -171,7 +174,8 @@ static Device getATenDevice(DLDeviceType type, c10::DeviceIndex index, void* dat
       return at::Device(DeviceType::HIP, index);
 #endif
     case DLDeviceType::kDLOneAPI:
-      TORCH_CHECK(data != nullptr, "Can't get ATen device for XPU without XPU data.");
+      TORCH_CHECK(
+          data != nullptr, "Can't get ATen device for XPU without XPU data.");
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
     case DLDeviceType::kDLMAIA:
       return at::Device(DeviceType::MAIA, index);
@@ -190,7 +194,8 @@ ScalarType toScalarType(const DLDataType& dtype) {
   if (dtype.code != DLDataTypeCode::kDLFloat4_e2m1fn) {
     TORCH_CHECK_BUFFER(
         dtype.lanes == 1,
-        "ATen does not support lanes != 1 for dtype code", std::to_string(dtype.code));
+        "ATen does not support lanes != 1 for dtype code",
+        std::to_string(dtype.code));
   }
   switch (dtype.code) {
     case DLDataTypeCode::kDLUInt:
@@ -290,7 +295,9 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK_BUFFER(
-              false, "Unsupported kDLFloat8_e5m2 bits ", std::to_string(dtype.bits));
+              false,
+              "Unsupported kDLFloat8_e5m2 bits ",
+              std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLFloat8_e5m2fnuz:
@@ -300,7 +307,9 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK_BUFFER(
-              false, "Unsupported kDLFloat8_e5m2fnuz bits ", std::to_string(dtype.bits));
+              false,
+              "Unsupported kDLFloat8_e5m2fnuz bits ",
+              std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLFloat8_e4m3fn:
@@ -310,7 +319,9 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK_BUFFER(
-              false, "Unsupported kDLFloat8_e4m3fn bits ", std::to_string(dtype.bits));
+              false,
+              "Unsupported kDLFloat8_e4m3fn bits ",
+              std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLFloat8_e4m3fnuz:
@@ -320,7 +331,9 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK_BUFFER(
-              false, "Unsupported kDLFloat8_e4m3fnuz bits ", std::to_string(dtype.bits));
+              false,
+              "Unsupported kDLFloat8_e4m3fnuz bits ",
+              std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLFloat8_e8m0fnu:
@@ -330,7 +343,9 @@ ScalarType toScalarType(const DLDataType& dtype) {
           break;
         default:
           TORCH_CHECK_BUFFER(
-              false, "Unsupported kDLFloat8_e8m0fnu bits ", std::to_string(dtype.bits));
+              false,
+              "Unsupported kDLFloat8_e8m0fnu bits ",
+              std::to_string(dtype.bits));
       }
       break;
     case DLDataTypeCode::kDLFloat4_e2m1fn:
@@ -342,16 +357,21 @@ ScalarType toScalarType(const DLDataType& dtype) {
               break;
             default:
               TORCH_CHECK_BUFFER(
-                false, "Unsupported kDLFloat4_e2m1fn lanes ", std::to_string(dtype.lanes));
+                  false,
+                  "Unsupported kDLFloat4_e2m1fn lanes ",
+                  std::to_string(dtype.lanes));
           }
           break;
         default:
           TORCH_CHECK_BUFFER(
-              false, "Unsupported kDLFloat4_e2m1fn bits ", std::to_string(dtype.bits));
+              false,
+              "Unsupported kDLFloat4_e2m1fn bits ",
+              std::to_string(dtype.bits));
       }
       break;
     default:
-      TORCH_CHECK_BUFFER(false, "Unsupported code ", std::to_string(dtype.code));
+      TORCH_CHECK_BUFFER(
+          false, "Unsupported code ", std::to_string(dtype.code));
   }
   return stype;
 }
@@ -378,8 +398,7 @@ template <class T>
 void fillVersion(T* tensor) {}
 
 template <>
-void fillVersion<DLManagedTensorVersioned>(
-    DLManagedTensorVersioned* tensor) {
+void fillVersion<DLManagedTensorVersioned>(DLManagedTensorVersioned* tensor) {
   tensor->flags = 0;
   tensor->version.major = DLPACK_MAJOR_VERSION;
   tensor->version.minor = DLPACK_MINOR_VERSION;
@@ -397,8 +416,10 @@ T* toDLPackImpl(const Tensor& src) {
   atDLMTensor->tensor.dl_tensor.device = torchDeviceToDLDevice(src.device());
   atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
-  atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(src.sizes().data());
-  atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(src.strides().data());
+  atDLMTensor->tensor.dl_tensor.shape =
+      const_cast<int64_t*>(src.sizes().data());
+  atDLMTensor->tensor.dl_tensor.strides =
+      const_cast<int64_t*>(src.strides().data());
   atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   fillVersion(&atDLMTensor->tensor);
 
@@ -407,7 +428,8 @@ T* toDLPackImpl(const Tensor& src) {
 
 // Explicitly instantiate the template above for both classes.
 template DLManagedTensor* toDLPackImpl<DLManagedTensor>(const Tensor&);
-template DLManagedTensorVersioned* toDLPackImpl<DLManagedTensorVersioned>(const Tensor&);
+template DLManagedTensorVersioned* toDLPackImpl<DLManagedTensorVersioned>(
+    const Tensor&);
 
 // This function constructs a Tensor from a memory managed DLPack which
 // may be represented as either: DLManagedTensor and DLManagedTensorVersioned.
@@ -422,7 +444,8 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
   }
 
   DLTensor& dl_tensor = src->dl_tensor;
-  Device device = getATenDevice(dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
+  Device device = getATenDevice(
+      dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
   ScalarType stype = toScalarType(dl_tensor.dtype);
 
   if (!dl_tensor.strides) {
@@ -443,8 +466,12 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
 }
 
 // Explicitly instantiate the template above for both classes.
-template at::Tensor fromDLPackImpl<DLManagedTensor>(DLManagedTensor* src, std::function<void(void*)> deleter);
-template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(DLManagedTensorVersioned* src, std::function<void(void*)> deleter);
+template at::Tensor fromDLPackImpl<DLManagedTensor>(
+    DLManagedTensor* src,
+    std::function<void(void*)> deleter);
+template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(
+    DLManagedTensorVersioned* src,
+    std::function<void(void*)> deleter);
 
 } // namespace
 
@@ -460,7 +487,9 @@ Tensor fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter) {
   return fromDLPackImpl<DLManagedTensor>(src, std::move(deleter));
 }
 
-Tensor fromDLPackVersioned(DLManagedTensorVersioned* src, std::function<void(void*)> deleter) {
+Tensor fromDLPackVersioned(
+    DLManagedTensorVersioned* src,
+    std::function<void(void*)> deleter) {
   return fromDLPackImpl<DLManagedTensorVersioned>(src, std::move(deleter));
 }
 
