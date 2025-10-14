@@ -1686,6 +1686,40 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         # However, at the time this change was introduced, it went down from 15154 to 403.
         self.assertLess(len(shape_env_guards), 1000)
 
+    # See # https://github.com/pytorch/pytorch/issues/164814
+    def test_aot_autograd_stride_reconstruction_on_zero_dim_dynamic_shaped_tensor(
+        self,
+    ) -> None:
+        def repro(sentinel: torch.Tensor, skip_squeeze: bool = False) -> torch.Tensor:
+            x = torch.unique(torch.ones(1))
+            x = torch.reshape(x, [1])
+            if not skip_squeeze:
+                x = torch.squeeze(x)  # 0-d tensor
+            return x * sentinel
+
+        # Grad required to trigger the issue (need to replay stride)
+        sentinel = torch.tensor(1.0, requires_grad=True)
+        eager_sq = repro(sentinel)
+        comp_aot_sq = torch.compile(repro, backend="aot_eager", fullgraph=True)(
+            sentinel
+        )
+        comp_ind_sq = torch.compile(repro, backend="inductor", fullgraph=True)(sentinel)
+        self.assertEqual(eager_sq, comp_aot_sq)
+        self.assertEqual(eager_sq, comp_ind_sq)
+        self.assertEqual(eager_sq.stride(), comp_ind_sq.stride())
+
+        # Now check semantics preserved when skipping squeeze
+        eager_no_sq = repro(sentinel, skip_squeeze=True)
+        comp_aot_no_sq = torch.compile(repro, backend="aot_eager", fullgraph=True)(
+            sentinel, skip_squeeze=True
+        )
+        comp_ind_no_sq = torch.compile(repro, backend="inductor", fullgraph=True)(
+            sentinel, skip_squeeze=True
+        )
+        self.assertEqual(eager_no_sq, comp_aot_no_sq)
+        self.assertEqual(eager_no_sq, comp_ind_no_sq)
+        self.assertEqual(eager_no_sq.stride(), comp_ind_no_sq.stride())
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

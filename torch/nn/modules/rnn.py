@@ -111,7 +111,6 @@ class RNNBase(Module):
 
         if (
             not isinstance(dropout, numbers.Number)
-            # pyrefly: ignore  # unsupported-operation
             or not 0 <= dropout <= 1
             or isinstance(dropout, bool)
         ):
@@ -120,7 +119,6 @@ class RNNBase(Module):
                 "representing the probability of an element being "
                 "zeroed"
             )
-        # pyrefly: ignore  # unsupported-operation
         if dropout > 0 and num_layers == 1:
             warnings.warn(
                 "dropout option adds dropout after all but last "
@@ -641,12 +639,10 @@ class RNN(RNNBase):
 
     @overload
     @torch._jit_internal._overload_method  # noqa: F811
-    # pyrefly: ignore  # bad-override
     def forward(
         self,
         input: Tensor,
         hx: Optional[Tensor] = None,
-        # pyrefly: ignore  # bad-return
     ) -> tuple[Tensor, Tensor]:
         pass
 
@@ -656,7 +652,6 @@ class RNN(RNNBase):
         self,
         input: PackedSequence,
         hx: Optional[Tensor] = None,
-        # pyrefly: ignore  # bad-return
     ) -> tuple[PackedSequence, Tensor]:
         pass
 
@@ -782,7 +777,6 @@ class RNN(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
                 output,
-                # pyrefly: ignore  # bad-argument-type
                 batch_sizes,
                 sorted_indices,
                 unsorted_indices,
@@ -1009,7 +1003,6 @@ class LSTM(RNNBase):
 
     # In the future, we should prevent mypy from applying contravariance rules here.
     # See torch/nn/modules/module.py::_forward_unimplemented
-    # pyrefly: ignore  # bad-override
     def check_forward_args(
         self,
         input: Tensor,
@@ -1043,12 +1036,10 @@ class LSTM(RNNBase):
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
-    # pyrefly: ignore  # bad-override
     def forward(
         self,
         input: Tensor,
         hx: Optional[tuple[Tensor, Tensor]] = None,
-        # pyrefly: ignore  # bad-return
     ) -> tuple[Tensor, tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
@@ -1059,7 +1050,6 @@ class LSTM(RNNBase):
         self,
         input: PackedSequence,
         hx: Optional[tuple[Tensor, Tensor]] = None,
-        # pyrefly: ignore  # bad-return
     ) -> tuple[PackedSequence, tuple[Tensor, Tensor]]:  # noqa: F811
         pass
 
@@ -1174,7 +1164,6 @@ class LSTM(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
                 output,
-                # pyrefly: ignore  # bad-argument-type
                 batch_sizes,
                 sorted_indices,
                 unsorted_indices,
@@ -1343,12 +1332,10 @@ class GRU(RNNBase):
 
     @overload  # type: ignore[override]
     @torch._jit_internal._overload_method  # noqa: F811
-    # pyrefly: ignore  # bad-override
     def forward(
         self,
         input: Tensor,
         hx: Optional[Tensor] = None,
-        # pyrefly: ignore  # bad-return
     ) -> tuple[Tensor, Tensor]:  # noqa: F811
         pass
 
@@ -1358,7 +1345,6 @@ class GRU(RNNBase):
         self,
         input: PackedSequence,
         hx: Optional[Tensor] = None,
-        # pyrefly: ignore  # bad-return
     ) -> tuple[PackedSequence, Tensor]:  # noqa: F811
         pass
 
@@ -1453,7 +1439,6 @@ class GRU(RNNBase):
         if isinstance(orig_input, PackedSequence):
             output_packed = PackedSequence(
                 output,
-                # pyrefly: ignore  # bad-argument-type
                 batch_sizes,
                 sorted_indices,
                 unsorted_indices,

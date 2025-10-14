@@ -64,6 +64,7 @@ def get_patches():
     return {
         "test_configs.estimate_aten_runtime": estimate_aten_runtime,
         "reorder_for_locality": False,
+        "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],
         "compile_threads": 1,
         "force_disable_caches": True,
@@ -357,6 +358,7 @@ def get_bucket_patches(compute_multiplier=1.0):
         "test_configs.estimate_aten_runtime": estimate_aten_runtime_part,
         "test_configs.aten_fx_overlap_preserving_bucketing": True,
         "reorder_for_locality": False,
+        "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],
         "compile_threads": 1,
         "force_disable_caches": True,
