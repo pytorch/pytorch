@@ -35,9 +35,8 @@ def fork_stream(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-    t: Tensor,
-) -> Tensor:
-    return t.clone()
+) -> int:
+    return from_index
 
 
 @fork_stream.register_fake
@@ -46,15 +45,14 @@ def _(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-    t: Tensor,
-) -> Tensor:
-    return t.clone()
+) -> int:
+    return from_index
 
 
 def fork_backward(ctx, grad_output):
     from_index, from_device, to_index, to_device = ctx.args
-    ret_val = join_stream(to_index, to_device, from_index, from_device, grad_output)
-    return None, None, None, None, ret_val, None
+    from_index = join_stream(to_index, to_device, from_index, from_device)
+    return None, from_index, None, None, None, None
 
 
 def fork_setup_context(ctx, inputs, output):
@@ -72,9 +70,8 @@ def join_stream(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-    t: Tensor,
-) -> Tensor:
-    return t.clone()
+) -> int:
+    return from_index
 
 
 @join_stream.register_fake
@@ -83,19 +80,18 @@ def _(
     from_device: torch.device,
     to_index: int,
     to_device: torch.device,
-    t: Tensor,
-) -> Tensor:
-    return t.clone()
+) -> int:
+    return from_index
 
 
 def join_backward(ctx, grad_output):
     from_index, from_device, to_index, to_device = ctx.args
-    ret_val = fork_stream(from_index, from_device, to_index, to_device, grad_output)
-    return None, None, None, None, ret_val, None
+    from_index = fork_stream(from_index, from_device, to_index, to_device)
+    return None, from_index, None, None, None, None
 
 
 def join_setup_context(ctx, inputs, output):
-    from_index, from_device, to_index, to_device, _ = inputs
+    from_index, from_device, to_index, to_device = inputs
     ctx.args = (from_index, from_device, to_index, to_device)
 
 
