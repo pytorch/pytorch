@@ -7702,7 +7702,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
 
-    def test_sparse_output_inductor(self) -> None:
+    def test_sparse_output_inductor_graph_breaks(self) -> None:
         def forward(x: torch.Tensor) -> torch.Tensor:
             x_sparse = x.to_sparse()
             return x_sparse * 2
@@ -7711,8 +7711,7 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         pt = forward(test_tensor)
         aot_eager = torch.compile(forward, backend="aot_eager")(test_tensor)
         self.assertEqual(pt, aot_eager)
-        with self.assertRaises(torch._dynamo.exc.BackendCompilerFailed):
-            inductor = torch.compile(forward, backend="inductor")(test_tensor)
+        inductor = torch.compile(forward, backend="inductor")(test_tensor)
 
     def test_nested_sequential_try_with(self):
         def fn(x):
