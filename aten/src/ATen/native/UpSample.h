@@ -406,7 +406,7 @@ scalar_t cubic_convolution2(scalar_t x, scalar_t A) {
 }
 
 template <typename scalar_t>
-void get_cubic_upsample_coefficients(
+static inline void get_cubic_upsample_coefficients(
     scalar_t coeffs[4],
     scalar_t t) {
   scalar_t A = -0.75;
