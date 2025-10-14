@@ -312,7 +312,6 @@ def get_peak_memory(
     fwd_graph: fx.Graph,
     bwd_graph: fx.Graph,
 ) -> int:
-
     fwd_peak_memory = max(build_memory_profile(fwd_graph, _is_releasable))
 
     bwd_baseline_memory, bwd_do_not_delete = get_fwd_bwd_interactions(
@@ -379,8 +378,8 @@ class MemoryTracker:
         self.peak_memory = self.current_memory_bytes
 
         log.debug(
-            f"Memory tracker initialized with "
-            f"initial memory: {self.current_memory_bytes // (1024 * 1024)} MB"
+            "Memory tracker initialized with initial memory: %d MB",
+            self.current_memory_bytes // (1024 * 1024),
         )
 
     def schedule_node(self, node: fx.Node) -> None:
@@ -411,12 +410,17 @@ class MemoryTracker:
 
         input_storages = self.alias_tracker.get_storage_uses(node)
         for storage_key in input_storages:
+            if not self.device_filter(storage_key.device):
+                continue
+
             # Invariant: if a node uses a storage, it must be live
             assert storage_key in self.current_live_storages, (
                 "all input storages should be currently allocated"
             )
 
-            if not self.is_releasable(self.alias_tracker.storage_to_allocator[storage_key]):
+            if not self.is_releasable(
+                self.alias_tracker.storage_to_allocator[storage_key]
+            ):
                 continue
 
             all_uses = self.alias_tracker.storage_to_uses[storage_key]
