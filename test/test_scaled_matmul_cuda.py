@@ -958,7 +958,7 @@ class TestFP8Matmul(TestCase):
         # rowwise on SM 9.0
         if torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "Only bf16 high precision output types are supported for row-wise scaling."
             ):
                 test()
@@ -1050,15 +1050,24 @@ class TestFP8Matmul(TestCase):
         # 1x128 blocks need scales to be outer-dim-major
         if lhs_block == 1:
             x_scales = x_scales.t().contiguous().t()
+            lhs_recipe = ScalingType.BlockWise1x128
+        else:
+            lhs_recipe = ScalingType.BlockWise128x128
+
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
+            rhs_recipe = ScalingType.BlockWise1x128
+        else:
+            rhs_recipe = ScalingType.BlockWise128x128
 
         # Verify that actual F8 mm doesn't error
-        mm_float8(
+        scaled_mm_wrap(
             x_fp8,
             y_fp8.t(),
             a_scale=x_scales,
+            scale_recipe_a=lhs_recipe,
             b_scale=y_scales.t(),
+            scale_recipe_b=rhs_recipe,
             output_dtype=output_dtype,
         )
 
