@@ -8178,7 +8178,9 @@ class TestEagerFusionOpInfo(AOTTestCase):
 
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @skipOps(
-        "TestEagerFusionOpInfo", "test_aot_autograd_default_partition_exhaustive", aot_autograd_failures
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_default_partition_exhaustive",
+        aot_autograd_failures,
     )
     def test_aot_autograd_default_partition_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op, use_min_cut=False)
@@ -8190,8 +8192,12 @@ class TestEagerFusionOpInfo(AOTTestCase):
         "test_aot_autograd_symbolic_default_partition_exhaustive",
         aot_autograd_failures | symbolic_aot_autograd_failures,
     )
-    def test_aot_autograd_symbolic_default_partition_exhaustive(self, device, dtype, op):
-        _test_aot_autograd_helper(self, device, dtype, op, dynamic=True, use_min_cut=False)
+    def test_aot_autograd_symbolic_default_partition_exhaustive(
+        self, device, dtype, op
+    ):
+        _test_aot_autograd_helper(
+            self, device, dtype, op, dynamic=True, use_min_cut=False
+        )
 
 
 aot_autograd_module_failures = set(
