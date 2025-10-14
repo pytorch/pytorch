@@ -4583,7 +4583,7 @@ class TestCudaMallocAsync(TestCase):
                 "pinned_use_cuda_host_register:none"
             )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_num_register_threads:none"
             )
