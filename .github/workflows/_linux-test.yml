@@ -226,7 +226,7 @@ jobs:
 
       - name: Download Windows torch libs for cross-compilation
         if: matrix.win_torch_libs_artifact != ''
-        uses: seemethere/download-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        uses: seemethere/download-artifact-s3@1da556a7aa0a088e3153970611f6c432d58e80e6 # v4.2.0
         with:
           name: ${{ matrix.win_torch_libs_artifact }}
           path: win-torch-libs

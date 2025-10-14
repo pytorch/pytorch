@@ -352,15 +352,18 @@ def check_mingw_win32_flavor(compiler: str) -> str:
     for line in out.splitlines():
         if "Thread model" in line:
             flavor = line.split(":")[1].strip().lower()
-    
+
     if flavor is None:
-        raise RuntimeError(f"Cannot determine the flavor of {compiler} (win32 or posix). No Thread model found in {compiler} -v")
+        raise RuntimeError(
+            f"Cannot determine the flavor of {compiler} (win32 or posix). No Thread model found in {compiler} -v"
+        )
 
     if flavor not in ("win32", "posix"):
-        raise RuntimeError(f"Only win32 and pofix flavor of {compiler} is supported. The flavor is {flavor}")
+        raise RuntimeError(
+            f"Only win32 and pofix flavor of {compiler} is supported. The flavor is {flavor}"
+        )
 
     return flavor
-
 
 
 def get_cpp_compiler() -> str:

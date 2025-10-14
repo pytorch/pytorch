@@ -1483,6 +1483,12 @@ def parse_args():
         help="exclude quantization tests",
     )
     parser.add_argument(
+        "--exclude-win-cross-compile-tests",
+        action="store_true",
+        default=True,
+        help="exclude Windows cross-compilation tests (they require MinGW and Windows libs)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -1660,7 +1666,7 @@ def get_selected_tests(options) -> list[str]:
 
     # Exclude cross-compilation tests by default - they require special setup (MinGW, Windows libs)
     # and should only run in their dedicated CI workflow
-    if not options.run_WIN_CROSS_COMPILE_TESTS:
+    if options.exclude_win_cross_compile_tests:
         options.exclude.extend(WIN_CROSS_COMPILE_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
