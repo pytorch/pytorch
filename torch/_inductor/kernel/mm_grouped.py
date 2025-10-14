@@ -242,7 +242,6 @@ def do_mma(a, b, accumulator):
 {%- endif %}
 {%- endif %}
 
-{%- if USE_TMA_LOAD %}
 {%- if USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR %}
     a_desc = tl._experimental_make_tensor_descriptor(
 {%- else %}
@@ -308,7 +307,6 @@ def do_mma(a, b, accumulator):
 {%- endif %}
 {%- endif %}
     )
-{%- endif %}
 
 {%- if M_IS_VARYING %}
     m_end_offset = 0
@@ -377,7 +375,6 @@ def do_mma(a, b, accumulator):
 
                 accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
-{%- if USE_TMA_LOAD %}
                 m_tile_offset = tile_m_idx * BLOCK_M
                 n_tile_offset = tile_n_idx * BLOCK_N
                 m_offset = (m_start_offset + m_tile_offset).to(tl.int32)
@@ -414,43 +411,9 @@ def do_mma(a, b, accumulator):
 {%- endif %}
 {%- endif %}
                     accumulator = do_mma(a, b, accumulator)
-{%- else %}
-                offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
-                offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
-                for k_block_offset in range(0, k_size, BLOCK_K):
-                    block_offs_k = k_block_offset + tl.arange(0, BLOCK_K)
-                    offs_k = block_offs_k + k_start_offset
-                    a_ptrs = (
-                        a_ptr
-{%- if not A_IS_2D %}
-                        + g * A_STRIDE_G
-{%- endif %}
-                        + (m_start_offset + offs_am[:, None]) * A_STRIDE_M
-                        + offs_k[None, :] * A_STRIDE_K
-                    )
-                    b_ptrs = (
-                        b_ptr
-{%- if not B_IS_2D %}
-                        + g * B_STRIDE_G
-{%- endif %}
-                        + (n_start_offset + offs_bn[:, None]) * B_STRIDE_N
-                        + offs_k[None, :] * B_STRIDE_K
-                    )
-                    a_mask = (offs_am[:, None] < m_size) & (block_offs_k[None, :] < k_size)
-                    b_mask = (offs_bn[:, None] < n_size) & (block_offs_k[None, :] < k_size)
-                    a = tl.load(a_ptrs, mask=a_mask, other=tl.zeros((), dtype=a_ptrs.dtype.element_ty))
-                    b = tl.load(b_ptrs, mask=b_mask, other=tl.zeros((), dtype=b_ptrs.dtype.element_ty))
-{%- if USE_FAST_ACCUM %}
-                    accumulator = tl.dot(a, b.T, accumulator)
-{%- else %}
-                    accumulator += tl.dot(a, b.T)
-{%- endif %}
-                    a_ptrs += BLOCK_K
-                    b_ptrs += BLOCK_K
-{%- endif %}
 
-                offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
-                offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
+                offs_am = m_tile_offset + tl.arange(0, BLOCK_M)
+                offs_bn = n_tile_offset + tl.arange(0, BLOCK_N)
 {%- if SCALED %}
                 scale_a = tl.load(
                     scale_a_ptr
@@ -598,6 +561,16 @@ def can_use_triton_kernel(
     ):
         return False
     if not has_triton():
+        return False
+
+    triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
+    triton_has_experimental_make_tensor_descriptor = hasattr(
+        tl, "_experimental_make_tensor_descriptor"
+    )
+    if not (
+        triton_has_make_tensor_descriptor
+        or triton_has_experimental_make_tensor_descriptor
+    ):
         return False
 
     # The _grouped_mm()/_scaled_grouped_mm() operator do not support
@@ -755,14 +728,10 @@ def _tuned_grouped_mm_common(
         a_is_k_major = mat_a.get_stride()[-1] == 1
         b_is_k_major = mat_b.get_stride()[-2] == 1
 
-        triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
         triton_has_experimental_make_tensor_descriptor = hasattr(
             tl, "_experimental_make_tensor_descriptor"
         )
-        use_tma_load = (
-            triton_has_make_tensor_descriptor
-            or triton_has_experimental_make_tensor_descriptor
-        )
+
         kwargs = {
             "SCALED": scaled,
             "A_IS_2D": a_is_2d,
@@ -771,7 +740,6 @@ def _tuned_grouped_mm_common(
             "B_IS_K_MAJOR": b_is_k_major,
             "USE_FAST_ACCUM": use_fast_accum,
             "NUM_SMS": get_num_sms(),
-            "USE_TMA_LOAD": use_tma_load,
             "USE_EXPERIMENTAL_MAKE_TENSOR_DESCRIPTOR": triton_has_experimental_make_tensor_descriptor,
         }
 
