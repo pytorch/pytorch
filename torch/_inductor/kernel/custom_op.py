@@ -1,10 +1,4 @@
 # Owner(s): ["module: inductor"]
-"""
-Custom operation autotuning for PyTorch Inductor.
-
-Enables automatic selection of the best performing implementation variant
-for custom operations by registering multiple decompositions and tuning knobs.
-"""
 
 import functools
 from typing import Any, Callable, Optional, Union
@@ -23,95 +17,13 @@ from torch._inductor.virtualized import V
 __all__ = [
     "autotune_custom_op",
     "register_custom_op_autotuning",
-    "register_parametric_op_autotuning",
 ]
-
-
-def _create_fallback_choice(
-    name: str,
-    default_impl: Callable[..., Any],
-    fake_output: torch.Tensor,
-    kwargs: dict[str, Any],
-) -> ExternKernelChoice:
-    """Create fallback ExternKernelChoice for the default implementation.
-
-    Args:
-        name: Base name for the fallback choice
-        default_impl: Default implementation function
-        fake_output: Fake output tensor for layout inference
-        kwargs: Keyword arguments to pass to the implementation
-
-    Returns:
-        ExternKernelChoice configured for the default implementation
-    """
-
-    def fallback_wrapper(*args: Any) -> Any:
-        return default_impl(*args, **kwargs)
-
-    return ExternKernelChoice(
-        kernel=fallback_wrapper,
-        name=f"{name}_fallback_default",
-        has_out_variant=False,
-        op_overload=default_impl,
-        use_fallback_kernel=True,
-    )
-
-
-def _create_user_input_gen_fns(
-    inputs: list[Any],
-    user_input_gen_fns: dict[int, Callable[[torch.Tensor], torch.Tensor]],
-) -> dict[int, Callable[[Any], torch.Tensor]]:
-    """Convert user-friendly input generation functions to internal format.
-
-    User functions take fake tensors (with shape/dtype info but no real data) and return
-    real tensors for benchmarking. This function bridges the user API to the internal API.
-
-    Args:
-        inputs: List of input IR nodes from compilation
-        user_input_gen_fns: User-provided input generation functions
-
-    Returns:
-        Dict mapping indices to internal input generation functions
-    """
-    internal_input_gen_fns = {}
-
-    with V.fake_mode:
-        fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
-
-    for i, user_gen_fn in user_input_gen_fns.items():
-        if i >= len(fake_inputs):
-            continue
-
-        fake_template = fake_inputs[i]
-
-        def create_internal_input_gen_fn(
-            user_function: Callable[[torch.Tensor], torch.Tensor],
-            template: torch.Tensor,
-        ) -> Callable[[Any], torch.Tensor]:
-            def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
-                fake_tensor_for_user = torch.empty(
-                    template.shape,
-                    dtype=template.dtype,
-                    device="meta",
-                )
-                return user_function(fake_tensor_for_user)
-
-            return internal_input_gen_fn
-
-        internal_input_gen_fns[i] = create_internal_input_gen_fn(
-            user_gen_fn, fake_template
-        )
-
-    return internal_input_gen_fns
 
 
 def _extract_tensor_inputs(
     args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> tuple[list[Any], dict[str, Any]]:
-    """Extract tensor inputs from mixed args/kwargs for custom op processing.
-
-    Separates tensor inputs (which need to be passed to decompositions) from
-    non-tensor parameters (which are passed as keyword arguments).
+    """Extract tensor inputs from mixed args/kwargs.
 
     Args:
         args: Positional arguments (mix of tensors and scalars)
@@ -138,6 +50,131 @@ def _extract_tensor_inputs(
             non_tensor_kwargs[key] = value
 
     return tensor_inputs, non_tensor_kwargs
+
+
+def _create_user_input_gen_fns(
+    inputs: list[Any],
+    user_input_gen_fns: dict[int, Callable[[torch.Tensor], torch.Tensor]],
+) -> dict[int, Callable[[Any], torch.Tensor]]:
+    """Convert user input generators to internal format.
+
+    Args:
+        inputs: List of input IR nodes from compilation
+        user_input_gen_fns: User-provided input generation functions
+
+    Returns:
+        Dict mapping indices to internal input generation functions
+    """
+    internal_input_gen_fns = {}
+
+    with V.fake_mode:
+        fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
+
+    def create_internal_input_gen_fn(
+        user_function: Callable[[torch.Tensor], torch.Tensor],
+        template: torch.Tensor,
+    ) -> Callable[[Any], torch.Tensor]:
+        def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
+            fake_tensor_for_user = torch.empty(
+                template.shape,
+                dtype=template.dtype,
+                device="meta",
+            )
+            return user_function(fake_tensor_for_user)
+
+        return internal_input_gen_fn
+
+    for i, user_gen_fn in user_input_gen_fns.items():
+        if i >= len(fake_inputs):
+            continue
+
+        fake_template = fake_inputs[i]
+        internal_input_gen_fns[i] = create_internal_input_gen_fn(
+            user_gen_fn, fake_template
+        )
+
+    return internal_input_gen_fns
+
+
+def _create_fallback_choice(
+    name: str,
+    default_impl: Callable[..., Any],
+    fake_output: torch.Tensor,
+    kwargs: dict[str, Any],
+) -> ExternKernelChoice:
+    """Create fallback choice for default implementation.
+
+    Args:
+        name: Base name for the fallback choice
+        default_impl: Default implementation function
+        fake_output: Fake output tensor for layout inference
+        kwargs: Keyword arguments for the implementation
+
+    Returns:
+        ExternKernelChoice configured for the default implementation
+    """
+
+    def fallback_wrapper(*args: Any) -> Any:
+        return default_impl(*args, **kwargs)
+
+    return ExternKernelChoice(
+        kernel=fallback_wrapper,
+        name=f"{name}_fallback_default",
+        has_out_variant=False,
+        op_overload=default_impl,
+        use_fallback_kernel=True,
+    )
+
+
+def _create_parameter_variants(
+    decompositions: list[Callable[..., Any]],
+    tuning_knob: dict[str, list[Any]],
+) -> list[Any]:  # Returns partial objects which are callable
+    """Create parameter variants for decompositions using tuning knob.
+
+    Args:
+        decompositions: Base implementation functions
+        tuning_knob: Parameter tuning dict with parameter names and value lists
+
+    Returns:
+        List of variant functions with all parameter combinations
+    """
+    # Validate parameter values
+    for param_name, param_values in tuning_knob.items():
+        if not isinstance(param_values, (list, tuple)):
+            raise TypeError(
+                f"Parameter values for '{param_name}' must be a list or tuple, got {type(param_values)}"
+            )
+        if not param_values:
+            raise ValueError(
+                f"At least one parameter value must be provided for '{param_name}'"
+            )
+
+    # Generate all combinations of parameter values using Cartesian product
+    import itertools
+
+    param_names = list(tuning_knob.keys())
+    param_values_lists = list(tuning_knob.values())
+    param_combinations = list(itertools.product(*param_values_lists))
+
+    # Create variants for each decomposition with each parameter combination
+    variants = []
+    for decomp_fn in decompositions:
+        for param_combo in param_combinations:
+            # Create kwargs dict for this combination
+            param_kwargs = dict(zip(param_names, param_combo))
+
+            # Create partial function with all parameters
+            variant = functools.partial(decomp_fn, **param_kwargs)
+
+            # Generate descriptive name
+            param_suffix = "_".join(
+                f"{name}_{value}" for name, value in param_kwargs.items()
+            )
+            variant.__name__ = f"{decomp_fn.__name__}_{param_suffix}"  # type: ignore[attr-defined]
+            variants.append(variant)
+
+    return variants
 
 
 def autotune_custom_op(
@@ -234,43 +271,45 @@ def register_custom_op_autotuning(
     decompositions: list[Callable[..., Any]],
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[int, Callable[[torch.Tensor], torch.Tensor]]] = None,
+    tuning_knob: Optional[dict[str, list[Any]]] = None,
 ) -> None:
     """Register custom operation for autotuning with multiple implementations.
 
-    Integrates with torch.library.custom_op and register_fake infrastructure.
-    The default implementation is automatically included as a fallback.
+    Supports multiple decompositions and optional parameter tuning.
+    When tuning_knob is provided, creates variants of each decomposition
+    with all combinations of parameter values (Cartesian product).
 
     Args:
         custom_op: Custom operation to register (e.g., torch.ops.mylib.myop.default)
-        decompositions: Alternative implementations to benchmark
+        decompositions: Implementation functions to benchmark
         name: Operation name for identification (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
+        tuning_knob: Optional parameter tuning dict. Supports multiple parameters.
+                    Creates all combinations of parameter values.
 
     Raises:
         TypeError: If decompositions is not a list/tuple
         ValueError: If no decompositions provided
 
     Example:
-        @torch.library.custom_op("mylib::rmsnorm", mutates_args=())
-        def rmsnorm_op(x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
-            return torch.nn.functional.rms_norm(x, x.shape[-1:], weight, eps=eps)
-
-        @rmsnorm_op.register_fake
-        def _(x: torch.Tensor, weight: torch.Tensor, eps: float = 1e-8):
-            return torch.empty_like(x)
-
+        # Multiple decompositions with parameter tuning
         register_custom_op_autotuning(
-            torch.ops.mylib.rmsnorm.default,
-            decompositions=[impl1, impl2, impl3],
+            torch.ops.mylib.attention.default,
+            decompositions=[standard_attention, flash_attention],
+            tuning_knob={
+                "head_dim": [32, 64, 128],
+                "method": ["chunked", "tiled"]
+            },
             input_gen_fns={
-                0: lambda fake: torch.randn_like(fake, device='cuda') * 0.02,
-                1: lambda fake: torch.ones_like(fake, device='cuda'),
+                0: lambda fake: torch.randn_like(fake, device='cuda') * 0.1,
+                1: lambda fake: torch.randn_like(fake, device='cuda') * 0.1,
+                2: lambda fake: torch.randn_like(fake, device='cuda') * 0.1,
             }
         )
     """
     if not isinstance(decompositions, (list, tuple)):
         raise TypeError(
-            f"decompositions must be a list or tuple of callables, got {type(decompositions)}"
+            f"decompositions must be a list or tuple, got {type(decompositions)}"
         )
 
     if not decompositions:
@@ -278,6 +317,12 @@ def register_custom_op_autotuning(
 
     if name is None:
         name = f"{custom_op._name}_autotuned"
+
+    # Generate final decomposition list with optional parameter variants
+    if tuning_knob is None:
+        final_decompositions = list(decompositions)
+    else:
+        final_decompositions = _create_parameter_variants(decompositions, tuning_knob)
 
     @functools.wraps(custom_op)
     def autotuning_lowering(*args: Any, **kwargs: Any) -> Any:
@@ -287,7 +332,7 @@ def register_custom_op_autotuning(
 
         result = autotune_custom_op(
             name=name,
-            decompositions=decompositions,
+            decompositions=final_decompositions,
             inputs=tensor_inputs,
             kwargs=non_tensor_kwargs,
             default_impl=custom_op,
@@ -298,71 +343,3 @@ def register_custom_op_autotuning(
         return result
 
     lowerings[custom_op] = autotuning_lowering
-
-
-def register_parametric_op_autotuning(
-    custom_op: torch._ops.OpOverload,
-    implementation_fn: Callable[..., Any],
-    parameter_name: str,
-    parameter_values: list[Any],
-    name: Optional[str] = None,
-    input_gen_fns: Optional[dict[int, Callable[[torch.Tensor], torch.Tensor]]] = None,
-) -> None:
-    """Register custom operation for autotuning with parameter-based variants.
-
-    This function addresses use case 2: autotuning hyperparameters for a custom operator.
-    Instead of providing explicit decompositions, users provide a single implementation
-    function and specify which parameter should be autotuned with which values.
-
-    Args:
-        custom_op: Custom operation to register (e.g., torch.ops.mylib.myop.default)
-        implementation_fn: Base implementation function that takes the parameter
-        parameter_name: Name of the parameter to autotune
-        parameter_values: List of values to try for the parameter
-        name: Operation name for identification (default: "{op_name}_parametric_autotuned")
-        input_gen_fns: Custom input generators for benchmarking
-
-    Example:
-        def parametric_algorithm(x: torch.Tensor, weight: torch.Tensor, method: int = 0) -> torch.Tensor:
-            if method == 0:
-                return x * weight  # Simple multiplication
-            elif method == 1:
-                return x / x.norm(dim=-1, keepdim=True) * weight  # Normalized
-            elif method == 2:
-                return x / torch.sqrt((x*x).mean(dim=-1, keepdim=True)) * weight  # RMS normalized
-
-        @torch.library.custom_op("mylib::parametric_op", mutates_args=())
-        def parametric_op(x: torch.Tensor, weight: torch.Tensor, method: int = 0) -> torch.Tensor:
-            return parametric_algorithm(x, weight, method)
-
-        register_parametric_op_autotuning(
-            torch.ops.mylib.parametric_op.default,
-            implementation_fn=parametric_algorithm,
-            parameter_name="method",
-            parameter_values=[0, 1, 2],
-        )
-    """
-    if not isinstance(parameter_values, (list, tuple)):
-        raise TypeError(
-            f"parameter_values must be a list or tuple, got {type(parameter_values)}"
-        )
-
-    if not parameter_values:
-        raise ValueError("At least one parameter value must be provided")
-
-    if name is None:
-        name = f"{custom_op._name}_parametric_autotuned"
-
-    # Generate specialized functions for each parameter value using functools.partial
-    decompositions: list[Callable[..., Any]] = []
-    for value in parameter_values:
-        variant = functools.partial(implementation_fn, **{parameter_name: value})
-        variant.__name__ = f"{implementation_fn.__name__}_{parameter_name}_{value}"  # type: ignore[attr-defined]
-        decompositions.append(variant)
-
-    register_custom_op_autotuning(
-        custom_op=custom_op,
-        decompositions=decompositions,
-        name=name,
-        input_gen_fns=input_gen_fns,
-    )
