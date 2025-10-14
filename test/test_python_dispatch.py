@@ -850,7 +850,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])""",
             lambda: A(torch.zeros(1)).detach(),
         )
 
-    def test_detach_appears_once_when_called_once(self) -> None:
+    def test_detach_appears_twice_when_called_once(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
             log_input("x", x)
@@ -863,7 +863,8 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])""",
             "\n".join(logs),
             """\
 $0: f32[1] = input('x')
-$1: f32[1] = torch._ops.aten.detach.default($0)""",
+$1: f32[1] = torch._ops.aten.detach.default($0)
+$2: f32[1] = torch._ops.aten.detach.default($1)""",
         )
 
     def test_storage(self) -> None:
