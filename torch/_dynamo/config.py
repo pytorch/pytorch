@@ -401,7 +401,7 @@ allow_rnn = False
 # exported FX graph. This flag should become the default eventually
 # and be removed, but currently provides a way to fall back to old
 # graph breaking behavior.
-capture_sparse_compute = not is_fbcode()
+capture_sparse_compute = False if is_fbcode() else True
 
 # If true, error if we try to compile a function that has
 # been seen before.
@@ -456,6 +456,10 @@ nested_graph_breaks = False
 # as graph attributes.  This is useful for export, as it
 # produces a consistent number of inputs to the graph.
 install_free_tensors = False
+
+# Temporary flag to control the turning of install_free_tensors to True for
+# export. We will remove this flag in a few weeks when stable.
+install_free_tensors_for_export = True
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True

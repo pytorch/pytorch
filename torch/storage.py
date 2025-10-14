@@ -889,7 +889,7 @@ class TypedStorage:
         return self._untyped_storage
 
     def _new_wrapped_storage(self, untyped_storage) -> Self:
-        assert type(untyped_storage) == torch.UntypedStorage
+        assert type(untyped_storage) is torch.UntypedStorage
 
         if type(self) is TypedStorage:
             return cast(
