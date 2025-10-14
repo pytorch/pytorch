@@ -1882,13 +1882,14 @@ PyObject* THCPModule_cuda_tunableop_set_numerical_check_tolerances(
   HANDLE_TH_ERRORS
 
   PyObject* enabled_obj;
-  PyObject* atol_obj;
-  PyObject* rtol_obj;
+  PyObject* atol_obj = NULL;
+  PyObject* rtol_obj = NULL;
 
-  if (!PyArg_ParseTuple(args, "OOO", &enabled_obj, &atol_obj, &rtol_obj)) {
+  // Parse: required bool, optional float, optional float
+  if (!PyArg_ParseTuple(args, "O|OO", &enabled_obj, &atol_obj, &rtol_obj)) {
     TORCH_CHECK(
         false,
-        "cuda_tunableop_set_numerical_check_tolerances expects (bool, float, float)");
+        "cuda_tunableop_set_numerical_check_tolerances expects (bool[, float[, float]])");
   }
 
   TORCH_CHECK(
@@ -1898,19 +1899,26 @@ PyObject* THCPModule_cuda_tunableop_set_numerical_check_tolerances(
 
   bool enabled = THPUtils_unpackBool(enabled_obj);
 
-  TORCH_CHECK(
-      PyFloat_Check(atol_obj),
-      "Second argument (atol) must be a float, got ",
-      THPUtils_typename(atol_obj));
+  double atol = 1e-5;
+  double rtol = 1e-5;
 
-  double atol = PyFloat_AsDouble(atol_obj);
+  if (atol_obj != NULL) {
+    TORCH_CHECK(
+        PyFloat_Check(atol_obj),
+        "Second argument (atol) must be a float, got ",
+        THPUtils_typename(atol_obj));
 
-  TORCH_CHECK(
-      PyFloat_Check(rtol_obj),
-      "Third argument (rtol) must be a float, got ",
-      THPUtils_typename(rtol_obj));
+    atol = PyFloat_AsDouble(atol_obj);
+  }
 
-  double rtol = PyFloat_AsDouble(rtol_obj);
+  if (rtol_obj != NULL) {
+    TORCH_CHECK(
+        PyFloat_Check(rtol_obj),
+        "Third argument (rtol) must be a float, got ",
+        THPUtils_typename(rtol_obj));
+
+    rtol = PyFloat_AsDouble(rtol_obj);
+  }
 
   TORCH_CHECK(
       atol > 0.0 && rtol > 0.0,
