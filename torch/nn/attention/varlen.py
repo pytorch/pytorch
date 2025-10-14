@@ -23,6 +23,12 @@ def _should_use_cudnn(device_index: int) -> bool:
 
 
 class AuxRequest(NamedTuple):
+    """
+    Request which auxiliary outputs to compute from varlen_attn.
+
+    Each field is a boolean indicating whether that auxiliary output should be computed.
+    """
+
     lse: bool = False
 
 
@@ -38,9 +44,9 @@ def _varlen_attn(
     is_causal: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Private custom op for variable-length attention using Flash Attention.
-    This is the internal implementation that calls into the Flash Attention kernels.
-    Users should use the public varlen_attn function instead.
+    Private custom op for variable-length attention.
+
+    This is the internal implementation. Users should use the public varlen_attn function instead.
     """
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)

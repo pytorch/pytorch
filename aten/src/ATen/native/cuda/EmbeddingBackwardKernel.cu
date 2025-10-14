@@ -88,9 +88,9 @@ __global__ void compute_grad_weight_bags(
     const int64_t stride_warped) {
 
   int64_t num_of_segments = *num_of_segments_ptr;
-  const int gid = blockIdx.x * blockDim.x + threadIdx.x;
-  const int id = gid / stride_warped;
-  const int startFeature = gid % stride_warped;
+  const int64_t gid = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t id = gid / stride_warped;
+  const int64_t startFeature = gid % stride_warped;
   if (startFeature >= stride) {
     return;
   }
@@ -134,9 +134,9 @@ __global__ void compute_grad_weight(
 
   int64_t num_of_segments = *num_of_segments_ptr;
   using accscalar_t = acc_type<scalar_t, true>;
-  const int gid = blockIdx.x * blockDim.x + threadIdx.x;
-  const int id = gid / stride_warped;
-  const int startFeature = gid % stride_warped;
+  const int64_t gid = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t id = gid / stride_warped;
+  const int64_t startFeature = gid % stride_warped;
   if (startFeature >= stride) {
     return;
   }
@@ -167,9 +167,9 @@ __global__ void sum_and_scatter(
 
   int64_t num_of_segments = *num_of_segments_ptr;
   int64_t num_of_partial_segments = *num_of_partial_segments_ptr;
-  const int gid = blockIdx.x * blockDim.x + threadIdx.x;
-  const int id = gid / stride_warped;
-  const int startFeature = gid % stride_warped;
+  const int64_t gid = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  const int64_t id = gid / stride_warped;
+  const int64_t startFeature = gid % stride_warped;
   if (startFeature >= stride) {
     return;
   }
