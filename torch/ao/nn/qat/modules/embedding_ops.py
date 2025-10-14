@@ -79,7 +79,7 @@ class Embedding(nn.Embedding):
         Args: `mod` a float module, either produced by torch.ao.quantization utilities
         or directly from user
         """
-        assert type(mod) == cls._FLOAT_MODULE, (
+        assert type(mod) is cls._FLOAT_MODULE, (
             " qat."
             + cls.__name__
             + ".from_float only works for "
@@ -202,7 +202,7 @@ class EmbeddingBag(nn.EmbeddingBag):
         Args: `mod` a float module, either produced by torch.ao.quantization utilities
         or directly from user
         """
-        assert type(mod) == cls._FLOAT_MODULE, (
+        assert type(mod) is cls._FLOAT_MODULE, (
             " qat."
             + cls.__name__
             + ".from_float only works for "
