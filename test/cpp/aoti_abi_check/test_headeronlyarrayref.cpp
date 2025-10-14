@@ -1,27 +1,27 @@
 #include <gtest/gtest.h>
 
-#include <torch/headeronly/util/HOArrayRef.h>
+#include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 
 #include <vector>
 
-using torch::headeronly::HOArrayRef;
+using torch::headeronly::HeaderOnlyArrayRef;
 
-TEST(TestHOArrayRef, TestEmpty) {
-  HOArrayRef<float> arr;
+TEST(TestHeaderOnlyArrayRef, TestEmpty) {
+  HeaderOnlyArrayRef<float> arr;
   ASSERT_TRUE(arr.empty());
 }
 
-TEST(TestHOArrayRef, TestSingleton) {
+TEST(TestHeaderOnlyArrayRef, TestSingleton) {
   float val = 5.0f;
-  HOArrayRef<float> arr(val);
+  HeaderOnlyArrayRef<float> arr(val);
   ASSERT_FALSE(arr.empty());
   EXPECT_EQ(arr.size(), 1);
   EXPECT_EQ(arr[0], val);
 }
 
-TEST(TestHOArrayRef, TestAPIs) {
+TEST(TestHeaderOnlyArrayRef, TestAPIs) {
   std::vector<int> vec = {1, 2, 3, 4, 5, 6, 7};
-  HOArrayRef<int> arr(vec);
+  HeaderOnlyArrayRef<int> arr(vec);
   ASSERT_FALSE(arr.empty());
   EXPECT_EQ(arr.size(), 7);
   for (size_t i = 0; i < arr.size(); i++) {
@@ -33,18 +33,18 @@ TEST(TestHOArrayRef, TestAPIs) {
   ASSERT_TRUE(arr.slice(3, 4).equals(arr.slice(3)));
 }
 
-TEST(TestHOArrayRef, TestFromInitializerList) {
+TEST(TestHeaderOnlyArrayRef, TestFromInitializerList) {
   std::vector<int> vec = {1, 2, 3, 4, 5, 6, 7};
-  HOArrayRef<int> arr({1, 2, 3, 4, 5, 6, 7});
+  HeaderOnlyArrayRef<int> arr({1, 2, 3, 4, 5, 6, 7});
   auto res_vec = arr.vec();
   for (size_t i = 0; i < vec.size(); i++) {
     EXPECT_EQ(vec[i], res_vec[i]);
   }
 }
 
-TEST(TestHOArrayRef, TestFromRange) {
+TEST(TestHeaderOnlyArrayRef, TestFromRange) {
   std::vector<int> vec = {1, 2, 3, 4, 5, 6, 7};
-  HOArrayRef<int> arr(vec.data() + 3, vec.data() + 7);
+  HeaderOnlyArrayRef<int> arr(vec.data() + 3, vec.data() + 7);
   auto res_vec = arr.vec();
   for (size_t i = 0; i < res_vec.size(); i++) {
     EXPECT_EQ(vec[i + 3], res_vec[i]);

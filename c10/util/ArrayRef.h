@@ -18,7 +18,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
-#include <torch/headeronly/util/HOArrayRef.h>
+#include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 
 #include <array>
 #include <cstddef>
@@ -43,95 +43,45 @@ namespace c10 {
 /// value.
 ///
 /// NOTE: We have refactored out the headeronly parts of the ArrayRef struct
-/// into HOArrayRef. As adding `virtual` will change the performance of the
-/// underlying constexpr calls, we rely on apparent-type dispatch for
+/// into HeaderOnlyArrayRef. As adding `virtual` would change the performance of
+/// the underlying constexpr calls, we rely on apparent-type dispatch for
 /// inheritance. This should be fine because their memory format is the same,
-/// and it is never incorrect for ArrayRef to call HOArrayRef methods.
+/// and it is never incorrect for ArrayRef to call HeaderOnlyArrayRef methods.
 template <typename T>
-class ArrayRef final : public HOArrayRef<T> {
- private:
-  void debugCheckNullptrInvariant() {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        this->Data != nullptr || this->Length == 0,
-        "created ArrayRef with nullptr and non-zero length! std::optional relies on this being illegal");
-  }
-
+class ArrayRef final : public HeaderOnlyArrayRef<T> {
  public:
-  /// @name Constructors, mostly inherited from HOArrayRef, with some
-  /// additional debugCheckNullptrInvariant checks.
+  /// @name Constructors, all inherited from HeaderOnlyArrayRef except for
+  /// SmallVector.
   /// @{
 
-  /// Construct an empty ArrayRef.
-  /* implicit */ constexpr ArrayRef() : HOArrayRef<T>() {}
+  // Inherits all constructors from HeaderOnlyArrayRef<T>
+  using HeaderOnlyArrayRef<T>::HeaderOnlyArrayRef;
 
-  /// Construct an ArrayRef from a single element.
-  // TODO Make this explicit
-  constexpr ArrayRef(const T& OneElt) : HOArrayRef<T>(OneElt) {}
-
-  /// Construct an ArrayRef from a pointer and length.
-  constexpr ArrayRef(const T* data, size_t length)
-      : HOArrayRef<T>(data, length) {
-    debugCheckNullptrInvariant();
-  }
-
-  /// Construct an ArrayRef from a range.
-  constexpr ArrayRef(const T* begin, const T* end)
-      : HOArrayRef<T>(begin, end - begin) {
-    debugCheckNullptrInvariant();
-  }
+  /// Construct an ArrayRef from a std::vector.
+  /// This constructor is identical to the one in HeaderOnlyArrayRef, but we
+  /// include it to help with Class Template Argument Deduction (CTAD).
+  /// Without it, CTAD can fail sometimes due to the indirect constructor
+  /// inheritance. So we explicitly include this constructor.
+  template <typename A>
+  /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
+      : HeaderOnlyArrayRef<T>(Vec.data(), Vec.size()) {}
 
   /// Construct an ArrayRef from a SmallVector. This is templated in order to
   /// avoid instantiating SmallVectorTemplateCommon<T> whenever we
   /// copy-construct an ArrayRef.
-  /// NOTE: this is the only constructor that is not inherited from HOArrayRef.
+  /// NOTE: this is the only constructor that is not inherited from
+  /// HeaderOnlyArrayRef.
   template <typename U>
   /* implicit */ ArrayRef(const SmallVectorTemplateCommon<T, U>& Vec)
-      : HOArrayRef<T>(Vec.data(), Vec.size()) {
-    debugCheckNullptrInvariant();
-  }
-
-  template <
-      typename Container,
-      typename U = decltype(std::declval<Container>().data()),
-      typename = std::enable_if_t<
-          (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
-  /* implicit */ ArrayRef(const Container& container)
-      : HOArrayRef<T>(container.data(), container.size()) {
-    debugCheckNullptrInvariant();
-  }
-
-  /// Construct an ArrayRef from a std::vector.
-  // The enable_if stuff here makes sure that this isn't used for
-  // std::vector<bool>, because ArrayRef can't work on a std::vector<bool>
-  // bitfield.
-  template <typename A>
-  /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
-      : HOArrayRef<T>(Vec.data(), Vec.size()) {}
-
-  /// Construct an ArrayRef from a std::array
-  template <size_t N>
-  /* implicit */ constexpr ArrayRef(const std::array<T, N>& Arr)
-      : HOArrayRef<T>(Arr.data(), N) {}
-
-  /// Construct an ArrayRef from a C array.
-  template <size_t N>
-  // NOLINTNEXTLINE(*c-arrays*)
-  /* implicit */ constexpr ArrayRef(const T (&Arr)[N])
-      : HOArrayRef<T>(Arr, N) {}
-
-  /// Construct an ArrayRef from a std::initializer_list.
-  /* implicit */ constexpr ArrayRef(const std::initializer_list<T>& Vec)
-      : HOArrayRef<T>(
-            std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
-                                             : std::begin(Vec),
-            Vec.size()) {}
+      : HeaderOnlyArrayRef<T>(Vec.data(), Vec.size()) {}
 
   /// @}
-  /// @name Simple Operations, mostly inherited from HOArrayRef
+  /// @name Simple Operations, mostly inherited from HeaderOnlyArrayRef
   /// @{
 
   /// front - Get the first element.
-  /// We deviate from HOArrayRef by using TORCH_CHECK instead of STD_TORCH_CHECK
+  /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
+  /// STD_TORCH_CHECK
   constexpr const T& front() const {
     TORCH_CHECK(
         !this->empty(), "ArrayRef: attempted to access front() of empty list");
@@ -139,7 +89,8 @@ class ArrayRef final : public HOArrayRef<T> {
   }
 
   /// back - Get the last element.
-  /// We deviate from HOArrayRef by using TORCH_CHECK instead of STD_TORCH_CHECK
+  /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
+  /// STD_TORCH_CHECK
   constexpr const T& back() const {
     TORCH_CHECK(
         !this->empty(), "ArrayRef: attempted to access back() of empty list");
@@ -147,7 +98,8 @@ class ArrayRef final : public HOArrayRef<T> {
   }
 
   /// slice(n, m) - Take M elements of the array starting at element N
-  /// We deviate from HOArrayRef by using TORCH_CHECK instead of STD_TORCH_CHECK
+  /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
+  /// STD_TORCH_CHECK
   constexpr ArrayRef<T> slice(size_t N, size_t M) const {
     TORCH_CHECK(
         N + M <= this->size(),
@@ -161,7 +113,8 @@ class ArrayRef final : public HOArrayRef<T> {
   }
 
   /// slice(n) - Chop off the first N elements of the array.
-  /// We deviate from HOArrayRef by using TORCH_CHECK instead of STD_TORCH_CHECK
+  /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
+  /// STD_TORCH_CHECK
   constexpr ArrayRef<T> slice(size_t N) const {
     TORCH_CHECK(
         N <= this->size(),
@@ -177,7 +130,8 @@ class ArrayRef final : public HOArrayRef<T> {
   /// @{
 
   /// Vector compatibility
-  /// We deviate from HOArrayRef by using TORCH_CHECK instead of STD_TORCH_CHECK
+  /// We deviate from HeaderOnlyArrayRef by using TORCH_CHECK instead of
+  /// STD_TORCH_CHECK
   constexpr const T& at(size_t Index) const {
     TORCH_CHECK(
         Index < this->Length,
