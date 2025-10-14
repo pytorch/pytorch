@@ -21,6 +21,8 @@ class _AsyncCheckpointExecutor(abc.ABC):
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
+        no_dist: bool = False,
+        use_collectives: bool = True,
     ) -> Future:
         """
         Execute the checkpoint save request asynchronously.

@@ -388,13 +388,17 @@ class Op:
         self, event: dict[Any, Any], memberships: dict[str, set[Any]], pg_name: str
     ):
         self.profiling_name = event["profiling_name"]
-        nccl, name = self.profiling_name.split(":")
-        assert nccl == "nccl", f"name formatting error? {nccl} != 'nccl'"
+        comm_lib_backend, name = self.profiling_name.split(":")
+        assert comm_lib_backend in ["nccl", "xccl"], (
+            f"name formatting error? {comm_lib_backend} != 'nccl' or 'xccl'"
+        )
         parts = name.split(" ")
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None
         self.state = event["state"]
-        self.pg_name, self.pg_desc = event["process_group"]
+        # Store the hashed pg_name for accessing memberships, and original pg info for display
+        self.pg_name = pg_name  # This is the hashed version used for memberships lookup
+        self.original_pg_name, self.pg_desc = event["process_group"]
         assert type in COLLECTIVES | P2P | {"coalesced"}, (
             f"{type} is not a supported operation"
         )
@@ -417,6 +421,7 @@ class Op:
         else:
             self.input_sizes, self.output_sizes = None, None
         self.collective_seq_id = event["collective_seq_id"]
+        self.stack_id = event.get("stack_id", -1)
         self.p2p_seq_id = event["p2p_seq_id"]
         self.input_dtypes = event["input_dtypes"]
         self.output_dtypes = event["output_dtypes"]
@@ -425,9 +430,9 @@ class Op:
         self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
     def _init_global_src_dst(self, pg_ranks: set[Any]) -> None:
-        pg_ranks = sorted(pg_ranks)
-        self._src_g = pg_ranks[self._src] if self._src is not None else None
-        self._dst_g = pg_ranks[self._dst] if self._dst is not None else None
+        pg_ranks_sorted = sorted(pg_ranks)
+        self._src_g = pg_ranks_sorted[self._src] if self._src is not None else None
+        self._dst_g = pg_ranks_sorted[self._dst] if self._dst is not None else None
 
     @property
     def src(self) -> int:
@@ -456,12 +461,37 @@ class Op:
                 f"pg_name={self.pg_name}",
                 f"pg_description={self.pg_desc}",
                 f"pg_size={self.pg_size}",
+                f"stack_id={self.stack_id}",
                 f"state={self.state}",
             )
             return f"{self.type}(%s)" % ", ".join(s for s in verbose_info if s)
         return f"{self.type}(%sinput_sizes={self.input_sizes}, state={self.state})" % (
             f"{p2p_info}, " if p2p_info else ""
         )
+
+    def dtype_mismatch(self, other: "Op") -> bool:
+        if (
+            (
+                self.type not in ["scatter", "gather", "broadcast"]
+                and set(self.input_dtypes) != set(self.output_dtypes)
+                and self.input_sizes[0]
+                and self.output_sizes[0]
+            )
+            or (
+                self.type not in ["scatter", "broadcast"]
+                and set(self.input_dtypes) != set(other.input_dtypes)
+                and self.input_sizes[0]
+                and other.input_sizes[0]
+            )
+            or (
+                self.type not in ["gather"]
+                and set(self.output_dtypes) != set(other.output_dtypes)
+                and self.output_sizes[0]
+                and other.output_sizes[0]
+            )
+        ):
+            return True
+        return False
 
     def match(self, other: "Op") -> MatchInfo:
         # TODO: I think this can validly not match,
@@ -498,44 +528,19 @@ class Op:
                     MatchState.COLLECTIVE_TYPE_MISMATCH,
                     f"Expected collective type: '{self.type}' does not match found collective type: '{other.type}'",
                 )
-            if self.state != other.state:
-                # MatchState()
-                return MatchInfo(
-                    MatchState.COLLECTIVE_STATE_MISMATCH,
-                    f"Expected state: '{self.state}' does not match found state: '{other.state}'",
-                )
             if (
-                (
-                    set(self.input_dtypes) != set(self.output_dtypes)
-                    and self.input_sizes[0]
-                    and self.output_sizes[0]
-                )
-                or (
-                    set(self.input_dtypes) != set(other.input_dtypes)
-                    and self.input_sizes[0]
-                    and other.input_sizes[0]
-                )
-                or (
-                    set(self.input_dtypes) != set(other.output_dtypes)
-                    and self.input_sizes[0]
-                    and other.output_sizes[0]
-                )
+                self.type not in ["all_to_all", "scatter"]
+                and self.input_sizes != other.input_sizes
             ):
-                return MatchInfo(
-                    MatchState.COLLECTIVE_DTYPE_MISMATCH,
-                    f"Expected dtypes: '{set(self.input_dtypes)}' does not "
-                    f"match found dtype: '{set(self.output_dtypes)}/"
-                    f"{set(other.input_dtypes)}/{set(other.output_dtypes)}'",
-                )
-            if self.type == "all_to_all":
-                return MatchInfo(MatchState.UNDECIDED)
-            if self.type != "scatter" and self.input_sizes != other.input_sizes:
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Expected input sizes: '{self.input_sizes}' does not match found input sizes: "
                     f"'{other.input_sizes}'",
                 )
-            if self.type != "gather" and self.output_sizes != other.output_sizes:
+            if (
+                self.type not in ["all_to_all", "gather"]
+                and self.output_sizes != other.output_sizes
+            ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Expected output sizes: '{self.output_sizes}' does not match found output sizes: "
@@ -549,32 +554,51 @@ class Op:
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Expected input sizes: '{self.input_sizes}' does not match found output sizes: '{other.output_sizes}'",
                 )
-            if self.type in [
-                "all_gather",
-                "all_gather_base",
-                "all_gather_into_tensor_coalesced",
-            ] and not (
-                math.prod(other.output_sizes[0])
-                == math.prod(self.input_sizes[0]) * self.pg_size
+            if (
+                self.type
+                in [
+                    "all_gather",
+                    "all_gather_base",
+                    "all_gather_into_tensor_coalesced",
+                ]
+                and math.prod(other.output_sizes[0])
+                != math.prod(self.input_sizes[0]) * self.pg_size
             ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Found input numel '{math.prod(other.input_sizes[0])} * pg size {self.pg_size}' "
                     f"does not match output numel '{math.prod(other.output_sizes[0])}'",
                 )
-            if self.type in [
-                "reduce_scatter",
-                "_reduce_scatter_base",
-                "reduce_scatter_tensor_coalesced",
-            ] and not (
-                math.prod(other.input_sizes[0])
-                == math.prod(self.output_sizes[0]) * self.pg_size
+            if (
+                self.type
+                in [
+                    "reduce_scatter",
+                    "_reduce_scatter_base",
+                    "reduce_scatter_tensor_coalesced",
+                ]
+                and math.prod(other.input_sizes[0])
+                != math.prod(self.output_sizes[0]) * self.pg_size
             ):
                 return MatchInfo(
                     MatchState.SIZE_OR_SYNTAX_MISMATCH,
                     f"Found input numel '{math.prod(other.input_sizes[0])}' does not match output numel "
                     f"'{math.prod(other.output_sizes[0])} * pg size {self.pg_size}'",
                 )
+            if self.dtype_mismatch(other):
+                return MatchInfo(
+                    MatchState.COLLECTIVE_DTYPE_MISMATCH,
+                    f"Expected dtypes: '{set(self.input_dtypes)}' does not "
+                    f"match found dtype: '{set(self.output_dtypes)}/"
+                    f"{set(other.input_dtypes)}/{set(other.output_dtypes)}'",
+                )
+            if self.state != other.state:
+                # MatchState()
+                return MatchInfo(
+                    MatchState.COLLECTIVE_STATE_MISMATCH,
+                    f"Expected state: '{self.state}' does not match found state: '{other.state}'",
+                )
+            if self.type == "all_to_all":
+                return MatchInfo(MatchState.UNDECIDED)
         elif self.type in [
             "coalesced",
             "ALLGATHER_coalesced",

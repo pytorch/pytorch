@@ -67,6 +67,7 @@ class TestCase(InductorTestCase):
     )
     # @config.patch("triton.codegen_upcast_to_fp32", False) # TODO enable
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @disable_cache_limit()
     def test_op_dtype_propagation(self, op, dtype):
@@ -204,6 +205,8 @@ class TestCase(InductorTestCase):
         # Edge case: torch.round maps to libdevice.nearbyint.
         triton_op_name_overrides = {
             "round": "nearbyint",
+            # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
+            "sqrt": "sqrt_rn",
         }
         override = triton_op_name_overrides.get(op_name)
         triton_op_name = override if override is not None else torch_op_name
@@ -255,12 +258,13 @@ class TestCase(InductorTestCase):
 
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
     @config.patch("triton.codegen_upcast_to_fp32", False)
     def test_downcast_div_mod(self):
         def fn(x, y):
             return x % y, x / y
 
-        x, y = (torch.rand([8], dtype=torch.float16, device="cuda") for _ in range(2))
+        x, y = (torch.rand([8], dtype=torch.float16, device=GPU_TYPE) for _ in range(2))
 
         out, code = run_and_get_code(torch.compile(fn), x, y)
 
@@ -269,31 +273,34 @@ class TestCase(InductorTestCase):
 
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
     def test_constant(self):
         def fn():
-            return (torch.full((2, 3), 3.1416, device="cuda", dtype=torch.float16),)
+            return (torch.full((2, 3), 3.1416, device=GPU_TYPE, dtype=torch.float16),)
 
         out, code = run_and_get_code(torch.compile(fn))
         FileCheck().check("static_assert").check_same(".dtype").run(code[0])
         self.assertEqual(fn(), out)
 
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     @config.patch("triton.persistent_reductions", False)
     def test_any(self):
         def fn(x):
             return torch.any(x)
 
-        x = torch.rand([40], device="cuda").to(torch.bool)
+        x = torch.rand([40], device=GPU_TYPE).to(torch.bool)
         out, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(fn(x), out)
 
     @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    @config.patch("test_configs.runtime_triton_shape_assert", True)
     @config.patch("test_configs.static_cpp_dtype_assert", True)
     def test_assoc_scan(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 
-        x = torch.randn(10, device="cuda")
+        x = torch.randn(10, device=GPU_TYPE)
         # dtype check correctly
         associative_scan(
             lambda acc, curr: acc + torch.abs(curr), x, dim=-1, combine_mode="pointwise"

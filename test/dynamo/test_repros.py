@@ -46,6 +46,7 @@ from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import (
     CompileCounter,
+    EagerAndRecordGraphs,
     rand_strided,
     same,
     skipIfNotPy312,
@@ -60,7 +61,11 @@ from torch.testing._internal.common_cuda import (
     SM70OrLater,
     TEST_CUDA,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    E4M3_MAX_POS,
+    e4m3_type,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -4185,6 +4190,21 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         torch.compile(fn, backend=counter)(torch.randn([2, 2]), [])
         self.assertEqual(counter.frame_count, 1)
 
+    def test_get_type_hints(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            typing.get_type_hints(Foo, include_extras=True)
+            return torch.sin(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_graph_break_on_jit_isinstance(self):
         @torch.compile(backend="eager")
         def fn(x):
@@ -4239,7 +4259,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         @torch.compile(fullgraph=True)
         def f(x):
             y = x.item()
-            torch._check_is_size(y)
+            torch._check(y >= 0)
             if y >= 0:
                 return x * 2
             else:
@@ -4803,6 +4823,67 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             "encountered a mutation on a view chain of length 2, where view 1 was an as_strided",
         ):
             f_compiled(a)
+        # See https://github.com/pytorch/pytorch/issues/161010
+
+    def test_preserve_stride_with_clone(self) -> None:
+        A = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
+        B = torch.rand(5, 5, device="cuda" if torch.cuda.is_available() else "cpu")
+
+        def fn(
+            src: torch.Tensor, count: torch.Tensor
+        ) -> tuple[tuple[int, ...], tuple[int, ...]]:
+            Q, R = torch.linalg.qr(src)
+            rhs = torch.ones(Q.shape[0], 1, device=src.device)
+            a = torch.linalg.solve_triangular(R, Q.T @ rhs, upper=True)
+            cloned = a.clone(memory_format=torch.preserve_format)
+            return a.stride(), cloned.stride()
+
+        a_stride, cloned_stride = fn(A, torch.zeros(1))
+        self.assertEqual(
+            a_stride,
+            cloned_stride,
+            f"Strides should match in eager: {a_stride} against {cloned_stride}",
+        )
+
+        compiled_a_stride, compiled_cloned_stride = torch.compile(fn, backend="eager")(
+            B, torch.zeros(1)
+        )
+        self.assertEqual(
+            compiled_a_stride,
+            compiled_cloned_stride,
+            f"Strides should match in eager: {compiled_a_stride} against {compiled_cloned_stride}",
+        )
+
+    # Extension of https://github.com/pytorch/pytorch/issues/161010
+    # in the non memory dense case
+    def test_clone_not_memory_dense(self):
+        def foo() -> torch.Tensor:
+            x = torch.randn(10, 8).t()[::2, ::2]
+            y = x.clone()
+            return y
+
+        y = foo()
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Reference eager implementation should have stride (1, 4)",
+        )
+        y = torch.compile(foo, backend="eager")()
+        self.assertEqual(
+            y.stride(), (1, 4), "Compile with eager backend should have stride (1, 4)"
+        )
+        y = torch.compile(foo, backend="aot_eager")()
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Compile with aot_eager backend should have stride (1, 4)",
+        )
+        y = torch.compile(foo, backend="inductor")()
+        self.assertEqual(
+            y.stride(),
+            (1, 4),
+            "Compile with inductor backend should have stride (1, 4)",
+        )
 
     # https://github.com/pytorch/pytorch/issues/146598
     @unittest.expectedFailure
@@ -4989,6 +5070,27 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x_weak, weight, y)
         self.assertEqual(ref, res)
+
+    # https://github.com/pytorch/pytorch/issues/159258
+    def test_weakref_proxy(self):
+        class DummyTrainer:
+            def __init__(self, x):
+                self.foo = x
+
+        class DummyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.trainer = None
+
+            def foo(self):
+                return self.trainer.foo
+
+        x = torch.randn(4)
+        model = DummyModel()
+        trainer = DummyTrainer(x)
+        model.trainer = weakref.proxy(trainer)
+        compiled_foo = torch.compile(model.foo, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_foo(), x)
 
     def test_weakref_reconstruct(self):
         def fn(x_weak, weight, y):
@@ -5714,6 +5816,31 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             return torch.sin(x)
 
         fn(torch.rand(4))
+
+    def test_export_vs_dynamo_for_multiheadattention(self):
+        # More details at https://github.com/pytorch/pytorch/issues/164062
+
+        # Ensure that both dynamo and export do not take the fast path.
+        with torch.no_grad():
+            inp = torch.randn(1, 2, 64)
+            mha = nn.MultiheadAttention(64, 2, dropout=0.1, batch_first=True)
+            mha.eval()
+
+            backend = EagerAndRecordGraphs()
+            mha_compile = torch.compile(mha, backend=backend, fullgraph=True)
+            mha_compile(inp, inp, inp)
+            torch.compiler.reset()
+
+            mha_export = torch._dynamo.export(mha)(inp, inp, inp)
+
+            compile_nodes = backend.graphs[0].graph.find_nodes(
+                op="call_function", target=torch._native_multi_head_attention
+            )
+            export_nodes = mha_export.graph_module.graph.find_nodes(
+                op="call_function", target=torch._native_multi_head_attention
+            )
+            self.assertEqual(len(compile_nodes), 0)
+            self.assertEqual(len(export_nodes), 0)
 
     def test_negative_floor_div_solve(self):
         class CompiledClass(nn.Module):
@@ -6485,21 +6612,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         with torch.no_grad():
             model(x)
 
-    def test_ao_fake_quantize_tracing(self):
-        import torch.ao.quantization.fake_quantize
-
-        q = torch.ao.quantization.FusedMovingAvgObsFakeQuantize()
-
-        def fn(x):
-            return q(x)
-
-        x = torch.ones(2, 2)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        res = opt_fn(x)
-        eager_res = fn(x)
-
-        self.assertEqual(res, eager_res)
-
     def test_typed_dict(self):
         class LlavaImagePixelInputs(TypedDict):
             type: Literal["pixel_values"]
@@ -7128,6 +7240,68 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 0, sys.monitoring.events.PY_START, old_callback
             )
 
+    def test_312_local_cell_overlap(self):
+        keys = range(10)
+        allowed = [0, 1, 2, 3]
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            key = [key for key in keys if key in allowed]
+
+            def inner():
+                nonlocal key
+
+            return x + key[0]
+
+        self.assertEqual(
+            fn(torch.ones(3)), torch.compile(fn, backend="eager")(torch.ones(3))
+        )
+
+    def test_311_resume_block_keyerror(self):
+        # https://github.com/pytorch/pytorch/issues/162313
+        flag = True
+
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 2
+            if flag:
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+                x = x + 4
+            else:
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+                x = x + 8
+            return x + 16
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+        flag = False
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_cells_unsupported_step_exception(self):
+        # This error happened because:
+        #  - we were generating cells into a list on the stack
+        #  - we encountered an unsupported step, resulting in a step graph break
+        #  - we encounter an exception, which pops the stack until it reaches a certain length;
+        #    the presence of the list of cells then messes things up.
+
+        cell = 0
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            x = x + 1 + 2
+            torch._dynamo.step_unsupported()
+            with contextlib.nullcontext():
+                print(cell)
+                raise AssertionError
+
+        with self.assertRaises(AssertionError):
+            fn(torch.ones(3))
+
     def test_unbind_copy_out(self):
         def f(eye, out):
             torch.unbind_copy(eye, out=out)
@@ -7139,6 +7313,37 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         f(eye, out_ref)
         torch.compile(f, backend="eager", fullgraph=True)(eye, out_res)
         self.assertEqual(out_ref, out_res)
+
+    def test_setitem_tensor_prop(self):
+        # Using the composite implicit of the forward would be incorrect
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return torch.matmul(x, x.t())
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out
+
+        def fn(x, y):
+            x[0] = y[0]
+            return MyFn.apply(x)
+
+        def inputs():
+            torch.manual_seed(123)
+            x = torch.randn(10, 10)
+            y = torch.randn(10, 10, requires_grad=True)
+            return x, y
+
+        x1, y1 = inputs()
+        fn(x1, y1).sum().backward()
+        self.assertTrue(x1.requires_grad)
+
+        x2, y2 = inputs()
+        torch.compile(fn, backend="eager")(x2, y2).sum().backward()
+        self.assertTrue(x2.requires_grad)
+
+        self.assertEqual(y1.grad, y2.grad)
 
     def test_nn_parameter_ctor_graph_breaks(self):
         def fn():
@@ -7416,9 +7621,9 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             return a
 
         def scale(t, amax_t):
-            max_v = torch.finfo(torch.float8_e4m3fn).max
+            max_v = E4M3_MAX_POS
             scale_t = torch.clamp(amax_t.float(), min=1e-12) / max_v
-            t_fp8 = mul_tiled(t, scale_t.reciprocal()).to(torch.float8_e4m3fn)
+            t_fp8 = mul_tiled(t, scale_t.reciprocal()).to(e4m3_type)
             return t_fp8, scale_t
 
         def matmul(first, amax_first, second_t, amax_second_t, bias):
@@ -7673,6 +7878,44 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         out2 = torch.compile(model, backend="eager")(input.clone())
         self.assertEqual(out1, out2)
 
+    @requires_cuda
+    def test_zero_dim_param_mixed_device_grad(self):
+        # cpu 0-dim params with cuda grads
+        # https://github.com/pytorch/pytorch/issues/160084
+        class RegressionModel(torch.nn.Module):
+            def __init__(self, a=0, b=0):
+                super().__init__()
+                self.a = torch.nn.Parameter(torch.tensor(a).float())
+                self.b = torch.nn.Parameter(torch.tensor(b).float())
+
+            def forward(self, x):
+                return x * self.a + self.b
+
+        model = RegressionModel()
+        model.forward = torch.compile(
+            model.forward, backend="aot_eager", fullgraph=True
+        )
+        inputs = torch.randn(4, 10).to("cuda")
+        out = model(inputs)
+        out.sum().backward()
+        self.assertIsNotNone(model.a.grad)
+        self.assertIsNotNone(model.b.grad)
+        self.assertEqual(model.a.grad.device, torch.device("cpu"))
+        self.assertEqual(model.b.grad.device, torch.device("cpu"))
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_cuda_sync(self):
+        def fn(x):
+            y = x + 1
+            torch.cuda.synchronize()
+            return y * 2
+
+        x = torch.ones(2, device="cuda")
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_filter_warnings(self):
         x = torch.ones(2, 2, requires_grad=True)
 
@@ -7728,6 +7971,37 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
 
             unsafe_grad(y)  # should not warn
             self.assertEqual(len(w), 1)
+
+    @torch._dynamo.config.patch(install_free_tensors=True)
+    def test_partial_export(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def parallelize(self):
+                fn = self._call_impl
+
+                def wrapped_fn(fn, *args, **kwargs):
+                    new_args_0 = args[0].to(torch.bfloat16)
+                    new_args_1 = args[1].to(torch.bfloat16)
+                    return fn(new_args_0, new_args_1)
+
+                fn = functools.partial(wrapped_fn, fn)
+                self._call_impl = fn
+
+            def forward(self, a, b):
+                return a + b
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        foo = Foo()
+        foo.parallelize()
+        x = torch.randn(4, 4, dtype=torch.float32)
+        y = torch.randn(4, 4, dtype=torch.float32)
+        ref = foo(x, y)
+        gm = _dynamo_graph_capture_for_export(foo)(x, y)
+        res = gm(x, y)
+        self.assertEqual(res, ref)
 
 
 instantiate_parametrized_tests(ReproTests)
