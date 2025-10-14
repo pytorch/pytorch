@@ -332,6 +332,7 @@ class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
         """Convert index variable to symbolic form."""
         return sympy_index_symbol(str(index_var))
 
+    # pyrefly: ignore  # bad-override
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> str:
@@ -435,6 +436,7 @@ class TritonTemplateKernel(TritonKernel):
         # for templates with fixed epilogues
         self.prefix_args = prefix_args
         self.suffix_args = suffix_args
+        # pyrefly: ignore  # invalid-type-var
         self.epilogue_fn = epilogue_fn
         self.render_hooks = {}  # type: ignore[var-annotated]
         self.triton_meta: Optional[dict[str, object]] = None
@@ -552,6 +554,7 @@ class TritonTemplateKernel(TritonKernel):
         context = (
             contextlib.nullcontext
             if not self.ops_handler
+            # pyrefly: ignore  # not-callable
             else lambda: V.set_ops_handler(self.ops_handler(V.get_ops_handler()))
         )
         with context():  # type: ignore[operator]
@@ -990,6 +993,7 @@ class TritonTemplateKernel(TritonKernel):
                             f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
                         )
 
+            # pyrefly: ignore  # bad-assignment
             self.ops_handler = StoreOutputSubstitution
 
             input_node = self.named_input_nodes[input_name]
@@ -1193,6 +1197,7 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(index_order),
+                                # pyrefly: ignore  # missing-argument
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1206,6 +1211,7 @@ class TritonTemplateKernel(TritonKernel):
                         )
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
+                        # pyrefly: ignore  # missing-argument
                         val_shape_copy[i] = range_tree.symt.name
                     # Reverse the index symbols because TMA is indexed
                     # as (x, y) whereas the variables will naturally be indexed
@@ -1283,6 +1289,7 @@ class TritonTemplateKernel(TritonKernel):
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
 
+            # pyrefly: ignore  # bad-assignment
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -1899,6 +1906,7 @@ class TritonTemplate(KernelTemplate):
             extra,
             input_call_args,
             prologue_supported_inputs,
+            # pyrefly: ignore  # bad-argument-type
             kernel_args_sizevars_keys,
             kernel_options,
         )
@@ -2462,6 +2470,7 @@ class DataProcessorTemplateWrapper:
             self._postprocessor = lambda x: x
         assert "input_nodes" in kwargs
         assert "layout" in kwargs
+        # pyrefly: ignore  # not-callable
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(
             kwargs["input_nodes"], kwargs["layout"]
         )
@@ -2633,6 +2642,7 @@ class AlgorithmSelectorCache(PersistentCache):
             choice for choice in choices if isinstance(choice, ExternKernelChoice)
         ]
         if len(externs) > 0:
+            # pyrefly: ignore  # bad-return
             return externs[0]
         else:
             return choices[0]
@@ -3130,7 +3140,9 @@ class AlgorithmSelectorCache(PersistentCache):
         # de-duplicate args
         unique_example_inputs = {
             x.get_name(): input_gen_fns.get(
-                i, lambda x: cls.benchmark_example_value(x, hint_override=hint_override)
+                i,
+                lambda x: cls.benchmark_example_value(x, hint_override=hint_override),
+                # pyrefly: ignore  # bad-argument-type
             )(x)
             for i, x in enumerate(input_nodes)
         }
@@ -3617,8 +3629,10 @@ class AlgorithmSelectorCache(PersistentCache):
             ),
             node.get_device(),
             node.get_dtype(),
+            # pyrefly: ignore  # missing-attribute
             node.layout.offset,
             V.graph.sizevars.size_hints(
+                # pyrefly: ignore  # bad-argument-type
                 V.graph.get_allocation_size(node),
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,

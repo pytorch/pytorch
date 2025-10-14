@@ -23,6 +23,12 @@ def _should_use_cudnn(device_index: int) -> bool:
 
 
 class AuxRequest(NamedTuple):
+    """
+    Request which auxiliary outputs to compute from varlen_attn.
+
+    Each field is a boolean indicating whether that auxiliary output should be computed.
+    """
+
     lse: bool = False
 
 
@@ -39,18 +45,14 @@ def _varlen_attn(
     attn_bias: torch.Tensor = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Private custom op for variable-length attention using Flash Attention.
-    This is the internal implementation that calls into the Flash Attention kernels.
-    Users should use the public varlen_attn function instead.
+    Private custom op for variable-length attention.
+
+    This is the internal implementation. Users should use the public varlen_attn function instead.
     """
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
-
-        query = query.contiguous()
-        key = key.contiguous()
-        value = value.contiguous()
 
         result = torch.ops.aten._cudnn_attention_forward(
             query,
@@ -231,9 +233,16 @@ def backward(ctx, grad_out, grad_lse, grad_rng, grad_philox_offset):
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
+
+        grad_out = grad_out.contiguous()
         query = query.contiguous()
         key = key.contiguous()
         value = value.contiguous()
+        out = out.contiguous()
+        lse = lse.contiguous()
+
+        head_dim = query.size(-1)
+        scale = 1.0 / (head_dim ** 0.5)
         dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
             grad_out,
             query,
@@ -250,6 +259,7 @@ def backward(ctx, grad_out, grad_lse, grad_rng, grad_philox_offset):
             max_k,
             0.0,
             is_causal,
+            # scale=scale
         )
     else:
         log.info("Using Flash Attention backend for varlen_attn")

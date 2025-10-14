@@ -31,7 +31,7 @@ class Var:
     __repr__ = __str__
 
     def __eq__(self, other):
-        return type(self) == type(other) and self.token == other.token  # type: ignore[attr-defined]
+        return type(self) is type(other) and self.token == other.token  # type: ignore[attr-defined]
 
     def __hash__(self):
         return hash((type(self), self.token))  # type: ignore[attr-defined]
