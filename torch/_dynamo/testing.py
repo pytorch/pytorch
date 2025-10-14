@@ -33,7 +33,7 @@ from torch import fx
 from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
 
-from . import config, eval_frame, optimize_assert, reset
+from . import config, eval_frame, optimize, reset
 from .bytecode_transformation import (
     create_instruction,
     debug_checks,
@@ -379,7 +379,7 @@ def standard_test(
     correct1 = fn(*args1)
     correct2 = fn(*args2)
     reset()
-    opt_fn = optimize_assert(actual)(fn)
+    opt_fn = optimize(actual, error_on_graph_break=True)(fn)
     val1a = opt_fn(*args1)
     val2a = opt_fn(*args2)
     val1b = opt_fn(*args1)
@@ -496,6 +496,7 @@ def make_test_cls_with_patches(
 def skipIfNotPy311(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 11):
         return fn
+    # pyrefly: ignore  # bad-return, bad-argument-type
     return unittest.skip(fn)
 
 
@@ -503,6 +504,12 @@ def skipIfNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     if sys.version_info >= (3, 12):
         return fn
     return unittest.skip("Requires Python 3.12+")(fn)
+
+
+def skipIfOnlyNotPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:
+    if sys.version_info >= (3, 13) or sys.version_info < (3, 12):
+        return unittest.skip("Requires Python 3.12")(fn)
+    return fn
 
 
 def xfailIfPy312(fn: Callable[_P, _T]) -> Callable[_P, _T]:

@@ -102,16 +102,25 @@ class TestCase(TorchTestCase):
             torch.set_grad_enabled(self._prior_is_grad_enabled)
 
     def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
-        if (
-            config.debug_disable_compile_counter
-            and isinstance(x, utils.CompileCounterInt)
-            or isinstance(y, utils.CompileCounterInt)
-        ):
-            return
+        if config.debug_disable_compile_counter:
+            if isinstance(x, utils.CompileCounterInt) or isinstance(
+                y, utils.CompileCounterInt
+            ):
+                return
+            # skip checks like self.assertEqual(len(counters["graph_break"]), 1)
+            if (
+                (cur_frame := inspect.currentframe())
+                and (upper_frame := cur_frame.f_back)
+                and (upper_code := inspect.getframeinfo(upper_frame).code_context)
+                and "counters" in upper_code[0]
+            ):
+                return
         return super().assertEqual(x, y, *args, **kwargs)
 
-    # assertExpectedInline might also need to be disabled for wrapped nested
-    # graph break tests
+    def assertExpectedInline(self, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        if config.debug_disable_compile_counter:
+            return
+        return super().assertExpectedInline(*args, **kwargs)
 
 
 class CPythonTestCase(TestCase):
@@ -153,7 +162,9 @@ class CPythonTestCase(TestCase):
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
     assertDictEqual = polyfills.assert_dict_equal
+    # pyrefly: ignore  # bad-override
     assertRaises = unittest.TestCase.assertRaises
+    # pyrefly: ignore  # bad-override
     assertRaisesRegex = unittest.TestCase.assertRaisesRegex
     assertWarns = unittest.TestCase.assertWarns
     assertWarnsRegex = unittest.TestCase.assertWarnsRegex
@@ -169,8 +180,10 @@ class CPythonTestCase(TestCase):
     ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
         # from unittest
+
         method = getattr(self, self._testMethodName)
         method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
+
         setattr(self, self._testMethodName, method)
         return fn
 
