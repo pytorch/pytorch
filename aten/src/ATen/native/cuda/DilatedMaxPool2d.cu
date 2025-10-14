@@ -38,20 +38,20 @@ __device__ inline int min(int a, int b) {
 #define BLOCK_STRIDE_BWD 2 // increasing block_stride to lower # of blocks launched
 #endif
 
-template <typename T>
-__device__ inline T dmin(T a, T b) {
+template <typename index_t>
+__device__ inline index_t dmin(index_t a, index_t b) {
   return a <= b ? a : b;
 }
 
-template <typename T>
-static __device__ inline T p_start(T size, int pad, int kernel, int dilation, int stride) {
-  const T kernel_extent = static_cast<T>((kernel - 1) * dilation + 1);
-  return (size + pad < kernel_extent) ? T(0) : (size + pad - kernel_extent) / stride + 1;
+template <typename index_t>
+static __device__ inline index_t p_start(index_t size, int pad, int kernel, int dilation, int stride) {
+  const index_t kernel_extent = static_cast<index_t>((kernel - 1) * dilation + 1);
+  return (size + pad < kernel_extent) ? index_t(0) : (size + pad - kernel_extent) / stride + 1;
 }
 
-template <typename T>
-static __device__ inline T p_end(T size, int pad, T pooled_size, int stride) {
-  return dmin<T>((size + pad) / stride + 1, pooled_size);
+template <typename index_t>
+static __device__ inline index_t p_end(index_t size, int pad, index_t pooled_size, int stride) {
+  return dmin<index_t>((size + pad) / stride + 1, pooled_size);
 }
 
 static inline bool can_use_int32_nhwc(
@@ -61,7 +61,7 @@ static inline bool can_use_int32_nhwc(
     int64_t in_stride_n, int64_t in_stride_c,
     int64_t in_stride_h, int64_t in_stride_w)
 {
-  const int64_t int_max = std::numeric_limits<int>::max();
+  constexpr int64_t int_max = std::numeric_limits<int>::max();
 
   int64_t max_intra_batch =
       (height ? (height - 1) * in_stride_h : 0) +
