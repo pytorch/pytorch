@@ -778,7 +778,6 @@ class GraphModule(torch.nn.Module):
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = None
         a: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
-
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', a, l_y_);  subgraph_1 = a = l_y_ = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
@@ -899,7 +898,6 @@ class GraphModule(torch.nn.Module):
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = None
         a: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
-
         subgraph_1 = self.subgraph_1
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', a, l_y_);  subgraph_1 = a = l_y_ = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
@@ -1547,7 +1545,6 @@ class GraphModule(torch.nn.Module):
         def forward(self, tangents_0: "f32[8, 8]", tangents_1: "f32[8, 8]"):
             mul_2: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 3)
             mul_3: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
-
             add: "f32[8, 8]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
             return (add,)
 """,
@@ -2159,7 +2156,6 @@ class GraphModule(torch.nn.Module):
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', x, y);  subgraph_0 = x = None
         z: "f32[5]" = invoke_subgraph[0];  invoke_subgraph = None
-
         subgraph_1 = self.subgraph_1
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', z, y);  subgraph_1 = z = y = None
         getitem_1: "f32[5]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
@@ -2308,12 +2304,10 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "Sym(s77)", getitem_17: "Sym(s77)", getitem_19: "Sym(s77)", getitem_21: "Sym(s77)", getitem_23: "Sym(s77)", getitem_16: "f32[s77, 16]", getitem_18: "f32[s77, 16]", getitem_20: "f32[s77, 16]", getitem_22: "f32[s77, 16]", cos: "f32[s77, 16]", tangents_1: "f32[]"):
         expand: "f32[s77, 16]" = torch.ops.aten.expand.default(tangents_1, [primals_1, 16]);  tangents_1 = primals_1 = None
-
         partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
 
         invoke_subgraph_15 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', getitem_23, getitem_22, expand);  partitioned_bw_subgraph_0_0 = getitem_23 = getitem_22 = None
         getitem_5: "f32[s77, 16]" = invoke_subgraph_15[1];  invoke_subgraph_15 = None
-
         add_16: "f32[s77, 16]" = torch.ops.aten.add.Tensor(expand, getitem_5);  expand = getitem_5 = None
 
         partitioned_bw_subgraph_0_3 = self.partitioned_bw_subgraph_0_1
@@ -2564,6 +2558,7 @@ class GraphModule(torch.nn.Module):
         repeated_subgraph0 = self.repeated_subgraph0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', x, y);  repeated_subgraph0 = x = None
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+
         repeated_subgraph0_1 = self.repeated_subgraph0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', getitem, y);  repeated_subgraph0_1 = getitem = y = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
