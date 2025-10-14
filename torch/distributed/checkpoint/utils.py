@@ -254,6 +254,7 @@ class _DistWrapper:
             if len(node_failures) > 0:
                 result = CheckpointException(step, node_failures)
 
+        # pyrefly: ignore  # bad-argument-type
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
@@ -302,6 +303,7 @@ class _DistWrapper:
                 result = map_fun()
             except BaseException as e:  # noqa: B036
                 result = CheckpointException(step, {self.rank: _wrap_exception(e)})
+        # pyrefly: ignore  # bad-argument-type
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
