@@ -510,9 +510,9 @@ class Mod(sympy.Function):
 
         # Evaluate if they are both literals.
         if q.is_Number and p.is_Number:
-            if not (p >= 0):
+            if p < 0:
                 raise AssertionError(p)
-            if not (q >= 1):
+            if q < 1:
                 raise AssertionError(q)
             return p % q
 
