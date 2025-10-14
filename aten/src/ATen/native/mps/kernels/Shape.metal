@@ -7,11 +7,11 @@ using namespace metal;
 using namespace c10::metal;
 
 template <typename I, typename T_in, typename T_out>
-kernel void cat_large(
+kernel void cat(
     constant T_in* input [[buffer(0)]],
     device T_out* output [[buffer(1)]],
-    constant CatLargeSharedParams<I>& shared_params [[buffer(2)]],
-    constant CatLargeInputParams<I>& input_params [[buffer(3)]],
+    constant CatSharedParams<I>& shared_params [[buffer(2)]],
+    constant CatInputParams<I>& input_params [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   auto ndim = shared_params.ndim;
   auto cat_dim = shared_params.cat_dim;
@@ -42,45 +42,45 @@ kernel void cat_large(
   output[output_offset] = static_cast<T_out>(input[input_offset]);
 }
 
-#define REGISTER_CAT_LARGE_OP(I, T_in, T_out)                         \
-  template [[host_name("cat_large_" #I "_" #T_in "_" #T_out)]]        \
-  kernel void cat_large<I, T_in, T_out>(                              \
-      constant T_in * input [[buffer(0)]],                            \
-      device T_out * output [[buffer(1)]],                            \
-      constant CatLargeSharedParams<I> & shared_params [[buffer(2)]], \
-      constant CatLargeInputParams<I> & input_params [[buffer(3)]],   \
+#define REGISTER_CAT_OP(I, T_in, T_out)                          \
+  template [[host_name("cat_" #I "_" #T_in "_" #T_out)]]         \
+  kernel void cat<I, T_in, T_out>(                               \
+      constant T_in * input [[buffer(0)]],                       \
+      device T_out * output [[buffer(1)]],                       \
+      constant CatSharedParams<I> & shared_params [[buffer(2)]], \
+      constant CatInputParams<I> & input_params [[buffer(3)]],   \
       uint tid [[thread_position_in_grid]]);
 
-#define REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, T_out) \
-  REGISTER_CAT_LARGE_OP(I, float, T_out);               \
-  REGISTER_CAT_LARGE_OP(I, half, T_out);                \
-  REGISTER_CAT_LARGE_OP(I, bfloat, T_out);              \
-  REGISTER_CAT_LARGE_OP(I, int, T_out);                 \
-  REGISTER_CAT_LARGE_OP(I, uint, T_out);                \
-  REGISTER_CAT_LARGE_OP(I, long, T_out);                \
-  REGISTER_CAT_LARGE_OP(I, ulong, T_out);               \
-  REGISTER_CAT_LARGE_OP(I, short, T_out);               \
-  REGISTER_CAT_LARGE_OP(I, ushort, T_out);              \
-  REGISTER_CAT_LARGE_OP(I, char, T_out);                \
-  REGISTER_CAT_LARGE_OP(I, uchar, T_out);               \
-  REGISTER_CAT_LARGE_OP(I, bool, T_out);
+#define REGISTER_CAT_OP_ALL_INPUT_TYPES(I, T_out) \
+  REGISTER_CAT_OP(I, float, T_out);               \
+  REGISTER_CAT_OP(I, half, T_out);                \
+  REGISTER_CAT_OP(I, bfloat, T_out);              \
+  REGISTER_CAT_OP(I, int, T_out);                 \
+  REGISTER_CAT_OP(I, uint, T_out);                \
+  REGISTER_CAT_OP(I, long, T_out);                \
+  REGISTER_CAT_OP(I, ulong, T_out);               \
+  REGISTER_CAT_OP(I, short, T_out);               \
+  REGISTER_CAT_OP(I, ushort, T_out);              \
+  REGISTER_CAT_OP(I, char, T_out);                \
+  REGISTER_CAT_OP(I, uchar, T_out);               \
+  REGISTER_CAT_OP(I, bool, T_out);
 
-#define REGISTER_CAT_FOR_INDEX_TYPE(I)              \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, float);  \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, half);   \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, bfloat); \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, int);    \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, uint);   \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, long);   \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, ulong);  \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, short);  \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, ushort); \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, char);   \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, uchar);  \
-  REGISTER_CAT_LARGE_OP_ALL_INPUT_TYPES(I, bool);   \
-                                                    \
-  REGISTER_CAT_LARGE_OP(I, float2, float2);         \
-  REGISTER_CAT_LARGE_OP(I, half2, half2);
+#define REGISTER_CAT_FOR_INDEX_TYPE(I)        \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, float);  \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, half);   \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, bfloat); \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, int);    \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, uint);   \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, long);   \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, ulong);  \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, short);  \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, ushort); \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, char);   \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, uchar);  \
+  REGISTER_CAT_OP_ALL_INPUT_TYPES(I, bool);   \
+                                              \
+  REGISTER_CAT_OP(I, float2, float2);         \
+  REGISTER_CAT_OP(I, half2, half2);
 
 REGISTER_CAT_FOR_INDEX_TYPE(int64_t);
 REGISTER_CAT_FOR_INDEX_TYPE(int32_t);

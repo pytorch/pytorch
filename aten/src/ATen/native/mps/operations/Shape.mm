@@ -86,7 +86,7 @@ std::string get_type_str<int32_t>() {
 // NOTE: `output` is expected to already have the correct size.
 template <typename idx_type_t>
 static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, const Tensor& output) {
-  CatLargeSharedParams<idx_type_t> shared_params;
+  CatSharedParams<idx_type_t> shared_params;
 
   shared_params.ndim = output.dim();
   shared_params.cat_dim = dimension;
@@ -116,7 +116,7 @@ static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, co
 
     for (int64_t numel_remaining = input.numel(); numel_remaining > 0; numel_remaining -= max_num_threads) {
       auto num_threads = std::min(max_num_threads, numel_remaining);
-      CatLargeInputParams<idx_type_t> input_params;
+      CatInputParams<idx_type_t> input_params;
 
       input_params.cat_dim_offset = safe_downcast<idx_type_t, int64_t>(cat_dim_offset);
       input_params.input_element_offset = safe_downcast<idx_type_t, int64_t>(input.numel() - numel_remaining);
@@ -129,7 +129,7 @@ static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, co
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
           id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
-          auto pipeline_state = lib.getPipelineStateForFunc(fmt::format("cat_large_{}_{}_{}",
+          auto pipeline_state = lib.getPipelineStateForFunc(fmt::format("cat_{}_{}_{}",
                                                                         get_type_str<idx_type_t>(),
                                                                         scalarToMetalTypeString(input),
                                                                         scalarToMetalTypeString(output)));
