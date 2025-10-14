@@ -411,7 +411,6 @@ public:
 
     Options()
     : schemaOrName_(std::nullopt)
-    , kernels()
     , aliasAnalysisKind_(std::nullopt)
     {}
 
@@ -420,7 +419,6 @@ public:
     struct KernelRegistrationConfig final {
       KernelRegistrationConfig()
         : dispatch_key(std::nullopt)
-        , func()
         , cpp_signature(std::nullopt)
         , inferred_function_schema(nullptr)
       {}

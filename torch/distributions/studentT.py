@@ -31,6 +31,7 @@ class StudentT(Distribution):
         scale (float or Tensor): scale of the distribution
     """
 
+    # pyrefly: ignore  # bad-override
     arg_constraints = {
         "df": constraints.positive,
         "loc": constraints.real,

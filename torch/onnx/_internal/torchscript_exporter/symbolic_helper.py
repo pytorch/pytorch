@@ -103,8 +103,14 @@ import math
 import sys
 import typing
 import warnings
-from typing import Any, Callable, Literal, NoReturn, TypeVar as _TypeVar
-from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSpec
+from typing import (
+    Any,
+    Concatenate as _Concatenate,
+    Literal,
+    NoReturn,
+    TypeVar as _TypeVar,
+)
+from typing_extensions import ParamSpec as _ParamSpec
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -115,7 +121,7 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.types import Number
 
@@ -358,6 +364,7 @@ def parse_args(
                 fn_name = None
             args = [
                 _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[method-assign]
+                # pyrefly: ignore  # no-matching-overload
                 for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)
             ]
             # only support _outputs in kwargs
@@ -815,9 +822,10 @@ def _is_fp(value) -> bool:
 
 
 def _is_bool(value) -> bool:
-    return _type_utils.JitScalarType.from_value(
-        value, _type_utils.JitScalarType.UNDEFINED
-    ) in {_type_utils.JitScalarType.BOOL}
+    return (
+        _type_utils.JitScalarType.from_value(value, _type_utils.JitScalarType.UNDEFINED)
+        == _type_utils.JitScalarType.BOOL
+    )
 
 
 def _generate_wrapped_number(g: jit_utils.GraphContext, scalar):
@@ -1793,22 +1801,27 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 
     if require_cast:
         for input in inputs:
+            # pyrefly: ignore  # missing-attribute
             if input.isCompleteTensor():
                 input_scalar_type = _type_utils.JitScalarType.from_value(input)
                 if input_scalar_type != dtype_0:
                     raise errors.SymbolicValueError(
                         f"Inputs of {op_name} must have same dtype."
                         f"Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
+                        # pyrefly: ignore  # bad-argument-type
                         input,
                     )
         for i, input in enumerate(inputs):
+            # pyrefly: ignore  # missing-attribute
             if input.isCompleteTensor() and not _is_fp(input):
                 inputs[i] = g.op(
                     "Cast",
+                    # pyrefly: ignore  # bad-argument-type
                     input,
                     to_i=target_float_t.onnx_type(),
                 )
 
+    # pyrefly: ignore  # bad-argument-type
     self = g.op(op_name, *inputs, **kwargs)
 
     if require_cast:

@@ -3358,6 +3358,20 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             return ::c10d::getNcclVersionTuple();
           });
 
+#ifdef NCCL_HAS_CTA_POLICY
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_DEFAULT",
+      [](const py::object&) { return NCCL_CTA_POLICY_DEFAULT; });
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_EFFICIENCY",
+      [](const py::object&) { return NCCL_CTA_POLICY_EFFICIENCY; });
+#ifdef NCCL_CTA_POLICY_ZERO // requires NCCL version >= 2.28
+  processGroupNCCL.def_property_readonly_static(
+      "NCCL_CTA_POLICY_ZERO",
+      [](const py::object&) { return NCCL_CTA_POLICY_ZERO; });
+#endif // NCCL_CTA_POLICY_ZERO
+#endif // NCCL_HAS_CTA_POLICY
+
   module.def(
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
@@ -3807,20 +3821,34 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       fakeProcessGroup, "Options", backendOptions)
       .def(py::init())
       .def_readwrite(
-          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option);
+          "fake_option", &::c10d::FakeProcessGroup::Options::fake_option)
+      .def_readwrite(
+          "error_on_collective",
+          &::c10d::FakeProcessGroup::Options::error_on_collective);
   fakeProcessGroup
-      .def(
-          py::init([](int rank,
-                      int size,
-                      c10::intrusive_ptr<::c10d::FakeProcessGroup::Options>
-                          options) {
-            return c10::make_intrusive<::c10d::FakeProcessGroup>(
+      .def_static(
+          "_create_internal",
+          [](int rank,
+             int size,
+             c10::intrusive_ptr<::c10d::FakeProcessGroup::Options> options) {
+            return ::c10d::FakeProcessGroup::_create_internal(
                 rank, size, std::move(options));
-          }),
+          },
           py::arg("rank"),
           py::arg("world_size"),
           py::arg("options") =
               c10::make_intrusive<::c10d::FakeProcessGroup::Options>())
+      .def(
+          "__init__",
+          [](const py::object&,
+             const py::args& args,
+             const py::kwargs& kwargs) {
+            TORCH_CHECK(
+                false,
+                "FakeProcessGroup cannot be constructed directly. "
+                "Use torch.distributed.init_process_group(backend='fake') instead to ensure "
+                "proper dispatch system integration.");
+          })
       .def_property_readonly(
           "options", &::c10d::FakeProcessGroup::getBackendOptions);
   auto fakeWork =
@@ -4063,6 +4091,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             Stringified pickle work traces.
             Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
+  module.def(
+      "_reset_fr_recording_nccl",
+      []() { ::c10d::reset_nccl_trace(); },
+      "API to reset Flight recorder recording when it comes fault tolerance.");
 #endif
 
   module.def(

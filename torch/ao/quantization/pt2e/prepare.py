@@ -366,7 +366,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     if input_edge_obs_or_fq is None:
         return new_arg
 
-    arg_as_output_obs_or_fq = obs_or_fq_map.get(original_arg, None)
+    arg_as_output_obs_or_fq = obs_or_fq_map.get(original_arg)
     # the arg is observed as the output and is using the same instance as the input_edge
     # we'll reuse the inserted observer/fake_quant
     if arg_as_output_obs_or_fq is not None and id(arg_as_output_obs_or_fq) == id(
@@ -497,11 +497,7 @@ def _maybe_insert_input_and_output_observers_for_node(
     is_qat: bool,
     model_device: Optional[torch.device] = None,
 ):
-    this_node_quantization_annotation = (
-        node.meta["quantization_annotation"]
-        if "quantization_annotation" in node.meta
-        else None
-    )
+    this_node_quantization_annotation = node.meta.get("quantization_annotation", None)
     if this_node_quantization_annotation is None:
         return
 

@@ -1158,7 +1158,7 @@ PyTorch,q_argsort,q_argsort_M512_N512_dtypetorch.quint8,short,FALSE,446.4263
 PyTorch,q_clone,q_clone_M512_N512_dtypetorch.quint8,short,FALSE,10.9374
 PyTorch,q_mean,q_mean_M512_N512_dtypetorch.quint8,short,FALSE,10.2288
 PyTorch,q_relu,q_relu_M512_N512_dtypetorch.quint8,short,FALSE,10.3366
-PyTorch,q_relu_,q_relu__M512_N512_dtypetorch.quint8,short,FALSE,25.3594
+PyTorch,q_relu_,q_relu__M512_N512_dtypetorch.quint8,short,FALSE,7.9869
 PyTorch,q_sort,q_sort_M512_N512_dtypetorch.quint8,short,FALSE,447.1303
 PyTorch,qtopk,qtopk_M512_N512_k5_dtypetorch.quint8,short,FALSE,64.856
 PyTorch,abs,abs_M512_N512_cpu,short,FALSE,12.3046

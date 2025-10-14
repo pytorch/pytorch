@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/ScalarType.h>
@@ -118,7 +119,8 @@ struct FromImpl<ScalarType> {
       case ScalarType::UInt64:
         return from(aoti_torch_dtype_uint64());
       default:
-        throw std::runtime_error(
+        TORCH_CHECK(
+            false,
             "Not yet supported ScalarType, please file an issue describing your use case.");
     }
   }
@@ -267,8 +269,10 @@ struct ToImpl<ScalarType> {
     } else if (shim_scalartype == aoti_torch_dtype_uint64()) {
       return ScalarType::UInt64;
     } else {
-      throw std::runtime_error(
-          "Not yet supported ScalarType " + std::to_string(shim_scalartype) +
+      TORCH_CHECK(
+          false,
+          "Not yet supported ScalarType ",
+          std::to_string(shim_scalartype),
           ", please file an issue describing your use case.");
     }
   }

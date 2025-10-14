@@ -76,13 +76,7 @@ void _print_dispatch_trace(const std::string& label, const std::string& op_name,
 
 OpRegistrationListener::~OpRegistrationListener()= default;
 
-Dispatcher::Dispatcher()
-: operators_()
-, operatorLookupTable_()
-, backendFallbackKernels_()
-, listeners_(std::make_unique<detail::RegistrationListenerList>())
-, cond_var_()
-, guard_(std::make_shared<Guard>())
+Dispatcher::Dispatcher(): backendFallbackKernels_(), listeners_(std::make_unique<detail::RegistrationListenerList>()), guard_(std::make_shared<Guard>())
 {}
 
 Dispatcher::~Dispatcher() {

@@ -263,6 +263,11 @@ class RecompileLimitExceeded(Unsupported):
     pass
 
 
+# debug exception thrown when tracing torch._dynamo.step_unsupported()
+class StepUnsupported(TorchDynamoException):
+    pass
+
+
 class UnsafeScriptObjectError(TorchDynamoException):
     pass
 
@@ -369,6 +374,7 @@ def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedExc
         observed_exception_map[exc_type] = type(  # type: ignore[assignment]
             f"Observed{name}Error", (ObservedException,), {}
         )
+    # pyrefly: ignore  # index-error
     return observed_exception_map[exc_type]
 
 

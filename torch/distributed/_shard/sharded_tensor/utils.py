@@ -208,6 +208,7 @@ def build_global_metadata(
     global_sharded_tensor_metadata = None
     global_metadata_rank = 0
 
+    # pyrefly: ignore  # bad-assignment
     for rank, rank_metadata in enumerate(gathered_metadatas):
         if rank_metadata is None:
             continue

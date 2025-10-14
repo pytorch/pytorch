@@ -29,6 +29,8 @@ from torch.distributed.checkpoint.planner_helpers import (
     _create_read_items,
     create_read_items_for_chunk_list,
 )
+
+# pyrefly: ignore  # deprecated
 from torch.distributed.checkpoint.state_dict_loader import load_state_dict
 from torch.distributed.checkpoint.storage import StorageReader
 from torch.distributed.checkpoint.utils import (
@@ -157,6 +159,7 @@ def _get_state_dict_2d_layout(
 class _ReaderWithOffset(DefaultLoadPlanner):
     translation: dict[MetadataIndex, MetadataIndex]
     state_dict: STATE_DICT_TYPE
+    # pyrefly: ignore  # bad-override
     metadata: Metadata
 
     def __init__(self, fqn_to_offset: dict[str, Sequence[int]]) -> None:

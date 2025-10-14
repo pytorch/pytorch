@@ -9,10 +9,11 @@ import sys
 import warnings
 import weakref
 from collections import defaultdict, deque
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -217,7 +218,7 @@ def _dump_DDP_relevant_env_vars():
     ]
     formatted_output = ""
     for var in relevant_env_vars:
-        value = os.environ[var] if var in os.environ else "N/A"
+        value = os.environ.get(var, "N/A")
         formatted_output += f"env:{var}={value}\n"
     print(formatted_output)
 
@@ -240,6 +241,7 @@ class _BufferCommHook:
 # is completed.
 class _DDPSink(Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, ddp_weakref, *inputs):
         # set_materialize_grads(False) will ensure that None gradients stay as
         # None and are not filled with zeros.
@@ -690,6 +692,7 @@ class DistributedDataParallel(Module, Joinable):
         elif process_group is None and device_mesh is None:
             self.process_group = _get_default_group()
         elif device_mesh is None:
+            # pyrefly: ignore  # bad-assignment
             self.process_group = process_group
         else:
             if device_mesh.ndim != 1:
@@ -778,11 +781,13 @@ class DistributedDataParallel(Module, Joinable):
             self.device_ids = None
             self.output_device = None
         else:
+            # pyrefly: ignore  # bad-assignment
             self.device_ids = [_get_device_index(x, True) for x in device_ids]
 
             if output_device is None:
                 output_device = device_ids[0]
 
+            # pyrefly: ignore  # bad-assignment
             self.output_device = _get_device_index(output_device, True)
 
         self.static_graph = False
@@ -818,7 +823,7 @@ class DistributedDataParallel(Module, Joinable):
                     "Run a dummy forward pass to correctly initialize the modules",
                 )
         # used for intra-node param sync and inter-node sync as well
-        self.broadcast_bucket_size = int(250 * 1024 * 1024)
+        self.broadcast_bucket_size = 250 * 1024 * 1024
 
         # reduction bucket size
         if bucket_cap_mb is None:
@@ -932,6 +937,7 @@ class DistributedDataParallel(Module, Joinable):
         # enabled.
         self._accum_grad_hooks: list[RemovableHandle] = []
         if self._use_python_reducer:
+            # pyrefly: ignore  # bad-assignment
             torch._inductor.config._fuse_ddp_communication = True
             torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
             # Directly adding this to the trace rule will disturb the users

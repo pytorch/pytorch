@@ -59,6 +59,8 @@ def split_module(
     keep_original_order: Optional[bool] = False,
     keep_original_node_name: Optional[bool] = False,
     keep_original_input_name: bool = True,
+    *,
+    partition_affix: Optional[str] = None,
 ):
     """
     Creates subgraphs out of main graph
@@ -81,6 +83,8 @@ def split_module(
             have the same node names as the original graph.
         keep_original_input_name: bool: If the partitioned graphs should
             have the same input names as the original graph.
+        partition_affix: Optional[str]: If specified, the submodules' names will contain
+            the affix, e.g. "submod_<affix>_<idx>".
 
     Returns:
         GraphModule: the module after split.
@@ -253,7 +257,13 @@ def split_module(
                     use_partition.dependencies.setdefault(defined)
 
     def instantiate_node_partition_mapping(node):
-        partition_name = str(split_callback(node))
+        partition_idx = split_callback(node)
+        partition_name = str(partition_idx)
+        if partition_affix is not None:
+            # For example, if user specifies partition_affix = "pp", then the
+            # partition name will be "pp_0", "pp_1", etc
+            partition_name = "_".join([partition_affix, partition_name])
+
         log.debug(
             "instantiate_node_partition_mapping %s (%s)", node.name, partition_name
         )
@@ -307,6 +317,7 @@ def split_module(
             and isinstance(s0 := val.node.expr, sympy.Symbol)
             and s0 not in symbol_to_node
         ):
+            # pyrefly: ignore  # unbound-name
             symbol_to_node[val.node.expr] = node
 
         if node.op in ["placeholder", "get_attr", "output"]:
@@ -340,7 +351,9 @@ def split_module(
 
     assert all(v is not None for v in autocast_exits.values()), "autocast must exit"
 
+    # pyrefly: ignore  # bad-assignment
     autocast_regions = {k: sorted(v) for k, v in autocast_regions.items()}
+    # pyrefly: ignore  # bad-assignment
     grad_regions = {k: sorted(v) for k, v in grad_regions.items()}
 
     if _LOGGER.isEnabledFor(logging.DEBUG):
@@ -405,7 +418,9 @@ def split_module(
     for regions_mapping in [autocast_regions, grad_regions]:
         for node, regions in regions_mapping.items():
             assert len(regions) > 0
+            # pyrefly: ignore  # index-error
             partitions[str(regions[0])].environment[node] = node
+            # pyrefly: ignore  # index-error
             for r in regions[1:]:
                 partition = partitions[str(r)]
                 new_node = partition.graph.create_node(
@@ -505,6 +520,7 @@ def split_module(
         for node in reversed(regions_mapping):
             regions = regions_mapping[node]
             assert len(regions) > 0
+            # pyrefly: ignore  # index-error
             for r in regions[:-1]:
                 partition = partitions[str(r)]
                 exit_node = autocast_exits[node]

@@ -52,6 +52,7 @@ class InterpreterShim(torch.fx.Interpreter):
         self.current_node = None
 
     def run_node(self, n: torch.fx.Node) -> Any:
+        # pyrefly: ignore  # bad-assignment
         self.current_node = n
         return super().run_node(n)
 
@@ -436,6 +437,7 @@ class LoopBody:
         if str(old) == str(new):
             return
         assert self.indexing is not None
+        # pyrefly: ignore  # bad-assignment
         self.indexing = {k: sympy_subs(v, {old: new}) for k, v in self.indexing.items()}
 
     def get_index(self, name):

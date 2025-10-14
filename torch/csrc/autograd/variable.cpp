@@ -274,12 +274,16 @@ void set_grad_accumulator(
       std::move(grad_accumulator);
 }
 
-std::shared_ptr<Node> try_get_grad_accumulator(const Variable& self) {
+std::shared_ptr<Node> try_get_grad_accumulator(const at::TensorBase& self) {
   if (get_autograd_meta(self)) {
     return get_autograd_meta(self)->grad_accumulator_.lock();
   } else {
     return nullptr;
   }
+}
+
+std::shared_ptr<Node> try_get_grad_accumulator(const Variable& self) {
+  return try_get_grad_accumulator(get_tensor_base(self));
 }
 
 std::shared_ptr<Node> grad_accumulator(const Variable& self) {
@@ -713,7 +717,8 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
             self.sym_sizes(), // Note: sizes(), not base_.sizes(), is
                               // intentional
             self.unsafeGetTensorImpl()->is_python_dispatch(),
-            self.is_nested());
+            self.is_nested(),
+            self.grad_dtype());
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);
@@ -907,6 +912,47 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
   return std::make_unique<ChainedViewFunc>(
       first->clone_and_set(first_symints, first_tensors),
       second->clone_and_set(second_symints, second_tensors));
+}
+
+std::optional<c10::ScalarType> VariableHooks::grad_dtype(
+    const at::TensorBase& self) const {
+  if (auto* meta = impl::get_autograd_meta(self)) {
+    return meta->grad_dtype(self);
+  }
+  return self.scalar_type();
+}
+
+void VariableHooks::set_grad_dtype(
+    const at::TensorBase& self,
+    const std::optional<c10::ScalarType>& grad_dtype) const {
+  auto* meta = impl::materialize_autograd_meta(self);
+  meta->set_grad_dtype(grad_dtype, self);
+}
+
+std::optional<at::ScalarType> AutogradMeta::grad_dtype(
+    const at::TensorBase& self) const {
+  if (allow_grad_dtype_mismatch_) {
+    return std::nullopt;
+  } else if (grad_dtype_.has_value()) {
+    return grad_dtype_;
+  } else {
+    return std::optional<at::ScalarType>(self.scalar_type());
+  }
+}
+void AutogradMeta::set_grad_dtype(
+    const std::optional<at::ScalarType>& grad_dtype,
+    const at::TensorBase& self) {
+  TORCH_CHECK(!grad_fn_, "grad_dtype can only be set on leaf tensors.");
+  if (grad_dtype.has_value()) {
+    grad_dtype_ = grad_dtype;
+    allow_grad_dtype_mismatch_ = false;
+  } else {
+    allow_grad_dtype_mismatch_ = true;
+  }
+  auto grad_acc = impl::try_get_grad_accumulator(self);
+  if (grad_acc) {
+    grad_acc->mutable_input_metadata(0).set_grad_dtype(grad_dtype);
+  }
 }
 
 } // namespace torch::autograd

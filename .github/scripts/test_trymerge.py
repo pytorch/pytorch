@@ -32,6 +32,7 @@ from trymerge import (
     main as trymerge_main,
     MandatoryChecksMissingError,
     MergeRule,
+    PostCommentError,
     RE_GHSTACK_DESC,
     read_merge_rules,
     remove_job_name_suffix,
@@ -587,6 +588,23 @@ class TestTryMerge(TestCase):
             # making another query
             self.assertEqual(mock_merge_base, pr.get_merge_base())
             mocked_gh_fetch_merge_base.assert_called_once()
+
+    def test_app_can_revert(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 164660)
+        repo = DummyGitRepo()
+        app_comment_id, impostor_comment_id = 3375785595, 3377647892
+        # Check that app can revert
+        self.assertIsNotNone(validate_revert(repo, pr, comment_id=app_comment_id))
+        # But impostor can not
+        self.assertRaises(
+            PostCommentError,
+            lambda: validate_revert(repo, pr, comment_id=impostor_comment_id),
+        )
+        # Despite it's name being the name of the bot
+        self.assertEqual(
+            pr.get_comment_by_id(impostor_comment_id).author_login,
+            "pytorch-auto-revert",
+        )
 
 
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)

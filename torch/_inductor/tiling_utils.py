@@ -126,13 +126,14 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
 
     # For the purposes of tiling/coalesced access, approximate ModularIndexing and FloorDiv
     # then check later
+    # pyrefly: ignore  # missing-attribute
     eq_1_expr_simplified = eq_1_expr.replace(ModularIndexing, indexing_div_rep).replace(
         FloorDiv, indexing_div_rep
     )
 
     out = _solve_simple_expr(eq_1_expr_simplified)
     # since we approximated FloorDiv/ModularIndexing, double check here
-    if not out or not (sympy_subs(eq_1_expr, {free_symbol: out})) == 1:
+    if not out or sympy_subs(eq_1_expr, {free_symbol: out}) != 1:
         return None
 
     required_values.append(out)
@@ -575,7 +576,7 @@ def get_score(addr: sympy.Expr, var_ranges: dict[sympy.Symbol, int]) -> int:
     # TODO - deduplicate with candidate_tilings
     var_sizes = []
     for v in addr.free_symbols:
-        v_size = var_ranges.get(v, None)
+        v_size = var_ranges.get(v)
         # TODO - reason about indirect vars
         if not symbol_is_type(v, SymT.INDIRECT) and v_size is not None:
             var_sizes.append(v_size)

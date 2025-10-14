@@ -452,11 +452,11 @@ void convolution_depthwise3x3_winograd_impl(
 #else
 
 void convolution_depthwise3x3_winograd_impl(
-    const Arguments&,
-    const float* const,
-    const float* const,
-    const float* const,
-    float* const) {
+    const Arguments& /*unused*/,
+    const float* const /*unused*/,
+    const float* const /*unused*/,
+    const float* const /*unused*/,
+    float* const /*unused*/) {
 }
 
 #endif /* __ARM_NEON__ */

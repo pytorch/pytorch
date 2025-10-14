@@ -127,7 +127,7 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
 
-#if defined (__gfx90a__) || defined(__gfx942__)
+#if defined (__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
 #define CDNA2_OR_LATER 1
 #else
 #define CDNA2_OR_LATER 0
@@ -143,7 +143,7 @@ template<typename T, uint32_t Rank>
 using VecT = T __attribute__((ext_vector_type(Rank)));
 
 static bool isCDNA2orLater(int index) {
-    return at::detail::getCUDAHooks().isGPUArch({"gfx90a", "gfx942"}, index);
+    return at::detail::getCUDAHooks().isGPUArch({"gfx90a", "gfx942", "gfx950"}, index);
 }
 
 #else

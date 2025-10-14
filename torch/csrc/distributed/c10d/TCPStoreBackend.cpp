@@ -96,7 +96,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   std::unordered_set<int> miscellaneousSockets_;
 
   Socket storeListenSocket_;
-  std::vector<Socket> sockets_{};
+  std::vector<Socket> sockets_;
 #ifdef _WIN32
   const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds{10};
   HANDLE ghStopEvent_{};

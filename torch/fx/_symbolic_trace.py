@@ -603,6 +603,7 @@ class Tracer(TracerBase):
                             in inspect.signature(self.create_proxy).parameters
                         ):
                             kwargs["proxy_factory_fn"] = (
+                                # pyrefly: ignore  # unsupported-operation
                                 None
                                 if not self.param_shapes_constant
                                 else lambda node: ParameterProxy(
@@ -890,7 +891,7 @@ class Tracer(TracerBase):
         new_tracer = Tracer.__new__(Tracer)
 
         for k, v in self.__dict__.items():
-            if k in {"_autowrap_search"}:
+            if k == "_autowrap_search":
                 new_obj = copy.copy(v)
             else:
                 new_obj = copy.deepcopy(v, memo)
@@ -926,7 +927,11 @@ class Tracer(TracerBase):
 
                     return out
                 # Union[int, bool] == bool in Python <= 3.6
-                if type(x) == bool or type(x) in base_types and type(x) != torch.Tensor:
+                if (
+                    type(x) is bool
+                    or type(x) in base_types
+                    and type(x) is not torch.Tensor
+                ):
                     torch._assert(
                         out == x,
                         f"{name} has been specialized to have value {x} but got another value",

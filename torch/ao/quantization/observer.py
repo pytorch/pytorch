@@ -280,9 +280,12 @@ class UniformQuantizationObserverBase(ObserverBase):
         )
         self.has_customized_qrange = (quant_min is not None) and (quant_max is not None)
         if self.has_customized_qrange:
+            # pyrefly: ignore  # bad-argument-type
             validate_qmin_qmax(quant_min, quant_max)
         self.quant_min, self.quant_max = calculate_qmin_qmax(
+            # pyrefly: ignore  # bad-argument-type
             quant_min,
+            # pyrefly: ignore  # bad-argument-type
             quant_max,
             self.has_customized_qrange,
             self.dtype,
@@ -388,7 +391,7 @@ class UniformQuantizationObserverBase(ObserverBase):
                     )
                 else:
                     zero_point = zero_point.new_full(zero_point.size(), 128)
-            elif self.dtype in [torch.uint16]:
+            elif self.dtype == torch.uint16:
                 zero_point = zero_point.new_full(zero_point.size(), 2**15)
         elif self.qscheme == torch.per_channel_affine_float_qparams:
             scale = (max_val - min_val) / float(quant_max - quant_min)
@@ -803,7 +806,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         unexpected_keys: list[str],
         error_msgs: list[str],
     ):
-        version = local_metadata.get("version", None)
+        version = local_metadata.get("version")
         if version is not None and version < 3:
             local_state = ["min_vals", "max_vals"]
             expected_min_name = "min_vals"

@@ -465,6 +465,7 @@ def _reorder_communication_preserving_peak_memory_internal(
     while _next[curr] is not None:
         if iterative_recompute_error:
             break
+        # pyrefly: ignore  # bad-argument-type
         if contains_collective(curr):
             if debug_num_collectives_to_reorder is not None and (
                 num_processed_collectives >= debug_num_collectives_to_reorder
@@ -825,8 +826,11 @@ def _schedule_for_comm(
             collective_cost > 0
             and (candidate := get_overlapping_candidate()) is not None
         ):
+            # pyrefly: ignore  # unbound-name
             ready.remove(candidate)
+            # pyrefly: ignore  # unbound-name
             schedule(candidate.snode)
+            # pyrefly: ignore  # unbound-name
             collective_cost -= snode_to_cost[candidate.snode]
         heapq.heapify(ready)
 
@@ -1028,6 +1032,7 @@ def _sink_waits_iterative_internal(
         ):
             break
 
+        # pyrefly: ignore  # bad-argument-type
         if contains_wait(curr) and curr not in processed_waits:
             processed_waits.add(curr)
             info = stats[curr] = SinkWaitInfo()
@@ -1093,6 +1098,7 @@ def _sink_waits_iterative_internal(
                         info.grouped_info = _group_names(gns)
                         candidate = _next[candidate]
                         continue
+                    # pyrefly: ignore  # unbound-name
                     elif (data_dep is None) and both_contain_comms:
                         info.limiting_factor = (
                             f"collective ordering {_group_names(gns)}"
@@ -1365,6 +1371,7 @@ def reorder_compute_and_comm_for_overlap(
             snodes, get_freeable_input_buf(snodes, graph_inputs), graph_outputs
         )
         print(f"final {peak_memory=}")
+    # pyrefly: ignore  # bad-return
     return order
 
 
@@ -1413,7 +1420,7 @@ Resize can only operate on graph inputs, but got {node} which is resizing non-gr
         )
         resized_to_0_idxes = graph_input_to_resized_to_0_node_idxes.get(graph_input, [])
 
-        if not len(resized_to_full_idxes) == len(resized_to_0_idxes):
+        if len(resized_to_full_idxes) != len(resized_to_0_idxes):
             log.warning(
                 f"""
 Unequal number of resize-to-full and resize-to-0 nodes for graph input {graph_input}:
@@ -1632,6 +1639,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             KeywordArg("group_size"),
             KeywordArg("group_name"),
         ),
+        # pyrefly: ignore  # bad-argument-type
         pass_dict=graph_pass,
         extra_check=lambda match: match.kwargs["item_idx"] == 0,
     )
@@ -1655,6 +1663,7 @@ def reinplace_fsdp_all_gather(graph: torch.fx.Graph) -> None:
             return all_gather_into_tensor
 
         match.replace_by_example(
+            # pyrefly: ignore  # bad-argument-type
             repl,
             [
                 kwargs["all_gather_inputs"],

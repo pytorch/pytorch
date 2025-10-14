@@ -4,8 +4,9 @@ import functools
 import operator
 import warnings
 from collections import namedtuple
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -163,7 +164,7 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
         torch.nn.functional.conv_transpose2d: torch.ops.quantized.conv_transpose2d_prepack,
         torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
     }
-    prepack_op = prepack_ops.get(conv_op, None)
+    prepack_op = prepack_ops.get(conv_op)
     assert prepack_op, f"Didn't find prepack op for {conv_op}"
     return prepack_op
 
@@ -703,7 +704,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
         return a.op == "call_function" and a.target == operator.getitem
 
     def match_tuple(a):
-        return a.op == "call_function" and a.target == tuple
+        return a.op == "call_function" and a.target is tuple
 
     def _match_pattern(match_pattern: list[Callable]) -> Optional[Node]:
         """
@@ -720,6 +721,7 @@ def _maybe_get_custom_module_lstm_from_node_arg(
                     a = a.args[0][0]  # type: ignore[assignment,index]
                 else:
                     a = a.args[0]  # type: ignore[assignment]
+        # pyrefly: ignore  # bad-return
         return a
 
     all_match_patterns = [
@@ -795,7 +797,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
 
         # Iterate through users of this node to find tuple/getitem nodes to match
         for user in node.users:
-            if user.op == "call_function" and user.target == tuple:
+            if user.op == "call_function" and user.target is tuple:
                 for i, user_arg in enumerate(user.args[0]):  # type: ignore[arg-type]
                     if user_arg == node:
                         index_stack.append(i)
@@ -824,7 +826,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
     for pattern in matched_patterns:
         first_tuple = pattern[0]
         last_getitem = pattern[-1]
-        assert first_tuple.op == "call_function" and first_tuple.target == tuple
+        assert first_tuple.op == "call_function" and first_tuple.target is tuple
         assert (
             last_getitem.op == "call_function"
             and last_getitem.target == operator.getitem

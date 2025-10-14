@@ -2176,7 +2176,7 @@ Tensor _nested_split_with_sizes_backward(
     const Tensor& nt_sizes,
     const at::TensorOptions& options) {
   // add 1 to account for batch dim
-  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(nt_sizes.size(1)) + 1);
+  dim = at::maybe_wrap_dim(dim, nt_sizes.size(1) + 1);
   // it's possible some of the grads are not defined (represents tensors of all
   // 0s). Since at::cat can't handle those, let's define them
   std::vector<Tensor> grads_all_defined;
@@ -2187,10 +2187,9 @@ Tensor _nested_split_with_sizes_backward(
       const auto& length = split_sizes[i].guard_int(__FILE__, __LINE__);
       auto nt_split_size = nt_sizes.clone();
       auto nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
-      for (int64_t j : c10::irange(static_cast<int64_t>(nt_sizes.size(0)))) {
+      for (int64_t j : c10::irange(nt_sizes.size(0))) {
         // subtract 1 to account for batch dim
-        nt_split_size_ptr
-            [j * static_cast<int64_t>(nt_sizes.size(1)) + (dim - 1)] = length;
+        nt_split_size_ptr[j * nt_sizes.size(1) + (dim - 1)] = length;
       }
       Tensor zeros_buffer = at::zeros(
           {at::native::get_numel_from_nested_size_tensor(nt_split_size)},

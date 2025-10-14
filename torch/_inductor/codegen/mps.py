@@ -1058,10 +1058,8 @@ class MetalScheduling(SIMDScheduling):
             wrapper.src_to_kernel[src_code] = kernel_name
 
             if V.graph.cpp_wrapper:
-                src_code = (
-                    f"at::native::mps::DynamicMetalShaderLibrary {mps_lib_name}"
-                    + src_code
-                )
+                # For shimified version, generate source constant instead of direct instantiation
+                src_code = f"const char* {mps_lib_name}_source = " + src_code
 
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
             metadata_comment = f"{origins}\n{detailed_origins}"

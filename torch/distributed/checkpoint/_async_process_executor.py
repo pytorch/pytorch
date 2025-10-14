@@ -4,7 +4,6 @@ import logging
 import os
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from datetime import timedelta
 from enum import Enum
 from typing import Any, Optional, Union
 from uuid import uuid4
@@ -223,9 +222,7 @@ class _AsyncCheckpointProcess:
                 "Initializing dist.ProcessGroup in checkpoint background process"
             )
             # NOTE: GLOO backend is enforced here.
-            dist.init_process_group(
-                backend=dist.Backend.GLOO, timeout=timedelta(seconds=600)
-            )
+            dist.init_process_group(backend=dist.Backend.GLOO)
             dist.barrier()
 
             logger.info("Checkpoint background process is running...")
@@ -308,6 +305,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             @_dcp_method_logger(**ckpt_kwargs)
             def create_checkpoint_daemon_process() -> None:
                 global _CHECKPOINT_PROCESS
+                # pyrefly: ignore  # bad-argument-type
                 _CHECKPOINT_PROCESS = _AsyncCheckpointProcess(pg_init_info=pg_init_info)
 
             create_checkpoint_daemon_process()

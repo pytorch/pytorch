@@ -6,19 +6,19 @@ import importlib
 import inspect
 import sys
 import types
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from functools import cached_property
 from typing import (
     Any,
-    Callable,
     ClassVar,
+    Concatenate,
     final,
     Generic,
     Optional,
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import Concatenate, ParamSpec, TypeVar
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
@@ -521,19 +521,14 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
     @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
-        def wrapper():
-            flat_args = _to_flat_tuple(args, kwargs)
-            if torch.overrides.has_torch_function(flat_args):
-                return torch.overrides.handle_torch_function(
-                    self, flat_args, *args, **kwargs
-                )
-
-            dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-            return self.dispatch(
-                dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
+        flat_args = _to_flat_tuple(args, kwargs)
+        if torch.overrides.has_torch_function(flat_args):
+            return torch.overrides.handle_torch_function(
+                self, flat_args, *args, **kwargs
             )
 
-        return wrapper()
+        dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+        return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
     # NOTE [HigherOrderOprator Schema]
     # Each invocation of a HigherOrderOperator (hop) should have its own schema because
@@ -803,7 +798,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
-        for a in self._schema.arguments:
+        for a in self._schema.arguments:  # pyrefly: ignore  # bad-assignment
             if a.alias_info is None:
                 continue
             if is_write is None:
@@ -885,7 +880,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         elif torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
             return self._op_dk(dk, *args, **kwargs)
         else:
-            return NotImplemented
+            return NotImplemented  # pyrefly: ignore  # bad-return
 
     # Remove a dispatch key from the dispatch cache.  This will force it to get
     # recomputed the next time.  Does nothing
@@ -990,9 +985,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         r = self.py_kernels.get(final_key, final_key)
         if cache_result:
-            self._dispatch_cache[key] = r
+            self._dispatch_cache[key] = r  # pyrefly: ignore  # unsupported-operation
             add_cached_op(self)
-        return r
+        return r  # pyrefly: ignore  # bad-return
 
     def name(self):
         return self._name
@@ -1122,7 +1117,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             )
 
         assert isinstance(handler, Callable)  # type: ignore[arg-type]
-        return handler(*args, **kwargs)
+        return handler(*args, **kwargs)  # pyrefly: ignore  # bad-return
 
 
 def _must_dispatch_in_python(args, kwargs):
@@ -1251,6 +1246,7 @@ class OpOverloadPacket(Generic[_P, _T]):
         # the schema and cause an error for torchbind op when inputs consist of FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
         if self._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
+            # pyrefly: ignore  # bad-argument-type
             return _call_overload_packet_from_python(self, *args, **kwargs)
         return self._op(*args, **kwargs)
 
@@ -1413,7 +1409,7 @@ class _HigherOrderNamespace(types.ModuleType):
 
     def __getattr__(self, name: str) -> HigherOrderOperator:
         # Following _OpNamespace.__getattr__, we cache the op on this object.
-        op = _higher_order_ops.get(name, None)
+        op = _higher_order_ops.get(name)
         if op is None:
             raise AttributeError(
                 f"'_HigherOrderNamespace' 'torch.ops.higher_order' object has no attribute '{name}'"

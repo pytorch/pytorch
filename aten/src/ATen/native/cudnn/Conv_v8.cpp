@@ -252,7 +252,7 @@ struct CacheKeyFusedWrapper : ParamsWrapper<CacheKeyFused> {
   }
 };
 
-static int getLRUCacheLimit() {
+int getLRUCacheLimit() {
   constexpr int DEFAULT_LIMIT =
       10000; // roughly corresponds to 2GiB assuming 200KiB per ExecutionPlan
   // 0 is used to indicate no limit
@@ -337,8 +337,7 @@ struct BenchmarkCache {
             engine_cache_order.begin(), engine_cache_order, it->second.second);
       }
     } else {
-      engine_cache.erase(key);
-      engine_cache.emplace(
+      engine_cache.insert_or_assign(
           key,
           std::make_pair(results, engine_cache_order.end())); // dummy iterator
     }

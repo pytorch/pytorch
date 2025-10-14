@@ -57,7 +57,7 @@ struct FDE {
       throw UnwindError("unsupported 'eh' augmentation string");
     }
     code_alignment_factor_ = static_cast<int64_t>(LC.readULEB128());
-    data_alignment_factor_ = static_cast<int64_t>(LC.readSLEB128());
+    data_alignment_factor_ = LC.readSLEB128();
     if (version == 1) {
       ra_register_ = LC.read<uint8_t>();
     } else {

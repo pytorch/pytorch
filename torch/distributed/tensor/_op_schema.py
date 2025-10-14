@@ -205,7 +205,7 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.mesh_shape
-        return f"[{strategy_list_str}] @ mesh: {mesh_shape}"
+        return f"OpStragety[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -373,23 +373,25 @@ class OpSchema:
 
     def __str__(self) -> str:
         args_schema: list[str] = []
-        mesh_shape = None
+        device_mesh = None
+
         for arg in self.args_schema:
             if isinstance(arg, DTensorSpec):
                 args_schema.append(str(arg))
-                mesh_shape = arg.mesh.shape
+                device_mesh = arg.mesh
             elif isinstance(arg, OpStrategy):
                 assert len(arg.strategies) == 1
                 args_schema.append(_pretty_print_spec(arg.strategies[0].output_specs))
-                mesh_shape = arg.mesh_shape
+                device_mesh = arg.mesh
             elif isinstance(arg, TupleStrategy):
                 first_op_strategy = arg.children[0]
                 assert isinstance(first_op_strategy, OpStrategy)
-                mesh_shape = first_op_strategy.mesh_shape
+                device_mesh = first_op_strategy.mesh
                 args_schema.append(str(arg))
             else:
                 args_schema.append(str(arg))
-        return f"Op(op={self.op}, args_schema={', '.join(args_schema)} @ mesh: {mesh_shape})"
+
+        return f"{self.op}({', '.join(args_schema)}) on {device_mesh})"
 
     def __post_init__(self) -> None:
         _DTensor_OpSchema_post_init(self)

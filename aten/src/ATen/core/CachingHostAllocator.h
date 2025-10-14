@@ -6,6 +6,7 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/llvmMathExtras.h>
+#include <iostream>
 #include <optional>
 
 #include <deque>
@@ -49,19 +50,57 @@ namespace {
   constexpr size_t MAX_SIZE_INDEX = 64;
 }
 
+// A large reserved pinned memory segment that is created in advance which is used
+// to allocate small pinned memory requests to avoid calling into expensive APIs.
+// We never free this memory and move up the pointer as we allocate new blocks
+// and when blocks are freed, they are cached in the free lists.
+struct PinnedReserveSegment {
+  PinnedReserveSegment(void *start, size_t size) : start_(start), size_(size),
+    current_ptr_(start_), initialized_(true) {}
+
+  PinnedReserveSegment() : start_(nullptr), size_(0), current_ptr_(nullptr), initialized_(false) {}
+
+  bool initialized() {
+    return initialized_;
+  }
+
+  void* allocate(size_t bytes) {
+    std::lock_guard<std::mutex> guard(mutex_);
+
+    // Round up the requested size to 4KB boundary for all including the small ones.
+    size_t rounded_bytes = (bytes + 4096 - 1) & ~(4096 - 1);
+
+    if (((uint8_t*)current_ptr_ + rounded_bytes) > ((uint8_t*)start_ + size_)) {
+      return nullptr;
+    }
+
+    void* ptr = current_ptr_;
+    current_ptr_ = (uint8_t*)current_ptr_ + rounded_bytes;
+    return ptr;
+  }
+
+  bool owns(void* ptr) {
+    return ptr >= start_ && ptr < (uint8_t*)start_ + size_;
+  }
+
+  std::mutex mutex_;
+  void* start_;
+  size_t size_;
+  void* current_ptr_;
+  bool initialized_;
+};
+
 // Struct containing memory allocator summary statistics for host.
 struct TORCH_API HostStats {
-  // COUNT: allocations requested by client code. Note that active
-  // count can be extracted by looking at current allocations
-  Stat allocation;
-  // COUNT: number of allocated segments from host memory allocation.
-  Stat segment;
-
-  // SUM: bytes allocated by this memory alocator. Note that active bytes
-  // can be extracted by looking at current bytes allocated
+  // COUNT: total allocations (active)
+  Stat active_requests;
+  // SUM: bytes allocated/reserved by this memory alocator. (active)
+  Stat active_bytes;
+  // COUNT: total allocations (active + free)
+  Stat allocations;
+  // SUM: bytes allocated/reserved by this memory alocator. This accounts
+  // for both free and in-use blocks.
   Stat allocated_bytes;
-  // SUM: bytes reserved by this memory allocator (both free and used)
-  Stat reserved_bytes;
 
   // SUM: time spent in cudaHostAlloc/cudaHostRegister in microseconds
   DurationStat host_alloc_time;
@@ -75,6 +114,9 @@ struct TORCH_API HostStats {
 
   // COUNT: number of times cudaHostFree/cudaHostUnregister was called.
   int64_t num_host_free = 0; // This is derived from segment or timing
+
+  // Count of cudaHostAlloc/cudaHostRegister per bucket
+  std::vector<int64_t> bucket_allocation = std::vector<int64_t>(MAX_SIZE_INDEX);
 };
 
 // Struct containing memory allocator summary statistics for host, as they
@@ -82,17 +124,22 @@ struct TORCH_API HostStats {
 // avoid locking the allocator while collecting stats.
 struct alignas(64) HostStatsStaged {
   std::mutex timing_mutex_;
-  // COUNT: allocations requested by client code resulting in a new segment/block allocation
+  // COUNT: total allocations (active + free)
   // LOCK: access to this stat is protected by the allocator's blocks_mutex_
-  Stat allocation;
-  // SUM: bytes within active memory blocks, including blocks that are
-  // currently in the free list.
-  // LOCK: access to this stat is protected by the allocator's blocks_mutex_
+  Stat allocations;
+  // SUM: bytes allocated/reserved by this memory alocator. This accounts
+  // for both free and in-use blocks.
   Stat allocated_bytes;
-  // COUNT: number of allocations per bucket
+  // COUNT: number of allocations per bucket (active)
+  // LOCK: access to this stat is protected by the per bucket free_list_[index].mutex_
+  std::vector<Stat> active_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
+  // SUM: bytes of allocation per bucket (active)
+  // LOCK: access to this stat is protected by the per bucket free_list_[index].mutex_
+  std::vector<Stat> active_bytes_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
+  // COUNT: number of allocations per bucket (active + free)
   // LOCK: access to this stat is protected by the per bucket free_list_[index].mutex_
   std::vector<Stat> allocation_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
-  // SUM: bytes of allocation per bucket
+  // SUM: bytes of allocation per bucket (active + free)
   // LOCK: access to this stat is protected by the per bucket free_list_[index].mutex_
   std::vector<Stat> allocated_bytes_bucket_stats = std::vector<Stat>(MAX_SIZE_INDEX);
   // SUM: time spent in cudaHostAlloc/cudaHostRegister
@@ -211,12 +258,6 @@ struct CachingHostAllocatorImpl {
     // Check in the recently freed blocks with pending events to see if we
     // can reuse them. Call get_free_block again after processing events
     if (pinned_use_background_threads()) {
-      process_events_for_specific_size(roundSize);
-      block = get_free_block(roundSize);
-      if (block) {
-        return {block->ptr_, reinterpret_cast<void*>(block)};
-      }
-
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
         getBackgroundThreadPool()->run([&]() {
@@ -278,8 +319,6 @@ struct CachingHostAllocatorImpl {
       auto index = size_index(block->size_);
       std::lock_guard<std::mutex> g(free_list_[index].mutex_);
       free_list_[index].list_.push_back(block);
-      stats_.allocation_bucket_stats[index].decrease(1);
-      stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
     } else {
       // restore these events that record by used streams.
       std::lock_guard<std::mutex> g(events_mutex_);
@@ -339,9 +378,12 @@ struct CachingHostAllocatorImpl {
       for (auto* block : blocks_to_remove) {
         blocks_.erase(block);
         ptr_to_block_.erase(block->ptr_);
-        stats_.allocation.decrease(1);
-        stats_.allocated_bytes.decrease(block->size_);
+        auto index = size_index(block->size_);
         free_block(block);
+        stats_.allocations.decrease(1);
+        stats_.allocated_bytes.decrease(block->size_);
+        stats_.allocation_bucket_stats[index].decrease(1);
+        stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
         delete block;
       }
     }
@@ -388,16 +430,17 @@ struct CachingHostAllocatorImpl {
       // per bucket (we pick index 0 arbitrarily). These are also all the host
       // allocations, not taking into account caching and free lists.
       if (i == 0) {
-        stats.segment = stats_.allocation;
-        stats.reserved_bytes = stats_.allocated_bytes;
-        stats.num_host_alloc = stats.segment.allocated;
-        stats.num_host_free = stats.segment.freed;
+        stats.allocations = stats_.allocations;
+        stats.allocated_bytes = stats_.allocated_bytes;
+        stats.num_host_alloc = stats.allocations.allocated;
+        stats.num_host_free = stats.allocations.freed;
       }
 
       // Bucket stats need to be merged with the slow-path stats. We do this in
       // a best effort manner, since we can't really replay the cached events per bucket.
-      add_bucket_stats(stats.allocation, stats_.allocation_bucket_stats[i]);
-      add_bucket_stats(stats.allocated_bytes, stats_.allocated_bytes_bucket_stats[i]);
+      add_bucket_stats(stats.active_requests, stats_.active_bucket_stats[i]);
+      add_bucket_stats(stats.active_bytes, stats_.active_bytes_bucket_stats[i]);
+      stats.bucket_allocation[i] = stats_.allocation_bucket_stats[i].allocated;
     }
 
     // Get the timing stats
@@ -421,9 +464,11 @@ struct CachingHostAllocatorImpl {
       std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
 
       if (i == 0) {
-        stats_.allocation.reset_accumulated();
+        stats_.allocations.reset_accumulated();
         stats_.allocated_bytes.reset_accumulated();
       }
+      stats_.active_bucket_stats[i].reset_accumulated();
+      stats_.active_bytes_bucket_stats[i].reset_accumulated();
       stats_.allocation_bucket_stats[i].reset_accumulated();
       stats_.allocated_bytes_bucket_stats[i].reset_accumulated();
     }
@@ -446,9 +491,11 @@ struct CachingHostAllocatorImpl {
       std::lock_guard<std::mutex> gb(blocks_mutex_, std::adopt_lock);
 
       if (i == 0) {
-        stats_.allocation.reset_peak();
+        stats_.allocations.reset_peak();
         stats_.allocated_bytes.reset_peak();
       }
+      stats_.active_bucket_stats[i].reset_peak();
+      stats_.active_bytes_bucket_stats[i].reset_peak();
       stats_.allocation_bucket_stats[i].reset_peak();
       stats_.allocated_bytes_bucket_stats[i].reset_peak();
     }
@@ -465,7 +512,7 @@ struct CachingHostAllocatorImpl {
   virtual void add_allocated_block(B* block) {
     std::lock_guard<std::mutex> g(blocks_mutex_);
     blocks_.insert(block);
-    stats_.allocation.increase(1);
+    stats_.allocations.increase(1);
     stats_.allocated_bytes.increase(block->size_);
     ptr_to_block_.insert({block->ptr_, block});
 
@@ -478,6 +525,8 @@ struct CachingHostAllocatorImpl {
       std::lock_guard<std::mutex> g(free_list_[index].mutex_);
       stats_.allocation_bucket_stats[index].increase(1);
       stats_.allocated_bytes_bucket_stats[index].increase(size);
+      stats_.active_bucket_stats[index].increase(1);
+      stats_.active_bytes_bucket_stats[index].increase(size);
     }
   }
 
@@ -488,8 +537,8 @@ struct CachingHostAllocatorImpl {
       B* block = free_list_[index].list_.back();
       free_list_[index].list_.pop_back();
       block->allocated_ = true;
-      stats_.allocation_bucket_stats[index].increase(1);
-      stats_.allocated_bytes_bucket_stats[index].increase(size);
+      stats_.active_bucket_stats[index].increase(1);
+      stats_.active_bytes_bucket_stats[index].increase(size);
       return block;
     }
     return nullptr;
@@ -583,8 +632,8 @@ struct CachingHostAllocatorImpl {
         auto index = size_index(block->size_);
         std::lock_guard<std::mutex> g(free_list_[index].mutex_);
         free_list_[index].list_.push_back(block);
-        stats_.allocation_bucket_stats[index].decrease(1);
-        stats_.allocated_bytes_bucket_stats[index].decrease(size);
+        stats_.active_bucket_stats[index].decrease(1);
+        stats_.active_bytes_bucket_stats[index].decrease(size);
         if (size != -1) {
           return;
         }

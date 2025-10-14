@@ -5,11 +5,11 @@ import io
 import itertools
 import os
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, cast, Optional, TypeVar, Union
 
 import torch
 import torch.distributed as dist
@@ -254,6 +254,7 @@ class _DistWrapper:
             if len(node_failures) > 0:
                 result = CheckpointException(step, node_failures)
 
+        # pyrefly: ignore  # bad-argument-type
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
@@ -302,6 +303,7 @@ class _DistWrapper:
                 result = map_fun()
             except BaseException as e:  # noqa: B036
                 result = CheckpointException(step, {self.rank: _wrap_exception(e)})
+        # pyrefly: ignore  # bad-argument-type
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result

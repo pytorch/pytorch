@@ -31,6 +31,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_X86,
     MI300_ARCH,
+    MI350_ARCH,
     parametrize,
     skipIfNoXPU,
     skipIfRocm,
@@ -1187,7 +1188,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocmArch(MI300_ARCH)
+    @skipIfRocmArch(MI300_ARCH + MI350_ARCH)
     def test_qconv2d_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
@@ -1197,7 +1198,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocmArch(MI300_ARCH)
+    @skipIfRocmArch(MI300_ARCH + MI350_ARCH)
     def test_qconv2d_int8_mixed_bf16_use_autocast(self):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
@@ -4694,7 +4695,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
             def __init__(
                 self,
                 input_dim,
-                transpose_for_score=False,
                 num_attention_heads=None,
                 attention_head_size=None,
             ) -> None:
@@ -4704,12 +4704,10 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 self.k_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
                 self.v_proj = torch.nn.Linear(input_dim, input_dim, bias=False)
                 self.softmax = torch.nn.Softmax(dim=-1)
-                self.transpose_for_score = transpose_for_score
-                if self.transpose_for_score:
-                    assert num_attention_heads is not None
-                    assert attention_head_size is not None
-                    self.num_attention_heads = num_attention_heads
-                    self.attention_head_size = attention_head_size
+                self.num_attention_heads = num_attention_heads
+                self.attention_head_size = attention_head_size
+                self.all_head_size = self.num_attention_heads * self.attention_head_size
+                self.dense = torch.nn.Linear(self.all_head_size, self.all_head_size)
 
             def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
                 new_x_shape = x.size()[:-1] + (
@@ -4723,19 +4721,21 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 q = self.q_proj(x)
                 k = self.k_proj(x)
                 v = self.v_proj(x)
-                if self.transpose_for_score:
-                    q = self.transpose_for_scores(q)
-                    k = self.transpose_for_scores(k)
-                    v = self.transpose_for_scores(v)
+                q = self.transpose_for_scores(q)
+                k = self.transpose_for_scores(k)
+                v = self.transpose_for_scores(v)
                 scores = torch.matmul(q, k.transpose(-1, -2)) / (self.input_dim**0.5)
                 attention = self.softmax(scores)
                 weighted = torch.matmul(attention, v)
-                return weighted
+                weighted = weighted.permute(0, 2, 1, 3).contiguous()
+                weighted = weighted.reshape(
+                    weighted.size()[:-2] + (self.all_head_size,)
+                )
+                return self.dense(weighted)
 
-        for annotate_matmul in [False, True]:
+        for annotate_matmul in [True, False]:
             mod = SelfAttnLikeModule(
                 input_dim=64 * 16,
-                transpose_for_score=True,
                 num_attention_heads=16,
                 attention_head_size=64,
             ).eval()
@@ -4743,12 +4743,17 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
             def matcher_check_fn():
                 self.assertEqual(
-                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 3
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 4
                 )
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_matcher_count"],
                     3 if annotate_matmul and not TEST_ACL else 0,
                 )
+                if IS_X86:  # Some issues on ARM
+                    self.assertEqual(
+                        counters["inductor"]["quant_lift_up_count"],
+                        4 if annotate_matmul and not TEST_ACL else 1,
+                    )
 
             quantizer = X86InductorQuantizer()
             quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())

@@ -1,6 +1,9 @@
 name: rocm-mi355
 
 on:
+  push:
+    tags:
+      - ciflow/rocm-mi355/*
   workflow_dispatch:
   schedule:
     - cron: 30 11,1 * * *  # about 4:30am PDT and 6:30pm PDT
@@ -38,7 +41,7 @@ jobs:
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-noble-rocm-py3.12-mi355
-      docker-image-name: ci-image:pytorch-linux-noble-rocm-alpha-py3
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
         { include: [
@@ -64,5 +67,7 @@ jobs:
       build-environment: linux-noble-rocm-py3.12-mi355
       docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
-      tests-to-include: "test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor"
+      tests-to-include: >-
+                        ${{ github.event_name == 'schedule' && 'test_nn test_torch test_cuda test_ops test_unary_ufuncs test_binary_ufuncs test_autograd inductor/test_torchinductor test_matmul_cuda test_scaled_matmul_cuda'
+                           || '' }}
     secrets: inherit

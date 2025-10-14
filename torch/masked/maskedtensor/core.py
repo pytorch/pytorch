@@ -174,6 +174,7 @@ class MaskedTensor(torch.Tensor):
                 UserWarning,
                 stacklevel=2,
             )
+        # pyrefly: ignore  # bad-argument-type
         return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)
 
     def _preprocess_data(self, data, mask):
@@ -197,7 +198,7 @@ class MaskedTensor(torch.Tensor):
     def _validate_members(self):
         data = self._masked_data
         mask = self.get_mask()
-        if type(data) != type(mask):
+        if type(data) is not type(mask):
             raise TypeError(
                 f"data and mask must have the same type. Got {type(data)} and {type(mask)}"
             )
@@ -243,10 +244,12 @@ class MaskedTensor(torch.Tensor):
 
         class Constructor(torch.autograd.Function):
             @staticmethod
+            # pyrefly: ignore  # bad-override
             def forward(ctx, data, mask):
                 return MaskedTensor(data, mask)
 
             @staticmethod
+            # pyrefly: ignore  # bad-override
             def backward(ctx, grad_output):
                 return grad_output, None
 
@@ -333,10 +336,12 @@ class MaskedTensor(torch.Tensor):
     def get_data(self):
         class GetData(torch.autograd.Function):
             @staticmethod
+            # pyrefly: ignore  # bad-override
             def forward(ctx, self):
                 return self._masked_data.detach()
 
             @staticmethod
+            # pyrefly: ignore  # bad-override
             def backward(ctx, grad_output):
                 if is_masked_tensor(grad_output):
                     return grad_output

@@ -254,7 +254,9 @@ class SummaryWriter:
         buckets = []
         neg_buckets = []
         while v < 1e20:
+            # pyrefly: ignore  # bad-argument-type
             buckets.append(v)
+            # pyrefly: ignore  # bad-argument-type
             neg_buckets.append(-v)
             v *= 1.1
         self.default_bins = neg_buckets[::-1] + [0] + buckets
@@ -262,15 +264,19 @@ class SummaryWriter:
     def _get_file_writer(self):
         """Return the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
+            # pyrefly: ignore  # bad-assignment
             self.file_writer = FileWriter(
                 self.log_dir, self.max_queue, self.flush_secs, self.filename_suffix
             )
+            # pyrefly: ignore  # bad-assignment, missing-attribute
             self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
             if self.purge_step is not None:
                 most_recent_step = self.purge_step
+                # pyrefly: ignore  # missing-attribute
                 self.file_writer.add_event(
                     Event(step=most_recent_step, file_version="brain.Event:2")
                 )
+                # pyrefly: ignore  # missing-attribute
                 self.file_writer.add_event(
                     Event(
                         step=most_recent_step,
@@ -414,7 +420,8 @@ class SummaryWriter:
         fw_logdir = self._get_file_writer().get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
             fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
-            assert self.all_writers is not None
+            if self.all_writers is None:
+                raise AssertionError("self.all_writers is None")
             if fw_tag in self.all_writers.keys():
                 fw = self.all_writers[fw_tag]
             else:
@@ -924,20 +931,19 @@ class SummaryWriter:
             fs.makedirs(save_path)
 
         if metadata is not None:
-            assert mat.shape[0] == len(
+            if mat.shape[0] != len(
                 metadata
-            ), "#labels should equal with #data points"
+            ):
+                raise AssertionError("#labels should equal with #data points")
             make_tsv(metadata, save_path, metadata_header=metadata_header)
 
         if label_img is not None:
-            assert (
-                mat.shape[0] == label_img.shape[0]
-            ), "#images should equal with #data points"
+            if mat.shape[0] != label_img.shape[0]:
+                raise AssertionError("#images should equal with #data points")
             make_sprite(label_img, save_path)
 
-        assert (
-            mat.ndim == 2
-        ), "mat should be 2D, where mat.size(0) is the number of data points"
+        if mat.ndim != 2:
+            raise AssertionError("mat should be 2D, where mat.size(0) is the number of data points")
         make_mat(mat, save_path)
 
         # Filesystem doesn't necessarily have append semantics, so we store an
@@ -949,6 +955,7 @@ class SummaryWriter:
             metadata, label_img, subdir, global_step, tag
         )
         self._projector_config.embeddings.extend([embedding_info])
+
 
         from google.protobuf import text_format
 
@@ -1087,7 +1094,8 @@ class SummaryWriter:
         torch._C._log_api_usage_once(
             "tensorboard.logging.add_custom_scalars_marginchart"
         )
-        assert len(tags) == 3
+        if len(tags) != 3:
+            raise AssertionError(f"Expected 3 tags, got {len(tags)}.")
         layout = {category: {title: ["Margin", tags]}}
         self._get_file_writer().add_summary(custom_scalars(layout))
 
@@ -1199,6 +1207,7 @@ class SummaryWriter:
         for writer in self.all_writers.values():
             writer.flush()
             writer.close()
+        # pyrefly: ignore  # bad-assignment
         self.file_writer = self.all_writers = None
 
     def __enter__(self):

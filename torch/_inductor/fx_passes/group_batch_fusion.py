@@ -840,6 +840,7 @@ class BatchLayernormFusion(BatchFusion):
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
+                    # pyrefly: ignore  # missing-attribute
                     stack_weight.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.mul,
@@ -850,28 +851,33 @@ class BatchLayernormFusion(BatchFusion):
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
+                    # pyrefly: ignore  # missing-attribute
                     stack_bias.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.add,
                 )
             elif group_weights is not None and group_biases is None:
                 previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
+                # pyrefly: ignore  # not-callable
                 batch_layer_norm = graph.call_function(
                     torch.mul, args=(stack_weight, batch_layer_norm)
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
+                    # pyrefly: ignore  # missing-attribute
                     stack_weight.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.mul,
                 )
             elif group_weights is None and group_biases is not None:
                 previous_batch_layer_norm_meta = batch_layer_norm.meta["example_value"]
+                # pyrefly: ignore  # not-callable
                 batch_layer_norm = graph.call_function(
                     torch.add, args=(stack_bias, batch_layer_norm)
                 )
                 update_pointwise_example_value(
                     batch_layer_norm,
+                    # pyrefly: ignore  # missing-attribute
                     stack_bias.meta["example_value"],
                     previous_batch_layer_norm_meta,
                     torch.add,

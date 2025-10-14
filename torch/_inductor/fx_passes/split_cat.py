@@ -291,6 +291,7 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
         log.debug("example value absent for node: %s", input)
         return
     ndim = input.meta["example_value"].ndim
+    # pyrefly: ignore  # unsupported-operation
     if dim < 0:  # Normalize unbind dim
         dim += ndim
     with graph.inserting_after(node):
@@ -340,6 +341,7 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors
     )
 
+    # pyrefly: ignore  # unsupported-operation
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
 
@@ -824,7 +826,7 @@ class SplitCatSimplifier:
         return split_ranges
 
     def has_non_overlapping_ranges(self, ranges: list[_Range]) -> bool:
-        for range_, next_range in zip(ranges, ranges[1:]):
+        for range_, next_range in itertools.pairwise(ranges):
             if range_[1] > next_range[0]:
                 return False
         return True
@@ -947,6 +949,7 @@ class SplitCatSimplifier:
                 if isinstance(user_input, tuple):
                     # Find the correct new getitem (present in split_items)
                     new_user_inputs.append(
+                        # pyrefly: ignore  # bad-argument-type
                         split_items[
                             split_ranges.index(
                                 (
@@ -997,6 +1000,7 @@ class SplitCatSimplifier:
                 for user_input_new, transform_param in zip(
                     user_inputs_new, transform_params
                 ):
+                    # pyrefly: ignore  # bad-argument-type
                     if not is_node_meta_valid(user_input_new):
                         log.debug("example value absent for node: %s", user_input_new)
                         return
@@ -1011,6 +1015,7 @@ class SplitCatSimplifier:
                         stack_dim is None or stack_dim == unsqueeze_params[0]
                     ):
                         to_stack.append(user_input_new)
+                        # pyrefly: ignore  # missing-attribute
                         to_stack_meta.append(user_input_new.meta["example_value"])
                         stack_dim = unsqueeze_params[0]
                         continue
@@ -1031,10 +1036,12 @@ class SplitCatSimplifier:
                         if unsqueeze_params:
                             to_stack.append(user_input_new)
                             stack_dim = unsqueeze_params[0]
+                            # pyrefly: ignore  # missing-attribute
                             to_stack_meta.append(user_input_new.meta["example_value"])
                             continue
 
                     if unflatten_params:
+                        # pyrefly: ignore  # missing-attribute
                         user_input_new_meta = user_input_new.meta["example_value"]
                         user_input_new = graph.call_function(
                             torch.unflatten, args=(user_input_new, *unflatten_params)
@@ -1044,6 +1051,7 @@ class SplitCatSimplifier:
                             *unflatten_params,  # type: ignore[arg-type]
                         )
                     if movedim_params:
+                        # pyrefly: ignore  # missing-attribute
                         user_input_new_meta = user_input_new.meta["example_value"]
                         user_input_new = graph.call_function(
                             torch.movedim, args=(user_input_new, *movedim_params)
@@ -1053,6 +1061,7 @@ class SplitCatSimplifier:
                             *movedim_params,  # type: ignore[arg-type]
                         )
                     if flatten_params:
+                        # pyrefly: ignore  # missing-attribute
                         user_input_new_meta = user_input_new.meta["example_value"]
                         user_input_new = graph.call_function(
                             torch.flatten, args=(user_input_new, *flatten_params)
@@ -1063,6 +1072,7 @@ class SplitCatSimplifier:
                         )
                     user_inputs_new_transformed.append(user_input_new)
                     user_inputs_new_transformed_meta.append(
+                        # pyrefly: ignore  # missing-attribute
                         user_input_new.meta["example_value"]
                     )
                 if to_stack:
@@ -1422,6 +1432,7 @@ def simplify_split_cat(match: Match, split_sections: list[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
         return
     split_node = next(node for node in match.nodes if node.target == torch.split)
+    # pyrefly: ignore  # bad-argument-type
     SplitCatSimplifier().simplify(match.graph, split_node, split_sections)
 
 
@@ -1477,7 +1488,7 @@ def is_sorted_and_consecutive(arr: list[int]) -> bool:
     # check if the array is sorted
     if arr == sorted(arr):
         # check if the differences between adjacent elements are all 1
-        return all(x[1] - x[0] == 1 for x in zip(arr, arr[1:]))
+        return all(x[1] - x[0] == 1 for x in itertools.pairwise(arr))
     else:
         return False
 
@@ -1490,6 +1501,7 @@ def calculate_fused_tensor_size(split_node: torch.fx.Node, indices: list[int]) -
     for i in range(len(split_node.args[1])):  # type: ignore[arg-type]
         if i in indices:
             fused_tensor_size += split_node.args[1][i]  # type: ignore[operator, assignment, index]
+    # pyrefly: ignore  # bad-return
     return fused_tensor_size
 
 
@@ -1966,6 +1978,7 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
 
     assert all(ndim == x.meta["val"].dim() or is_empty_tensor(x) for x in tensors)
 
+    # pyrefly: ignore  # unsupported-operation
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
 
@@ -3031,5 +3044,6 @@ def replace_einsum_to_pointwise(match: Match, *args, **kwargs):
     einsum_node = match.nodes[0]
     input, weights = get_arg_value(einsum_node, 1), get_arg_value(einsum_node, 2)
     if should_replace_einsum(einsum_node):
+        # pyrefly: ignore  # bad-argument-type
         match.replace_by_example(repl, [input, weights])
         counters[backend]["einsum_to_pointwise_pass"] += 1

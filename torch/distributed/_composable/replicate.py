@@ -214,7 +214,7 @@ def replicate(
 
     state = replicate.state(module)
     module.register_forward_pre_hook(state.forward_pre_hook, with_kwargs=True)
-    device_mesh = kwargs.get("device_mesh", None)
+    device_mesh = kwargs.get("device_mesh")
     if device_mesh is not None:
         from torch.distributed.device_mesh import _mesh_resources
 

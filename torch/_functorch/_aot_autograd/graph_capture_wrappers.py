@@ -12,9 +12,10 @@ It does so by:
 """
 
 import warnings
+from collections.abc import Callable
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, cast, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -1304,10 +1305,12 @@ def aot_dispatch_subclass(
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         without_output_descs(metadata_fn),
+        # pyrefly: ignore  # bad-argument-type
         flat_args_descs=primals_unwrapped_descs,
         static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
+        # pyrefly: ignore  # not-iterable
     )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated

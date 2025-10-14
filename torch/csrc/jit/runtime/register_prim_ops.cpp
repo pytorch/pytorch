@@ -1710,7 +1710,7 @@ int64_t stringFindImpl(
     bool reverse = false) {
   int64_t size = string.size();
   if (start < 0) {
-    start = std::max(int64_t(0), int64_t(size + start));
+    start = std::max(int64_t(0), size + start);
   }
   if (end < 0) {
     end = std::max(int64_t(0), int64_t(size + end + 1));
@@ -1964,7 +1964,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
             return;
           }
           if (start < 0) {
-            start = std::max(int64_t(0), int64_t(size + start));
+            start = std::max(int64_t(0), size + start);
           }
           if (end < 0) {
             end = std::max(int64_t(0), int64_t(size + end + 1));
@@ -1993,7 +1993,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string string = pop(stack).toStringRef();
           int64_t size = string.size();
           if (start < 0) {
-            start = std::max(int64_t(0), int64_t(size + start));
+            start = std::max(int64_t(0), (size + start));
           }
           if (end < 0) {
             end = std::max(int64_t(0), int64_t(size + end + 1));
@@ -2019,7 +2019,7 @@ static const std::vector<OperatorGeneratorArgs> stringOpGenArgs{
           std::string string = pop(stack).toStringRef();
           int64_t size = string.size();
           if (start < 0) {
-            start = std::max(int64_t(0), int64_t(size + start));
+            start = std::max(int64_t(0), (size + start));
           }
           if (end < 0) {
             end = std::max(int64_t(0), int64_t(size + end + 1));
