@@ -3511,6 +3511,72 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
 
+    def test_setattr_weakref_with_exception_handler(self):
+        class Custom:
+            pass
+
+        @torch.compile(backend="eager")
+        def fn(x, obj):
+            try:
+                obj.__weakref__ = None
+            except AttributeError:
+                pass
+            return x + 1
+
+        result = fn(torch.ones(3), Custom())
+        expected = torch.ones(3) + 1
+        assert torch.allclose(result, expected)
+
+    def test_setattr_dict_with_exception_handler(self):
+        class Custom:
+            pass
+
+        @torch.compile(backend="eager")
+        def fn(x, obj):
+            try:
+                obj.__dict__ = {}
+            except AttributeError:
+                pass
+            return x + 1
+
+        result = fn(torch.ones(3), Custom())
+        expected = torch.ones(3) + 1
+        assert torch.allclose(result, expected)
+
+    def test_setattr_readonly_property_with_exception_handler(self):
+        class Custom:
+            @property
+            def readonly(self):
+                return 42
+
+        @torch.compile(backend="eager")
+        def fn(x, obj):
+            try:
+                obj.readonly = 100
+            except AttributeError:
+                pass
+            return x + 1
+
+        result = fn(torch.ones(3), Custom())
+        expected = torch.ones(3) + 1
+        assert torch.allclose(result, expected)
+
+    def test_setattr_slots_violation_with_exception_handler(self):
+        class Slotted:
+            __slots__ = ["allowed"]
+
+        @torch.compile(backend="eager")
+        def fn(x, obj):
+            try:
+                obj.not_allowed = 5
+            except AttributeError:
+                pass
+            return x + 1
+
+        result = fn(torch.ones(3), Slotted())
+        expected = torch.ones(3) + 1
+        assert torch.allclose(result, expected)
+
     def test_nesteduserfunction_setattr(self):
         x = 0
 
