@@ -806,7 +806,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         unexpected_keys: list[str],
         error_msgs: list[str],
     ):
-        version = local_metadata.get("version", None)
+        version = local_metadata.get("version")
         if version is not None and version < 3:
             local_state = ["min_vals", "max_vals"]
             expected_min_name = "min_vals"

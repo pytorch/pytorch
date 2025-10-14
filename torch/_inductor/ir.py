@@ -1074,6 +1074,11 @@ class Pointwise(Loops):
 
         return self.inner_fn
 
+    def __str__(self) -> str:
+        return self._to_str(("ranges",))
+
+    __repr__ = __str__
+
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
         return []
 
