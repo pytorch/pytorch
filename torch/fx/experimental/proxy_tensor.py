@@ -2235,9 +2235,9 @@ class _MakefxTracer:
             self.fake_tensor_mode = parent_tracer.fake_tensor_mode
 
             def _create_sub_fx_tracer(parent_tracer: _ProxyTracer) -> PythonKeyTracer:
-                if type(parent_tracer) == PythonKeyTracer:
+                if type(parent_tracer) is PythonKeyTracer:
                     return PythonKeyTracer()
-                elif type(parent_tracer) == _ModuleStackTracer:
+                elif type(parent_tracer) is _ModuleStackTracer:
                     return _ModuleStackTracer(parent_tracer.scope_root)
                 else:
                     raise RuntimeError(
