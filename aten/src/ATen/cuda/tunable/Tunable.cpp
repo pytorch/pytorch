@@ -194,8 +194,7 @@ void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const
   realtime_out_ = std::make_unique<std::ofstream>(filename, std::ios::out | std::ios::app);
 
   if (!realtime_out_->good()) {
-    TORCH_WARN("TunableOp realtime append: failed to open '", filename,
-               "'; falling back to batch write on exit.");
+    TORCH_WARN("TunableOp realtime append: failed to open '", filename,"'");
     realtime_out_.reset();
     return;
   }
