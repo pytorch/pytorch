@@ -622,7 +622,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args);
 
-// Perserve for BC and will delete it later, using the STD_TORCH_CHECK directly
+// Preserve for BC and will delete it later, using the STD_TORCH_CHECK directly
 #define AOTI_TORCH_CHECK(cond, ...) STD_TORCH_CHECK(cond, ##__VA_ARGS__)
 
 AOTI_TORCH_EXPORT void aoti_torch_warn(
