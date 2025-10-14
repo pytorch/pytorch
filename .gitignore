@@ -396,3 +396,4 @@ CLAUDE.local.md
 /test_*.py
 /debug_*.py
 CLAUDE_CONTEXT/
+.venv/
