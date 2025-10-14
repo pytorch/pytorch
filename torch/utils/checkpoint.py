@@ -1292,7 +1292,7 @@ SAC_IGNORED_OPS = {
     # With subclasses involved, these metadata ops become dispatchable, this
     # can result in incorrectness if these ops are selected cached.
     torch.ops.prim.device.default,
-} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
+} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):
