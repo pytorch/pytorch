@@ -292,7 +292,7 @@ IF(USE_FBGEMM_GENAI)
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
     )
 
-    target_include_directories(fbgemm_genai PUBLIC
+    target_include_directories(fbgemm_genai PRIVATE
       ${FBGEMM_THIRD_PARTY}/cutlass/include
       ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
       ${fbgemm_genai_mx8mx8bf16_grouped}
@@ -334,7 +334,7 @@ IF(USE_FBGEMM_GENAI)
       set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
       target_compile_definitions(fbgemm_genai PRIVATE FBGEMM_GENAI_NO_EXTENDED_SHAPES)
 
-      target_include_directories(fbgemm_genai PUBLIC
+      target_include_directories(fbgemm_genai PRIVATE
         # FBGEMM version of Composable Kernel is used due to some customizations
         ${FBGEMM_THIRD_PARTY}/composable_kernel/include
         ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
