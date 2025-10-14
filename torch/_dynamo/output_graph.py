@@ -100,6 +100,7 @@ from .exc import (
     unimplemented_v2,
     unimplemented_v2_with_warning,
 )
+from .graph_bytecode_inputs import has_user_objects, index_to_source
 from .graph_deduplication import apply_graph_deduplication
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
@@ -708,6 +709,7 @@ class OutputGraph(OutputGraphCommon):
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = None
 
+        # pyrefly: ignore  # bad-override
         self.name_of_builtins_dict_key_in_fglobals: str = (
             self.install_builtins_dict_in_fglobals()
         )
@@ -1078,6 +1080,14 @@ class OutputGraph(OutputGraphCommon):
     def register_static_attr_and_return_proxy(
         self, attr_prefix: str, attr_value: Any
     ) -> fx.Proxy:
+        # Check if the module already exists, if it does, return the already
+        # added proxy. This is important for executorch tests.
+        if isinstance(attr_value, torch.nn.Module):
+            for name, mod in self.nn_modules.items():
+                if mod is attr_value:
+                    proxy = self.create_proxy("get_attr", name, (), {})
+                    return proxy
+
         attr_name = get_unique_name_wrt(attr_prefix, self.nn_modules)
         # TODO `nn_modules` has been historically overloaded to store a lot more
         # than just nn module objects, fix that.
@@ -1147,6 +1157,7 @@ class OutputGraph(OutputGraphCommon):
                 vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
 
                 assert "tensor_dict" not in vt.as_proxy().node.meta
+                # pyrefly: ignore  # bad-argument-type
                 vt.as_proxy().node.meta["tensor_dict"] = _extract_tensor_dict(target)
 
                 return vt
@@ -1158,6 +1169,7 @@ class OutputGraph(OutputGraphCommon):
                 install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
                 def wrap_name(module_key: str) -> VariableTracker:
+                    # pyrefly: ignore  # bad-argument-type
                     return NNModuleVariable(type(target), module_key, target, **options)
 
             else:
@@ -1509,6 +1521,27 @@ class OutputGraph(OutputGraphCommon):
 
         from .decorators import disable
 
+        if has_user_objects():
+            # NB: This is where we store possible user objects before running the graph
+            # index_to_user_object_weakref is the function used in the graph to translate
+            # the dynamo-generated index into the actual object passed to the compiled function.
+            # We generate bytecode to store all user objects at the proper index in the below
+            # call.
+            codegen = PyCodegen(
+                self.root_tx, root, overridden_sources=overridden_sources
+            )
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    torch._dynamo.graph_bytecode_inputs.__name__,
+                    "store_user_object_weakrefs",
+                )
+            )
+            for source in reversed(index_to_source.values()):
+                codegen(source)
+            codegen.call_function(len(index_to_source), False)
+            codegen.pop_top()
+            self.add_output_instructions(codegen.get_instructions())
+
         # to handle random calls
         if len(self.random_calls) > 0:
             random_calls_instructions = []
@@ -1654,7 +1687,7 @@ class OutputGraph(OutputGraphCommon):
                             )
                         elif (
                             vt.source is not None
-                            and (source := getattr(vt.source, "base", None))
+                            and (source := getattr(vt.source, "base", None))  # type: ignore[assignment]
                             and source.is_input
                         ):
                             self.export_metadata.output_return_type[idx] = (
@@ -1914,7 +1947,7 @@ class OutputGraph(OutputGraphCommon):
             node.meta.pop("creation_timestamp", None)
 
         grad_enabled = torch.is_grad_enabled()
-        for node1, node2 in zip(nodes, nodes[1:]):
+        for node1, node2 in itertools.pairwise(nodes):
             if (
                 node1.target is torch._C._set_grad_enabled
                 and tuple(node1.args) == (not grad_enabled,)
@@ -2012,7 +2045,9 @@ class OutputGraph(OutputGraphCommon):
         tx = self.root_tx
         assert tx is not None
         if (ds := tx.distributed_state) is not None and ds.all_states is None:
+            # pyrefly: ignore  # unbound-name
             compile_pg = ds.compile_pg
+            # pyrefly: ignore  # unbound-name
             log.info("compiler_collective %s", ds.local_state)
             torch._logging.trace_structured(
                 "artifact",
@@ -2020,6 +2055,7 @@ class OutputGraph(OutputGraphCommon):
                     "name": "compiler_collective",
                     "encoding": "string",
                 },
+                # pyrefly: ignore  # unbound-name
                 payload_fn=lambda: ds.local_state.render(),
             )
             device_types = compile_pg._device_types
@@ -2033,7 +2069,9 @@ class OutputGraph(OutputGraphCommon):
                 dynamo_timed("compiler_collective", log_pt2_compile_event=True),
             ):
                 all_states: list[Any] = [None] * compile_pg.size()
+                # pyrefly: ignore  # unbound-name
                 dist.all_gather_object(all_states, ds.local_state, group=compile_pg)
+                # pyrefly: ignore  # unbound-name
                 ds.all_states = all_states
             # Clear speculation log, because are tracing may diverge due to
             # this information from the compiler collective
@@ -2363,6 +2401,7 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
+        # pyrefly: ignore  # unbound-name
         return compiled_fn
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
@@ -2417,6 +2456,7 @@ class OutputGraph(OutputGraphCommon):
                 isinstance(b, torch.SymBool)
                 and (r := b.node.maybe_as_bool()) is not None
             ):
+                # pyrefly: ignore  # unbound-name
                 return r
             # TODO: We can also technically remove all cases when the input
             # doesn't have unbacked inputs, since it's all in the ShapeEnv
@@ -2782,6 +2822,7 @@ def check_pt2_compliant_op(
                 hints=[],
             )
 
+        # pyrefly: ignore  # unbound-name
         op = getattr(target, overload)
         if torch.Tag.pt2_compliant_tag in op.tags:
             encountered_compliant_op(op)
@@ -2789,6 +2830,7 @@ def check_pt2_compliant_op(
             encountered_non_compliant_op(
                 op,
                 f"Encountered the torch.ops.OpOverloadPacket {target} "
+                # pyrefly: ignore  # unbound-name
                 f"which resolves to the overload ({overload}) that is "
                 f"not PT2 compliant.",
             )
@@ -2809,6 +2851,7 @@ class LazyProxy:
         **kwargs: P.kwargs,
     ) -> None:
         self.tracer = tracer
+        # pyrefly: ignore  # invalid-type-var
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
