@@ -585,14 +585,14 @@ class BlockDescriptorOptions:
         if for_store is True:
             - First Broadcast the value. Since self.broadcast_shape is stored in
             descending stride order, it must must be reverted to the original order
-            since the input value is in the original non-descending order.
-            - After, transpose the value broadcasted value so that dimensions are in
-            descending stride order.
+            since the input value does not have dims with descending strides
+            - After, transpose the broadcasted value so that dimensions are in
+            descending stride order
             - Finally reshape to the block shape
         else (for load):
-            - First broadcast the value to self.broadcast_shape (which is in descending order)
+            - First broadcast the value to self.broadcast_shape (strides are descending)
             - Then transpose the value so that dimensions no longer have descending strides
-            - Finally rehspae the block to the final kernel tile shape
+            - Finally reshape the block to the final kernel tile shape
         """
         broadcast_shape = self.broadcast_shape
         broadcasting_dims = self.broadcasting_dims
