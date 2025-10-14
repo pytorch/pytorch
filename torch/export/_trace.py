@@ -698,10 +698,10 @@ def _restore_state_dict(
     param_buffer_table_reverse = {v: k for k, v in param_buffer_table.items()}
 
     # Replace state dict attr names with the fqn
-    for name, _ in chain(
+    for name, _ in list(chain(
         original_module.named_parameters(remove_duplicate=False),
         original_module.named_buffers(remove_duplicate=False),
-    ):
+    )):
         if name in param_buffer_table_reverse:
             dynamo_name = param_buffer_table_reverse[name]
             param = torch.fx.graph_module._get_attr(traced_module, dynamo_name)
