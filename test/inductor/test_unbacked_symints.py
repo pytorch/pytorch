@@ -236,7 +236,6 @@ class TestUnbackedSymints(InductorTestCase):
 
         def fn(x, w, repeats, is_bmm):
             u0 = repeats.item()
-            torch._check_is_size(u0)
 
             x_unbacked = x.expand(u0, 32)
             w_unbacked = w.expand(32, u0)
@@ -268,7 +267,6 @@ class TestUnbackedSymints(InductorTestCase):
     def test_unbacked_range_tree_divisor(self, device):
         def fn(x, num):
             u0 = num.item()
-            torch._check_is_size(u0)
             zeros = torch.zeros(u0, device=device, dtype=torch.int)
             return (torch.ops.aten.index(x, [None, zeros]),)
 
@@ -302,8 +300,6 @@ class TestUnbackedSymints(InductorTestCase):
     def test_unbacked_repeat(self, device):
         def fn(x, a, b):
             u0, u1 = a.item(), b.item()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
 
             return x.repeat(u0, 2).repeat(2, u1)
 
@@ -596,7 +592,6 @@ class TestUnbackedSymints(InductorTestCase):
     def test_to_int_with_unbacked_size(self, device):
         def fn(x):
             unbacked = x.item()
-            torch._check_is_size(unbacked)
 
             # Transpose to avoid contig short-circuit.
             unbacked_size = torch.ones(
