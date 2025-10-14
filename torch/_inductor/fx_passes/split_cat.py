@@ -65,6 +65,7 @@ pre_grad_pass_names = [
     "move_reshape_out_of_split_stack_pass",
     "einsum_to_pointwise_pass",
     "use_custom_rmsnorm_kernel_pass",
+    "use_custom_layernorm_kernel_pass",
 ]
 
 post_grad_pass_names = [
