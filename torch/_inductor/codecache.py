@@ -14,6 +14,7 @@ import logging
 import os
 import pickle
 import pkgutil
+import platform
 import re
 import shlex
 import shutil
@@ -49,6 +50,7 @@ from typing_extensions import override, Self
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import SkipFrame
 from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
@@ -92,6 +94,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import (
     ALIGN_BYTES,
     clear_on_fresh_cache,
+    determine_aoti_mmap_flags,
     is_linux,
     is_windows,
 )
@@ -143,7 +146,7 @@ if TYPE_CHECKING:
 
 
 _IS_WINDOWS = sys.platform == "win32"
-LOCK_TIMEOUT = 600
+LOCK_TIMEOUT = config.file_lock_timeout
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
@@ -172,6 +175,21 @@ def get_kernel_bin_format(device: str) -> str:
         return "spv"
     else:
         return ""
+
+
+def get_device_information(device_type: str) -> dict[str, str]:
+    """
+    Gets all the current device information used to compile the .so.
+    """
+    metadata: dict[str, str] = {
+        "AOTI_PLATFORM": sys.platform,
+        "AOTI_MACHINE": platform.machine(),
+        "AOTI_CPU_ISA": str(torch._inductor.cpu_vec_isa.pick_vec_isa()).upper(),
+        "AOTI_COMPUTE_CAPABILITY": str(
+            get_interface_for_device(device_type).get_compute_capability()
+        ),
+    }
+    return metadata
 
 
 class CacheBase:
@@ -390,7 +408,14 @@ class WritableTempFile:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.temp_file.close()
-        os.unlink(self.temp_file.name)
+        try:
+            os.unlink(self.temp_file.name)
+        except OSError as e:
+            if _IS_WINDOWS:
+                # On Windows, some case temp file is opened and fail to unlink. Need to ignore it.
+                pass
+            else:
+                raise e
 
 
 def write(
@@ -633,7 +658,8 @@ class FxGraphCachePickler(pickle.Pickler):
             if isinstance(obj, torch.Tensor):
                 return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
-                return "<bytes>"
+                val = obj.decode("utf-8", errors="replace")
+                return val if len(val) <= 1024 else val[:1024] + "..."
             elif type(obj) in self.dispatch_table:
                 # Run the reducer on the object
                 return str(self.dispatch_table[type(obj)](obj)[1])
@@ -1245,7 +1271,10 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         )
         trace_structured(
             "inductor_output_code",
-            lambda: {"filename": artifact_path},
+            lambda: {
+                "filename": artifact_path,
+                "file_path": os.path.abspath(artifact_path),
+            },
             payload_fn=lambda: code,
         )
         trace_structured(
@@ -1770,7 +1799,7 @@ class AotCodeCompiler:
 
         header_code = ""
         header_path = ""
-        if config.aot_inductor.compile_standalone:
+        if not config.aot_inductor.dynamic_linkage:
             # to link statically, we also need a header file
             with open(
                 os.path.join(
@@ -1820,7 +1849,7 @@ class AotCodeCompiler:
             generated_files.append(wrapper_path)
             if not config.aot_inductor.package_cpp_only:
                 generated_files.append(kernel_path)
-            if config.aot_inductor.compile_standalone:
+            if not config.aot_inductor.dynamic_linkage:
                 generated_files.append(header_path)
 
         output_code_log.info("Wrapper code written to: %s", wrapper_path)
@@ -1843,7 +1872,7 @@ class AotCodeCompiler:
             },
             payload_fn=lambda: kernel_code,
         )
-        if config.aot_inductor.compile_standalone:
+        if not config.aot_inductor.dynamic_linkage:
             output_code_log.info("Header code written to: %s", header_path)
             trace_structured(
                 "graph_dump",
@@ -2076,6 +2105,9 @@ end
             metadata = config.aot_inductor.metadata
             metadata["AOTI_DEVICE_KEY"] = device_type
 
+            # Add environment information to ensure .so compatibility
+            metadata.update(get_device_information(device_type))
+
             # Save user provided metadata
             meta_json = str(
                 wrapper_path_operator.with_name(
@@ -2140,10 +2172,14 @@ end
                     data_ptr,
                     ctypes.POINTER(ctypes.c_ubyte * nbytes),
                 )
+                # pyrefly: ignore  # missing-attribute
                 raw_bytes = bytes(raw_array.contents)
                 return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
-            if config.aot_inductor.package_constants_in_so:
+            if (
+                config.aot_inductor.package_constants_in_so
+                or config.aot_inductor.package_constants_on_disk_format == "binary_blob"
+            ):
                 serialized_weights = b"".join(
                     _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
                     for name in graph.constants.keys()
@@ -2152,7 +2188,7 @@ end
             else:
                 serialized_weights = b""
 
-            if config.aot_inductor.package_constants_on_disk:
+            if config.aot_inductor.package_constants_on_disk_format == "pickle_weights":
                 # We need to return a storage key here because the original value tensor might be a clone
                 weights_dict = Weights(
                     {
@@ -2168,15 +2204,27 @@ end
 
             consts_size = len(serialized_weights)
 
-            # TODO: Fix mmap weights with cuda
-            use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
-            if config.aot_inductor.force_mmap_weights:
-                use_mmap_weights = True
+            use_external_weights, use_mmap_weights = determine_aoti_mmap_flags(
+                consts_size
+            )
+            if use_external_weights and use_mmap_weights:
+                # Should never reach here, just a check for sanity
+                raise RuntimeError(
+                    "use_external_weights and  use_mmap_weights cannot both be True."
+                )
+
+            external_weights_path = None
+            if use_external_weights:
+                external_weights_filename = f"{wrapper_path_operator.stem}_weights.blob"
+                external_weights_path = str(
+                    wrapper_path_operator.with_name(external_weights_filename)
+                )
 
             compile_command: dict[str, Any] = {
                 "aot_mode": graph.aot_mode,
                 "device_type": device_type,
                 "use_mmap_weights": use_mmap_weights,
+                "use_mmap_weights_external": use_external_weights,
                 "use_relative_path": use_relative_path,
                 "vec_isa": picked_vec_isa,
             }
@@ -2255,7 +2303,15 @@ end
             if not use_mmap_weights:
                 aot_constants = serialized_weights
                 magic_number = 0
+                if use_external_weights:
+                    aot_constants = struct.pack("q", consts_size)
+                    assert external_weights_path is not None
+                    # For external weights, write weights to separate file and embed minimal placeholder
+                    with open(external_weights_path, "wb") as f_weights:
+                        f_weights.write(serialized_weights)
+                    generated_files.append(external_weights_path)
             else:
+                # we'll append weights binary to the end of .so file and mmap it when loading
                 magic_number = cast(
                     int, torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
                 )
@@ -2331,6 +2387,7 @@ end
                     ):
                         current_arch = _nvcc_arch_as_compile_option()
                         cmd = (
+                            # pyrefly: ignore  # unbound-name
                             f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
                             # Triton only allows generating PTX version as same as the current arch
                             f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
@@ -2435,6 +2492,10 @@ end
                     os.remove(o_file)
 
                 if use_mmap_weights:
+                    if config.aot_inductor.cross_target_platform == "windows":
+                        raise RuntimeError(
+                            "when cross_target_platform is windows, use_mmap_weights should not be true."
+                        )
 
                     def get_page_size() -> int:
                         # Don't use resource.getpagesize() on Windows, as it is a Unix specific package
@@ -2485,16 +2546,16 @@ end
                 if config.aot_inductor.package:
                     generated_files.append(output_so)
 
-        if config.aot_inductor.package:
-            if config.trace.provenance_tracking_level != 0:
-                kernel_info = torch._inductor.debug.create_kernel_information_json()
-                kernel_info_json = os.path.join(
-                    wrapper_path_operator.parent, "kernel_information.json"
-                )
-                with open(kernel_info_json, "w") as f:
-                    f.write(json.dumps(kernel_info, indent=4))
-                generated_files.append(kernel_info_json)
+        if config.trace.provenance_tracking_level != 0:
+            kernel_info = torch._inductor.debug.create_kernel_information_json()
+            kernel_info_json = os.path.join(
+                wrapper_path_operator.parent, "kernel_information.json"
+            )
+            with open(kernel_info_json, "w") as f:
+                f.write(json.dumps(kernel_info, indent=4))
+            generated_files.append(kernel_info_json)
 
+        if config.aot_inductor.package:
             # We want to return the directory that contains all the AOTI
             # generated files, not just the so
             # return os.path.split(output_so)[0]
@@ -2533,6 +2594,7 @@ def custom_op_wrapper(op: str, *args: Any) -> Union[list[c_void_p], c_void_p, No
 
     # convert any kwarg-only arguments to kwargs
     kwargs = dict()
+    # pyrefly: ignore  # missing-attribute
     for func_arg, conv_arg in zip(func._schema.arguments, converted_args):
         if func_arg.kwarg_only:
             kwargs[func_arg.name] = conv_arg
@@ -2714,10 +2776,14 @@ class CppCodeCache:
         main_build_option = CppTorchDeviceOptions(
             compile_only=bool(optimized_code),
             min_optimize=optimized_code is not None,
+            # pyrefly: ignore  # bad-argument-type
             **compile_command,
         )
         optimized_build_option = CppTorchDeviceOptions(
-            compile_only=True, **compile_command
+            # pyrefly: ignore  # bad-argument-type
+            compile_only=True,
+            # pyrefly: ignore  # bad-argument-type
+            **compile_command,
         )
 
         def get_hashable_command_line(build_option: BuildOptionsBase) -> str:
@@ -2766,6 +2832,7 @@ class CppCodeCache:
                 # decision if that ever changes.
                 if optimized_code and (header := _get_cpp_prefix_header(device_type)):
                     optimized_build_option.precompiled_header = _precompile_header(
+                        # pyrefly: ignore  # unbound-name
                         header,
                         optimized_cmd_line,
                         **compile_command,
@@ -2796,6 +2863,7 @@ class CppCodeCache:
                         main_builder.get_target_file_path(),
                         optimized_builder.get_target_file_path(),
                     ],
+                    # pyrefly: ignore  # bad-argument-type
                     BuildOption=CppTorchDeviceOptions(**compile_command),
                     output_dir=output_dir,
                 )
@@ -2954,6 +3022,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
     )
 
     @classmethod
+    # pyrefly: ignore  # bad-override
     def _load_library_inner(cls, path: str, key: str) -> ModuleType:
         os.environ["_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR"] = str(
             torch._C._dynamo.guards._torchinductor_pyobject_tensor_data_ptr  # type: ignore[attr-defined]
@@ -3225,10 +3294,12 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         buffer_names = []
         for i, arg in enumerate(meta.argtypes):
             if arg.is_buffer():
+                # pyrefly: ignore  # bad-argument-type
                 buffer_names.append(f"&hl_buf_{i}")
                 buffers.extend(cls._codegen_buffer(f"hl_buf_{i}", arg, is_cuda))
             else:
                 assert "*" not in arg.ctype
+                # pyrefly: ignore  # bad-argument-type
                 buffer_names.append(arg.name)
         buffers = "\n".join([f"    {line}" for line in buffers]).lstrip()
 
@@ -3483,6 +3554,7 @@ def _worker_task_halide(lockfile: str, jobs: list[partial[Any]]) -> None:
 
                 ci = cmd.index("-o")
                 assert isinstance(ci, int)
+                # pyrefly: ignore  # unsupported-operation
                 cmd[ci + 1] = Out()
                 repl = textwrap.indent(
                     textwrap.dedent(

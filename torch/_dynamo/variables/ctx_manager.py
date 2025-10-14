@@ -23,6 +23,7 @@ restoring state changes.
 import inspect
 import sys
 import warnings
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, Union
 
 import torch._C
@@ -1262,6 +1263,38 @@ class SDPAKernelVariable(ContextWrappingVariable):
         return "_sdpa_kernel_variadic"
 
 
+class FxTracebackAnnotateVariable(ContextWrappingVariable):
+    """
+    fx.traceback.annotate is a context manager that allows users to annotate the
+    fx graph nodes with custom metadata. In the context of Dynamo, we don't have
+    to trace the body of the context manager. Instead we want to directly run
+    the body of the context manager, so the Dynamo created Fx graphs have the
+    right custom metadata. This variable tracker just runs __enter__ and
+    __exit__ method (instead of tracing).
+    """
+
+    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def enter(self, tx, *args):
+        # Run the annotation ctx manager in eager. Also ensure that
+        # preserve_node_meta context manager is setup. This is important to pass
+        # on the metadata to the create_proxy nodes.
+        stack = ExitStack()
+        stack.enter_context(torch.fx.traceback.annotate(self.target_values))
+        stack.enter_context(torch.fx.traceback.preserve_node_meta())
+        self.set_cleanup_hook(tx, lambda: stack.close())
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self):
+        return "torch.fx.traceback"
+
+    def fn_name(self):
+        return "annotate"
+
+
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs) -> None:
         if proxy is not None and "example_value" in proxy.node.meta:
@@ -1448,6 +1481,46 @@ class ErrorOnGraphBreakVariable(ContextWrappingVariable):
 
     def fn_name(self):
         return "error_on_graph_break"
+
+
+class WithEnterFunctionVariable(VariableTracker):
+    def __init__(
+        self,
+        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.ctx = ctx
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert not args
+        assert not kwargs
+        # NOTE: we assume that the instruction immediately after the current CALL instruction
+        # is the first instruction of the block.
+        return tx.enter_ctx(self.ctx, tx.current_instruction)
+
+    def reconstruct(self, codegen: "PyCodegen"):
+        try:
+            type_str = f"{self.ctx.module_name()}.{self.ctx.fn_name()}"
+        except NotImplementedError:
+            type_str = str(type(self.ctx))
+        unimplemented_v2(
+            gb_type="Attempted to reconstruct context manager's __enter__ method",
+            context=str(self.ctx),
+            explanation=f"Attempted to reconstruct context manager {type_str} while tracing `with ...:`",
+            hints=[
+                "It is likely there is a graph break while tracing `with ctx:` "
+                "but outside the actual `ctx.__enter__()` method. "
+                "`torch.compile` does not expect this to happen.",
+                *graph_break_hints.DIFFICULT,
+                *graph_break_hints.DYNAMO_BUG,
+            ],
+        )
 
 
 class WithExitFunctionVariable(VariableTracker):

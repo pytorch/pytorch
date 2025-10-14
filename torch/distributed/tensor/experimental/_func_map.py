@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
-from collections.abc import Sequence
-from typing import Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Optional, Union
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -238,6 +238,7 @@ def _local_map_wrapped(
 
             flat_local_args.append(arg)
 
+    # pyrefly: ignore  # bad-argument-type
     local_args = pytree.tree_unflatten(flat_local_args, args_spec)
 
     out = func(*local_args, **kwargs)
@@ -271,6 +272,7 @@ def _local_map_wrapped(
 
                 flat_dist_out.append(out)
 
+        # pyrefly: ignore  # bad-argument-type
         return pytree.tree_unflatten(flat_dist_out, out_spec)
     else:
         return out

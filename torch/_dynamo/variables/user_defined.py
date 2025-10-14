@@ -716,7 +716,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
                 assert all(x is not None for x in items)
 
-            return variables.NamedTupleVariable(items, self.value)
+            # Modify mutability of namedtuple for sourcelesss instantiations.
+            from .base import AttributeMutationNew
+
+            return variables.NamedTupleVariable(
+                items, self.value, mutation_type=AttributeMutationNew()
+            )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
@@ -1667,7 +1672,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
         def __eq__(self, other):
             return (
-                type(self) == type(other)
+                type(self) is type(other)
                 and self.cls == other.cls
                 and self.fields == other.fields
             )

@@ -78,6 +78,10 @@ def create_grouped_node_for_allreduce_and_its_deps(snodes):
 
 
 @requires_accelerator_dist_backend()
+@unittest.skipIf(
+    torch._inductor.config.triton.native_matmul,
+    "native matmul is fused with surrounding ops",
+)
 class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
     """
     Run correctness checks in multi-proc runner, mark with minimum # GPUs to run under
@@ -258,6 +262,11 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             "reorder_compute_for_overlap",
         ],
     )
+    @patch.object(
+        torch._inductor.config,
+        "runtime_estimations_mms_benchmark",
+        False,
+    )
     def test_reorder_compute_for_overlap(self):
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
@@ -362,6 +371,10 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        torch._inductor.config.triton.native_matmul,
+        "native matmul is fused with surrounding ops",
+    )
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(
