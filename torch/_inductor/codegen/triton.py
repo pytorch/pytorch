@@ -2339,7 +2339,9 @@ class TMACompatibilityChecker:
                 )
 
                 # TODO: min block size may be too large / introduce redundancy
-                if min_block_size > self.kernel.max_block(prefix_str[innermost_block_symt]):
+                if min_block_size > self.kernel.max_block(
+                    prefix_str[innermost_block_symt]
+                ):
                     log.debug(
                         "%s the minimum block size to satisfy expression %s is too large: %d",
                         self.failed_debug_prefix,
