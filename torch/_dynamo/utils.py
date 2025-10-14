@@ -4725,6 +4725,7 @@ def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
 user_obj_id_to_weakref: dict[int, weakref.ReferenceType[object]] = {}
 
 
+# TODO: mlazos to remove after replacing w/ above API
 def get_user_object_from_id(obj_id: int) -> Any:
     obj = user_obj_id_to_weakref[obj_id]()
     assert obj is not None, "User object is no longer alive"
@@ -4739,7 +4740,7 @@ def store_user_object_weakref(obj: object) -> None:
         from .exc import unimplemented_v2
 
         unimplemented_v2(
-            gb_type="Failed to make weakref to User Object",
+            gb_type="Failed to make weakref to User Object when storing by ID",
             context=f"user_objected: {obj}",
             explanation="Object does not allow us to make a weakref to it",
             hints=[],
