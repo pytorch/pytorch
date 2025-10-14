@@ -1882,7 +1882,8 @@ def _convert_state_with_flat_params(
             if to_save:
                 if len(unflat_state) != len(optim_state_key.unflat_param_names):
                     raise AssertionError(
-                        f"Expected len(unflat_state) == len(optim_state_key.unflat_param_names), got {len(unflat_state)} != {len(optim_state_key.unflat_param_names)}"
+                        f"Expected len(unflat_state) == len(optim_state_key.unflat_param_names), "
+                        f"got {len(unflat_state)} != {len(optim_state_key.unflat_param_names)}"
                     )
                 fsdp_osd_state.update(
                     zip(

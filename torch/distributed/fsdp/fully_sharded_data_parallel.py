@@ -1284,7 +1284,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             using_optim_input = False
             if optim_input is not None or rank0_only:
                 raise AssertionError(
-                    f"Expected optim_input to be None and rank0_only to be False, got optim_input={optim_input}, rank0_only={rank0_only}"
+                    f"Expected optim_input to be None and rank0_only to be False, "
+                    f"got optim_input={optim_input}, rank0_only={rank0_only}"
                 )
 
         use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
@@ -1344,7 +1345,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             using_optim_input = False
             if optim_input is not None or rank0_only:
                 raise AssertionError(
-                    f"Expected optim_input to be None and rank0_only to be False, got optim_input={optim_input}, rank0_only={rank0_only}"
+                    f"Expected optim_input to be None and rank0_only to be False, "
+                    f"got optim_input={optim_input}, rank0_only={rank0_only}"
                 )
 
         use_orig_params = FullyShardedDataParallel.fsdp_modules(model)[
