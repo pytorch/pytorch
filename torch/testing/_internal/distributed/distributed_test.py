@@ -725,7 +725,7 @@ class DistributedTest:
                 lines = out.getvalue().splitlines()
 
             def format_line(var):
-                return f"env:{var}={os.environ[var] if var in os.environ else 'N/A'}"
+                return f"env:{var}={os.environ.get(var, 'N/A')}"
 
             # Check relevant env vars
             vars = [
@@ -6212,7 +6212,7 @@ class DistributedTest:
         )
         def test_ddp_logging_data_cpu(self):
             def parse_env(var):
-                return os.environ[var] if var in os.environ else "N/A"
+                return os.environ.get(var, "N/A")
 
             dist.set_debug_level(dist.DebugLevel.INFO)
             _, group_id, _ = self._init_global_test()
