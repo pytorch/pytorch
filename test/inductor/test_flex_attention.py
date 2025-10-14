@@ -18,7 +18,7 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
-from torch._inductor import metrics
+from torch._inductor import config, metrics
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -456,15 +456,17 @@ class TestFlexAttention(InductorTestCase):
         compiled_out: torch.Tensor,
         fudge_factor: float,
         tensor_name: Optional[str] = None,
+        fudge_atol: float = 0,
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
         if torch.isnan(compiled_error).any() or torch.isnan(ref_error).any():
-            self.assertTrue(False, "Output/Grad with NaN")
-        if compiled_error > ref_error * fudge_factor:
-            name = tensor_name if tensor_name is not None else ""
-            msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
-            self.assertTrue(False, msg)
+            self.fail("Output/Grad with NaN")
+        name = tensor_name if tensor_name is not None else ""
+        msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
+        torch.testing.assert_close(
+            compiled_error, ref_error, rtol=fudge_factor, atol=1e-7, msg=msg
+        )
 
     def _check_out(
         self,
@@ -3975,6 +3977,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @unittest.skipIf(config.triton.native_matmul, "different dynamo counters")
     def test_free_symbol_dynamic(self, device):
         def batch_flip_causal(b, h, q_idx, kv_idx):
             return (q_idx >= kv_idx) & (b % 2 == 0)

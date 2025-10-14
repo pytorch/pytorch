@@ -175,6 +175,7 @@ class CheckpointReader:
                         # create a new map with all the keys present in source_value
                         target_value = dict.fromkeys(source_value.keys())
 
+                    # pyrefly: ignore  # missing-attribute
                     for key in list(target_value.keys()):
                         current_path = f"{key_path}.{key}" if key_path else key
                         if key in source_value:

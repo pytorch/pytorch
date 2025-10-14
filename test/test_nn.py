@@ -11225,6 +11225,16 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_ref, out)
 
     @onlyCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    def test_cudnn_rnn(self, dtype):
+        rnn = nn.RNN(10, 20, num_layers=2, device='cuda', dtype=dtype)
+        input = torch.randn(5, 4, 10, device='cuda', dtype=dtype)
+        hx = torch.randn(2, 4, 20, device='cuda', dtype=dtype)
+        output = rnn(input, hx)
+        output_ref = rnn.cpu()(input.cpu(), hx.cpu())
+        self.assertEqual(tuple([i.cuda() for i in output_ref]), output, atol=5e-3, rtol=1e-3)
+
+    @onlyCUDA
     @gcIfJetson
     def test_upsamplingNearest3d_launch_config(self, device):
         m = nn.Upsample(scale_factor=2)

@@ -218,6 +218,14 @@ class FlexKernelOptions(TypedDict, total=False):
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
+    force_flash: NotRequired[bool]
+    """ If True, forces use of the cute-dsl flash attention kernel.
+
+    Raises an error if flash attention cannot be used instead of falling back
+    to the default implementation. Useful for ensuring flash attention is used
+    when expected.
+    """
+
 
 class AuxRequest(NamedTuple):
     """Request which auxiliary outputs to compute from flex_attention.
@@ -261,7 +269,7 @@ def _get_mod_type(fn: Callable) -> _ModificationType:
     num_positional_args = sum(
         1
         for param in inspect.signature(fn).parameters.values()
-        if param.default == inspect.Parameter.empty
+        if param.default is inspect.Parameter.empty
     )
     assert num_positional_args == 5 or num_positional_args == 4
     if num_positional_args == 5:
