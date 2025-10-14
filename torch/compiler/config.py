@@ -288,7 +288,7 @@ reorderable_logging_functions: set = Config(
 A set of logging functions that can be reordered to execute after the compiled
 portion of the graph, allowing larger graphs to be captured. Functions in this
 set will have their execution deferred to avoid graph breaks, though this may
-affect the timing of log output. In particular, mutated values will not be logged 
+affect the timing of log output. In particular, mutated values will not be logged
 at the right time, leading to incorrect logging.
 """
 
