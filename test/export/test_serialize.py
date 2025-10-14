@@ -82,7 +82,7 @@ class TestSerialize(TestCase):
                 return 0
 
             def __eq__(self, other):
-                return type(other) == type(self)
+                return type(other) is type(self)
 
             def __call__(self, *args, **kwargs):
                 return torch.ops.aten.add.Tensor(*args, **kwargs)
@@ -1412,7 +1412,6 @@ class TestDeserialize(TestCase):
             def forward(self, x):
                 y = x.nonzero()
                 z = y.size(0)
-                torch._check_is_size(z)
                 torch._check(z == 2)
                 return y
 
@@ -1423,7 +1422,6 @@ class TestDeserialize(TestCase):
             def forward(self, x):
                 y = x.nonzero()
                 z = y.size(0)
-                torch._check_is_size(z)
                 torch._check(z % 3 == 0)
                 torch._check(z == 3)
                 return y
@@ -1707,7 +1705,7 @@ def forward(self, x):
         class Module(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n)
+                torch._check(n >= 0)
                 return y.sum() + torch.ones(n, 5).sum()
 
         f = Module()
@@ -2000,6 +1998,51 @@ class TestSaveLoad(TestCase):
         inp = (torch.tensor(1),)
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
+    def test_save_load_with_multiple_empty_tensors(self) -> None:
+        # Test scenario where models have multiple empty tensors
+        # but with differnt data types.
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "int_buffer",
+                    torch.zeros([0], dtype=torch.uint8),
+                )
+                self.register_buffer(
+                    "int_buffer2",
+                    torch.zeros([0], dtype=torch.uint8),
+                )
+                self.register_buffer(
+                    "float_buffer",
+                    torch.zeros([0], dtype=torch.float32),
+                )
+
+            def forward(self, t: torch.Tensor) -> torch.Tensor:
+                return t + self.int_buffer + self.float_buffer + self.int_buffer2
+
+        m = M()
+        inp = torch.rand([0])
+
+        ep = torch.export.export(m, (inp,))
+
+        buffer = io.BytesIO()
+        torch.export.save(ep, buffer)
+        model_bytes = buffer.getvalue()
+
+        # First two buffers are duplicates, but not the third one.
+        # So in the serialized model, there will be two physical tensors.
+        self.assertTrue(b"weight_0" in model_bytes)
+        self.assertTrue(b"weight_1" in model_bytes)
+        self.assertFalse(b"weight_2" in model_bytes)
+
+        buffer = io.BytesIO(model_bytes)
+        buffer.seek(0)
+        dep = torch.export.load(buffer)
+        unf = torch.export.unflatten(dep)
+        self.assertEqual(unf.int_buffer.dtype, torch.uint8)
+        self.assertEqual(unf.int_buffer2.dtype, torch.uint8)
+        self.assertEqual(unf.float_buffer.dtype, torch.float32)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
@@ -2222,7 +2265,8 @@ def forward(self, x):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
                 n = x.item()
-                torch._check_is_size(n, max=y.size(0) - 1)
+                torch._check(n >= 0)
+                torch._check(n < y.size(0))
                 return torch.empty(n), y[n]
 
         ep = torch.export.export(
