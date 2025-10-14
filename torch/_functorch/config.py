@@ -4,6 +4,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from typing import Callable
+
+
 """
 Global flags for aot autograd
 """
@@ -13,6 +16,13 @@ import sys
 from typing import Literal, Optional, TYPE_CHECKING
 
 from torch.utils._config_module import Config, install_config_module
+
+
+# [@compile_ignored: debug]
+_save_config_ignore = [
+    # callable not serializeable
+    "joint_custom_pass",
+]
 
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
@@ -296,6 +306,11 @@ fake_tensor_prefer_device_type: Optional[str] = None
 # TODO: turn on by default
 graphsafe_rng_functionalization = True
 
+# Whether or not to eagerly compile the backward
+# used by AOT compile and other settings
+# TODO: once AOT compile calls aot autograd directly instead of
+# through compile_fx, we can remove this
+force_non_lazy_backward_lowering = False
 
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
@@ -351,6 +366,10 @@ _sync_decision_cross_ranks = False
 # (this includes parameters and user marked as static)
 # "all" - no filtering, everything saved for backward.
 saved_tensors_hooks_filtering_mode = "donated"
+
+
+# This callback is invoked on the joint graph before partitioning
+joint_custom_pass: Callable = None  # type: ignore[assignment]
 
 
 if TYPE_CHECKING:

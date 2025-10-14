@@ -51,6 +51,19 @@ def my_abs(t) -> Tensor:
     return torch.ops.libtorch_agnostic.my_abs.default(t)
 
 
+def my_is_cpu(t) -> bool:
+    """
+    Returns is_cpu on the input tensor.
+
+    Args:
+        t: any Tensor
+
+    Returns:
+        a bool
+    """
+    return torch.ops.libtorch_agnostic.my_is_cpu.default(t)
+
+
 def my_ones_like(tensor, device) -> Tensor:
     """
     Returns a new Tensor like the input tensor, but with all ones
@@ -154,6 +167,30 @@ def my_zero_(t) -> Tensor:
     return torch.ops.libtorch_agnostic.my_zero_.default(t)
 
 
+def my_amax(t) -> Tensor:
+    """
+    Returns t.amax()
+
+    Args:
+        t: Tensor
+
+    Returns: amax(t)
+    """
+    return torch.ops.libtorch_agnostic.my_amax.default(t)
+
+
+def my_amax_vec(t) -> Tensor:
+    """
+    Returns t.amax()
+
+    Args:
+        t: Tensor
+
+    Returns: amax(t)
+    """
+    return torch.ops.libtorch_agnostic.my_amax_vec.default(t)
+
+
 def fill_infinity(t) -> Tensor:
     """
     Fills the tensor with inf.
@@ -205,6 +242,32 @@ def my_narrow(t, dim, start, length) -> Tensor:
     return torch.ops.libtorch_agnostic.my_narrow.default(t, dim, start, length)
 
 
+def my_copy_(dst, src, non_blocking) -> Tensor:
+    """
+    Returns tensor dst that is updated with src elements.
+
+    Args:
+        dst: Destination tensor
+        src: Source tensor
+        non_blocking: bool
+
+    Returns: Updated tensor
+    """
+    return torch.ops.libtorch_agnostic.my_copy_.default(dst, src, non_blocking)
+
+
+def my_clone(t) -> Tensor:
+    """
+    Returns a clone of input tensor.
+
+    Args:
+        t: Input tensor
+
+    Returns: Cloned tensor
+    """
+    return torch.ops.libtorch_agnostic.my_clone.default(t)
+
+
 def test_device_guard(device_index) -> int:
     """
     Tests the DeviceGuard functionality by creating a device guard and returning an empty tensor.
@@ -246,3 +309,27 @@ def test_get_current_device_index() -> int:
     Returns: Current device index as an integer
     """
     return torch.ops.libtorch_agnostic.test_get_current_device_index.default()
+
+
+def my_new_empty_dtype_variant(t) -> Tensor:
+    """
+    Returns a new empty tensor with shape [2, 5] and dtype bfloat16
+
+    Args:
+        t: Input tensor used as a reference for device and other properties
+
+    Returns: New empty tensor with shape [2, 5] and dtype bfloat16
+    """
+    return torch.ops.libtorch_agnostic.my_new_empty_dtype_variant.default(t)
+
+
+def my_new_zeros_dtype_variant(t) -> Tensor:
+    """
+    Returns a new tensor filled with 0s with shape [2, 5] and dtype Float
+
+    Args:
+        t: Input tensor used as a reference for device and other properties
+
+    Returns: New zeros tensor
+    """
+    return torch.ops.libtorch_agnostic.my_new_zeros_dtype_variant.default(t)

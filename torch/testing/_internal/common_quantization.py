@@ -58,7 +58,7 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     XNNPACKQuantizer,
 )
 
-from torch.export import export_for_training
+from torch.export import export
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
@@ -87,7 +87,8 @@ import io
 import os
 
 import unittest
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
+from collections.abc import Callable
 
 import numpy as np
 import torch._dynamo as torchdynamo
@@ -765,7 +766,7 @@ class QuantizationTestCase(TestCase):
             and not isinstance(module, _FusedModule)
         ):
             for child in module.children():
-                if type(child) in [nn.Dropout]:
+                if type(child) is nn.Dropout:
                     continue
                 self.checkObservers(
                     child, propagate_qconfig_list, prepare_custom_config_dict
@@ -1246,7 +1247,7 @@ class QuantizationTestCase(TestCase):
                }
             """
             # TODO: make img_data a single example instead of a list
-            if type(inputs) == list:
+            if type(inputs) is list:
                 inputs = inputs[0]
 
             if quant_type == QuantType.QAT:
@@ -1286,7 +1287,7 @@ class QuantizationTestCase(TestCase):
                 prepare_custom_config=prepare_custom_config,
                 backend_config=backend_config,
             )
-            if not quant_type == QuantType.DYNAMIC:
+            if quant_type != QuantType.DYNAMIC:
                 prepared(*inputs)
 
             if print_debug_info:
@@ -1513,7 +1514,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             {0: torch.export.Dim("dim")} if i == 0 else None
             for i in range(len(example_inputs))
         )
-        m = export_for_training(
+        m = export(
             m,
             example_inputs,
             dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
@@ -1554,7 +1555,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m_fx = _convert_to_reference_decomposed_fx(
                 m_fx, backend_config=backend_config
             )
-            m_fx = export_for_training(
+            m_fx = export(
                 m_fx,
                 example_inputs,
                 dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
@@ -1578,7 +1579,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         # resetting dynamo cache
         torch._dynamo.reset()
 
-        m = export_for_training(m, example_inputs, strict=True).module()
+        m = export(m, example_inputs, strict=True).module()
         if is_qat:
             m = prepare_qat_pt2e(m, quantizer)
         else:
@@ -3183,12 +3184,15 @@ class TestHelperModules:
             x = self.adaptive_avg_pool2d(x)
             return x
 
-
     class ConvWithBNRelu(torch.nn.Module):
         def __init__(self, relu, dim=2, bn=True, bias=True, padding=0):
             super().__init__()
             convs = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
-            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d, 3: torch.nn.BatchNorm3d}
+            bns = {
+                1: torch.nn.BatchNorm1d,
+                2: torch.nn.BatchNorm2d,
+                3: torch.nn.BatchNorm3d,
+            }
             self.conv = convs[dim](3, 3, 3, bias=bias, padding=padding)
 
             if bn:
@@ -3394,7 +3398,7 @@ def _generate_qdq_quantized_model(
 
     maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
     with maybe_no_grad:
-        export_model = export_for_training(mod, inputs, strict=True).module()
+        export_model = export(mod, inputs, strict=True).module(check_guards=False)
         quantizer = (
             quantizer
             if quantizer

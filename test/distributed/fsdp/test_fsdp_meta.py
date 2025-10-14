@@ -43,6 +43,8 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 def _reset_params_if_meta(is_meta: bool, model: nn.Module):
     # For torchdistX init, we don't need to call reset_params, as
@@ -117,7 +119,7 @@ def _init_with_reset_params(module: nn.Module):
         )
     )
     if has_meta_states:
-        device = torch.device("cuda", torch.cuda.current_device())
+        device = torch.device(device_type, torch.accelerator.current_device_index())
         module.to_empty(device=device, recurse=False)
         module.reset_parameters()
 
@@ -164,13 +166,13 @@ class TestFSDPWithMetaDevice(FSDPTest):
 
         # Test to make sure it is the same model parameters as regular FSDP
         # approach.
-        regular = MyModel(device="cuda")
+        regular = MyModel(device=device_type)
         _reset_params_if_meta(is_meta, regular)
         fsdp_regular = FSDP(regular, auto_wrap_policy=always_wrap)
         regular_opt = torch.optim.SGD(fsdp_regular.parameters(), lr=1e-3)
 
         self._compare_fsdp(fsdp_meta, fsdp_regular)
-        inp = torch.randn(10, 2, device="cuda")
+        inp = torch.randn(10, 2, device=device_type)
         fsdp_meta(inp).sum().backward()
         fsdp_regular(inp).sum().backward()
         meta_opt.step()
@@ -182,7 +184,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
         model = meta_module_fn()
         fsdp_meta = FSDP(model, param_init_fn=init_fn)
         meta_opt = torch.optim.SGD(fsdp_meta.parameters(), lr=1e-3)
-        regular = MyModel(device="cuda")
+        regular = MyModel(device=device_type)
         _reset_params_if_meta(is_meta, regular)
         fsdp_regular = FSDP(regular, auto_wrap_policy=always_wrap)
         regular_opt = torch.optim.SGD(fsdp_regular.parameters(), lr=1e-3)
@@ -217,7 +219,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
     )
     def test_simple_model_with_torchdistX_default_init(self):
         def meta_module_fn():
-            return deferred_init.deferred_init(MyModel, device="cuda")
+            return deferred_init.deferred_init(MyModel, device=device_type)
 
         self._test_simple_model_with_meta_device(meta_module_fn)
 
@@ -228,7 +230,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
     )
     def test_simple_model_with_torchdistX_init_fn(self):
         def meta_module_fn():
-            return deferred_init.deferred_init(MyModel, device="cuda")
+            return deferred_init.deferred_init(MyModel, device=device_type)
 
         self._test_simple_model_with_meta_device(
             meta_module_fn, init_fn=_init_with_torchdistX
@@ -248,7 +250,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
                 param_init_fn=init_fn,
             )
             meta_opt = torch.optim.SGD(fsdp_meta.parameters(), lr=1e-3)
-            module_regular = NestedModel(device="cuda")
+            module_regular = NestedModel(device=device_type)
             _reset_params_if_meta(is_meta, module_regular)
             fsdp_regular = FSDP(
                 module_regular,
@@ -269,7 +271,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
 
             # Init and reset parameters before wrapping so that reset_params
             # matches up with meta device's initialization.
-            module_regular = NestedModel(device="cuda")
+            module_regular = NestedModel(device=device_type)
             _reset_params_if_meta(is_meta, module_regular)
             with enable_wrap(wrapper_cls=FSDP):
                 module_regular.lin1 = wrap(module_regular.lin1)
@@ -279,7 +281,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
 
         # Compare it before training
         self._compare_fsdp(fsdp_meta, fsdp_regular)
-        inp = torch.randn(10, 2, device="cuda")
+        inp = torch.randn(10, 2, device=device_type)
         fsdp_meta(inp).sum().backward()
         fsdp_regular(inp).sum().backward()
         meta_opt.step()
@@ -317,7 +319,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
     @parametrize("auto_wrap", [True, False])
     def test_nested_model_with_torchdistX_default_init(self, auto_wrap):
         def meta_module_fn():
-            return deferred_init.deferred_init(NestedModel, device="cuda")
+            return deferred_init.deferred_init(NestedModel, device=device_type)
 
         self._test_nested_model_with_meta_device(
             auto_wrap=auto_wrap, meta_module_fn=meta_module_fn
@@ -331,7 +333,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
     @parametrize("auto_wrap", [True, False])
     def test_nested_model_with_torchdistX_init_fn(self, auto_wrap):
         def meta_module_fn():
-            return deferred_init.deferred_init(NestedModel, device="cuda")
+            return deferred_init.deferred_init(NestedModel, device=device_type)
 
         self._test_nested_model_with_meta_device(
             auto_wrap=auto_wrap,
@@ -351,7 +353,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
     )
     def test_bad_arg_torchdistx(self):
         def meta_module_fn():
-            return deferred_init.deferred_init(NestedModel, "cuda")
+            return deferred_init.deferred_init(NestedModel, device_type)
 
         self._test_bad_arg(meta_module_fn)
 
@@ -401,7 +403,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
             # TODO: `module.to_empty()` is not generally correct for meta
             # device initialization.
             # https://github.com/pytorch/pytorch/issues/90465
-            module.to_empty(device=torch.device("cuda"))
+            module.to_empty(device=torch.device(device_type))
             module.apply(model._module_init_fn)
 
         model = Model()
@@ -414,7 +416,7 @@ class TestFSDPWithMetaDevice(FSDPTest):
                 param_dtype=torch.float32, reduce_dtype=torch.float16
             ),
             param_init_fn=_param_init_fn,
-            device_id=torch.cuda.current_device(),
+            device_id=torch.accelerator.current_device_index(),
         )
 
 

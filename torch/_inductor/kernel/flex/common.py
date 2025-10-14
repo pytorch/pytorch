@@ -11,7 +11,7 @@ import sympy
 import torch
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_map, tree_map_only
 
 from ...ir import (
     ComputedBuffer,
@@ -90,13 +90,16 @@ def get_fwd_subgraph_outputs(
     subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
 ) -> list[Optional[ComputedBuffer]]:
     subgraph_buffer = (
+        # pyrefly: ignore  # bad-assignment
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
+        # pyrefly: ignore  # bad-assignment
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
     )
+    # pyrefly: ignore  # not-iterable
     return [*subgraph_buffer, *mask_graph_buffer]
 
 
@@ -124,12 +127,6 @@ def build_subgraph_module_buffer(
     )
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*args)
-
-    # Since we are allowing mutations/buffer creation, we need to register any fresh buffers
-    # creating during the pointwise subgraph lowering
-    if len(pw_subgraph.buffers) > 0:
-        for buffer in pw_subgraph.buffers:
-            V.graph.register_buffer(buffer)
 
     def convert_output_node_to_buffer(output_buffer) -> Optional[ComputedBuffer]:
         if output_buffer is None:
@@ -177,6 +174,22 @@ def maybe_realize(args: list[Optional[IRNode]]):
         ),
         args,
     )
+
+
+def freeze_irnodes(tree: Any) -> Any:
+    """Freeze layouts for every IRNode contained in a pytree."""
+
+    if tree is None:
+        return None
+
+    def _freeze(node: IRNode) -> IRNode:
+        try:
+            node.freeze_layout()
+        except NotImplementedError:
+            pass
+        return node
+
+    return tree_map_only(IRNode, _freeze, tree)
 
 
 def create_placeholder(

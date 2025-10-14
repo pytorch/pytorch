@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
+import functools
 import warnings
 from collections import deque
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, overload, Protocol, Union
+from typing import Optional, overload, Protocol, TYPE_CHECKING, Union
 from typing_extensions import TypeIs
 
 import torch
@@ -19,6 +21,10 @@ from torch._C import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
 # - We need a better user-facing api for _DisableTorchDispatch that
 #   is able to selectively disable __torch_dispatch__ of a particular class.
@@ -27,14 +33,20 @@ from torch._C import (
 
 _is_in_torch_dispatch_mode = False
 _is_in_non_infra_torch_dispatch_mode = False
+# If inside any mode that has ignore_compile_internals() = False
+_is_in_any_mode_without_ignore_compile_internals = False
 
 
-def is_in_torch_dispatch_mode(include_infra_modes=True) -> bool:
+def is_in_torch_dispatch_mode(include_infra_modes: bool = True) -> bool:
     return (
         _is_in_torch_dispatch_mode
         if include_infra_modes
         else _is_in_non_infra_torch_dispatch_mode
     )
+
+
+def is_in_any_mode_without_ignore_compile_internals() -> bool:
+    return _is_in_any_mode_without_ignore_compile_internals
 
 
 class TorchDispatchMode:
@@ -64,7 +76,7 @@ class TorchDispatchMode:
     the next mode on the mode stack.  If you want recursively call back into
     your current ``__torch_dispatch__`` implementation, either explicitly
     invoke ``self.__torch_dispatch__(...)``, or use the context manager
-    ``__torch_dispatch__(self)`` to make PyTorch
+    ``self`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
 
@@ -81,6 +93,9 @@ class TorchDispatchMode:
 
         self.old_dispatch_mode_flags: deque[bool] = deque()
         self.old_non_infra_dispatch_mode_flags: deque[bool] = deque()
+        self.old_without_ignore_compile_internals_dispatch_mode_flags: deque[bool] = (
+            deque()
+        )
 
     def _lazy_init_old_dispatch_mode_flags(self):
         if not hasattr(self, "old_dispatch_mode_flags"):
@@ -89,12 +104,21 @@ class TorchDispatchMode:
         if not hasattr(self, "old_non_infra_dispatch_mode_flags"):
             self.old_non_infra_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
 
+        if not hasattr(
+            self, "old_without_ignore_compile_internals_dispatch_mode_flags"
+        ):
+            self.old_without_ignore_compile_internals_dispatch_mode_flags: deque[  # type: ignore[no-redef]
+                bool
+            ] = deque()
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError
 
     def __enter__(self):
         global _is_in_torch_dispatch_mode
         global _is_in_non_infra_torch_dispatch_mode
+        global _is_in_any_mode_without_ignore_compile_internals
+
         # Previously, there wasn't any state in this class' constructor
         # super calls were added to existing modes, but for any new modes
         # this will replicate the previous behavior of not strictly needing
@@ -107,6 +131,13 @@ class TorchDispatchMode:
         )
         _is_in_non_infra_torch_dispatch_mode = (
             _is_in_non_infra_torch_dispatch_mode or not self.is_infra_mode()
+        )
+        self.old_without_ignore_compile_internals_dispatch_mode_flags.append(
+            _is_in_any_mode_without_ignore_compile_internals
+        )
+        _is_in_any_mode_without_ignore_compile_internals = (
+            _is_in_any_mode_without_ignore_compile_internals
+            or not self.ignore_compile_internals()
         )
         _push_mode(self)
         return self
@@ -123,6 +154,10 @@ class TorchDispatchMode:
         _is_in_non_infra_torch_dispatch_mode = (
             self.old_non_infra_dispatch_mode_flags.pop()
         )
+        global _is_in_any_mode_without_ignore_compile_internals
+        _is_in_any_mode_without_ignore_compile_internals = (
+            self.old_without_ignore_compile_internals_dispatch_mode_flags.pop()
+        )
         _pop_mode(mb_dk_or_mode_key)
 
     @classmethod
@@ -137,10 +172,45 @@ class TorchDispatchMode:
     def is_infra_mode(cls):
         return False
 
+    @classmethod
+    def ignore_compile_internals(cls):
+        """Ignore operators that are compiled via torch.compile.
 
-def _get_current_dispatch_mode():
+        If ``True``, then this TorchDispatchMode ignores operators that
+        are optimized by :func:`torch.compile`. Mechanically, this involves
+        turning off the TorchDispatchMode throughout the whole compilation process,
+        and turning it back on for the runtime of the compiled artifact(s).
+        For example,
+
+        @torch.compile
+        def f(x):
+            return x.sin().cos()
+
+        with LoggingMode():
+            f(x)
+
+        The above example will not log anything if
+        ``LoggingMode.ignore_compile_internals()`` is True.
+        torch.compile will fuse sin() and cos() into a single operation
+        and this TorchDispatchMode will not be passed sin and cos.
+
+        If ``False`` (default), :func:`torch.compile` will respect
+        the eager semantics of passing this TorchDispatchMode all
+        operators that would have run during eager execution.
+        The way this will usually happen is that :func:`torch.compile`
+        will just fallback to eager-mode PyTorch.
+        """
+        if cls.is_infra_mode():
+            return True
+        return False
+
+
+def _get_current_dispatch_mode() -> Optional[TorchDispatchMode]:
+    """
+    Return the top user mode on the stack (the next one that would be
+    executed) if there are any.
+    """
     stack_len = _len_torch_dispatch_stack()
-    # Return a user mode on the stack if there are any
     if stack_len > 0:
         return _get_dispatch_stack_at(stack_len - 1)
     return None
@@ -194,7 +264,12 @@ def _disable_infra_mode(key):
             _push_mode(mode_unset)
 
 
-def _get_current_dispatch_mode_stack():
+def _get_current_dispatch_mode_stack() -> list[TorchDispatchMode]:
+    """
+    Returns the current stack of dispatch modes, with the most recent
+    (i.e., the one that will be processed first) at the end of the
+    list (standard stack convention).
+    """
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
@@ -344,7 +419,7 @@ class TensorWithFlatten(Protocol):
     @overload
     def to(
         self,
-        device: Optional["torch._prims_common.DeviceLikeType"] = None,
+        device: Optional[torch._prims_common.DeviceLikeType] = None,
         dtype: Optional[torch.types._dtype] = None,
         non_blocking: bool = False,
         copy: bool = False,
@@ -393,7 +468,7 @@ def is_traceable_wrapper_subclass(t: object) -> TypeIs[TensorWithFlatten]:
                 that require the stride info to be constructed. In most cases, this arg can be
                 safely ignored.
     """
-    is_subclass = isinstance(t, torch.Tensor) and type(t) != torch.Tensor
+    is_subclass = isinstance(t, torch.Tensor) and type(t) is not torch.Tensor
     return (
         is_subclass
         and hasattr(t, "__tensor_flatten__")
@@ -405,7 +480,7 @@ def is_traceable_wrapper_subclass_type(t: type) -> TypeIs[type[TensorWithFlatten
     """Same as above, but takes a type argument instead of an instance."""
     return (
         issubclass(t, torch.Tensor)
-        and t != torch.Tensor
+        and t is not torch.Tensor
         and hasattr(t, "__tensor_flatten__")
         and hasattr(t, "__tensor_unflatten__")
     )
@@ -474,10 +549,19 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         # in theory if a subclass that needs this API wants to sometimes return
         # plain tensors, we could remove the assert and just not perform the aliasing,
         # but it seems safer to learn more about this case first.
-        if is_traceable_wrapper_subclass(arg) or is_traceable_wrapper_subclass(ret):
+        #
+        # Performance note: This is all just to assert that the argument and result
+        # types match, checking that is cheaper than is_traceable_wrapper_subclass_type,
+        # and multiple returns are relatively unlikely, so just check up front!
+        arg_type = type(arg)
+        ret_type = type(ret)
+        if arg_type is not ret_type and (
+            is_traceable_wrapper_subclass_type(arg_type)
+            or is_traceable_wrapper_subclass_type(ret_type)
+        ):
             ret_list = ret if isinstance(ret, list) else [ret]
             for r in ret_list:
-                assert type(arg) == type(
+                assert type(arg) is type(
                     r
                 ), f"""Called {str(func)} with input of type {type(arg)}
 and output of type {type(ret)}. But expected types to match."""
@@ -499,17 +583,12 @@ and output of type {type(ret)}. But expected types to match."""
             assert isinstance(ret, torch.Tensor), f"type: {type(ret)}"
             torch._functionalize_unsafe_set(ret, arg)
 
-    def is_read_only_alias_match(arg, ret):
-        shared_aliases = arg.alias_set & ret.alias_set
-        return len(shared_aliases) > 0 and not arg.is_write
-
-    num_args = len(func._schema.arguments)
-    num_returns = len(func._schema.returns)
-    for arg_idx in range(num_args):
-        for return_idx in range(num_returns):
-            if is_read_only_alias_match(
-                schema_info.args[arg_idx], schema_info.outs[return_idx]
-            ):
+    for arg_idx, schema_arg in enumerate(schema_info.args):
+        for return_idx, schema_out in enumerate(schema_info.outs):
+            is_read_only_alias_match = (
+                schema_arg.alias_set & schema_out.alias_set
+            ) and not schema_arg.is_write
+            if is_read_only_alias_match:
                 alias_non_inplace_storage(args[arg_idx], outs[return_idx])
 
 
@@ -528,16 +607,19 @@ class SchemaInfo:
     args: list[AliasInfo]
     outs: list[AliasInfo]
 
-
-# Can't import torch._ops.OpOverload due to circular reference
-parsed_schema_map: dict[Any, SchemaInfo] = {}
+    # NOTE[SchemaInfo int_tags]: This has nothing to do with aliasing, but we take
+    # advantage of our existing caching of data for each OpOverload to paper over an
+    # efficiency problem with pybind11::enum_ (which currently is used to implement
+    # torch.Tag): a scan over a list of pybind enums using `in` is inefficient because
+    # each element must be converted to int with the __int__ method, which incurs a lot
+    # of overhead. Converting to int once and caching removes this per-op overhead.
+    int_tags: list[int]
 
 
 # Given an OpOverload, returns schema information on it.
 # This is cached for efficiency, since it can involve running torchgen
+@functools.cache
 def get_alias_info(func) -> SchemaInfo:
-    if func in parsed_schema_map:
-        return parsed_schema_map[func]
     # For ATen ops: use torchgen (since torchscript parser doesn't handle alias annotations
     # properly for some ops that output tensorlists)
     if func.namespace == "aten":
@@ -599,9 +681,69 @@ def get_alias_info(func) -> SchemaInfo:
             )
             for a in func._schema.returns
         ]
-    schema_info = SchemaInfo(args=arg_schemas, outs=out_schemas)
-    parsed_schema_map[func] = schema_info
+    schema_info = SchemaInfo(
+        args=arg_schemas, outs=out_schemas, int_tags=[int(x) for x in func.tags]
+    )
     return schema_info
+
+
+def autograd_would_have_decomposed(
+    func: torch._ops.OpOverload, flat_args: Sequence[Union[torch.Tensor, object]]
+) -> bool:
+    """
+    Suppose that an operator has CompositeImplicitAutograd decomp registered.
+    Would autograd have used this decomposition?  It will only use it if there
+    isn't an explicit backend registration for the device as well.  This function
+    will tell if this would have occurred.
+
+    Why do we need to apply these decompositions later?  When inference mode is
+    on, the autograd key is bypassed entirely, so a lower level mode cannot rely
+    on the decomposition have been applied.  It's easy to accidentally never apply
+    the decomposition, resulting in an operator showing up in a graph that
+    is unexpected.
+
+    Why do we need to AVOID applying the decomposition when autograd wouldn't
+    have decomposed?  If autograd doesn't decompose, this means in eager mode
+    we would have run the fused kernel.  It must be possible to trace this
+    fused kernel directly into the graph for fidelity with eager (NB: a user
+    has the option of then further decomposing at proxy tensor mode via
+    decomposition table, but we must preserve it to proxy mode to have the
+    choice.)
+
+    Why does functionalization need to also perform the test here?  This is
+    because some CompositeImplicitAutograd decompositions are not functional.
+    If we are eventually going to decompose, we need to do this while we can
+    still turn functionalization back on, so those decompositions get functionalized.
+    So an early decomposition in functionalization may still be necessary.  Note that
+    if proxy tensor decomposition process could turn functionalization back on, this
+    wouldn't be necessary, and maybe that is a useful thing to do anyway because
+    the decomposition table is user specified and a user could violate the functional
+    decomp requirement with a bad decomp.  If this happened, then you could always
+    pass through functionalization.
+    """
+    has_backend_registration = False
+    for a in flat_args:
+        if isinstance(a, torch.Tensor):
+            backend_key = torch._C._parse_dispatch_key(
+                torch._C._dispatch_key_for_device(a.device.type)
+            )
+            assert backend_key is not None
+            # TODO: use func.has_kernel_for_dispatch_key(backend_key)
+            # but this one checks py_impl and CompositeImplicitAutograd
+            # incorrectly shows up as has backend reg here
+            has_backend_registration = torch._C._dispatch_has_kernel_for_dispatch_key(
+                func.name(), backend_key
+            )
+
+            # in theory we should take all backend keys and take the highest priority one
+            # to properly mimic the dispatcher,
+            # this just grabs the first tensor and takes its device key
+            break
+    return not has_backend_registration
+
+
+# See NOTE[SchemaInfo int_tags] above.
+_TORCH_TAG_INPLACE_VIEW_INT = int(torch.Tag.inplace_view)  # type: ignore[call-overload]
 
 
 def return_and_correct_aliasing(func, args, kwargs, out):
@@ -625,14 +767,14 @@ def return_and_correct_aliasing(func, args, kwargs, out):
     schema_info = get_alias_info(func)
 
     def get_write_alias(x):
-        if len(x.alias_set) == 0:
+        alias_set = x.alias_set
+        if not alias_set or not x.is_write:
             return None
-        alias_set = list(x.alias_set)
         # torchscript allows for complicated alias sets, but our dispatcher ops only really involve simple aliasing
         assert len(alias_set) == 1
-        if x.is_write:
-            return alias_set[0]
-        return None
+        # timeit says next(iter(alias_set)) is faster than list(alias_set)[0] even for
+        # set of size 1 on Python 3.13.
+        return next(iter(alias_set))
 
     def get_arg_from_alias(output_alias, schema_info, args, kwargs):
         new_args, new_kwargs = torch.fx.operator_schemas.normalize_function(  # type: ignore[misc]
@@ -658,7 +800,8 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # For inplace_view ops in particular, we'll try hard to make sure that the wrapper subclass's
     # metadata is set correctly.
-    if torch.Tag.inplace_view in func.tags:
+    # See NOTE[SchemaInfo int_tags] above.
+    if _TORCH_TAG_INPLACE_VIEW_INT in schema_info.int_tags:
         # no_dispatch() to make sure that we secretly change the metadata on the wrapper,
         # but don't end up dispatching the op anywhere else.
         mutated_args = [
@@ -687,30 +830,26 @@ def return_and_correct_aliasing(func, args, kwargs, out):
 
     # Next: we need to make sure to return inputs directly, if the output is a mutable alias (e.g. add_()).
 
+    # Compute write aliases once instead of repeatedly.
+    schema_info_outs_write_aliases = [get_write_alias(r) for r in schema_info.outs]
     # simple case: none of our outputs have mutable aliases, so we can return the output as-is
-    if not any(get_write_alias(r) is not None for r in schema_info.outs):
+    if not any(x is not None for x in schema_info_outs_write_aliases):
         return out
 
     # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
-    if not all(get_write_alias(r) is not None for r in schema_info.outs):
+    if not all(x is not None for x in schema_info_outs_write_aliases):
         raise RuntimeError("Unsupported schema: " + str(func._schema))
 
-    if len(func._schema.returns) == 1:
+    if len(schema_info_outs_write_aliases) == 1:
         return get_arg_from_alias(
-            get_write_alias(schema_info.outs[0]), schema_info, args, kwargs
+            schema_info_outs_write_aliases[0], schema_info, args, kwargs
         )
 
     # In the multi-return case, all aten ops return a tuple / list, so cast accordingly.
     outs_to_return = type(out)(
         [
-            (
-                get_arg_from_alias(
-                    get_write_alias(schema_info.outs[i]), schema_info, args, kwargs
-                )
-                if get_write_alias(r) is not None
-                else o
-            )
-            for ((i, r), o) in zip(enumerate(schema_info.outs), out)
+            (get_arg_from_alias(write_alias, schema_info, args, kwargs))
+            for write_alias in schema_info_outs_write_aliases
         ]
     )
     return outs_to_return

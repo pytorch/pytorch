@@ -4,7 +4,9 @@ import contextlib
 
 import torch
 import torch.fx
+from torch._dynamo.graph_deduplication import apply_graph_deduplication
 from torch._dynamo.graph_utils import _detect_cycles
+from torch._dynamo.output_graph import FakeRootModule
 from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -1128,6 +1130,82 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
         result_compiled = fn_opt(*inps)
         result_eager = fn(*inps)
         self.assertEqual(result_compiled, result_eager)
+
+    def test_tuple_inputs(self):
+        with (
+            torch._dynamo.config.patch("use_graph_deduplication", False),
+            torch._dynamo.config.patch("track_nodes_for_deduplication", True),
+        ):
+
+            def inner(x, y):
+                x0, x1 = torch.split(x, 5)
+                return x0 + x1 + y
+
+            def fn(x, y):
+                o1 = inner(x, y)
+                o2 = inner(x, y)
+                o3 = inner(x, y)
+                o4 = inner(x, y)
+                return o1.sum() + o2.sum() + o3.sum() + o4.sum()
+
+            graph, tracker = extract_graph_and_tracker(
+                fn, torch.rand(10, 10), torch.rand(5, 10)
+            )
+
+            class MockOutputGraph:
+                def __init__(self):
+                    self.graph = graph
+                    self.region_tracker = tracker
+                    self.nn_modules = FakeRootModule({})
+
+                def install_subgraph(self, name, subgraph):
+                    return ""
+
+            splits = [
+                n
+                for n in graph.nodes
+                if n.op == "call_function" and n.target == torch.split
+            ]
+            for split in splits:
+                tracker.node_to_duplicates.pop(split)
+
+            apply_graph_deduplication(MockOutputGraph())
+            self.assertExpectedInline(
+                graph,
+                """\
+graph():
+    %_unnamed : [num_users=4] = get_attr[target=]
+    %l_x_ : torch.Tensor [num_users=4] = placeholder[target=L_x_]
+    %l_y_ : torch.Tensor [num_users=4] = placeholder[target=L_y_]
+    %split : [num_users=2] = call_function[target=torch.functional.split](args = (%l_x_, 5), kwargs = {})
+    %x0 : [num_users=1] = call_function[target=operator.getitem](args = (%split, 0), kwargs = {})
+    %x1 : [num_users=1] = call_function[target=operator.getitem](args = (%split, 1), kwargs = {})
+    %split_1 : [num_users=2] = call_function[target=torch.functional.split](args = (%l_x_, 5), kwargs = {})
+    %x0_1 : [num_users=1] = call_function[target=operator.getitem](args = (%split_1, 0), kwargs = {})
+    %x1_1 : [num_users=1] = call_function[target=operator.getitem](args = (%split_1, 1), kwargs = {})
+    %split_2 : [num_users=2] = call_function[target=torch.functional.split](args = (%l_x_, 5), kwargs = {})
+    %x0_2 : [num_users=1] = call_function[target=operator.getitem](args = (%split_2, 0), kwargs = {})
+    %x1_2 : [num_users=1] = call_function[target=operator.getitem](args = (%split_2, 1), kwargs = {})
+    %split_3 : [num_users=2] = call_function[target=torch.functional.split](args = (%l_x_, 5), kwargs = {})
+    %x0_3 : [num_users=1] = call_function[target=operator.getitem](args = (%split_3, 0), kwargs = {})
+    %x1_3 : [num_users=1] = call_function[target=operator.getitem](args = (%split_3, 1), kwargs = {})
+    %invoke_subgraph : [num_users=1] = call_function[target=torch.ops.higher_order.invoke_subgraph](args = (%_unnamed, , %x0, %x1, %l_y_), kwargs = {})
+    %getitem_8 : [num_users=1] = call_function[target=operator.getitem](args = (%invoke_subgraph, 0), kwargs = {})
+    %sum_1 : [num_users=1] = call_method[target=sum](args = (%getitem_8,), kwargs = {})
+    %invoke_subgraph_1 : [num_users=1] = call_function[target=torch.ops.higher_order.invoke_subgraph](args = (%_unnamed, , %x0_1, %x1_1, %l_y_), kwargs = {})
+    %getitem_9 : [num_users=1] = call_function[target=operator.getitem](args = (%invoke_subgraph_1, 0), kwargs = {})
+    %sum_2 : [num_users=1] = call_method[target=sum](args = (%getitem_9,), kwargs = {})
+    %add_8 : [num_users=1] = call_function[target=operator.add](args = (%sum_1, %sum_2), kwargs = {})
+    %invoke_subgraph_2 : [num_users=1] = call_function[target=torch.ops.higher_order.invoke_subgraph](args = (%_unnamed, , %x0_2, %x1_2, %l_y_), kwargs = {})
+    %getitem_10 : [num_users=1] = call_function[target=operator.getitem](args = (%invoke_subgraph_2, 0), kwargs = {})
+    %sum_3 : [num_users=1] = call_method[target=sum](args = (%getitem_10,), kwargs = {})
+    %add_9 : [num_users=1] = call_function[target=operator.add](args = (%add_8, %sum_3), kwargs = {})
+    %invoke_subgraph_3 : [num_users=1] = call_function[target=torch.ops.higher_order.invoke_subgraph](args = (%_unnamed, , %x0_3, %x1_3, %l_y_), kwargs = {})
+    %getitem_11 : [num_users=1] = call_function[target=operator.getitem](args = (%invoke_subgraph_3, 0), kwargs = {})
+    %sum_4 : [num_users=1] = call_method[target=sum](args = (%getitem_11,), kwargs = {})
+    %add_10 : [num_users=1] = call_function[target=operator.add](args = (%add_9, %sum_4), kwargs = {})
+    return (add_10,)""",
+            )
 
     def test_param_transfer_to_submodule(self):
         def inner_fn(x, y):

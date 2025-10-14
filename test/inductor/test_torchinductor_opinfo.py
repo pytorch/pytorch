@@ -49,7 +49,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
@@ -682,6 +682,14 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.unfold", f16): {
         "reference_in_float": True,
     },
+    # Reference crash on Intel LTS2 driver.
+    ("nn.functional.interpolate.trilinear", f32): {
+        "check_gradient": False,
+    },
+    # Reference crash on Intel LTS2 driver.
+    ("nn.functional.interpolate.trilinear", f64): {
+        "check_gradient": False,
+    },
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
@@ -1125,7 +1133,7 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @skipXPUIf(
         not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
     )

@@ -132,7 +132,7 @@ def _infer_device_type(*args):
 
     def add_device_types(arg):
         nonlocal device_types
-        if isinstance(arg, torch.Tensor) and not arg.device.type == "cpu":
+        if isinstance(arg, torch.Tensor) and arg.device.type != "cpu":
             device_types.append(arg.device.type)
     tree_map(add_device_types, args)
 
@@ -222,6 +222,7 @@ def _get_autocast_kwargs(device_type="cuda"):
 
 class CheckpointFunction(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(ctx, run_function, preserve_rng_state, *args):
         check_backward_validity(args)
         ctx.run_function = run_function
@@ -347,6 +348,7 @@ def checkpoint(
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
+    early_stop: bool = True,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model.
@@ -373,7 +375,7 @@ def checkpoint(
     .. warning::
 
         The ``use_reentrant`` parameter should be passed explicitly. In version
-        2.4 we will raise an exception if ``use_reentrant`` is not passed.
+        2.9 we will raise an exception if ``use_reentrant`` is not passed.
         If you are using the ``use_reentrant=True`` variant, please refer to the
         note below for important considerations and potential limitations.
 
@@ -425,6 +427,9 @@ def checkpoint(
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
+        args: tuple containing inputs to the :attr:`function`
+
+    Keyword args:
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint. Note that under torch.compile,
             this flag doesn't take effect and we always preserve RNG state.
@@ -432,7 +437,7 @@ def checkpoint(
         use_reentrant(bool):
             specify whether to use the activation checkpoint variant that
             requires reentrant autograd. This parameter should be passed
-            explicitly. In version 2.5 we will raise an exception if
+            explicitly. In version 2.9 we will raise an exception if
             ``use_reentrant`` is not passed. If ``use_reentrant=False``,
             ``checkpoint`` will use an implementation that does not require
             reentrant autograd. This allows ``checkpoint`` to support additional
@@ -455,7 +460,11 @@ def checkpoint(
             a trace of the operators ran during the original forward computation
             as well as the recomputation. This argument is only supported if
             ``use_reentrant=False``.
-        args: tuple containing inputs to the :attr:`function`
+        early_stop(bool, optional): If ``True``, non-reentrant checkpoint stops
+            recomputation as soon as it has computed all needed Tensors. This
+            argument is ignored if ``use_reentrant=True``. Can be overridden
+            globally using :func:`set_checkpoint_early_stop` context manager.
+            Default: ``True``.
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`
@@ -488,7 +497,7 @@ def checkpoint(
         return CheckpointFunction.apply(function, preserve, *args)
     else:
         gen = _checkpoint_without_reentrant_generator(
-            function, preserve, context_fn, determinism_check, debug, *args, **kwargs
+            function, preserve, context_fn, determinism_check, debug, early_stop, *args, **kwargs
         )
         # Runs pre-forward logic
         next(gen)
@@ -511,7 +520,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
 
     .. warning::
         The ``use_reentrant`` parameter should be passed explicitly. In version
-        2.4 we will raise an exception if ``use_reentrant`` is not passed.
+        2.9 we will raise an exception if ``use_reentrant`` is not passed.
         If you are using the ``use_reentrant=True` variant, please see
         :func:`~torch.utils.checkpoint.checkpoint` for
         the important considerations and limitations of this variant. It is
@@ -552,7 +561,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
         warnings.warn(
             "torch.utils.checkpoint.checkpoint_sequential: the use_reentrant "
             "parameter should be passed explicitly. "
-            "In version 2.5 we will raise an exception if use_reentrant "
+            "In version 2.9 we will raise an exception if use_reentrant "
             "is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
@@ -731,7 +740,7 @@ def _internal_assert(cond):
 #    by holder=None. We skip over them. We still save x at (4) (since its holder
 #    is still alive.)
 
-_enable_checkpoint_early_stop = True
+_enable_checkpoint_early_stop: Optional[bool] = None
 
 
 @contextlib.contextmanager
@@ -776,6 +785,7 @@ class _Holder:
 
 class _NoopSaveInputs(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore  # bad-override
     def forward(*args):
         return torch.empty((0,))
 
@@ -998,6 +1008,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
             def logging_mode():
                 with LoggingTensorMode(), \
                      capture_logs(True, python_tb=True, script_tb=True, cpp_tb=cpp_tb) as logs_and_tb:
+                    # pyrefly: ignore  # bad-assignment
                     self.logs, self.tbs = logs_and_tb
                     yield logs_and_tb
             return logging_mode()
@@ -1281,7 +1292,7 @@ SAC_IGNORED_OPS = {
     # With subclasses involved, these metadata ops become dispatchable, this
     # can result in incorrectness if these ops are selected cached.
     torch.ops.prim.device.default,
-} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
+} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)  # type: ignore[has-type]
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):
@@ -1448,6 +1459,7 @@ def _checkpoint_without_reentrant_generator(
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     determinism_check: str = _DEFAULT_DETERMINISM_MODE,
     debug: bool = False,
+    early_stop: bool = True,
     *args,
     **kwargs
 ):
@@ -1475,6 +1487,10 @@ def _checkpoint_without_reentrant_generator(
         debug(bool, optional): If ``True``, error messages will also include
             a trace of the operators ran during the original forward computation
             as well as the recomputation.
+        early_stop(bool, optional): If ``True``, non-reentrant checkpoint stops
+            recomputation as soon as it has computed all needed Tensors. Can be
+            overridden globally using :func:`set_checkpoint_early_stop` context
+            manager. Default: ``True``.
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
@@ -1543,7 +1559,7 @@ def _checkpoint_without_reentrant_generator(
 
     new_frame = _CheckpointFrame(
         recompute_fn,
-        _enable_checkpoint_early_stop,
+        _enable_checkpoint_early_stop if _enable_checkpoint_early_stop is not None else early_stop,
         unpack_error_cb,
         metadata_fn
     )
