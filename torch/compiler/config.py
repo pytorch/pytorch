@@ -187,9 +187,9 @@ performance issues that could affect the entire program.
 
 verbose: bool = Config(alias="torch._dynamo.config.verbose")
 """
-Enables verbose debugging output across the entire compilation stack. When enabled,
-provides detailed information about compilation decisions, optimizations, and
-potential issues. This user-facing option helps with debugging compilation problems.
+Enables verbose debugging output for Dynamo. When enabled, provides detailed 
+information about Dynamo's compilation decisions, optimizations, and potential 
+issues. 
 """
 
 
@@ -288,7 +288,8 @@ reorderable_logging_functions: set = Config(
 A set of logging functions that can be reordered to execute after the compiled
 portion of the graph, allowing larger graphs to be captured. Functions in this
 set will have their execution deferred to avoid graph breaks, though this may
-affect the timing of log output.
+affect the timing of log output. In particular, mutated values will not be logged 
+at the right time, leading to incorrect logging.
 """
 
 
