@@ -300,7 +300,7 @@ if __name__ == "__main__":
     upload_workflow_stats_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
-        "all_test_runs_experiment",
+        "all_test_runs",
         remove_nan_inf(test_cases),
     )
 
