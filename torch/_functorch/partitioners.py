@@ -1026,7 +1026,11 @@ def default_partition(
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
-        elif "tensor_meta" not in node.meta and node.op == "call_function":
+        elif (
+            "tensor_meta" not in node.meta
+            and node.op == "call_function"
+            and not isinstance(node.meta.get("val"), torch._subclasses.FakeTensor)
+        ):
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
             assert all(user.target == operator.getitem for user in users)
