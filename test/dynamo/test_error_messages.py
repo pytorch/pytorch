@@ -908,7 +908,7 @@ from user code:
         )
 
         self.assertIn(
-            "LazyVariableTracker(Unrealized: <class 'function'>)", all_lines[0]
+            "LazyVariableTracker(unrealized: <class 'function'>)", all_lines[0]
         )
         self.assertIn(
             "LazyVariableTracker(realized: UserFunctionVariable())", all_lines[3]
@@ -1186,17 +1186,17 @@ NOTE: the most recent `torch.compile` tracing attempt might not be where you app
 Most recent bytecode instructions traced (max 20):
 TRACE RESUME 0 []
 TRACE LOAD_FAST 'x' []
-TRACE LOAD_CONST 1 [LazyVariableTracker(Unrealized: <class 'torch.Tensor'>)]
-TRACE BINARY_OP 0 [LazyVariableTracker(Unrealized: <class 'torch.Tensor'>), ConstantVariable(int: 1)]
+TRACE LOAD_CONST 1 [LazyVariableTracker(unrealized: <class 'torch.Tensor'>)]
+TRACE BINARY_OP 0 [LazyVariableTracker(unrealized: <class 'torch.Tensor'>), ConstantVariable(int: 1)]
 TRACE STORE_FAST 'y' [TensorVariable()]
 TRACE LOAD_FAST 'x' []
 TRACE LOAD_FAST 'y' [TensorVariable()]
 TRACE BINARY_OP 0 [TensorVariable(), TensorVariable()]
 TRACE STORE_FAST 'z' [TensorVariable()]
 TRACE LOAD_GLOBAL 'torch' []
-TRACE LOAD_ATTR '_dynamo' [LazyVariableTracker(Unrealized: <class 'module'>)]
-TRACE LOAD_ATTR 'graph_break' [LazyVariableTracker(Unrealized: <class 'module'>)]
-TRACE CALL 0 [NullVariable, LazyVariableTracker(Unrealized: <class 'function'>)]""",
+TRACE LOAD_ATTR '_dynamo' [LazyVariableTracker(unrealized: <class 'module'>)]
+TRACE LOAD_ATTR 'graph_break' [LazyVariableTracker(unrealized: <class 'module'>)]
+TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]""",
         )
 
     @torch._dynamo.config.patch(verbose=True)
