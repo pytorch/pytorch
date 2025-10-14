@@ -1,5 +1,7 @@
+# Owner(s): ["module: dynamo"]
+
 import torch
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 
 
 def _compile_fullgraph(fn):
@@ -134,3 +136,7 @@ class TestTorchCheck(TestCase):
 
         with self.assertRaises(AssertionError):
             f(x)
+
+
+if __name__ == "__main__":
+    run_tests()
