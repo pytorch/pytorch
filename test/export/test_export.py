@@ -15203,18 +15203,19 @@ graph():
         from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 
         inp = torch.randn(4, 4)
-        gm = _dynamo_graph_capture_for_export(Foo())(inp)
+        gm = export(Foo(), (inp,)).run_decompositions().module()
         self.assertExpectedInline(
             str(gm.graph).strip(),
             """\
 graph():
-    %l_flat_args_0_ : [num_users=3] = placeholder[target=arg_0]
-    %val : [num_users=1] = call_method[target=sin](args = (%l_flat_args_0_,), kwargs = {})
-    %cos : [num_users=1] = call_method[target=cos](args = (%l_flat_args_0_,), kwargs = {})
-    %val_1 : [num_users=1] = call_function[target=operator.iadd](args = (%val, %cos), kwargs = {})
-    %cos_1 : [num_users=1] = call_method[target=cos](args = (%l_flat_args_0_,), kwargs = {})
-    %val_2 : [num_users=1] = call_function[target=operator.iadd](args = (%val_1, %cos_1), kwargs = {})
-    return (val_2,)""",
+    %x : [num_users=4] = placeholder[target=x]
+    %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%x,), kwargs = {})
+    %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
+    %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %cos_1), kwargs = {})
+    return (add_1,)""",
         )
 
         self.assertEqual(gm(inp), Foo()(inp))
