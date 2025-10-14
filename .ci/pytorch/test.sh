@@ -487,7 +487,7 @@ test_inductor_aoti() {
 
 test_inductor_aoti_cross_compile_for_windows() {
   sudo apt-get update
-  sudo apt-get install -y g++-mingw-w64-x86-64-win32
+  sudo apt-get install -y g++-mingw-w64-x86-64-posix
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
@@ -512,7 +512,7 @@ test_inductor_aoti_cross_compile_for_windows() {
     ls -lah "$WIN_TORCH_LIBS_DIR/lib/" || true
     ls -lah "$WIN_TORCH_LIBS_DIR/lib/x64/" || true
 
-    python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR" --win-torch-lib-dir "$WIN_TORCH_LIBS_DIR"
+    python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR" --win-torch-lib-dir "$WIN_TORCH_LIBS_DIR/lib/"
   else
     python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR"
   fi

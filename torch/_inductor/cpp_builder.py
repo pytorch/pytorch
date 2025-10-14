@@ -976,7 +976,7 @@ def get_cpp_options(
     if config.aot_inductor.cross_target_platform == "windows":
         passthrough_args.extend(["-static-libstdc++", "-static-libgcc"])
         if check_mingw_win32_flavor(MINGW_GXX) == "posix":
-            passthrough_args.append("-Wl,-Bstatic -lpthread -Wl,-Bdynamic")
+            passthrough_args.append("-Wl,-Bstatic -lwinpthread -Wl,-Bdynamic")
 
     return (
         definitions,

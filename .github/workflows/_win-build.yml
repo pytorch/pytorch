@@ -218,7 +218,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           name: ${{ inputs.build-environment }}-win-torch-libs
-          path: C:\${{ github.run_id }}\win-torch-libs
+          path: /c/${{ github.run_id }}/win-torch-libs
 
       # Upload to github so that people can click and download artifacts
       - name: Upload artifacts to s3
