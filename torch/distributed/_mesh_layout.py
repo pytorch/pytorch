@@ -151,13 +151,41 @@ class _MeshLayout(Layout):
 
     def unflatten(self, dim: int, unflatten_sizes: tuple[int, ...]) -> "_MeshLayout":
         """
-        Unflatten the layout by the given sizes. This is a wrapper of pycute's unflatten.
+        Unflatten a single dimension in the layout by splitting it into multiple dimensions.
+        It takes a dimension at position `dim` and splits it into multiple new dimensions
+        with the specified sizes.
+
+        Args:
+            dim (int): The index of the dimension to unflatten. Must be a valid dimension index.
+            unflatten_sizes (tuple[int, ...]): The new sizes for the dimensions that will replace
+                the original dimension at `dim`. The product of these sizes must equal the size
+                of the original dimension at `dim`.
+
+        Returns:
+            _MeshLayout: A new layout with the specified dimension unflattened.
 
         Example:
-          self = (4,2):(2,1)      # sizes=(4,2), strides=(2,1)
-          sizes = (2,2)
-          self.unflatten(sizes) = (2,2):(4,2)
+            Original: sizes=(8,), strides=(1,)  # 8 ranks in 1D
+            Call: unflatten(0, (2, 2, 2))  # Create 3D topology
+            Result: sizes=(2, 2, 2), strides=(4, 2, 1)  # 2*2*2 unflattened topology
         """
+        # Check that dim is within valid range
+        if dim < 0 or dim >= len(self):
+            raise ValueError(
+                f"dim {dim} is out of range for layout with {len(self)} dimensions. "
+                f"Expected dim to be in range [0, {len(self) - 1}]."
+            )
+
+        # Check that the product of unflatten_sizes equals the original dimension size
+        original_size = self[dim].numel()
+        unflatten_product = math.prod(unflatten_sizes)
+        if unflatten_product != original_size:
+            raise ValueError(
+                f"The product of unflatten_sizes {unflatten_sizes} is {unflatten_product}, "
+                f"but the original dimension at dim={dim} has size {original_size}. "
+                f"These must be equal for unflatten to work correctly."
+            )
+
         sizes = list(self.sizes)  # type: ignore[arg-type]
         strides = list(self.strides)  # type: ignore[arg-type]
         unflatten_layout = self[dim].composition(
@@ -165,10 +193,7 @@ class _MeshLayout(Layout):
         )
         sizes[dim : dim + 1] = list(unflatten_layout.sizes)  # type: ignore[arg-type]
         strides[dim : dim + 1] = list(unflatten_layout.strides)  # type: ignore[arg-type]
-        return _MeshLayout(
-            tuple(sizes),
-            tuple(strides),
-        )
+        return _MeshLayout(tuple(sizes), tuple(strides))
 
     def all_ranks_from_zero(self) -> list[int]:
         """
