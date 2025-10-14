@@ -3868,7 +3868,7 @@ class DualWrapperCodegen(CodeGen):
                 if attr1 == attr2:
                     return attr1
                 else:
-                    breakpoint()
+                    # breakpoint()
                     raise RuntimeError(
                         f"DualWrapperCodegen attribute '{name}' has different values between original_wrapper_code and autotuning_wrapper_code: {attr1} != {attr2}"
                     )
@@ -3882,5 +3882,14 @@ class DualWrapperCodegen(CodeGen):
         Apply a function to each wrapper (original_wrapper_code and autotuning_wrapper_code).
         The function should take a wrapper as its input parameter.
         """
+        # This should just be self, using tmp for ease of understanding.
+        tmp_wrapper_code = V.graph.wrapper_code
+
+        V.graph.wrapper_code = self.original_wrapper_code
         func(self.original_wrapper_code)
+
+        V.graph.wrapper_code = self.autotuning_wrapper_code
         func(self.autotuning_wrapper_code)
+
+        # Restore to original wrapper_code.
+        V.graph.wrapper_code = tmp_wrapper_code
