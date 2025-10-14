@@ -83,9 +83,10 @@ def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwa
         world_size = world_size_opt
     if rank != -1 or world_size != -1 or world_size_opt is None:
         query_dict = _query_to_dict(result.query)
-        assert "rank" not in query_dict and "world_size" not in query_dict, (
-            f"The url: {url} has node-specific arguments(rank, world_size) already."
-        )
+        if "rank" in query_dict or "world_size" in query_dict:
+            raise AssertionError(
+                f"The url: {url} has node-specific arguments(rank, world_size) already."
+            )
         if rank != -1:
             query_dict["rank"] = str(rank)
         if world_size != -1 or world_size_opt is None:
@@ -227,7 +228,8 @@ def _tcp_rendezvous_handler(
     world_size = int(query_dict["world_size"])
     use_libuv = _get_use_libuv_from_query_dict(query_dict)
 
-    assert result.hostname is not None
+    if result.hostname is None:
+        raise AssertionError("hostname cannot be None")
 
     store = _create_c10d_store(
         result.hostname, result.port, rank, world_size, timeout, use_libuv

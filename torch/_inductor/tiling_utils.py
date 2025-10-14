@@ -126,6 +126,7 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
 
     # For the purposes of tiling/coalesced access, approximate ModularIndexing and FloorDiv
     # then check later
+    # pyrefly: ignore  # missing-attribute
     eq_1_expr_simplified = eq_1_expr.replace(ModularIndexing, indexing_div_rep).replace(
         FloorDiv, indexing_div_rep
     )
