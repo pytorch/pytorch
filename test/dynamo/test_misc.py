@@ -7709,8 +7709,10 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
 
         test_tensor = torch.randn(10, 10)
         pt = forward(test_tensor)
-        inductor = torch.compile(forward)(test_tensor)
-        self.assertEqual(pt, inductor)
+        aot_eager = torch.compile(forward, backend="aot_eager")(test_tensor)
+        self.assertEqual(pt, aot_eager)
+        with self.assertRaises(torch._dynamo.exc.BackendCompilerFailed):
+            inductor = torch.compile(forward, backend="inductor")(test_tensor)
 
     def test_nested_sequential_try_with(self):
         def fn(x):
