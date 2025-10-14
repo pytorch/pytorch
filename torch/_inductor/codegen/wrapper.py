@@ -3851,9 +3851,22 @@ class DualWrapperCodegen(CodeGen):
             if callable(attr1) and callable(attr2):
 
                 def dual_method(*args, **kwargs):
+                    tmp_wrapper_code = V.graph.wrapper_code
+                    tmp_cpp_wrapper = V.graph.cpp_wrapper
+
                     # Call the method on both wrappers
+                    V.graph.wrapper_code = self.original_wrapper_code
                     result1 = attr1(*args, **kwargs)
+
+                    V.graph.wrapper_code = self.autotuning_wrapper_code
+                    V.graph.cpp_wrapper = False
                     result2 = attr2(*args, **kwargs)
+
+
+                    # Restore to original wrapper_code.
+                    V.graph.wrapper_code = tmp_wrapper_code
+                    V.graph.cpp_wrapper = tmp_cpp_wrapper
+                    
                     # Check if results are the same, otherwise raise an error
                     if result1 == result2:
                         return result1
@@ -3884,12 +3897,15 @@ class DualWrapperCodegen(CodeGen):
         """
         # This should just be self, using tmp for ease of understanding.
         tmp_wrapper_code = V.graph.wrapper_code
+        tmp_cpp_wrapper = V.graph.cpp_wrapper
 
         V.graph.wrapper_code = self.original_wrapper_code
         func(self.original_wrapper_code)
 
         V.graph.wrapper_code = self.autotuning_wrapper_code
+        V.graph.cpp_wrapper = False
         func(self.autotuning_wrapper_code)
 
         # Restore to original wrapper_code.
         V.graph.wrapper_code = tmp_wrapper_code
+        V.graph.cpp_wrapper = tmp_cpp_wrapper
