@@ -33,6 +33,7 @@ from torch.utils._sympy.symbol import (
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
+from ..scheduler import MixOrderReduction
 from ..analyze_preserves_zero_mask import prologue_preserves_zero_mask
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
@@ -384,6 +385,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         override_persistent_reduction: Optional[bool] = None,
         override_cooperative_reduction: Optional[bool] = None,
         tiling_scores: Optional[dict[str, sympy.Expr]] = None,
+        mix_order_reduction: bool = False,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -411,6 +413,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if override_persistent_reduction is not None
             else self.should_use_persistent_reduction()
         )
+        self.mix_order_reduction: bool = mix_order_reduction
         self.no_x_dim = self.want_no_x_dim()
         self.code_hash: Optional[str] = None
         # Info to enable multiple store_output calls for epilogue subtiling
@@ -1397,8 +1400,65 @@ class SIMDScheduling(BaseScheduling):
         return node_schedule
 
     def codegen_mix_order_reduction(self, node):
-        breakpoint()
-        raise RuntimeError("NYI")
+        snodes = node.snodes
+        assert len(snodes) == 2
+        assert isinstance(snodes[0], scheduler.SchedulerNode)
+        assert isinstance(snodes[1], scheduler.SchedulerNode)
+
+        node1, node2 = snodes
+
+        # Make sure there are no producer/consumer relationship
+        assert not (node1.ancestors & node2.get_operation_names()) and not (
+            node2.ancestors & node1.get_operation_names()
+        )
+
+        self._codegen_mix_order_reduction(snodes[0], snodes[1])
+
+    def _codegen_mix_order_reduction(self, node1, node2):
+        if not V.graph.sizevars.statically_known_gt(node1.group[1][0], node1.group[1][1]):
+            return _codegen_mix_order_reduction(node2, node1)
+
+        assert V.graph.sizevars.statically_known_gt(node1.group[1][0], node1.group[1][1])
+
+        # Decide the numel and rnumel
+        common_read = MixOrderReduction.get_common_read(node1, node2)
+        assert len(common_read) == 1
+        common_read = common_read[0]
+
+        # decide the split size
+        nrow, ncol = node1.group[1]
+        split_size = 128 # TODO don't hard code
+        nsplit = (nrow + split_size - 1) // split_size
+
+        # TODO: create the intermediate tensor
+        if True:
+            numel, rnumel = node1.group[1]
+            node_schedule = self.generate_node_schedule(node1.get_nodes(), numel, rnumel)
+            kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel, None)
+            kernel = self.create_kernel_choices(kernel_features,
+                [{"x": numel, "r0_": rnumel}], {"features": kernel_features, "tiling_scores": None, "mix_order_reduction": True})[0]
+            # TODO: instead of create the kernel and then change the attributes, let the kernel constructor decides these attributes itself.
+            assert kernel.persistent_reduction
+            assert kernel.mix_order_reduction
+            kernel.rsplit_size = split_size
+
+            self.codegen_node_schedule_with_kernel(node_schedule, kernel) 
+            with V.set_kernel_handler(kernel):
+                src_code = kernel.codegen_kernel()
+            kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+            kernel.kernel_name = kernel_name
+            kernel.code_hash = code_hash(src_code)
+
+            with V.set_kernel_handler(kernel):
+                for node in kernel_features.scheduler_nodes():
+                    node.mark_run()
+            kernel.call_kernel(kernel.kernel_name)
+            V.graph.removed_buffers |= kernel.removed_buffers
+            V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+            self.free_buffers_in_scheduler()
+        else:
+            self.codegen_node(node1)
+        self.codegen_node(node2)
 
     def codegen_node(
         self, node: Union[scheduler.FusedSchedulerNode, scheduler.SchedulerNode]

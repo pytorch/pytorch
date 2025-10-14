@@ -1405,6 +1405,7 @@ class IndentedBuffer:
         self.writeline("\n")
 
     def writeline(self, line: Union[LineContext, DeferredLineBase, str]) -> None:
+        # if isinstance(line, str) and "x0 = xindex" in line: breakpoint()
         if isinstance(line, LineContext):
             self._lines.append(line)
         elif isinstance(line, DeferredLineBase):

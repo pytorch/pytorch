@@ -144,15 +144,30 @@ class MixOrderReduction:
         index = found_dep.index
         var_ranges = node.read_writes.var_ranges
 
-        return not (set(var_ranges) - set(index.free_symbols))
+        if not (set(var_ranges) - set(index.free_symbols)):
+            return True
+
+        # cases that happen after merging loops:
+        #   MemoryDep('arg0_1', c0, {c0: 25165824})])
+        #   var_ranges={d0: 32768, d1: 768}
+        if V.graph.sizevars.statically_known_equals(sympy_product(found_dep.size), sympy_product(var_ranges.values())):
+            return True
+        return False
 
     @classmethod
-    def has_common_read(cls, node1, node2):
+    def get_common_read(cls, node1, node2):
+        out = []
         common_reads = node1.used_buffer_names() & node2.used_buffer_names()
         for buf in common_reads:
             if cls._is_full_access(buf, node1) and cls._is_full_access(buf, node2):
-                return True
-        return False
+                out.append(buf)
+
+        return out
+                
+
+    @classmethod
+    def has_common_read(cls, node1, node2):
+        return len(cls.get_common_read(node1, node2)) > 0
      
     # TODO add a cache
     @classmethod
@@ -165,14 +180,51 @@ class MixOrderReduction:
             return False
 
         # check common buffer accesses
-        if not cls.has_common_read(node1, node2):
+        common_read = MixOrderReduction.get_common_read(node1, node2)
+        if len(common_read) != 1:
+            return False;
+        assert len(common_read) == 1
+        common_read = common_read[0]
+
+        g1 = node1.group[1]
+        nrow = max(g1[0], g1[1])
+        ncol = min(g1[0], g1[1])
+
+        # We require more more row than columns since
+        # 1, we prefer doing persistent reduction for each row
+        # 2, we will split the reduction across the rows
+        if not V.graph.sizevars.statically_known_geq(nrow, ncol * 10):
             return False
 
-        return True
+        contiguous_node = node1 if node1.group[1][1] == ncol else node2
+        return cls.is_contiguous_load(common_read, contiguous_node)
    
     @classmethod
     def are_mix_order_reductions(cls, node1, node2):
         return cls.can_fuse(node1, node2)
+
+
+    @classmethod
+    def is_contiguous_load(cls, buf, node):
+        from torch._inductor.loop_body import MemoryUsageType
+        loop_body = node._body
+        entries = loop_body.memory_usage[MemoryUsageType.LOAD]
+        index_names = [e.index_name for e in entries if e.buffer_name == buf]
+        if len(index_names) != 1:
+            return False
+        index_name = index_names[0]
+        index_expr = loop_body.indexing_exprs[index_name]
+        var_ranges = loop_body.var_ranges
+        if len(var_ranges) != 2:
+            return False
+
+        var_symbols = list(var_ranges.keys())
+        stride_vars = V.graph.sizevars.stride_vars(
+            index_expr,
+            var_symbols,
+            var_symbols,
+        )
+        return stride_vars[-1] == 1
 
 @dataclasses.dataclass
 class SchedulerBuffer:
@@ -5717,6 +5769,7 @@ class BaseScheduling:  # noqa: docstring_linter
         self.scheduler = scheduler
 
     def free_buffers_in_scheduler(self) -> None:
+        return # TODO bring this back
         if self.scheduler:
             self.scheduler.free_buffers()
 
