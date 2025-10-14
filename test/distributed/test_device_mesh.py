@@ -41,6 +41,13 @@ from torch.utils._typing_utils import not_none
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 device_count = torch.accelerator.device_count()
 
+try:
+    import torch._C._distributed_c10d.ProcessGroupNCCL
+
+    _NCCL_AVAILABLE = True
+except ImportError:
+    _NCCL_AVAILABLE = False
+
 
 def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_rank=-1):
     os.environ["MASTER_ADDR"] = addr
@@ -1004,6 +1011,8 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(mesh_3d["cp"].get_group(), unflatten_mesh["cp"].get_group())
 
         # Test unflatten with backend override set.
+        if not _NCCL_AVAILABLE:
+            return
         opts = dist.ProcessGroupNCCL.Options()
         opts._timeout = timedelta(seconds=30)
         mesh_2d = global_mesh._unflatten(
