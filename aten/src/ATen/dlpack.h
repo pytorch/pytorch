@@ -32,8 +32,8 @@
 #define DLPACK_DLL
 #endif
 
-#include <stddef.h>
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -147,8 +147,7 @@ typedef enum {
   kDLFloat = 2U,
   /*!
    * \brief Opaque handle type, reserved for testing purposes.
-   * Frameworks need to agree on the handle data type for the exchange to be
-   * well-defined.
+   * Frameworks need to agree on the handle data type for the exchange to be well-defined.
    */
   kDLOpaqueHandle = 3U,
   /*! \brief bfloat16 */
@@ -170,37 +169,35 @@ typedef enum {
   kDLFloat8_e5m2fnuz = 13U,
   kDLFloat8_e8m0fnu = 14U,
   /*! \brief FP6 data types
-   * Setting bits != 6 is currently unspecified, and the producer must ensure it
-   * is set while the consumer must stop importing if the value is unexpected.
+   * Setting bits != 6 is currently unspecified, and the producer must ensure it is set
+   * while the consumer must stop importing if the value is unexpected.
    */
   kDLFloat6_e2m3fn = 15U,
   kDLFloat6_e3m2fn = 16U,
   /*! \brief FP4 data types
-   * Setting bits != 4 is currently unspecified, and the producer must ensure it
-   * is set while the consumer must stop importing if the value is unexpected.
+   * Setting bits != 4 is currently unspecified, and the producer must ensure it is set
+   * while the consumer must stop importing if the value is unexpected.
    */
   kDLFloat4_e2m1fn = 17U,
 } DLDataTypeCode;
 
 /*!
- * \brief The data type the tensor can hold. The data type is assumed to follow
- * the native endian-ness. An explicit error message should be raised when
- * attempting to export an array with non-native endianness
+ * \brief The data type the tensor can hold. The data type is assumed to follow the
+ * native endian-ness. An explicit error message should be raised when attempting to
+ * export an array with non-native endianness
  *
  *  Examples
  *   - float: type_code = 2, bits = 32, lanes = 1
  *   - float4(vectorized 4 float): type_code = 2, bits = 32, lanes = 4
  *   - int8: type_code = 0, bits = 8, lanes = 1
  *   - std::complex<float>: type_code = 5, bits = 64, lanes = 1
- *   - bool: type_code = 6, bits = 8, lanes = 1 (as per common array library
- * convention, the underlying storage size of bool is 8 bits)
+ *   - bool: type_code = 6, bits = 8, lanes = 1 (as per common array library convention, the underlying storage size of bool is 8 bits)
  *   - float8_e4m3: type_code = 8, bits = 8, lanes = 1 (packed in memory)
  *   - float6_e3m2fn: type_code = 16, bits = 6, lanes = 1 (packed in memory)
  *   - float4_e2m1fn: type_code = 17, bits = 4, lanes = 1 (packed in memory)
  *
- *  When a sub-byte type is packed, DLPack requires the data to be in little
- * bit-endian, i.e., for a packed data set D ((D >> (i * bits)) && bit_mask)
- * stores the i-th element.
+ *  When a sub-byte type is packed, DLPack requires the data to be in little bit-endian, i.e.,
+ *  for a packed data set D ((D >> (i * bits)) && bit_mask) stores the i-th element.
  */
 typedef struct {
   /*!
@@ -267,8 +264,7 @@ typedef struct {
    * \brief strides of the tensor (in number of elements, not bytes),
    *  can not be NULL if ndim != 0, must points to
    *  an array of ndim elements that specifies the strides,
-   *  so consumer can always rely on strides[dim] being valid for 0 <= dim <
-   * ndim.
+   *  so consumer can always rely on strides[dim] being valid for 0 <= dim < ndim.
    *
    *  When ndim == 0, strides can be set to NULL.
    *
@@ -301,14 +297,14 @@ typedef struct DLManagedTensor {
   /*! \brief the context of the original host framework of DLManagedTensor in
    *   which DLManagedTensor is used in the framework. It can also be NULL.
    */
-  void* manager_ctx;
+  void * manager_ctx;
   /*!
    * \brief Destructor - this should be called
    * to destruct the manager_ctx  which backs the DLManagedTensor. It can be
    * NULL if there is no way for the caller to provide a reasonable destructor.
    * The destructor deletes the argument self as well.
    */
-  void (*deleter)(struct DLManagedTensor* self);
+  void (*deleter)(struct DLManagedTensor * self);
 } DLManagedTensor;
 
 // bit masks used in the DLManagedTensorVersioned
@@ -353,16 +349,15 @@ typedef struct DLManagedTensorVersioned {
    * Stores DLManagedTensorVersioned is used in the
    * framework. It can also be NULL.
    */
-  void* manager_ctx;
+  void *manager_ctx;
   /*!
    * \brief Destructor.
    *
-   * This should be called to destruct manager_ctx which holds the
-   * DLManagedTensorVersioned. It can be NULL if there is no way for the caller
-   * to provide a reasonable destructor. The destructor deletes the argument
-   * self as well.
+   * This should be called to destruct manager_ctx which holds the DLManagedTensorVersioned.
+   * It can be NULL if there is no way for the caller to provide a reasonable
+   * destructor. The destructor deletes the argument self as well.
    */
-  void (*deleter)(struct DLManagedTensorVersioned* self);
+  void (*deleter)(struct DLManagedTensorVersioned *self);
   /*!
    * \brief Additional bitmask flags information about the tensor.
    *
@@ -406,16 +401,15 @@ typedef struct DLManagedTensorVersioned {
  * \sa DLPackExchangeAPI
  */
 typedef int (*DLPackManagedTensorAllocator)(                                         //
-   DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,              //
-   void (*SetError)(void* error_ctx, const char* kind, const char* message)           //
- );
+  DLTensor* prototype, DLManagedTensorVersioned** out, void* error_ctx,              //
+  void (*SetError)(void* error_ctx, const char* kind, const char* message)           //
+);
 
 /*!
  * \brief Exports a PyObject* Tensor/NDArray to a DLManagedTensorVersioned.
  *
- * This function does not perform any stream synchronization. The consumer
- * should query DLPackCurrentWorkStream to get the current work stream and
- * launch kernels on it.
+ * This function does not perform any stream synchronization. The consumer should query
+ * DLPackCurrentWorkStream to get the current work stream and launch kernels on it.
  *
  * This function is exposed by the framework through the DLPackExchangeAPI.
  *
@@ -429,24 +423,23 @@ typedef int (*DLPackManagedTensorAllocator)(                                    
  * \sa DLPackExchangeAPI, DLPackCurrentWorkStream
  */
 typedef int (*DLPackManagedTensorFromPyObjectNoSync)(                 //
-   void* py_object,                                                    //
-   DLManagedTensorVersioned** out                                      //
- );
+  void* py_object,                                                    //
+  DLManagedTensorVersioned** out                                      //
+);
 
 /*!
  * \brief Exports a PyObject* Tensor/NDArray to a provided DLTensor.
  *
- * This function provides a faster interface for temporary, non-owning,
- * exchange. The producer (implementor) still owns the memory of data, strides,
- * shape. The liveness of the DLTensor and the data it views is only guaranteed
- * until control is returned.
+ * This function provides a faster interface for temporary, non-owning, exchange.
+ * The producer (implementor) still owns the memory of data, strides, shape.
+ * The liveness of the DLTensor and the data it views is only guaranteed until
+ * control is returned.
  *
  * This function currently assumes that the producer (implementor) can fill
  * in the DLTensor shape and strides without the need for temporary allocations.
  *
- * This function does not perform any stream synchronization. The consumer
- * should query DLPackCurrentWorkStream to get the current work stream and
- * launch kernels on it.
+ * This function does not perform any stream synchronization. The consumer should query
+ * DLPackCurrentWorkStream to get the current work stream and launch kernels on it.
  *
  * This function is exposed by the framework through the DLPackExchangeAPI.
  *
@@ -459,9 +452,9 @@ typedef int (*DLPackManagedTensorFromPyObjectNoSync)(                 //
  * \sa DLPackExchangeAPI, DLPackCurrentWorkStream
  */
 typedef int (*DLPackDLTensorFromPyObjectNoSync)(                      //
-   void* py_object,                                                    //
-   DLTensor* out                                                       //
- );
+  void* py_object,                                                    //
+  DLTensor* out                                                       //
+);
 
 /*!
  * \brief Obtain the current work stream of a device.
@@ -485,10 +478,10 @@ typedef int (*DLPackDLTensorFromPyObjectNoSync)(                      //
  * \sa DLPackExchangeAPI
  */
 typedef int (*DLPackCurrentWorkStream)(                         //
-   DLDeviceType device_type,                                     //
-   int32_t device_id,                                            //
-   void** out_current_stream                                     //
- );
+  DLDeviceType device_type,                                     //
+  int32_t device_id,                                            //
+  void** out_current_stream                                     //
+);
 
 /*!
  * \brief Imports a DLManagedTensorVersioned to a PyObject* Tensor/NDArray.
@@ -508,9 +501,9 @@ typedef int (*DLPackCurrentWorkStream)(                         //
  * \sa DLPackExchangeAPI
  */
 typedef int (*DLPackManagedTensorToPyObjectNoSync)(                //
-   DLManagedTensorVersioned* tensor,                                //
-   void** out_py_object                                             //
- );
+  DLManagedTensorVersioned* tensor,                                //
+  void** out_py_object                                             //
+);
 
 /*!
  * \brief DLPackExchangeAPI stable header.
@@ -564,11 +557,10 @@ typedef struct DLPackExchangeAPIHeader {
  *     header.prev_version_api = nullptr;
  *
  *     managed_tensor_allocator = MyDLPackManagedTensorAllocator;
- *     managed_tensor_from_py_object_no_sync =
- * MyDLPackManagedTensorFromPyObjectNoSync; managed_tensor_to_py_object_no_sync
- * = MyDLPackManagedTensorToPyObjectNoSync; dltensor_from_py_object_no_sync =
- * MyDLPackDLTensorFromPyObjectNoSync; current_work_stream =
- * MyDLPackCurrentWorkStream;
+ *     managed_tensor_from_py_object_no_sync = MyDLPackManagedTensorFromPyObjectNoSync;
+ *     managed_tensor_to_py_object_no_sync = MyDLPackManagedTensorToPyObjectNoSync;
+ *     dltensor_from_py_object_no_sync = MyDLPackDLTensorFromPyObjectNoSync;
+ *     current_work_stream = MyDLPackCurrentWorkStream;
  *  }
  *
  *  static const DLPackExchangeAPI* Global() {
@@ -581,24 +573,23 @@ typedef struct DLPackExchangeAPIHeader {
  * Guidelines for leveraging DLPackExchangeAPI:
  *
  * There are generally two kinds of consumer needs for DLPack exchange:
- * - N0: library support, where consumer.kernel(x, y, z) would like to run a
- * kernel with the data from x, y, z. The consumer is also expected to run the
- * kernel with the same stream context as the producer. For example, when x, y,
- * z is torch.Tensor, consumer should query exchange_api->current_work_stream to
- * get the current stream and launch the kernel with the same stream. This setup
- * is necessary for no synchronization in kernel launch and maximum
- * compatibility with CUDA graph capture in the producer. This is the desirable
- * behavior for library extension support for frameworks like PyTorch.
+ * - N0: library support, where consumer.kernel(x, y, z) would like to run a kernel
+ *       with the data from x, y, z. The consumer is also expected to run the kernel with the same
+ *       stream context as the producer. For example, when x, y, z is torch.Tensor,
+ *       consumer should query exchange_api->current_work_stream to get the
+ *       current stream and launch the kernel with the same stream.
+ *       This setup is necessary for no synchronization in kernel launch and maximum compatibility
+ *       with CUDA graph capture in the producer.
+ *       This is the desirable behavior for library extension support for frameworks like PyTorch.
  * - N1: data ingestion and retention
  *
  * Note that obj.__dlpack__() API should provide useful ways for N1.
- * The primary focus of the current DLPackExchangeAPI is to enable faster
- * exchange N0 with the support of the function pointer current_work_stream.
+ * The primary focus of the current DLPackExchangeAPI is to enable faster exchange N0
+ * with the support of the function pointer current_work_stream.
  *
  * Array/Tensor libraries should statically create and initialize this structure
  * then return a pointer to DLPackExchangeAPI as an int value in Tensor/Array.
- * The DLPackExchangeAPI* must stay alive throughout the lifetime of the
- * process.
+ * The DLPackExchangeAPI* must stay alive throughout the lifetime of the process.
  *
  * One simple way to do so is to create a static instance of DLPackExchangeAPI
  * within the framework and return a pointer to it. The following code
@@ -630,8 +621,7 @@ typedef struct DLPackExchangeAPI {
   DLPackManagedTensorToPyObjectNoSync managed_tensor_to_py_object_no_sync;
   /*!
    * \brief Producer function pointer for DLPackDLTensorFromPyObject
-   *        This function can be NULL when the producer does not support this
-   * function.
+   *        This function can be NULL when the producer does not support this function.
    * \sa DLPackDLTensorFromPyObjectNoSync
    */
   DLPackDLTensorFromPyObjectNoSync dltensor_from_py_object_no_sync;
@@ -644,6 +634,6 @@ typedef struct DLPackExchangeAPI {
 } DLPackExchangeAPI;
 
 #ifdef __cplusplus
-} // DLPACK_EXTERN_C
+}  // DLPACK_EXTERN_C
 #endif
-#endif // DLPACK_DLPACK_H_
+#endif  // DLPACK_DLPACK_H_
