@@ -20,7 +20,6 @@ from inspect import currentframe
 from itertools import count
 from operator import attrgetter
 from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
 import torch._inductor.async_compile
@@ -98,6 +97,7 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExpr
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 
 from .._dynamo.backends.common import aot_autograd
 from .._dynamo.exc import ShortenTraceback, SkipFrame
@@ -836,9 +836,9 @@ def _compile_fx_inner(
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
 
-    assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
-        f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
-    )
+    assert isinstance(
+        next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)
+    ), f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
 
     if graph_kwargs.get("cudagraphs") is None:
         graph_kwargs["cudagraphs"] = BoxedBool(config.triton.cudagraphs)
@@ -1397,6 +1397,12 @@ class _InProcessFxCompile(FxCompile):
                             const_graph.codegen_with_cpp_wrapper()
                         )
 
+                # We use dual wrapper to generate autotuning code alongside with the original codegen.
+                use_dual_wrapper = (
+                    aot_mode
+                    and config.triton.autotune_at_compile_time
+                    and config.triton.autotune_full_graph
+                )
                 graph = GraphLowering(
                     gm,
                     # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
@@ -1420,6 +1426,7 @@ class _InProcessFxCompile(FxCompile):
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
+                    use_dual_wrapper=use_dual_wrapper,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
@@ -1468,9 +1475,9 @@ class _InProcessFxCompile(FxCompile):
                         elif graph.aot_mode:
                             from .codecache import AotCodeCompiler
 
-                            assert graph.cpp_wrapper, (
-                                "AOT mode only supports C++ wrapper"
-                            )
+                            assert (
+                                graph.cpp_wrapper
+                            ), "AOT mode only supports C++ wrapper"
                             wrapper_code, kernel_code = graph.codegen_with_cpp_wrapper()
                             output_code_log.debug(
                                 "Output wrapper code: \n%s", wrapper_code.value
@@ -1624,11 +1631,9 @@ class _InProcessFxCompile(FxCompile):
                         )
 
                         # pyrefly: ignore  # unbound-name
-                        V.graph.disable_cudagraphs_reason = (
-                            check_lowering_disable_cudagraph(
-                                # pyrefly: ignore  # unbound-name
-                                V.graph.device_node_mapping
-                            )
+                        V.graph.disable_cudagraphs_reason = check_lowering_disable_cudagraph(
+                            # pyrefly: ignore  # unbound-name
+                            V.graph.device_node_mapping
                         )
 
                     self._compile_stats[type(self)].codegen_and_compile += 1
@@ -1699,9 +1704,9 @@ def fx_codegen_and_compile(
         from .compile_fx_ext import _OutOfProcessFxCompile
 
         # pyrefly: ignore  # unbound-name
-        assert isinstance(scheme, _OutOfProcessFxCompile), (
-            "async is only valid with an out-of-process compile mode"
-        )
+        assert isinstance(
+            scheme, _OutOfProcessFxCompile
+        ), "async is only valid with an out-of-process compile mode"
         # pyrefly: ignore  # unbound-name
         scheme = _AsyncFxCompile(scheme)
 
@@ -1710,9 +1715,9 @@ def fx_codegen_and_compile(
         from .compile_fx_ext import _OutOfProcessFxCompile
 
         # pyrefly: ignore  # unbound-name
-        assert isinstance(scheme, _OutOfProcessFxCompile), (
-            "progressive is only valid with an out-of-process compile mode"
-        )
+        assert isinstance(
+            scheme, _OutOfProcessFxCompile
+        ), "progressive is only valid with an out-of-process compile mode"
 
         progression_configs = _get_progression_configs()
 
@@ -1850,9 +1855,7 @@ def cudagraphify_impl(
         (
             x
             if not isinstance(x, torch.Tensor)
-            else static_input(x)
-            if idx not in static_input_idxs
-            else x.detach()
+            else static_input(x) if idx not in static_input_idxs else x.detach()
         )
         for idx, x in enumerate(inputs)
     ]
@@ -2667,9 +2670,7 @@ def _compile_fx_main(
         def bw_compiler(
             gm: GraphModule, example_inputs: Sequence[InputType]
         ) -> OutputCode:
-            with (
-                dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"),
-            ):
+            with (dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"),):
                 return compile_fx_backward(
                     gm,
                     example_inputs,

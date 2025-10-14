@@ -3862,11 +3862,10 @@ class DualWrapperCodegen(CodeGen):
                     V.graph.cpp_wrapper = False
                     result2 = attr2(*args, **kwargs)
 
-
                     # Restore to original wrapper_code.
                     V.graph.wrapper_code = tmp_wrapper_code
                     V.graph.cpp_wrapper = tmp_cpp_wrapper
-                    
+
                     # Check if results are the same, otherwise raise an error
                     if result1 == result2:
                         return result1

@@ -4598,6 +4598,7 @@ class Scheduler:
 
     def free_buffers(self) -> None:
         """Free any buffers that are no longer needed"""
+        # breakpoint()
         for name in sorted(
             self.buffer_names_to_free
             - V.graph.removed_buffers
@@ -5442,6 +5443,7 @@ class Scheduler:
             V.graph.wrapper_code.write_get_raw_stream_header()
 
         for node in nodes:
+            # breakpoint()
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -5475,10 +5477,10 @@ class Scheduler:
                         V.graph.wrapper_code.codegen_device_guard_enter(device.index)
 
             self.current_node = node
-            self.buffer_names_to_free.update(node.last_usage)
 
             def wrap_codegen_node(w):
                 curr_node = node
+                self.buffer_names_to_free.update(curr_node.last_usage)
                 if node.is_template():
                     prologue, template_node, epilogue = node.get_prologue_template_epilogue(
                         list(node.get_nodes())

@@ -340,6 +340,7 @@ class GraphLowering(torch.fx.Interpreter):
         name: Optional[str] = None,
         inputs_to_check: Optional[Sequence[int]] = None,
         fx_wrapper: bool = False,
+        use_dual_wrapper: bool = False,
     ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
@@ -444,6 +445,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.name = name  # type: ignore[assignment]
         self.cpp_wrapper = cpp_wrapper
         self.fx_wrapper = fx_wrapper
+        self.use_dual_wrapper = use_dual_wrapper
 
         # record multi_kernel choice for cpp_wrapper so the second pass knows
         # which sub-kernel is picked. Copy cpp_wrapper to another variable
@@ -2092,12 +2094,12 @@ class GraphLowering(torch.fx.Interpreter):
             partition_signatures,
         )
 
+        # We do not need tuning code if only_cpu is True.
+        if only_cpu:
+            self.use_dual_wrapper = False
+
         # Create autotuning_wrapper_code for full graph autotuning if needed
-        if (
-            self.aot_mode
-            and config.triton.autotune_full_graph
-            and config.triton.autotune_at_compile_time
-        ):
+        if self.use_dual_wrapper:
             if self.cpp_wrapper:
                 # If we're using cpp wrapper, create a separate Python wrapper for autotuning
                 python_wrapper_code_gen_cls = get_wrapper_codegen_for_device(
@@ -2387,11 +2389,7 @@ class GraphLowering(torch.fx.Interpreter):
                 V.graph.all_codegen_kernel_names,
             )
 
-            if (
-                self.aot_mode
-                and config.triton.autotune_full_graph
-                and config.triton.autotune_at_compile_time
-            ):
+            if self.use_dual_wrapper:
                 # If we're doing full graph autotuning, we need to generate the autotuning wrapper code
                 # and the autotuning kernels
                 original_wrapper_code = self.wrapper_code.original_wrapper_code
@@ -2408,6 +2406,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # breakpoint()
                 self.cpp_wrapper = original_cpp_wrapper
                 self.wrapper_code = original_wrapper_code
+            # breakpoint()
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
             return result
