@@ -97,6 +97,7 @@ def draw_buffers(
             dtype = node.data.dtype
 
         metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
+        # pyrefly: ignore  # missing-attribute
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
@@ -228,6 +229,7 @@ def update_orig_fx_node_name_to_buf_name(
             )
             continue
         else:
+            # pyrefly: ignore  # bad-argument-type, unsupported-operation
             assert len(children_nodes) == 1 and children_nodes[0] == node
 
         ir_node = node.node
@@ -251,6 +253,7 @@ def get_node_name_to_buf_meta(
         if buf_name not in buf_name_to_n_node:
             buf_name_to_n_node[buf_name] = OrderedSet([node_name])
         else:
+            # pyrefly: ignore  # missing-attribute
             buf_name_to_n_node[buf_name].add(node_name)
 
     node_name_to_buf_meta = {}
@@ -1103,6 +1106,9 @@ def set_kernel_post_grad_provenance_tracing(
     Returns a unique int debug handler for each call to this function.
     """
 
+    if config.trace.provenance_tracking_level == 0:
+        return None
+
     try:
         from .codegen.simd_kernel_features import DisableReduction, EnableReduction
 
@@ -1143,9 +1149,11 @@ def set_kernel_post_grad_provenance_tracing(
                                 kernel_name, []
                             )
                         )
+                        # pyrefly: ignore  # missing-attribute
                         stack_traces_set.update(snode.node.get_stack_traces())
                         curr_node_info.extend(
                             origin.name
+                            # pyrefly: ignore  # missing-attribute
                             for origin in snode.node.origins
                             if origin.name not in curr_node_info
                         )

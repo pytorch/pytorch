@@ -3,10 +3,10 @@ import contextlib
 import functools
 import gc
 import warnings
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import asdict, dataclass, field
 from itertools import chain
-from typing import Any, Callable, cast, no_type_check, Optional, Union
+from typing import Any, cast, no_type_check, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -199,6 +199,7 @@ def _get_fqns(
                 return {f"{prefix}{fqn}" for fqn in flat_param._fqns}
             curr_obj = getattr(curr_obj, FSDP_WRAPPED_MODULE)
             if curr_obj_name != FSDP_WRAPPED_MODULE:
+                # pyrefly: ignore  # bad-argument-type
                 fqn_obj_names.append(curr_obj_name)
                 curr_obj = getattr(curr_obj, curr_obj_name)
         elif isinstance(curr_obj, torch._dynamo.eval_frame.OptimizedModule):
@@ -215,6 +216,7 @@ def _get_fqns(
                 ):
                     if hasattr(curr_obj, removed_fqn):
                         curr_obj = getattr(curr_obj, removed_fqn)
+            # pyrefly: ignore  # bad-argument-type
             fqn_obj_names.append(curr_obj_name)
             if curr_obj_name == nn.modules.module._EXTRA_STATE_KEY_SUFFIX:
                 if i != len(obj_names) - 1:
@@ -305,7 +307,7 @@ def _verify_options(
             continue
 
         fqns = _get_fqns(model, name)
-        fqn = fqn_param_mapping.get(param, None)
+        fqn = fqn_param_mapping.get(param)
         if fqn is not None:
             cast(set[str], fqn_param_mapping[param]).update(fqns)
             shared_params_mapping[param] = fqn_param_mapping[param]
@@ -1206,6 +1208,7 @@ def _unflatten_model_state_dict(
     if not state_dict:
         return {}
 
+    # pyrefly: ignore  # no-matching-overload
     if isinstance(next(iter(state_dict.keys())), nn.Module):
         warnings.warn(
             "Passing model_state_dict as a ``Dict[nn.Module, Dict[str, Any]]``"

@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/fuser/fallback.h>
 #include <torch/csrc/jit/codegen/fuser/kernel_cache.h>
 
+#include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
 #include <stdexcept>
 
@@ -93,9 +94,8 @@ std::string debugGetFusedKernelCode(
   const auto key = fuser::registerFusion(fusion_group);
 
   std::string code;
-  if (!fuser::runFusion(key, stack, &code)) {
-    throw std::runtime_error("Could not run fusion for graph");
-  }
+  TORCH_CHECK(
+      fuser::runFusion(key, stack, &code), "Could not run fusion for graph")
 
   return code;
 }
