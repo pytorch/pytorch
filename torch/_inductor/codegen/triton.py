@@ -584,7 +584,7 @@ class BlockDescriptorOptions:
         Transposes are also applied to the input if self.desc_stride_sorter is not None.
         if for_store is True:
             - First Broadcast the value. Since self.broadcast_shape is stored in
-            descending stride order, it must must be reverted to the original order
+            descending stride order, it must be reverted to the original order
             since the input value does not have dims with descending strides
             - After, transpose the broadcasted value so that dimensions are in
             descending stride order
