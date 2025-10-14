@@ -204,6 +204,7 @@ def run_functionalized_fw_and_collect_metadata(
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
+            # pyrefly: ignore  # unbound-name
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
         with disable_above, mode, suppress_pending:
             # precondition: The passed in function already handles unflattening inputs + flattening outputs

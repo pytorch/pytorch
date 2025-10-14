@@ -308,7 +308,7 @@ optimize_ddp: Union[
     ],
 ] = True
 
-# By default, Dynamo emits runtime asserts (e.g. torch._check, torch._check_is_size) in the graph.
+# By default, Dynamo emits runtime asserts (e.g. torch._check) in the graph.
 # In some cases those asserts could be performance costly
 # E.g. torch._check(tensor[0].item() > 2) for tensor on cuda will require cuda sync.
 # Setting this to True keeps them hinting to symbolic shapes engine,
@@ -401,7 +401,7 @@ allow_rnn = False
 # exported FX graph. This flag should become the default eventually
 # and be removed, but currently provides a way to fall back to old
 # graph breaking behavior.
-capture_sparse_compute = False if is_fbcode() else True
+capture_sparse_compute = not is_fbcode()
 
 # If true, error if we try to compile a function that has
 # been seen before.
@@ -457,6 +457,10 @@ nested_graph_breaks = False
 # produces a consistent number of inputs to the graph.
 install_free_tensors = False
 
+# Temporary flag to control the turning of install_free_tensors to True for
+# export. We will remove this flag in a few weeks when stable.
+install_free_tensors_for_export = True
+
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
 
@@ -481,7 +485,8 @@ issue_3_13_0_warning = True
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
 
-# Used for testing - forces all top-level functions to be nested when traced with Dynamo
+# Used for testing - forces all top-level functions to be nested when traced with Dynamo.
+# There are slight differences between this config and wrap_top_frame.
 debug_force_nested_calls = False
 
 # Used for testing - forces a graph break when a function
