@@ -7,10 +7,6 @@ from typing import Any, cast, Optional, TYPE_CHECKING, Union
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
-from torch.distributed._distributed_c10d import (
-    _allow_inflight_collective_as_graph_input,
-    _set_allow_inflight_collective_as_graph_input,
-)
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
@@ -637,6 +633,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         if func == torch.ops.aten.view.default:
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
+            # pyrefly: ignore  # index-error
             res = func(args[0].elem, args[1])
             wrapper_res = AsyncCollectiveTensor(res)
             return wrapper_res
@@ -790,6 +787,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
                 FutureWarning,
                 stacklevel=3,
             )
+        # pyrefly: ignore  # redundant-cast
         return c10d._resolve_group_name_by_ranks_and_tag(cast(list[int], group), tag)
     else:
         raise ValueError(f"Unsupported group type: {type(group)}, {group}")
@@ -818,6 +816,11 @@ def _are_we_tracing() -> bool:
         return True
     # If fake mode is turned on, we are almost definitely compiling/tracing.
     if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None:
+        return True
+    # See Note [enable_python_dispatcher in dynamo]
+    if torch._C._dispatch_tls_is_dispatch_key_included(
+        torch._C.DispatchKey.PythonDispatcher
+    ):
         return True
     return get_proxy_mode() is not None
 
@@ -857,13 +860,15 @@ def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
     will be registered in the work registry, and the wait_tensor() in compiled region called on
     the output tensor of the collective will wait on the correct work object.
     """
-    previous = _allow_inflight_collective_as_graph_input()
+    previous = torch._C._distributed_c10d._allow_inflight_collective_as_graph_input()
 
     try:
-        _set_allow_inflight_collective_as_graph_input(value)
+        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(value)
         yield
     finally:
-        _set_allow_inflight_collective_as_graph_input(previous)
+        torch._C._distributed_c10d._set_allow_inflight_collective_as_graph_input(
+            previous
+        )
 
 
 def _make_all_gather_out_tensor(input, group_size):
@@ -941,7 +946,7 @@ def _all_to_all_single_meta(
         return input.new_empty(input.size())
     else:
         for s in output_split_sizes:
-            torch._check_is_size(s)
+            torch._check(s >= 0)
         out_size = list(input.size())
         out_size[0] = sum(output_split_sizes)
         return input.new_empty(out_size)
@@ -1161,8 +1166,10 @@ def all_gather_inplace(
     for t in tensor_list:
         is_scalar = t.dim() == 0
         t_offset = 1 if is_scalar else t.size(0)
+        # pyrefly: ignore  # unsupported-operation
         out = output[offset] if is_scalar else output[offset : offset + t_offset]
         output_splits.append(out)
+        # pyrefly: ignore  # unsupported-operation
         offset += t_offset
     for dst, src in zip(tensor_list, output_splits):
         dst.copy_(src)
