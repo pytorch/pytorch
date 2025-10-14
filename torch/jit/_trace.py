@@ -651,7 +651,7 @@ def analyze_ts_result_with_export_result(export, trace):
         # mkldnn is not supported for torch.allclose
         if orig.layout == torch._mkldnn:  # type: ignore[attr-defined]
             return True
-        if type(orig) != type(loaded):
+        if type(orig) is not type(loaded):
             return False
 
         if isinstance(orig, torch._subclasses.FakeTensor):

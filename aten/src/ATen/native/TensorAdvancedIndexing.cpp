@@ -2676,7 +2676,7 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
       std::move(dim));
 }
 
-static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
+inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
   TORCH_CHECK(
       !t.defined() || t.device() == device,
       "Expected tensor to have ",
@@ -2689,7 +2689,7 @@ static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
       ")");
 }
 
-static inline void checkDevice(
+inline void checkDevice(
     CheckedFrom c,
     at::ArrayRef<Tensor> tensors,
     Device device) {
