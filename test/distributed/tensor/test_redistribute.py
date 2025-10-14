@@ -5,6 +5,7 @@ import contextlib
 import copy
 import itertools
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch.distributed.device_mesh import init_device_mesh
@@ -18,7 +19,10 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
-from torch.distributed.tensor._redistribute import redistribute_local_tensor
+from torch.distributed.tensor._redistribute import (
+    DTensorRedistributePlanner,
+    redistribute_local_tensor,
+)
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1144,6 +1148,105 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         sharded_dt = self.redistribute(
             sharded_dt, mesh, tgt_placement, shard_order=None
         )
+
+    @unittest.expectedFailure
+    @with_comms
+    @patch.object(DTensorRedistributePlanner, "find_min_cost_path")
+    def test_with_partial_in_backward(self, mock_find_path):
+        """
+        Test with backward redistribution path contains Partial().
+        """
+
+        # generate ground truth
+        input_tensor = torch.randn(8, 8, requires_grad=True)
+        input_tensor_orig = input_tensor.clone().detach().requires_grad_(True)
+        loss = input_tensor_orig.sum()
+        loss.backward()
+
+        forward_path = [
+            DTensorRedistributePlanner.DistState(
+                placements=(Replicate(), Replicate()),
+                tensor_dim_to_mesh_dim=(),
+            ),
+            DTensorRedistributePlanner.DistState(
+                placements=(Shard(0), Replicate()),
+                tensor_dim_to_mesh_dim=(),
+            ),
+        ]
+
+        backward_path = [
+            DTensorRedistributePlanner.DistState(
+                placements=(Replicate(), Replicate()),
+                tensor_dim_to_mesh_dim=(),
+            ),
+            # Note: The current DTensor implementation silently skips the
+            # transition from Replicate to Partial (R->P) during the backward
+            # pass. This can lead to numerical correctness issues if any
+            # operations are performed on that mesh dimension after the
+            # Partial() conversion. If we change the Partial() to something like
+            # Shard(0), the issue will be resolved. The will not be an issue for
+            # greedy solution, because it won't generate a path like P->R, but
+            # this may happen in graph based redistribution.
+            DTensorRedistributePlanner.DistState(
+                placements=(Partial(), Replicate()),
+                tensor_dim_to_mesh_dim=(),
+            ),
+            DTensorRedistributePlanner.DistState(
+                placements=(Replicate(), Replicate()),
+                tensor_dim_to_mesh_dim=(),
+            ),
+        ]
+
+        # set side_effect with a list - first call gets first item, second call gets second item
+        mock_find_path.side_effect = [forward_path, backward_path]
+        import torch.distributed.tensor._redistribute as redistribute_module
+
+        original_redistribute = redistribute_module.redistribute_local_tensor
+
+        def force_graph_based(*args, **kwargs):
+            kwargs["use_graph_based_transform"] = True
+            return original_redistribute(*args, **kwargs)
+
+        def disable_graph_based(*args, **kwargs):
+            kwargs["use_graph_based_transform"] = False
+            return original_redistribute(*args, **kwargs)
+
+        device_mesh = init_device_mesh(self.device_type, (4, 2))
+
+        # disable the graph based path finding in `distribute_tensor`
+        with patch.object(
+            redistribute_module,
+            "redistribute_local_tensor",
+            side_effect=disable_graph_based,
+        ):
+            dtensor = distribute_tensor(
+                input_tensor, device_mesh, [Replicate(), Replicate()]
+            )
+            assert mock_find_path.call_count == 0
+
+        # enable the graph based path finding in `distribute_tensor`, so that
+        # mock_find_path.side_effect will be used
+        with patch.object(
+            redistribute_module,
+            "redistribute_local_tensor",
+            side_effect=force_graph_based,
+        ):
+            dtensor_sharded = dtensor.redistribute(
+                device_mesh,
+                [Shard(0), Replicate()],
+            )
+            loss = dtensor_sharded.sum()
+            assert type(loss) is DTensor
+            # loss.placement is supposed to be [Partial(), Replicate()], but at
+            # some place, it silently get updated to [Replicate(), Replicate()].
+            loss.backward()
+
+        # verify forward and backward paths in mock_find_path.side_effect were used
+        assert mock_find_path.call_count == 2, (
+            f"Run {mock_find_path.call_count} calls to find_min_cost_path"
+        )
+
+        self.assertEqual(input_tensor_orig.grad, dtensor.grad.full_tensor())
 
 
 if __name__ == "__main__":
