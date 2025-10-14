@@ -12,7 +12,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
-from torch.distributed._pycute import is_int, suffix_product
+from torch.distributed._pycute import is_int
 from torch.utils._typing_utils import not_none
 
 
@@ -1102,31 +1102,18 @@ else:
             ] = ((None, None),),
         ) -> "DeviceMesh":
             root_mesh = self._get_root_mesh()
-            unflatten_length = len(mesh_sizes)
-            original_sizes = [self._layout[i].sizes for i in range(len(self._layout))]
-            original_strides = [
-                self._layout[i].strides for i in range(len(self._layout))
-            ]
-            orig_mesh_dim_names = list(not_none(self.mesh_dim_names))
-            unflatten_layout = self._layout[dim].composition(
-                _MeshLayout(tuple(mesh_sizes), suffix_product(mesh_sizes))
-            )
             cur_rank = self.get_rank()
-            original_sizes[dim : dim + 1] = list(unflatten_layout.sizes)  # type: ignore[arg-type]
-            original_strides[dim : dim + 1] = list(unflatten_layout.strides)  # type: ignore[arg-type]
-            unflattened_layout = _MeshLayout(
-                tuple(original_sizes),
-                tuple(original_strides),
-            )
+            unflattened_layout = self._layout.unflatten(dim, mesh_sizes)
             pg_ranks_by_dim = unflattened_layout.remap_to_tensor(
                 root_mesh.mesh,
             )
-            orig_mesh_dim_names[dim : dim + 1] = list(mesh_dim_names)
+            unflattened_mesh_dim_names = list(not_none(self.mesh_dim_names))
+            unflattened_mesh_dim_names[dim : dim + 1] = list(mesh_dim_names)
             res_mesh = DeviceMesh._create_mesh_from_ranks(
                 self.device_type,
                 pg_ranks_by_dim,
                 cur_rank,
-                tuple(orig_mesh_dim_names),  # mesh_dim_names
+                tuple(unflattened_mesh_dim_names),
                 _init_backend=False,
                 _layout=unflattened_layout,
                 _root_mesh=root_mesh,
@@ -1137,6 +1124,11 @@ else:
             # TODO: To make backend init more efficient with cute layout representation and support
             # per dim backend init.
             if hasattr(self, "_dim_group_names"):
+                unflatten_length = len(mesh_sizes)
+                unflatten_layout = _MeshLayout(
+                    tuple(unflattened_layout.sizes[dim : dim + unflatten_length]),  # type: ignore[index]
+                    tuple(unflattened_layout.strides[dim : dim + unflatten_length]),  # type: ignore[index]
+                )
                 unflatten_pg_ranks_by_dim = unflatten_layout.remap_to_tensor(
                     root_mesh.mesh,
                 )

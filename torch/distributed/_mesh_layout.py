@@ -17,6 +17,7 @@ from torch.distributed._pycute import (
     is_int,
     is_tuple,
     Layout,
+    suffix_product,
 )
 
 
@@ -147,6 +148,27 @@ class _MeshLayout(Layout):
         """
         layout = complement(self, world_size)
         return _MeshLayout(layout.shape, layout.stride)
+
+    def unflatten(self, dim: int, unflatten_sizes: tuple[int, ...]) -> "_MeshLayout":
+        """
+        Unflatten the layout by the given sizes. This is a wrapper of pycute's unflatten.
+
+        Example:
+          self = (4,2):(2,1)      # sizes=(4,2), strides=(2,1)
+          sizes = (2,2)
+          self.unflatten(sizes) = (2,2):(4,2)
+        """
+        sizes = list(self.sizes)  # type: ignore[arg-type]
+        strides = list(self.strides)  # type: ignore[arg-type]
+        unflatten_layout = self[dim].composition(
+            _MeshLayout(tuple(unflatten_sizes), suffix_product(unflatten_sizes))
+        )
+        sizes[dim : dim + 1] = list(unflatten_layout.sizes)  # type: ignore[arg-type]
+        strides[dim : dim + 1] = list(unflatten_layout.strides)  # type: ignore[arg-type]
+        return _MeshLayout(
+            tuple(sizes),
+            tuple(strides),
+        )
 
     def all_ranks_from_zero(self) -> list[int]:
         """
