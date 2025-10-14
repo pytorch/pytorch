@@ -4885,6 +4885,151 @@ def max_pool3d_with_indices(
     )
 
 
+def _max_pool2d_scatter_backward(
+    grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
+):
+    """
+    Scatter-based max_pool2d backward implementation optimized for large kernels.
+
+    Uses O(output_size) scatter operations instead of O(output_size × kernel_size²)
+    approach. No input validation as inputs come from autograd.
+    """
+    # Normalize parameters to list format
+    if isinstance(kernel_size, int):
+        kernel_size = [kernel_size, kernel_size]
+    if isinstance(stride, int):
+        stride = [stride, stride]
+    if isinstance(padding, int):
+        padding = [padding, padding]
+    if isinstance(dilation, int):
+        dilation = [dilation, dilation]
+
+    # Tensor dimensions
+    batch_size, channels, out_h, out_w = grad_output.get_size()
+    _, _, in_h, in_w = x.get_size()
+
+    def compute_scatter_indices():
+        """Transform kernel offsets from max_pool2d indices to absolute input tensor positions."""
+
+        def index_transform(idx):
+            """
+            Transform output indices to input linear indices for scatter operation.
+
+            The indices tensor from max_pool2d_with_indices contains linear indices
+            into the input spatial dimensions (H×W), not kernel offsets.
+            For each output position, indices[b,c,h,w] = h_in * W + w_in where
+            (h_in, w_in) is the 2D position in the input that produced the maximum.
+
+            We need to convert this to a full 4D linear index including batch and channel.
+            """
+            batch_idx, channel_idx, out_h_idx, out_w_idx = idx
+
+            # Load linear spatial index from max_pool2d forward pass
+            # indices[batch, channel, out_h, out_w] = h_in * in_w + w_in
+            indices_loader = indices.make_loader()
+            linear_spatial_idx = indices_loader(idx)
+
+            # Convert linear spatial index to 2D coordinates in input
+            in_w_const = ops.index_expr(in_w, torch.int64)
+            in_h_const = ops.index_expr(in_h, torch.int64)
+
+            abs_h = linear_spatial_idx // in_w_const
+            abs_w = linear_spatial_idx % in_w_const
+
+            # Validate that the computed position is within input bounds
+            # This guards against invalid indices (shouldn't happen, but defensive)
+            h_valid = ops.and_(ops.ge(abs_h, 0), ops.lt(abs_h, in_h_const))
+            w_valid = ops.and_(ops.ge(abs_w, 0), ops.lt(abs_w, in_w_const))
+            position_valid = ops.and_(h_valid, w_valid)
+
+            # Convert 4D tensor coordinates to linear index for scatter operation
+            # linear_idx = batch_idx * (C*H*W) + channel_idx * (H*W) + abs_h * W + abs_w
+
+            # Compute batch and channel offsets as SymPy expressions
+            batch_offset_sympy = batch_idx * channels * in_h * in_w
+            channel_offset_sympy = channel_idx * in_h * in_w
+
+            # Convert SymPy expressions to IR nodes
+            batch_offset = ops.index_expr(batch_offset_sympy, torch.int64)
+            channel_offset = ops.index_expr(channel_offset_sympy, torch.int64)
+
+            # Compute spatial offset from abs_h and abs_w (already IR nodes)
+            h_offset = ops.mul(abs_h, in_w_const)
+
+            # Combine all offsets to get final linear index
+            linear_idx = ops.add(
+                ops.add(ops.add(batch_offset, channel_offset), h_offset),
+                abs_w
+            )
+
+            # Return linear index or -1 for invalid positions
+            return ops.where(position_valid, linear_idx, ops.constant(-1, torch.int64))
+
+        return ir.Pointwise.create(
+            device=indices.get_device(),
+            dtype=torch.int64,
+            inner_fn=index_transform,
+            ranges=grad_output.get_size(),
+        )
+
+    # Execute scatter-based gradient accumulation
+    # Compute scatter indices
+    scatter_indices = compute_scatter_indices()
+
+    # Flatten tensors for scatter operation
+    grad_output_flat = view(grad_output, [grad_output.get_numel()])
+    scatter_indices_flat = view(scatter_indices, [grad_output.get_numel()])
+
+    # Initialize gradient accumulator tensor
+    grad_input_flat = _full(
+        0, grad_output.get_device(), grad_output.get_dtype(), [x.get_numel()]
+    )
+
+    # Handle invalid indices (-1) by creating safe indices and values
+    # Use pointwise operations to mask invalid positions
+    indices_loader = scatter_indices_flat.make_loader()
+    grad_loader = grad_output_flat.make_loader()
+
+    def make_safe_indices(idx):
+        scatter_idx = indices_loader(idx)
+        # Replace -1 with 0 to prevent out-of-bounds
+        return ops.where(
+            ops.ne(scatter_idx, ops.constant(-1, torch.int64)),
+            scatter_idx,
+            ops.constant(0, torch.int64),
+        )
+
+    safe_indices = ir.Pointwise.create(
+        device=scatter_indices_flat.get_device(),
+        dtype=torch.int64,
+        inner_fn=make_safe_indices,
+        ranges=scatter_indices_flat.get_size(),
+    )
+
+    def make_safe_values(idx):
+        scatter_idx = indices_loader(idx)
+        grad_val = grad_loader(idx)
+        # Zero out gradients for invalid indices
+        return ops.where(
+            ops.ne(scatter_idx, ops.constant(-1, torch.int64)),
+            grad_val,
+            ops.constant(0.0, grad_output.get_dtype()),
+        )
+
+    safe_grad_values = ir.Pointwise.create(
+        device=grad_output_flat.get_device(),
+        dtype=grad_output.get_dtype(),
+        inner_fn=make_safe_values,
+        ranges=grad_output_flat.get_size(),
+    )
+
+    # Accumulate gradients at computed positions
+    result_flat = scatter_add_(grad_input_flat, 0, safe_indices, safe_grad_values)
+
+    # Reshape back to input dimensions
+    return view(result_flat, x.get_size())
+
+
 fallback_max_pool2d_with_indices_backward = fallback_handler(
     aten.max_pool2d_with_indices_backward.default,
     add_to_fallback_set=False,
@@ -4908,6 +5053,14 @@ def max_pool2d_with_indices_backward(
     assert len(padding) == 2
     assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
+
+    # Use scatter backend for large kernels (window_size > 25)
+    # Scatter approach is O(output_size) vs O(output_size × kernel_size²)
+    window_size = kernel_size[0] * kernel_size[1]
+    if window_size > 25 and not ceil_mode:
+        return _max_pool2d_scatter_backward(
+            grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
+        )
 
     # we will read this many times, so make sure it is computed
     grad_output.realize_hint()

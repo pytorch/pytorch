@@ -9692,7 +9692,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @expectedFailureXPU
     def test_max_pool2d_with_indices_backward5(self):
-        # Window size is too big. Should fallback
+        # Large kernel (13x13=169 > 144) with large window (169 > 25)
+        # Should use scatter backend instead of fallback
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
                 a, b, [13, 13], [1, 1], [2, 2], [1, 1], False, c
@@ -9716,7 +9717,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        assertGeneratedKernelCountEqual(self, 0)
+        # Scatter backend generates 2 kernels:
+        # 1) Fused pointwise (index transform + masking)
+        # 2) Scatter-add (atomic gradient accumulation)
+        assertGeneratedKernelCountEqual(self, 2)
 
     # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d_with_indices_backward6(self):
@@ -9745,6 +9749,106 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
         assertGeneratedKernelCountEqual(self, 0)
+
+    def test_max_pool2d_scatter_backward_issue_66042(self):
+        """
+        Regression test for Issue #66042.
+        Test that max_pool2d_with_indices_backward works with large kernels without fallback.
+        """
+
+        def fn(x):
+            return torch.nn.functional.max_pool2d(
+                x, 8, stride=2, padding=1, return_indices=True
+            )
+
+        # Test shapes that should trigger scatter implementation (8x8 = 64 > 25)
+        test_cases = [
+            (1, 1, 32, 32),  # Single channel
+            (2, 4, 28, 28),  # Multi-channel
+            (1, 8, 64, 64),  # Large input
+        ]
+
+        for batch, channels, height, width in test_cases:
+            with self.subTest(shape=(batch, channels, height, width)):
+                x = torch.randn(batch, channels, height, width, requires_grad=True)
+                self.common(fn, (x,))
+
+    def test_max_pool2d_scatter_correctness_large_kernels(self):
+        """Test scatter implementation produces correct gradients for large kernels."""
+        import warnings
+
+        # Test various large kernels (all window_size > 25)
+        for kernel_size in [6, 7, 8]:  # All > 25 window_size
+            with self.subTest(kernel_size=kernel_size):
+
+                def fn(x):
+                    return torch.nn.functional.max_pool2d(
+                        x, kernel_size, stride=2, padding=1, return_indices=True
+                    )
+
+                x = torch.randn(1, 4, 32, 32, requires_grad=True)
+
+                # Ensure no fallback warnings
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter("always")
+
+                    # Test compilation works
+                    self.common(fn, (x,))
+
+                    # Check no fallback warnings
+                    fallback_warnings = [
+                        str(warn.message)
+                        for warn in w
+                        if "fallback" in str(warn.message).lower()
+                    ]
+                    self.assertEqual(
+                        len(fallback_warnings),
+                        0,
+                        f"Unexpected fallback for kernel {kernel_size}: {fallback_warnings}",
+                    )
+
+                # Verify backward gradients match eager mode
+                x_compiled = torch.randn(1, 4, 32, 32, requires_grad=True)
+                x_eager = x_compiled.clone().detach().requires_grad_(True)
+
+                # Compiled version
+                fn_compiled = torch.compile(fn, backend="inductor")
+                pooled_comp, indices_comp = fn_compiled(x_compiled)
+
+                # Eager version
+                pooled_eager, indices_eager = fn(x_eager)
+
+                # Forward pass should match
+                torch.testing.assert_close(pooled_comp, pooled_eager)
+                torch.testing.assert_close(indices_comp, indices_eager)
+
+                # Backward pass should match
+                grad_output = torch.randn_like(pooled_comp)
+                pooled_comp.backward(grad_output)
+                pooled_eager.backward(grad_output.clone())
+
+                torch.testing.assert_close(
+                    x_compiled.grad, x_eager.grad, rtol=1e-3, atol=1e-4
+                )
+
+    def test_max_pool2d_scatter_overlapping_windows(self):
+        """Test scatter handles overlapping receptive fields correctly."""
+
+        # Test with larger kernel (8x8 = 64 > 25) and stride=1
+        # This creates many overlapping windows that scatter to same input positions
+        def fn(x):
+            return torch.nn.functional.max_pool2d(x, 8, stride=1, return_indices=True)
+
+        # Test both small and larger inputs with multiple channels
+        test_cases = [
+            (1, 1, 12, 12),  # Small input, single channel
+            (1, 2, 16, 16),  # Larger input, multiple channels
+        ]
+
+        for batch, channels, height, width in test_cases:
+            with self.subTest(shape=(batch, channels, height, width)):
+                x = torch.randn(batch, channels, height, width, requires_grad=True)
+                self.common(fn, (x,))
 
     def test_issue102546(self):
         def fn(x):
