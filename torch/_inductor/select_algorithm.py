@@ -425,7 +425,7 @@ class TritonTemplateKernel(TritonKernel):
             # ["z", "y", "x", "r0_", "r1_"] (see simd.py:all_prefixes)
             # and this order defines what the kernel block shape will be. So if the template
             # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
-            # trees in the order ["y", "x"]. This would mean that the template would need to tranpose
+            # trees in the order ["y", "x"]. This would mean that the template would need to transpose
             # the loaded value.
             # The below sorts the range trees according to that required by the caller
             pw_sorted_range_trees = []

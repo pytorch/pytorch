@@ -13,7 +13,7 @@ import os
 import textwrap
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -105,7 +105,6 @@ from .wrapper import SymbolicCallArg
 
 if TYPE_CHECKING:
     from types import ModuleType
-    from typing import TypeVar
 
     from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 
@@ -2043,10 +2042,10 @@ class BlockParameters:
         @classmethod
         def create(
             cls, original_strides: list[Union[int, sympy.Expr]]
-        ) -> Optional[DescStrideSorter]:
+        ) -> Optional[BlockParameters.DescStrideSorter]:
             """
-            create a `DescStrideSorter` which can be used to sort block parameters.
-            if the strides are not all known constants or if the strides are already
+            Create a `DescStrideSorter` which can be used to sort block parameters.
+            If the strides are not all known constants or if the strides are already
             sorted in descending order, return None
             """
             if not all(isinstance(s, (int, sympy.Integer)) for s in original_strides):
@@ -2076,14 +2075,10 @@ class BlockParameters:
                 revert_sort_idx=revert_sort_idx,
             )
 
-        def sort(
-            self, attr: list[Union[int, sympy.Expr]]
-        ) -> list[Union[int, sympy.Expr]]:
+        def sort(self, attr):
             return [attr[i] for i in self.sort_idx]
 
-        def revert(
-            self, attr: list[Union[int, sympy.Expr]]
-        ) -> list[Union[int, sympy.Expr]]:
+        def revert(self, attr):
             return [attr[i] for i in self.revert_sort_idx]
 
     def __add__(self, other: BlockParameters) -> BlockParameters:
@@ -2096,10 +2091,10 @@ class BlockParameters:
 
     def maybe_sort_by_desc_stride_order(
         self,
-    ) -> tuple[BlockParameters, Optional[DescStrideSorter]]:
+    ) -> tuple[BlockParameters, Optional[BlockParameters.DescStrideSorter]]:
         """
         If the strides are known constants, returns block parameters sorted by strides in descending
-        order as well as `DescStrideSorter` which contains information on how the sort can be reverted.
+        order as well as DescStrideSorter which contains information on how the sort can be reverted.
         If the strides are not known constants, returns unmodified BlockParameters and None.
 
         For example if block_shape @ strides is [ZBLOCK, XBLOCK, YBLOCK] @ [8, 1, 16]
@@ -2348,8 +2343,9 @@ class TMACompatibilityChecker:
                     block_params.shape[-1],
                 ):
                     log.debug(
-                        "%s the minimum block size for %s is too large: %d",
+                        "%s the minimum block size to satisfy expression %s is too large: %d",
                         self.failed_debug_prefix,
+                        solve_expr_simplified,
                         min_block_size,
                     )
                     return False
