@@ -905,13 +905,6 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
 
     filter_matmul = None
     if _is_last_dim(_get_tensor(input_node), orig_scatter_dim):
-        group = torch._C._distributed_c10d._resolve_process_group(group_name)
-        group_size = group.size()
-
-        # Decomposed mms on reduction dim should not be too small
-        if _get_tensor(input_node).shape[-1] // group_size < 1024:
-            return
-
         # scaled_mm is not supported yet for last dim mm+rs
         def _filter_out_scaled_matmul(matmul: _Matmul):
             return not isinstance(matmul, _ScaledMatmul)
