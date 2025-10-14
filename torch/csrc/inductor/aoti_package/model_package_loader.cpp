@@ -522,7 +522,7 @@ class RAIIMinizArchive {
           "Failed to read zip filename at index ",
           i);
 
-      zip_filenames.emplace_back(zip_filename);
+      zip_filenames.emplace_back(std::move(zip_filename));
     }
 
     return zip_filenames;
@@ -704,6 +704,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
 
   std::string so_filename;
   std::string cpp_filename;
+  std::string weight_blob_filename;
   std::vector<std::string> obj_filenames;
   std::string model_directory = normalize_path_separator(
       file_prefix + "data" + k_separator + "aotinductor" + k_separator +
@@ -767,6 +768,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
           obj_filenames.push_back(output_file_path);
         } else if (filename_extension == extension_file_ext()) {
           so_filename = output_file_path;
+        } else if (filename_extension == ".blob") {
+          weight_blob_filename = output_file_path;
         }
       }
     }
@@ -820,6 +823,10 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::string cubin_dir = temp_dir_ + k_separator + model_directory;
   runner_ = registered_aoti_runner[device_key](
       so_path, num_runners, device.str(), cubin_dir, run_single_threaded);
+
+  if (weight_blob_filename != "") {
+    runner_->update_constant_buffer_from_blob(weight_blob_filename);
+  }
 }
 
 AOTIModelPackageLoader::~AOTIModelPackageLoader() {
