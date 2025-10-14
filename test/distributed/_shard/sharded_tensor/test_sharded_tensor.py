@@ -9,7 +9,7 @@ import sys
 
 import torch
 import torch.distributed as dist
-from torch.distributed import distributed_c10d, rpc
+from torch.distributed import distributed_c10d
 from torch.distributed._shard import sharded_tensor
 from torch.distributed._shard.api import (
     _collect_local_shard,
@@ -44,7 +44,6 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
     spawn_threads_and_init_comms,
-    tp_transports,
 )
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -474,7 +473,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             ],
         )
 
-        st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 20, init_rrefs=False)
         st_metadata = st.metadata()
         self.assertEqual(torch.Size([10, 20]), st_metadata.size)
         self.assertEqual(torch.Size([10, 20]), st.size())
@@ -484,10 +483,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertTrue(st.is_contiguous())
         self.assertFalse(st.is_pinned())
 
-        st = sharded_tensor.empty(spec, 10, 20, requires_grad=True, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 20, requires_grad=True, init_rrefs=False)
         self.assertEqual(True, st.requires_grad)
 
-        st = sharded_tensor.empty(spec, 10, 20, dtype=torch.double, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 20, dtype=torch.double, init_rrefs=False)
         self.assertEqual(torch.double, st.dtype)
 
         # Need CPU for pin_memory
@@ -501,7 +500,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             ],
         )
 
-        st = sharded_tensor.empty(spec, 10, 20, pin_memory=True, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 20, pin_memory=True, init_rrefs=False)
         self.assertEqual(True, st.is_pinned())
 
         # test read only properties, they're read only as we can't simply change
@@ -524,7 +523,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                     "rank:3/cuda:3",
                 ],
             )
-            st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
+            st = sharded_tensor.empty(spec, 10, 20, init_rrefs=False)
 
             # Validate local shard.
             local_shards = st.local_shards()
@@ -842,7 +841,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 "rank:3/cuda:3",
             ],
         )
-        st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 20, init_rrefs=False)
 
         # Validate local shard.
         local_shards = st.local_shards()
@@ -898,7 +897,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         )
 
         pg = dist.new_group(ranks=[1, 2, 3])
-        st = sharded_tensor.empty(spec, 10, 20, process_group=pg, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 20, process_group=pg, init_rrefs=False)
 
         # Validate local shard.
         local_shards = st.local_shards()
@@ -958,7 +957,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                 "rank:3/cuda:3",
             ],
         )
-        st = sharded_tensor.empty(spec, 16, 20, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 16, 20, init_rrefs=False)
 
         # Validate local shards.
         local_shards = st.local_shards()
@@ -1078,47 +1077,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         ):
             sharded_tensor.empty(spec, 10, 20)
 
-        spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
-        with self.assertRaisesRegex(
-            RuntimeError, "RPC Framework needs to be initialized"
-        ):
-            st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
-
-        with self.assertRaisesRegex(
-            RuntimeError, "ShardedTensor created with init_rrefs=False"
-        ):
-            st = sharded_tensor.empty(spec, 10, 20)
-            st.remote_shards()
-
-        self.init_rpc()
-        spec = ChunkShardingSpec(dim=0, placements=["workerfoo/cuda:1"])
-        with self.assertRaisesRegex(ValueError, "Invalid worker name"):
-            sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
-
-    @skip_if_lt_x_gpu(4)
-    @requires_nccl()
-    def test_invalid_pg_rpc_ranks(self):
-        self.init_pg()
-
-        # Init RPC with different ranks.
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
-            _transports=tp_transports()
-        )
-        rpc_backend_options.init_method = f"file://{self.file_name}"
-        rank = (self.rank + 1) % self.world_size
-        rpc.init_rpc(
-            name=f"worker{rank}",
-            rank=rank,
-            world_size=self.world_size,
-            rpc_backend_options=rpc_backend_options,
-        )
-
-        spec = ChunkShardingSpec(dim=0, placements=["rank:1/cuda:1"])
-        with self.assertRaisesRegex(
-            ValueError, "Default ProcessGroup and RPC ranks must be the same"
-        ):
-            sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
-
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_insufficient_sharding_dims(self):
@@ -1178,38 +1136,38 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         )
 
         # Test with *args
-        st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 20, init_rrefs=False)
         self.assertEqual(torch.Size([10, 20]), st.size())
 
         # Test with single *args
-        st = sharded_tensor.empty(spec, 10, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, init_rrefs=False)
         self.assertEqual(torch.Size([10]), st.size())
 
         # Test with list
-        st = sharded_tensor.empty(spec, [10, 20], init_rrefs=True)
+        st = sharded_tensor.empty(spec, [10, 20], init_rrefs=False)
         self.assertEqual(torch.Size([10, 20]), st.size())
 
         # Test with tuple
-        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=False)
         self.assertEqual(torch.Size([10, 20]), st.size())
 
         # Test with row size
-        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=False)
         self.assertEqual(st.size(0), 10)
 
         # Test with col size
-        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=False)
         self.assertEqual(st.size(1), 20)
 
         # Test with negative indexed size
-        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=False)
         self.assertEqual(st.size(-1), 20)
 
         # Test with dim/ndim
         self.assertEqual(st.dim(), 2)
         self.assertEqual(st.ndim, 2)
         # Test with invalid input
-        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=False)
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             st.size(-3)
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
@@ -1334,8 +1292,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_load_state_dict_errors(self):
-        self.init_rpc()
-
         dist.init_process_group(
             backend="nccl",
             world_size=self.world_size,
@@ -1383,7 +1339,6 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         ):
             # ShardedTensor weights_only is already tested in TestFSDPStateDict.test_torch_save_load
             torch.load(buffer, weights_only=False)
-        rpc.shutdown()
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1399,7 +1354,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
                     "rank:3/cuda:3",
                 ],
             )
-            sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
+            sharded_tensor.empty(spec, 10, 20, init_rrefs=False)
             sharded_tensor.empty(spec, 10, 20)
 
         create_tensors()
@@ -1436,7 +1391,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             ]
         )
 
-        st = sharded_tensor.empty(spec, 10, 10, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 10, init_rrefs=False)
         st_metadata = st.metadata()
         self.assertEqual(torch.Size([10, 10]), st_metadata.size)
         self.assertEqual(torch.float, st.dtype)
@@ -1445,10 +1400,10 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         self.assertTrue(st.is_contiguous())
         self.assertFalse(st.is_pinned())
 
-        st = sharded_tensor.empty(spec, 10, 10, requires_grad=True, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 10, requires_grad=True, init_rrefs=False)
         self.assertEqual(True, st.requires_grad)
 
-        st = sharded_tensor.empty(spec, 10, 10, dtype=torch.double, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 10, dtype=torch.double, init_rrefs=False)
         self.assertEqual(torch.double, st.dtype)
 
         # Need CPU for pin_memory
@@ -1477,7 +1432,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             ]
         )
 
-        st = sharded_tensor.empty(spec, 10, 10, pin_memory=True, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 10, pin_memory=True, init_rrefs=False)
         self.assertTrue(st.is_pinned())
 
     @skipIfRocm
@@ -1510,7 +1465,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             ]
         )
 
-        st = sharded_tensor.empty(spec, 10, 10, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 10, init_rrefs=False)
         self.assertEqual((10, 10), st.size())
         self.assertEqual(1, len(st.local_shards()))
 
@@ -1582,7 +1537,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             ]
         )
 
-        st = sharded_tensor.ones(spec, 10, 10, init_rrefs=True)
+        st = sharded_tensor.ones(spec, 10, 10, init_rrefs=False)
         self.assertEqual((10, 10), st.size())
         self.assertEqual(1, len(st.local_shards()))
 
@@ -1624,7 +1579,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         )
 
         h, w = 10, 10
-        st = sharded_tensor.ones(spec, h, w, init_rrefs=True)
+        st = sharded_tensor.ones(spec, h, w, init_rrefs=False)
 
         full_tensor = None
         dst = 0
@@ -1669,7 +1624,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         )
 
         h, w = 10, 10
-        st = sharded_tensor.ones(spec, h, w, init_rrefs=True)
+        st = sharded_tensor.ones(spec, h, w, init_rrefs=False)
 
         full_tensor = None
         dst = 0
@@ -2018,7 +1973,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             ]
         )
 
-        st = sharded_tensor.empty(spec, 10, 5, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 5, init_rrefs=False)
         self.assertEqual((10, 5), st.size())
         if self.rank <= 1:
             self.assertEqual(1, len(st.local_shards()))
@@ -2087,7 +2042,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
 
         pg = dist.new_group(ranks=[1, 2, 3])
 
-        st = sharded_tensor.empty(spec, 10, 5, process_group=pg, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 5, process_group=pg, init_rrefs=False)
         self.assertEqual((10, 5), st.size())
         if self.rank == 1 or self.rank == 3:
             # Verify local shard.
@@ -2164,7 +2119,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             ]
         )
 
-        st = sharded_tensor.empty(spec, 10, 10, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 10, init_rrefs=False)
         self.assertEqual((10, 10), st.size())
 
         if self.rank <= 1:
@@ -2248,7 +2203,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             ]
         )
 
-        st = sharded_tensor.empty(spec, 10, 10, init_rrefs=True)
+        st = sharded_tensor.empty(spec, 10, 10, init_rrefs=False)
         self.assertEqual((10, 10), st.size())
         self.assertEqual(1, len(st.local_shards()))
 
@@ -2314,7 +2269,7 @@ class TestShardedTensorFromLocalTensor(ShardedTensorTestBase):
             local_tensor,
             sharding_spec,
             st_size,
-            init_rrefs=True,
+            init_rrefs=False,
         )
         self.assertEqual(tuple(st_size), st.size())
         self.assertEqual(1, len(st.local_shards()))
@@ -2446,7 +2401,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         ]
 
         st = sharded_tensor.init_from_local_shards(
-            local_shards, [10, 10], init_rrefs=True
+            local_shards, [10, 10], init_rrefs=False
         )
         self.assertEqual((10, 10), st.size())
         self.assertEqual(1, len(st.local_shards()))
@@ -2890,7 +2845,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         st = ShardedTensor._init_from_local_shards_and_global_metadata(
             local_shards,
             sharded_tensor_metadata,
-            init_rrefs=True,
+            init_rrefs=False,
         )
         self.assertEqual((10, 10), st.size())
         self.assertEqual(1, len(st.local_shards()))
@@ -3000,7 +2955,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         empty_local_shards = []
         with self.assertRaisesRegex(ValueError, "have no local shards on all ranks"):
             sharded_tensor.init_from_local_shards(
-                empty_local_shards, [10, 10], init_rrefs=True
+                empty_local_shards, [10, 10], init_rrefs=False
             )
 
         wrong_layout_shards = [
@@ -3010,7 +2965,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             ValueError, "Only torch.strided layout is currently supported"
         ):
             sharded_tensor.init_from_local_shards(
-                wrong_layout_shards, [10, 10], init_rrefs=True
+                wrong_layout_shards, [10, 10], init_rrefs=False
             )
 
         wrong_memory_format_shards = [
@@ -3023,7 +2978,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             "Only torch.contiguous_format memory_format is currently supported",
         ):
             sharded_tensor.init_from_local_shards(
-                wrong_memory_format_shards, [10, 10], init_rrefs=True
+                wrong_memory_format_shards, [10, 10], init_rrefs=False
             )
 
         with self.assertRaisesRegex(ValueError, "Shard tensor size does not match"):
@@ -3056,7 +3011,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             "ShardedTensor global_size property does not match from different ranks!",
         ):
             sharded_tensor.init_from_local_shards(
-                wrong_dtype_shards, tensor_overall_size, init_rrefs=True
+                wrong_dtype_shards, tensor_overall_size, init_rrefs=False
             )
 
         tensor_dtype = torch.int if self.rank == 0 else torch.float32
@@ -3071,7 +3026,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             "ShardedTensor dtype property does not match from different ranks!",
         ):
             sharded_tensor.init_from_local_shards(
-                wrong_dtype_shards, [10, 10], init_rrefs=True
+                wrong_dtype_shards, [10, 10], init_rrefs=False
             )
 
         tensor_requires_grad = True if self.rank == 0 else False
@@ -3088,7 +3043,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             "ShardedTensor requires_grad property does not match from different ranks!",
         ):
             sharded_tensor.init_from_local_shards(
-                wrong_requires_grad_shards, [10, 10], init_rrefs=True
+                wrong_requires_grad_shards, [10, 10], init_rrefs=False
             )
 
         local_shard_metadata = ShardMetadata(
@@ -3118,7 +3073,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             ValueError, "Local shards' tensor pin_memory property need to be the same"
         ):
             sharded_tensor.init_from_local_shards(
-                wrong_pin_memory_local_shards, [10, 10], init_rrefs=True
+                wrong_pin_memory_local_shards, [10, 10], init_rrefs=False
             )
 
         tensor_pin_memory = True if self.rank == 0 else False
@@ -3132,7 +3087,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             "ShardedTensor pin_memory property does not match from different ranks!",
         ):
             sharded_tensor.init_from_local_shards(
-                wrong_pin_memory_shards_cross_ranks, [10, 10], init_rrefs=True
+                wrong_pin_memory_shards_cross_ranks, [10, 10], init_rrefs=False
             )
 
     @with_comms
@@ -3155,7 +3110,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         with self.assertRaisesRegex(ValueError, "overlap"):
             sharded_tensor.init_from_local_shards(
-                local_shards, [10, 10], init_rrefs=True
+                local_shards, [10, 10], init_rrefs=False
             )
 
     @with_comms
@@ -3178,7 +3133,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         with self.assertRaisesRegex(ValueError, "does not match tensor volume"):
             sharded_tensor.init_from_local_shards(
-                local_shards, [10, 10], init_rrefs=True
+                local_shards, [10, 10], init_rrefs=False
             )
 
     @with_comms

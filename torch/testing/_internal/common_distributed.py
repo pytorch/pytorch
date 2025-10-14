@@ -508,7 +508,7 @@ def create_tcp_store(
     timeout=timedelta(minutes=5),
     wait_for_workers=True,
     jit_class=False,
-    use_libuv=True,
+    use_libuv=False,
 ):
     """
     Creates a TCP store. Retries if the chosen port is already in use.

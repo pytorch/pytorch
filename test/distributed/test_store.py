@@ -353,7 +353,7 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
 
 
 class TCPStoreTest(TestCase, StoreTestBase):
-    _use_libuv = False
+    self._use_libuv = False
 
     def _create_store(self):
         store = create_tcp_store(use_libuv=self._use_libuv)
@@ -631,20 +631,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
         self.assertEqual(second_server.port, store.port)
 
 
-class LibUvTCPStoreTest(TCPStoreTest):
-    _use_libuv = True
-
-    def _create_store(self):
-        store = create_tcp_store(use_libuv=True)
-        store.set_timeout(timedelta(seconds=300))
-        return store
-
-    def _create_store_with_ws(self, addr, world_size):
-        return create_tcp_store(
-            addr, world_size, wait_for_workers=False, use_libuv=True
-        )
-
-
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super().setUp()
@@ -869,12 +855,6 @@ class RendezvousTCPTest(TestCase):
         time_diff = end - start
         self.assertGreater(10, time_diff)
 
-    def test_tcp_store_url_with_libuv(self):
-        url = self.create_tcp_url()
-        gen0 = dist.rendezvous(url + "&rank=0&use_libuv=1")
-        store0, _, _ = next(gen0)
-        self.assertTrue(store0.libuvBackend)
-
 
 class DummyStore(dist.Store):
     def __init__(self) -> None:
@@ -972,7 +952,6 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
     hash_store = dist.HashStore()
 
     tcp_store = create_tcp_store(use_libuv=False)
-    tcp_store_uv = create_tcp_store(use_libuv=True)
 
     @property
     def world_size(self):
@@ -1019,9 +998,6 @@ class TestMultiThreadedWait(MultiThreadedTestCase):
 
     def test_wait_tcp_store(self):
         self._test_wait_tcp_store(self.tcp_store)
-
-    def test_wait_tcp_store_uv(self):
-        self._test_wait_tcp_store(self.tcp_store_uv)
 
 
 instantiate_parametrized_tests(TestMultiThreadedWait)
