@@ -336,29 +336,26 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.bw_graphs), 1)
         self.assertEqual(ref, res)
         self.assertExpectedInline(
-            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+            empty_line_normalizer(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False))
+            ),
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[8]", primals_2: "f32[8]", primals_3: "f32[8]"):
         partitioned_fw_subgraph_0_0 = self.partitioned_fw_subgraph_0_0
-
         invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', primals_1, primals_2, primals_3);  partitioned_fw_subgraph_0_0 = None
         getitem_12: "f32[8]" = invoke_subgraph_4[3]
         getitem_11: "f32[8]" = invoke_subgraph_4[2]
         getitem_10: "f32[8]" = invoke_subgraph_4[1]
         getitem: "f32[8]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
-
         partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_0
-
         invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_1, 'partitioned_fw_subgraph_0_0', primals_1, primals_2, primals_3);  partitioned_fw_subgraph_0_1 = primals_1 = primals_2 = primals_3 = None
         getitem_15: "f32[8]" = invoke_subgraph_6[3]
         getitem_14: "f32[8]" = invoke_subgraph_6[2]
         getitem_13: "f32[8]" = invoke_subgraph_6[1]
         getitem_1: "f32[8]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
-
         add: "f32[8]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return (add, getitem_12, getitem_11, getitem_10, getitem_15, getitem_14, getitem_13)
-
     class partitioned_fw_subgraph_0_0(torch.nn.Module):
         def forward(self, primals_0: "f32[8]", primals_1: "f32[8]", primals_2: "f32[8]"):
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(primals_0, primals_1)
