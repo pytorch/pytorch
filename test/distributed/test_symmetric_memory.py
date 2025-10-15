@@ -294,7 +294,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
-    @parametrize("gather_dim", [0, 1])
+    @parametrize("gather_dim", [0, 1, 2])
     def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
         self._init_process()
 
@@ -306,7 +306,10 @@ class AsyncTPTest(MultiProcContinuousTest):
         rank = self.rank
 
         torch.manual_seed(42 + rank)
-        A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda")
+        A_shard_shape = [BATCH, M, K]
+        A_shard_shape[gather_dim] //= self.world_size
+
+        A_shard = torch.rand(A_shard_shape, device="cuda")
         Bs = [torch.rand(K, N, device="cuda") for _ in range(3)]
 
         ag_output_0, mm_outputs_0 = _fused_all_gather_matmul_fallback(
@@ -523,7 +526,7 @@ class AsyncTPTest(MultiProcContinuousTest):
         BATCH = 8
         M = 64
         N = 16
-        K = 32
+        K = 1024
         group = dist.group.WORLD
         rank = self.rank
 
