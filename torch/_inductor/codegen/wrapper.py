@@ -734,7 +734,7 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
         if not self.is_reused:
-            # code.writeline(self.wrapper.make_buffer_free(self.node))
+            code.writeline(self.wrapper.make_buffer_free(self.node))
             pass
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:

@@ -1556,7 +1556,7 @@ class KernelArgs:
 
     def workspace(self, nelem: sympy.Expr, zero_fill: bool, dtype=torch.uint8) -> tuple[str, int]:
         """
-        Allocate or extend a workspace buffer of nbytes bytes.
+        Allocate or extend a workspace buffer of nelem elements.
 
         This function manages the allocation of a workspace buffer. It either creates
         a new WorkspaceArg or extends an existing one.
@@ -1569,13 +1569,13 @@ class KernelArgs:
         - A new argument "ws_ptr" will be present in the generated code.
 
         Args:
-            nbytes (sympy.Expr): The number of bytes to allocate.
+            nelem (sympy.Expr): The number of elements to allocate.
             zero_fill (bool): Whether to initialize the buffer to zero.
 
         Returns:
             Tuple[str, int]: A tuple containing:
                 - "ws_ptr": A string identifier for the workspace pointer.
-                - offset: An integer representing the byte offset in the workspace.
+                - offset: An integer representing the item offset in the workspace.
         """
         arg = WorkspaceArg(
             count=nelem,

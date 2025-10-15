@@ -1454,7 +1454,9 @@ class SIMDScheduling(BaseScheduling):
                     node.mark_run()
                 for node in node2.get_nodes():
                     node.mark_run()
-            kernel.call_kernel(kernel.kernel_name)
+
+            # workspace args is still needed after the call
+            kernel.call_kernel(kernel.kernel_name, deallocate_ws=False)
             V.graph.removed_buffers |= kernel.removed_buffers
             V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
@@ -1469,6 +1471,7 @@ class SIMDScheduling(BaseScheduling):
                 V.graph.wrapper_code.writeline(
                     f"{bufname2} = workspace_0[{nsplit} * 768:].view({nsplit}, 768).sum(dim=0)",
                 )
+            kernel.deallocate_workspaces()
             self.free_buffers_in_scheduler()
         else:
             self.codegen_node(node1)

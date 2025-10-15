@@ -5804,7 +5804,7 @@ class BaseScheduling:  # noqa: docstring_linter
         self.scheduler = scheduler
 
     def free_buffers_in_scheduler(self) -> None:
-        return # TODO bring this back
+        # return # TODO bring this back
         if self.scheduler:
             self.scheduler.free_buffers()
 
