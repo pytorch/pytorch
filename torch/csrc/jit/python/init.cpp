@@ -1617,7 +1617,7 @@ void initJITBindings(PyObject* module) {
             auto [data, size] = self.getRecord(key);
             auto scalar_type =
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
-            
+
             TORCH_INTERNAL_ASSERT(size == numel * elementSize(scalar_type));
 
             c10::Storage storage(
