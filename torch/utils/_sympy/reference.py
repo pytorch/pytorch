@@ -76,7 +76,8 @@ class ReferenceAnalysis:
 
     @staticmethod
     def not_(a):
-        assert not isinstance(a, bool)
+        if isinstance(a, bool):
+            raise AssertionError("not_ needs sympy expr")
         return ~a
 
     @staticmethod
