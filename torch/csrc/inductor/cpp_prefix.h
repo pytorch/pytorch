@@ -296,13 +296,13 @@ inline T cascade_sum_combine(
 }
 
 template <typename T>
-T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = at::vec::maximum(a, b);
   return T::set(a, out, tail_size);
 }
 
 template <>
-at::vec::VecMask<float, 1> max_masked_reduce(
+inline at::vec::VecMask<float, 1> max_masked_reduce(
     const at::vec::VecMask<float, 1>& a,
     const at::vec::VecMask<float, 1>& b,
     const int64_t tail_size) {
@@ -311,13 +311,13 @@ at::vec::VecMask<float, 1> max_masked_reduce(
 }
 
 template <typename T>
-T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = at::vec::minimum(a, b);
   return T::set(a, out, tail_size);
 }
 
 template <>
-at::vec::VecMask<float, 1> min_masked_reduce(
+inline at::vec::VecMask<float, 1> min_masked_reduce(
     const at::vec::VecMask<float, 1>& a,
     const at::vec::VecMask<float, 1>& b,
     const int64_t tail_size) {
@@ -326,13 +326,13 @@ at::vec::VecMask<float, 1> min_masked_reduce(
 }
 
 template <typename T>
-T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a + b;
   return T::set(a, out, tail_size);
 }
 
 template <>
-at::vec::VecMask<float, 1> sum_masked_reduce(
+inline at::vec::VecMask<float, 1> sum_masked_reduce(
     const at::vec::VecMask<float, 1>& a,
     const at::vec::VecMask<float, 1>& b,
     const int64_t tail_size) {
