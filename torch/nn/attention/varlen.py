@@ -32,7 +32,7 @@ class AuxRequest(NamedTuple):
     lse: bool = False
 
 
-@torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
+@torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={}, device_types=("cuda",))
 def _varlen_attn(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -84,8 +84,9 @@ def _varlen_attn(
             is_causal,
             return_debug_mask=False,
         )
-        philox_offset = torch.empty(0, device=query.device)
-    return output, softmax_lse, rng_state, philox_offset
+
+    rng_state_ = torch.zeros((2,), dtype=torch.uint64, device=query.device) # hardcoded to 0 because dropout is 0
+    return output, softmax_lse, rng_state_
 
 
 @_varlen_attn.register_fake
@@ -98,13 +99,14 @@ def _varlen_attn_fake(
     max_q: int,
     max_k: int,
     is_causal: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
     Based on the 3D varlen path from meta__flash_attention_forward:
     - query shape: (total, num_heads, head_dim)
     - logsumexp shape: (num_heads, total_q)
     """
+
     # Output has same shape as query
     output = torch.empty_like(query)
 
@@ -115,7 +117,9 @@ def _varlen_attn_fake(
         (num_heads, total_q), dtype=torch.float, device=query.device
     )
 
-    return output, logsumexp
+    rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
+
+    return output, logsumexp, rng_state
 
 
 def varlen_attn(
@@ -227,8 +231,7 @@ def _backward(ctx, grad_out, grad_lse, grad_rng):
     attn_bias = ctx.attn_bias
     out = ctx.output
     lse = ctx.lse
-    rng_state = getattr(ctx, "rng_state", torch.empty(0, device=query.device))
-    philox_offset = getattr(ctx, "philox_offset", torch.empty(0, device=query.device))
+    rng_state = torch.empty(2, device=query.device)
     unused = torch.empty(0, device=query.device)
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
