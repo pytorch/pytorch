@@ -336,9 +336,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.bw_graphs), 1)
         self.assertEqual(ref, res)
         self.assertExpectedInline(
-            empty_line_normalizer(
-                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False))
-            ),
+            normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[8]", primals_2: "f32[8]", primals_3: "f32[8]"):
@@ -364,6 +362,7 @@ class GraphModule(torch.nn.Module):
             mul_2: "f32[8]" = torch.ops.aten.mul.Tensor(mul_1, primals_2);  mul_1 = None
             return (mul_2, primals_0, primals_1, primals_2)
 """,
+        ignore_empty_lines=True,
         )
         self.assertExpectedInline(
             normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
@@ -396,6 +395,7 @@ class GraphModule(torch.nn.Module):
             mul_7: "f32[8]" = torch.ops.aten.mul.Tensor(mul_5, primals_1);  mul_5 = primals_1 = None
             return (mul_7, mul_6, None)
 """,
+        ignore_empty_lines=True,
         )
 
     def test_buffer_mutation_works_under_no_grad(self):
