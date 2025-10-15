@@ -527,6 +527,7 @@ class TestDTensorDebugMode(TestCase):
                 super().__init__()
                 self.l1 = torch.nn.Linear(4, 4)
                 self.l2 = torch.nn.Linear(4, 4)
+
             def forward(self, x):
                 return self.l2(self.l1(x))
 
@@ -535,6 +536,7 @@ class TestDTensorDebugMode(TestCase):
                 super().__init__()
                 self.abc = Foo()
                 self.xyz = torch.nn.Linear(4, 4)
+
             def forward(self, x):
                 return self.xyz(self.abc(x))
 
@@ -576,7 +578,6 @@ class TestDTensorDebugMode(TestCase):
             out.sum().backward()
 
         self.assertEqual(debug_mode.debug_string().count("inductor_graph_call"), 2)
-
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 

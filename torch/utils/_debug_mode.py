@@ -14,6 +14,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import tree_map
 from torch.utils._traceback import CapturedTraceback
 
+
 if TYPE_CHECKING:
     from torch.distributed._tools.mod_tracker import ModTracker
 
@@ -409,7 +410,7 @@ class DebugMode(TorchDispatchMode):
 
         self.record_nn_module = record_nn_module
 
-        self.module_tracker: Optional["ModTracker"] = None
+        self.module_tracker: Optional[ModTracker] = None
         if self.record_nn_module:
             self.module_tracker_setup()
 
@@ -473,14 +474,14 @@ class DebugMode(TorchDispatchMode):
 
         super().__enter__()
         if self.record_nn_module:
-            self.module_tracker.__enter__()  # type: ignore[attribute]
+            self.module_tracker.__enter__()  # type: ignore[union-attr]
         return self
 
     # pyrefly: ignore  # bad-override
     def __exit__(self, *args):
         super().__exit__(*args)
         if self.record_nn_module:
-            self.module_tracker.__exit__()  # type: ignore[attribute]
+            self.module_tracker.__exit__()  # type: ignore[union-attr]
         if self.record_torchfunction:
             torch._C._pop_torch_function_stack()
 
@@ -491,7 +492,7 @@ class DebugMode(TorchDispatchMode):
 
         # module pre-fw hook: record module call
         def pre_fw_hook(module, input):
-            fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute]
+            fqn = self.module_tracker._get_mod_name(module)  # type: ignore[union-attr]
             self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
             self.call_depth += 1
 
