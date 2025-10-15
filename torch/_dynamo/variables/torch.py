@@ -225,17 +225,14 @@ def get_overridable_functions():
     from itertools import chain
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
+    from torch.utils._device import _device_constructors
 
     funcs = set(chain.from_iterable(get_overridable_functions_().values()))
-    more: set[Callable[..., Any]] = {
-        torch.ones,
-        torch.ones_like,
-        torch.zeros,
-        torch.zeros_like,
-        torch.empty,
-        torch.full,
-    }
-    funcs.update(more)
+
+    # Add all device constructor functions to support torch.set_default_device()
+    # These functions accept a 'device' parameter and should respect the default device
+    funcs.update(_device_constructors())
+
     return funcs
 
 
