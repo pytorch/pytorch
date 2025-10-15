@@ -184,18 +184,12 @@ def _iterate_state_dict(
 
             if companion_obj is not None:
                 if isinstance(companion_obj, DTensor):
-                    if not isinstance(ret, DTensor):
-                        raise AssertionError(
-                            "ret must be a DTensor when companion_obj is a DTensor"
-                        )
+                    assert isinstance(ret, DTensor)
                     companion_obj._local_tensor.copy_(
                         ret._local_tensor, non_blocking=non_blocking
                     )
                 elif isinstance(companion_obj, ShardedTensor):
-                    if not isinstance(ret, ShardedTensor):
-                        raise AssertionError(
-                            "ret must be a ShardedTensor when companion_obj is a ShardedTensor"
-                        )
+                    assert isinstance(ret, ShardedTensor)
                     for idx, shard in enumerate(companion_obj.local_shards()):
                         shard.tensor.copy_(
                             ret.local_shards()[idx].tensor, non_blocking=non_blocking
@@ -554,8 +548,7 @@ def _broadcast_tensors(
     for key in keys:
         if dist.get_rank() == 0:
             full_state = full_state_dict[key]
-            if not isinstance(full_state, torch.Tensor):
-                raise AssertionError("full_state must be a torch.Tensor")
+            assert isinstance(full_state, torch.Tensor)
             full_tensor = full_state.detach().to(pg_device)
         else:
             tensor_info = full_state_dict[key]
@@ -714,8 +707,7 @@ def _distribute_state_dict(
         elif value.dim() == 0:
             local_state_dict[key] = value.cpu()
         else:
-            if not isinstance(value, torch.Tensor):
-                raise AssertionError("value must be a torch.Tensor")
+            assert isinstance(value, torch.Tensor)
             local_state = local_state_dict.get(key, None)
             if local_state is None:
                 continue
