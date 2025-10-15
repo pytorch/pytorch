@@ -311,18 +311,6 @@ def addmm_float8_unwrapped(
     )
     return output
 
-def mm_float8(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    a_scale: torch.Tensor,
-    b_scale: torch.Tensor,
-    output_dtype: torch.dtype,  # output dtype
-    output_scale: Optional[torch.Tensor] = None,  # output scale, precomputed
-) -> torch.Tensor:
-    return addmm_float8_unwrapped(
-        a, a_scale, b, b_scale, output_dtype, output_scale
-    )
-
 def to_fp8_saturated(
     x: torch.Tensor,
     fp8_dtype: torch.dtype
@@ -674,12 +662,12 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
+        out_scaled_mm = scaled_mm_wrap(
             x_fp8,
             y_fp8,
-            a_scale=x_scale,
-            b_scale=y_scale,
-            output_dtype=output_dtype
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
@@ -726,12 +714,12 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
+        out_scaled_mm = scaled_mm_wrap(
             x_fp8,
             y_fp8,
-            a_scale=x_scale,
-            b_scale=y_scale,
-            output_dtype=output_dtype
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
@@ -993,8 +981,12 @@ class TestFP8Matmul(TestCase):
 
         def test():
             # Calculate actual F8 mm
-            out_scaled_mm = mm_float8(
-                x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
+            out_scaled_mm = scaled_mm_wrap(
+                x_fp8,
+                y_fp8,
+                scale_a=x_scales.reciprocal(),
+                scale_b=y_scales.reciprocal(),
+                out_dtype=output_dtype
             )
 
             # Calculate emulated F8 mm
@@ -1013,7 +1005,7 @@ class TestFP8Matmul(TestCase):
         # rowwise on SM 9.0
         if torch.cuda.get_device_capability() != (9, 0) and output_dtype == torch.float:
             with self.assertRaisesRegex(
-                RuntimeError,
+                ValueError,
                 "Only bf16 high precision output types are supported for row-wise scaling."
             ):
                 test()
@@ -1105,16 +1097,25 @@ class TestFP8Matmul(TestCase):
         # 1x128 blocks need scales to be outer-dim-major
         if lhs_block == 1:
             x_scales = x_scales.t().contiguous().t()
+            lhs_recipe = ScalingType.BlockWise1x128
+        else:
+            lhs_recipe = ScalingType.BlockWise128x128
+
         if rhs_block == 1:
             y_scales = y_scales.t().contiguous().t()
+            rhs_recipe = ScalingType.BlockWise1x128
+        else:
+            rhs_recipe = ScalingType.BlockWise128x128
 
         # Verify that actual F8 mm doesn't error
-        mm_float8(
+        scaled_mm_wrap(
             x_fp8,
             y_fp8.t(),
-            a_scale=x_scales,
-            b_scale=y_scales.t(),
-            output_dtype=output_dtype,
+            scale_a=x_scales,
+            scale_recipe_a=lhs_recipe,
+            scale_b=y_scales.t(),
+            scale_recipe_b=rhs_recipe,
+            out_dtype=output_dtype,
         )
 
         # Verify that emulated F8 mm doesn't error
