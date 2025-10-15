@@ -118,7 +118,7 @@ std::unordered_map<std::string, std::string> torch_ucc_envs_map = {
 };
 
 std::vector<OpType> parse_blocking_wait(std::string op_list_string) {
-  constexpr static std::unordered_map<std::string, OpType> str2op = {
+  const static std::unordered_map<std::string, OpType> str2op = {
       {"allgather", OpType::ALLGATHER},
       {"allgather_base", OpType::_ALLGATHER_BASE},
       {"allreduce", OpType::ALLREDUCE},

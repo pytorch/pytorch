@@ -216,7 +216,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
 }
 
 
-static const int BLOCK_THREADS = 256;
+static constexpr int BLOCK_THREADS = 256;
 
 template <typename scalar_t, typename accscalar_t>
 #if defined (USE_ROCM)

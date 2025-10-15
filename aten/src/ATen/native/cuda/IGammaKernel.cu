@@ -160,7 +160,7 @@ __host__ __device__ scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
   constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static const int MAXITER = 2000;
+  constexpr int MAXITER = 2000;
 
   int i;
   accscalar_t ans, ax, c, r;
@@ -196,7 +196,7 @@ __host__ __device__ scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
   accscalar_t fac = 1;
   accscalar_t sum = 0;
   accscalar_t term, logx;
-  static const int MAXITER = 2000;
+  constexpr int MAXITER = 2000;
   constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
 
@@ -314,7 +314,7 @@ __host__ __device__ scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar
   int i;
   accscalar_t ans, ax, c, yc, r, t, y, z;
   accscalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
-  static const int MAXITER = 2000;
+  constexpr int MAXITER = 2000;
   constexpr accscalar_t MACHEP = std::is_same_v<accscalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
   constexpr accscalar_t BIG = std::is_same_v<accscalar_t,double> ?
