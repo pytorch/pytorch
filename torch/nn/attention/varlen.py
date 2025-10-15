@@ -1,5 +1,6 @@
 """
 Variable-length attention implementation using Flash Attention.
+
 This module provides a high-level Python interface for variable-length attention
 that calls into the optimized Flash Attention kernels.
 """
@@ -102,6 +103,7 @@ def _varlen_attn_fake(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
+
     Based on the 3D varlen path from meta__flash_attention_forward:
     - query shape: (total, num_heads, head_dim)
     - logsumexp shape: (num_heads, total_q)
