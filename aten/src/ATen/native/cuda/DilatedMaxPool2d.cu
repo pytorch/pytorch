@@ -39,19 +39,14 @@ __device__ inline int min(int a, int b) {
 #endif
 
 template <typename index_t>
-__device__ inline index_t dmin(index_t a, index_t b) {
-  return a <= b ? a : b;
-}
-
-template <typename index_t>
 static __device__ inline index_t p_start(index_t size, int pad, int kernel, int dilation, int stride) {
-  const index_t kernel_extent = static_cast<index_t>((kernel - 1) * dilation + 1);
+  const auto kernel_extent = static_cast<index_t>((kernel - 1) * dilation + 1);
   return (size + pad < kernel_extent) ? index_t(0) : (size + pad - kernel_extent) / stride + 1;
 }
 
 template <typename index_t>
 static __device__ inline index_t p_end(index_t size, int pad, index_t pooled_size, int stride) {
-  return dmin<index_t>((size + pad) / stride + 1, pooled_size);
+  return std::min((size + pad) / stride + 1, pooled_size);
 }
 
 static inline bool can_use_int32_nhwc(
@@ -172,10 +167,10 @@ __global__ void max_pool_forward_nhwc(
 
   for (int oh = ostartH; oh < oendH; oh+=blockDim.z) {
     index_t hstart = static_cast<index_t>(oh) * stride_h - pad_h;
-    index_t hend = dmin<index_t>(hstart + static_cast<index_t>((kernel_h - 1) * dilation_h + 1), height);
+    index_t hend = std::min(hstart + static_cast<index_t>((kernel_h - 1) * dilation_h + 1), height);
     for (int ow = ostartW; ow < oendW; ow+=blockDim.y) {
       index_t wstart = static_cast<index_t>(ow) * stride_w - pad_w;
-      index_t wend = dmin<index_t>(wstart + static_cast<index_t>((kernel_w - 1) * dilation_w + 1), width);
+      index_t wend = std::min(wstart + static_cast<index_t>((kernel_w - 1) * dilation_w + 1), width);
       while(hstart < 0)
         hstart += dilation_h;
       while(wstart < 0)
