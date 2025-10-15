@@ -15,6 +15,7 @@
 #endif
 #include <c10/core/SymNodeImpl.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -1890,6 +1891,18 @@ void initJITBindings(PyObject* module) {
         customObj->setPayload(std::move(payload));
       },
       R"doc(Sets the payload of the given opaque object with the given Python object.)doc");
+  m.def(
+      "_register_opaque_type",
+      [](const std::string& type_name) {
+        torch::jit::registerOpaqueType(type_name);
+      },
+      R"doc(Registers a type name to be treated as an opaque type (PyObject) in schema parsing.)doc");
+  m.def(
+      "_is_opaque_type_registered",
+      [](const std::string& type_name) -> bool {
+        return torch::jit::isRegisteredOpaqueType(type_name);
+      },
+      R"doc(Checks if a type name is registered as an opaque type.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
