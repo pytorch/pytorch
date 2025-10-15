@@ -1020,6 +1020,19 @@ class DTensorMeshTest(DTensorTestBase):
             self.fail("Unexpected ValueError raised with run_check=False")
 
 
+DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
+    DTensorMeshTest,
+    skipped_tests=[
+        # Submeshes are not supported by local tensor mode
+        "test_from_local_sub_mesh",
+        "test_default_value_sub_mesh",
+        "test_redistribute_sub_mesh",
+        # Local tensor mode doesn't support tensors of different types on different ranks
+        "test_metadata_consistency_check",
+    ],
+)
+
+
 class TestDTensorPlacementTypes(DTensorTestBase):
     @property
     def world_size(self):
@@ -1084,6 +1097,11 @@ class TestDTensorPlacementTypes(DTensorTestBase):
                     for unpadded_tensor in unpadded_list
                 ]
                 assert_array_equal(expected_is_tensor_empty, is_tensor_empty)
+
+
+TestDTensorPlacementTypesWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorPlacementTypes,
+)
 
 
 class TestDTensorSpec(DTensorTestBase):
@@ -1264,6 +1282,10 @@ class TestDTensorSpec(DTensorTestBase):
             DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
         )
 
+
+TestDTensorSpecWithLocalTensor = create_local_tensor_test_class(
+    TestDTensorSpec,
+)
 
 if __name__ == "__main__":
     run_tests()
