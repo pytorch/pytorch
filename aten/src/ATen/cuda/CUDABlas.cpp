@@ -2041,14 +2041,19 @@ void scaled_gemm(
   float *beta_ptr = &beta_val;
 
   if (alpha.has_value()) {
-    std::cout << "setting alpha" << std::endl;
     auto& a = alpha.value();
 
     // if device-tensor
     if (a.is_cuda()) {
+      // NOTE: there are lifetime requirements on device-side pointers for alpha/beta -- the value must be
+      //       valid & correct until the cublas call finishes (not is scheduled like host-side values). Thus
+      //       we need to use allocations for alpha/beta that have some guarantees on lifetime - a statically
+      //       managed 4B buffer for alpha that we'll copy the passed alpha value into, and constant memory
+      //       for beta respectively.
       float *user_alpha_ptr = at::cuda::detail::get_user_alpha_ptr();
       at::Tensor user_alpha = at::from_blob(user_alpha_ptr, {1}, TensorOptions().device(kCUDA).dtype(kFloat));
       user_alpha.copy_(a);
+      // Tell cublasLt we're using device-side pointers for alpha/beta
       auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
       computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);
       alpha_ptr = user_alpha.data_ptr<float>();
