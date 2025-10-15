@@ -176,6 +176,9 @@ struct FlightRecorder {
     TORCH_API std::string getTraceback();
   };
 
+  // Tombstone marks all entries with id_ < tombstone_ as soft-deleted
+  std::optional<size_t> tombstone_ = std::nullopt;
+
   bool enabled_ = false;
   bool capture_cpp_stack_ = false;
   std::mutex mutex_;

@@ -161,8 +161,10 @@ template <typename EventType>
 std::vector<typename FlightRecorder<EventType>::Entry> FlightRecorder<
     EventType>::dump_entries() {
   std::vector<Entry> result;
+  std::optional<size_t> tombstone;
   {
     std::lock_guard<std::mutex> guard(mutex_);
+    tombstone = tombstone_;
     result.reserve(entries_.size());
     result.insert(
         result.end(),
@@ -178,6 +180,19 @@ std::vector<typename FlightRecorder<EventType>::Entry> FlightRecorder<
     update_state(r);
     r.start_ = r.end_ = nullptr;
   }
+
+  // Filter out tombstoned entries (entries with id_ < tombstone_ are deleted)
+  if (tombstone.has_value()) {
+    result.erase(
+        std::remove_if(
+            result.begin(),
+            result.end(),
+            [&tombstone](const Entry& e) {
+              return e.id_ < *tombstone;
+            }),
+        result.end());
+  }
+
   return result;
 }
 
@@ -215,9 +230,6 @@ void FlightRecorder<EventType>::retire_id(
   std::unique_lock<std::mutex> guard(mutex_);
 
   auto idx = *id % max_entries_;
-  if (entries_.size() <= idx) {
-    return;
-  }
 
   Entry* entry = &entries_.at(idx);
   if (entry->id_ == *id) {
@@ -257,9 +269,10 @@ void FlightRecorder<EventType>::retire_id(
 template <typename EventType>
 void FlightRecorder<EventType>::reset_all() {
   std::lock_guard<std::mutex> guard(mutex_);
-  next_ = 0;
-  id_ = 0;
-  entries_.clear();
+  if (!entries_.empty()) {
+    // Soft delete: mark all entries with id_ < tombstone_ as deleted
+    tombstone_ = id_;
+  }
 }
 
 template <typename EventType>
