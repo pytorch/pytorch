@@ -1397,6 +1397,12 @@ class _InProcessFxCompile(FxCompile):
                             const_graph.codegen_with_cpp_wrapper()
                         )
 
+                # We use dual wrapper to generate autotuning code alongside with the original codegen.
+                use_dual_wrapper = (
+                    aot_mode
+                    and config.triton.autotune_at_compile_time
+                    and config.triton.autotune_full_graph
+                )
                 graph = GraphLowering(
                     gm,
                     # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
@@ -1420,6 +1426,7 @@ class _InProcessFxCompile(FxCompile):
                     const_module=const_graph,
                     inputs_to_check=inputs_to_check,
                     fx_wrapper=fx_wrapper,
+                    use_dual_wrapper=use_dual_wrapper,
                 )
                 metrics_helper = metrics.CachedMetricsHelper()
 
