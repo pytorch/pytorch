@@ -465,11 +465,11 @@ class OverlapScheduler:
             # defer waits locally if they are exposed.
             compute_local_priority = int(info.is_exposed)
         else:
-            # if we're scheduling this collective via its score, then it was not
-            # hidden and pre-fetched. we might as well maximize overlap for the
+            # if we're scheduling this collective via its queue, then it was not
+            # pre-fetched. we might as well maximize overlap for the
             # local, non-mm nodes prior to the next compute node.
             if self.in_overlappable_collective_unary_chain(node):
-                compute_local_priority = 1
+                compute_local_priority = -1
             else:
                 compute_local_priority = 0
 
