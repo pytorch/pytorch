@@ -763,7 +763,7 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
 
     def test_special_placement_with_shard_order(self):
         """Test special placement when specify shard_order together."""
-        mesh = self.build_device_mesh((2, self.world_size // 2))
+        mesh = self.build_device_mesh((self.world_size // 2, 2))
         input_tensor = torch.randn(8, 6, 5, device=self.device)
         # test _StridedShard
         dt_default = distribute_tensor(
