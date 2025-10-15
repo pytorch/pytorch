@@ -2540,22 +2540,24 @@ def pointwise(
                 triton_config_with_settings(
                     size_hints, bs // 2, num_elements_per_warp=64
                 ),
-                triton_config_with_settings(
-                    size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
-                ),
-                triton_config_with_settings(
-                    size_hints,
-                    4096,  # wrt: better than the max_block for some kernel
-                ),
                 *hinted_configs,
             ]
-            # Additional reduction configs appended for ROCm builds
+            # Additional configs appended for ROCm builds
             if torch.version.hip:
-                configs.append(
-                    triton_config_with_settings(
-                        size_hints, 2048, num_warps=8, num_stages=2, waves_per_eu=1
-                    )
-                )  # 20% improvement
+                configs.extend(
+                    [
+                        triton_config_with_settings(
+                            size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
+                        ),
+                        triton_config_with_settings(
+                            size_hints,
+                            4096,  # wrt: better than the max_block for some kernel
+                        ),
+                        triton_config_with_settings(
+                            size_hints, 2048, num_warps=8, num_stages=2, waves_per_eu=1,  # 20% improvement
+                        ),
+                    ]
+                )
     if len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
         # ROCm has observed improvement by diverging here
@@ -2570,23 +2572,29 @@ def pointwise(
         else:
             configs = [
                 triton_config_with_settings(size_hints, 32, 32),
-                triton_config_with_settings(
-                    size_hints, 64, 32
-                ),  # better for some kernels
                 triton_config_with_settings(size_hints, 64, 64),  # ~8% better for fp16
                 triton_config_with_settings(size_hints, 256, 16),
                 triton_config_with_settings(size_hints, 16, 256),
-                triton_config_with_settings(
-                    size_hints, 128, 16
-                ),  # +10% for some kernels
-                triton_config_with_settings(size_hints, 128, 32),  # additional 10% more
-                triton_config_with_settings(
-                    size_hints, 32, 512
-                ),  # +30% for some kernels
                 triton_config_with_settings(size_hints, bs, 1),
                 triton_config_with_settings(size_hints, 1, bs),
                 *hinted_configs,
             ]
+            # Additional configs appended for ROCm builds
+            if torch.version.hip:
+                configs.extend(
+                    [
+                        triton_config_with_settings(
+                            size_hints, 64, 32
+                        ),  # better for some kernels
+                        triton_config_with_settings(
+                            size_hints, 128, 16
+                        ),  # +10% for some kernels
+                        triton_config_with_settings(size_hints, 128, 32),  # additional 10% more
+                            triton_config_with_settings(
+                            size_hints, 32, 512
+                        ),  # +30% for some kernels
+                    ]
+                )
     if len(size_hints) == 3:
         if disable_pointwise_autotuning(inductor_meta):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
