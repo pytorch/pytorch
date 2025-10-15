@@ -517,8 +517,9 @@ struct GenericViewFunc : public ViewFunc {
   }
 
   std::unique_ptr<ViewFunc> clone_and_set(
-      std::optional<std::vector<c10::SymInt>> = std::nullopt,
-      std::optional<std::vector<at::Tensor>> = std::nullopt) const override {
+      std::optional<std::vector<c10::SymInt>> /*unused*/ = std::nullopt,
+      std::optional<std::vector<at::Tensor>> /*unused*/ =
+          std::nullopt) const override {
     return std::make_unique<GenericViewFunc>(
         non_tensor_stack_, aliased_input_idx_val_, op_);
   }
