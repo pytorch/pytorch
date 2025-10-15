@@ -486,6 +486,12 @@ static void upsample_bilinear2d_backward_out_cuda_template(
     return;
   }
 
+#ifdef USE_ROCM
+  constexpr bool use_input = true;
+#else
+  constexpr bool use_input = false;
+#endif
+
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output_.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
@@ -535,11 +541,7 @@ static void upsample_bilinear2d_backward_out_cuda_template(
       const accscalar_t rwidth = area_pixel_compute_scale<accscalar_t>(
           input_width, output_width, align_corners, scales_w);
 
-#ifdef USE_ROCM
-      const size_t num_kernels = nbatch * channels * input_height * input_width;
-#else
-      const size_t num_kernels = nbatch * channels * output_height * output_width;
-#endif
+      const size_t num_kernels = nbatch * channels * (use_input ? input_height * input_width : output_height * output_width);
 
       upsample_bilinear2d_backward_out_frame<scalar_t, accscalar_t>
           <<<ceil_div(num_kernels, static_cast<size_t>(num_threads)),
