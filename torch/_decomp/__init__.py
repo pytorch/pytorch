@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import lru_cache, partial, wraps
 from itertools import chain
-from typing import Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 
@@ -240,6 +240,7 @@ def get_decompositions(
 
     registry = global_decomposition_table[type]
     packets_to_overloads = defaultdict(list)
+
     for opo in registry:
         if isinstance(opo, (OpOverload, OpOverloadPacket)):
             packets_to_overloads[opo.overloadpacket].append(opo)
@@ -403,6 +404,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.max_unpool3d,
             aten.mish,
             aten.mish_,
+            aten.mish_backward,
             aten.mse_loss,
             aten.mse_loss_backward,
             aten.multi_margin_loss,
@@ -418,6 +420,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.native_dropout_backward,
             aten.native_group_norm_backward,
             aten.native_layer_norm_backward,
+            aten._fused_rms_norm,
             aten._fused_rms_norm_backward,
             aten.new_empty,
             aten.new_full,
@@ -474,6 +477,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.silu,
             aten.silu_,
             aten.silu_backward.grad_input,
+            aten.silu_backward,
             aten.sinc,
             aten.sinc_,
             aten.slice_backward,

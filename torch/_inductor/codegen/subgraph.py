@@ -95,17 +95,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     assert ar.shape == example_inp.shape
                     assert ar.stride() == example_inp.stride()
 
-        if len(sym_inputs) == 0:
-            # Sanity check that args are same layout as example inputs
-            # Only do it if there are no symbolic inputs, otherwise
-            # the dynamic dim will be realized to the same size as args
-            for ar, example_inp in zip(args, self.example_inputs):
-                # Sanity check that args are same layout as example inputs
-                if isinstance(ar, torch.Tensor):
-                    assert isinstance(example_inp, torch.Tensor)
-                    assert ar.shape == example_inp.shape
-                    assert ar.stride() == example_inp.stride()
-
         with V.set_graph_handler(bm_graph_lowering):
             # Don't bother autotuning on Triton here
             with inductor_config.patch(
@@ -120,7 +109,10 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_func([*sym_inputs, *args])
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
-        return benchmarker.benchmark_gpu(lambda: bm_func([*sym_inputs, *args]))
+        return benchmarker.benchmark(
+            bm_func,
+            fn_args=([*sym_inputs, *args],),
+        )
 
     def hash_key(self) -> str:
         return "-".join(

@@ -2832,6 +2832,15 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(out, out_cpu.cuda().half(), atol=1e-3, rtol=1e-3)
         self.assertEqual(q.grad, q_cpu.grad.cuda().half(), atol=7e-3, rtol=5e-3)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_seqlen1_dropout_heuristic(self):
+        q = torch.randn(2, 8, 1, 128, dtype=torch.half, device='cuda', requires_grad=True)
+        grad = torch.randn_like(q)
+
+        with torch.nn.attention.sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION]):
+            out = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.5)
+            out.backward(grad)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
     def test_mem_efficient_attention_mask_variants(self, device, mask_dim: list[int]):
@@ -2964,7 +2973,7 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "Fused SDPA was not built for this system")
     @unittest.skipIf("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED" not in os.environ, "cuDNN Nested Tensor support not enabled")
     @parametrize("type", ["nested"])
-    @parametrize("is_contiguous", [True])
+    @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_cudnn_nested(self, device, type: str, is_contiguous: bool):
         if TEST_WITH_ROCM and type == 'nested':
             self.skipTest("ROCM does not support efficient attention on nested tensors, for now")
