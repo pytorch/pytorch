@@ -26,7 +26,7 @@ import inspect
 import operator
 import types
 from collections.abc import Hashable as py_Hashable
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
 
@@ -1381,3 +1381,20 @@ class DictItemsVariable(DictViewVariable):
                 return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
             return ConstantVariable.create(False)
         return super().call_method(tx, name, args, kwargs)
+
+
+# Create a dict with lazy keys and values to delay graph breaks due to VT wrapping errors
+# until the they are actually accessed.
+def build_sourceless_lazy_dict_variable(
+    tx: "InstructionTranslator", value: dict[Any, Any]
+) -> VariableTracker:
+    def create(obj):
+        try:
+            return variables.LazyVariableTracker.create(obj, None)
+        except Exception:
+            return VariableTracker.build(tx, obj)
+
+    return ConstDictVariable(
+        {create(k): create(v) for k, v in value.items()},
+        dict,
+    )

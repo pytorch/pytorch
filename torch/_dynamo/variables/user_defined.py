@@ -1293,6 +1293,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return key in self.value.__dict__
 
+    def get_generic_dict_keys(self, tx: "InstructionTranslator") -> list[str]:
+        return list(self.value.__dict__.keys()) + list(
+            tx.output.side_effects.get_pending_mutation_keys(self)
+        )
+
     def get_source_by_walking_mro(self, name):
         assert self.cls_source is not None
 
@@ -1637,6 +1642,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         return variables.LazyVariableTracker.create(
                             subobj_from_class, src_from_class
                         )
+
+                if istype(subobj, dict):
+                    from .dicts import build_sourceless_lazy_dict_variable
+
+                    return build_sourceless_lazy_dict_variable(tx, subobj)
 
                 return VariableTracker.build(tx, subobj)
 
