@@ -286,12 +286,12 @@ struct CastStoreAccumulate {
 };
 
 template <typename StorePolicy, typename scalar_t>
-void store(char * C10_RESTRICT data, int64_t stride, int64_t index, scalar_t value) {
+static void store(char * C10_RESTRICT data, int64_t stride, int64_t index, scalar_t value) {
   StorePolicy::store(data, stride, index, value);
 }
 
 template <typename StorePolicy, typename scalar_t, size_t numel>
-void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
+static void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
                   const std::array<scalar_t, numel> &values) {
   auto *base_ptr = data + stride * index;
   for (const auto k : c10::irange(numel)) {
@@ -301,7 +301,7 @@ void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
 }
 
 template <typename StorePolicy, typename scalar_t>
-void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
+static void store(char * C10_RESTRICT data, int64_t stride, int64_t index,
                   const Vectorized<scalar_t> &values) {
   using vec_t = Vectorized<scalar_t>;
   alignas(64) std::array<scalar_t, vec_t::size()> array_values{};

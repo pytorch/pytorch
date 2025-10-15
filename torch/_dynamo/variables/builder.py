@@ -45,10 +45,6 @@ import sympy
 import torch
 from torch import SymInt
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.graph_bytecode_inputs import (
-    get_user_object_by_index,
-    register_user_object,
-)
 from torch._dynamo.utils import (
     get_metrics_context,
     is_int_specialization_case,
@@ -176,9 +172,11 @@ from .ctx_manager import (
     AutocastModeVariable,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
+    EventVariable,
     NullContextVariable,
     PreserveVersionContextVariable,
     StreamContextVariable,
+    StreamVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -259,7 +257,6 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
-from .streams import EventVariable, StreamVariable
 from .tensor import (
     NumpyNdarrayVariable,
     supported_const_comparison_op_values,
@@ -1039,19 +1036,24 @@ class VariableBuilder:
             stream_var = VariableBuilder(self.tx, stream_source)(value.stream)
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, torch.Stream):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            index = register_user_object(value, self.source)
+            self.install_guards(GuardBuilder.ID_MATCH)
             stream_proxy = self.tx.output.create_proxy(
-                "call_function", get_user_object_by_index, (index,), {}
+                "call_function",
+                type(value),
+                (),
+                {
+                    "stream_id": value.stream_id,
+                    "device_index": value.device_index,
+                    "device_type": value.device_type,
+                },
             )
             set_example_value(stream_proxy.node, value)
-            var = StreamVariable(
+            return StreamVariable(
                 stream_proxy,
                 value,
                 value.device,
                 source=self.source,
             )
-            return self.tx.output.side_effects.track_object_existing(value, var)
         elif isinstance(value, (torch._C._SDPAParams)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return SDPAParamsVariable.create(self.tx, value, self.source)
@@ -1059,12 +1061,12 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.ID_MATCH)
             return FuncTorchInterpreterVariable(value)
         elif isinstance(value, torch.Event):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            index = register_user_object(value, self.source)
+            self.install_guards(GuardBuilder.ID_MATCH)
+            torch._dynamo.utils.store_user_object_weakref(value)
             event_proxy = self.tx.output.create_proxy(
                 "call_function",
-                get_user_object_by_index,
-                (index,),
+                torch._dynamo.utils.get_user_object_from_id,
+                (id(value),),
                 {},
             )
             set_example_value(event_proxy.node, value)

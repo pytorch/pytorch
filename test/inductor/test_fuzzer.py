@@ -155,9 +155,6 @@ class TestConfigFuzzer(TestCase):
         )
 
     @unittest.skipIf(not IS_LINUX, "PerfCounters are only supported on Linux")
-    @unittest.skip(
-        "Need default values for dynamo flags - https://github.com/pytorch/pytorch/issues/164062"
-    )
     def test_config_fuzzer_dynamo_bisect(self):
         # these values just chosen randomly, change to different ones if necessary
         key_1 = {"dead_code_elimination": False, "specialize_int": True}

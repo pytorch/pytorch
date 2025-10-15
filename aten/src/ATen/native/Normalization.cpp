@@ -92,7 +92,7 @@ namespace {
              arg_name, " should contain ", expected, " elements not ", actual);
   }
 
-  inline Tensor repeat_if_defined(const Tensor& t, const SymInt& repeat) {
+  static inline Tensor repeat_if_defined(const Tensor& t, const SymInt& repeat) {
     if (t.defined()) {
       return t.repeat_symint(repeat);
     }

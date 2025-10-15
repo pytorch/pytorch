@@ -52,7 +52,7 @@ class _ScriptLocalOptimizer(nn.Module):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
         # apply functional optimizer step with a list of gradients
         grads: list[Optional[Tensor]] = [
-            all_local_grads[p] if p in all_local_grads else None  # noqa: SIM401
+            all_local_grads[p] if p in all_local_grads else None
             for p in self._local_params
         ]
 

@@ -420,8 +420,7 @@ class SummaryWriter:
         fw_logdir = self._get_file_writer().get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
             fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
-            if self.all_writers is None:
-                raise AssertionError("self.all_writers is None")
+            assert self.all_writers is not None
             if fw_tag in self.all_writers.keys():
                 fw = self.all_writers[fw_tag]
             else:
@@ -931,19 +930,20 @@ class SummaryWriter:
             fs.makedirs(save_path)
 
         if metadata is not None:
-            if mat.shape[0] != len(
+            assert mat.shape[0] == len(
                 metadata
-            ):
-                raise AssertionError("#labels should equal with #data points")
+            ), "#labels should equal with #data points"
             make_tsv(metadata, save_path, metadata_header=metadata_header)
 
         if label_img is not None:
-            if mat.shape[0] != label_img.shape[0]:
-                raise AssertionError("#images should equal with #data points")
+            assert (
+                mat.shape[0] == label_img.shape[0]
+            ), "#images should equal with #data points"
             make_sprite(label_img, save_path)
 
-        if mat.ndim != 2:
-            raise AssertionError("mat should be 2D, where mat.size(0) is the number of data points")
+        assert (
+            mat.ndim == 2
+        ), "mat should be 2D, where mat.size(0) is the number of data points"
         make_mat(mat, save_path)
 
         # Filesystem doesn't necessarily have append semantics, so we store an
@@ -1094,8 +1094,7 @@ class SummaryWriter:
         torch._C._log_api_usage_once(
             "tensorboard.logging.add_custom_scalars_marginchart"
         )
-        if len(tags) != 3:
-            raise AssertionError(f"Expected 3 tags, got {len(tags)}.")
+        assert len(tags) == 3
         layout = {category: {title: ["Margin", tags]}}
         self._get_file_writer().add_summary(custom_scalars(layout))
 

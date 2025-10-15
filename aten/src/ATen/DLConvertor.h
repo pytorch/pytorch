@@ -52,16 +52,16 @@ struct DLPackTraits {};
 
 template <>
 struct DLPackTraits<DLManagedTensor> {
-  inline static constexpr const char* capsule = "dltensor";
-  inline static constexpr const char* used = "used_dltensor";
+  inline static const char* capsule = "dltensor";
+  inline static const char* used = "used_dltensor";
   inline static auto toDLPack = at::toDLPack;
   inline static auto fromDLPack = at::fromDLPack;
 };
 
 template <>
 struct DLPackTraits<DLManagedTensorVersioned> {
-  inline static constexpr const char* capsule = "dltensor_versioned";
-  inline static constexpr const char* used = "used_dltensor_versioned";
+  inline static const char* capsule = "dltensor_versioned";
+  inline static const char* used = "used_dltensor_versioned";
   inline static auto toDLPack = at::toDLPackVersioned;
   inline static auto fromDLPack = at::fromDLPackVersioned;
 };

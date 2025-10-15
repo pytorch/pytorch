@@ -76,12 +76,10 @@ def _prepare_video(V):
 
 def make_grid(I, ncols=8):
     # I: N1HW or N3HW
-    if not isinstance(I, np.ndarray):
-        raise AssertionError("plugin error, should pass numpy array here")
+    assert isinstance(I, np.ndarray), "plugin error, should pass numpy array here"
     if I.shape[1] == 1:
         I = np.concatenate([I, I, I], 1)
-    if I.ndim != 4 or I.shape[1] != 3:
-        raise AssertionError("Input should be a 4D numpy array with 3 channels")
+    assert I.ndim == 4 and I.shape[1] == 3
     nimg = I.shape[0]
     H = I.shape[2]
     W = I.shape[3]
@@ -103,12 +101,13 @@ def make_grid(I, ncols=8):
 
 
 def convert_to_HWC(tensor, input_format):  # tensor: numpy array
-    if len(set(input_format)) != len(input_format):
-        raise AssertionError(f"You can not use the same dimension shordhand twice. \
-            input_format: {input_format}")
-    if len(tensor.shape) != len(input_format):
-        raise AssertionError(f"size of input tensor and input format are different. \
-        tensor shape: {tensor.shape}, input_format: {input_format}")
+    assert len(set(input_format)) == len(
+        input_format
+    ), f"You can not use the same dimension shordhand twice.         input_format: {input_format}"
+    assert len(tensor.shape) == len(
+        input_format
+    ), f"size of input tensor and input format are different. \
+        tensor shape: {tensor.shape}, input_format: {input_format}"
     input_format = input_format.upper()
 
     if len(input_format) == 4:

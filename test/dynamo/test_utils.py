@@ -500,7 +500,6 @@ class TestDynamoTimed(TestCase):
             e.cuda_version = None
             e.triton_version = None
             e.python_version = None
-            e.pytorch_version = None
             e.stack_trace = None
             e.graph_node_shapes = None
             e.exception_stack_trace = None
@@ -577,7 +576,6 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
  'python_version': None,
- 'pytorch_version': None,
  'recompile_reason': None,
  'recompile_user_contexts': None,
  'remote_cache_time_saved_s': None,
@@ -663,7 +661,6 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': 0,
  'python_version': None,
- 'pytorch_version': None,
  'recompile_reason': None,
  'recompile_user_contexts': None,
  'remote_cache_time_saved_s': None,
@@ -760,7 +757,6 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
  'python_version': None,
- 'pytorch_version': None,
  'recompile_reason': None,
  'recompile_user_contexts': None,
  'remote_cache_time_saved_s': None,
@@ -846,7 +842,6 @@ class TestDynamoTimed(TestCase):
  'post_grad_pass_time_us': 0,
  'pre_grad_pass_time_us': None,
  'python_version': None,
- 'pytorch_version': None,
  'recompile_reason': None,
  'recompile_user_contexts': None,
  'remote_cache_time_saved_s': None,

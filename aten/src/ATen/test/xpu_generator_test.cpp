@@ -80,19 +80,3 @@ TEST(XpuGeneratorTest, testMultithreadingGetSetCurrentSeed) {
   t2.join();
   EXPECT_EQ(gen1.current_seed(), initial_seed+3);
 }
-
-TEST(XpuGeneratorTest, testRNGForking) {
-  // See Note [Acquire lock when using random generators]
-  if (!at::xpu::is_available()) return;
-  auto default_gen = at::xpu::detail::getDefaultXPUGenerator();
-  auto current_gen = at::xpu::detail::createXPUGenerator();
-  {
-    std::lock_guard<std::mutex> lock(default_gen.mutex());
-    current_gen = default_gen.clone(); // capture the current state of default generator
-  }
-  auto target_value = at::randn({1000}, at::kXPU);
-  // Dramatically alter the internal state of the main generator
-  auto x = at::randn({100000}, at::kXPU);
-  auto forked_value = at::randn({1000}, current_gen, at::kXPU);
-  ASSERT_EQ(target_value.sum().item<double>(), forked_value.sum().item<double>());
-}

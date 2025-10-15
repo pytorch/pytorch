@@ -474,9 +474,6 @@ class BaseSchedulerNode:
     def is_reduction(self) -> bool:
         return False
 
-    def is_native_matmul(self) -> bool:
-        return False
-
     def is_split_scan(self) -> bool:
         return False
 
@@ -1344,10 +1341,6 @@ class SchedulerNode(BaseSchedulerNode):
         )
         return bool(self.node.get_reduction_type())
 
-    def is_native_matmul(self) -> bool:
-        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
-        return self.node.get_reduction_type() == "dot"
-
     def is_split_scan(self) -> bool:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
             f"{type(self.node)=}"
@@ -1682,10 +1675,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_reduction(self) -> bool:
         return any(x.is_reduction() for x in self.snodes)
-
-    @cache_on_self
-    def is_native_matmul(self) -> bool:
-        return any(x.is_native_matmul() for x in self.snodes)
 
     @cache_on_self
     def is_split_scan(self) -> bool:
@@ -2282,6 +2271,7 @@ class Scheduler:
                 *V.graph.torchbind_constants.keys(),
             ]
         )
+
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()

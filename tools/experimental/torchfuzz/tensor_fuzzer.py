@@ -554,7 +554,7 @@ def fuzz_scalar(spec, seed: Optional[int] = None) -> Union[float, int, bool, com
 
 def specs_compatible(spec1: Spec, spec2: Spec) -> bool:
     """Check if two specifications are compatible (one can be used where the other is expected)."""
-    if type(spec1) is not type(spec2):
+    if type(spec1) != type(spec2):
         return False
 
     if isinstance(spec1, ScalarSpec):

@@ -20,10 +20,8 @@ def assert_dicts_equal(dict_0, dict_1):
         x = {"a": np.ones((2, 1))}
         x == x  # Raises ValueError
     """
-    if set(dict_0.keys()) != set(dict_0.keys()):
-        raise AssertionError("dicts must have the same keys")
-    if all(np.all(v != dict_1[k]) for k, v in dict_0.items() if k != "dtype"):
-        raise AssertionError("dict values differ for keys other than 'dtype'")
+    assert set(dict_0.keys()) == set(dict_0.keys())
+    assert all(np.all(v == dict_1[k]) for k, v in dict_0.items() if k != "dtype")
 
 def run(n, stmt, fuzzer_cls):
     float_iter = fuzzer_cls(seed=0, dtype=torch.float32).take(n)

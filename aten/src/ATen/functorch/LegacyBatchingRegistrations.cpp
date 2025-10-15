@@ -68,18 +68,18 @@ namespace at::functorch {
 
 namespace{
 // PyTorch allows operations to specify dim 0 and dim -1 on a scalar tensor.
-bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
+static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
 }
 
-int64_t get_current_level() {
+static int64_t get_current_level() {
   auto maybe_level = maybeCurrentDynamicLayer();
   TORCH_INTERNAL_ASSERT(maybe_level.has_value());
   return maybe_level->layerId();
 }
 
 // This check should probably go into the dispatcher...
-bool participatesInCurrentLevel(const Tensor& self) {
+static bool participatesInCurrentLevel(const Tensor& self) {
   auto current_level = get_current_level();
   auto* maybe_batched_impl = maybeGetBatchedImpl(self);
   if (!maybe_batched_impl) {
@@ -90,7 +90,7 @@ bool participatesInCurrentLevel(const Tensor& self) {
   return self_level == current_level;
 }
 
-bool participatesInCurrentLevel(ITensorListRef self) {
+static bool participatesInCurrentLevel(ITensorListRef self) {
   for (const Tensor& tensor : self) {
     if (participatesInCurrentLevel(tensor)) {
       return true;
@@ -285,7 +285,7 @@ std::vector<Tensor> unbind_batching_rule(const Tensor& self, int64_t dim) {
 // given (sizes, strides, storage_offset) returns the maximum location that
 // can be indexed (or nullopt if such a location doesn't exist, e.g., tensors
 // with zero-size dims).
-std::optional<c10::SymInt> maximum_indexable_location(
+static std::optional<c10::SymInt> maximum_indexable_location(
     c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides, const c10::SymInt& storage_offset) {
   auto result = native::storage_size_for(sizes, strides);
   if (result == 0) {
@@ -298,7 +298,7 @@ std::optional<c10::SymInt> maximum_indexable_location(
 // This checks that the range of possible memory locations accessible by
 // x.as_strided(sizes, strides, maybe_storage_offset)
 // are within the bounds of possible memory locations accessible by x.
-void checkBasicAsStridedValidForSlice(
+static void checkBasicAsStridedValidForSlice(
     const Tensor& physical_tensor,
     int64_t num_batch_dims,
     c10::SymIntArrayRef sizes,

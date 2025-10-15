@@ -17,11 +17,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
-from torch.testing._internal.common_utils import (
-    parametrize,
-    TEST_CUDA,
-    TEST_WITH_SLOW_GRADCHECK,
-)
+from torch.testing._internal.common_utils import parametrize, TEST_CUDA
 
 
 try:
@@ -83,7 +79,6 @@ class TestSelectAlgorithmCuda(BaseTestSelectAlgorithm):
     @parametrize("in_features", (128, 144, 1024))
     @parametrize("out_features", (64, 65, 1024))
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @unittest.skipIf(TEST_WITH_SLOW_GRADCHECK, "Leaking memory")
     def test_int8_woq_mm_cuda(
         self, dtype, batch_size, mid_dim, in_features, out_features
     ):
@@ -138,7 +133,6 @@ class TestSelectAlgorithmCuda(BaseTestSelectAlgorithm):
     @parametrize("in_features", (128,))
     @parametrize("out_features", (64,))
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    @unittest.skipIf(TEST_WITH_SLOW_GRADCHECK, "Leaking memory")
     def test_int8_woq_mm_concat_cuda(
         self, dtype, batch_size, mid_dim, in_features, out_features
     ):

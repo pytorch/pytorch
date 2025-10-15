@@ -825,6 +825,14 @@ void Context::setDisplayVmapFallbackWarnings(bool enabled) {
   display_vmap_fallback_warnings_ = enabled;
 }
 
+bool Context::warnOnAccumulateGradStreamMismatch() const {
+  return warn_on_accumulate_grad_stream_mismatch_;
+}
+
+void Context::setWarnOnAccumulateGradStreamMismatch(bool enabled) {
+  warn_on_accumulate_grad_stream_mismatch_ = enabled;
+}
+
 bool Context::isDefaultMobileCPUAllocatorSet() {
   return prev_allocator_ptr_ != nullptr;
 }

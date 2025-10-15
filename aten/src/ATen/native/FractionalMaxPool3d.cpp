@@ -99,7 +99,7 @@ namespace at::native {
 namespace {
 
 template<typename scalar_t>
-void fractional_max_pool3d_out_single_batch_frame(
+static void fractional_max_pool3d_out_single_batch_frame(
   const scalar_t* input,
   scalar_t* output,
   int64_t* indices,
@@ -169,7 +169,7 @@ void fractional_max_pool3d_out_single_batch_frame(
 }
 
 template<typename scalar_t>
-void fractional_max_pool3d_out_frame(
+static void fractional_max_pool3d_out_frame(
   const scalar_t* input,
   scalar_t* output,
   int64_t* indices,
@@ -257,7 +257,7 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
 namespace {
 
 template<typename scalar_t>
-void fractional_max_pool3d_backward_out_single_batch_frame(
+static void fractional_max_pool3d_backward_out_single_batch_frame(
   scalar_t* gradInput,
   const scalar_t* gradOutput,
   const int64_t* indices,
@@ -287,7 +287,7 @@ void fractional_max_pool3d_backward_out_single_batch_frame(
 }
 
 template<typename scalar_t>
-void fractional_max_pool3d_backward_out_frame(
+static void fractional_max_pool3d_backward_out_frame(
   scalar_t* gradInput,
   const scalar_t* gradOutput,
   const int64_t* indices,
