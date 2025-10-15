@@ -607,6 +607,18 @@ flop_registry = {
     aten._efficient_attention_forward: _efficient_attention_forward_flop,
     aten._flash_attention_backward: _flash_attention_backward_flop,
     aten._efficient_attention_backward: _efficient_attention_backward_flop,
+    aten.add: element_wise_flop, 
+    aten.sub: element_wise_flop, 
+    aten.mul: element_wise_flop, 
+    aten.div: element_wise_flop, 
+    aten.pow: element_wise_flop, 
+    aten.remainder: element_wise_flop, 
+    aten.add_: element_wise_flop, 
+    aten.sub_: element_wise_flop, 
+    aten.mul_: element_wise_flop, 
+    aten.div_: element_wise_flop, 
+    aten.pow_: element_wise_flop, 
+    aten.remainder_: element_wise_flop,
 }
 
 def normalize_tuple(x):
