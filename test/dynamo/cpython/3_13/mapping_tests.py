@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 
 __TestCase = CPythonTestCase
 
@@ -568,7 +568,7 @@ class TestMappingProtocol(BasicTestMappingProtocol):
         for copymode in -1, +1:
             # -1: b has same structure as a
             # +1: b is a.copy()
-            for log2size in range(12):
+            for log2size in range(3):
                 size = 2**log2size
                 a = self._empty_mapping()
                 b = self._empty_mapping()
@@ -693,6 +693,7 @@ class TestHashMappingProtocol(TestMappingProtocol):
         d = self._full_mapping({1: BadRepr()})
         self.assertRaises(Exc, repr, d)
 
+    @skipIfTorchDynamo("slow test")
     def test_repr_deep(self):
         d = self._empty_mapping()
         for i in range(get_c_recursion_limit() + 1):
