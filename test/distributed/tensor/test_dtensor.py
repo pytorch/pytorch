@@ -219,7 +219,7 @@ class DTensorTest(DTensorTestBase):
         dtensor = DTensor.from_local(local_tensor, device_mesh, shard_spec)
 
         with self.assertRaisesRegex(
-            RuntimeError, "the local_tensor argument only accepts torch.Tensor"
+            ValueError, "the local_tensor argument only accepts torch.Tensor"
         ):
             DTensor.from_local(dtensor, device_mesh, shard_spec)
 
@@ -263,7 +263,7 @@ class DTensorTest(DTensorTestBase):
         )
 
         with self.assertRaisesRegex(
-            RuntimeError, "Please pass both shape and stride at the same time."
+            ValueError, "Please pass both shape and stride at the same time."
         ):
             DTensor.from_local(
                 map_local_tensor_for_rank(tensor_list, self.rank, lambda tl, r: tl[r]),
@@ -273,7 +273,7 @@ class DTensorTest(DTensorTestBase):
             )
 
         with self.assertRaisesRegex(
-            RuntimeError, "Please pass both shape and stride at the same time."
+            ValueError, "Please pass both shape and stride at the same time."
         ):
             DTensor.from_local(
                 map_local_tensor_for_rank(tensor_list, self.rank, lambda tl, r: tl[r]),
