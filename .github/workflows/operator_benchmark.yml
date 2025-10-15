@@ -30,9 +30,9 @@ permissions:
   contents: read
 
 jobs:
-  opbenchmark-build:
+  x86-opbenchmark-build:
     if: github.repository_owner == 'pytorch'
-    name: opbenchmark-build
+    name: x86-opbenchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-jammy-py3.10-gcc11-build
@@ -43,12 +43,12 @@ jobs:
         ]}
     secrets: inherit
 
-  opbenchmark-test:
-    name: opbenchmark-test
+  x86-opbenchmark-test:
+    name: x86-opbenchmark-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: opbenchmark-build
+    needs: x86-opbenchmark-build
     with:
       build-environment: linux-jammy-py3.10-gcc11-build
-      docker-image: ${{ needs.opbenchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.opbenchmark-build.outputs.test-matrix }}
+      docker-image: ${{ needs.x86-opbenchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.x86-opbenchmark-build.outputs.test-matrix }}
     secrets: inherit
