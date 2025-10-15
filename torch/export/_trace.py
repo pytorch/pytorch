@@ -357,24 +357,11 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
             if add_root:
 
                 def normalize_path(path):
-                    try:
-                        parts = []
-
-                        class Path:
-                            def __getattr__(self, name):
-                                if name != "_modules":
-                                    parts.append(name)
-                                return self
-
-                            def __getitem__(self, idx):
-                                # pyrefly: ignore  # bad-argument-type
-                                parts.append(str(idx))
-                                return self
-
-                        eval(path, {"L": {"self": Path()}})
-                        return ".".join(parts)
-                    except Exception:  # TODO(zhxchen17) Remove this.
-                        return path
+                    if path == "L['self']":
+                        return ""
+                    if path.startswith("L['self']."):
+                        return path[len("L['self'].") :]
+                    return path
 
                 nn_module_stack = {
                     root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
