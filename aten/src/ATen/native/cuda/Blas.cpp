@@ -1273,6 +1273,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // by decreasing priority. We prefer "simpler" schemes as they are supported
   // more broadly (more GPU archs, more CUDA versions) and because they are more
   // efficient. This tends to matter only for small matmuls (e.g., 1x1x128).
+
+  // List of supported BlockWise pairs for FP8:
+  // https://docs.nvidia.com/cuda/cublas/#element-1d-and-128x128-2d-block-scaling-for-fp8-data-types
+
   auto [scaling_choice_a, scaling_choice_b] = get_joint_scaling(
     {
       std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),

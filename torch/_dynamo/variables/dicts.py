@@ -1371,3 +1371,13 @@ class DictItemsVariable(DictViewVariable):
 
     def python_type(self):
         return dict_items
+
+    def call_method(self, tx, name, args, kwargs):
+        # TODO(guilhermeleobas): This should actually check if args[0]
+        # implements the mapping protocol.
+        if name == "__eq__":
+            assert len(args) == 1
+            if isinstance(args[0], DictItemsVariable):
+                return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
+            return ConstantVariable.create(False)
+        return super().call_method(tx, name, args, kwargs)
