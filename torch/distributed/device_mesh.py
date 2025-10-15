@@ -1,17 +1,18 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import inspect
 import logging
-import math
 import os
 import threading
 import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
+from typing_extensions import get_overloads, overload
 
 import torch
 from torch.distributed import is_available
-from torch.distributed._mesh_layout import _MeshLayout
+from torch.distributed._mesh_layout import _MeshLayout, suffix_product
 from torch.distributed._pycute import is_int
 from torch.utils._typing_utils import not_none
 
@@ -173,13 +174,15 @@ else:
         """
 
         _device_type: str
-        _mesh: torch.Tensor
+        _global_rank_permutation: torch.Tensor
         _mesh_dim_names: Optional[tuple[str, ...]]
         _layout: _MeshLayout
         _root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"] = {}
 
+        # This is the only public (legacy) constructor. It forwards to the private one.
+        @overload
         def __init__(
             self,
             device_type: str,
@@ -189,52 +192,81 @@ else:
             backend_override: Optional[tuple[BackendConfig, ...]] = None,
             _init_backend: bool = True,
             _rank: Optional[int] = None,
-            _layout: Optional[_MeshLayout] = None,
         ) -> None:
-            self._device_type = device_type
             if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
                 raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
-            self._mesh = (
+            mesh_tensor = (
                 mesh.detach().to(dtype=torch.int).contiguous()
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
-            self._mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
-            if backend_override is None:
-                backend_override = ((None, None),) * self.mesh.ndim
-            elif len(backend_override) != self.mesh.ndim:
-                raise ValueError(
-                    f"backend_override should have the same length as the number of mesh dimensions, "
-                    f"but got {len(backend_override)} and {self.mesh.ndim}."
-                )
-            # Internal bookkeeping for the device mesh.
-            self._layout = (
-                _layout
-                if _layout
-                else _MeshLayout(self.mesh.size(), self.mesh.stride())
-            )
-            assert self._layout.check_non_overlap(), (
-                "Please use a non-overlapping layout when creating a DeviceMesh."
-            )
-            # Because we still need to support slicing of flattened dim from root mesh, so we don't check stride here.
-            assert self._layout.numel() == self.mesh.numel(), (
-                "Please use a valid layout when creating a DeviceMesh."
-                f"The layout {self._layout} is not consistent with the mesh size {self.mesh.size()}."
+            layout = _MeshLayout(mesh_tensor.size(), mesh_tensor.stride())
+            global_rank_permutation = mesh_tensor.flatten()
+            DeviceMesh.__init__(
+                self,
+                _device_type=device_type,
+                _layout=layout,
+                _global_rank_permutation=global_rank_permutation,
+                _mesh_dim_names=mesh_dim_names,
+                _backend_override=backend_override,
+                _init_backend=_init_backend,
+                _rank=_rank,
             )
 
-            # private field to pre-generate DeviceMesh's hash
-            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._thread_id = None
+        # This is the core private constructor. All args are thus underscore-prefixed,
+        # and also keyword-only to avoid this overload triggering by mistake.
+        @overload
+        def __init__(
+            self,
+            *,
+            _device_type: str,
+            _layout: _MeshLayout,
+            _global_rank_permutation: torch.Tensor,
+            _mesh_dim_names: Optional[tuple[str, ...]] = None,
+            _root_mesh: Optional["DeviceMesh"] = None,
+            _backend_override: Optional[tuple[BackendConfig, ...]] = None,
+            _init_backend: bool = True,
+            _rank: Optional[int] = None,
+        ) -> None:
+            assert _layout.check_non_overlap(), (
+                "Please use a non-overlapping layout when creating a DeviceMesh."
+            )
+            assert _global_rank_permutation.ndim == 1, (
+                "The global rank permutation must be 1-dimensional"
+            )
+            assert _global_rank_permutation.is_contiguous(), (
+                "The global rank permutation must be contiguous"
+            )
+            assert _global_rank_permutation.numel() >= _layout.cosize(), (
+                "The global rank permutation must be large enough for the layout: "
+                f"got {_global_rank_permutation.numel()}, "
+                f"expected >= {'*'.join(f'{s}' for s in _layout.top_level_sizes)}"
+            )
+
+            self._device_type = _device_type
+            self._layout = _layout
+            self._global_rank_permutation = _global_rank_permutation
+            self._mesh_dim_names = tuple(_mesh_dim_names) if _mesh_dim_names else None
+            self._root_mesh = _root_mesh
+
+            if _backend_override is None:
+                _backend_override = ((None, None),) * len(self._layout)
+            elif len(_backend_override) != len(self._layout):
+                raise ValueError(
+                    f"backend_override should have the same length as the number of mesh dimensions, "
+                    f"but got {len(_backend_override)} and {len(self._layout)}."
+                )
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            if device_type != "xla":
+            self._thread_id = None
+            if _device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
                     self._setup_world_group_and_device()
-                    self._init_process_groups(backend_override)
+                    self._init_process_groups(_backend_override)
 
                 if is_initialized() and get_backend() == "threaded":
                     # pyrefly: ignore  # bad-assignment
@@ -250,6 +282,26 @@ else:
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
 
+            # private field to pre-generate DeviceMesh's hash
+            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+
+        # This is the actual constructor entry-point which dispatches to the overloads.
+        def __init__(self, *args, **kwargs) -> None:
+            mismatches: list[tuple[str, str]] = []
+            for func in get_overloads(DeviceMesh.__init__):
+                sig = inspect.signature(func)
+                try:
+                    sig.bind(self, *args, **kwargs)
+                except TypeError as e:
+                    mismatches.append((f"{sig!s}", f"{e!s}"))
+                    continue
+                func(self, *args, **kwargs)
+                return
+            raise TypeError(
+                f"{args=} and {kwargs=} didn't match any overload:\n"
+                + "\n".join(f"- overload {s}: {e}" for s, e in mismatches)
+            )
+
         @property
         def device_type(self) -> str:
             """Returns the device type of the mesh."""
@@ -258,7 +310,13 @@ else:
         @property
         def mesh(self) -> torch.Tensor:
             """Returns the tensor representing the layout of devices."""
-            return self._mesh
+            full_mesh = self._layout.remap_to_tensor(self._global_rank_permutation)
+            my_coords = (full_mesh == get_rank()).nonzero()
+            if my_coords.size(0) > 0:
+                return full_mesh[my_coords[0, 0]]
+            if full_mesh.size(0) == 1:
+                return full_mesh[0]
+            return full_mesh.new_empty((0,) * full_mesh.ndim)
 
         @property
         def mesh_dim_names(self) -> Optional[tuple[str, ...]]:
@@ -273,9 +331,9 @@ else:
                 init_process_group()
 
             world_size = get_world_size()
-            if self.mesh.numel() > world_size:
+            if self._layout.numel() > world_size:
                 raise RuntimeError(
-                    f"Mesh should not be bigger than default world size {world_size}, but found {self.mesh.numel()} ranks!"
+                    f"Mesh should not be bigger than default world size {world_size}, but found {self._layout.numel()} ranks!"
                 )
 
             # ONLY set the device if the current device is not initialized, if user already
@@ -326,8 +384,8 @@ else:
             default_group = _get_default_group()
 
             if (
-                self.mesh.ndim == 1
-                and self.mesh.numel() == get_world_size()
+                len(self._layout) == 1
+                and self._layout.numel() == get_world_size()
                 and backend_override[0] == (None, None)
             ):
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
@@ -346,11 +404,13 @@ else:
                 dim_group_names.append(dim_group.group_name)
             else:
                 # create sub pgs base on the mesh argument specified
-                for dim in range(self.mesh.ndim):
+                for dim in range(len(self._layout)):
                     # swap the current dim to the last dim
                     # then reshape to flatten out other dims
-                    pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
-                        -1, self.mesh.size(dim)
+                    pg_ranks_by_dim = (
+                        self._layout[dim]
+                        .nest()
+                        .remap_to_tensor(self._global_rank_permutation)
                     )
                     backend, pg_options = backend_override[dim]
                     # We need to explicitly pass in timeout when specified in option, otherwise
@@ -446,14 +506,14 @@ else:
 
         def __repr__(self) -> str:
             device_mesh_repr = (
-                f"({', '.join(f'{k}={v}' for k, v in zip(self._mesh_dim_names, self._mesh.shape))})"
+                f"({', '.join(f'{k}={v}' for k, v in zip(self._mesh_dim_names, self._layout.top_level_sizes))})"
                 if self._mesh_dim_names
-                else f"{tuple(self._mesh.shape)}"
+                else f"{self._layout.top_level_sizes}"
             )
-            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, '{self.device_type}', stride={self._mesh.stride()}"
+            device_mesh_repr = f"DeviceMesh({device_mesh_repr}, '{self.device_type}', stride={self._layout.strides}"
             # We only print the mesh tensor if the debug mode is turned on.
             if os.environ.get("TORCH_DISTRIBUTED_DEBUG", "") == "DETAIL":
-                device_mesh_repr += f", Mesh: {self._mesh.tolist()}"
+                device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
             return f"{device_mesh_repr})"
 
         def __hash__(self):
@@ -463,7 +523,8 @@ else:
                 self._hash = hash(
                     (
                         self._flatten_mesh_list,
-                        self._mesh.shape,
+                        self._layout.sizes,
+                        self._layout.strides,
                         self._device_type,
                         self._mesh_dim_names,
                         self._thread_id,
@@ -479,7 +540,8 @@ else:
                 return False
             return (
                 self._flatten_mesh_list == other._flatten_mesh_list
-                and self._mesh.shape == other._mesh.shape
+                and self._layout.sizes == other._layout.sizes
+                and self._layout.strides == other._layout.strides
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
@@ -571,16 +633,16 @@ else:
             if not hasattr(self, "_dim_group_names"):
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
-            if self.mesh.ndim > 1 and mesh_dim is None:
+            if len(self._layout) > 1 and mesh_dim is None:
                 raise RuntimeError(
-                    f"Found the DeviceMesh have {self.mesh.ndim} dimensions",
+                    f"Found the DeviceMesh have {len(self._layout)} dimensions",
                     "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
                     "If you want to get the list of all the ProcessGroups in the DeviceMesh,"
                     "please use `get_all_groups()` instead.",
                 )
 
             # Quick return if the current device_mesh is a 1D mesh.
-            if self.mesh.ndim == 1 and mesh_dim is None:
+            if len(self._layout) == 1 and mesh_dim is None:
                 return not_none(_resolve_process_group(self._dim_group_names[0]))
 
             root_mesh = self._get_root_mesh()
@@ -606,7 +668,7 @@ else:
             Returns:
                 A list of :class:`ProcessGroup` object.
             """
-            return [self.get_group(i) for i in range(self.mesh.ndim)]
+            return [self.get_group(i) for i in range(len(self._layout))]
 
         def _create_sub_mesh(
             self,
@@ -632,18 +694,13 @@ else:
                             not_none(flatten_mesh._mesh_dim_names).index(name)
                         ]
                     )
-            cur_rank = self.get_rank()
-            pg_ranks_by_dim = layout.remap_to_tensor(
-                root_mesh.mesh,
-            )
-            res_submesh = DeviceMesh._create_mesh_from_ranks(
-                self._device_type,
-                pg_ranks_by_dim,
-                cur_rank,
-                submesh_dim_names,
-                _init_backend=False,
+            res_submesh = DeviceMesh(
+                _device_type=self._device_type,
                 _layout=layout,
+                _global_rank_permutation=root_mesh._global_rank_permutation,
+                _mesh_dim_names=submesh_dim_names,
                 _root_mesh=root_mesh,
+                _init_backend=False,
             )
             res_submesh._dim_group_names = slice_dim_group_name
             return res_submesh
@@ -672,6 +729,8 @@ else:
                 )
 
             flattened_mesh_layout = self._layout.coalesce()
+            if len(flattened_mesh_layout) > 1:
+                flattened_mesh_layout = flattened_mesh_layout.nest()
             # Quick return if the flatten mesh has been created before.
             if mesh_dim_name in root_mesh._flatten_mapping:
                 if (
@@ -685,22 +744,13 @@ else:
                         f"Please specify another valid mesh_dim_name."
                     )
 
-            cur_rank = root_mesh.get_rank()
-            # Due to the limitation of ProcessGroup api, we need to start from root mesh so that all ranks call the
-            # new_group api to avoid potential hang.
-            pg_ranks_by_dim = flattened_mesh_layout.remap_to_tensor(
-                root_mesh.mesh,
-            )
-            res_flattened_mesh = DeviceMesh._create_mesh_from_ranks(
-                root_mesh._device_type,
-                pg_ranks_by_dim.flatten(
-                    start_dim=1
-                ),  # this is needed for flatten non-contiguous mesh dims.
-                cur_rank,
-                (mesh_dim_name,),
-                (backend_override,),
-                _layout=self._layout.coalesce(),
+            res_flattened_mesh = DeviceMesh(
+                _device_type=root_mesh._device_type,
+                _layout=flattened_mesh_layout,
+                _global_rank_permutation=root_mesh._global_rank_permutation,
+                _mesh_dim_names=(mesh_dim_name,),
                 _root_mesh=root_mesh,
+                _backend_override=(backend_override,),
             )
             root_mesh._flatten_mapping[mesh_dim_name] = res_flattened_mesh
 
@@ -830,7 +880,7 @@ else:
             mesh_dim = self._get_mesh_dim_by_name(mesh_dim_name)
             layout = self._layout[mesh_dim]
             pg_ranks_by_dim = layout.remap_to_tensor(
-                self.mesh,
+                self._global_rank_permutation,
             )
             cur_rank = self.get_rank()
             res_submeshes = []
@@ -849,60 +899,6 @@ else:
                 res_submeshes.append(submesh)
 
             return res_submeshes
-
-        @staticmethod
-        def _create_mesh_from_ranks(
-            device_type: str,
-            pg_ranks_by_dim: torch.Tensor,
-            cur_rank: int,
-            mesh_dim_names: tuple[str, ...],
-            backend_override: Optional[tuple[BackendConfig, ...]] = None,
-            _init_backend: bool = True,
-            _layout: Optional[_MeshLayout] = None,
-            _root_mesh: Optional["DeviceMesh"] = None,
-        ) -> "DeviceMesh":
-            """
-            Helper method to create a DeviceMesh from tensor `pg_ranks_by_dim`. This is due to
-            the constraint of ProcessGroup API that all ranks have to call the PG creation API
-            even if the rank is not in that PG.
-            We will create a potentially very large number of DeviceMesh objects
-            (e.g., on 1024 GPUs with TP=2, this could be up to 512 DeviceMeshes), only to throw
-            them all away except when the mesh contains the current rank.
-
-            #TODO: Further refactor this method once we relax the ProcessGroup API constraint.
-
-            Args:
-                device_type: The device type of the mesh.
-                pg_ranks_by_dim: all ranks within the worlds organized by dimensions.
-                cur_rank: The current global rank in the mesh.
-                mesh_dim_names: Mesh dimension names.
-                backend_override: Optional backend override for the mesh.
-                _init_backend: Whether to initialize the backend of the mesh.
-                _layout: Optional layout for the mesh.
-
-            Returns:
-                The DeviceMesh containing the current rank.
-            """
-            res_mesh = None
-            for mesh_nd in pg_ranks_by_dim:
-                mesh = DeviceMesh(
-                    device_type,
-                    mesh_nd,
-                    mesh_dim_names=mesh_dim_names,
-                    backend_override=backend_override,
-                    _init_backend=_init_backend,
-                    _layout=_layout,
-                )
-                if cur_rank in mesh_nd:
-                    res_mesh = mesh
-            if res_mesh is None:
-                raise RuntimeError(
-                    f"Current rank {cur_rank} not found in any mesh, "
-                    f"input {pg_ranks_by_dim} does not contain all ranks in the world"
-                )
-            if _root_mesh is not None:
-                res_mesh._root_mesh = _root_mesh
-            return res_mesh
 
         @staticmethod
         def from_group(
@@ -1000,15 +996,17 @@ else:
             return device_mesh
 
         def size(self, mesh_dim: Optional[int] = None) -> int:
-            return self.mesh.numel() if mesh_dim is None else self.mesh.size(mesh_dim)
+            if mesh_dim is not None:
+                return self._layout[mesh_dim].numel()
+            return self._layout.numel()
 
         @property
         def ndim(self) -> int:
-            return self.mesh.ndim
+            return len(self._layout)
 
         @property
         def shape(self) -> tuple[int, ...]:
-            return tuple(self.mesh.shape)
+            return self._layout.top_level_sizes
 
         def get_rank(self) -> int:
             """
@@ -1047,7 +1045,7 @@ else:
             """
             if self.ndim > 1 and mesh_dim is None:
                 raise RuntimeError(
-                    f"Found the DeviceMesh have {self.mesh.ndim} dimensions",
+                    f"Found the DeviceMesh have {len(self._layout)} dimensions",
                     "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
                 )
             elif mesh_dim is None:
@@ -1109,21 +1107,16 @@ else:
             ] = ((None, None),),
         ) -> "DeviceMesh":
             root_mesh = self._get_root_mesh()
-            cur_rank = self.get_rank()
             unflattened_layout = self._layout.unflatten(dim, mesh_sizes)
-            pg_ranks_by_dim = unflattened_layout.remap_to_tensor(
-                root_mesh.mesh,
-            )
             unflattened_mesh_dim_names = list(not_none(self.mesh_dim_names))
             unflattened_mesh_dim_names[dim : dim + 1] = list(mesh_dim_names)
-            res_mesh = DeviceMesh._create_mesh_from_ranks(
-                self.device_type,
-                pg_ranks_by_dim,
-                cur_rank,
-                tuple(unflattened_mesh_dim_names),
-                _init_backend=False,
+            res_mesh = DeviceMesh(
+                _device_type=self.device_type,
                 _layout=unflattened_layout,
+                _global_rank_permutation=root_mesh._global_rank_permutation,
+                _mesh_dim_names=tuple(unflattened_mesh_dim_names),
                 _root_mesh=root_mesh,
+                _init_backend=False,
             )
 
             # If original mesh has initiated its backend, we need to initialize the backend
@@ -1136,15 +1129,12 @@ else:
                     tuple(unflattened_layout.sizes[dim : dim + unflatten_length]),  # type: ignore[index]
                     tuple(unflattened_layout.strides[dim : dim + unflatten_length]),  # type: ignore[index]
                 )
-                unflatten_pg_ranks_by_dim = unflatten_layout.remap_to_tensor(
-                    root_mesh.mesh,
-                )
-                unflatten_submesh = DeviceMesh._create_mesh_from_ranks(
-                    self.device_type,
-                    unflatten_pg_ranks_by_dim,
-                    cur_rank,
-                    mesh_dim_names,
-                    backend_override=backend_override,
+                unflatten_submesh = DeviceMesh(
+                    _device_type=self.device_type,
+                    _layout=unflatten_layout,
+                    _global_rank_permutation=root_mesh._global_rank_permutation,
+                    _mesh_dim_names=mesh_dim_names,
+                    _backend_override=backend_override,
                 )
                 dim_group_names = []
                 for idx in range(0, res_mesh.ndim):
@@ -1345,15 +1335,17 @@ else:
                 "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
             )
 
-        # Always initialize the mesh's tensor on CPU, regardless of what the
+        layout = _MeshLayout(tuple(mesh_shape), suffix_product(mesh_shape))
+        # Always initialize the (identity) permutation on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)
         with torch.device("cpu"):
-            mesh = torch.arange(math.prod(mesh_shape), dtype=torch.int).view(mesh_shape)
+            global_rank_permutation = torch.arange(layout.numel(), dtype=torch.int)
         device_mesh = DeviceMesh(
-            device_type=device_type,
-            mesh=mesh,
-            mesh_dim_names=mesh_dim_names,
-            backend_override=backend_override_tuple,
+            _device_type=device_type,
+            _layout=layout,
+            _global_rank_permutation=global_rank_permutation,
+            _mesh_dim_names=mesh_dim_names,
+            _backend_override=backend_override_tuple,
         )
 
         return device_mesh
