@@ -559,7 +559,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             FAIL = 138
             pc = start_processes(
                 name="echo",
-                entrypoint=bin("echo1.py"),
+                entrypoint=bin("echo4.py"),
                 args={0: ("--exitcode", FAIL, "foo"), 1: ("--exitcode", 0, "bar")},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                 logs_specs=DefaultLogsSpecs(
