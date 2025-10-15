@@ -63,7 +63,7 @@ class VllmBuildParameters:
     # DOCKERFILE_PATH: path to Dockerfile used when use_local_dockerfile is True"
     use_local_dockerfile: bool = env_bool_field("USE_LOCAL_DOCKERFILE", True)
     dockerfile_path: Path = env_path_field(
-        "DOCKERFILE_PATH", ".github/ci_configs/vllm/Dockerfile"
+        "DOCKERFILE_PATH", ".github/ci_configs/vllm/Dockerfile.tmp_vllm"
     )
 
     # the cleaning script to remove torch dependencies from pip

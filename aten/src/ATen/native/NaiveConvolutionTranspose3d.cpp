@@ -22,7 +22,7 @@ namespace at::native {
 
 namespace {
 
-inline void slow_conv_transpose3d_shape_check(
+static inline void slow_conv_transpose3d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,

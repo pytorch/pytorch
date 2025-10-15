@@ -66,7 +66,7 @@ class GroupedSetup:
 
     def __post_init__(self) -> None:
         for field in dataclasses.fields(self):
-            assert field.type is str
+            assert field.type == str
             value: str = getattr(self, field.name)
             object.__setattr__(self, field.name, textwrap.dedent(value))
 

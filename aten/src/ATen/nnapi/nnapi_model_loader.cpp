@@ -77,7 +77,7 @@ typedef struct _SerializedModel {
  * Get the physically stored size of a value.  All values are padded out
  * to a multiple of 4 bytes to ensure the next value is 4-byte aligned.
  */
-uint32_t value_physical_size(uint32_t len) {
+static uint32_t value_physical_size(uint32_t len) {
   uint32_t phys = len;
   if (len % 4 == 0) {
     return len;

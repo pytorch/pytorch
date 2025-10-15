@@ -280,7 +280,7 @@ backward_pass_autocast = "same_as_forward"
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
-donated_buffer = not is_fbcode()
+donated_buffer = False if is_fbcode() else True
 
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/

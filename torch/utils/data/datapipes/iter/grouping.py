@@ -57,8 +57,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         drop_last: bool = False,
         wrapper_class: type[DataChunk] = DataChunk,
     ) -> None:
-        if batch_size <= 0:
-            raise AssertionError("Batch size is required to be larger than 0!")
+        assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
         self.datapipe = datapipe
         self.batch_size = batch_size
@@ -216,15 +215,11 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.group_size = group_size
         self.guaranteed_group_size = None
         if group_size is not None and buffer_size is not None:
-            if not (0 < group_size <= buffer_size):
-                raise AssertionError("group_size must be > 0 and <= buffer_size")
+            assert 0 < group_size <= buffer_size
             # pyrefly: ignore  # bad-assignment
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
-            if group_size is None or not (0 < guaranteed_group_size <= group_size):
-                raise AssertionError(
-                    "guaranteed_group_size must be > 0 and <= group_size and group_size must be set"
-                )
+            assert group_size is not None and 0 < guaranteed_group_size <= group_size
             # pyrefly: ignore  # bad-assignment
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining

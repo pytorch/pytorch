@@ -54,7 +54,7 @@ inline int end_index(int out_idx, int out_len, int in_len) {
 
 // adaptive avg pool for 2D and 3D inputs
 template <typename scalar_t>
-void adaptive_avg_pool_single_out_frame(
+static void adaptive_avg_pool_single_out_frame(
     scalar_t* input_p,
     scalar_t* output_p,
     int64_t sizeC,

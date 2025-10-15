@@ -103,7 +103,7 @@ def check_labels(
                 description=(
                     f"{label} is not an acceptable owner "
                     "(please update to another label or edit ACCEPTABLE_OWNERS_LABELS "
-                    "in tools/linters/adapters/testowners_linter.py)"
+                    "in tools/linters/adapters/testowners_linter.py"
                 ),
             )
         )

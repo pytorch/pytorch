@@ -325,8 +325,7 @@ def proxy_mode_key(
     qualname = proxy_mode.tracer.get_fresh_qualname("wrap_body")  # type: ignore[union-attr]
 
     # TODO (tmanlaibaatar) don't we need flat_apply here??
-    # Dynamo already traced the gmod body without kwargs
-    flat_args, _ = pytree.tree_flatten(args)
+    flat_args, _ = pytree.tree_flatten((args, kwargs))
     with fx_traceback.preserve_node_meta():
         gmod_aten = reenter_make_fx(Interpreter(gmod).run)(*flat_args)
         gmod_aten.meta["_checkpoint_context_fn"] = gmod.meta["_checkpoint_context_fn"]

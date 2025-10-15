@@ -143,7 +143,7 @@ def sample_vllm_test_library():
                 "pytest -v -s compile/test_decorator.py",
             ],
         },
-        "vllm_language_model_test_extended_generation_28_failure_test": {
+        "vllm_languagde_model_test_extended_generation_28_failure_test": {
             "title": "Language Models Test (Extended Generation) 2.8 release failure",
             "id": "vllm_languagde_model_test_extended_generation_28_failure_test",
             "package_install": [

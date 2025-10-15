@@ -13,7 +13,7 @@ namespace at::native {
 namespace {
 
 template <typename scalar_t>
-inline void cadd(
+static inline void cadd(
     scalar_t* z,
     const scalar_t* x,
     const scalar_t* y,
@@ -34,7 +34,7 @@ inline void cadd(
 }
 
 template <typename scalar_t>
-void unfolded2d_acc(
+static void unfolded2d_acc(
     scalar_t* finput_data,
     scalar_t* input_data,
     int64_t kH,
@@ -113,7 +113,7 @@ void unfolded2d_acc(
 }
 
 template <typename scalar_t>
-void unfolded2d_acc_channels_last(
+static void unfolded2d_acc_channels_last(
     scalar_t* finput_data,
     scalar_t* input_data,
     int64_t kH,
@@ -225,7 +225,7 @@ void unfolded2d_acc_kernel(
 }
 
 template <typename scalar_t>
-void unfolded2d_copy(
+static void unfolded2d_copy(
     const scalar_t* input_data,
     scalar_t* finput_data,
     int64_t kH,
@@ -326,7 +326,7 @@ void unfolded2d_copy(
 }
 
 template <typename scalar_t>
-void unfolded2d_copy_channels_last(
+static void unfolded2d_copy_channels_last(
     const scalar_t* input_data,
     scalar_t* finput_data,
     int64_t kH,

@@ -15,11 +15,7 @@ TORCH_LIBRARY(c10d, m) {
   m.class_<Work>("Work")
       .def(torch::init<>())
       .def("wait", [](const c10::intrusive_ptr<Work>& self) { self->wait(); });
-  m.class_<ReduceOp>("ReduceOp")
-      .def(torch::init<>())
-      .def("op", [](const c10::intrusive_ptr<ReduceOp>& self) -> int64_t {
-        return self->op_;
-      });
+  m.class_<ReduceOp>("ReduceOp").def(torch::init<>());
   m.def(
       "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
   m.def(

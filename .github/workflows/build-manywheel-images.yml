@@ -46,12 +46,10 @@ jobs:
       fail-fast: false
       matrix:
         include: [
-          { name: "manylinux2_28-builder",          tag: "cuda13.0",          runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "cuda13.0",         runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "cuda12.8",          runner: "linux.9xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "cuda12.9",          runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "cuda12.6",          runner: "linux.9xlarge.ephemeral" },
           { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "linux.arm64.2xlarge.ephemeral" },
-          { name: "manylinuxaarch64-builder",       tag: "cuda12.9",          runner: "linux.arm64.2xlarge.ephemeral" },
           { name: "manylinuxaarch64-builder",       tag: "cuda12.8",          runner: "linux.arm64.2xlarge.ephemeral" },
           { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "linux.arm64.2xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "rocm6.4",           runner: "linux.9xlarge.ephemeral" },

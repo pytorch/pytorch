@@ -58,7 +58,7 @@ inline scalar_t multilabel_margin_loss_forward_inner_sum_cpu(
 }
 
 template <typename scalar_t>
-void multilabel_margin_loss_forward_out_frame(
+static void multilabel_margin_loss_forward_out_frame(
     const Tensor& input_contiguous,
     const Tensor& target_contiguous,
     Tensor& output,
@@ -108,7 +108,7 @@ void multilabel_margin_loss_forward_out_frame(
   }
 }
 
-void multilabel_margin_loss_forward_out_cpu_template(
+static void multilabel_margin_loss_forward_out_cpu_template(
     const Tensor& input,
     const Tensor& target,
     Tensor& output,
@@ -153,7 +153,7 @@ void multilabel_margin_loss_forward_out_cpu_template(
 }
 
 template <typename scalar_t>
-void multilabel_margin_loss_backward_out_frame(
+static void multilabel_margin_loss_backward_out_frame(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input_contiguous,
@@ -222,7 +222,7 @@ void multilabel_margin_loss_backward_out_frame(
   }
 }
 
-void multilabel_margin_loss_backward_out_cpu_template(
+static void multilabel_margin_loss_backward_out_cpu_template(
     Tensor& grad_input,
     const Tensor& grad_output,
     const Tensor& input,

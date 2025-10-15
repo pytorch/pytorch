@@ -327,12 +327,11 @@ class OverlapScheduler:
             runtime_estimations_keys.append(key)
 
         import torch.distributed as dist
-        from torch._subclasses.fake_tensor import unset_fake_temporarily
         from torch.distributed.distributed_c10d import _get_default_group
 
         world_size = dist.get_world_size()
         pg = _get_default_group()
-        with unset_fake_temporarily():
+        with no_dispatch():
             gathered_runtime_estimations: list[list[float]] = [
                 [] for _ in range(world_size)
             ]
