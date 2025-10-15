@@ -280,6 +280,37 @@ enum class ScalarType : int8_t {
 constexpr uint16_t NumScalarTypes =
     static_cast<uint16_t>(ScalarType::NumOptions);
 
+namespace impl {
+
+// These are used to map ScalarTypes to C++ types.
+
+template <c10::ScalarType N>
+struct ScalarTypeToCPPType;
+
+#define SPECIALIZE_ScalarTypeToCPPType(cpp_type, scalar_type)                \
+  template <>                                                                \
+  struct ScalarTypeToCPPType<c10::ScalarType::scalar_type> {                 \
+    using type = cpp_type;                                                   \
+                                                                             \
+    /* This is a workaround for the CUDA bug which prevents */               \
+    /* ::detail::ScalarTypeToCType<T>::type being used directly due to */    \
+    /* ambiguous reference which can't to be resolved. For some reason it */ \
+    /* can't pick between at::detail and at::cuda::detail. */                \
+    /* For repro example, please see: */                                     \
+    /* https://gist.github.com/izdeby/952ae7cf256ddb740a73776d39a7e7ba */    \
+    /* TODO: remove once the bug is fixed. */                                \
+    static type t;                                                           \
+  };
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
+
+#undef SPECIALIZE_ScalarTypeToCPPType
+
+template <c10::ScalarType N>
+using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
+
+} // namespace impl
+
 } // namespace c10
 
 namespace torch::headeronly {
@@ -287,4 +318,7 @@ using c10::dummy_int1_7_t;
 using c10::dummy_uint1_7_t;
 using c10::NumScalarTypes;
 using c10::ScalarType;
+namespace impl {
+using c10::impl::ScalarTypeToCPPTypeT;
+} // namespace impl
 } // namespace torch::headeronly
