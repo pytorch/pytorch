@@ -27,7 +27,7 @@ written in Python and it marks the transition of PyTorch from C++ to Python.
   acceleration of both forwards and backwards pass using TorchInductor.
 
 To better understand how `torch.compile` tracing behavior on your code, or to
-learn more about the internals of `torch.compile`, please refer to the [`torch.compile` programming model](compile/programming_model.md).
+learn more about the internals of `torch.compile`, please refer to the [`torch.compile` programming model](../../compile/programming_model.md).
 
 :::{note}
 In some cases, the terms `torch.compile`, TorchDynamo, `torch.compiler`
