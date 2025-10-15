@@ -133,7 +133,6 @@ class DeviceCachingAllocator {
   ska::flat_hash_map<xpu::XPUStream, std::deque<std::pair<sycl::event, Block*>>>
       xpu_events;
   DeviceIndex device_index;
-  size_t total_allocated_memory = 0;
   size_t allowed_memory_maximum = 0;
   bool set_fraction = false;
 
@@ -257,6 +256,13 @@ class DeviceCachingAllocator {
     auto device = p.device();
     if (isRetry) {
       stats.num_alloc_retries += 1;
+    }
+    if (set_fraction &&
+        tats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current +
+
+                ize >
+            allowed_memory_maximum) {
+      return false;
     }
     void* ptr = sycl::aligned_alloc_device(
         kDeviceAlignment,
@@ -788,3 +794,4 @@ void setMemoryFraction(double fraction, DeviceIndex device) {
 REGISTER_ALLOCATOR(kXPU, &allocator)
 
 } // namespace c10::xpu::XPUCachingAllocator
+ 
