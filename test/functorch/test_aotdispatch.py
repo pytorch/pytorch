@@ -8157,7 +8157,9 @@ aot_autograd_failures = {
     decorate(
         "linalg.pinv",
         "singular",
-        decorator=toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+        # This delta is coming entirely from the clone() on tangents
+        # in AOTDispatcher to make them contiguous
+        decorator=toleranceOverride({torch.float32: tol(atol=4e-05, rtol=1e-05)}),
     ),
     decorate(
         "nn.functional.interpolate",
@@ -8229,7 +8231,6 @@ def _test_aot_autograd_helper(
     dtype,
     op,
     dynamic=False,
-    use_min_cut=False,
     disable_functionalization=False,
 ):
     if not op.supports_autograd:
@@ -8262,7 +8263,6 @@ def _test_aot_autograd_helper(
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
                 skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
-                use_min_cut=use_min_cut,
                 disable_functionalization=disable_functionalization,
             )
         except DynamicOutputShapeException:
@@ -8372,7 +8372,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
     )
     def test_aot_autograd_disable_functionalization_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(
-            self, device, dtype, op, use_min_cut=False, disable_functionalization=True
+            self, device, dtype, op, disable_functionalization=True
         )
 
     @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
@@ -8391,7 +8391,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
             dtype,
             op,
             dynamic=True,
-            use_min_cut=False,
             disable_functionalization=True,
         )
 

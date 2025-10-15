@@ -39,7 +39,6 @@ def aot_autograd_check(
         check_gradients=True,
         try_check_data_specialization=False,
         skip_correctness_check=False,
-        use_min_cut=True,
         disable_functionalization=False):
     """Compares func(*args, **kwargs) in eager-mode to under AOTAutograd.
 
