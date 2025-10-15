@@ -32,7 +32,9 @@ class AuxRequest(NamedTuple):
     lse: bool = False
 
 
-@torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={}, device_types=("cuda",))
+@torch.library.custom_op(
+    "torch_nn_attention::_varlen_attn", mutates_args={}, device_types=("cuda",)
+)
 def _varlen_attn(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -84,7 +86,9 @@ def _varlen_attn(
             return_debug_mask=False,
         )
 
-    rng_state_ = torch.zeros((2,), dtype=torch.uint64, device=query.device) # hardcoded to 0 because dropout is 0
+    rng_state_ = torch.zeros(
+        (2,), dtype=torch.uint64, device=query.device
+    ) # hardcoded
     return output, softmax_lse, rng_state_
 
 
@@ -105,7 +109,6 @@ def _varlen_attn_fake(
     - query shape: (total, num_heads, head_dim)
     - logsumexp shape: (num_heads, total_q)
     """
-
     # Output has same shape as query
     output = torch.empty_like(query)
 
