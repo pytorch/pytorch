@@ -709,21 +709,6 @@ def fake_tensor_prop(
     return fake_mode
 
 
-def check_and_error_on_sparse_tensors(gm: GraphModule) -> None:
-    # Check for sparse tensors in the graph - inductor doesn't support them
-    from torch._subclasses.meta_utils import is_sparse_any
-
-    for node in gm.graph.nodes:
-        if "val" in node.meta:
-            val = node.meta["val"]
-            if isinstance(val, torch.Tensor) and is_sparse_any(val):
-                raise NotImplementedError(
-                    f"Inductor does not support sparse tensors. "
-                    f"Found sparse tensor output from node '{node.name}' (op: {node.op}, target: {node.target}). "
-                    f"Sparse operations should run in eager mode."
-                )
-
-
 # pass config dict back to user
 def get_patched_config_dict(
     config_patches: Optional[Union[str, dict[str, Any]]] = None,
@@ -850,7 +835,6 @@ def _compile_fx_inner(
     static_input_idxs: Sequence[int] = graph_kwargs.setdefault("static_input_idxs", ())
     static_inputs_log.debug("static input idxs compile_fx_inner: %s", static_input_idxs)
     inputs_to_check = get_input_idxs_to_check(example_inputs, static_input_idxs)
-    check_and_error_on_sparse_tensors(gm)
 
     assert isinstance(next(iter(reversed(gm.graph.nodes))).args[0], (tuple, list)), (
         f"inductor can only compile FX graphs which return a tuple/list, but got {gm.graph}"
