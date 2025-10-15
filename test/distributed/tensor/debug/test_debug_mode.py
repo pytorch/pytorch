@@ -450,39 +450,76 @@ class TestDTensorDebugMode(TestCase):
   [node] output: output""",  # NOQA: B950
         )
 
-    def test_regional_hook(self):
-        def _clone(func, types, args, kwargs, result):
-            return {"value": result.clone()}
+    def test_fx_annotate_in_graph(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x = x + 2
+                with torch.fx.traceback.annotate({"region": "foo"}):
+                    x = x @ y
+                    x = x + 2
+                x = x * 2
+                return x
 
-        def _dtype(func, types, args, kwargs, result):
-            return {"dtype": result.dtype}
+        mod = Foo()
+        x, y = torch.randn(4, 4), torch.randn(4, 8)
+        with torch.fx.traceback.preserve_node_meta():
+            gm = torch.export.export(mod, (x, y)).module()
 
+        debug_mode = DebugMode()
+        debug_mode.run_graph(gm, x, y)
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [node] x: placeholder
+  [node] y: placeholder
+  [node] _guards_fn: call_module[_guards_fn](x, y)
+  [node] add: call_function[aten::add.Tensor](x, 2)
+      aten::add.Tensor(t: f32[4, 4], 2)
+  [node] matmul: call_function[aten::matmul](add, y)  # {"region": foo}
+      aten::mm(t: f32[4, 4], t: f32[4, 8])
+  [node] add_1: call_function[aten::add.Tensor](matmul, 2)  # {"region": foo}
+      aten::add.Tensor(t: f32[4, 8], 2)
+  [node] mul: call_function[aten::mul.Tensor](add_1, 2)
+      aten::mul.Tensor(t: f32[4, 8], 2)
+  [node] output: output""",
+        )
+
+    def test_custom_hooks(self):
+        def numel_hook(func, types, args, kwargs, result):
+            return {"numel": result.numel()}
+
+        # test dispatch hooks
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.l1 = torch.nn.Linear(4, 5)
                 self.l2 = torch.nn.Linear(5, 6)
-                self.l3 = torch.nn.Linear(6, 7)
 
             def forward(self, x):
                 x0 = self.l1(x)
-                with DebugMode.dispatch_hooks(record_hook=_clone, log_hook=_dtype):
+                # local recoding hook & annotation
+                with DebugMode.record_outputs():
                     x1 = self.l2(x0)
-                x2 = self.l3(x1)
-                return x2, x1, x0
+                return x1, x0
 
         x = torch.randn(4, 4, device=self.device_type)
         mod = Foo().to(device=self.device_type)
 
-        debug_mode = DebugMode()
-        with DebugMode() as debug_mode:
-            _, x1, _ = mod(x)
+        # global logging hook
+        with DebugMode.dispatch_hooks(log_hook=numel_hook), DebugMode() as debug_mode:
+            x1, _ = mod(x)
 
-        print(debug_mode.debug_string())
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::t(t: f32[5, 4])  # {'numel': 20}
+    aten::addmm(t: f32[5], t: f32[4, 4], t: f32[4, 5])  # {'numel': 20}
+    aten::t(t: f32[6, 5])  # {'numel': 30}
+    aten::addmm(t: f32[6], t: f32[4, 5], t: f32[5, 6])  # {'numel': 24}""",
+        )
         self.assertTrue(debug_mode.operators[0].record is None)
-        record = debug_mode.operators[3].record["value"]
+        record = debug_mode.operators[3].record["output"]
         self.assertTrue(torch.allclose(record, x1))
-
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)

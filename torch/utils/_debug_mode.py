@@ -111,7 +111,12 @@ def _op_to_str(op) -> str:
 class _DebugCall:
     """Base class for tracking operator calls in DebugMode"""
 
-    def __init__(self, call_depth: int, record: Optional[dict[str, Any]] = None, log: Optional[dict[str, Any]] = None):
+    def __init__(
+        self,
+        call_depth: int,
+        record: Optional[dict[str, Any]] = None,
+        log: Optional[dict[str, Any]] = None,
+    ):
         global RECORD_STACK_TRACE, CPP_STACK_TRACE
 
         self.call_depth: int = call_depth
@@ -130,7 +135,15 @@ class _DebugCall:
 class _OpCall(_DebugCall):
     """Normal operator call"""
 
-    def __init__(self, op, args: tuple, kwargs: dict, call_depth: int, record: Optional[dict[str, Any]] = None, log: Optional[dict[str, Any]] = None):
+    def __init__(
+        self,
+        op,
+        args: tuple,
+        kwargs: dict,
+        call_depth: int,
+        record: Optional[dict[str, Any]] = None,
+        log: Optional[dict[str, Any]] = None,
+    ):
         super().__init__(call_depth, record, log)
         self.op = op
         self.args = args
@@ -155,7 +168,14 @@ class _RedistributeCall(_DebugCall):
     """Redistribute call from DTensor dispatch"""
 
     def __init__(
-        self, arg, src_placement, dst_placement, transform_info_str, call_depth, record: Optional[dict[str, Any]] = None, log: Optional[dict[str, Any]] = None
+        self,
+        arg,
+        src_placement,
+        dst_placement,
+        transform_info_str,
+        call_depth,
+        record: Optional[dict[str, Any]] = None,
+        log: Optional[dict[str, Any]] = None,
     ):
         super().__init__(call_depth, record, log)
         self.arg = arg
@@ -177,7 +197,13 @@ class _RedistributeCall(_DebugCall):
 class _FXNodeCall(_DebugCall):
     """FX graph node call"""
 
-    def __init__(self, node, call_depth: int, record: Optional[dict[str, Any]] = None, log: Optional[dict[str, Any]] = None):
+    def __init__(
+        self,
+        node,
+        call_depth: int,
+        record: Optional[dict[str, Any]] = None,
+        log: Optional[dict[str, Any]] = None,
+    ):
         super().__init__(call_depth, record, log)
         self.node = node
 
@@ -200,7 +226,20 @@ class _FXNodeCall(_DebugCall):
                 f"[node] {node.name}: {node.op}[{target_str}]({args_str}{kwargs_str})"
             )
 
-        log_str = f"  # {self.log}" if self.log else ""
+        # Check for custom metadata from fx.traceback.annotate
+        log = {} if self.log is None else self.log
+        if (
+            "custom" in self.node.meta
+            and isinstance((custom := self.node.meta["custom"]), dict)
+            and all(isinstance(x, str) for x in custom.keys())
+        ):
+            log.update(custom)
+
+        if log:
+            log_str = ", ".join(f'"{k}": {v}' for k, v in log.items())
+            log_str = f"  # {{{log_str}}}"
+        else:
+            log_str = ""
 
         return f"{node_str}{log_str}"
 
@@ -219,7 +258,7 @@ def _run_node_hooks(call: _DebugCall, node: torch.fx.Node, result: Any) -> None:
         call.record = record
 
     if _node_log_hooks:
-        log = {}
+        log = {} if call.log is None else call.log
         for hook in _node_log_hooks:
             log.update(_run_hook(hook, node, result))
         call.log = log
@@ -233,7 +272,7 @@ def _run_dispatch_hooks(call: _DebugCall, func, types, args, kwargs, result) -> 
         call.record = record
 
     if _dispatch_log_hooks:
-        log = {}
+        log = {} if call.log is None else call.log
         for hook in _dispatch_log_hooks:
             log.update(_run_hook(hook, func, types, args, kwargs, result))
         call.log = log
@@ -247,10 +286,14 @@ def _num_hooks(hooks: Optional[Union[Callable, list[Callable]]]) -> int:
     elif callable(hooks):
         return 1
     else:
-        raise Exception(f"Received hooks of type {type(hooks)}, expected None, Callable, or list[Callable].")
+        raise Exception(  # noqa: TRY002
+            f"Received hooks of type {type(hooks)}, expected None, Callable, or list[Callable]."
+        )
 
 
-def _add_hooks(hooks: list[Callable], new_hooks: Optional[Union[Callable, list[Callable]]]) -> None:
+def _add_hooks(
+    hooks: list[Callable], new_hooks: Optional[Union[Callable, list[Callable]]]
+) -> None:
     if new_hooks is None:
         return
     elif isinstance(new_hooks, list):
@@ -425,8 +468,10 @@ class DebugMode(TorchDispatchMode):
         try:
             yield
         finally:
-            _dispatch_record_hooks = _dispatch_record_hooks[: -n_record]
-            _dispatch_log_hooks = _dispatch_log_hooks[: -n_log]
+            if n_record:
+                _dispatch_record_hooks = _dispatch_record_hooks[:-n_record]
+            if n_log:
+                _dispatch_log_hooks = _dispatch_log_hooks[:-n_log]
 
     @staticmethod
     @contextlib.contextmanager
@@ -443,8 +488,27 @@ class DebugMode(TorchDispatchMode):
         try:
             yield
         finally:
-            _node_record_hooks = _node_record_hooks[: -n_record]
-            _node_log_hooks = _node_log_hooks[: -n_log]
+            if n_record:
+                _node_record_hooks = _node_record_hooks[:-n_record]
+            if n_log:
+                _node_log_hooks = _node_log_hooks[:-n_log]
+
+    @staticmethod
+    @contextlib.contextmanager
+    def record_outputs():
+        def _clone(result):
+            return tree_map(
+                lambda x: x.clone() if isinstance(x, torch.Tensor) else x, result
+            )
+
+        def dispatch_hook(func, types, args, kwargs, result):
+            return {"output": _clone(result)}
+
+        def node_hook(node, result):
+            return {"output": _clone(result)}
+
+        with DebugMode.dispatch_hooks(dispatch_hook), DebugMode.node_hooks(node_hook):
+            yield
 
     def debug_string(self) -> str:
         with torch._C.DisableTorchFunction():
