@@ -1610,12 +1610,6 @@ void _linalg_check_errors(
       TORCH_CHECK_LINALG(info != -4, api_name, batch_str,
           ": The algorithm failed to converge because the input matrix contained non-finite values.");
     }
-    // MPSMatrixDecompositionLU `info` for singular matrices is -2 (MPSMatrixDecompositionStatus.singular)
-    // keep in sync with info > 0 branch error message.
-    if (api_name.find("solve") != api_name.npos && infos.device().type() == at::kMPS) {
-      TORCH_CHECK_LINALG(info != -2, api_name, batch_str,
-          ": The solver failed because the input matrix is singular.");
-    }
     TORCH_INTERNAL_ASSERT(false, api_name, batch_str,
         ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
   } else if (info > 0) {
