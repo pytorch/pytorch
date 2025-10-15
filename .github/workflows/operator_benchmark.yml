@@ -7,7 +7,6 @@ on:
   workflow_dispatch:
     inputs:
       test_mode:
-        required: false
         type: string
         default: 'short'
         description: tag filter for operator benchmarks, options from long, short, all
