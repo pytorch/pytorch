@@ -483,7 +483,7 @@ else:
                 and self._device_type == other._device_type
                 and self._mesh_dim_names == other._mesh_dim_names
                 and self._thread_id == other._thread_id
-                and self._root_mesh == other._root_mesh
+                and self._get_root_mesh() == other._get_root_mesh()
             )
 
         def __getitem__(
