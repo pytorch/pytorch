@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 import os
 import unittest
+from datetime import timedelta
 
 import torch
 import torch.distributed as dist
@@ -39,6 +40,13 @@ from torch.utils._typing_utils import not_none
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 device_count = torch.accelerator.device_count()
+
+try:
+    import torch._C._distributed_c10d.ProcessGroupNCCL
+
+    _NCCL_AVAILABLE = True
+except ImportError:
+    _NCCL_AVAILABLE = False
 
 
 def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_rank=-1):
@@ -961,6 +969,85 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(dp_cp_mesh.mesh_dim_names, ("dp_cp",))
         # check flattened mesh dependency
         self.assertEqual(dp_cp_mesh._get_root_mesh(), mesh_4d)
+
+    @with_comms
+    def test_unflatten_mesh_2d(self):
+        mesh_shape = (4, 2)
+        mesh_dim_names = ("dp", "tp")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        unflatten_mesh = mesh_2d._unflatten(0, (2, 2), ("dp_shard", "dp_replicate"))
+        self.assertEqual(
+            unflatten_mesh.mesh_dim_names, ["dp_shard", "dp_replicate", "tp"]
+        )
+        self.assertEqual(mesh_2d["tp"].mesh, unflatten_mesh["tp"].mesh)
+        self.assertEqual(mesh_2d["tp"].get_group(), unflatten_mesh["tp"].get_group())
+
+        # Not supporting slicing out unflatten dim name from root mesh.
+        with self.assertRaises(KeyError):
+            self.assertEqual(mesh_2d["dp_shard"].mesh, unflatten_mesh["dp_shard"].mesh)
+
+    @with_comms
+    def test_unflatten_mesh_3d(self):
+        # Test unflatten from a dummy world mesh, which is the case we need for Expert Parallelism(EP).
+        global_mesh = init_device_mesh(
+            self.device_type,
+            (8,),
+            mesh_dim_names=("world",),
+        )
+        non_ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "cp", "tp"))
+        ep_mesh = global_mesh._unflatten(0, (2, 2, 2), ("dp", "ep", "ep_tp"))
+        self.assertEqual(non_ep_mesh["cp"].mesh, ep_mesh["ep"].mesh)
+        self.assertEqual(non_ep_mesh["tp"].mesh, ep_mesh["ep_tp"].mesh)
+        mesh_3d = global_mesh._unflatten(0, (4, 2, 1), ("dp", "cp", "tp"))
+        unflatten_mesh = mesh_3d._unflatten(0, (2, 2), ("dp_shard", "dp_replicate"))
+        self.assertEqual(
+            unflatten_mesh.mesh_dim_names, ["dp_shard", "dp_replicate", "cp", "tp"]
+        )
+        self.assertEqual(mesh_3d["tp"].mesh, unflatten_mesh["tp"].mesh)
+        self.assertEqual(mesh_3d["tp"].get_group(), unflatten_mesh["tp"].get_group())
+        self.assertEqual(mesh_3d["cp"].mesh, unflatten_mesh["cp"].mesh)
+        self.assertEqual(mesh_3d["cp"].get_group(), unflatten_mesh["cp"].get_group())
+
+        # Test unflatten with backend override set.
+        if not _NCCL_AVAILABLE:
+            return
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=30)
+        mesh_2d = global_mesh._unflatten(
+            0,
+            (1, 8),
+            ("pp", "spmd"),
+            backend_override={"pp": "fake", "spmd": ("nccl", opts)},
+        )
+        opts = dist.ProcessGroupNCCL.Options()
+        opts._timeout = timedelta(seconds=60)
+        mesh_4d = mesh_2d._unflatten(
+            1,
+            (2, 2, 2),
+            ("dp", "cp", "tp"),
+            backend_override={"dp": "nccl", "cp": "nccl", "tp": ("nccl", opts)},
+        )
+        self.assertEqual(mesh_4d["pp"].get_group()._get_backend_name(), "custom")
+        spmd_pg = mesh_2d["spmd"].get_group()
+        self.assertEqual(spmd_pg._get_backend_name(), "nccl")
+        w = spmd_pg.allreduce(torch.rand(10).cuda(self.rank))
+        self.assertTrue(
+            spmd_pg._get_backend(
+                torch.device(f"cuda:{self.rank}")
+            )._verify_work_timeout(w, timedelta(seconds=30))
+        )
+        w.wait()
+        tp_pg = mesh_4d["tp"].get_group()
+        self.assertEqual(tp_pg._get_backend_name(), "nccl")
+        w = tp_pg.allreduce(torch.rand(10).cuda(self.rank))
+        self.assertTrue(
+            tp_pg._get_backend(torch.device(f"cuda:{self.rank}"))._verify_work_timeout(
+                w, timedelta(seconds=60)
+            )
+        )
+        w.wait()
 
     @with_comms
     def test_reconstruct_mesh_with_flatten_dim(self):

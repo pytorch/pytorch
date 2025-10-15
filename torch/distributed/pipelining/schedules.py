@@ -2038,6 +2038,7 @@ BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
                         if not isinstance(submodule, FSDPModule):
                             continue
                         submodule.reshard()
+                    unsharded_stages.remove(stage_idx)
             elif comp_type == FORWARD:
                 if stage_uses_fsdp:
                     _assert_unsharded(stage_idx)
