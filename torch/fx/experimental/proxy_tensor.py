@@ -435,10 +435,29 @@ def get_proxy_slot(
     return res
 
 
+@functools.cache
+def _sympy_handlers():
+    """
+    Returns a dict converting sympy functions to python operators
+    (i.e. `sympy.Mul` -> `operator.mul`)
+    """
+    import torch.utils._sympy.interp
+    handlers = {}
+    for k, v in torch.utils._sympy.interp.handlers().items():
+        op = getattr(operator, v, None)
+        if op is not None:
+            handlers[k] = op
+    return handlers
+
+
 def _build_proxy_for_sym_expr(
     tracer: _ProxyTracer, expr: sympy.Expr, out: PySymType | None = None
 ) -> PySymType | None:
     """
+    Decompose `expr` and look for the pieces as inputs. If `out` is provided
+    then that will be the resulting SymNode (and `out.expr` must be the same as
+    `expr`).
+
     This function is used when the ProxyTorchDispatchMode sees a SymNode
     that it hasn't seen before to try to associate it with traced inputs.
 
@@ -514,14 +533,7 @@ def _build_proxy_for_sym_expr(
         args.append(arg_value)
     args = tuple(args)
 
-    import sympy
-
-    func: OpOverload
-    match expr:
-        case sympy.Mul():
-            func = operator.mul  # type: ignore[assignment]
-        case _:
-            raise RuntimeError(f"Unhandled sympy type: {type(expr)}")
+    func: OpOverload | None = _sympy_handlers().get(expr.func)
 
     if out is None:
         out = func(*args)
