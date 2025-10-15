@@ -69,8 +69,9 @@ def _unpack_kwargs(
     flat_args: tuple[Any, ...], kwarg_keys: tuple[str, ...]
 ) -> tuple[tuple[Any, ...], dict[str, Any]]:
     """See _pack_kwargs."""
-    if len(kwarg_keys) > len(flat_args):
-        raise AssertionError(f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}")
+    assert len(kwarg_keys) <= len(flat_args), (
+        f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
+    )
     if len(kwarg_keys) == 0:
         return flat_args, {}
     args = flat_args[: -len(kwarg_keys)]
@@ -126,8 +127,7 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                     if isinstance(obj, PackedSequence):
                         output.data.record_stream(current_stream)  # type: ignore[arg-type]
                     else:
-                        if not isinstance(output, torch.Tensor):
-                            raise AssertionError("output must be a torch.Tensor")
+                        assert isinstance(output, torch.Tensor)
                         output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
 
