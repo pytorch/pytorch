@@ -489,6 +489,7 @@ if __name__ == "__main__":
         torch.xpu.empty_cache()
         total_memory = torch.xpu.get_device_properties().total_memory
         fraction = 0.5
+        orig_fraction = torch.xpu.get_per_process_memory_fraction()
         with self.assertRaisesRegex(ValueError, "invalid fraction:"):
             torch.xpu.set_per_process_memory_fraction(-0.1)
         with self.assertRaisesRegex(ValueError, "invalid fraction:"):
@@ -503,11 +504,13 @@ if __name__ == "__main__":
         gc.collect()
         torch.xpu.empty_cache()
 
+        self.assertEqual(fraction, torch.xpu.get_per_process_memory_fraction())
+
         application_memory = int(total_memory * 0.51)
         with self.assertRaises(torch.OutOfMemoryError):
             _ = torch.empty(application_memory, dtype=torch.int8, device="xpu")
 
-        torch.xpu.set_per_process_memory_fraction(1.0)
+        torch.xpu.set_per_process_memory_fraction(orig_fraction)
 
     def test_memory_allocation(self):
         torch.xpu.empty_cache()
