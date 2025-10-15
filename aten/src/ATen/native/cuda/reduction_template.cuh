@@ -466,13 +466,18 @@ struct ReduceJitOp {
 
     __syncthreads();
 
-    for (size_t offset = warpSize / 2; offset > 0; offset >>= 1) {
+    #ifdef USE_ROCM
+    for (int offset = 1; offset < dim_x; offset <<= 1) {
+    #else
+    int offset = warpSize / 2;
+    while (offset >= dim_x)
+      offset >>= 1;
+    for (; offset > 0; offset >>= 1) {
+    #endif
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = reducer::warp_shfl_down(value[i], offset);
-        if (threadIdx.x + offset < dim_x) {
-          value[i] = reducer::combine(value[i], other);
-        }
+        value[i] = reducer::combine(value[i], other);
       }
     }
     return value;
