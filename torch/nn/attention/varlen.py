@@ -88,7 +88,7 @@ def _varlen_attn(
     return output, softmax_lse, rng_state, philox_offset
 
 
-# @_varlen_attn.register_fake
+@_varlen_attn.register_fake
 def _varlen_attn_fake(
     query: torch.Tensor,
     key: torch.Tensor,
