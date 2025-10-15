@@ -1930,19 +1930,15 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator", user_cls, *args, **kwargs
     ):
-        if user_cls not in {dict, OrderedDict, defaultdict}:
-            msg = ConstantVariable.create(
-                f"{user_cls.__name__}.fromkeys() is not supported"
-            )
-            raise_observed_exception(TypeError, tx, args=[msg])
+        assert user_cls in {dict, OrderedDict, defaultdict}
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
-            if user_cls is not OrderedDict:
-                msg = ConstantVariable.create(
-                    f"{user_cls.__name__}.fromkeys() takes no keyword arguments"
-                )
-                raise_observed_exception(TypeError, tx, args=[msg])
-            if len(args) != 1 or len(kwargs) != 1 or "value" not in kwargs:
+            if (
+                user_cls is not OrderedDict
+                or len(args) != 1
+                or len(kwargs) != 1
+                or "value" not in kwargs
+            ):
                 msg = ConstantVariable.create(
                     f"{user_cls.__name__}.fromkeys() takes no keyword arguments"
                 )

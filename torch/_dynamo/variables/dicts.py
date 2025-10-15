@@ -512,7 +512,7 @@ class ConstDictVariable(VariableTracker):
                 msg = ConstantVariable.create(
                     f"dict.__setitem__ takes exactly two arguments ({len(args)} given)"
                 )
-                raise_observed_exception(AssertionError, tx, args=[msg])
+                raise_observed_exception(TypeError, tx, args=[msg])
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)

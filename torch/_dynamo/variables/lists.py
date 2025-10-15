@@ -1117,13 +1117,10 @@ class SizeVariable(TupleVariable):
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__getitem__":
-            if len(args) != 1:
+            if len(args) != 1 or kwargs:
                 msg = ConstantVariable.create(
                     f"{name} takes exactly one argument ({len(args)} given)"
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
-            if kwargs:
-                msg = ConstantVariable.create(f"{name} takes no keyword arguments")
                 raise_observed_exception(TypeError, tx, args=[msg])
             out = self.get_item_dyn(tx, args[0])
             return out
