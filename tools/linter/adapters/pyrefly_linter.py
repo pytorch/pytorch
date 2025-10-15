@@ -112,9 +112,16 @@ def in_github_actions() -> bool:
 
 def check_files(
     code: str,
+    config: str,
 ) -> list[LintMessage]:
     try:
-        pyrefly_commands = ["pyrefly", "check", "--output-format=json"]
+        pyrefly_commands = [
+            "pyrefly",
+            "check",
+            "--config",
+            config,
+            "--output-format=json",
+        ]
         proc = run_command(
             [*pyrefly_commands],
             extra_env={},
@@ -227,6 +234,11 @@ def main() -> None:
         action="store_true",
         help="verbose logging",
     )
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="path to an mypy .ini config file",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -235,7 +247,9 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    lint_messages = check_pyrefly_installed(args.code) + check_files(args.code)
+    lint_messages = check_pyrefly_installed(args.code) + check_files(
+        args.code, args.config
+    )
     for lint_message in lint_messages:
         print(json.dumps(lint_message._asdict()), flush=True)
 
