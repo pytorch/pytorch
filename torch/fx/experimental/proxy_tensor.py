@@ -16,12 +16,12 @@ import typing
 import typing_extensions
 import weakref
 from collections import defaultdict, OrderedDict
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import _GeneratorContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import (
     Any,
-    Callable,
+    Concatenate,
     Optional,
     overload,
     Protocol,
@@ -29,7 +29,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Concatenate, ParamSpec, Self, TypeVarTuple, Unpack
+from typing_extensions import ParamSpec, Self, TypeVarTuple, Unpack
 from weakref import WeakKeyDictionary
 
 import torch
