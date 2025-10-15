@@ -1721,6 +1721,12 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
                 return args[0]
             elif isinstance(args[0], int) and args[0] == 1:
                 return args[1]
+        elif func == operator.add:
+            # add zero
+            if isinstance(args[1], int) and args[1] == 0:
+                return args[0]
+            elif isinstance(args[0], int) and args[0] == 0:
+                return args[1]
 
         # For speed, we assume there are no nested data structures
         # (otherwise we could use tree_map)
