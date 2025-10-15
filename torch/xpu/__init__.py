@@ -522,6 +522,7 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
 # import here to avoid circular import
 from .memory import (
     empty_cache,
+    get_per_process_memory_fraction,
     max_memory_allocated,
     max_memory_reserved,
     mem_get_info,
@@ -531,6 +532,7 @@ from .memory import (
     memory_stats_as_nested_dict,
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
+    set_per_process_memory_fraction,
 )
 from .random import (
     get_rng_state,
