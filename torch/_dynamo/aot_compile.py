@@ -279,7 +279,7 @@ def aot_compile_fullgraph(
             source_info.add_code(traced_code)
 
         artifacts = CompileArtifacts(
-            signature=inspect.signature(fn),
+            signature=convert_frame._get_signature(fn),
             bytecode=graph_capture_output.bytecode,
             guard_manager=check_fn.guard_manager,
             guards_state=check_fn.guards_state,

@@ -29,6 +29,7 @@ import cProfile
 import dis
 import functools
 import gc
+import inspect
 import itertools
 import logging
 import os
@@ -116,6 +117,7 @@ from .exc import (
     unimplemented_v2,
     Unsupported,
 )
+from .graph_bytecode_inputs import reset_user_object_tracking
 from .guards import (
     CheckFunctionManager,
     get_and_maybe_log_recompilation_reasons,
@@ -123,7 +125,11 @@ from .guards import (
 )
 from .hooks import Hooks
 from .output_graph import DynamoTracerOutput, OutputGraphCommon
-from .pgo import log_frame_dynamic_whitelist, put_code_state
+from .pgo import (
+    _log_size_mismatch_recompile,
+    log_frame_dynamic_whitelist,
+    put_code_state,
+)
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -310,6 +316,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
             exit_stack.enter_context(torch_function_mode_stack_state_mgr)
+            reset_user_object_tracking()
             try:
                 return fn(*args, **kwargs)
             finally:
@@ -750,6 +757,9 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
+# TODO - We want to run preserve_node_meta context manager here, but the CI
+# fails (its unclear if the failures were flaky)
+# @torch.fx.traceback.preserve_node_meta()
 @preserve_global_state
 def trace_frame(
     code: types.CodeType,
@@ -966,6 +976,10 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
         raise RuntimeError(f"Unsupported model code type {mod}")
 
 
+def _get_signature(fn: Any) -> inspect.Signature:
+    return inspect.signature(fn, follow_wrapped=False)
+
+
 def _get_frame(
     mod: Any,
     args: tuple[Any, ...],
@@ -975,7 +989,6 @@ def _get_frame(
     Create a frame to trace, given a model, args, and optional kwargs.
     """
     import builtins
-    import inspect
 
     fn, self_opt = get_traced_fn(mod)
     if self_opt is not None:
@@ -983,7 +996,7 @@ def _get_frame(
     if kwargs is None:
         kwargs = {}
 
-    signature = inspect.signature(fn)
+    signature = _get_signature(fn)
     bound_arguments = signature.bind(*args, **kwargs)
     bound_arguments.apply_defaults()
     f_locals = bound_arguments.arguments
@@ -1588,6 +1601,8 @@ def _compile(
                 and output_graph.has_outputs()
             ):
                 log_frame_dynamic_whitelist(code)
+                if recompile_reason and "size mismatch at index" in recompile_reason:
+                    _log_size_mismatch_recompile()
 
             return guarded_code
         except Exception as e:
