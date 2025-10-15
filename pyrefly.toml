@@ -1,5 +1,7 @@
 # A Pyrefly configuration for PyTorch
 # Based on https://github.com/pytorch/pytorch/blob/main/mypy.ini
+python-version = "3.12"
+
 project-includes = [
     "torch",
     "caffe2",
