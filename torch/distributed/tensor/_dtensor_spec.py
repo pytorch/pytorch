@@ -27,6 +27,7 @@ class ShardOrderEntry(NamedTuple):
                    second, etc. This tuple is guaranteed to be non-empty.
 
     Examples:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DISTRIBUTED)
         >>> # Tensor dim 1 sharded across mesh dim 2, then mesh dim 0
         >>> ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0))
 

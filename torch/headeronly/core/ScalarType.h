@@ -263,6 +263,28 @@ enum class ScalarType : int8_t {
 constexpr uint16_t NumScalarTypes =
     static_cast<uint16_t>(ScalarType::NumOptions);
 
+namespace impl {
+
+// These are used to map ScalarTypes to C++ types.
+
+template <c10::ScalarType N>
+struct ScalarTypeToCPPType;
+
+#define SPECIALIZE_ScalarTypeToCPPType(cpp_type, scalar_type) \
+  template <>                                                 \
+  struct ScalarTypeToCPPType<c10::ScalarType::scalar_type> {  \
+    using type = cpp_type;                                    \
+  };
+
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
+
+#undef SPECIALIZE_ScalarTypeToCPPType
+
+template <c10::ScalarType N>
+using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
+
+} // namespace impl
+
 inline const char* toString(ScalarType t) {
 #define DEFINE_CASE(_, name) \
   case ScalarType::name:     \
@@ -289,6 +311,9 @@ using c10::dummy_int1_7_t;
 using c10::dummy_uint1_7_t;
 using c10::NumScalarTypes;
 using c10::ScalarType;
+namespace impl {
+using c10::impl::ScalarTypeToCPPTypeT;
+} // namespace impl
 using c10::toString;
 using c10::operator<<;
 } // namespace torch::headeronly
