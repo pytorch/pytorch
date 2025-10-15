@@ -1918,22 +1918,13 @@ graph():
         # TODO (tmanlaibaatar) this kinda sucks but today there is no good way to get
         # good source name. We should have an util that post processes dynamo source names
         # to be more readable.
-        if is_strict_v2_test(self._testMethodName) or is_inline_and_install_strict_test(
-            self._testMethodName
+        with self.assertWarnsRegex(
+            UserWarning,
+            r"(L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
+            r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
+            r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
         ):
-            with self.assertWarnsRegex(
-                UserWarning,
-                r"(L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank"
-                r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[1\]\.cell_contents\.bank_dict"
-                r"|L\['self']\._modules\['_export_root']\.forward\.__func__\.__closure__\[0\]\.cell_contents)",
-            ):
-                ref(torch.randn(4, 4), torch.randn(4, 4))
-        else:
-            with self.assertWarnsRegex(
-                UserWarning,
-                r"(L\['global_list'\]|L\['self'\]\.bank|L\['self'\]\.bank_dict)",
-            ):
-                ref(torch.randn(4, 4), torch.randn(4, 4))
+            ref(torch.randn(4, 4), torch.randn(4, 4))
 
     def test_mask_nonzero_static(self):
         class TestModule(torch.nn.Module):

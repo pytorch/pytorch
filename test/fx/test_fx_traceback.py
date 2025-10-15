@@ -227,7 +227,7 @@ class TestFXNodeSource(TestCase):
         check_node_source(
             key_provenance,
             "x",
-            "Interpreter_FlattenInputOutputSignature",
+            "Interpreter_DynamoGraphTransformer",
             CREATE_STR,
         )
 
@@ -276,7 +276,7 @@ class TestFXNodeSource(TestCase):
             check_node_source(
                 key_provenance,
                 "x",
-                "Interpreter_FlattenInputOutputSignature",
+                "Interpreter_DynamoGraphTransformer",
                 CREATE_STR,
             )
 
