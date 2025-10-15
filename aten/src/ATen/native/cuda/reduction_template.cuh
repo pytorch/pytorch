@@ -469,10 +469,7 @@ struct ReduceJitOp {
     #ifdef USE_ROCM
     for (int offset = 1; offset < dim_x; offset <<= 1) {
     #else
-    int offset = warpSize / 2;
-    while (offset >= dim_x)
-      offset >>= 1;
-    for (; offset > 0; offset >>= 1) {
+    for (int offset = dim_x >> 1; offset > 0; offset >>= 1) {
     #endif
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
