@@ -38,7 +38,7 @@ def _explicit_order_placements(
         Explanation: The strided shard on mesh dim 1 is deferred and appears after
         the regular shard on mesh dim 2.
 
-    Example 2 (Explicit mutated order, must without _StridedShard):
+    Example 2 (Explicit order, must without _StridedShard):
         Input:
             mesh_shape = (2, 2, 2)  # 3D device mesh
             placements = [Shard(0), Shard(0), Shard(0)]

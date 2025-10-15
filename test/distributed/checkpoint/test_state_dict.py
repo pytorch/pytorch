@@ -2,7 +2,6 @@
 
 import copy
 import functools
-import os
 import sys
 from collections.abc import Callable
 from itertools import chain
@@ -42,6 +41,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.distributed.tensor.placement_types import _StridedShard, Shard
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import Optimizer
 from torch.testing._internal.common_dist_composable import (
@@ -1103,8 +1103,8 @@ class TestNoComm(MultiProcessTestCase):
 
 class ShardOrderStateDict(DTensorTestBase):
     # At the time of writing this test, shard propagation support for device
-    # order is not yet available. So we test whether simple DTensor with mutated
-    # shard_order can be correctly gathered in state dict or not.
+    # order is not yet available. So we test whether simple DTensor with
+    # arbitrary shard_order can be correctly saved/loaded in state dict or not.
 
     @property
     def world_size(self):
@@ -1112,6 +1112,45 @@ class ShardOrderStateDict(DTensorTestBase):
 
     # TODO(zpcore): Once the `from_local()` function supports the `shard_order`
     # argument, test with Partial() placement.
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_dtensor_checkpoint_with_shard_order(self):
+        """
+        Test that DTensor with arbitrary shard_order can be saved and loaded via checkpoints.
+        """
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+        checkpoint_path = self.temp_dir  # pyright: ignore[reportAttributeAccessIssue]
+        shard_order_list = [{0: [0, 1]}, {0: [1, 0]}, {}, {1: [1, 0]}]
+        for i in range(len(shard_order_list)):
+            for j in range(len(shard_order_list)):
+                if i == j:
+                    continue
+                shard_order_to_save = shard_order_list[i]
+                shard_order_to_load = shard_order_list[j]
+                # create a distributed tensor with custom shard_order
+                x = torch.randn(8, 4, device=self.device_type)
+                x_dt = distribute_tensor(
+                    x, device_mesh, shard_order=shard_order_to_save
+                )
+
+                state_dict_to_save = {"x_dt": x_dt}
+                save(state_dict=state_dict_to_save, checkpoint_id=checkpoint_path)
+
+                # create a new DTensor with the same shape for loading
+                x_new_dt = distribute_tensor(
+                    torch.zeros_like(x), device_mesh, shard_order=shard_order_to_load
+                )
+                state_dict_to_load = {"x_dt": x_new_dt}
+
+                # load the distributed tensor from checkpoint
+                load(state_dict=state_dict_to_load, checkpoint_id=checkpoint_path)
+                x_dt_loaded = state_dict_to_load["x_dt"]
+
+                # verify the loaded tensor
+                assert isinstance(x_dt_loaded, DTensor)
+                self.assertEqual(x_dt_loaded.full_tensor(), x)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -1125,32 +1164,59 @@ class ShardOrderStateDict(DTensorTestBase):
             {1: [1, 0]},  # reversed order on tensor dim 1
         ],
     )
-    def test_dtensor_checkpoint_with_shard_order(self, shard_order):
-        """
-        Test that DTensor with arbitrary shard_order can be saved and loaded via checkpoints.
-        """
+    def test_load_strided_shard_into_ordered_shard(self, shard_order):
         device_mesh = init_device_mesh(self.device_type, (2, 2))
-        checkpoint_path = os.path.join(self.temp_dir, "checkpoint")  # pyright: ignore[reportAttributeAccessIssue]
+        checkpoint_path = self.temp_dir  # pyright: ignore[reportAttributeAccessIssue]
 
-        # Create a distributed tensor with custom shard_order
         x = torch.randn(8, 4, device=self.device_type)
-        x_dt = distribute_tensor(x, device_mesh, shard_order=shard_order)
 
-        # Save the distributed tensor to checkpoint. By default full_tensor()
-        # will be triggered to gather DTensor.
-        state_dict_to_save = {"x_dt": x_dt}
+        strided_placement = [_StridedShard(0, split_factor=2), Shard(0)]
+        x_strided_dt = distribute_tensor(x, device_mesh, strided_placement)
+
+        # save StridedShard and load to ordered shard
+        state_dict_to_save = {"x_strided_dt": x_strided_dt}
         save(state_dict=state_dict_to_save, checkpoint_id=checkpoint_path)
 
-        # Create a new tensor with the same shape for loading
-        x_new = torch.zeros_like(x)
-        state_dict_to_load = {"x_dt": x_new}
-
-        # Load the distributed tensor from checkpoint
+        # load
+        x_ordered_dt = distribute_tensor(
+            torch.zeros_like(x), device_mesh, shard_order=shard_order
+        )
+        state_dict_to_load = {"x_strided_dt": x_ordered_dt}
         load(state_dict=state_dict_to_load, checkpoint_id=checkpoint_path)
+        self.assertEqual(x_ordered_dt.full_tensor(), x)
 
-        # Verify the loaded tensor
-        x_dt_loaded = state_dict_to_load["x_dt"]
-        self.assertEqual(x, x_dt_loaded)
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    @parametrize(
+        "shard_order",
+        [
+            {0: [0, 1]},  # default order
+            {0: [1, 0]},  # reversed order on tensor dim 0
+            {},  # default to all replicate
+            {1: [1, 0]},  # reversed order on tensor dim 1
+        ],
+    )
+    def test_load_ordered_shard_into_strided_shard(self, shard_order):
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+        checkpoint_path = self.temp_dir  # pyright: ignore[reportAttributeAccessIssue]
+
+        x = torch.randn(8, 4, device=self.device_type)
+
+        x_ordered_dt = distribute_tensor(x, device_mesh, shard_order=shard_order)
+
+        # save ordered shard and load to ordered shard
+        state_dict_to_save = {"x_ordered_dt": x_ordered_dt}
+        save(state_dict=state_dict_to_save, checkpoint_id=checkpoint_path)
+
+        # load
+        strided_placement = [_StridedShard(0, split_factor=2), Shard(0)]
+        x_strided_dt = distribute_tensor(
+            torch.zeros_like(x), device_mesh, strided_placement
+        )
+        state_dict_to_load = {"x_ordered_dt": x_strided_dt}
+        load(state_dict=state_dict_to_load, checkpoint_id=checkpoint_path)
+        self.assertEqual(x_strided_dt.full_tensor(), x)
 
 
 instantiate_parametrized_tests(ShardOrderStateDict)
