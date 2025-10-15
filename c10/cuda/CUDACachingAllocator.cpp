@@ -132,6 +132,9 @@ namespace Native {
  *                  notifyCaptureDestroy.
  */
 
+// counter to track order for Mempool Registration
+thread_local int32_t registration_counter_global = -1;
+
 static char SHAREABLE_HANDLE_VERSION = 2;
 enum ShareableHandleType : char {
   SHAREABLE_CUDA_MALLOC = 'c',
@@ -187,6 +190,7 @@ struct Block {
   c10::DeviceIndex device; // gpu
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
+  int32_t registration_counter{-1};
   size_t size; // block size in bytes
   size_t requested_size; // memory originally requested
   BlockPool* pool{nullptr}; // owning memory pool
@@ -221,11 +225,17 @@ struct Block {
         size(size),
         requested_size(0),
         pool(pool),
-        ptr(ptr) {}
+        ptr(ptr) {
+          registration_counter_global++;
+          registration_counter = registration_counter_global;	  
+	}
 
   // constructor for search key
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
-      : device(device), stream(stream), size(size), requested_size(0) {}
+      : device(device), stream(stream), size(size), requested_size(0) {
+        registration_counter_global++;
+        registration_counter = registration_counter_global;	  
+      }
 
   size_t gc_count() {
     TORCH_INTERNAL_ASSERT(pool);
@@ -2494,12 +2504,13 @@ class DeviceCachingAllocator {
           id == mempool_id) {
         segment_info.owner_private_pool_id = id;
       }
+      segment_info.registration_counter = head_block->registration_counter;
 
       const Block* block = head_block;
       while (block != nullptr && block->mapped) {
         segment_info.blocks.emplace_back();
         BlockInfo& block_info = segment_info.blocks.back();
-
+        
         block_info.size = block->size;
         block_info.requested_size = block->requested_size;
         block_info.allocated = block->allocated;
