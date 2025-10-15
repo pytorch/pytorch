@@ -566,7 +566,7 @@ class DeviceCachingAllocator {
 
   void setMemoryFraction(double fraction) {
     c10::xpu::DeviceProp device_prop;
-    c10::xpu::get_device_properties(&device_prop, device);
+    c10::xpu::get_device_properties(&device_prop, device_index);
     auto device_total = device_prop.global_mem_size;
     allowed_memory_maximum = static_cast<size_t>(fraction * device_total);
     set_fraction = true;
@@ -794,4 +794,3 @@ void setMemoryFraction(double fraction, DeviceIndex device) {
 REGISTER_ALLOCATOR(kXPU, &allocator)
 
 } // namespace c10::xpu::XPUCachingAllocator
- 
