@@ -614,6 +614,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
         position_to_quant.get(i, node) for i, node in enumerate(fwd_outputs)
     ]
     # add the scale nodes to the output find the first sym_node in the output
+    # pyrefly: ignore  # bad-argument-type
     idx = find_first_sym_node(output_updated_args)
     scale_nodes = tensor_scale_nodes + sym_scale_nodes
     if scale_nodes:

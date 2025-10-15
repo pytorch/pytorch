@@ -136,12 +136,14 @@ if is_available():
     # pyrefly: ignore  # deprecated
     from .distributed_c10d import *  # noqa: F403
     from .distributed_c10d import (  # pyrefly: ignore  # deprecated
+        # pyrefly: ignore  # deprecated
         _all_gather_base,
         _coalescing_manager,
         _CoalescingManager,
         _create_process_group_wrapper,
         _get_process_group_name,
         _rank_not_in_group,
+        # pyrefly: ignore  # deprecated
         _reduce_scatter_base,
         _time_estimator,
         get_node_local_rank,

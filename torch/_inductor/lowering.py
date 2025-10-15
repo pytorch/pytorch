@@ -30,6 +30,7 @@ from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (  # pyrefly: ignore  # deprecated
     canonicalize_dim,
     canonicalize_dims,
+    # pyrefly: ignore  # deprecated
     check,
     dtype_to_type,
     elementwise_dtypes,

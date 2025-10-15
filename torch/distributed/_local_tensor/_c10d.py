@@ -337,6 +337,7 @@ def _local_all_gather_(
             source_tensor = input_tensor
             if isinstance(input_tensor, LocalTensor):
                 source_tensor = input_tensor._local_tensors[rank_i]
+            # pyrefly: ignore  # missing-attribute
             output_tensors[i].copy_(source_tensor)
 
     work = FakeWork()
