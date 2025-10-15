@@ -491,7 +491,8 @@ test_inductor_aoti_cross_compile_for_windows() {
   mkdir -p "$TEST_REPORTS_DIR"
 
   # Set WINDOWS_CUDA_HOME environment variable
-  export WINDOWS_CUDA_HOME="$(pwd)/win-torch-wheel-extracted"
+  WINDOWS_CUDA_HOME="$(pwd)/win-torch-wheel-extracted"
+  export WINDOWS_CUDA_HOME
 
   echo "WINDOWS_CUDA_HOME is set to: $WINDOWS_CUDA_HOME"
   echo "Contents:"

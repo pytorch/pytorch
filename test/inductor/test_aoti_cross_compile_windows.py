@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import os
 import platform
-import subprocess
 import tempfile
 import unittest
 from dataclasses import dataclass
@@ -12,19 +11,6 @@ import torch
 import torch._inductor.config
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
-
-
-def _check_mingw_gcc_available():
-    try:
-        result = subprocess.run(
-            ["x86_64-w64-mingw32-gcc", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return result.returncode == 0
-    except (subprocess.SubprocessError, FileNotFoundError, subprocess.TimeoutExpired):
-        return False
 
 
 @dataclass
@@ -90,12 +76,6 @@ class WindowsCrossCompilationTestFramework:
                 raise unittest.SkipTest(
                     "This test should run on Linux for cross-compilation"
                 )
-
-            if not _check_mingw_gcc_available():
-                raise unittest.SkipTest("requires x86_64-w64-mingw32-gcc")
-
-            if not HAS_GPU:
-                raise unittest.SkipTest("Test requires GPU")
 
             self.assertTrue("WINDOWS_CUDA_HOME" in os.environ)
 
