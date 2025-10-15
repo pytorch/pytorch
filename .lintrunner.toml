@@ -217,8 +217,8 @@ include_patterns = [
     'torch/**/*.pyi',
     'torchgen/**/*.py',
     'torchgen/**/*.pyi',
-    'functorch/**/*.py', 
-    'functorch/**/*.pyi', 
+    'functorch/**/*.py',
+    'functorch/**/*.pyi',
 ]
 exclude_patterns = []
 command = [
