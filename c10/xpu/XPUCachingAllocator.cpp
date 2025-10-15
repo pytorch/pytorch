@@ -558,6 +558,17 @@ class DeviceCachingAllocator {
     }
   }
 
+  double getMemoryFraction() {
+    if (!set_fraction) {
+      return 1.0;
+    }
+
+    c10::xpu::DeviceProp device_prop;
+    c10::xpu::get_device_properties(&device_prop, device);
+    return static_cast<double>(allowed_memory_maximum) /
+        static_cast<double>(device_prop.global_mem_size);
+  }
+
   void setMemoryFraction(double fraction) {
     c10::xpu::DeviceProp device_prop;
     c10::xpu::get_device_properties(&device_prop, device);
