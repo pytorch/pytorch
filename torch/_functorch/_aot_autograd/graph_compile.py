@@ -1559,6 +1559,7 @@ def _aot_stage2a_partition(
 
             # apply joint_gm callback here
             if callable(torch._functorch.config.joint_custom_pass):
+                assert isinstance(joint_inputs, tuple)
                 fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
 
             static_lifetime_input_indices = fw_metadata.static_input_indices
