@@ -1021,6 +1021,49 @@ torch.cuda.synchronize()
         c = out.size(1)
         self.assertEqual(out.stride(), [c, 1, 1, 1, 1])
 
+    @onlyCUDA
+    @dtypes(torch.bfloat16, torch.half)
+    def test_adaptive_avg_pool3d_cpu_gpu_parity(self, device, dtype):
+        # test for CPU-GPU consistency with reduced precision types (BFloat16/Half)
+        # this test ensures that the fix for using higher precision accumulation
+
+        input_tensor = torch.tensor(
+            [
+                [
+                    [
+                        [-1.4062, 1.4609, 0.6797],
+                        [-0.6875, -0.9492, 0.4434],
+                        [-1.0312, -0.3730, 0.9453],
+                    ],
+                    [
+                        [0.9766, 0.2070, 0.8242],
+                        [-1.6484, 1.4531, 1.7891],
+                        [0.3945, 0.5352, -0.8711],
+                    ],
+                ],
+                [
+                    [
+                        [-2.5000, 0.2617, -0.3613],
+                        [-1.6094, -1.4219, -0.3281],
+                        [-1.3594, -2.3594, -0.5312],
+                    ],
+                    [
+                        [-1.9375, 1.0938, 1.5547],
+                        [-0.5820, -0.1167, 1.3438],
+                        [1.1953, -1.3750, -1.3438],
+                    ],
+                ],
+            ],
+            dtype=dtype,
+        )
+
+        output_size = (None, 1, None)
+
+        result_cpu = F.adaptive_avg_pool3d(input_tensor.cpu(), output_size)
+        result_gpu = F.adaptive_avg_pool3d(input_tensor.cuda(), output_size)
+
+        self.assertEqual(result_cpu, result_gpu.cpu(), atol=1e-2, rtol=1e-3)
+
     @expectedFailureMPS  # Runtime Error not raised for mps
     @expectedFailureMeta  # Runtime Error not raised for meta
     @onlyNativeDeviceTypes
