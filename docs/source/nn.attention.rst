@@ -23,6 +23,7 @@ Submodules
     flex_attention
     bias
     experimental
+    varlen
 
 .. toctree::
     :hidden:
@@ -30,3 +31,4 @@ Submodules
     nn.attention.flex_attention
     nn.attention.bias
     nn.attention.experimental
+    nn.attention.varlen
