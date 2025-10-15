@@ -539,8 +539,8 @@ class TestTorchDlPack(TestCase):
     def test_dlpack_exchange_api(self, device):
         """Comprehensive test of all DLPack Exchange API functions using inline C++"""
         # Check that the C API function exists and get the API pointer
-        self.assertTrue(hasattr(torch._C, "_dlpack_exchange_api"))
-        api_ptr = torch._C._dlpack_exchange_api()
+        self.assertTrue(hasattr(torch.Tensor, "__c_dlpack_exchange_api__"))
+        api_ptr = torch.Tensor.__c_dlpack_exchange_api__
         self.assertIsInstance(api_ptr, int, "API pointer should be an integer")
         self.assertNotEqual(api_ptr, 0, "API pointer should not be NULL")
         tensor = torch.arange(24, dtype=torch.float32, device=device).reshape(2, 3, 4)
