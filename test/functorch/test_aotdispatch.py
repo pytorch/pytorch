@@ -28,6 +28,7 @@ from common_utils import (
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
@@ -4944,8 +4945,6 @@ class <lambda>(torch.nn.Module):
     ):
         cos: "f32[2, 2]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
 
-        _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
-
         body_graph_0 = self.body_graph_0
         map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
         getitem_2: "f32[2, 2]" = map_impl[0];  map_impl = None
@@ -6333,7 +6332,7 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(out_ref[0].b, out_test[0].b)
         self.assertEqual(out_ref[1], out_test[1])
 
-        # We compiled our graph assuming type(grad_out[1]) == torch.Tensor,
+        # We compiled our graph assuming type(grad_out[1]) is torch.Tensor,
         # but we were wrong: in the below tests, it is a subclass.
         # This will eventually require a repartition + recompile
         with self.assertRaisesRegex(
@@ -7199,6 +7198,26 @@ metadata incorrectly.
         torch.compile(fn, backend="inductor", fullgraph=True)(x)
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
+    def test_layer_norm(self):
+        def fn(x):
+            return F.layer_norm(x, normalized_shape=(8,))
+
+        x = torch.randn(2, 4, 8)
+        eager = fn(x)
+        aot_eager = torch.compile(backend="aot_eager")(fn)(x)
+        self.assertEqual(eager, aot_eager, atol=0, rtol=0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_rms_norm(self):
+        # Only CUDA rms norm fails to be decomposed
+        def fn(x):
+            return F.rms_norm(x, normalized_shape=(8,))
+
+        x = torch.randn(2, 4, 8, device="cuda")
+        eager = fn(x)
+        aot_eager = torch.compile(backend="aot_eager")(fn)(x)
+        self.assertEqual(eager, aot_eager, atol=0, rtol=0)
+
     def test_subclass_parameters(self):
         class _M(torch.nn.Module):
             def __init__(self):
@@ -8040,7 +8059,7 @@ symbolic_aot_autograd_failures = {
 }
 
 
-def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
+def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False, use_min_cut=True):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
@@ -8071,6 +8090,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
                 skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
+                use_min_cut=use_min_cut,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -8170,6 +8190,29 @@ class TestEagerFusionOpInfo(AOTTestCase):
     )
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op, dynamic=True)
+
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @skipOps(
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_default_partition_exhaustive",
+        aot_autograd_failures,
+    )
+    def test_aot_autograd_default_partition_exhaustive(self, device, dtype, op):
+        _test_aot_autograd_helper(self, device, dtype, op, use_min_cut=False)
+
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @patch("functorch.compile.config.debug_assert", True)
+    @skipOps(
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_symbolic_default_partition_exhaustive",
+        aot_autograd_failures | symbolic_aot_autograd_failures,
+    )
+    def test_aot_autograd_symbolic_default_partition_exhaustive(
+        self, device, dtype, op
+    ):
+        _test_aot_autograd_helper(
+            self, device, dtype, op, dynamic=True, use_min_cut=False
+        )
 
 
 aot_autograd_module_failures = set(

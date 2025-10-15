@@ -418,16 +418,14 @@ class ShardingPropagator:
                     output_specs: OutputSpecType = output_strategy.output_specs
                     if isinstance(output_specs, DTensorSpec):
                         output_specs = tuple(
-                            [
-                                # create a new DTensorSpec with the same placement as the
-                                # output_specs in output_strategy
-                                DTensorSpec(
-                                    mesh=output_specs.mesh,
-                                    placements=output_specs.placements,
-                                    tensor_meta=output_specs.tensor_meta,
-                                )
-                                for _ in range(len(op_schema.op._schema.returns))
-                            ]
+                            # create a new DTensorSpec with the same placement as the
+                            # output_specs in output_strategy
+                            DTensorSpec(
+                                mesh=output_specs.mesh,
+                                placements=output_specs.placements,
+                                tensor_meta=output_specs.tensor_meta,
+                            )
+                            for _ in range(len(op_schema.op._schema.returns))
                         )
                 elif (
                     op_schema.return_type_tensor()
