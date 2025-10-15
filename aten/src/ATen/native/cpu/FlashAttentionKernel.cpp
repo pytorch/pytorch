@@ -158,14 +158,14 @@ inline void _mul_reduce_max_fusion_kernel(
 }
 
 template <typename scalar_t>
-inline scalar_t* conditional_data_ptr(scalar_t* ptr, scalar_t* ptr2) {
+static inline scalar_t* conditional_data_ptr(scalar_t* ptr, scalar_t* ptr2) {
   TORCH_CHECK(ptr2 == nullptr);
   return ptr;
 }
 
 template <typename scalar_t,
           typename std::enable_if_t<is_reduced_floating_point_v<scalar_t>, int> = 0>
-inline scalar_t* conditional_data_ptr(float* ptr, scalar_t* ptr2) {
+static inline scalar_t* conditional_data_ptr(float* ptr, scalar_t* ptr2) {
   return ptr2;
 }
 

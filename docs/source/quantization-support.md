@@ -52,26 +52,6 @@ This module contains Eager mode quantization APIs.
     default_eval_fn
 ```
 
-## torch.ao.quantization.utils
-
-```{eval-rst}
-.. automodule:: torch.ao.quantization.utils
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    activation_is_dynamically_quantized
-    activation_is_int32_quantized
-    activation_is_int8_quantized
-    activation_is_statically_quantized
-
-    determine_qparams
-    check_min_max_valid
-    calculate_qmin_qmax
-    validate_qmin_qmax
-```
-
 ## torch.ao.quantization.quantize_fx
 
 This module contains FX graph mode quantization APIs (prototype).
@@ -170,7 +150,7 @@ This module contains a few CustomConfig classes that's used in both eager mode a
 ## torch.ao.quantization.pt2e.export_utils
 
 ```{eval-rst}
-.. automodule:: torch.ao.quantization.pt2e.export_utils
+.. currentmodule:: torch.ao.quantization.pt2e.export_utils
 ```
 
 ```{eval-rst}

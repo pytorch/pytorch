@@ -138,7 +138,7 @@ class TestObserver(QuantizationTestCase):
             # Calculate Qparams should return with a warning for observers with no data
             qparams = myobs.calculate_qparams()
             input_scale = 2**16 if qdtype is torch.qint32 else 1
-            if type(myobs) is MinMaxObserver:
+            if type(myobs) == MinMaxObserver:
                 x = torch.tensor([1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 6.0]) * input_scale
                 y = torch.tensor([4.0, 5.0, 5.0, 6.0, 7.0, 8.0]) * input_scale
             else:
@@ -201,7 +201,7 @@ class TestObserver(QuantizationTestCase):
                     [[[-4.0, -3.0], [5.0, 5.0]], [[6.0, 3.0], [7.0, 8.0]]],
                 ]
             )
-            if type(myobs) is MovingAveragePerChannelMinMaxObserver:
+            if type(myobs) == MovingAveragePerChannelMinMaxObserver:
                 # Scaling the input tensor to model change in min/max values
                 # across batches
                 result = myobs(0.5 * x)

@@ -415,10 +415,7 @@ class _IterDataPipeSerializationWrapper(_DataPipeSerializationWrapper, IterDataP
         return self
 
     def __next__(self) -> _T_co:  # type: ignore[type-var]
-        if self._datapipe_iter is None:
-            raise AssertionError(
-                "Iterator has not been initialized; call __iter__() before __next__()"
-            )
+        assert self._datapipe_iter is not None
         return next(self._datapipe_iter)
 
 

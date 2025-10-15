@@ -145,7 +145,7 @@ INVARIANT_CHECK_FUNC_API _check_idx_sorted_distinct_vals_slices_with_cidx(
   }
 }
 
-inline int64_t indexCount(IntArrayRef sizes) {
+static inline int64_t indexCount(IntArrayRef sizes) {
   int64_t res = 1;
   for (const auto& s : sizes) {
     res *= s;

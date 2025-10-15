@@ -249,7 +249,7 @@ kernel void embedding_bag(
 
 template <EmbeddingBagMode M, typename T>
 struct MaybeDivBagSize {
-  inline opmath_t<T> operator()(opmath_t<T> val, opmath_t<T> /*bag_size*/) {
+  inline opmath_t<T> operator()(opmath_t<T> val, opmath_t<T> bag_size) {
     return val;
   }
 };

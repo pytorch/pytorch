@@ -1188,10 +1188,9 @@ def repeat_interleave_Tensor(
     assert repeat.ndim == 1
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
-    indices = torch.searchsorted(
+    return torch.searchsorted(
         cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True
     )
-    return torch.clamp(indices, max=repeat.size(0) - 1)
 
 
 # intentionally not regiestered

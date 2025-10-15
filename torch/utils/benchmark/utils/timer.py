@@ -208,8 +208,7 @@ class Timer:
                 )
 
         elif language in (Language.CPP, "cpp", "c++"):
-            if self._timer_cls is not timeit.Timer:
-                raise AssertionError("_timer_cls has already been swapped.")
+            assert self._timer_cls is timeit.Timer, "_timer_cls has already been swapped."
             self._timer_cls = CPPTimer
             setup = ("" if setup == "pass" else setup)
             self._language = Language.CPP
@@ -518,8 +517,7 @@ class Timer:
         # the parent process rather than the valgrind subprocess.
         self._timeit(1)
         is_python = (self._language == Language.PYTHON)
-        if not is_python and self._globals:
-            raise AssertionError("_timer globals are only supported for Python timers")
+        assert is_python or not self._globals
         result = valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             task_spec=self._task_spec,
             globals=self._globals,
