@@ -559,6 +559,25 @@ class TestDTensorDebugMode(TestCase):
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
         )
 
+    def test_inductor_calls_for_mm(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        x = torch.randn(1, 8, requires_grad=False)
+        y = torch.randn(1, 32, requires_grad=True)
+        x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+        y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
+
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(x, y):
+            return torch.mm(x, y)
+
+        with DebugMode(record_torchfunction=False) as debug_mode:
+            out = fn(x_dtensor, y_dtensor)
+            out.sum().backward()
+
+        self.assertEqual(debug_mode.debug_string().count("inductor_graph_call"), 2)
+
+
 instantiate_parametrized_tests(TestDTensorDebugMode)
 
 

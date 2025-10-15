@@ -51,6 +51,7 @@ from torch._inductor.utils import (
     set_tracing_context_output_strides,
 )
 from torch.autograd.profiler import record_function
+from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
 
 from . import config
@@ -591,6 +592,17 @@ class CompiledFxGraph(OutputCode):
     def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
 
+        if (debug_mode := get_active_debug_mode()) is not None:
+            debug_mode.record_inductor_graph_call(
+                post_grad_graph=self.inductor_post_grad_graph_str,
+                cache_key=self._fx_graph_cache_key,
+                inputs=tuple(inputs),
+                fx_kwargs=dict(self.fx_kwargs),
+            )
+            debug_mode.call_depth += (
+                1  # manually indent call_depth to avoid context manager usage
+            )
+
         if (
             torch._inductor.debug.RECORD_GRAPH_EXECUTION
             and torch._inductor.debug.GRAPH_EXECUTION_ORDER is not None
@@ -613,9 +625,12 @@ class CompiledFxGraph(OutputCode):
                 with record_function(
                     f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
                 ):
-                    return self.current_callable(inputs)
+                    result = self.current_callable(inputs)
             else:
-                return self.current_callable(inputs)
+                result = self.current_callable(inputs)
+            if debug_mode:
+                debug_mode.call_depth -= 1
+            return result
         finally:
             get_runtime_metrics_context().finish()
             AutotuneCacheBundler.end_compile()
