@@ -258,9 +258,8 @@ class DeviceCachingAllocator {
       stats.num_alloc_retries += 1;
     }
     if (set_fraction &&
-        tats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current +
-
-                ize >
+        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current +
+                size >
             allowed_memory_maximum) {
       return false;
     }
@@ -483,7 +482,8 @@ class DeviceCachingAllocator {
           format_size(device_total),
           " of which ",
           format_size(device_free),
-          " is free. " allowed_info,
+          " is free. ",
+          allowed_info,
           "Of the allocated memory ",
           format_size(allocated_bytes),
           " is allocated by PyTorch, and ",
