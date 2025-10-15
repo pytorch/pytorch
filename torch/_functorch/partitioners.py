@@ -203,11 +203,11 @@ def _extract_graph_with_inputs_outputs(
         env[node] = new_node
 
     for node in joint_graph.nodes:
-        if _must_be_in_backward(node) and subgraph != "backward":
+        if _must_be_in_backward(node) and subgraph != "backward" and node not in inputs:
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 
-        if _must_be_in_forward(node) and subgraph != "forward":
+        if _must_be_in_forward(node) and subgraph != "forward" and node not in inputs:
             env[node] = InvalidNode  # type: ignore[assignment]
             continue
 

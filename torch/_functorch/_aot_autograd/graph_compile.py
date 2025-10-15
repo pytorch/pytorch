@@ -1570,10 +1570,6 @@ def _aot_stage2a_partition(
                 num_fwd_outputs=num_inner_fwd_outputs,
                 static_lifetime_input_indices=static_lifetime_input_indices,
             )
-            fw_module.graph.eliminate_dead_code()
-            fw_module.recompile()
-            bw_module.graph.eliminate_dead_code()
-            bw_module.recompile()
             rng_states = [
                 n
                 for n in fw_module.graph.find_nodes(op="placeholder")

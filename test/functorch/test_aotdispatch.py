@@ -2638,10 +2638,21 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=False),
         ]
 
+        fw_graph = [None]
+        bw_graph = [None]
+
+        def fw_compiler(gm, example_inputs):
+            fw_graph[0] = gm
+            return gm
+
+        def bw_compiler(gm, example_inputs):
+            bw_graph[0] = gm
+            return gm
+
         compiled_f = compiled_function(
             f,
-            nop,
-            nop,
+            fw_compiler,
+            bw_compiler,
             dynamic=False,
             partition_fn=default_partition,
             keep_inference_input_mutations=True,
@@ -2655,6 +2666,28 @@ def forward(self, primals_1, primals_2):
         out_ref.sum().backward()
         out.sum().backward()
         self.assertEqual(inps_ref[0].grad, inps[0].grad)
+
+        # important bit: there are 2 mutations in the fw
+        self.assertExpectedInline(
+            fw_graph[0].code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    _foreach_mul_ = torch.ops.aten._foreach_mul_.ScalarList([primals_2], [2]);  _foreach_mul_ = None
+    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
+    _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
+    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
+    return (mul, add)""",
+        )
+
+        # important bit: there is 1 mutation in the bw
+        self.assertExpectedInline(
+            bw_graph[0].code.strip(),
+            """\
+def forward(self, add, tangents_1):
+    _foreach_mul__2 = torch.ops.aten._foreach_mul_.ScalarList([add], [4]);  _foreach_mul__2 = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = add = None
+    return (mul_1, None)""",
+        )
 
     def test_fw_bw_mutation_no_functionalization2(self):
         class FwBwMutation(torch.autograd.Function):
@@ -2688,10 +2721,21 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=False),
         ]
 
+        fw_graph = [None]
+        bw_graph = [None]
+
+        def fw_compiler(gm, example_inputs):
+            fw_graph[0] = gm
+            return gm
+
+        def bw_compiler(gm, example_inputs):
+            bw_graph[0] = gm
+            return gm
+
         compiled_f = compiled_function(
             f,
-            nop,
-            nop,
+            fw_compiler,
+            bw_compiler,
             dynamic=False,
             partition_fn=default_partition,
             keep_inference_input_mutations=True,
@@ -2705,6 +2749,27 @@ def forward(self, primals_1, primals_2):
         out_ref.sum().backward()
         out.sum().backward()
         self.assertEqual(inps_ref[0].grad, inps[0].grad)
+
+        # important bit: there are 2 mutations in the fw
+        # (the mutation on an activation doesn't get moved to bw)
+        self.assertExpectedInline(
+            fw_graph[0].code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    _foreach_mul_ = torch.ops.aten._foreach_mul_.ScalarList([primals_2], [2]);  _foreach_mul_ = None
+    add = torch.ops.aten.add.Tensor(primals_2, 1);  primals_2 = None
+    _foreach_mul__1 = torch.ops.aten._foreach_mul_.ScalarList([add], [3]);  _foreach_mul__1 = None
+    mul = torch.ops.aten.mul.Tensor(add, primals_1);  primals_1 = None
+    return (mul, add)""",
+        )
+
+        self.assertExpectedInline(
+            bw_graph[0].code.strip(),
+            """\
+def forward(self, add, tangents_1):
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, add);  tangents_1 = add = None
+    return (mul_1, None)""",
+        )
 
     def test_backward_mutation_metadata(self):
         class BwMutation(torch.autograd.Function):

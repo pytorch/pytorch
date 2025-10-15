@@ -462,15 +462,15 @@ def aot_dispatch_autograd_graph(
         aot_config=aot_config,
     )
 
-    # There should be *NO* mutating ops in the graph at this point.
-    # /assert_functional_graph(fx_g.graph)
-
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.
     # See Note: [Fake Modules and AOTAutograd]
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
     if not aot_config.disable_functionalization:
         fx_g.graph.eliminate_dead_code()
+        # There should be *NO* mutating ops in the graph at this point.
+        assert_functional_graph(fx_g.graph)
+
     copy_fwd_metadata_to_bw_nodes(fx_g)
     fx_g.recompile()
 
