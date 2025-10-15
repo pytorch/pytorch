@@ -42,7 +42,8 @@ class AdaroundFakeQuantizer(FakeQuantize):
         if quant_min is not None and quant_max is not None:
             if quant_min > quant_max:
                 raise AssertionError(
-                    "quant_min must be less than or equal to quant_max"
+                    "quant_min must be less than or equal to quant_max, "
+                    f"got quant_min:{quant_min}, quant_max:{quant_max}"
                 )
         self.qscheme: torch.qscheme = qscheme
         self.is_per_tensor: bool = is_per_tensor(qscheme)
