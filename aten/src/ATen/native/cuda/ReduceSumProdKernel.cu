@@ -48,7 +48,6 @@ struct sum_functor<c10::complex<at::Half>> {
       return a + b;
     }
     );
-    std::cout << "Jiterator" << std::endl;
     jitted_gpu_reduce_kernel<sum_name, scalar_t, scalar_t>(
         iter, func, 0.);
   }
