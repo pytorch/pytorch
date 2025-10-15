@@ -353,7 +353,7 @@ class PrefixFileStoreTest(TestCase, StoreTestBase):
 
 
 class TCPStoreTest(TestCase, StoreTestBase):
-    self._use_libuv = False
+    _use_libuv = False
 
     def _create_store(self):
         store = create_tcp_store(use_libuv=self._use_libuv)
