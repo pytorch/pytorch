@@ -497,15 +497,17 @@ if __name__ == "__main__":
         torch.xpu.set_per_process_memory_fraction(fraction)
         allowed_memory = int(total_memory * 0.49)
         reserved_memory = torch.xpu.memory_reserved()
-        application = allowed_memory - reserved_memory
-        tensor = torch.empty(application, dtype=torch.int8, device="xpu")
+        application_memory = allowed_memory - reserved_memory
+        tensor = torch.empty(application_memory, dtype=torch.int8, device="xpu")
         del tensor
         gc.collect()
         torch.xpu.empty_cache()
 
-        application = int(total_memory * 0.51)
+        application_memory = int(total_memory * 0.51)
         with self.assertRaises(torch.OutOfMemoryError):
-            tensor = torch.empty(application, dtype=torch.int8, device="xpu")
+            tensor = torch.empty(application_memory, dtype=torch.int8, device="xpu")
+
+        torch.xpu.set_per_process_memory_fraction(1.0)
 
     def test_memory_allocation(self):
         torch.xpu.empty_cache()
