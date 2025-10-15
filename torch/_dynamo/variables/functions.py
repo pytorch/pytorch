@@ -79,12 +79,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import (
-    AsPythonConstantNotImplementedError,
-    AttributeMutationNew,
-    ValueMutationNew,
-    VariableTracker,
-)
+from .base import AsPythonConstantNotImplementedError, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .user_defined import UserDefinedObjectVariable
 
@@ -283,11 +278,6 @@ def _create_nested_fn(
 
     func = FunctionType(code, f_globals, name, defaults, closure)
     func.__kwdefaults__ = kwdefaults
-
-    if isinstance(annotations, tuple):
-        from itertools import pairwise
-
-        annotations = dict(pairwise(annotations))
 
     # TypeError: __annotations__ must be set to a dict object
     assert annotations is None or isinstance(annotations, dict)
@@ -1251,6 +1241,12 @@ def _dummy_fn_for_nested_user_function_variable(*args, **kwargs):
     raise InternalTorchDynamoError("This function should never be called")
 
 
+def _dict_from_flat_pairs(flat):
+    # [1, 2, 3, 4] -> {1: 2, 3: 4}
+    it = iter(flat)
+    return dict(zip(it, it))
+
+
 class NestedUserFunctionVariable(BaseUserFunctionVariable, UserDefinedObjectVariable):
     _nonvar_fields = {
         "f_globals",
@@ -1260,7 +1256,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable, UserDefinedObjectVari
 
     def __init__(
         self,
-        tx,
         fn_name,
         code,
         f_globals,
@@ -1284,14 +1279,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable, UserDefinedObjectVari
         self.f_globals = f_globals
         self.defaults = defaults
         self.kwdefaults = kwdefaults
+        # annotations expected to be None, dict, or tuple
+        if annotations and isinstance(annotations, variables.BaseListVariable):
+            annotations = variables.ConstDictVariable(
+                _dict_from_flat_pairs(annotations.items), dict
+            )
         self.annotations = annotations
         self.closure = closure
-        tx.output.side_effects.track_mutable(self, self, AttributeMutationNew)
-        variables.BuiltinVariable(setattr).call_function(
-            tx,  # type: ignore[arg-type]
-            [self, ConstantVariable.create("__name__"), fn_name],
-            {},
-        )
 
     def self_args(self):
         return []
@@ -1316,13 +1310,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable, UserDefinedObjectVari
             func.__kwdefaults__ = self.kwdefaults.as_python_constant()
         if self.annotations:
             annotations = self.annotations.as_python_constant()
-            if isinstance(annotations, tuple):
-                from itertools import pairwise
-
-                annotations = dict(pairwise(annotations))
-
             # TypeError: __annotations__ must be set to a dict object
-            assert isinstance(annotations, dict)
+            assert isinstance(annotations, dict), breakpoint()
             func.__annotations__ = annotations
         return func
 
@@ -1394,6 +1383,51 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable, UserDefinedObjectVari
             codegen.extend_output([codegen.create_load_const(None)])
 
         codegen.extend_output(create_call_function(7, False))
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        if name == "__code__":
+            return self.code
+        elif name == "__name__":
+            return self.fn_name
+        elif name == "__globals__":
+            from .dicts import build_sourceless_lazy_dict_variable
+
+            return build_sourceless_lazy_dict_variable(tx, self.f_globals)
+        elif name == "__defaults__":
+            return self.defaults if self.defaults else ConstantVariable.create(None)
+        elif name == "__kwdefaults__":
+            return self.kwdefaults if self.kwdefaults else ConstantVariable.create(None)
+        elif name == "__annotations__":
+            return (
+                self.annotations if self.annotations else ConstantVariable.create(None)
+            )
+        elif name == "__closure__":
+            return self.closure if self.closure else ConstantVariable.create(None)
+        return super().var_getattr(tx, name)
+
+    def method_setattr_standard(
+        self, tx: "InstructionTranslator", name, value, directly_update_dict=False
+    ):
+        if name in (
+            "__code__",
+            "__name__",
+            "__globals__",
+            "__defaults__",
+            "__kwdefaults__",
+            "__annotations__",
+            "__closure__",
+        ):
+            unimplemented_v2(
+                gb_type="Unsupported nested function setattr",
+                context=f"{self}, setattr: {name}, value: {value}",
+                explanation=f"`torch.compile` does not support setting attribute {name} of functions "
+                "that are defined within the compiled region.",
+                hints=[
+                    "Remove the function set attribute.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        return super().method_setattr_standard(tx, name, value, directly_update_dict)
 
 
 class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):

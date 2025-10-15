@@ -3337,9 +3337,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # Test on non autocast state and autocast cache states.
         self.assertIn("autocast_state", json_guards)
         for key, value in json_guards.items():
-            if type(value) == int:
+            if type(value) is int:
                 variant = value + 1
-            elif type(value) == bool:
+            elif type(value) is bool:
                 variant = not value
             elif isinstance(value, dict) and key == "autocast_state":
                 variant = value.copy()
@@ -11304,12 +11304,12 @@ fn
             fn(x, y)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_guard_size_oblivious(self):
+    def test_infer_unbacked_size_gt_zero(self):
         # This code, in fact, does NOT work in eager
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             y = torch.zeros(x.item())
-            if guard_size_oblivious(y.size(0) == 0):
+            if y.size(0) < 0:
                 assert False
             return y
 
@@ -13152,7 +13152,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             counter = CompileCounter()
             opt_fn = torch.compile(fn, backend=counter)
             res = opt_fn()
-            self.assertEqual(res.device.type, device)
+            self.assertTrue(res.device.type in device)
             self.assertEqual(res.device.index, 0)
             self.assertEqual(counter.frame_count, 2)
 

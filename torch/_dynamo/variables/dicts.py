@@ -197,7 +197,7 @@ class ConstDictVariable(VariableTracker):
         @staticmethod
         def _eq_impl(a, b):
             # TODO: Put this in utils and share it between variables/builtin.py and here
-            if type(a) != type(b):
+            if type(a) is not type(b):
                 return False
             elif isinstance(a, tuple):
                 Hashable = ConstDictVariable._HashableTracker
@@ -1371,6 +1371,16 @@ class DictItemsVariable(DictViewVariable):
 
     def python_type(self):
         return dict_items
+
+    def call_method(self, tx, name, args, kwargs):
+        # TODO(guilhermeleobas): This should actually check if args[0]
+        # implements the mapping protocol.
+        if name == "__eq__":
+            assert len(args) == 1
+            if isinstance(args[0], DictItemsVariable):
+                return self.dv_dict.call_method(tx, "__eq__", [args[0].dv_dict], {})
+            return ConstantVariable.create(False)
+        return super().call_method(tx, name, args, kwargs)
 
 
 # Create a dict with lazy keys and values to delay graph breaks due to VT wrapping errors
