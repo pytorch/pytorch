@@ -53,7 +53,7 @@ jobs:
 
   aarch64-opbenchmark-build:
     if: github.repository_owner == 'pytorch'
-    name: opbenchmark-build
+    name: aarch64-opbenchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-jammy-aarch64-py3.10
