@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     IS_WINDOWS,
     run_tests,
+    serialTest,
     suppress_warnings,
     TEST_XPU,
     TestCase,
@@ -481,6 +482,32 @@ if __name__ == "__main__":
         torch.xpu.memory.empty_cache()
         with self.assertRaises(torch.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
+
+    @serialTest()
+    def test_set_per_process_memory_fraction(self):
+        gc.collect()
+        torch.xpu.empty_cache()
+        total_memory = torch.xpu.get_device_properties().total_memory
+        fraction = 0.5
+        with self.assertRaiseRegex(ValueError, "invalid fraction:"):
+            torch.xpu.set_per_process_memory_fraction(-0.1)
+        with self.assertRaiseRegex(ValueError, "invalid fraction:"):
+            torch.xpu.set_per_process_memory_fraction(1.1)
+
+        torch.xpu.set_per_process_memory_fraction(fraction)
+        allowed_memory = int(total_memory * 0.49)
+        reserved_memory = torch.xpu.memory_reserved()
+        application = allowed_memory - reserved_memory
+        tensor = torch.empty(application, dtype=torch.int8, device="xpu")
+        del tensor
+        gc.collect()
+        torch.xpu.empty_cache()
+
+        self.assertEqual(fraction, torch.xpu.get_per_process_memory_fraction())
+
+        application = int(total_memory * 0.51)
+        with self.assertRaises(torch.OutOfMemoryError):
+            tensor = torch.empty(application, dtype=torch.int8, device="xpu")
 
     def test_memory_allocation(self):
         torch.xpu.empty_cache()
