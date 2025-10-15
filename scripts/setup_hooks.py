@@ -89,7 +89,7 @@ if venv_dir.exists():
     print("Removing existing hook venv...")
     shutil.rmtree(venv_dir)
 
-run(["uv", "venv", str(venv_dir), "--python", "3.10"])
+run(["uv", "venv", str(venv_dir), "--python", "3.9"])
 
 # Install lintrunner in the isolated environment
 print("Installing lintrunner in isolated environment...")

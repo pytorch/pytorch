@@ -177,9 +177,6 @@ jobs:
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm

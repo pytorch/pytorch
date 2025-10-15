@@ -105,7 +105,7 @@ namespace at::native {
 namespace {
 
 template <typename scalar_t>
-void upsample_bicubic2d_backward_out_frame(
+static void upsample_bicubic2d_backward_out_frame(
     const scalar_t* odata,
     scalar_t* idata,
     int64_t input_height,
@@ -177,7 +177,7 @@ void upsample_bicubic2d_backward_out_frame(
   });
 }
 
-void upsample_bicubic2d_backward_kernel(
+static void upsample_bicubic2d_backward_kernel(
     const Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,

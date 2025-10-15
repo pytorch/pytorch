@@ -15,12 +15,12 @@ namespace at::native {
 inline namespace CPU_CAPABILITY {
 
 namespace {
-bool reduced_input(ScalarType input_t, ScalarType output_t) {
+static bool reduced_input(ScalarType input_t, ScalarType output_t) {
   return !at::isFloat8Type(input_t) && at::isReducedFloatingType(input_t) &&
       output_t == kFloat;
 }
 
-bool reduced_output(ScalarType input_t, ScalarType output_t) {
+static bool reduced_output(ScalarType input_t, ScalarType output_t) {
   return !at::isFloat8Type(output_t) && at::isReducedFloatingType(output_t) &&
       input_t == kFloat;
 }

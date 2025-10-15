@@ -259,7 +259,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const std::optional<Tensor
  *
  * Refer to histogramdd_out_cpu_template for more details.
  */
-void histogramdd_kernel_impl(const Tensor& self, const std::optional<Tensor>& weight, bool density,
+static void histogramdd_kernel_impl(const Tensor& self, const std::optional<Tensor>& weight, bool density,
         Tensor& hist, const TensorList& bin_edges) {
     histogramdd_out_cpu_template<BINARY_SEARCH>(self, weight, density, hist, bin_edges);
 }
@@ -269,7 +269,7 @@ void histogramdd_kernel_impl(const Tensor& self, const std::optional<Tensor>& we
  *
  * Refer to histogramdd_out_cpu_template for more details.
  */
-void histogramdd_linear_kernel_impl(const Tensor& self, const std::optional<Tensor>& weight,
+static void histogramdd_linear_kernel_impl(const Tensor& self, const std::optional<Tensor>& weight,
         bool density, Tensor& hist, const TensorList& bin_edges, bool local_search) {
     if (local_search) {
         // histogramdd codepath: both hist and bin_edges are eventually returned as output,
@@ -298,7 +298,7 @@ void infer_bin_edges_from_input(const Tensor& input, const int64_t N,
     std::copy(max_data, max_data + N, rightmost_edges.begin());
 }
 
-void histogram_select_outer_bin_edges_impl(const Tensor& input, const int64_t N,
+static void histogram_select_outer_bin_edges_impl(const Tensor& input, const int64_t N,
         std::vector<double> &leftmost_edges, std::vector<double> &rightmost_edges) {
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogramdd", [&]() {
         infer_bin_edges_from_input<scalar_t>(input, N, leftmost_edges, rightmost_edges);

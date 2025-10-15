@@ -44,14 +44,14 @@ class TestApply(FSDPTest):
 
     @torch.no_grad()
     def _init_linear_weights(self, m):
-        if type(m) is nn.Linear:
+        if type(m) == nn.Linear:
             m.weight.fill_(1.0)
             m.bias.fill_(1.0)
 
     def check_weights(self, fsdp, expected_tensor_fn, check):
         with FSDP.summon_full_params(fsdp, recurse=True):
             linear_modules = [
-                module for module in fsdp.modules() if type(module) is nn.Linear
+                module for module in fsdp.modules() if type(module) == nn.Linear
             ]
             for module in linear_modules:
                 for param in module.parameters():

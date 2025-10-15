@@ -114,7 +114,7 @@ maml_omniglot,pass,0
 
 
 
-microbench_unbacked_tolist_sum,pass,0
+microbench_unbacked_tolist_sum,pass,1
 
 
 

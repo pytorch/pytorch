@@ -10,7 +10,6 @@ torch.cpu
     current_device
     current_stream
     is_available
-    is_initialized
     synchronize
     stream
     set_device

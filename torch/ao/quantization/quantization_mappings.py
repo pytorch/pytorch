@@ -343,7 +343,7 @@ def get_default_float_to_quantized_operator_mappings() -> dict[
 # TODO: merge with get_static_quant_module_class
 def get_quantized_operator(float_op: Union[Callable, str]) -> Callable:
     """Get the quantized operator corresponding to the float operator"""
-    quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op)
+    quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op, None)
     assert quantized_op is not None, (
         f"Operator {str(float_op)} does not have corresponding quantized op"
     )

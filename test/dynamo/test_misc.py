@@ -3370,9 +3370,9 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         # Test on non autocast state and autocast cache states.
         self.assertIn("autocast_state", json_guards)
         for key, value in json_guards.items():
-            if type(value) is int:
+            if type(value) == int:
                 variant = value + 1
-            elif type(value) is bool:
+            elif type(value) == bool:
                 variant = not value
             elif isinstance(value, dict) and key == "autocast_state":
                 variant = value.copy()
@@ -13279,7 +13279,7 @@ class MiscTestsDevice(torch._inductor.test_case.TestCase):
             counter = CompileCounter()
             opt_fn = torch.compile(fn, backend=counter)
             res = opt_fn()
-            self.assertTrue(res.device.type in device)
+            self.assertEqual(res.device.type, device)
             self.assertEqual(res.device.index, 0)
             self.assertEqual(counter.frame_count, 2)
 

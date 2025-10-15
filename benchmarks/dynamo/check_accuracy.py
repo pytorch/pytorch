@@ -15,8 +15,6 @@ flaky_models = {
     "moondream",  # discovered in https://github.com/pytorch/pytorch/pull/159291
     # discovered in https://github.com/pytorch/pytorch/issues/161419. Its not flaky but really hard to repro, so skipping it
     "mobilenetv3_large_100",
-    # https://github.com/pytorch/pytorch/issues/163670
-    "vision_maskrcnn",
 }
 
 
@@ -63,10 +61,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "swsl_resnext101_32x16d",
                 "torchrec_dlrm",
                 "vgg16",
-                "BERT_pytorch",
-                "coat_lite_mini",
-                "mobilenet_v3_large",
-                "vision_maskrcnn",
                 # LLM
                 "meta-llama/Llama-3.2-1B",
                 "google/gemma-2-2b",

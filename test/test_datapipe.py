@@ -2478,7 +2478,7 @@ class TestTyping(TestCase):
             else:
                 self.assertFalse(issubinstance(d, S))
             for t in basic_type:
-                if type(d) is t:
+                if type(d) == t:
                     self.assertTrue(issubinstance(d, t))
                 else:
                     self.assertFalse(issubinstance(d, t))
@@ -2577,7 +2577,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP4, IterDataPipe))
         dp4 = DP4()
-        self.assertTrue(dp4.type.param is tuple)
+        self.assertTrue(dp4.type.param == tuple)
 
         class DP5(IterDataPipe):
             r"""DataPipe without type annotation"""
@@ -2601,7 +2601,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP6, IterDataPipe))
         dp6 = DP6()
-        self.assertTrue(dp6.type.param is int)
+        self.assertTrue(dp6.type.param == int)
 
         class DP7(IterDataPipe[Awaitable[T_co]]):
             r"""DataPipe with abstract base class"""

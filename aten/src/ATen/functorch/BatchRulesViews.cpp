@@ -346,7 +346,7 @@ std::tuple<Tensor, std::optional<int64_t>> slice_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
-bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
+static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
 }
 

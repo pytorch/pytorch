@@ -296,7 +296,7 @@ class TestSplitOutputType(TestCase):
         gm_output = module(inputs)
         split_gm_output = split_gm(inputs)
 
-        self.assertTrue(type(gm_output) is type(split_gm_output))
+        self.assertTrue(type(gm_output) == type(split_gm_output))
         self.assertTrue(torch.equal(gm_output, split_gm_output))
 
 
