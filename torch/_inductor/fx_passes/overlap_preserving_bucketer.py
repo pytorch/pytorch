@@ -1,27 +1,16 @@
 from collections import defaultdict
-from typing import Optional
 
 import torch
 import torch.fx as fx
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
-    _ag_group_key,
-    _rs_group_key,
+    bucket_key,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
     is_wait_tensor,
 )
 from torch._inductor.fx_passes.overlap_scheduling import CollBucket, CollectiveInfo
 from torch.utils._ordered_set import OrderedSet
-
-
-def bucket_key(node: torch.fx.Node) -> Optional[object]:
-    if is_all_gather(node):
-        return _ag_group_key(node)
-    elif is_reduce_scatter(node):
-        return _rs_group_key(node)
-    else:
-        return None
 
 
 class OverlapPreservingBucketer:
