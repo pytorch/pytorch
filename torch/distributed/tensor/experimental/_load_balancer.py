@@ -2,7 +2,7 @@
 # for different load-balancing strategies in tensor sharding.
 import functools
 from abc import ABC, abstractmethod
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -77,9 +77,7 @@ class _LoadBalancer(ABC):
 
 
 class _HeadTailLoadBalancer(_LoadBalancer):
-    def __init__(
-        self, seq_length: int, world_size: int, device: Union[str, torch.device]
-    ):
+    def __init__(self, seq_length: int, world_size: int, device: str | torch.device):
         self.seq_length = seq_length
         self.world_size = world_size
         self.device = device
@@ -182,7 +180,7 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
         self,
         seq_length_per_doc: list[list[int]],
         world_size: int,
-        device: Union[str, torch.device],
+        device: str | torch.device,
     ):
         """
         `seq_length_per_doc` has size (B, seq_len) if the load-balancing should vary
@@ -306,21 +304,20 @@ class _PerDocumentHeadTailLoadBalancer(_LoadBalancer):
 
 class _PTRRLoadBalancer(_LoadBalancer):
     """
-    Processing-Time based Round-Robin (PTRR) load balancer.
+    Processing-Time based Round-Robin (PTRR) load balancer. This load balancer should
+    only be used for flex_attention() since it leverages `BlockMask`.
     """
 
     def __init__(
         self,
         block_mask: BlockMask,
         world_size: int,
-        device: Union[str, torch.device],
     ):
         """
         `block_mask` must have shape (B, 1, seq_len, seq_len) or (1, 1, seq_len, seq_len).
         """
         self.block_mask = block_mask
         self.world_size = world_size
-        self.device = device
 
     @staticmethod
     def ptrr_scheduling(process_time: Tensor, group_size: int) -> Tensor:
@@ -352,7 +349,10 @@ class _PTRRLoadBalancer(_LoadBalancer):
 
         num_tasks = process_time.size(0)
 
-        assert num_tasks % group_size == 0
+        if num_tasks % group_size != 0:
+            raise NotImplementedError(
+                f"num_tasks {num_tasks} must be divisible by group_size {group_size}"
+            )
 
         device = process_time.device
         _, sorted_indices_descending = torch.sort(
@@ -477,7 +477,7 @@ class _PTRRLoadBalancer(_LoadBalancer):
 
 
 def _create_default_load_balancer(
-    seq_length: int, world_size: int, device: Union[str, torch.device]
+    seq_length: int, world_size: int, device: str | torch.device
 ) -> Optional[_LoadBalancer]:
     from torch.distributed.tensor.experimental._attention import _cp_options
 
