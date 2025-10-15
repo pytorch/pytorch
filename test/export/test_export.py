@@ -394,6 +394,20 @@ graph():
         seq_len = torch.tensor(5)
         torch.export.export(MySlice(), args=(x, seq_len))
 
+    def test_abc(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x += 1
+                with torch.fx.traceback.annotate({"a": "b"}):
+                    x += 1
+                x += 1
+                return x
+
+        ep = export(Foo(), (torch.randn(2),))
+
+        add_1 = list(ep.graph.nodes)[2]
+        self.assertTrue("custom" in add_1.meta and add_1.meta["custom"].get("a") == "b")
+
     @torch.fx.experimental._config.patch(backed_size_oblivious=True)
     def test_reshape_view_backed_size_oblivious(self):
         N = 3
