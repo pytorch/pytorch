@@ -527,6 +527,7 @@ class TestDTensorDebugMode(TestCase):
                 super().__init__()
                 self.l1 = torch.nn.Linear(4, 4)
                 self.l2 = torch.nn.Linear(4, 4)
+
             def forward(self, x):
                 return self.l2(self.l1(x))
 
@@ -535,6 +536,7 @@ class TestDTensorDebugMode(TestCase):
                 super().__init__()
                 self.abc = Foo()
                 self.xyz = torch.nn.Linear(4, 4)
+
             def forward(self, x):
                 return self.xyz(self.abc(x))
 
@@ -558,6 +560,7 @@ class TestDTensorDebugMode(TestCase):
         aten::t(t: f32[4, 4])
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
         )
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 
