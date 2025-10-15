@@ -1890,36 +1890,37 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
-        (
-            FileCheck()
-            .check_count(
-                "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
-                count=2,
-                exactly=True,
+        if not torch._inductor.config.triton.native_matmul:
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                    count=2,
+                    exactly=True,
+                )
+                .check(
+                    "extern_kernels.mm",
+                )
+                .check(
+                    "extern_kernels.addmm",
+                )
+                .run(code)
             )
-            .check(
-                "extern_kernels.mm",
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                    count=2,
+                    exactly=True,
+                )
+                .check(
+                    "extern_kernels.mm",
+                )
+                .check(
+                    "extern_kernels.addmm",
+                )
+                .run(code)
             )
-            .check(
-                "extern_kernels.addmm",
-            )
-            .run(code)
-        )
-        (
-            FileCheck()
-            .check_count(
-                "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-                count=2,
-                exactly=True,
-            )
-            .check(
-                "extern_kernels.mm",
-            )
-            .check(
-                "extern_kernels.addmm",
-            )
-            .run(code)
-        )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"

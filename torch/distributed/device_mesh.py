@@ -12,7 +12,7 @@ from typing import Optional, TYPE_CHECKING, Union
 import torch
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import _MeshLayout
-from torch.distributed._pycute import IntTuple, is_int
+from torch.distributed._pycute import flatten, IntTuple, is_int
 from torch.utils._typing_utils import not_none
 
 
@@ -1244,7 +1244,9 @@ else:
                     raise RuntimeError(
                         "Cannot concatenate DeviceMeshes with different root mesh tensors"
                     )
-            concat_mesh_layout = _MeshLayout(tuple(concat_sizes), tuple(concat_strides))
+            concat_mesh_layout = _MeshLayout(
+                flatten(tuple(concat_sizes)), flatten(tuple(concat_strides))
+            )
             if not concat_mesh_layout.check_non_overlap():
                 raise RuntimeError(
                     f"Cannot concatenate overlapping meshes: {device_mesh_list}"
@@ -1260,6 +1262,7 @@ else:
                 tuple(concat_dim_names),
                 _init_backend=False,
                 _layout=concat_mesh_layout,
+                _root_mesh=root_mesh,
             )
             res_submesh._dim_group_names = concat_dim_group_name
             return res_submesh
