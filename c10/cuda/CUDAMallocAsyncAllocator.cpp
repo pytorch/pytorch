@@ -446,7 +446,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return !devs_initialized_flags.empty();
   }
 
-  static inline void assertValidDevice(c10::DeviceIndex device) {
+  static void assertValidDevice(c10::DeviceIndex device) {
     TORCH_CHECK(
         0 <= device && device < device_count, "Invalid device argument.");
   }
@@ -495,6 +495,13 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     // introduces performance nondeterminism.
   }
 
+  std::vector<StreamSegmentSize> getExpandableSegmentSizes(
+      c10::DeviceIndex device) override {
+    TORCH_CHECK(
+        false,
+        "CUDAMallocAsyncAllocator does not yet support getExpandableSegmentSizes.");
+  }
+
   void emptyCache(/*unused*/ MempoolId_t mempool_id) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
@@ -510,7 +517,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
   }
 
-  void enable(bool) override {
+  void enable(bool /*value*/) override {
     // cannot disable
   }
 
@@ -792,7 +799,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::function<bool(cudaStream_t)>) override {
+      std::function<bool(cudaStream_t)> /*filter*/) override {
     std::lock_guard<std::mutex> lk(general_mutex);
 
     TORCH_INTERNAL_ASSERT(capture_free_streams.empty());

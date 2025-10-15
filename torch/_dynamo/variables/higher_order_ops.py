@@ -453,9 +453,7 @@ def _call_while_loop(
         cond_r_meta = _extract_tensor_metadata(
             cond_r.proxy.node.meta["example_value"], include_contiguity=False
         )
-        if not cond_r_meta.dtype == torch.bool or not cond_r_meta.shape == torch.Size(
-            []
-        ):
+        if cond_r_meta.dtype != torch.bool or cond_r_meta.shape != torch.Size([]):
             unimplemented(
                 f"Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}"
             )
@@ -2077,9 +2075,16 @@ class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable
             unimplemented(
                 "executorch_call_delegate: kwargs arguments were not enabled."
             )
-        lowered_module = tx.output.get_submodule(args[0].module_key)
-
-        lowered_node = make_attr(tx, args[0].module_key)
+        if isinstance(args[0], variables.NNModuleVariable):
+            lowered_module = tx.output.get_submodule(args[0].module_key)
+            lowered_node = make_attr(tx, args[0].module_key)
+        elif isinstance(args[0], variables.UnspecializedNNModuleVariable):
+            # This nn module is special sa delegated by executorch. Just
+            # install it as a attr in the graph.
+            lowered_module = args[0].value
+            lowered_node = tx.output.register_static_attr_and_return_proxy(
+                "delegate", lowered_module
+            )
 
         p_args = tuple(arg.as_proxy() for arg in args[1:])
         real_sub_args = pytree.tree_map_only(
@@ -2583,7 +2588,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             elif isinstance(
                 ctx, torch._dynamo.variables.functions.FunctoolsPartialVariable
             ):
-                context_fn = ctx.as_python_constant()
+                context_fn = ctx.guard_as_python_constant()
             else:
                 raise NotImplementedError(
                     f"checkpoint not implemented for {type(ctx)} context_fn"
@@ -3540,7 +3545,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         from torch.distributed.tensor.experimental._func_map import _local_map_wrapped
 
         # check is important to avoid subclass dispatch
-        if type(value) != type(_local_map_wrapped):
+        if type(value) is not type(_local_map_wrapped):
             return False
 
         return value == _local_map_wrapped and cls._enabled
@@ -3669,7 +3674,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
         expected_num_outputs = len(out_placements.value) - output_none_placements
         assert len(body_gmod.graph.find_nodes(op="output")) == 1
         actual_num_outputs = len(body_gmod.graph.find_nodes(op="output")[0].args[0])
-        gm_str = body_gmod.print_readable(print_output=False)
+
         template = (
             "Expecting {expected} {inputs_or_outputs} to local_map function based on placements"
             ", but found {actual}. If the count matches for eager, "
@@ -3677,18 +3682,25 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             "tensors used via closures. "
             "Please adjust the input placements to match what the traced graph sees: \n{gm_str}."
         )
-        assert expected_num_inputs == actual_num_inputs, template.format(
-            expected=expected_num_inputs,
-            inputs_or_outputs="inputs",
-            actual=actual_num_inputs,
-            gm_str=gm_str,
-        )
-        assert expected_num_outputs == actual_num_outputs, template.format(
-            expected=expected_num_outputs,
-            inputs_or_outputs="outputs",
-            actual=actual_num_outputs,
-            gm_str=gm_str,
-        )
+
+        def make_error_msg(*args):
+            expected_num, actual_num, inputs_or_outputs = args
+            gm_str = body_gmod.print_readable(print_output=False)
+            return template.format(
+                expected=expected_num,
+                inputs_or_outputs=inputs_or_outputs,
+                actual=actual_num,
+                gm_str=gm_str,
+            )
+
+        if expected_num_inputs != actual_num_inputs:
+            raise AssertionError(
+                make_error_msg(expected_num_inputs, actual_num_inputs, "inputs")
+            )
+        if expected_num_outputs != actual_num_outputs:
+            raise AssertionError(
+                make_error_msg(expected_num_outputs, actual_num_outputs, "outputs")
+            )
 
         if inputs_none_placements > 0:
             expected_input_nodes = [
