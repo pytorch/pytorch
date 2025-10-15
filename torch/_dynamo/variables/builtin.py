@@ -1930,7 +1930,16 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator", user_cls, *args, **kwargs
     ):
-        assert user_cls in {dict, OrderedDict, defaultdict}
+        if user_cls not in {dict, OrderedDict, defaultdict}:
+            unimplemented_v2(
+                gb_type="Unsupported dict type for fromkeys()",
+                context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
+                explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
+                f"{user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
+                hints=[
+                    f"Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict.",
+                ],
+            )
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
             if (
