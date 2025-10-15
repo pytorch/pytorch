@@ -320,7 +320,6 @@ def _local_all_gather_(
 
     ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
 
-    assert isinstance(input_tensor, LocalTensor), "Input tensor must be a LocalTensor"
     for i in range(len(output_tensors)):
         assert isinstance(output_tensors[i], LocalTensor), (
             "Output tensor must be a LocalTensor"
@@ -333,7 +332,11 @@ def _local_all_gather_(
 
         # For each rank in the group, gather from their input tensor
         for i, rank_i in enumerate(group_ranks):
-            output_tensors[i].copy_(input_tensor._local_tensors[rank_i])
+            # allgather object happens to create pure tensor, so we special case it here
+            source_tensor = input_tensor
+            if isinstance(input_tensor, LocalTensor):
+                source_tensor = input_tensor._local_tensors[rank_i]
+            output_tensors[i].copy_(source_tensor)
 
     work = FakeWork()
     work_so = Work.boxed(work)
