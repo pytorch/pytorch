@@ -53,13 +53,13 @@ def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
         def _wrap_rref_type_cont(fut):
             try:
                 _rref_type_cont(fut).then(_complete_op)
-            except BaseException as ex:
+            except BaseException as ex:  # noqa: B036
                 result.set_exception(ex)
 
         def _complete_op(fut):
             try:
                 result.set_result(fut.value())
-            except BaseException as ex:
+            except BaseException as ex:  # noqa: B036
                 result.set_exception(ex)
 
         rref_fut.then(_wrap_rref_type_cont)

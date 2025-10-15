@@ -1042,7 +1042,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
 void LazyGraphExecutor::TensorCollectionBarrier(SyncTensorCollection* coll) {
   if (coll) {
     static const std::string invalid_device(
-        "Unknown0"); /* Temp solution to idetify unassigned devices */
+        "Unknown0"); /* Temp solution to identify unassigned devices */
     if (coll->device.toString() == invalid_device || !coll->unlocker.empty()) {
       return;
     }
@@ -1071,6 +1071,18 @@ hash_t LazyGraphExecutor::GetGraphHash(
   auto po_data = RunPostOrder(ir_values, &coll);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
   return coll.hash;
+}
+
+void LazyGraphExecutor::ClearComputationCache() {
+  VLOG(4) << "Clearing the computation cache";
+  GetComputationCache()->Clear();
+}
+
+void LazyGraphExecutor::RemoveFromComputationCache(const hash_t& hash) {
+  VLOG(4) << "Removing computation cache for hash " << hash;
+  if (!GetComputationCache()->Erase(hash)) {
+    LOG(ERROR) << "There is no cached computation for hash " << hash << '\n';
+  }
 }
 
 } // namespace torch::lazy

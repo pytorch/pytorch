@@ -35,9 +35,7 @@ TORCH_API Tensor toNonOptFwGrad(const std::optional<Tensor>& t);
 TORCH_API Tensor toNonOptPrimal(const std::optional<Tensor>& t);
 TORCH_API Tensor toNonOptTensor(const std::optional<Tensor>& t);
 
-TORCH_API inline std::optional<Tensor> wrap_opt_if(
-    const Tensor& t,
-    const bool cond) {
+inline std::optional<Tensor> wrap_opt_if(const Tensor& t, const bool cond) {
   using OptTensor = std::optional<Tensor>;
   return cond ? OptTensor(t) : static_cast<OptTensor>(std::nullopt);
 }
@@ -281,7 +279,7 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
     const at::Tensor& self,
     const at::Tensor& min,
     const at::Tensor& max,
-    const std::array<bool, 2>&);
+    const std::array<bool, 2>& /*grad_input_mask*/);
 at::Tensor clamp_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -305,6 +303,22 @@ at::Tensor mm_mat2_backward(
     at::SymIntArrayRef sizes,
     at::SymIntArrayRef strides,
     c10::Layout layout,
+    const at::Scalar& alpha);
+at::Tensor _grouped_mm_mat1_backward(
+    const Tensor& grad,
+    const Tensor& mat2,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
+    c10::Layout mat1_layout,
+    std::optional<Tensor> offs,
+    const Scalar& alpha);
+at::Tensor _grouped_mm_mat2_backward(
+    const at::Tensor& grad,
+    const at::Tensor& mat1,
+    at::SymIntArrayRef sizes,
+    at::SymIntArrayRef strides,
+    c10::Layout layout,
+    std::optional<Tensor> offs,
     const at::Scalar& alpha);
 at::Tensor mm_mat1_sparse_backward(
     const at::Tensor& grad,
@@ -631,11 +645,18 @@ Tensor linalg_eig_backward(
     const Tensor& V,
     const bool is_hermitian,
     const bool symeig_eigenvectors = true);
-Tensor linalg_lstsq_jvp(
+Tensor linalg_lstsq_solution_jvp(
     const Tensor& A,
-    const Tensor& B,
+    const Tensor& B_,
     const Tensor& dA,
-    const Tensor& dB);
+    const Tensor& dB_);
+Tensor linalg_lstsq_residuals_jvp(
+    const Tensor& A,
+    const Tensor& B_,
+    const Tensor& dA,
+    const Tensor& dB_,
+    const Tensor& X_,
+    const Tensor& L);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
     const Tensor& grad_x,
     const Tensor& grad_m,
@@ -805,6 +826,15 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask);
 
+std::tuple<Tensor, Tensor> infinitely_differentiable_native_rms_norm_backward(
+    const Tensor& dY,
+    const Tensor& drstd,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& rstd,
+    const std::optional<Tensor>& weight_opt,
+    std::array<bool, 2> grad_input_mask);
+
 std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,
     const Tensor& result,
@@ -887,9 +917,11 @@ Tensor linalg_det_jvp(
     const Tensor& pivots,
     const bool use_A_T);
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
-    const Tensor& grad,
+    const Tensor& gX_,
+    const Tensor& gL,
     const Tensor& A,
     const Tensor& B_,
+    const Tensor& X_,
     const std::array<bool, 2>& grad_input_mask);
 Tensor linalg_lu_backward(
     const Tensor& L_grad,
@@ -941,6 +973,20 @@ Tensor layer_norm_jvp(
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
     c10::SymIntArrayRef normalized_shape);
+
+Tensor rms_norm_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape);
+
+Tensor rms_norm_rstd_jvp(
+    const Tensor& input_p,
+    const Tensor& input_t,
+    const Tensor& saved_rstd,
+    IntArrayRef normalized_shape);
 
 Tensor group_norm_jvp(
     const Tensor& input_p,

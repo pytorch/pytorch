@@ -200,7 +200,7 @@ PyObject* THPCppFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   return THPUtils_packUInt64(fn.sequence_nr());
 }
 
-PyObject* THPCppFunction_set_sequence_nr(
+static PyObject* THPCppFunction_set_sequence_nr(
     PyObject* self,
     PyObject* sequence_nr) {
   HANDLE_TH_ERRORS
@@ -261,8 +261,7 @@ PyTypeObject* _initFunctionPyTypeObject(
   type.tp_traverse = THPCppFunction_traverse;
   type.tp_clear = THPCppFunction_clear;
   if (PyType_Ready(&type) < 0) {
-    auto msg = std::string("Unable to instantiate PyTypeObject for ") + name;
-    throw std::runtime_error(msg);
+    TORCH_CHECK(false, "Unable to instantiate PyTypeObject for ", name);
   }
   return &type;
 }
@@ -278,7 +277,7 @@ struct DefaultFunctionType {
   PyTypeObject type;
 };
 
-PyTypeObject* get_default_type() {
+static PyTypeObject* get_default_type() {
   static DefaultFunctionType default_type;
   return &(default_type.type);
 }
@@ -339,7 +338,7 @@ bool THPCppFunction_Check(PyObject* obj) {
   }
 }
 
-PyObject* callRegisterFn(PyObject* dict, PyObject* hook) {
+static PyObject* callRegisterFn(PyObject* dict, PyObject* hook) {
   THPObjectPtr register_fn(
       PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
   if (!register_fn) {

@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import logging
-import sys
+from importlib.metadata import entry_points
 
 from .api import (
     rendezvous_handler_registry as handler_registry,
@@ -14,11 +14,6 @@ from .api import (
 )
 from .dynamic_rendezvous import create_handler
 
-
-if sys.version_info < (3, 10):
-    from importlib_metadata import entry_points
-else:
-    from importlib.metadata import entry_points
 
 log = logging.getLogger(__name__)
 
@@ -86,11 +81,15 @@ def get_rendezvous_handler(params: RendezvousParameters) -> RendezvousHandler:
       from torch.distributed.elastic.rendezvous import rendezvous_handler_registry
       from torch.distributed.elastic.rendezvous.registry import get_rendezvous_handler
 
+
       def create_my_rdzv(params: RendezvousParameters):
-        return MyCustomRdzv(params)
+          return MyCustomRdzv(params)
+
 
       rendezvous_handler_registry.register("my_rdzv_backend_name", create_my_rdzv)
 
-      my_rdzv_handler = get_rendezvous_handler("my_rdzv_backend_name", RendezvousParameters)
+      my_rdzv_handler = get_rendezvous_handler(
+          "my_rdzv_backend_name", RendezvousParameters
+      )
     """
     return handler_registry.create_handler(params)

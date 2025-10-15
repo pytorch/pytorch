@@ -5,7 +5,7 @@ import itertools
 import math
 import pickle
 import sys
-from typing import Callable, List, Tuple, Type
+from collections.abc import Callable
 
 import sympy
 
@@ -22,7 +22,9 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._sympy.functions import (
     FloorDiv,
+    Identity,
     OpaqueUnaryFn_cos,
+    BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
 )
 from torch.utils._sympy.interp import sympy_interp
@@ -34,7 +36,9 @@ from torch.utils._sympy.reference import (
 )
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
-from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges
+from torch._inductor.bounds import ValueRangeAnalysis
+from torch._inductor.index_propagation import TypedExpr
 
 
 UNARY_OPS = [
@@ -420,7 +424,7 @@ class TestSympyInterp(TestCase):
                 sargs = [sympy.sympify(a) for a in args]
                 sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
                 ref_r = getattr(ReferenceAnalysis, fn)(*sargs)
-                # Yes, I know this is a longwinded way of saying xreplace; the
+                # Yes, I know this is a long-winded way of saying xreplace; the
                 # point is to test sympy_interp
                 r = sympy_interp(
                     ReferenceAnalysis, dict(zip(symbols, sargs)), sympy_expr
@@ -594,7 +598,7 @@ class TestSympyInterp(TestCase):
                     self.fail(f"Unexpected error for {fn}{args}: {str(e)}")
 
 
-def type_name_fn(type: Type) -> str:
+def type_name_fn(type: type) -> str:
     return type.__name__
 
 
@@ -606,7 +610,7 @@ def parametrize_relational_types(*types):
 
 
 class TestSympySolve(TestCase):
-    def _create_integer_symbols(self) -> List[sympy.Symbol]:
+    def _create_integer_symbols(self) -> list[sympy.Symbol]:
         return sympy.symbols("a b c", integer=True)
 
     def test_give_up(self):
@@ -665,9 +669,9 @@ class TestSympySolve(TestCase):
 
     def _test_cases(
         self,
-        cases: List[Tuple[sympy.Basic, sympy.Basic]],
+        cases: list[tuple[sympy.Basic, sympy.Basic]],
         thing: sympy.Basic,
-        op: Type[sympy.Rel],
+        op: type[sympy.Rel],
         **kwargs,
     ):
         for source, expected in cases:
@@ -761,7 +765,7 @@ class TestSympySolve(TestCase):
             Le: (Le(FloorDiv(a, pos), integer), (integer + 1) * pos),
         }[op]
 
-        cases: List[Tuple[sympy.Basic, sympy.Basic]] = [
+        cases: list[tuple[sympy.Basic, sympy.Basic]] = [
             # 'b' is not strictly positive
             (op(FloorDiv(a, b), integer), None),
             # 'c' is not strictly positive
@@ -870,6 +874,10 @@ class TestSympyFunctions(TestCase):
         r = pickle.loads(pickle.dumps(x))
         self.assertEqual(x, r)
 
+        x = BitwiseFn_bitwise_and(sympy.Symbol("a"), sympy.Symbol("b"))
+        r = pickle.loads(pickle.dumps(x))
+        self.assertEqual(x, r)
+
 
 class TestSingletonInt(TestCase):
     def test_basic(self):
@@ -953,6 +961,44 @@ class TestSingletonInt(TestCase):
             j1 * j2
 
         self.assertEqual(j1.free_symbols, set())
+
+class TestIdentity(TestCase):
+    def test_expand_identity(self):
+        """
+        Test removing an identity via expansion.
+        """
+        x = sympy.Symbol("x")
+        arg = x + sympy.S.One
+        expr = Identity(arg)
+        expanded = expr.expand(identity=True)
+        self.assertEqual(expanded.count(Identity), 0)
+        self.assertEqual(expanded, arg)
+
+    def test_cast_identity_int(self):
+        num = 1
+        expr = Identity(num)
+        self.assertEqual(num, int(expr))
+
+    def test_cast_identity_float(self):
+        num = 1.1
+        expr = Identity(num)
+        self.assertEqual(num, float(expr))
+
+    def test_cast_identity_illegal(self):
+        sym = Identity(sympy.Symbol("x"))
+        self.assertRaises(TypeError, int, sym)
+        self.assertRaises(TypeError, float, sym)
+
+        tup = (0, 1, 2)
+        tup_I = Identity(tup)
+        self.assertRaises(TypeError, int, tup_I)
+        self.assertRaises(TypeError, float, tup_I)
+
+class TestTypedExpr(TestCase):
+    def test_typed_expr(self):
+        I = Identity(1)
+        typed_I = TypedExpr(I, torch.int32)
+        self.assertEqual(typed_I.expr, 1)
 
 
 instantiate_parametrized_tests(TestValueRanges)

@@ -3,7 +3,6 @@
 import os
 import sys
 import unittest
-from typing import Set
 
 # torch
 import torch
@@ -21,7 +20,11 @@ from torch.testing._internal.common_quantized import (
 )
 
 # Testing utils
-from torch.testing._internal.common_utils import IS_AVX512_VNNI_SUPPORTED, TestCase
+from torch.testing._internal.common_utils import (
+    IS_AVX512_VNNI_SUPPORTED,
+    raise_on_run_directly,
+    TestCase,
+)
 from torch.testing._internal.quantization_torch_package_models import (
     LinearReluFunctional,
 )
@@ -239,7 +242,7 @@ class TestSerialization(TestCase):
             mq = quantize_fx.convert_fx(mp)
             return mq
 
-        def _get_get_attr_target_strings(m: GraphModule) -> Set[str]:
+        def _get_get_attr_target_strings(m: GraphModule) -> set[str]:
             results = set()
             for node in m.graph.nodes:
                 if node.op == "get_attr":
@@ -566,3 +569,7 @@ class TestSerialization(TestCase):
     def test_linear_relu_package_quantization_transforms(self):
         m = LinearReluFunctional(4).eval()
         self._test_package(m, input_size=(1, 1, 4, 4), generate=False)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

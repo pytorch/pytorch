@@ -38,8 +38,6 @@
 #include <torch/csrc/distributed/c10d/logging.h>
 #include <torch/csrc/distributed/c10d/socket_fmt.h>
 
-#include <c10/util/CallOnce.h>
-
 namespace c10d::detail {
 namespace {
 #ifdef _WIN32
@@ -195,38 +193,50 @@ class SocketImpl {
 };
 
 std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
+  // It can be be very slow to repeatedly hit DNS resolution failure, but its
+  // very helpful to have DNS names in logs by default. So we try to use DNS but
+  // if we hit a transient failure we just disable it for the remainder of the
+  // job, logging IP addresses instead. See
+  // https://github.com/pytorch/pytorch/issues/159007
+  static bool disable_getnameinfo = false;
+
   char host[NI_MAXHOST], port[NI_MAXSERV]; // NOLINT
 
-  if (int err = ::getnameinfo(
-          addr, len, host, NI_MAXHOST, port, NI_MAXSERV, NI_NUMERICSERV)) {
-    C10D_WARNING(
-        "The hostname of the client socket cannot be retrieved. err={}", err);
-
-    // if we can't resolve the hostname, display the IP address
-    if (addr->sa_family == AF_INET) {
-      struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
-      // NOLINTNEXTLINE(*array*)
-      char ip[INET_ADDRSTRLEN];
-      if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
-          nullptr) {
-        return fmt::format("{}:{}", ip, psai->sin_port);
-      }
-    } else if (addr->sa_family == AF_INET6) {
-      struct sockaddr_in6* psai = (struct sockaddr_in6*)&addr;
-      // NOLINTNEXTLINE(*array*)
-      char ip[INET6_ADDRSTRLEN];
-      if (inet_ntop(
-              addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
-          nullptr) {
-        return fmt::format("[{}]:{}", ip, psai->sin6_port);
-      }
+  if (!disable_getnameinfo) {
+    int err = ::getnameinfo(
+        addr, len, host, NI_MAXHOST, port, NI_MAXSERV, NI_NUMERICSERV);
+    if (err != 0) {
+      C10D_WARNING(
+          "The hostname of the client socket cannot be retrieved. err={}", err);
+      disable_getnameinfo = true;
     }
-    return "?UNKNOWN?";
   }
+  // if getnameinfo failed, disable would be set
+  if (!disable_getnameinfo) {
+    if (addr->sa_family == AF_INET) {
+      return fmt::format("{}:{}", host, port);
+    }
+    return fmt::format("[{}]:{}", host, port);
+  }
+  // if we can't resolve the hostname, display the IP address
   if (addr->sa_family == AF_INET) {
-    return fmt::format("{}:{}", host, port);
+    struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
+    // NOLINTNEXTLINE(*array*)
+    char ip[INET_ADDRSTRLEN];
+    if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
+        nullptr) {
+      return fmt::format("{}:{}", ip, psai->sin_port);
+    }
+  } else if (addr->sa_family == AF_INET6) {
+    struct sockaddr_in6* psai = (struct sockaddr_in6*)&addr;
+    // NOLINTNEXTLINE(*array*)
+    char ip[INET6_ADDRSTRLEN];
+    if (inet_ntop(addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
+        nullptr) {
+      return fmt::format("[{}]:{}", ip, psai->sin6_port);
+    }
   }
-  return fmt::format("[{}]:{}", host, port);
+  return "?UNKNOWN?";
 }
 } // namespace c10d::detail
 
@@ -522,8 +532,8 @@ class SocketListenOp {
 
   std::string port_;
   const SocketOptions* opts_;
-  std::vector<std::string> errors_{};
-  std::unique_ptr<SocketImpl> socket_{};
+  std::vector<std::string> errors_;
+  std::unique_ptr<SocketImpl> socket_;
 };
 
 SocketListenOp::SocketListenOp(std::uint16_t port, const SocketOptions& opts)
@@ -762,9 +772,9 @@ class SocketConnectOp {
   const char* host_;
   std::string port_;
   const SocketOptions* opts_;
-  TimePoint deadline_{};
-  std::vector<std::string> errors_{};
-  std::unique_ptr<SocketImpl> socket_{};
+  TimePoint deadline_;
+  std::vector<std::string> errors_;
+  std::unique_ptr<SocketImpl> socket_;
 };
 
 SocketConnectOp::SocketConnectOp(
@@ -1027,17 +1037,16 @@ void SocketConnectOp::throwTimeoutError() const {
 
 void Socket::initialize() {
 #ifdef _WIN32
-  static c10::once_flag init_flag{};
-
   // All processes that call socket functions on Windows must first initialize
   // the Winsock library.
-  c10::call_once(init_flag, []() {
+  static bool init_flag [[maybe_unused]] = []() {
     WSADATA data{};
     if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) {
       C10D_THROW_ERROR(
           SocketError, "The initialization of Winsock has failed.");
     }
-  });
+    return true;
+  }();
 #endif
 }
 

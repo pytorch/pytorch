@@ -54,7 +54,7 @@ bool ceil_mode) {
     TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input");
   } else {
-    TORCH_CHECK(false, "Unsupport memory format. Supports only ChannelsLast, Contiguous");
+    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 
   /* sizes */
@@ -130,7 +130,7 @@ const Tensor& indices) {
     TORCH_CHECK((input.ndimension() == 3 || input.ndimension() == 4),
       "non-empty 3D or 4D (batch mode) tensor expected for input");
   } else {
-    TORCH_CHECK(false, "Unsupport memory format. Supports only ChannelsLast, Contiguous");
+    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 
   /* sizes */

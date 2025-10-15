@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# ruff: noqa: F841
 
 import functools
 import itertools
@@ -805,11 +804,9 @@ class TestTypes(TestCase):
         # these are failing because of the "scalars do not upcast arrays" rule
         # Two first tests (i32 + f32 -> f64, and i64+f32 -> f64) xfail
         # until ufuncs implement the proper type promotion (ufunc loops?)
-        b = np.bool_(0)
-        i8, i16, i32, i64 = np.int8(0), np.int16(0), np.int32(0), np.int64(0)
-        u8 = np.uint8(0)
+        i8, i32, i64 = np.int8(0), np.int32(0), np.int64(0)
         f32, f64 = np.float32(0), np.float64(0)
-        c64, c128 = np.complex64(0), np.complex128(0)
+        c128 = np.complex128(0)
 
         assert_equal(promote_func(i32, f32), np.dtype(np.float64))
         assert_equal(promote_func(i64, f32), np.dtype(np.float64))
@@ -2387,7 +2384,7 @@ class TestLikeFuncs(TestCase):
         b = a[:, ::2]  # Ensure b is not contiguous.
         kwargs = {"fill_value": ""} if likefunc == np.full_like else {}
         result = likefunc(b, dtype=dtype, **kwargs)
-        if dtype == str:
+        if dtype is str:
             assert result.strides == (16, 4)
         else:
             # dtype is bytes
@@ -2736,10 +2733,18 @@ class TestMoveaxis(TestCase):
         assert_raises(np.AxisError, np.moveaxis, x, 3, 0)  # 'source.*out of bounds',
         assert_raises(np.AxisError, np.moveaxis, x, -4, 0)  # 'source.*out of bounds',
         assert_raises(
-            np.AxisError, np.moveaxis, x, 0, 5  # 'destination.*out of bounds',
+            np.AxisError,
+            np.moveaxis,
+            x,
+            0,
+            5,  # 'destination.*out of bounds',
         )
         assert_raises(
-            ValueError, np.moveaxis, x, [0, 0], [0, 1]  # 'repeated axis in `source`',
+            ValueError,
+            np.moveaxis,
+            x,
+            [0, 0],
+            [0, 1],  # 'repeated axis in `source`',
         )
         assert_raises(
             ValueError,  # 'repeated axis in `destination`',
@@ -3032,7 +3037,7 @@ class TestBroadcast(TestCase):
     def test_shape_mismatch_error_message(self):
         with assert_raises(
             ValueError,
-            match=r"arg 0 with shape \(1, 3\) and " r"arg 2 with shape \(2,\)",
+            match=r"arg 0 with shape \(1, 3\) and arg 2 with shape \(2,\)",
         ):
             np.broadcast([[1, 2, 3]], [[4], [5]], [6, 7])
 

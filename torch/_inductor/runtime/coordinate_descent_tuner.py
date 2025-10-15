@@ -20,6 +20,8 @@ def get_field(config, name):
         return config.num_warps
     elif name == "num_stages":
         return config.num_stages
+    elif name == "waves_per_eu":
+        return config.kwargs.get(name, int(8 // config.num_warps))
     else:
         return config.kwargs.get(name, None)
 
@@ -45,9 +47,20 @@ class CoordescTuner:
     """
 
     def __init__(
-        self, is_mm=False, name="unknown", size_hints=None, inductor_meta=None
+        self,
+        is_mm=False,
+        is_native_matmul=False,
+        name="unknown",
+        size_hints=None,
+        inductor_meta=None,
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
+
+        # Native matmul codegen assumes ZBLOCK=1 always.
+        # This is because 3d tl.dot is slow and so we want to tile y and x only.
+        # tl.dot also does not support size smaller than 16; we put this restriction.
+        self.is_native_matmul = is_native_matmul
+        assert not (self.is_mm and self.is_native_matmul)
         self.cached_benchmark_results = {}
         self.name = name
         self.size_hints = size_hints
@@ -97,6 +110,11 @@ class CoordescTuner:
         ]
         if self.is_mm:
             out.append("num_stages")
+        if self.inductor_meta.get("is_hip") is True:
+            out.append("waves_per_eu")
+        if self.is_native_matmul:
+            out.append("num_stages")
+            out.remove("ZBLOCK")  # ZBLOCK=1 always in native matmul
 
         return out
 
@@ -107,8 +125,19 @@ class CoordescTuner:
             return val > self.get_config_max(prefix)
         if name == "num_warps":
             return val > self.get_warpsmax()
+        if name == "waves_per_eu":
+            return val > 8
 
         return False
+
+    def value_too_small(self, name: str, val: int) -> bool:
+        # In native matmul, block size should be >= 16 for tl.dot
+        if self.is_native_matmul:
+            if name in ["YBLOCK", "XBLOCK", "R0_BLOCK"]:
+                return val < 16
+
+        # Break if value becomes 0/neg
+        return val <= 0
 
     def get_neighbour_values(self, name, orig_val, radius=1, include_self=False):
         """
@@ -142,7 +171,7 @@ class CoordescTuner:
         cur_val = orig_val
         for _ in range(radius):
             cur_val = update(cur_val, False)
-            if cur_val <= 0:
+            if self.value_too_small(name, cur_val):
                 break
             out.append(cur_val)
 
@@ -202,7 +231,7 @@ class CoordescTuner:
         """
         Check if candidate_config is better than best_config.
 
-        Return a touple of (compare_result, candidate_timing).
+        Return a tuple of (compare_result, candidate_timing).
         compare_result is true iff candidate_config is better.
         """
         log.debug("Try config %s", candidate_config)
@@ -235,7 +264,10 @@ class CoordescTuner:
 
         log.debug("= Do coordinate descent tuning for %s =", self.name)
         log.debug(
-            "Baseline Config %s, baseline timing %f", baseline_config, baseline_timing
+            "%s: Baseline Config %s, baseline timing %f",
+            self.name,
+            baseline_config,
+            baseline_timing,
         )
         improved = True
         best_config = baseline_config
@@ -277,15 +309,17 @@ class CoordescTuner:
 
                 if improved:
                     msg = red_text(
-                        "Coordinate descend tuning found improvement of %.3fx by looking in all directions."
+                        "%s: Coordinate descend tuning found improvement of %.3fx by looking in all directions."
                     )
                     log.debug(
                         msg,
+                        self.name,
                         old_best_timing / best_timing,
                     )
 
         log.debug(
-            "Improve from %s %f -> %s %f, %.3fx",
+            "%s: Improve from %s %f -> %s %f, %.3fx",
+            self.name,
             baseline_config,
             baseline_timing,
             best_config,

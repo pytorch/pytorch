@@ -9,19 +9,19 @@
 import contextlib
 import functools
 import itertools
-import os
-import threading
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch import Tensor
-from torch._C._functorch import (
+from torch._C._functorch import is_batchedtensor
+from torch._functorch.predispatch import (
     _add_batch_dim,
     _remove_batch_dim,
     _vmap_decrement_nesting,
     _vmap_increment_nesting,
-    is_batchedtensor,
+    lazy_load_decompositions,
 )
 from torch.utils._pytree import (
     _broadcast_to_and_flatten,
@@ -32,8 +32,8 @@ from torch.utils._pytree import (
 )
 
 
-in_dims_t = Union[int, Tuple]
-out_dims_t = Union[int, Tuple[int, ...]]
+in_dims_t = Union[int, tuple]
+out_dims_t = Union[int, tuple[int, ...]]
 
 
 def doesnt_support_saved_tensors_hooks(f):
@@ -52,7 +52,7 @@ def doesnt_support_saved_tensors_hooks(f):
 
 # Checks that all args-to-be-batched have the same batch dim size
 def _validate_and_get_batch_size(
-    flat_in_dims: List[Optional[int]], flat_args: List
+    flat_in_dims: list[Optional[int]], flat_args: list
 ) -> int:
     batch_sizes = [
         arg.size(in_dim)
@@ -69,7 +69,7 @@ def _validate_and_get_batch_size(
     return batch_sizes[0]
 
 
-def _num_outputs(batched_outputs: Union[Tensor, Tuple[Tensor, ...]]) -> int:
+def _num_outputs(batched_outputs: Union[Tensor, tuple[Tensor, ...]]) -> int:
     if isinstance(batched_outputs, tuple):
         return len(batched_outputs)
     return 1
@@ -81,7 +81,7 @@ def _num_outputs(batched_outputs: Union[Tensor, Tuple[Tensor, ...]]) -> int:
 
 def _as_tuple(
     value: Any, num_elements: int, error_message_lambda: Callable[[], str]
-) -> Tuple:
+) -> tuple:
     if not isinstance(value, tuple):
         return (value,) * num_elements
     if len(value) != num_elements:
@@ -90,8 +90,8 @@ def _as_tuple(
 
 
 def _process_batched_inputs(
-    in_dims: in_dims_t, args: Tuple, func: Callable
-) -> Tuple[int, List[Any], List[Any], TreeSpec]:
+    in_dims: in_dims_t, args: tuple, func: Callable
+) -> tuple[int, list[Any], list[Any], TreeSpec]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
             f"vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): "
@@ -152,8 +152,8 @@ def _process_batched_inputs(
 
 
 def _create_batched_inputs(
-    flat_in_dims: List[Any], flat_args: List[Any], vmap_level: int, args_spec
-) -> Tuple:
+    flat_in_dims: list[Any], flat_args: list[Any], vmap_level: int, args_spec
+) -> tuple:
     # See NOTE [Ignored _remove_batch_dim, _add_batch_dim]
     batched_inputs = [
         arg if in_dim is None else _add_batch_dim(arg, in_dim, vmap_level)
@@ -186,12 +186,12 @@ def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_di
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
-    batched_outputs: Union[Tensor, Tuple[Tensor, ...]],
+    batched_outputs: Union[Tensor, tuple[Tensor, ...]],
     out_dims: out_dims_t,
     vmap_level: int,
     batch_size: int,
     func: Callable,
-) -> Tuple:
+) -> tuple:
     flat_batched_outputs, output_spec = tree_flatten(batched_outputs)
 
     def incompatible_error():
@@ -249,61 +249,13 @@ def _get_name(func: Callable):
     if hasattr(func, "__name__"):
         return func.__name__
 
-    # Not all callables have __name__, in fact, only static functions/methods do.
-    # A callable created via functools.partial or an nn.Module, to name some
-    # examples, don't have a __name__.
+    if isinstance(func, functools.partial):
+        return f"functools.partial({_get_name(func.func)}, ...)"
+
+    # Not all callables have __name__, in fact, only static functions/methods
+    # do.  A callable created via nn.Module, to name one example, doesn't have a
+    # __name__.
     return repr(func)
-
-
-DECOMPOSITIONS_LOADED = False
-DECOMPOSITIONS_LOCK = threading.Lock()
-VMAP_DECOMPOSITIONS_LIB = None
-
-
-# torch.package, Python 3.11, and torch.jit-less environments are unhappy with
-# decompositions. Only load them when needed if possible.
-def lazy_load_decompositions():
-    global DECOMPOSITIONS_LOADED
-    if DECOMPOSITIONS_LOADED:
-        return
-
-    with DECOMPOSITIONS_LOCK:
-        if DECOMPOSITIONS_LOADED:
-            return
-
-        if not (os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__):
-            DECOMPOSITIONS_LOADED = True
-            return
-
-        # use an alternate way to register an operator into the decomposition table
-        # _register_jit_decomposition doesn't work for some operators, e.g. addr,
-        #  because the Tensor types generated cannot be unioned by torchscript
-        # decomp should be type OpOverload
-        global VMAP_DECOMPOSITIONS_LIB
-        VMAP_DECOMPOSITIONS_LIB = torch.library.Library(
-            "aten", "IMPL", "FuncTorchBatched"
-        )
-
-        from torch._decomp import decomposition_table
-
-        def _register_python_decomposition_vmap(decomp):
-            if decomp in decomposition_table:
-                VMAP_DECOMPOSITIONS_LIB.impl(decomp, decomposition_table[decomp])
-            else:
-                raise RuntimeError(f"could not find decomposition for {decomp}")
-
-        _register_python_decomposition_vmap(torch.ops.aten.mse_loss_backward.default)
-        _register_python_decomposition_vmap(
-            torch.ops.aten.smooth_l1_loss_backward.default
-        )
-        _register_python_decomposition_vmap(torch.ops.aten.huber_loss_backward.default)
-        _register_python_decomposition_vmap(torch.ops.aten.nll_loss_forward.default)
-        _register_python_decomposition_vmap(torch.ops.aten.nll_loss2d_forward.default)
-        _register_python_decomposition_vmap(torch.ops.aten.nll_loss_backward.default)
-        _register_python_decomposition_vmap(torch.ops.aten.nll_loss2d_backward.default)
-        _register_python_decomposition_vmap(torch.ops.aten.addr.default)
-
-        DECOMPOSITIONS_LOADED = True
 
 
 def vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs):
@@ -357,12 +309,14 @@ def _get_chunked_inputs(flat_args, flat_in_dims, batch_size, chunk_size):
         split_idxs = tuple(itertools.accumulate(chunk_sizes))
 
     flat_args_chunks = tuple(
-        t.tensor_split(split_idxs, dim=in_dim)
-        if in_dim is not None
-        else [
-            t,
-        ]
-        * len(split_idxs)
+        (
+            t.tensor_split(split_idxs, dim=in_dim)
+            if in_dim is not None
+            else [
+                t,
+            ]
+            * len(split_idxs)
+        )
         for t, in_dim in zip(flat_args, flat_in_dims)
     )
 
@@ -523,9 +477,11 @@ def unwrap_batched(args, level):
     if len(flat_args) == 0:
         return args, ()
     result = [
-        torch._C._functorch._unwrap_batched(arg, level)
-        if isinstance(arg, torch.Tensor)
-        else (arg, None)
+        (
+            torch._C._functorch._unwrap_batched(arg, level)
+            if isinstance(arg, torch.Tensor)
+            else (arg, None)
+        )
         for arg in flat_args
     ]
     output, bdims = zip(*result)

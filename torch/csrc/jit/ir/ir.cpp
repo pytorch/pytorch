@@ -100,7 +100,9 @@ void findAllNodes(
 // NB: This overload will become ambiguous with the one Caffe2 provides in its
 // logging, if they ever intersect.
 template <typename T>
-std::ostream& operator<<(std::ostream& out, const std::vector<T>& nodes) {
+static std::ostream& operator<<(
+    std::ostream& out,
+    const std::vector<T>& nodes) {
   out << at::ArrayRef<T>{nodes};
   return out;
 }
@@ -840,10 +842,7 @@ bool Value::isValidName(const std::string& name) {
 }
 
 Value* Value::setDebugName(const std::string& name) {
-  if (!isValidName(name)) {
-    throw std::runtime_error("Invalid name: '" + name + "'");
-  }
-
+  TORCH_CHECK(isValidName(name), "Invalid name: '", name, "'")
   auto& names = node()->owningGraph()->unique_names_;
 
   // clear any old name from the map
@@ -968,8 +967,7 @@ static size_t findArgument(
       return i;
     }
   }
-  throw std::runtime_error(
-      std::string("Couldn't find an argument called ") + unqualName);
+  TORCH_CHECK(false, "Couldn't find an argument called ", unqualName);
 }
 
 static size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
@@ -1141,7 +1139,7 @@ bool Node::isNondeterministic() const {
   if (!kind().is_aten()) {
     return false;
   }
-  // All aten ops are expecte to have a schema. However this is left as a
+  // All aten ops are expected to have a schema. However this is left as a
   // warning instead of an assert to ensure that previous use cases do not
   // break.
   if (!schema) {
@@ -1177,12 +1175,10 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
-#if !defined(USE_ROCM)
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
     case cuda::synchronize:
-#endif
     case prim::Enter:
     case prim::Exit:
       return true;
@@ -1646,7 +1642,7 @@ Block* Node::findCommonAncestorBlockWith(Node* n) {
     n2 = n2->owningBlock()->owningNode();
   }
 
-  // Now they are the same numer of blocks from the graph block,
+  // Now they are the same number of blocks from the graph block,
   // recurse upwards, checking if they are on the same block
   while (true) {
     if (n1->owningBlock() == n2->owningBlock()) {
@@ -1671,7 +1667,7 @@ size_t Node::blocksFromGraphBlock() {
   return dist;
 }
 
-inline const SourceRange& fakeRange() {
+static inline const SourceRange& fakeRange() {
   static SourceRange range(std::make_shared<Source>(std::string("")), 0, 1);
   return range;
 }
@@ -1771,7 +1767,7 @@ Node* Graph::createTupleSlice(
 
   int64_t i = beg;
   for ([[maybe_unused]] const auto j : c10::irange(num_values)) {
-    auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+    auto idx = insertConstant(IValue(i));
     auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
 
     new_vals.push_back(tupleIndex->output());
@@ -2038,7 +2034,7 @@ at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   return g.insertNode(g.createTupleUnpack(v))->outputs();
 }
 
-void inlineCallStackOfNode(
+static void inlineCallStackOfNode(
     Node* n,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,

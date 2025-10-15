@@ -3,7 +3,7 @@ import sys
 from benchmark_base import BenchmarkBase
 
 import torch
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 class Benchmark(BenchmarkBase):
@@ -50,7 +50,7 @@ class Benchmark(BenchmarkBase):
                     result = result.sin()
             return result
 
-        with fresh_inductor_cache():
+        with fresh_cache():
             f(self.a, self.b)
 
 

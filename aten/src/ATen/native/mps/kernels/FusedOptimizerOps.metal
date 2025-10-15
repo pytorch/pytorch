@@ -1,11 +1,9 @@
 #include <metal_stdlib>
 
 using metal::max;
-#if __METAL_VERSION__ >= 310
 bfloat max(bfloat a, bfloat b) {
   return a > b ? a : b;
 }
-#endif
 
 #define kmaxThreadGroups 32
 #define kmaxTensors 32
@@ -57,9 +55,9 @@ struct SgdMomentumArguments {
 };
 
 struct MetadataArguments {
-  uint32_t numels[kmaxTensors];
-  uint32_t threadgroup_to_tensor[kmaxThreadGroups];
-  uint32_t threadgroup_to_chunk[kmaxThreadGroups];
+  ulong numels[kmaxTensors];
+  ulong threadgroup_to_tensor[kmaxThreadGroups];
+  ulong threadgroup_to_chunk[kmaxThreadGroups];
 };
 
 enum ADAM_MODE : uint8_t { ORIGINAL = 0, ADAMW = 1 };
@@ -306,11 +304,9 @@ REGISTER_ADAM_OPS_QUART(float, float);
 REGISTER_ADAM_OPS_QUART(float, half);
 REGISTER_ADAM_OPS_QUART(half, float);
 REGISTER_ADAM_OPS_QUART(half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_ADAM_OPS_QUART(float, bfloat);
 REGISTER_ADAM_OPS_QUART(bfloat, bfloat);
 REGISTER_ADAM_OPS_QUART(bfloat, float);
-#endif
 
 template <typename T>
 inline void sgd_momentum_math(
@@ -460,7 +456,5 @@ REGISTER_FUSED_SGD_OP(float);
 REGISTER_FUSED_SGD_OP(half);
 REGISTER_FUSED_SGD_MOMENTUM_OP(float);
 REGISTER_FUSED_SGD_MOMENTUM_OP(half);
-#if __METAL_VERSION__ >= 310
 REGISTER_FUSED_SGD_OP(bfloat);
 REGISTER_FUSED_SGD_MOMENTUM_OP(bfloat);
-#endif

@@ -6,7 +6,7 @@ import logging
 import operator
 import struct
 import sys
-from typing import List, NamedTuple, Optional, Tuple
+from typing import NamedTuple, Optional
 
 import torch
 
@@ -201,7 +201,7 @@ class DimOrder(enum.Enum):
 
 
 class Operand(NamedTuple):
-    """Represenation of an NNAPI operand."""
+    """Representation of an NNAPI operand."""
 
     # NNAPI operand type.  One of NNAPI_OperandCode.
     # TODO: Make this an enum.
@@ -210,7 +210,7 @@ class Operand(NamedTuple):
     # This is always the PyTorch shape, which is NCHW for feature maps.
     # The actual NNAPI operand might have a transposed shape.
     # we use 0 for load time dynamic shapes & -1 for runtime dynamic shapes
-    shape: Tuple[int, ...]
+    shape: tuple[int, ...]
 
     # Specifies how the shape of the operand that we define in NNAPI
     # relates to the shape we track above.
@@ -414,6 +414,7 @@ class _NnapiSerializer:
             )  # noqa: TRY002
         return Operand(
             shape=tuple(tensor.shape),
+            # pyrefly: ignore  # bad-argument-type
             op_type=op_type,
             dim_order=dim_order,
             scale=scale,
@@ -943,8 +944,8 @@ class _NnapiSerializer:
         assert node.outputsSize() == 1
         output = node.outputsAt(0)
         ctype = output.type()
-        const_vals: Optional[List] = []
-        tensors: Optional[List] = []
+        const_vals: Optional[list] = []
+        tensors: Optional[list] = []
         for inp in node.inputs():
             if const_vals is not None and inp in self.constants:
                 _, val = self.get_constant_value(inp)
@@ -1734,11 +1735,13 @@ class _NnapiSerializer:
         for dim in (2, 3):  # h, w indices
             if image_oper.shape[dim] == 0:
                 if size_ctype.kind() != "NoneType":
+                    # pyrefly: ignore  # unsupported-operation
                     self.compute_operand_shape(out_id, dim, size_arg[dim - 2])
                 elif scale_ctype.kind() != "NoneType":
                     self.compute_operand_shape(
                         out_id,
                         dim,
+                        # pyrefly: ignore  # unsupported-operation
                         f"int({scale_arg[dim - 2]} * {flex_name(image_id, dim)})",
                     )
                 else:

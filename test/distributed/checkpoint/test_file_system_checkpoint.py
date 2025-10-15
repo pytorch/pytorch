@@ -4,7 +4,6 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import Dict
 
 import torch
 import torch.distributed as dist
@@ -22,8 +21,15 @@ from torch.distributed.checkpoint import (
     load_state_dict,
     save_state_dict,
 )
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.checkpoint.default_planner import DefaultSavePlanner
+from torch.testing._internal.common_distributed import (
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
@@ -35,6 +41,14 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
     MyShardedModel1,
 )
+from torch.testing._internal.distributed.checkpoint_utils import (
+    get_test_extension_registry,
+    Rot13Example,
+    with_temp_dir,
+)
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -47,8 +61,8 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 def assert_state_dict_equal(
     self: TestCase,
-    state_dict_1: Dict[str, torch.Tensor],
-    state_dict_2: Dict[str, torch.Tensor],
+    state_dict_1: dict[str, torch.Tensor],
+    state_dict_2: dict[str, torch.Tensor],
 ) -> bool:
     self.assertEqual(
         len(state_dict_1), len(state_dict_2), "state_dict must be the same size"
@@ -158,8 +172,9 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
-    def test_read_write_shard_tensor(self) -> None:
+    @requires_accelerator_dist_backend()
+    @parametrize("extensions", [None, [Rot13Example()], [ZStandard()]])
+    def test_read_write_shard_tensor(self, extensions) -> None:
         paths = [tempfile.mkdtemp()]
         dist.broadcast_object_list(paths)
 
@@ -169,8 +184,8 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
             ],
         )
 
@@ -180,7 +195,7 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
-        fs_writer = FileSystemWriter(path=path)
+        fs_writer = FileSystemWriter(path=path, _extensions=extensions)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
         dist.barrier()
@@ -198,7 +213,9 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(ShardedTensorTestBase):
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
         # Test load.
-        fs_reader = FileSystemReader(path=path)
+        fs_reader = FileSystemReader(
+            path=path, _extension_registry=get_test_extension_registry()
+        )
         load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
         assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
@@ -217,14 +234,16 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     def load_tensor(self, tensor: ShardedTensor) -> torch.Tensor:
         res = (
-            torch.zeros(tensor.shape, device="cuda:0") if dist.get_rank() == 0 else None
+            torch.zeros(tensor.shape, device=f"{device_type}:0")
+            if dist.get_rank() == 0
+            else None
         )
         tensor.gather(out=res)
         return res
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_load_with_different_shard_plan(self) -> None:
         path = self.get_file_path()
 
@@ -236,18 +255,18 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
+                    f"rank:0/{device_type}:0",
+                    f"rank:1/{device_type}:1",
                 ],
             ),
             # pyre-fixme [28]: Unexpected keyword argument `dim` to call `dist._sharding_spec.api.ChunkShardingSpec.__init__`.
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
-                    "rank:1/cuda:1",
-                    "rank:0/cuda:0",
+                    f"rank:0/{device_type}:0",
+                    f"rank:1/{device_type}:1",
+                    f"rank:1/{device_type}:1",
+                    f"rank:0/{device_type}:0",
                 ],
             ),
             # This requires the tensors to be [10, 20]
@@ -256,27 +275,27 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     ShardMetadata(
                         shard_offsets=[0, 0],
                         shard_sizes=[2, 20],
-                        placement="rank:0/cuda:0",
+                        placement=f"rank:0/{device_type}:0",
                     ),
                     ShardMetadata(
                         shard_offsets=[2, 0],
                         shard_sizes=[1, 20],
-                        placement="rank:1/cuda:1",
+                        placement=f"rank:1/{device_type}:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[3, 0],
                         shard_sizes=[3, 20],
-                        placement="rank:0/cuda:0",
+                        placement=f"rank:0/{device_type}:0",
                     ),
                     ShardMetadata(
                         shard_offsets=[6, 0],
                         shard_sizes=[3, 20],
-                        placement="rank:1/cuda:1",
+                        placement=f"rank:1/{device_type}:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[9, 0],
                         shard_sizes=[1, 20],
-                        placement="rank:0/cuda:0",
+                        placement=f"rank:0/{device_type}:0",
                     ),
                 ]
             ),
@@ -286,12 +305,12 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     ShardMetadata(
                         shard_offsets=[0, 0],
                         shard_sizes=[8, 20],
-                        placement="rank:1/cuda:1",
+                        placement=f"rank:1/{device_type}:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[8, 0],
                         shard_sizes=[2, 20],
-                        placement="rank:0/cuda:0",
+                        placement=f"rank:0/{device_type}:0",
                     ),
                 ]
             ),
@@ -339,7 +358,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_load_rowwise_to_colwise(self) -> None:
         path = self.get_file_path()
         self.assertEqual(self.world_size, dist.get_world_size())
@@ -348,8 +367,8 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         src_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
             ],
         )
 
@@ -357,8 +376,8 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
         dst_spec = ChunkShardingSpec(
             dim=1,
             placements=[
-                "rank:0/cuda:0",
-                "rank:1/cuda:1",
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
             ],
         )
 
@@ -366,14 +385,14 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             shutil.rmtree(path, ignore_errors=True)
             os.makedirs(path)
 
-        model_to_save = MyShardedModel3(src_spec).cuda(dist.get_rank())
+        model_to_save = MyShardedModel3(src_spec).to(dist.get_rank())
         model_to_save._register_state_dict_hook(state_dict_hook)
         state_dict_to_save = model_to_save.state_dict()
 
         fs_writer = FileSystemWriter(path=path)
         save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer)
 
-        model_to_load = MyShardedModel3(dst_spec).cuda(dist.get_rank())
+        model_to_load = MyShardedModel3(dst_spec).to(dist.get_rank())
         model_to_load._register_state_dict_hook(state_dict_hook)
         state_dict_to_load_to = model_to_load.state_dict()
 
@@ -390,7 +409,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_save_load_bytes(self) -> None:
         path = self.get_file_path()
 
@@ -409,7 +428,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
-    @requires_nccl()
+    @requires_accelerator_dist_backend()
     def test_switch_between_sharded_tensor_to_tensor(self) -> None:
         path = self.get_file_path()
         tensor_size = 32
@@ -418,17 +437,17 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
+                    f"rank:0/{device_type}:0",
+                    f"rank:1/{device_type}:1",
                 ],
             ),
             ChunkShardingSpec(
                 dim=0,
                 placements=[
-                    "rank:0/cuda:0",
-                    "rank:1/cuda:1",
-                    "rank:1/cuda:1",
-                    "rank:0/cuda:0",
+                    f"rank:0/{device_type}:0",
+                    f"rank:1/{device_type}:1",
+                    f"rank:1/{device_type}:1",
+                    f"rank:0/{device_type}:0",
                 ],
             ),
             EnumerableShardingSpec(
@@ -436,12 +455,12 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     ShardMetadata(
                         shard_offsets=[0],
                         shard_sizes=[8],
-                        placement="rank:1/cuda:1",
+                        placement=f"rank:1/{device_type}:1",
                     ),
                     ShardMetadata(
                         shard_offsets=[8],
                         shard_sizes=[tensor_size - 8],
-                        placement="rank:0/cuda:0",
+                        placement=f"rank:0/{device_type}:0",
                     ),
                 ]
             ),
@@ -450,12 +469,12 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                     ShardMetadata(
                         shard_offsets=[0],
                         shard_sizes=[10],
-                        placement="rank:0/cuda:0",
+                        placement=f"rank:0/{device_type}:0",
                     ),
                     ShardMetadata(
                         shard_offsets=[10],
                         shard_sizes=[tensor_size - 10],
-                        placement="rank:1/cuda:1",
+                        placement=f"rank:1/{device_type}:1",
                     ),
                 ]
             ),
@@ -493,6 +512,94 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
                         f"save-spec {save_spec} load-spec {load_spec}",
                     )
 
+
+class TestDistributedStateDictSaveLoadWithCaching(ShardedTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_accelerator_dist_backend()
+    @with_temp_dir
+    def test_read_write_shard_tensor(self) -> None:
+        # pyre-fixme [28]: Unexpected keyword argument `dim` to call `dist._sharding_spec.api.ChunkShardingSpec.__init__`.
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                f"rank:0/{device_type}:0",
+                f"rank:1/{device_type}:1",
+            ],
+        )
+
+        model_to_save = MyShardedModel1(spec, init_rrefs=False)
+
+        # Test save
+        model_to_save._register_state_dict_hook(state_dict_hook)
+        state_dict_to_save = model_to_save.state_dict()
+
+        fs_writer = FileSystemWriter(path=self.temp_dir)
+        save_state_dict(
+            state_dict=state_dict_to_save,
+            storage_writer=fs_writer,
+            planner=DefaultSavePlanner(enable_plan_caching=True),
+        )
+
+        dist.barrier()
+
+        # Create a new model
+        model_to_load = MyShardedModel1(spec, init_rrefs=False)
+        # This is not the correct hook for loading the state dict
+        # model_to_load._register_load_state_dict_pre_hook(pre_load_state_dict_hook, True)
+        model_to_load._register_state_dict_hook(state_dict_hook)
+        state_dict_to_load_to = model_to_load.state_dict()
+
+        dist.barrier()
+
+        with self.assertRaises(AssertionError):
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+        # Test load.
+        fs_reader = FileSystemReader(
+            path=self.temp_dir, _extension_registry=get_test_extension_registry()
+        )
+        load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
+
+        assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+        dist.barrier()
+
+        # Save Attempt 2
+        save_state_dict(
+            state_dict=state_dict_to_save,
+            storage_writer=fs_writer,
+            planner=DefaultSavePlanner(enable_plan_caching=True),
+        )
+
+        dist.barrier()
+
+        # Create a new model
+        model_to_load = MyShardedModel1(spec, init_rrefs=False)
+        # This is not the correct hook for loading the state dict
+        # model_to_load._register_load_state_dict_pre_hook(pre_load_state_dict_hook, True)
+        model_to_load._register_state_dict_hook(state_dict_hook)
+        state_dict_to_load_to = model_to_load.state_dict()
+
+        dist.barrier()
+
+        with self.assertRaises(AssertionError):
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+        # Test load.
+        fs_reader = FileSystemReader(
+            path=self.temp_dir, _extension_registry=get_test_extension_registry()
+        )
+        load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
+
+        assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+        dist.barrier()
+
+
+instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
 
 if __name__ == "__main__":
     run_tests()

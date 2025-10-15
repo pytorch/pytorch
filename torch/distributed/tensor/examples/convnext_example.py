@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 """
 The following example demonstrates how to train a ConvNeXt model
-with intermediate activations sharded across mutliple GPUs via DTensor
+with intermediate activations sharded across multiple GPUs via DTensor
 
 To run the example, use the following command:
 torchrun --standalone --nnodes=1 --nproc-per-node=4 convnext_example.py
 """
+
 import os
 import time
 
@@ -33,7 +34,7 @@ class LayerNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(normalized_shape))
         self.eps = eps
         self.data_format = data_format
-        if self.data_format not in [torch.contiguous_format]:
+        if self.data_format != torch.contiguous_format:
             raise NotImplementedError
         self.normalized_shape = (normalized_shape,)
 
@@ -109,7 +110,7 @@ class DownSampling(nn.Module):
 
 @torch.no_grad()
 def init_weights(m):
-    if type(m) == nn.Conv2d or type(m) == nn.Linear:
+    if type(m) is nn.Conv2d or type(m) is nn.Linear:
         nn.init.ones_(m.weight)
         if m.bias is not None:
             nn.init.zeros_(m.bias)
@@ -243,13 +244,16 @@ def train_convnext_example():
     max_reserved = torch.cuda.max_memory_reserved()
     max_allocated = torch.cuda.max_memory_allocated()
     print(
-        f"rank {rank}, {ITER_TIME} iterations, average latency {(end - start)/ITER_TIME*1000:10.2f} ms"
+        f"rank {rank}, {ITER_TIME} iterations, "
+        f"average latency {(end - start) / ITER_TIME * 1000:10.2f} ms"
     )
     print(
-        f"rank {rank}, forward {forward_time/ITER_TIME*1000:10.2f} ms, backward {backward_time/ITER_TIME*1000:10.2f} ms"
+        f"rank {rank}, forward {forward_time / ITER_TIME * 1000:10.2f} ms, "
+        f"backward {backward_time / ITER_TIME * 1000:10.2f} ms"
     )
     print(
-        f"rank {rank}, max reserved {max_reserved/1024/1024/1024:8.2f} GiB, max allocated {max_allocated/1024/1024/1024:8.2f} GiB"
+        f"rank {rank}, max reserved {max_reserved / 1024 / 1024 / 1024:8.2f} GiB, "
+        f"max allocated {max_allocated / 1024 / 1024 / 1024:8.2f} GiB"
     )
     dist.destroy_process_group()
 

@@ -7,7 +7,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.testing import same
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import TEST_HPU, TestCase
+from torch.testing._internal.common_utils import TestCase
 
 
 try:
@@ -359,11 +359,11 @@ class TestModelOutputBert(TestCase):
         )
 
 
-devices = ["cpu", "cuda"]
-if TEST_HPU:
-    devices.append("hpu")
+devices = ["cpu", "cuda", "xpu", "hpu"]
 
-instantiate_device_type_tests(TestModelOutputBert, globals(), only_for=devices)
+instantiate_device_type_tests(
+    TestModelOutputBert, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

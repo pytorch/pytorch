@@ -42,7 +42,7 @@ void LockingLogger::setAggregationType(
   agg_types[stat_name] = type;
 }
 
-std::atomic<LoggerBase*> global_logger{new NoopLogger()};
+static std::atomic<LoggerBase*> global_logger{new NoopLogger()};
 
 LoggerBase* getLogger() {
   return global_logger.load();

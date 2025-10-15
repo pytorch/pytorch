@@ -1,29 +1,23 @@
 from __future__ import annotations
 
-from collections.abc import MutableSet, Set as AbstractSet
-from typing import (
-    Any,
-    cast,
-    Dict,
-    Generic,
+from collections.abc import (
+    Hashable,
     Iterable,
     Iterator,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TypeVar,
+    MutableSet,
+    Reversible,
+    Set as AbstractSet,
 )
+from typing import Any, cast, Optional, TypeVar
 
 
-T = TypeVar("T")
-T_co = TypeVar("T_co", covariant=True)
+T = TypeVar("T", bound=Hashable)
+T_co = TypeVar("T_co", bound=Hashable, covariant=True)
 
 __all__ = ["OrderedSet"]
 
 
-# Using Generic[T] bc py38 does not support type parameterized MutableSet
-class OrderedSet(MutableSet, Generic[T]):
+class OrderedSet(MutableSet[T], Reversible[T]):
     """
     Insertion ordered set, similar to OrderedDict.
     """
@@ -34,13 +28,13 @@ class OrderedSet(MutableSet, Generic[T]):
         self._dict = dict.fromkeys(iterable, None) if iterable is not None else {}
 
     @staticmethod
-    def _from_dict(dict_inp: Dict[T, None]) -> OrderedSet[T]:
+    def _from_dict(dict_inp: dict[T, None]) -> OrderedSet[T]:
         s: OrderedSet[T] = OrderedSet()
         s._dict = dict_inp
         return s
 
     #
-    # Required overriden abstract methods
+    # Required overridden abstract methods
     #
     def __contains__(self, elem: object) -> bool:
         return elem in self._dict
@@ -50,6 +44,9 @@ class OrderedSet(MutableSet, Generic[T]):
 
     def __len__(self) -> int:
         return len(self._dict)
+
+    def __reversed__(self) -> Iterator[T]:
+        return reversed(self._dict)
 
     def add(self, elem: T) -> None:
         self._dict[elem] = None
@@ -92,22 +89,22 @@ class OrderedSet(MutableSet, Generic[T]):
 
     def difference_update(self, *others: Iterable[T]) -> None:
         for other in others:
-            self -= other  # type: ignore[operator, arg-type]
+            self -= other  # type: ignore[arg-type]
 
     def update(self, *others: Iterable[T]) -> None:
         for other in others:
-            self |= other  # type: ignore[operator, arg-type]
+            self |= other
 
     def intersection(self, *others: Iterable[T]) -> OrderedSet[T]:
         res = self.copy()
         for other in others:
             if other is not self:
-                res &= other  # type: ignore[operator, arg-type]
+                res &= other  # type: ignore[arg-type]
         return res
 
     def intersection_update(self, *others: Iterable[T]) -> None:
         for other in others:
-            self &= other  # type: ignore[operator, arg-type]
+            self &= other  # type: ignore[arg-type]
 
     def issubset(self, other: Iterable[T]) -> bool:
         return self <= self._wrap_iter_in_set(other)
@@ -116,17 +113,17 @@ class OrderedSet(MutableSet, Generic[T]):
         return self >= self._wrap_iter_in_set(other)
 
     def symmetric_difference(self, other: Iterable[T]) -> OrderedSet[T]:
-        return self ^ other  # type: ignore[operator, arg-type]
+        return self ^ other  # type: ignore[operator]
 
     def symmetric_difference_update(self, other: Iterable[T]) -> None:
-        self ^= other  # type: ignore[operator, arg-type]
+        self ^= other  # type: ignore[arg-type]
 
     def union(self, *others: Iterable[T]) -> OrderedSet[T]:
         res = self.copy()
         for other in others:
             if other is self:
                 continue
-            res |= other  # type: ignore[operator, arg-type]
+            res |= other
         return res
 
     # Specify here for correct type inference, otherwise would
@@ -145,15 +142,15 @@ class OrderedSet(MutableSet, Generic[T]):
             return self
         return super().__ior__(other)  # type: ignore[arg-type]
 
-    def __eq__(self, other: AbstractSet[T]) -> bool:  # type: ignore[misc, override]
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, OrderedSet):
             return self._dict == other._dict
-        return super().__eq__(other)  # type: ignore[arg-type]
+        return super().__eq__(other)
 
-    def __ne__(self, other: AbstractSet[T]) -> bool:  # type: ignore[misc, override]
+    def __ne__(self, other: object) -> bool:
         if isinstance(other, OrderedSet):
             return self._dict != other._dict
-        return super().__ne__(other)  # type: ignore[arg-type]
+        return super().__ne__(other)
 
     def __or__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
         return cast(OrderedSet[T], super().__or__(other))
@@ -161,6 +158,7 @@ class OrderedSet(MutableSet, Generic[T]):
     def __and__(self, other: AbstractSet[T_co]) -> OrderedSet[T]:
         # MutableSet impl will iterate over other, iter over smaller of two sets
         if isinstance(other, OrderedSet) and len(self) < len(other):
+            # pyrefly: ignore  # unsupported-operation, bad-return
             return other & self
         return cast(OrderedSet[T], super().__and__(other))
 
@@ -170,11 +168,11 @@ class OrderedSet(MutableSet, Generic[T]):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({list(self)})"
 
-    def __getstate__(self) -> List[T]:
+    def __getstate__(self) -> list[T]:
         return list(self._dict.keys())
 
-    def __setstate__(self, state: List[T]) -> None:
+    def __setstate__(self, state: list[T]) -> None:
         self._dict = dict.fromkeys(state, None)
 
-    def __reduce__(self) -> Tuple[Type[OrderedSet[T]], Tuple[List[T]]]:
+    def __reduce__(self) -> tuple[type[OrderedSet[T]], tuple[list[T]]]:
         return (OrderedSet, (list(self),))

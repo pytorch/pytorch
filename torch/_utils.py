@@ -1,12 +1,15 @@
 # mypy: allow-untyped-defs
 import copyreg
 import functools
+import importlib
 import logging
 import sys
 import traceback
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Generic, List, Optional, TYPE_CHECKING
+from collections.abc import Callable
+from types import ModuleType
+from typing import Any, Generic, Optional, TYPE_CHECKING
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -34,7 +37,7 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
 
     if isinstance(dtype, str):
         dtype = _import_dotted_name(dtype)
-    if dtype == type(self):
+    if dtype is type(self):
         return self
     if self.is_sparse:
         if not dtype.is_sparse:
@@ -79,9 +82,9 @@ def _to(self, device, non_blocking=False):
         return untyped_storage
 
     device_module = getattr(torch, device.type, None)
-    assert (
-        device_module is not None
-    ), f"{device.type.upper()} device module is not loaded"
+    assert device_module is not None, (
+        f"{device.type.upper()} device module is not loaded"
+    )
     with device_module.device(device):
         if self.is_sparse and hasattr(device_module, "sparse"):
             new_type = getattr(device_module.sparse, self.__class__.__name__)
@@ -93,9 +96,9 @@ def _to(self, device, non_blocking=False):
             )
             return new_type(indices, values, self.size())
         else:
-            assert (
-                not self.is_sparse
-            ), f"sparse storage is not supported for {device.type.upper()} tensors"
+            assert not self.is_sparse, (
+                f"sparse storage is not supported for {device.type.upper()} tensors"
+            )
             untyped_storage = torch.UntypedStorage(self.size(), device=device)
             untyped_storage.copy_(self, non_blocking)
             return untyped_storage
@@ -157,7 +160,7 @@ def _get_restore_location(device):
 #     serialization), and the state dict saves "data" only, thus
 #     stripping the backward hooks.  In some cases, hooks are
 #     essential to the well-functioning of a model (e.g., DDP),
-#     but DDP already manages readding the hooks!
+#     but DDP already manages re-adding the hooks!
 #
 #   - We didn't serialize them in many cases.  Prior to #10220, we
 #     were dropping backward hooks in ForkingPickler.  We "fixed" this
@@ -188,7 +191,7 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
 
 def get_tensor_metadata(tensor):
     # Tensor's Metadata for serializing.
-    # Currently, this only returns a dict[string, bool] specifing whether
+    # Currently, this only returns a dict[string, bool] specifying whether
     # `conj` or `neg` bit is set.
     assert isinstance(tensor, torch.Tensor)
     return torch._C._get_tensor_metadata(tensor)  # type: ignore[attr-defined]
@@ -199,6 +202,16 @@ def set_tensor_metadata(tensor, metadata):
     assert isinstance(metadata, dict)
     assert isinstance(tensor, torch.Tensor)
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
+
+
+def _restore_device_fake_mode(tensor):
+    if torch._guards.detect_fake_mode(None) is not None:
+        if tensor.untyped_storage()._fake_device is not None:
+            device = _get_restore_location(tensor.untyped_storage()._fake_device)
+            if not isinstance(device, torch.device):
+                device = torch.device(device)
+            tensor.fake_device = torch.device(device)
+    return tensor
 
 
 def _rebuild_tensor_v2(
@@ -219,6 +232,8 @@ def _rebuild_tensor_v2(
     # general expectation is that backward_hooks is an empty
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
+
+    tensor = _restore_device_fake_mode(tensor)
     return tensor
 
 
@@ -242,10 +257,11 @@ def _rebuild_tensor_v3(
     if metadata:
         set_tensor_metadata(t, metadata)
     t._backward_hooks = backward_hooks
+    t = _restore_device_fake_mode(t)
     return t
 
 
-_sparse_tensors_to_validate: List["torch.Tensor"] = []
+_sparse_tensors_to_validate: list["torch.Tensor"] = []
 
 
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
@@ -259,11 +275,25 @@ _sparse_tensors_to_validate: List["torch.Tensor"] = []
 # to Pickler semantics, we have to use the same (non-validating) function for
 # unpickling sparse tensors, regardless of the caller.
 def _validate_loaded_sparse_tensors():
+    if not torch.sparse.check_sparse_tensor_invariants().is_enabled():
+        # Skip sparse tensor invariants validation for better
+        # performance. See check_sparse_tensor_invariants
+        # documentation for how to control sparse tensor invariants
+        # checking.
+        _sparse_tensors_to_validate.clear()
+        return
     try:
+        # We disable pinning check (see check_pinning=False below) to
+        # avoid gh-153143. In fact, pinning check is unnecessary
+        # anywhy when loading sparse data from external sources.
         for t in _sparse_tensors_to_validate:
             if t.layout is torch.sparse_coo:
                 torch._validate_sparse_coo_tensor_args(
-                    t._indices(), t._values(), t.size(), t.is_coalesced()
+                    t._indices(),
+                    t._values(),
+                    t.size(),
+                    t.is_coalesced(),
+                    check_pinning=False,
                 )
             elif t.layout in {
                 torch.sparse_csr,
@@ -284,7 +314,12 @@ def _validate_loaded_sparse_tensors():
                         t.row_indices(),
                     )
                 torch._validate_sparse_compressed_tensor_args(
-                    compressed_indices, plain_indices, t.values(), t.size(), t.layout
+                    compressed_indices,
+                    plain_indices,
+                    t.values(),
+                    t.size(),
+                    t.layout,
+                    check_pinning=False,
                 )
             else:
                 raise NotImplementedError(
@@ -376,7 +411,7 @@ def _rebuild_wrapper_subclass(
     requires_grad,
 ):
     device = _get_restore_location(device)
-    return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+    return torch.Tensor._make_wrapper_subclass(
         cls,
         size,
         strides=stride,
@@ -465,7 +500,7 @@ def _rebuild_parameter_with_state(data, requires_grad, backward_hooks, state):
 
 def _get_obj_state(obj):
     # Get the state of the python subclass
-    # This loosely mimicks the function on the object class but since Tensor do not inherit
+    # This loosely mimics the function on the object class but since Tensor do not inherit
     # from it, we cannot call that function directly
     # https://github.com/python/cpython/blob/c83919bd635f4433f1c6ae8504996a9fe3c215e5/Objects/typeobject.c#L4891
     # Note that starting with Python 3.11, this `__getstate__` is always defined and thus
@@ -635,7 +670,7 @@ def _take_tensors(tensors, size_limit):
         Blocks of tensors of same type and within size_limit. The yielded
         tensors are only ordered as the original sequence within its types.
     """
-    buf_dict: DefaultDict[str, List] = defaultdict(lambda: [[], 0])
+    buf_dict: defaultdict[str, list] = defaultdict(lambda: [[], 0])
     for tensor in tensors:
         t = tensor.type()
         if tensor.is_sparse:
@@ -651,8 +686,8 @@ def _take_tensors(tensors, size_limit):
         if buf_and_size[1] + size > size_limit and buf_and_size[1] > 0:
             yield buf_and_size[0]
             buf_and_size = buf_dict[t] = [[], 0]
-        buf_and_size[0].append(tensor)
-        buf_and_size[1] += size
+        buf_and_size[0].append(tensor)  # pyrefly: ignore  # missing-attribute
+        buf_and_size[1] += size  # pyrefly: ignore  # unsupported-operation
     for buf, _ in buf_dict.values():
         if len(buf) > 0:
             yield buf
@@ -674,7 +709,7 @@ def render_call(fn, args, kwargs):
     if str_fn is None:
         str_fn = str(fn)
 
-    str_args: List[str] = []
+    str_args: list[str] = []
     with torch._tensor_str.printoptions(threshold=0, edgeitems=0):
         str_args.extend(repr(a) for a in args)
         str_args.extend(f"{k}={repr(v)}" for k, v in kwargs.items())
@@ -694,6 +729,8 @@ def render_call(fn, args, kwargs):
 class KeyErrorMessage(str):
     r"""str subclass that returns itself in repr"""
 
+    __slots__ = ()
+
     def __repr__(self):
         return self
 
@@ -707,15 +744,18 @@ class ExceptionWrapper:
         if exc_info is None:
             exc_info = sys.exc_info()
         self.exc_type = exc_info[0]
-        self.exc_msg = "".join(traceback.format_exception(*exc_info))
+        self.exc_msg = "".join(
+            # pyrefly: ignore  # no-matching-overload
+            traceback.format_exception(*exc_info)
+        )
         self.where = where
 
     def reraise(self):
         r"""Reraises the wrapped exception in the current thread"""
         # Format a message such as: "Caught ValueError in DataLoader worker
         # process 2. Original Traceback:", followed by the traceback.
-        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"
-        if self.exc_type == KeyError:
+        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"  # pyrefly: ignore  # missing-attribute
+        if self.exc_type is KeyError:
             # KeyError calls repr() on its argument (usually a dict key). This
             # makes stack traces unreadable. It will not be changed in Python
             # (https://bugs.python.org/issue2651), so we work around it.
@@ -723,9 +763,13 @@ class ExceptionWrapper:
         elif getattr(self.exc_type, "message", None):
             # Some exceptions have first argument as non-str but explicitly
             # have message field
-            raise self.exc_type(message=msg)
+            # pyrefly: ignore  # not-callable
+            raise self.exc_type(
+                # pyrefly: ignore  # unexpected-keyword
+                message=msg
+            )
         try:
-            exception = self.exc_type(msg)
+            exception = self.exc_type(msg)  # pyrefly: ignore  # not-callable
         except Exception:
             # If the exception takes multiple arguments or otherwise can't
             # be constructed, don't try to instantiate since we don't know how to
@@ -977,16 +1021,16 @@ class _LazySeedTracker:
         self.call_order = []
 
     def queue_seed_all(self, cb, traceback):
-        self.manual_seed_all_cb = (cb, traceback)
+        self.manual_seed_all_cb = (cb, traceback)  # pyrefly: ignore  # bad-assignment
         # update seed_all to be latest
         self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
 
     def queue_seed(self, cb, traceback):
-        self.manual_seed_cb = (cb, traceback)
+        self.manual_seed_cb = (cb, traceback)  # pyrefly: ignore  # bad-assignment
         # update seed to be latest
         self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
 
-    def get_calls(self) -> List:
+    def get_calls(self) -> list:
         return self.call_order
 
 
@@ -997,7 +1041,7 @@ P = ParamSpec("P")
 class CallbackRegistry(Generic[P]):
     def __init__(self, name: str):
         self.name = name
-        self.callback_list: List[Callable[P, None]] = []
+        self.callback_list: list[Callable[P, None]] = []
 
     def add_callback(self, cb: Callable[P, None]) -> None:
         self.callback_list.append(cb)
@@ -1010,6 +1054,25 @@ class CallbackRegistry(Generic[P]):
                 logger.exception(
                     "Exception in callback for %s registered with gpu trace", self.name
                 )
+
+
+def try_import(module_name: str) -> Optional[ModuleType]:
+    # Implementation based on
+    # https://docs.python.org/3/library/importlib.html#checking-if-a-module-can-be-imported
+    if (module := sys.modules.get(module_name, None)) is not None:
+        return module
+
+    if (spec := importlib.util.find_spec(module_name)) is not None:
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+
+        # https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader
+        # "The finder should always set this attribute"
+        assert spec.loader is not None, "The loader attribute should always be set"
+        spec.loader.exec_module(module)
+        return module
+
+    return None
 
 
 # IMPORT_MAPPING and NAME_MAPPING are adapted from https://github.com/python/cpython/blob/main/Lib/_compat_pickle.py

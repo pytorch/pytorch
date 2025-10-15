@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import warnings
-from typing import cast, Generator
+from collections.abc import Generator
+from typing import cast
 
 import torch
 import torch.distributed.fsdp._traversal_utils as traversal_utils
@@ -65,7 +66,8 @@ def _writeback_to_local_shard(
     if writeback_grad:
         existing_grad = handle.sharded_grad
         if existing_grad is not None:
-            assert handle.flat_param.grad is not None
+            if handle.flat_param.grad is None:
+                raise AssertionError("Expected handle.flat_param.grad to not be None")
             grad_shard = _get_shard(handle.flat_param.grad)
             existing_grad[: grad_shard.numel()].copy_(grad_shard)
 
@@ -184,9 +186,10 @@ def _unshard_fsdp_state_params(
         yield
         return
 
-    assert (
-        handle._training_state == HandleTrainingState.IDLE
-    ), f"Expects the handle training to be IDLE but got {handle._training_state}"
+    if handle._training_state != HandleTrainingState.IDLE:
+        raise AssertionError(
+            f"Expects the handle training to be IDLE but got {handle._training_state}"
+        )
 
     handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
 

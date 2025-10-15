@@ -55,7 +55,6 @@
 #include <ATen/ops/is_pinned_native.h>
 #include <ATen/ops/resize_as_sparse.h>
 #include <ATen/ops/resize_as_sparse_native.h>
-#include <ATen/ops/sparse_coo_tensor.h>
 #include <ATen/ops/sparse_coo_tensor_native.h>
 #include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/sparse_mask_native.h>
@@ -274,7 +273,7 @@ Tensor sparse_coo_tensor(IntArrayRef size,
 
 // helper
 namespace {
-static inline Tensor expand_values_if_needed(const Tensor& values) {
+inline Tensor expand_values_if_needed(const Tensor& values) {
   // expand
   if (values.dim() == 0) {
     // Mimic Numpy behavior here and treat it as a 1D tensor
@@ -356,13 +355,14 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_,
     computed_sizes[static_cast<size_t>(sparse_dim + d)] = values.size(d + 1);
   }
 
-  return at::_sparse_coo_tensor_with_dims_and_tensors(
-      sparse_dim,
-      dense_dim,
-      computed_sizes,
+  return at::native::_sparse_coo_tensor_unsafe(
       indices,
       values,
-      values.options().layout(kSparse),
+      computed_sizes,
+      optTypeMetaToScalarType(options.dtype_opt()),
+      options.layout_opt(),
+      options.device_opt(),
+      options.pinned_memory_opt(),
       is_coalesced);
 }
 
@@ -370,9 +370,11 @@ void _validate_sparse_coo_tensor_args(
     const Tensor& indices,
     const Tensor& values_,
     ArrayRef<int64_t> size,
-    std::optional<bool> is_coalesced_) {
+    std::optional<bool> is_coalesced_,
+    std::optional<bool> check_pinning_) {
   Tensor values = expand_values_if_needed(values_);
   bool is_coalesced = is_coalesced_.value_or(false);
+  const bool check_pinning = check_pinning_.value_or(true);
 
   // the following checks are redundant because they are also checked in
   // SparseTensorImpl::set_indices_and_values_unsafe but we need to ensure them
@@ -388,21 +390,23 @@ void _validate_sparse_coo_tensor_args(
   int64_t sparse_dim = indices.size(0);
   int64_t dense_dim = values.dim() - 1;
   TORCH_CHECK(
-      static_cast<int64_t>(size.size()) == sparse_dim + dense_dim,
-      "number of dimensions must be sparse_dim (",
-      sparse_dim,
-      ") + dense_dim (",
-      dense_dim,
-      "), but got ",
-      size.size());
+    sparse_dim + dense_dim == static_cast<int64_t>(size.size()),
+    "'len(size) == sparse_dim + dense_dim' is not satisfied: len(size) = ",
+    size.size(),
+    ", sparse_dim = ",
+    sparse_dim,
+    ", dense_dim = ",
+    dense_dim);
 
-  TORCH_CHECK(
-      indices.is_pinned() == values.is_pinned(),
-      "memory pinning of indices (=",
-      indices.is_pinned(),
-      ") must match memory pinning of values (=",
-      values.is_pinned(),
-      ")");
+  if (check_pinning) {
+    TORCH_CHECK(
+        indices.is_pinned() == values.is_pinned(),
+        "memory pinning of indices (=",
+        indices.is_pinned(),
+        ") must match memory pinning of values (=",
+        values.is_pinned(),
+        ")");
+  }
 
   // Check to make sure all indices are within the boundaries of `size`
   if (indices.numel() > 0) {
@@ -725,7 +729,7 @@ static std::tuple<Tensor, Tensor, OptTensor> sparse_mask_like_prepare_sparse_inp
   // is that these primitives might project first argument onto second one or
   // the other way around depending on which arguments are coalesced and which are
   // larger. This function prepares inputs for `sparse_mask` such that `t` is
-  // projected onto `mask` by sorting `t` if uncoalesced and artifically marking it
+  // projected onto `mask` by sorting `t` if uncoalesced and artificially marking it
   // as coalesced all while `mask` is set to uncoalesced.
   // The result of this projectionk is going to be uncoalesced, so it is up to the
   // user to set the corresponding flag correctly with respect to the operations'
@@ -795,7 +799,7 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
 
   if (t.layout() == at::kSparse) {
     if (!t._nnz()) {
-      auto res = mask.clone().to(t.device(), t.scalar_type());
+      auto res = mask.to(t.device(), t.scalar_type(), /*non_blocking=*/false, /*copy=*/true);
       res._values().zero_();
       return res;
     }

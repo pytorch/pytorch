@@ -1,8 +1,14 @@
 # mypy: allow-untyped-defs
+from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 import torch
+import torch.distributed as dist
+
+
+_ReduceOp = Union[dist.ReduceOp, dist.ReduceOp.RedOpType]
 
 
 @dataclass(frozen=True)
@@ -45,6 +51,80 @@ class MixedPrecisionPolicy:
     reduce_dtype: Optional[torch.dtype] = None
     output_dtype: Optional[torch.dtype] = None
     cast_forward_inputs: bool = True
+
+
+class Comm(ABC):
+    """
+    Interface for communication primitives.
+    A primitive primarily needs to handle 3 tasks, namely:
+
+    1. How to allocate memory for communication
+       Depending on the goal, an implementation can choose to:
+       a. associate each call to a temporary buffer
+          (best for flexibility and simplicity)
+       b. reuse an persistent buffer for efficiency reasons
+
+    2. Where to allocate memory
+       (e.g. NCCL mem pool or regular cuda caching allocator)
+
+    3. What to do/call upon the comm is called
+       (see `AllGather` interface as an example)
+    """
+
+    @abstractmethod
+    def allocate(
+        self,
+        size: Sequence[Union[int, torch.SymInt]],
+        *,
+        dtype: torch.dtype,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """
+        This handles the "how to allocate memory" part.
+
+        A default implementation could be simply:
+
+        .. code-block:: python
+            with self.mem_pool:
+                torch.empty(...)
+
+        Args:
+            size (Sequence[Union[int, torch.SymInt]]): size of the tensor buffer
+            dtype (torch.dtype): dtype of the tensor buffer
+            device (torch.device): which device to allocate the tensor onto
+        """
+        ...
+
+
+class AllGather(Comm):
+    """
+    Interface for all_gather comm primitive
+    """
+
+    @abstractmethod
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        async_op: bool = False,
+    ) -> Optional[dist.Work]: ...
+
+
+class ReduceScatter(Comm):
+    """
+    Interface for reduce_scatter comm primitive
+    """
+
+    @abstractmethod
+    def __call__(
+        self,
+        output_tensor: torch.Tensor,
+        input_tensor: torch.Tensor,
+        group: dist.ProcessGroup,
+        op: _ReduceOp,
+        async_op: bool = False,
+    ) -> Optional[dist.Work]: ...
 
 
 @dataclass

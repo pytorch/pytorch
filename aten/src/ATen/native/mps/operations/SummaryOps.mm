@@ -19,7 +19,7 @@ static Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tens
   bool has_weights = weights.defined();
 
   @autoreleasepool {
-    string key = "bincount_mps_impl" + getTensorsStringKey({self, weights});
+    std::string key = "bincount_mps_impl" + getTensorsStringKey({self, weights});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
       MPSGraphTensor* scatterDataTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSScalarType(output.scalar_type()));

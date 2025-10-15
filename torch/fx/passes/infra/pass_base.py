@@ -11,12 +11,15 @@ __all__ = ["PassResult", "PassBase"]
 
 
 @compatibility(is_backward_compatible=False)
+# pyrefly: ignore  # invalid-inheritance
 class PassResult(namedtuple("PassResult", ["graph_module", "modified"])):
     """
     Result of a pass:
         graph_module: The modified graph module
         modified: A flag for if the pass has modified the graph module
     """
+
+    __slots__ = ()
 
     def __new__(cls, graph_module, modified):
         return super().__new__(cls, graph_module, modified)

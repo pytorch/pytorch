@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     gradcheck,
     parametrize,
-    skipIfRocm,
 )
 
 
@@ -231,7 +230,6 @@ class TestSegmentReductions(TestCase):
                             length_type,
                         )
 
-    @skipIfRocm
     @dtypes(
         *product(
             (torch.half, torch.bfloat16, torch.float, torch.double),
@@ -558,7 +556,7 @@ class TestSegmentReductions(TestCase):
         lengths = torch.tensor([0, 2, 3, 0], device=device, dtype=length_type)
         data = torch.arange(6, dtype=torch.float, device=device)
 
-        # test for error on 1-D lenghts
+        # test for error on 1-D lengths
         with self.assertRaisesRegex(RuntimeError, "Expected all rows of lengths along axis"):
             torch._segment_reduce(data, 'sum', lengths=lengths, axis=0, unsafe=False)
 

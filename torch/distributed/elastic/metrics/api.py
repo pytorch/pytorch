@@ -11,7 +11,7 @@ import abc
 import time
 from collections import namedtuple
 from functools import wraps
-from typing import Dict, Optional
+from typing import Optional
 from typing_extensions import deprecated
 
 
@@ -37,7 +37,7 @@ MetricData = namedtuple("MetricData", ["timestamp", "group_name", "name", "value
 class MetricsConfig:
     __slots__ = ["params"]
 
-    def __init__(self, params: Optional[Dict[str, str]] = None):
+    def __init__(self, params: Optional[dict[str, str]] = None):
         self.params = params
         if self.params is None:
             self.params = {}
@@ -72,7 +72,7 @@ class MetricStream:
         )
 
 
-_metrics_map: Dict[str, MetricHandler] = {}
+_metrics_map: dict[str, MetricHandler] = {}
 _default_metrics_handler: MetricHandler = NullMetricHandler()
 
 
@@ -88,10 +88,7 @@ def configure(handler: MetricHandler, group: Optional[str] = None):
 
 
 def getStream(group: str):
-    if group in _metrics_map:
-        handler = _metrics_map[group]
-    else:
-        handler = _default_metrics_handler
+    handler = _metrics_map.get(group, _default_metrics_handler)
     return MetricStream(group, handler)
 
 
@@ -122,6 +119,7 @@ def prof(fn=None, group: str = "torchelastic"):
      @metrics.prof
      def x():
          pass
+
 
      @metrics.prof(group="agent")
      def y():
@@ -170,12 +168,15 @@ def profile(group=None):
             try:
                 start_time = time.time()
                 result = func(*args, **kwargs)
+                # pyrefly: ignore  # bad-argument-type
                 publish_metric(group, f"{func.__name__}.success", 1)
             except Exception:
+                # pyrefly: ignore  # bad-argument-type
                 publish_metric(group, f"{func.__name__}.failure", 1)
                 raise
             finally:
                 publish_metric(
+                    # pyrefly: ignore  # bad-argument-type
                     group,
                     f"{func.__name__}.duration.ms",
                     get_elapsed_time_ms(start_time),  # type: ignore[possibly-undefined]

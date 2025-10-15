@@ -62,7 +62,7 @@ struct FusedSgdMathFunctor {
       depth == 2 || depth == 3,
       "depth of 2 for SGD w/ momentum == 0, 3 for SGD w/ momentum != 0");
   C10_DEVICE __forceinline__ void operator()(
-      const int chunk_size,
+      const int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       const double weight_decay,
       const double momentum,
@@ -232,7 +232,7 @@ void _fused_sgd_with_momentum_kernel_cuda_(
   }
   TORCH_CHECK(
       lr.device() == params[0].device(),
-      "found_inf must be on the same GPU device as the params");
+      "lr must be on the same GPU device as the params");
   float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   float* found_inf_ptr =

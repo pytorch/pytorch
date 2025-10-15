@@ -3,6 +3,13 @@
 
 import torch
 
+if __name__ == '__main__':
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+
+    # The value of GRAPH_EXECUTOR depends on command line arguments so make sure they're parsed
+    # before instantiating tests.
+    parse_cmd_line_args()
+
 # This is how we include tests located in test/jit/...
 # They are included here so that they are invoked when you call `test_jit.py`,
 # do not run these test files directly.
@@ -97,7 +104,7 @@ import torch.nn.functional as F
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
-    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
+    GRAPH_EXECUTOR, suppress_warnings, IS_SANDCASTLE, ProfilingMode, \
     TestCase, freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
@@ -158,6 +165,7 @@ def doAutodiffCheck(testname):
     if "test_t_" in testname or testname == "test_t":
         return False
 
+    assert GRAPH_EXECUTOR
     if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
         return False
 
@@ -201,6 +209,7 @@ def doAutodiffCheck(testname):
     return testname not in test_exceptions
 
 
+assert GRAPH_EXECUTOR
 # TODO: enable TE in PE when all tests are fixed
 torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
@@ -457,6 +466,13 @@ class TestJit(JitTestCase):
                 return x
 
             pkl_fn = pickle.dumps(fn, protocol=0)
+
+    def test_script_fn_valid_name(self):
+        @torch.jit.script
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            return x
+        self.assertIsNotNone(fn.__name__)
+        self.assertIsNotNone(fn.__qualname__)
 
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
@@ -1754,8 +1770,7 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             n_ = g2.createClone(node, lambda x: g_to_g2[x])
             g2.appendNode(n_)
-            for o, no in zip(node.outputs(), n_.outputs()):
-                g_to_g2[o] = no
+            g_to_g2.update(zip(node.outputs(), n_.outputs()))
 
         for node in g.outputs():
             g2.registerOutput(g_to_g2[node])
@@ -2872,9 +2887,9 @@ graph(%Ra, %Rb):
                     self.assertTrue(hasattr(input, 'type'))
                     self.assertTrue(input.type() is not None)
                 self.assertTrue(hasattr(block, 'returnNode'))
-                self.assertTrue(type(block.returnNode()) == torch._C.Node)
+                self.assertTrue(type(block.returnNode()) is torch._C.Node)
                 self.assertTrue(hasattr(block, 'paramNode'))
-                self.assertTrue(type(block.paramNode()) == torch._C.Node)
+                self.assertTrue(type(block.paramNode()) is torch._C.Node)
         self.assertTrue(tested_blocks)
 
     def test_export_opnames(self):
@@ -4758,7 +4773,7 @@ a")
         self.assertIsNot(fun_compiled, fun_compiled_2)
         self.assertEqual(fun_compiled_2(), 7)
 
-        # caching doesnt increase refcounts to function (holds weak reference)
+        # caching doesn't increase refcounts to function (holds weak reference)
         self.assertTrue(sys.getrefcount(fun), num_ref_counts)
 
     def test_string_ops(self):
@@ -6495,7 +6510,7 @@ a")
                     if isinstance(res_python, Exception):
                         continue
 
-                    if type(res_python) == type(res_script):
+                    if type(res_python) is type(res_script):
                         if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
                             continue
                         if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
@@ -7368,8 +7383,8 @@ a")
                     # tensor from empty list is type float in python and annotated type in torchscript
                     if "annotate" in li and "dtype" not in option:
                         continue
-                    # Skip unsigned tensor initializaton for signed values on 3.10
-                    if sys.version_info[:2] >= (3, 10) and "torch.uint8" in option and "-" in li:
+                    # Skip unsigned tensor initialization for signed values on 3.10
+                    if "torch.uint8" in option and "-" in li:
                         continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}
@@ -7984,7 +7999,7 @@ dedent """
                 m += k
             return m
 
-        # use of k tests the pathway where we have to insert unitialized
+        # use of k tests the pathway where we have to insert uninitialized
         self.checkScript(test_varexit, (3,))
         self.checkScript(test_varexit, (2,))
 
@@ -8631,7 +8646,7 @@ dedent """
         args = args + [1, 1.5]
 
         def isBool(arg):
-            return type(arg) == bool or (type(arg) == str and "torch.bool" in arg)
+            return type(arg) is bool or (type(arg) is str and "torch.bool" in arg)
 
         for op in ops:
             for first_arg in args:
@@ -8640,7 +8655,7 @@ dedent """
                     if (op == 'sub' or op == 'div') and (isBool(first_arg) or isBool(second_arg)):
                         continue
                     # div is not implemented correctly for mixed-type or int params
-                    if (op == 'div' and (type(first_arg) != type(second_arg) or
+                    if (op == 'div' and (type(first_arg) is not type(second_arg) or
                        isinstance(first_arg, int) or
                        (isinstance(first_arg, str) and 'int' in first_arg))):
                         continue
@@ -8656,7 +8671,7 @@ dedent """
                     graph = cu.func.graph
                     torch._C._jit_pass_complete_shape_analysis(graph, (), False)
                     # use dim=-1 to represent a python/jit scalar.
-                    dim = -1 if type(first_arg) != str and type(second_arg) != str else non_jit_result.dim()
+                    dim = -1 if type(first_arg) is not str and type(second_arg) is not str else non_jit_result.dim()
                     dtype = non_jit_result.dtype
                     # jit only supports int/float scalars.
                     if dim < 0:
@@ -10060,7 +10075,7 @@ dedent """
         buffer = io.BytesIO()
         torch.jit.save(cm, buffer)
         buffer.seek(0)
-        # when tensor is loaded as constant it isnt specialized
+        # when tensor is loaded as constant it isn't specialized
         cm_load = torch.jit.load(buffer)
         FileCheck().check_not("Float(1, 3)").run(cm_load.forward.graph)
 
@@ -10294,7 +10309,7 @@ dedent """
 
     def test_type_inferred_from_empty_annotation(self):
         """
-        Test that the type inferred from an empty or missing annotation is Torch.Tensor wtih `inferred=true`
+        Test that the type inferred from an empty or missing annotation is Torch.Tensor with `inferred=true`
         """
         @torch.jit.script
         def fn(x):
@@ -13617,7 +13632,7 @@ dedent """
             self.checkScript(test_oct, (n,))
             self.checkScript(test_hex, (n,))
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_get_set_state(self):
         class Root(torch.jit.ScriptModule):
             __constants__ = ['number']
@@ -14829,7 +14844,7 @@ dedent """
 
         # testing overload declared first, then non-overload
         if sys.version_info < (3, 13):  # test broken in 3.13
-            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            with self.assertRaisesRegex(Exception, "Overloads are not usable when a module"):
                 class W3(torch.nn.Module):
                     @torch.jit._overload_method  # noqa: F811
                     def forward(self, x):  # noqa: F811
@@ -14882,7 +14897,7 @@ dedent """
                 return self.hello(1), self.hello(x)
 
         if sys.version_info < (3, 13):  # test broken in 3.13
-            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            with self.assertRaisesRegex(Exception, "Overloads are not usable when a module"):
                 a = torch.jit.script(W2())
 
     def test_narrow_copy(self):
@@ -15345,7 +15360,7 @@ dedent """
             return 1
         self.assertEqual(fun(), 1)
 
-    @unittest.skipIf(IS_WINDOWS or IS_SANDCASTLE, "NYI: TemporaryFileName support for Windows or Sandcastle")
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: TemporaryFileName support for Sandcastle")
     def test_attribute_unpickling(self):
         tensor = torch.randn(2, 2)
         tester = self
@@ -15436,7 +15451,6 @@ dedent """
     def test_script_scope(self):
         scripted = torch.jit.script(torch.nn.functional.triplet_margin_loss)
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: TemporaryFileName on Windows")
     def test_serialization_sharing(self):
         class M(torch.jit.ScriptModule):
             def __init__(self) -> None:
@@ -15461,16 +15475,17 @@ dedent """
             m.save(fname)
             archive_name = os.path.basename(os.path.normpath(fname))
             archive = zipfile.ZipFile(fname, 'r')
-            pickled_data = archive.read(os.path.join(archive_name, 'data.pkl'))
+            pickled_data = archive.read(f"{archive_name}/data.pkl")
 
             out = io.StringIO()
             pickletools.dis(pickled_data, out=out)
             disassembled = out.getvalue()
+            archive.close()
 
             FileCheck().check_count(s1, 1, exactly=True) \
                 .check_count("BINGET", 2, exactly=True) \
                 .check_count(s2, 1, exactly=True) \
-                .check_count("BINGET", 2, exactly=True).run(out.getvalue())
+                .check_count("BINGET", 2, exactly=True).run(disassembled)
 
     def test_sys_stdout_override(self):
         @torch.jit.script
@@ -15600,7 +15615,7 @@ dedent """
                 a = hasattr(self, "fee")
                 b = hasattr(self, "foo")
                 c = hasattr(self, "hi")
-                d = hasattr(self, "nonexistant")
+                d = hasattr(self, "nonexistent")
                 return (a, b, c, d)
 
             def foo(self):
@@ -16038,7 +16053,7 @@ EXCLUDE_TYPE_CHECK = {
 # chunk returns a list in scripting and we don't unpack the list,
 # Thus it won't be replaced by ConstantChunk and run AD.
 # It's explicitly checked in test_chunk_constant_script_ad
-# Similary for split, it's replaced by split_with_sizes in tracing,
+# Similarly for split, it's replaced by split_with_sizes in tracing,
 # but we don't have AD formula for aten::split(Tensor, int[], int),
 # an op registered in JIT so AD is not triggered in scripting.
 EXCLUDE_SCRIPT_AD_CHECK = {

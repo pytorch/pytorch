@@ -559,7 +559,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::
       TORCH_CHECK((input_.sizes()[0] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
                   "For mask_type == 1 mask shape should be (B, L)");
       if (dim_ != input_.dim() - 1) {
-            // We only process padding mask in the optimized way if softmax is applied along the last dimesion,
+            // We only process padding mask in the optimized way if softmax is applied along the last dimension,
             // otherwise we need to expand the mask into a generic 4D one
             mask = mask_.view({input_.sizes()[0], 1, 1, input_.sizes()[2]});
             mask = mask.expand(input_.sizes()).contiguous();
@@ -570,7 +570,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::
       TORCH_CHECK((mask.dim() == 2) && (input_.sizes()[2] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
                   "For mask_type == 0 mask shape should be (L, L)");
       if (dim_ != input_.dim() - 1) {
-            // We only process attention mask in a optimized way if softmax is applied along the last dimesion,
+            // We only process attention mask in a optimized way if softmax is applied along the last dimension,
             // otherwise we need to expand the mask into a generic 4D one
             mask = mask.view({1, 1, input_.sizes()[2], input_.sizes()[2]});
             mask = mask.expand(input_.sizes()).contiguous();

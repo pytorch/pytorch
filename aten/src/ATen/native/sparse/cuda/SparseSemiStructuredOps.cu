@@ -3,7 +3,7 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
@@ -16,7 +16,7 @@
 #include <type_traits>
 #include <tuple>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #define CUTLASS_STATUS_CHECK(status)                                    \
   {                                                                     \
@@ -28,7 +28,7 @@
 
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 // Wrapper function for CUTLASS sparse GEMM implementation, used
 // solely to simplify dispatching from
@@ -41,6 +41,7 @@ template <
     typename ThreadblockShape,
     typename WarpShape,
     typename InstructionShape,
+    typename Operator,
     typename LayoutInputA,
     typename LayoutInputB,
     bool use_tensor_c>
@@ -57,7 +58,6 @@ void spgemm_cutlass(
     using SmArch = cutlass::arch::Sm80; // Only CC 8.x devices are supported at the moment.
     using SwizzleThreadBlock = cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>; // This choice provides good performance across wide range of operand sizes.
     constexpr int NumStages = 3; // This choice provides good performance across wide range of operand sizes.
-    using Operator = cutlass::arch::OpMultiplyAdd;
     constexpr int NumEVTEpilogueStages = 1;
 
     constexpr int AlignmentInputA = 128 / cutlass::sizeof_bits<ElementInputA>::value;
@@ -70,12 +70,6 @@ void spgemm_cutlass(
     using LayoutC = LayoutOutput;
     constexpr int AlignmentC = 128 / cutlass::sizeof_bits<ElementC>::value;
 
-    using TensorCTileThreadMap = cutlass::epilogue::threadblock::OutputTileThreadLayout<
-        ThreadblockShape,
-        WarpShape,
-        ElementC,
-        AlignmentC,
-        NumEVTEpilogueStages>;
     using OutputTileThreadMap = cutlass::epilogue::threadblock::OutputTileThreadLayout<
         ThreadblockShape,
         WarpShape,
@@ -105,7 +99,7 @@ void spgemm_cutlass(
         cutlass::epilogue::threadblock::VisitorScalarBroadcast<ElementC>;
     using TensorCTensor =
         cutlass::epilogue::threadblock::VisitorColBroadcast<
-            TensorCTileThreadMap,
+            OutputTileThreadMap,
             ElementC,
             cute::Stride<cute::_1, cute::_0, int64_t>>;
     using TensorC = std::conditional_t<use_tensor_c, TensorCTensor, TensorCScalar>;
@@ -215,7 +209,7 @@ void spgemm_cutlass(
                           std::is_same_v<ElementComputeEpilogue, cutlass::bfloat16_t>) {
                 return {ElementComputeEpilogue{alpha.to<float>()}};
             } else {
-                return {alpha.to<ElementComputeEpilogue>()};
+                return {{alpha.to<ElementComputeEpilogue>()}};
             }
         }()
     };
@@ -225,7 +219,7 @@ void spgemm_cutlass(
                           std::is_same_v<ElementComputeEpilogue, cutlass::bfloat16_t>) {
                 return {ElementComputeEpilogue{beta.to<float>()}};
             } else {
-                return {beta.to<ElementComputeEpilogue>()};
+                return {{beta.to<ElementComputeEpilogue>()}};
             }
         }()
     };
@@ -236,7 +230,7 @@ void spgemm_cutlass(
                         ElementC(0),
                         {cute::_1{}, cute::_0{}, problem_size.m()}};
             } else {
-                return {ElementC(0)};
+                return {{ElementC(0)}};
             }
         }()
     };
@@ -305,6 +299,7 @@ template <
     typename ThreadblockShape,
     typename WarpShape,
     typename InstructionShape,
+    typename Operator,
     bool EnableRowMajorRowMajorLayouts,
     bool EnableRowMajorColumnMajorLayouts,
     bool EnableColumnMajorRowMajorLayouts,
@@ -333,6 +328,7 @@ void spgemm_cutlass_dispatch_layouts(
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                Operator,
                 cutlass::layout::RowMajor,
                 cutlass::layout::RowMajor,
                 use_tensor_c>(
@@ -358,6 +354,7 @@ void spgemm_cutlass_dispatch_layouts(
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                Operator,
                 cutlass::layout::RowMajor,
                 cutlass::layout::ColumnMajor,
                 use_tensor_c>(
@@ -383,6 +380,7 @@ void spgemm_cutlass_dispatch_layouts(
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                Operator,
                 cutlass::layout::ColumnMajor,
                 cutlass::layout::RowMajor,
                 use_tensor_c>(
@@ -408,6 +406,7 @@ void spgemm_cutlass_dispatch_layouts(
                 ThreadblockShape,
                 WarpShape,
                 InstructionShape,
+                Operator,
                 cutlass::layout::ColumnMajor,
                 cutlass::layout::ColumnMajor,
                 use_tensor_c>(
@@ -439,6 +438,7 @@ template <
     typename ThreadblockShape,
     typename WarpShape,
     typename InstructionShape,
+    typename Operator,
     bool EnableRowMajorRowMajorLayouts,
     bool EnableRowMajorColumnMajorLayouts,
     bool EnableColumnMajorRowMajorLayouts,
@@ -456,6 +456,7 @@ void spgemm_cutlass_dispatch_layouts_tensor_c(
             ThreadblockShape,
             WarpShape,
             InstructionShape,
+            Operator,
             EnableRowMajorRowMajorLayouts,
             EnableRowMajorColumnMajorLayouts,
             EnableColumnMajorRowMajorLayouts,
@@ -477,6 +478,7 @@ void spgemm_cutlass_dispatch_layouts_tensor_c(
             ThreadblockShape,
             WarpShape,
             InstructionShape,
+            Operator,
             EnableRowMajorRowMajorLayouts,
             EnableRowMajorColumnMajorLayouts,
             EnableColumnMajorRowMajorLayouts,
@@ -524,7 +526,7 @@ Tensor sparse_semi_structured_mad_op(
       const Tensor& mat1, const Tensor& mat1_meta, const Tensor& mat2,
       const std::optional<Tensor>& input_opt, const Scalar& alpha,
       const Scalar& beta, const std::optional<c10::ScalarType> out_dtype_opt) {
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
     TORCH_CHECK(false, __func__, " : CUTLASS not supported");
     return Tensor{};
 #else
@@ -629,6 +631,7 @@ Tensor sparse_semi_structured_mad_op(
                     cutlass::gemm::GemmShape<128, 128, 128>;
                 using WarpShape = cutlass::gemm::GemmShape<64, 64, 128>;
                 using InstructionShape = cutlass::gemm::GemmShape<16, 8, 64>;
+                using Operator = cutlass::arch::OpMultiplyAddSaturate;
                 const auto EnableRowMajorRowMajorLayouts = false;
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = false;
@@ -643,6 +646,7 @@ Tensor sparse_semi_structured_mad_op(
                       ThreadblockShape,
                       WarpShape,
                       InstructionShape,
+                      Operator,
                       EnableRowMajorRowMajorLayouts,
                       EnableRowMajorColumnMajorLayouts,
                       EnableColumnMajorRowMajorLayouts,
@@ -664,6 +668,7 @@ Tensor sparse_semi_structured_mad_op(
                       ThreadblockShape,
                       WarpShape,
                       InstructionShape,
+                      Operator,
                       EnableRowMajorRowMajorLayouts,
                       EnableRowMajorColumnMajorLayouts,
                       EnableColumnMajorRowMajorLayouts,
@@ -687,6 +692,7 @@ Tensor sparse_semi_structured_mad_op(
                 using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 64>;
                 using WarpShape = cutlass::gemm::GemmShape<64, 64, 64>;
                 using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
+                using Operator = cutlass::arch::OpMultiplyAdd;
                 const auto EnableRowMajorRowMajorLayouts = true;
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = true;
@@ -699,6 +705,7 @@ Tensor sparse_semi_structured_mad_op(
                     ThreadblockShape,
                     WarpShape,
                     InstructionShape,
+                    Operator,
                     EnableRowMajorRowMajorLayouts,
                     EnableRowMajorColumnMajorLayouts,
                     EnableColumnMajorRowMajorLayouts,
@@ -721,6 +728,7 @@ Tensor sparse_semi_structured_mad_op(
                 using ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 64>;
                 using WarpShape = cutlass::gemm::GemmShape<64, 64, 64>;
                 using InstructionShape = cutlass::gemm::GemmShape<16, 8, 32>;
+                using Operator = cutlass::arch::OpMultiplyAdd;
                 const auto EnableRowMajorRowMajorLayouts = true;
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = true;
@@ -733,6 +741,7 @@ Tensor sparse_semi_structured_mad_op(
                     ThreadblockShape,
                     WarpShape,
                     InstructionShape,
+                    Operator,
                     EnableRowMajorRowMajorLayouts,
                     EnableRowMajorColumnMajorLayouts,
                     EnableColumnMajorRowMajorLayouts,
@@ -755,6 +764,7 @@ Tensor sparse_semi_structured_mad_op(
                 using ThreadblockShape = cutlass::gemm::GemmShape<128, 64, 32>;
                 using WarpShape = cutlass::gemm::GemmShape<64, 32, 32>;
                 using InstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
+                using Operator = cutlass::arch::OpMultiplyAdd;
                 const auto EnableRowMajorRowMajorLayouts = true;
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = true;
@@ -767,6 +777,7 @@ Tensor sparse_semi_structured_mad_op(
                     ThreadblockShape,
                     WarpShape,
                     InstructionShape,
+                    Operator,
                     EnableRowMajorRowMajorLayouts,
                     EnableRowMajorColumnMajorLayouts,
                     EnableColumnMajorRowMajorLayouts,
@@ -807,7 +818,7 @@ Tensor _sparse_semi_structured_addmm(
 // Following is just for testing purposes.
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 // Copied from tools/util/include/host_reorder.h, from CUTLASS source
 // tree.  This is for simplicity - namely, this file is not under
@@ -845,7 +856,7 @@ static void reorder_meta(cutlass::TensorRef<Element, LayoutDest> dest,
 
 std::tuple<Tensor, Tensor>
 _to_sparse_semi_structured(const Tensor& dense) {
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
   TORCH_CHECK(false, __func__, " : CUTLASS not supported");
   return std::make_tuple(Tensor{}, Tensor{});
 #else

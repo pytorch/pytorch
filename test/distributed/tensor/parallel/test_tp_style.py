@@ -5,13 +5,8 @@ from copy import deepcopy
 
 import torch
 import torch.nn as nn
-from torch.distributed._tensor import (
-    distribute_tensor,
-    DTensor,
-    init_device_mesh,
-    Replicate,
-    Shard,
-)
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.distributed.tensor.parallel.style import (
@@ -346,6 +341,8 @@ class TensorParallelStyleTest(DTensorTestBase):
     @with_comms
     def test_sequence_parallel_style(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # early init RNG tracker
+        torch.distributed.tensor._random.manual_seed(0, mesh)
 
         comm_mode = CommDebugMode()
         batch, N, embedding_dim = 20, 8, 12

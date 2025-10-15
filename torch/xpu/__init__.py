@@ -6,10 +6,12 @@ Intel GPU optimization.
 This package is lazily initialized, so you can always import it, and use
 :func:`is_available()` to determine if your system supports XPU.
 """
+
 import threading
 import traceback
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._C
@@ -23,13 +25,13 @@ from .streams import Event, Stream
 _initialized = False
 _tls = threading.local()
 _initialization_lock = threading.Lock()
-_queued_calls: List[
-    Tuple[Callable[[], None], List[str]]
+_queued_calls: list[
+    tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
 _device_t = Union[_device, str, int, None]
 _lazy_seed_tracker = _LazySeedTracker()
-default_generators: Tuple[torch._C.Generator] = ()  # type: ignore[assignment]
+default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
 
 def _is_compiled() -> bool:
@@ -62,13 +64,29 @@ def device_count() -> int:
 
 def is_available() -> bool:
     r"""Return a bool indicating if XPU is currently available."""
-    # This function nerver throws.
+    # This function never throws.
     return device_count() > 0
 
 
-def is_bf16_supported():
+def is_bf16_supported(including_emulation: bool = True) -> bool:
     r"""Return a bool indicating if the current XPU device supports dtype bfloat16."""
-    return True
+    if not is_available():
+        return False
+    return (
+        including_emulation
+        or torch.xpu.get_device_properties().has_bfloat16_conversions
+    )
+
+
+def is_tf32_supported() -> bool:
+    r"""Return a bool indicating if the current XPU device supports dtype tf32."""
+    if not is_available():
+        return False
+    # On Intel Xe architecture and newer, TF32 operations can be accelerated
+    # through DPAS (Dot Product Accumulate Systolic) instructions. Therefore,
+    # TF32 support can be determined by checking whether the device supports
+    # subgroup matrix multiply-accumulate operations.
+    return torch.xpu.get_device_properties().has_subgroup_matrix_multiply_accumulate
 
 
 def is_initialized():
@@ -216,7 +234,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 
 
 @lru_cache(None)
-def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
+def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     r"""Get the xpu capability of a device.
 
     Args:
@@ -230,19 +248,20 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
         Dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
-    # pybind service attributes are no longer needed and their presence breaks
-    # the further logic related to the serialization of the created dictionary.
-    # In particular it filters out `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
-    # to fix Triton tests.
-    # This field appears after updating pybind to 2.13.6.
+    # Only keep attributes that are safe for dictionary serialization.
+    serializable_types = (int, float, bool, str, type(None), list, tuple, dict)
     return {
-        prop: getattr(props, prop)
-        for prop in dir(props)
-        if not prop.startswith(("__", "_pybind11_"))
+        # pyrefly: ignore  # unbound-name
+        key: value
+        for key in dir(props)
+        if not key.startswith("__")
+        and isinstance((value := getattr(props, key)), serializable_types)
     }
 
 
-def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
+def get_device_properties(
+    device: Optional[_device_t] = None,
+) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
     r"""Get the properties of a device.
 
     Args:
@@ -254,8 +273,6 @@ def get_device_properties(device: Optional[_device_t] = None) -> _XpuDevicePrope
     """
     _lazy_init()
     device = _get_device_index(device, optional=True)
-    if device < 0 or device >= device_count():
-        raise AssertionError("Invalid device index")
     return _get_device_properties(device)  # type: ignore[name-defined]  # noqa: F821
 
 
@@ -278,6 +295,22 @@ def _get_device(device: Union[int, str, torch.device]) -> torch.device:
     return device
 
 
+def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
+    r"""Query whether a device can access a peer device's memory.
+
+    Args:
+        device (torch.device or int or str): selected device.
+        peer (torch.device or int or str): peer device to query access to.
+
+    Returns:
+        bool: ``True`` if ``device`` can access ``peer``, ``False`` otherwise.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    peer = _get_device_index(peer, optional=True)
+    return torch._C._xpu_canDeviceAccessPeer(device, peer)
+
+
 class StreamContext:
     r"""Context-manager that selects a given stream.
 
@@ -289,13 +322,14 @@ class StreamContext:
             ``None``.
     .. note:: Streams are per-device.
     """
+
     cur_stream: Optional["torch.xpu.Stream"]
 
     def __init__(self, stream: Optional["torch.xpu.Stream"]):
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
-            self.idx = -1
+            self.idx = -1  # pyrefly: ignore  # bad-assignment
 
     def __enter__(self):
         cur_stream = self.stream
@@ -420,9 +454,9 @@ def synchronize(device: _device_t = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
-def get_arch_list() -> List[str]:
+def get_arch_list() -> list[str]:
     r"""Return list XPU architectures this library was compiled for."""
-    if not is_available():
+    if not _is_compiled():
         return []
     arch_flags = torch._C._xpu_getArchFlags()
     if arch_flags is None:
@@ -435,7 +469,7 @@ def get_gencode_flags() -> str:
     arch_list = get_arch_list()
     if len(arch_list) == 0:
         return ""
-    return f'-device {",".join(arch for arch in arch_list)}'
+    return f"-device {','.join(arch for arch in arch_list)}"
 
 
 def _get_generator(device: torch.device) -> torch._C.Generator:
@@ -515,6 +549,7 @@ __all__ = [
     "Event",
     "Stream",
     "StreamContext",
+    "can_device_access_peer",
     "current_device",
     "current_stream",
     "default_generators",
@@ -535,6 +570,7 @@ __all__ = [
     "is_available",
     "is_bf16_supported",
     "is_initialized",
+    "is_tf32_supported",
     "manual_seed",
     "manual_seed_all",
     "max_memory_allocated",

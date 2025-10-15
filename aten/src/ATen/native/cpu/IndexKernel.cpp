@@ -184,7 +184,13 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
       }
     }),
     AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
-    AT_EXPAND(AT_FLOAT8_TYPES),
+    // AT_EXPAND(AT_FLOAT8_TYPES),
+    // TODO(#113663): clean up accumulation behavior in float8 dtypes, accumulate=True
+    // should not be supported here, then reenable AT_FLOAT8_DTYPES
+    kFloat8_e4m3fn,
+    kFloat8_e5m2,
+    kFloat8_e4m3fnuz,
+    kFloat8_e5m2fnuz,
     kComplexHalf,
     kHalf,
     kBool,
@@ -743,21 +749,29 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
         // });
 
         if (iter_dtype == kByte) {
-          return cpu_hflip_vec<uint8_t>(iter);
+          cpu_hflip_vec<uint8_t>(iter);
+          return;
         } else if (iter_dtype == kChar) {
-          return cpu_hflip_vec<int8_t>(iter);
+          cpu_hflip_vec<int8_t>(iter);
+          return;
         } else if (iter_dtype == kInt) {
-          return cpu_hflip_vec<int32_t>(iter);
+          cpu_hflip_vec<int32_t>(iter);
+          return;
         } else if (iter_dtype == kLong) {
-          return cpu_hflip_vec<int64_t>(iter);
+          cpu_hflip_vec<int64_t>(iter);
+          return;
         } else if (iter_dtype == kShort) {
-          return cpu_hflip_vec<int16_t>(iter);
+          cpu_hflip_vec<int16_t>(iter);
+          return;
         } else if (iter_dtype == kBool) {
-          return cpu_hflip_vec<bool>(iter);
+          cpu_hflip_vec<bool>(iter);
+          return;
         } else if (iter_dtype == kFloat) {
-          return cpu_hflip_vec<float>(iter);
+          cpu_hflip_vec<float>(iter);
+          return;
         } else if (iter_dtype == kDouble) {
-          return cpu_hflip_vec<double>(iter);
+          cpu_hflip_vec<double>(iter);
+          return;
         }
       }
       // other dtypes (float16, bfloat16, complex) are handled by cpu_kernel_vec (see below)
@@ -772,10 +786,12 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
           c == input_strides_2[1] &&
           c == iter.element_size(0) * iter.shape()[0]  // checks if dim=1 is contiguous as well
       ) {
-        return cpu_hflip_channels_last_vec(iter);
+        cpu_hflip_channels_last_vec(iter);
+        return;
       }
       // Special case: vertical flip using memcpy (faster than generic cpu_kernel_vec)
-      return cpu_vflip_memcpy(iter);
+      cpu_vflip_memcpy(iter);
+      return;
     }
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",

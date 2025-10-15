@@ -15,6 +15,7 @@
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Elu.h>
 #include <ATen/native/cpu/Gelu.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/Parallel.h>
@@ -25,7 +26,11 @@ namespace at::native {
 
 namespace {
 
-static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
+#if defined(__GNUC__) && __GNUC__ == 14 && defined(__aarch64__) && !defined(__ARM_FEATURE_SVE)
+// Workaround for gcc-14.2.0 ICE during RTL pass: expand when compiling for NEON
+__attribute__((optimize("no-tree-vectorize")))
+#endif
+void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const TensorBase &input) {
   if (at::isReducedFloatingType(input.scalar_type())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(input.scalar_type(), "log_sigmoid_cpu", [&]() {
     using Vec = Vectorized<scalar_t>;
@@ -91,7 +96,7 @@ static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const
   }
 }
 
-static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
+void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "log_sigmoid_backward_cpu", [&]() {
       using Vec = Vectorized<scalar_t>;
@@ -145,7 +150,7 @@ static void log_sigmoid_backward_cpu_kernel(TensorIterator& iter) {
   }
 }
 
-static void threshold_kernel(
+void threshold_kernel(
     TensorIteratorBase& iter,
     const Scalar& threshold_scalar,
     const Scalar& value_scalar) {
@@ -190,56 +195,17 @@ static void threshold_kernel(
 void elu_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
   if (at::isReducedFloatingType(it.common_dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(it.common_dtype(), "elu_cpu", [&]() {
-      auto negcoef = alpha.to<float>() * scale.to<float>();
-      auto poscoef = scale.to<float>();
-      auto negiptcoef = input_scale.to<float>();
-      const Vectorized<float> negcoef_vec(negcoef);
-      const Vectorized<float> negiptcoef_vec(negiptcoef);
-      const Vectorized<float> poscoef_vec(poscoef);
-      const Vectorized<float> one_vec(static_cast<float>(1));
-      const Vectorized<float> zero_vec(static_cast<float>(0));
       cpu_kernel_vec(
         it,
-        [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
-          return float(a) <= float(0) ? (std::exp(float(a) * negiptcoef) - float(1)) * negcoef : float(a) * poscoef;
-        },
-        [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vectorized<scalar_t> a) -> Vectorized<scalar_t> {
-          auto [a0, a1] = convert_to_float<scalar_t>(a);
-          auto cmp0 = (a0 > zero_vec);
-          auto cmp1 = (a1 > zero_vec);
-          auto get_res_masked = [&](Vectorized<float>& cmp, Vectorized<float>& a) {
-            return !cmp.zero_mask() ? a * poscoef_vec :
-              Vectorized<float>::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
-          };
-          auto res0 = get_res_masked(cmp0, a0);
-          auto res1 = get_res_masked(cmp1, a1);
-          return convert_from_float<scalar_t>(res0, res1);
-        });
+        get_scalar_elu_elementwise_func<scalar_t, float>(alpha.to<float>(), scale.to<float>(), input_scale.to<float>()),
+        get_vectorized_elu_elementwise_func<scalar_t>(alpha.to<float>(), scale.to<float>(), input_scale.to<float>()));
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES(it.common_dtype(), "elu_cpu", [&]() {
-      using Vec = Vectorized<scalar_t>;
-      auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
-      auto poscoef = scale.to<scalar_t>();
-      auto negiptcoef = input_scale.to<scalar_t>();
-      const Vec negcoef_vec(negcoef);
-      const Vec negiptcoef_vec(negiptcoef);
-      const Vec poscoef_vec(poscoef);
-      const Vec one_vec(static_cast<scalar_t>(1));
-      const Vec zero_vec(static_cast<scalar_t>(0));
       cpu_kernel_vec(
           it,
-          [negcoef, negiptcoef, poscoef](scalar_t a) -> scalar_t {
-            return a <= scalar_t(0) ? (std::exp(a * negiptcoef) - scalar_t(1)) * negcoef : a * poscoef;
-          },
-          [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &one_vec, &zero_vec](Vec a) -> Vec {
-            auto cmp = (a > zero_vec);
-            if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
-              return a * poscoef_vec;
-            } else {
-              return Vec::blendv(((a * negiptcoef_vec).exp() - one_vec) * negcoef_vec, a * poscoef_vec, cmp);
-            }
-          });
+          get_scalar_elu_elementwise_func<scalar_t>(alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>()),
+          get_vectorized_elu_elementwise_func<scalar_t>(alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>()));
     });
   }
 }
@@ -832,9 +798,9 @@ void hardswish_backward_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
       iter,
       [&](scalar_t grad_val, scalar_t self_val) -> scalar_t {
-        if (float(self_val) < neg_three) {
+        if (float(self_val) <= neg_three) {
           return zero;
-        } else if (float(self_val) <= three) {
+        } else if (float(self_val) < three) {
           return float(grad_val) * ((float(self_val) / three) + one_half);
         } else {
           return grad_val;
@@ -850,7 +816,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
             self_val0 >= kThreeVec
           ),
           kZeroVec,
-          self_val0 < kNegThreeVec
+          self_val0 <= kNegThreeVec
         );
         self_val1 = Vec::blendv(
           Vec::blendv(
@@ -859,7 +825,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
             self_val1 >= kThreeVec
           ),
           kZeroVec,
-          self_val1 < kNegThreeVec
+          self_val1 <= kNegThreeVec
         );
         return convert_from_float<scalar_t>(self_val0, self_val1);
       });
@@ -878,9 +844,9 @@ void hardswish_backward_kernel(TensorIterator& iter) {
     cpu_kernel_vec(
       iter,
       [&](scalar_t grad_val, scalar_t self_val) {
-        if (self_val < neg_three) {
+        if (self_val <= neg_three) {
           return zero;
-        } else if (self_val <= three) {
+        } else if (self_val < three) {
           return grad_val * ((self_val / three) + one_half);
         } else {
           return grad_val;
@@ -894,7 +860,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
             self_val >= kThreeVec
           ),
           kZeroVec,
-          self_val < kNegThreeVec
+          self_val <= kNegThreeVec
         );
       }
     );
@@ -902,7 +868,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
   }
 }
 
-static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
+void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "leaky_relu_cpu", [&]() {
     auto zero_vec = Vectorized<float>((float)(0));
@@ -941,7 +907,7 @@ static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   }
 }
 
-static void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
+void leaky_relu_backward_kernel(TensorIteratorBase& iter, const Scalar& negval_) {
   if (at::isReducedFloatingType(iter.dtype())) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "leaky_relu_backward_cpu", [&]() {
     auto zero_vec = Vectorized<float>((float)(0));

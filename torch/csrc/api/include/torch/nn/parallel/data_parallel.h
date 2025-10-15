@@ -59,7 +59,7 @@ namespace {
 // in data parallel, and should not be exposed as a user API.
 struct ReduceAdd : public autograd::Node {
   explicit ReduceAdd(const at::Device& destination_device)
-      : destination_device_(destination_device){};
+      : destination_device_(destination_device) {};
   ~ReduceAdd() override = default;
 
   // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
@@ -275,7 +275,7 @@ Tensor data_parallel(
     return module->forward(std::move(input)).to(*output_device);
   }
 
-  autograd::Scatter scatter(*devices, /*chunk_sizes=*/nullopt, dim);
+  autograd::Scatter scatter(*devices, /*chunk_sizes=*/std::nullopt, dim);
   auto scattered_inputs = fmap<Tensor>(scatter.apply({std::move(input)}));
   // Input tensor might not be big enough to scale across all available devices
   if (scattered_inputs.size() < devices->size()) {

@@ -1,19 +1,21 @@
 # mypy: allow-untyped-defs
 import argparse
+import base64
 import functools
 import importlib
 import logging
 import os
 import sys
-from typing import Type, TypeVar
+from typing import TypeVar
 
 from torch._inductor.async_compile import pre_fork_setup
+from torch._inductor.codecache import torch_key
 from torch._inductor.compile_worker.subproc_pool import (
     SubprocKind,
     SubprocMain,
     SubprocPickler,
 )
-from torch._inductor.compile_worker.watchdog import _async_compile_initializer
+from torch._inductor.compile_worker.utils import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import _set_triton_ptxas_path
 
 
@@ -32,7 +34,7 @@ except ImportError:
     pass
 
 
-def _lookup_and_create_type(base: Type[_T], qname: str) -> _T:
+def _lookup_and_create_type(base: type[_T], qname: str) -> _T:
     """
     Given a base type and qualified name: import & lookup that name, check
     that it's of the given type and then instantiate it.
@@ -56,6 +58,7 @@ def main():
         parser.add_argument("--parent", type=int)
         parser.add_argument("--read-fd", type=int)
         parser.add_argument("--write-fd", type=int)
+        parser.add_argument("--torch-key", type=str)
         args = parser.parse_args()
         if os.getppid() != args.parent:
             sys.exit(0)
@@ -63,6 +66,8 @@ def main():
         write_fd = os.fdopen(args.write_fd, "wb")
 
         pre_fork_setup()
+
+        torch_key.set(base64.b64decode(args.torch_key.encode("utf-8")))  # type: ignore[attr-defined]
 
         _async_compile_initializer(args.parent)
 

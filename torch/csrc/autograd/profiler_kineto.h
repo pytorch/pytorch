@@ -23,7 +23,7 @@ using extra_meta_t = std::unordered_map<std::string, std::string>;
 
 struct TORCH_API KinetoEvent {
   KinetoEvent(
-      const std::shared_ptr<const torch::profiler::impl::Result>&,
+      const std::shared_ptr<const torch::profiler::impl::Result>& /*result*/,
       const bool verbose);
 
   uint64_t startThreadId() const;
@@ -37,6 +37,7 @@ struct TORCH_API KinetoEvent {
   bool hasConcreteInputs() const;
   const c10::ArrayRef<c10::IValue> concreteInputs() const;
   bool hasKwinputs() const;
+  bool isHiddenEvent() const;
   const std::unordered_map<std::string, c10::IValue> kwinputs() const;
   uint64_t flops() const;
   int64_t sequenceNr() const;
@@ -47,6 +48,7 @@ struct TORCH_API KinetoEvent {
   const c10::ArrayRef<std::string> moduleHierarchy() const;
   int64_t debugHandle() const;
   std::string name() const;
+  std::string overload_name() const;
   c10::DeviceType deviceType() const;
   int deviceIndex() const;
   int64_t nBytes() const;
@@ -61,8 +63,9 @@ struct TORCH_API KinetoEvent {
   bool isPythonFunction() const;
   int64_t cudaElapsedUs() const;
   int64_t privateuse1ElapsedUs() const;
-  void getPerfEventCounters(torch::profiler::perf_counters_t&) const;
+  void getPerfEventCounters(torch::profiler::perf_counters_t& /*in*/) const;
   extra_meta_t extraMeta() const;
+  std::string metadataJson() const;
 
  private:
   torch::profiler::impl::ProfilerVoidEventStub fallbackStart() const;
@@ -183,6 +186,10 @@ TORCH_API void prepareProfiler(
 TORCH_API void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities);
+
+TORCH_API void startMemoryProfile();
+TORCH_API void stopMemoryProfile();
+TORCH_API void exportMemoryProfile(const std::string& path);
 
 /**
  * When a C++ thread really has no control over how the profiler was enabled,

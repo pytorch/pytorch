@@ -13,7 +13,7 @@ struct Value;
 
 // \brief Parse IR from \p STR constructing the corresponding IR in\ GRAPH.
 // if parse_tensor_constants is true will construct empty tensors
-// for Tensor constants with random or unitialized contents, otherwise will
+// for Tensor constants with random or uninitialized contents, otherwise will
 // throw
 TORCH_API void parseIR(
     const std::string& str,
@@ -25,7 +25,7 @@ TORCH_API void parseIR(
  * \p VMAP is filled with String to Value pairs allowing to index Values in the
  * newly created graph by their name in the original IR string.
  * if parse_tensor_constants is true will construct empty tensors
- * for Tensor constants with random or unitialized contents, otherwise will
+ * for Tensor constants with random or uninitialized contents, otherwise will
  * throw
  */
 TORCH_API void parseIR(

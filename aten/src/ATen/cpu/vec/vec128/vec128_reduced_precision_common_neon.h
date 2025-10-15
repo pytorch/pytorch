@@ -10,10 +10,15 @@ inline namespace CPU_CAPABILITY {
 // Shared implementation between Vectorized<c10::Half> and
 // Vectorized<c10::BFloat16>. Uses CRTP to allow derived class
 // customization.
-template <typename VecT, typename ValueT, template <int, bool> typename BlendRegs, typename Derived>
+template <
+    typename VecT,
+    typename ValueT,
+    template <int, bool> typename BlendRegs,
+    typename Derived>
 struct Vectorized16 {
  protected:
   VecT values;
+
  public:
   using value_type = ValueT;
   using size_type = int;
@@ -28,7 +33,8 @@ struct Vectorized16 {
       value_type (*const f)(value_type, value_type)) const {
     __at_align__ value_type tmp_first[size()];
     __at_align__ value_type tmp_second[size()];
-    static_cast<const Derived*>(this)->store(tmp_first); // store this to tmp_first
+    static_cast<const Derived*>(this)->store(
+        tmp_first); // store this to tmp_first
     second.store(tmp_second);
     for (const auto i : c10::irange(size())) {
       tmp_first[i] = f(tmp_first[i], tmp_second[i]);
@@ -47,23 +53,23 @@ struct Vectorized16 {
   template <int64_t mask>
   static Derived blend(const Derived& a, const Derived& b) {
     Derived vec;
-    vec.values = BlendRegs<0, (mask & 0x01) != 0>::impl(
-        a.values, b.values, vec.values);
-    vec.values = BlendRegs<1, (mask & 0x02) != 0>::impl(
-        a.values, b.values, vec.values);
-    vec.values = BlendRegs<2, (mask & 0x04) != 0>::impl(
-        a.values, b.values, vec.values);
-    vec.values = BlendRegs<3, (mask & 0x08) != 0>::impl(
-        a.values, b.values, vec.values);
+    vec.values = BlendRegs < 0,
+    (mask & 0x01) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 1,
+    (mask & 0x02) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 2,
+    (mask & 0x04) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 3,
+    (mask & 0x08) != 0 > ::impl(a.values, b.values, vec.values);
 
-    vec.values = BlendRegs<4, (mask & 0x10) != 0>::impl(
-        a.values, b.values, vec.values);
-    vec.values = BlendRegs<5, (mask & 0x20) != 0>::impl(
-        a.values, b.values, vec.values);
-    vec.values = BlendRegs<6, (mask & 0x40) != 0>::impl(
-        a.values, b.values, vec.values);
-    vec.values = BlendRegs<7, (mask & 0x80) != 0>::impl(
-        a.values, b.values, vec.values);
+    vec.values = BlendRegs < 4,
+    (mask & 0x10) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 5,
+    (mask & 0x20) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 6,
+    (mask & 0x40) != 0 > ::impl(a.values, b.values, vec.values);
+    vec.values = BlendRegs < 7,
+    (mask & 0x80) != 0 > ::impl(a.values, b.values, vec.values);
 
     return vec;
   }
@@ -120,8 +126,12 @@ struct Vectorized16 {
   Derived angle() const {
     auto zero = Derived(0);
     auto pi = Derived(c10::pi<value_type>);
-    auto tmp = Derived::blendv(zero, pi, *static_cast<const Derived*>(this) < zero);
-    return Derived::blendv(tmp, *static_cast<const Derived*>(this), static_cast<const Derived*>(this)->isnan());
+    auto tmp =
+        Derived::blendv(zero, pi, *static_cast<const Derived*>(this) < zero);
+    return Derived::blendv(
+        tmp,
+        *static_cast<const Derived*>(this),
+        static_cast<const Derived*>(this)->isnan());
   }
   Derived real() const {
     return *this;
@@ -137,99 +147,132 @@ struct Vectorized16 {
   // converting to FP32, applying the math function, and then converting back to
   // FP16/BF16.
   Derived acos() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::acos);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::acos);
   }
   Derived acosh() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::acosh);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::acosh);
   }
   Derived asin() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::asin);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::asin);
   }
   Derived asinh() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::asinh);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::asinh);
   }
   Derived atan() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::atan);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::atan);
   }
   Derived atanh() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::atanh);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::atanh);
   }
   Derived atan2(const Derived& exp) const {
-    return static_cast<const Derived*>(this)->map2_with_vec_float_method(exp, &Vectorized<float>::atan2);
+    return static_cast<const Derived*>(this)->map2_with_vec_float_method(
+        exp, &Vectorized<float>::atan2);
   }
   Derived copysign(const Derived& sign) const {
-    return static_cast<const Derived*>(this)->map2_with_vec_float_method(sign, &Vectorized<float>::copysign);
+    return static_cast<const Derived*>(this)->map2_with_vec_float_method(
+        sign, &Vectorized<float>::copysign);
   }
   Derived erf() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::erf);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::erf);
   }
   Derived erfc() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::erfc);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::erfc);
   }
   Derived erfinv() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::erfinv);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::erfinv);
   }
   Derived exp() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::exp);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::exp);
   }
   Derived exp2() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::exp2);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::exp2);
   }
   Derived expm1() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::expm1);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::expm1);
   }
   Derived exp_u20() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::exp_u20);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::exp_u20);
+  }
+  Derived fexp_u20() const {
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::exp_u20);
   }
   Derived fmod(const Derived& q) const {
     // This function is questionable with a conversion, so we use map2
     return map2(q, std::fmod);
   }
   Derived hypot(const Derived& b) const {
-    return static_cast<const Derived*>(this)->map2_with_vec_float_method(b, &Vectorized<float>::hypot);
+    return static_cast<const Derived*>(this)->map2_with_vec_float_method(
+        b, &Vectorized<float>::hypot);
   }
   Derived i0() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::i0);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::i0);
   }
   Derived i0e() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::i0e);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::i0e);
   }
   Derived digamma() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::digamma);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::digamma);
   }
   Derived igamma(const Derived& x) const {
-    return static_cast<const Derived*>(this)->map2_with_vec_float_method(x, &Vectorized<float>::igamma);
+    return static_cast<const Derived*>(this)->map2_with_vec_float_method(
+        x, &Vectorized<float>::igamma);
   }
   Derived igammac(const Derived& x) const {
-    return static_cast<const Derived*>(this)->map2_with_vec_float_method(x, &Vectorized<float>::igammac);
+    return static_cast<const Derived*>(this)->map2_with_vec_float_method(
+        x, &Vectorized<float>::igammac);
   }
   Derived log() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::log);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::log);
   }
   Derived log10() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::log10);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::log10);
   }
   Derived log1p() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::log1p);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::log1p);
   }
   Derived log2() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::log2);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::log2);
   }
   Derived nextafter(const Derived& b) const {
     // This function does not make sense with conversion, so we use map2
     return map2(b, std::nextafter);
   }
   Derived sin() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::sin);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::sin);
   }
   Derived sinh() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::sinh);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::sinh);
   }
   Derived cos() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::cos);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::cos);
   }
   Derived cosh() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::cosh);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::cosh);
   }
   Derived ceil() const {
     // This function is questionable with a conversion, so we use map
@@ -244,23 +287,25 @@ struct Vectorized16 {
     return map(at::native::round_impl);
   }
   Derived tan() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::tan);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::tan);
   }
   Derived tanh() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::tanh);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::tanh);
   }
   Derived lgamma() const {
-    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::lgamma);
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(
+        &Vectorized<float>::lgamma);
   }
   Derived rsqrt() const {
     return static_cast<const Derived*>(this)->sqrt().reciprocal();
   }
   Derived pow(const Derived& exp) const {
-    return static_cast<const Derived*>(this)->map2_with_vec_float_method(exp, &Vectorized<float>::pow);
+    return static_cast<const Derived*>(this)->map2_with_vec_float_method(
+        exp, &Vectorized<float>::pow);
   }
-
 };
-
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec

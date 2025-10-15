@@ -101,7 +101,6 @@ includes = [
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/debug_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/gemm_kernel_utils.h",
     "aten/src/ATen/native/transformers/cuda/mem_eff_attention/pytorch_utils.h",
-    "aten/src/ATen/native/transformers/cuda/flash_attn/flash_api.h",
     "aten/src/THC/*",
     "aten/src/ATen/test/*",
     # CMakeLists.txt isn't processed by default, but there are a few
@@ -109,6 +108,7 @@ includes = [
     "aten/src/THC/CMakeLists.txt",
     "torch/*",
     "tools/autograd/templates/python_variable_methods.cpp",
+    "torch/csrc/stable/*",
 ]
 
 includes = [os.path.join(proj_dir, include) for include in includes]
@@ -137,6 +137,7 @@ ignores = [
     "third_party/nvfuser/runtime/helpers.cu",
     "torch/csrc/jit/codegen/fuser/cuda/resource_strings.h",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
+    "torch/csrc/jit/ir/ir.h",
     # generated files we shouldn't frob
     "torch/lib/tmp_install/*",
     "torch/include/*",
@@ -146,13 +147,11 @@ ignores = [os.path.join(proj_dir, ignore) for ignore in ignores]
 
 
 # Check if the compiler is hip-clang.
+#
+# This used to be a useful function but now we can safely always assume hip-clang.
+# Leaving the function here avoids bc-linter errors.
 def is_hip_clang() -> bool:
-    try:
-        hip_path = os.getenv("HIP_PATH", "/opt/rocm/hip")
-        with open(hip_path + "/lib/.hipInfo") as f:
-            return "HIP_COMPILER=clang" in f.read()
-    except OSError:
-        return False
+    return True
 
 
 # TODO Remove once the following submodules are updated
@@ -202,12 +201,14 @@ for hip_platform_file in hip_platform_files:
                     sources.write(line)
             print(f"{hip_platform_file} updated")
 
+
 hipify_python.hipify(
     project_directory=proj_dir,
     output_directory=out_dir,
     includes=includes,
     ignores=ignores,
     extra_files=[
+        "torch/_inductor/codegen/cuda/device_op_overrides.py",
         "torch/_inductor/codegen/cpp_wrapper_cpu.py",
         "torch/_inductor/codegen/cpp_wrapper_gpu.py",
         "torch/_inductor/codegen/wrapper.py",

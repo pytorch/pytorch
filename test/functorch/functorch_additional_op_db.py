@@ -322,13 +322,13 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
     test_args = [
         (3, ([1, 2],)),
         (3, (slice(0, 3),)),
-        (3, ([slice(0, 3), 1],)),
-        (3, ([[0, 2, 3], [1, 3, 3], [0, 0, 2]],)),
-        (3, ([[0, 0, 3], [1, 1, 3], [0, 0, 2]],)),
-        (3, ([slice(None), slice(None), [0, 3]],)),
-        (3, ([slice(None), [0, 3], slice(None)],)),
-        (3, ([[0, 3], slice(None), slice(None)],)),
-        (3, ([[0, 3], [1, 2], slice(None)],)),
+        (3, ((slice(0, 3), 1),)),
+        (3, (([0, 2, 3], [1, 3, 3], [0, 0, 2]),)),
+        (3, (([0, 0, 3], [1, 1, 3], [0, 0, 2]),)),
+        (3, ((slice(None), slice(None), [0, 3]),)),
+        (3, ((slice(None), [0, 3], slice(None)),)),
+        (3, (([0, 3], slice(None), slice(None)),)),
+        (3, (([0, 3], [1, 2], slice(None)),)),
         (
             3,
             (
@@ -337,20 +337,20 @@ def sample_inputs_getitem(op_info, device, dtype, requires_grad, **kwargs):
                 ],
             ),
         ),
-        (3, ([[0, 3], slice(None)],)),
-        (3, ([[0, 3], Ellipsis],)),
-        (3, ([[0, 2, 3], [1, 3, 3], torch.LongTensor([0, 0, 2])],)),
-        (4, ([slice(None), adv_idx, adv_idx, slice(None)],)),
-        (4, ([slice(None), adv_idx, slice(None), adv_idx],)),
-        (4, ([adv_idx, slice(None), slice(None), adv_idx],)),
-        (4, ([slice(None), slice(None), adv_idx, adv_idx],)),
-        (4, ([Ellipsis, adv_idx, adv_idx],)),
-        (5, ([slice(None), slice(None), adv_idx, slice(None), adv_idx],)),
-        (5, ([slice(None), slice(None), adv_idx, adv_idx, slice(None)],)),
-        (5, ([slice(None), slice(None), adv_idx, None, adv_idx, slice(None)],)),
-        (6, ([slice(None), slice(None), slice(None), adv_idx, adv_idx],)),
-        (6, ([slice(None), slice(None), adv_idx, adv_idx, adv_idx],)),
-        (6, ([slice(None), slice(None), None, adv_idx, adv_idx, adv_idx],)),
+        (3, (([0, 3], slice(None)),)),
+        (3, (([0, 3], Ellipsis),)),
+        (3, (([0, 2, 3], [1, 3, 3], torch.LongTensor([0, 0, 2])),)),
+        (4, ((slice(None), adv_idx, adv_idx, slice(None)),)),
+        (4, ((slice(None), adv_idx, slice(None), adv_idx),)),
+        (4, ((adv_idx, slice(None), slice(None), adv_idx),)),
+        (4, ((slice(None), slice(None), adv_idx, adv_idx),)),
+        (4, ((Ellipsis, adv_idx, adv_idx),)),
+        (5, ((slice(None), slice(None), adv_idx, slice(None), adv_idx),)),
+        (5, ((slice(None), slice(None), adv_idx, adv_idx, slice(None)),)),
+        (5, ((slice(None), slice(None), adv_idx, None, adv_idx, slice(None)),)),
+        (6, ((slice(None), slice(None), slice(None), adv_idx, adv_idx),)),
+        (6, ((slice(None), slice(None), adv_idx, adv_idx, adv_idx),)),
+        (6, ((slice(None), slice(None), None, adv_idx, adv_idx, adv_idx),)),
     ]
 
     def get_shape(dim):
@@ -400,20 +400,22 @@ def sample_inputs_aten_index_put(op_info, device, dtype, requires_grad, **kwargs
     adv_idx = torch.LongTensor([[0, 1], [2, 3]])
     # self_shape, indices
     additional = [
-        ((5, 6, 7, 8), [None, adv_idx, adv_idx, None]),
-        ((5, 6, 7, 8), [None, adv_idx, None, adv_idx]),
-        ((5, 6, 7, 8), [adv_idx, None, None, adv_idx]),
-        ((5, 6, 7, 8), [None, None, adv_idx, adv_idx]),
-        ((5, 6, 7, 8, 9), [None, None, adv_idx, None, adv_idx]),
-        ((5, 6, 7, 8, 9), [None, None, adv_idx, adv_idx, None]),
-        ((5, 6, 7, 8, 9, 10), [None, None, None, adv_idx, adv_idx]),
-        ((5, 6, 7, 8, 9, 10), [None, None, adv_idx, adv_idx, adv_idx]),
+        ((5, 6, 7, 8), (None, adv_idx, adv_idx, None)),
+        ((5, 6, 7, 8), (None, adv_idx, None, adv_idx)),
+        ((5, 6, 7, 8), (adv_idx, None, None, adv_idx)),
+        ((5, 6, 7, 8), (None, None, adv_idx, adv_idx)),
+        ((5, 6, 7, 8, 9), (None, None, adv_idx, None, adv_idx)),
+        ((5, 6, 7, 8, 9), (None, None, adv_idx, adv_idx, None)),
+        ((5, 6, 7, 8, 9, 10), (None, None, None, adv_idx, adv_idx)),
+        ((5, 6, 7, 8, 9, 10), (None, None, adv_idx, adv_idx, adv_idx)),
     ]
     for self_shape, indices in additional:
         for broadcast_value in [False, True]:
             inp = make_arg(self_shape)
 
-            tmp_indices = [slice(None) if idx is None else idx for idx in indices]
+            tmp_indices = tuple(
+                [slice(None) if idx is None else idx for idx in indices]
+            )
             values_shape = inp[tmp_indices].shape
             if broadcast_value:
                 values_shape = values_shape[3:]

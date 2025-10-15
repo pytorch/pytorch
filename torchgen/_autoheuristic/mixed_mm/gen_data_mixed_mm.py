@@ -15,7 +15,7 @@ from benchmark_utils import (  # type: ignore[import-not-found]
 )
 
 import torch
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unimported]
@@ -59,7 +59,7 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
         )
         b = b.to(dtype=dtype_right)
 
-        with fresh_inductor_cache():
+        with fresh_cache():
 
             def mixed_mm(A, B):
                 return torch.mm(A, B.to(A.dtype))

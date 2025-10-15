@@ -10,7 +10,7 @@ of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 
 import functools
 import logging
-from typing import Any, Dict, Union
+from typing import Any, Union
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 # TODO: Dedupe this with SYMPY_INTERP
 
 
-@functools.lru_cache(None)
+@functools.cache
 def handlers():
     # TODO add CeilDiv (it doesn't appear in the index_expr)
 
@@ -160,7 +160,8 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
     handler = getattr(analysis, handler_name)
     try:
         if handler_name in ASSOCIATIVE_OPS:
-            assert len(args) > 1
+            if len(args) <= 1:
+                raise AssertionError("associative op needs >1 args")
             acc = handler(args[0], args[1])
             for i in range(2, len(args)):
                 acc = handler(acc, args[i])
@@ -182,7 +183,7 @@ _nil = object()
 
 def sympy_interp(
     analysis,
-    env: Dict[sympy.Symbol, Any],
+    env: dict[sympy.Symbol, Any],
     expr: Union[sympy.Expr, SympyBoolean],
     *,
     index_dtype=torch.int64,
@@ -219,7 +220,7 @@ def sympy_interp(
                 missing_handler=missing_handler,
             )
             for arg in expr.args
-        ],  # type: ignore[arg-type]
+        ],
         expr,
         index_dtype=index_dtype,
-    )  # type: ignore[arg-type]
+    )

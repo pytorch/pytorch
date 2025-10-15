@@ -1,7 +1,7 @@
 import abc
 import os
 from dataclasses import dataclass
-from typing import Any, List, Optional, Union
+from typing import Any, Optional, Union
 
 from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex, StorageMeta
 from torch.distributed.checkpoint.planner import (
@@ -61,7 +61,9 @@ class StorageWriter(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
+    def set_up_storage_writer(
+        self, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
         """
         Initialize this instance.
 
@@ -86,7 +88,7 @@ class StorageWriter(abc.ABC):
         """
 
     @abc.abstractmethod
-    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         """
         Perform centralized planning of storage.
 
@@ -105,7 +107,7 @@ class StorageWriter(abc.ABC):
     @abc.abstractmethod
     def write_data(
         self, plan: SavePlan, planner: SavePlanner
-    ) -> Future[List[WriteResult]]:
+    ) -> Future[list[WriteResult]]:
         """
         Write all items from ``plan`` using ``planner`` to resolve the data.
 
@@ -127,7 +129,7 @@ class StorageWriter(abc.ABC):
         """
 
     @abc.abstractmethod
-    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
+    def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         """
         Write the metadata and marks the current checkpoint as successful.
 
@@ -147,7 +149,7 @@ class StorageWriter(abc.ABC):
     @abc.abstractmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         """
-        Check if the given checkpoint_id is supported by the stroage. This allow
+        Check if the given checkpoint_id is supported by the storage. This allow
         us to enable automatic storage selection.
         """
         ...
@@ -200,7 +202,7 @@ class StorageReader(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def read_metadata(self) -> Metadata:
+    def read_metadata(self, *args: Any, **kwargs: Any) -> Metadata:
         """
         Read the checkpoint metadata.
 
@@ -210,7 +212,9 @@ class StorageReader(abc.ABC):
         """
 
     @abc.abstractmethod
-    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(
+        self, metadata: Metadata, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
         """
         Initialize this instance.
 
@@ -236,7 +240,7 @@ class StorageReader(abc.ABC):
         """
 
     @abc.abstractmethod
-    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+    def prepare_global_plan(self, plans: list[LoadPlan]) -> list[LoadPlan]:
         """
         Perform centralized planning of storage loading.
 
@@ -278,7 +282,7 @@ class StorageReader(abc.ABC):
     @abc.abstractmethod
     def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
         """
-        Check if the given checkpoint_id is supported by the stroage. This allow
+        Check if the given checkpoint_id is supported by the storage. This allow
         us to enable automatic storage selection.
         """
         ...

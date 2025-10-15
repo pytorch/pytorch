@@ -1,8 +1,6 @@
 # Owner(s): ["module: dynamo"]
-# ruff: noqa: F841
-""" Test functions for linalg module
+"""Test functions for linalg module"""
 
-"""
 import functools
 import itertools
 import os
@@ -490,7 +488,7 @@ class SolveCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
     # kept apart from TestSolve for use for testing with matrices.
     def do(self, a, b, tags):
         x = linalg.solve(a, b)
-        assert_almost_equal(b, dot_generalized(a, x))
+        assert_almost_equal(b, dot_generalized(a, x), single_decimal=5)
         assert_(consistent_subclass(x, b))
 
 
@@ -939,7 +937,7 @@ class DetCases(LinalgSquareTestCase, LinalgGeneralizedSquareTestCase):
 @instantiate_parametrized_tests
 class TestDet(DetCases, TestCase):
     def test_zero(self):
-        # NB: comment out tests of type(det) == double : we return zero-dim arrays
+        # NB: comment out tests of type(det) is double : we return zero-dim arrays
         assert_equal(linalg.det([[0.0]]), 0.0)
         #    assert_equal(type(linalg.det([[0.0]])), double)
         assert_equal(linalg.det([[0.0j]]), 0.0)
@@ -1105,7 +1103,7 @@ class TestMatrixPower(TestCase):
 
         for mat in self.rshft_all:
             tz(mat.astype(dt))
-            if dt != object:
+            if dt is not object:
                 tz(self.stacked.astype(dt))
 
     @parametrize("dt", [np.dtype(c) for c in "?bBhilefdFD"])
@@ -1117,7 +1115,7 @@ class TestMatrixPower(TestCase):
 
         for mat in self.rshft_all:
             tz(mat.astype(dt))
-            if dt != object:
+            if dt is not object:
                 tz(self.stacked.astype(dt))
 
     @parametrize("dt", [np.dtype(c) for c in "?bBhilefdFD"])
@@ -1130,7 +1128,7 @@ class TestMatrixPower(TestCase):
 
         for mat in self.rshft_all:
             tz(mat.astype(dt))
-            if dt != object:
+            if dt is not object:
                 tz(self.stacked.astype(dt))
 
     @parametrize("dt", [np.dtype(c) for c in "?bBhilefdFD"])

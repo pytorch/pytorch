@@ -1,9 +1,10 @@
 import textwrap
-from typing import Any, Callable, Dict, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 
-_BACK_COMPAT_OBJECTS: Dict[Any, None] = {}
-_MARKED_WITH_COMPATIBILITY: Dict[Any, None] = {}
+_BACK_COMPAT_OBJECTS: dict[Any, None] = {}
+_MARKED_WITH_COMPATIBILITY: dict[Any, None] = {}
 
 
 _T = TypeVar("_T")

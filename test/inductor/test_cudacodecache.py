@@ -1,16 +1,15 @@
 # Owner(s): ["module: inductor"]
 
 import ctypes
-import unittest
 
 import torch
-from torch._inductor import config
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import CUDACodeCache
 from torch._inductor.codegen.cuda.cuda_env import nvcc_exist
 from torch._inductor.exc import CUDACompileError
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 _SOURCE_CODE = r"""
@@ -37,10 +36,10 @@ int saxpy(int n, float a, float *x, float *y) {
 """
 
 
-@unittest.skipIf(config.is_fbcode(), "fbcode requires different CUDA_HOME setup")
 class TestCUDACodeCache(InductorTestCase):
+    @requires_cuda_and_triton
     def test_cuda_load(self):
-        with fresh_inductor_cache():
+        with fresh_cache():
             # Test both .o and .so compilation.
             (
                 object_file_path,
@@ -50,8 +49,8 @@ class TestCUDACodeCache(InductorTestCase):
             dll_wrapper, so_hash_key, source_code_path1 = CUDACodeCache.load(
                 _SOURCE_CODE, "so"
             )
-            self.assertNotEqual(source_code_path0, source_code_path1)
-            self.assertNotEqual(object_hash_key, so_hash_key)
+            self.assertEqual(source_code_path0, source_code_path1)
+            self.assertEqual(object_hash_key, so_hash_key)
 
             # Test load and call functions in .so.
             x = torch.rand(10).float().cuda()
@@ -66,14 +65,16 @@ class TestCUDACodeCache(InductorTestCase):
             )
             torch.testing.assert_close(y, expected_y)
 
+    @requires_cuda_and_triton
     def test_compilation_error(self):
-        with fresh_inductor_cache():
+        with fresh_cache():
             error_source_code = _SOURCE_CODE.replace("saxpy_device", "saxpy_wrong", 1)
             with self.assertRaises(CUDACompileError):
                 CUDACodeCache.compile(error_source_code, "o")
 
+    @requires_cuda_and_triton
     def test_async_compile(self):
-        with fresh_inductor_cache():
+        with fresh_cache():
             async_compile = AsyncCompile()
             compiled_res = async_compile.cuda(_SOURCE_CODE, "so")
             async_compile.wait(globals())

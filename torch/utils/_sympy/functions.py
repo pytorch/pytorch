@@ -3,16 +3,8 @@ import functools
 import math
 import operator
 import sys
-from typing import (
-    Callable,
-    Iterable,
-    List,
-    Optional,
-    SupportsFloat,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from collections.abc import Callable
+from typing import Optional, SupportsFloat, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import TypeVarTuple, Unpack
 
 import sympy
@@ -28,7 +20,13 @@ from sympy.core.traversal import walk
 from sympy.printing.precedence import PRECEDENCE
 from sympy.utilities.iterables import sift
 
+from torch.torch_version import TorchVersion
+
 from .numbers import int_oo
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 _T = TypeVar("_T", bound=SupportsFloat)
@@ -103,10 +101,11 @@ def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
 
 
 def _keep_float(
-    f: Callable[[Unpack[_Ts]], _T]
+    f: Callable[[Unpack[_Ts]], _T],
 ) -> Callable[[Unpack[_Ts]], Union[_T, sympy.Float]]:
     @functools.wraps(f)
     def inner(*args: Unpack[_Ts]) -> Union[_T, sympy.Float]:
+        # pyrefly: ignore  # bad-argument-type
         r: Union[_T, sympy.Float] = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
@@ -114,6 +113,7 @@ def _keep_float(
             r = sympy.Float(float(r))
         return r
 
+    # pyrefly: ignore  # bad-return
     return inner
 
 
@@ -141,7 +141,7 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     """
 
     def integer_coefficient(x: sympy.Basic) -> int:
-        integer_coefficients: List[int] = [
+        integer_coefficients: list[int] = [
             abs(int(arg))
             for arg in sympy.Mul.make_args(x)
             if isinstance(arg, (int, sympy.Integer))
@@ -157,10 +157,10 @@ def simple_floordiv_gcd(p: sympy.Basic, q: sympy.Basic) -> sympy.Basic:
     gcd: int = math.gcd(integer_factor(p), integer_factor(q))
     p, q = p / gcd, q / gcd  # type: ignore[operator, assignment]  # remove in py3.12
 
-    base_splits: List[Tuple[sympy.Basic, ...]] = list(
+    base_splits: list[tuple[sympy.Basic, ...]] = list(
         map(sympy.Mul.make_args, sympy.Add.make_args(p))
     )
-    divisor_split: Tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
+    divisor_split: tuple[sympy.Basic, ...] = sympy.Mul.make_args(q)
     for x in divisor_split:
         if all(x in base_split for base_split in base_splits):
             gcd = gcd * x  # type: ignore[operator]  # remove in py3.12
@@ -194,21 +194,23 @@ class FloorDiv(sympy.Function):
     NB: This is Python-style floor division, round to -Inf
     """
 
-    nargs: Tuple[int, ...] = (2,)
+    nargs: tuple[int, ...] = (2,)
     precedence: int = 35  # lower precedence than add
     is_integer: bool = True
 
     @property
     def base(self) -> sympy.Basic:
+        # pyrefly: ignore  # missing-attribute
         return self.args[0]
 
     @property
     def divisor(self) -> sympy.Basic:
+        # pyrefly: ignore  # missing-attribute
         return self.args[1]
 
     def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
-        base = printer.parenthesize(self.base, self.precedence)
-        divisor = printer.parenthesize(self.divisor, self.precedence)
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
         return f"({base}//{divisor})"
 
     # Automatic evaluation.
@@ -272,7 +274,20 @@ class FloorDiv(sympy.Function):
             for term in sympy.Add.make_args(base):
                 quotient = term / divisor
 
-                if quotient.is_integer:
+                # This is a sympy bug fixed in https://github.com/sympy/sympy/pull/28442
+                # sympy can generate a quotient with (1/22)*.... such that quotient.is_integer is True
+                # FloorDiv should not allow that as output. see
+                quotient_is_integer = None
+                if isinstance(quotient, sympy.Mul) and TorchVersion(
+                    sympy.__version__
+                ) < TorchVersion("1.15.0"):
+                    rationals = quotient.atoms(sympy.Rational)
+                    all_rationals_ints = all(r.q == 1 for r in rationals)
+                    quotient_is_integer = quotient.is_integer and all_rationals_ints
+                else:
+                    quotient_is_integer = quotient.is_integer
+
+                if quotient_is_integer:
                     terms.append(term)
                     quotients += quotient
 
@@ -302,7 +317,7 @@ class ModularIndexing(sympy.Function):
     ModularIndexing(a, b, c) => (a // b) % c where % is the C modulus
     """
 
-    nargs: Tuple[int, ...] = (3,)
+    nargs: tuple[int, ...] = (3,)
     is_integer: bool = True
     precedence: int = 35  # lower precedence than add
 
@@ -312,7 +327,6 @@ class ModularIndexing(sympy.Function):
     ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
             return sympy.S.Zero
-
         if (
             isinstance(base, sympy.Integer)
             and isinstance(divisor, sympy.Integer)
@@ -333,7 +347,7 @@ class ModularIndexing(sympy.Function):
             pass  # https://github.com/pytorch/pytorch/issues/108276
 
         if isinstance(base, sympy.Add):
-            new_terms: List[sympy.Integer] = []
+            new_terms: list[sympy.Integer] = []
             all_positive: bool = True
             for term in base.args:
                 if sympy.gcd(term, modulus * divisor) != modulus * divisor:
@@ -342,9 +356,9 @@ class ModularIndexing(sympy.Function):
                         and isinstance(term.args[0], sympy.Integer)
                         and term.args[0] < 0
                     ):
-                        # workaround for https://github.com/openai/triton/issues/619,
+                        # workaround for https://github.com/triton-lang/triton/issues/619,
                         # if there are negative terms, // produces wrong result
-                        # TODO if https://github.com/openai/triton/issues/619 is fixed
+                        # TODO if https://github.com/triton-lang/triton/issues/619 is fixed
                         # this optimization would become valid
                         all_positive = False
                         break
@@ -360,12 +374,9 @@ class ModularIndexing(sympy.Function):
         return None
 
     def _eval_is_nonnegative(self) -> Optional[bool]:
+        # pyrefly: ignore  # missing-attribute
         p, q = self.args[:2]
         return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
-
-    def _eval_is_positive(self) -> Optional[bool]:
-        p, q = self.args[:2]
-        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
 
 
 class Where(sympy.Function):
@@ -373,7 +384,7 @@ class Where(sympy.Function):
     Good ol' ternary operator
     """
 
-    nargs: Tuple[int, ...] = (3,)
+    nargs: tuple[int, ...] = (3,)
     precedence: int = 35  # lower precedence than add
 
     def _eval_is_integer(self) -> Optional[bool]:
@@ -402,7 +413,7 @@ class Where(sympy.Function):
 
 # Python-style modulus: take sign from RHS
 class PythonMod(sympy.Function):
-    nargs: Tuple[int, ...] = (2,)
+    nargs: tuple[int, ...] = (2,)
 
     precedence: int = 35  # lower precedence than add
     is_integer: bool = True
@@ -444,6 +455,7 @@ class PythonMod(sympy.Function):
         #   - floor(p / q) = 0
         #   - p % q = p - floor(p / q) * q = p
         less = p < q
+        # pyrefly: ignore  # missing-attribute
         if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
@@ -458,6 +470,15 @@ class PythonMod(sympy.Function):
 
     def _eval_is_nonpositive(self) -> Optional[bool]:
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
+
+    def _ccode(self, printer):
+        # pyrefly: ignore  # missing-attribute
+        p = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        # pyrefly: ignore  # missing-attribute
+        q = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        # pyrefly: ignore  # missing-attribute
+        abs_q = str(q) if self.args[1].is_positive else f"abs({q})"
+        return f"({p} % {q}) < 0 ? {p} % {q} + {abs_q} : {p} % {q}"
 
 
 # Generic modulus: only defined on non-negative arguments
@@ -489,8 +510,10 @@ class Mod(sympy.Function):
 
         # Evaluate if they are both literals.
         if q.is_Number and p.is_Number:
-            assert p >= 0, p
-            assert q >= 1, q
+            if p < 0:
+                raise AssertionError(p)
+            if q < 1:
+                raise AssertionError(q)
             return p % q
 
         # If q == 2, it's a matter of whether p is odd or even.
@@ -535,17 +558,23 @@ class CeilToInt(sympy.Function):
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
 
+    def _ccode(self, printer):
+        # pyrefly: ignore  # missing-attribute
+        number = printer.parenthesize(self.args[0], self.args[0].precedence - 0.5)
+        return f"ceil({number})"
+
 
 class FloorToInt(sympy.Function):
     is_integer = True
 
     @classmethod
     def eval(cls, number):
-        # assert number.is_integer is not True, number
         if number in (sympy.oo, int_oo):
             return int_oo
         if number in (-sympy.oo, int_oo):
             return -int_oo
+        if isinstance(number, sympy.Integer):
+            return number
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
 
@@ -583,7 +612,7 @@ class RShift(sympy.Function):
     def eval(cls, base, shift):
         if shift < 0:
             raise ValueError("negative shift count")
-        return base // 2**shift
+        return FloorDiv(base, 2**shift)
 
 
 class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
@@ -801,6 +830,7 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
             if not cond:
                 return ai.func(*[do(i, a) for i in ai.args], evaluate=False)
             if isinstance(ai, cls):
+                # pyrefly: ignore  # missing-attribute
                 return ai.func(*[do(i, a) for i in ai.args if i != a], evaluate=False)
             return a
 
@@ -919,10 +949,12 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
 
     _eval_is_algebraic = lambda s: _torf(i.is_algebraic for i in s.args)  # noqa: E731
     _eval_is_antihermitian = lambda s: _torf(  # noqa: E731
-        i.is_antihermitian for i in s.args  # noqa: E731
+        i.is_antihermitian
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_commutative = lambda s: _torf(  # noqa: E731
-        i.is_commutative for i in s.args  # noqa: E731
+        i.is_commutative
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_complex = lambda s: _torf(i.is_complex for i in s.args)  # noqa: E731
     _eval_is_composite = lambda s: _torf(i.is_composite for i in s.args)  # noqa: E731
@@ -936,10 +968,12 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_negative = lambda s: _torf(i.is_negative for i in s.args)  # noqa: E731
     _eval_is_noninteger = lambda s: _torf(i.is_noninteger for i in s.args)  # noqa: E731
     _eval_is_nonnegative = lambda s: _torf(  # noqa: E731
-        i.is_nonnegative for i in s.args  # noqa: E731
+        i.is_nonnegative
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_nonpositive = lambda s: _torf(  # noqa: E731
-        i.is_nonpositive for i in s.args  # noqa: E731
+        i.is_nonpositive
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_nonzero = lambda s: _torf(i.is_nonzero for i in s.args)  # noqa: E731
     _eval_is_odd = lambda s: _torf(i.is_odd for i in s.args)  # noqa: E731
@@ -949,10 +983,12 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_rational = lambda s: _torf(i.is_rational for i in s.args)  # noqa: E731
     _eval_is_real = lambda s: _torf(i.is_real for i in s.args)  # noqa: E731
     _eval_is_extended_real = lambda s: _torf(  # noqa: E731
-        i.is_extended_real for i in s.args  # noqa: E731
+        i.is_extended_real
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_transcendental = lambda s: _torf(  # noqa: E731
-        i.is_transcendental for i in s.args  # noqa: E731
+        i.is_transcendental
+        for i in s.args  # noqa: E731
     )  # noqa: E731
     _eval_is_zero = lambda s: _torf(i.is_zero for i in s.args)  # noqa: E731
 
@@ -972,6 +1008,7 @@ class Max(MinMaxBase, Application):  # type: ignore[misc]
         return fuzzy_or(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
     def _eval_is_negative(self):  # type:ignore[override]
+        # pyrefly: ignore  # missing-attribute
         return fuzzy_and(a.is_negative for a in self.args)
 
 
@@ -990,6 +1027,7 @@ class Min(MinMaxBase, Application):  # type: ignore[misc]
         return fuzzy_and(a.is_nonnegative for a in self.args)  # type: ignore[attr-defined]
 
     def _eval_is_negative(self):  # type:ignore[override]
+        # pyrefly: ignore  # missing-attribute
         return fuzzy_or(a.is_negative for a in self.args)
 
 
@@ -1054,7 +1092,7 @@ class PowByNatural(sympy.Function):
 
 
 # base is assumed to be nonnegative, thereby prevent complex numbers from
-# occuring
+# occurring
 class FloatPow(sympy.Function):
     is_real = True
 
@@ -1126,6 +1164,13 @@ class IntTrueDiv(sympy.Function):
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
 
+    def _ccode(self, printer):
+        # pyrefly: ignore  # missing-attribute
+        base = printer.parenthesize(self.args[0], PRECEDENCE["Atom"] - 0.5)
+        # pyrefly: ignore  # missing-attribute
+        divisor = printer.parenthesize(self.args[1], PRECEDENCE["Atom"] - 0.5)
+        return f"((int){base}/(int){divisor})"
+
 
 # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
 # Because we do not have the ability to guard on the stride permutation
@@ -1138,7 +1183,10 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
 
     @classmethod
     def eval(cls, *args):
-        assert len(args) % 2 == 0
+        if len(args) % 2 != 0:
+            raise AssertionError(
+                f"expected an even number of arguments, got {len(args)}"
+            )
         dim = len(args) // 2
         sizes = args[0:dim]
         strides = args[dim:]
@@ -1170,7 +1218,8 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
             # this function could help figure this out.
 
         if all(isinstance(a, sympy.Integer) for a in strides):
-            assert dim != 0
+            if dim == 0:
+                raise AssertionError("dim must not be zero")
             # When all strides are integral, we can sort, and the size for the
             # largest stride doesn't matter and can be arbitrarily symbolic
             s_sizes, s_strides = zip(
@@ -1282,13 +1331,32 @@ class Identity(sympy.Function):
     precedence = 10
 
     def __repr__(self):  # type: ignore[override]
+        # pyrefly: ignore  # missing-attribute
         return f"Identity({self.args[0]})"
 
+    def _sympystr(self, printer):
+        """Controls how sympy's StrPrinter prints this"""
+        return f"({printer.doprint(self.args[0])})"
+
     def _eval_is_real(self):
+        # pyrefly: ignore  # missing-attribute
         return self.args[0].is_real
 
     def _eval_is_integer(self):
         return self.args[0].is_integer  # type: ignore[attr-defined]
+
+    def _eval_expand_identity(self, **hints):
+        # Removes the identity op.
+        # pyrefly: ignore  # missing-attribute
+        return self.args[0]
+
+    def __int__(self) -> int:
+        # pyrefly: ignore  # missing-attribute
+        return int(self.args[0])
+
+    def __float__(self) -> float:
+        # pyrefly: ignore  # missing-attribute
+        return float(self.args[0])
 
 
 def make_opaque_unary_fn(name):
@@ -1299,11 +1367,12 @@ def make_opaque_unary_fn(name):
         constant propagation.  This helps avoid performing transformations
         that are valid for real numbers but are invalid for floating point;
         in particular, while we are willing to make optimizations that change
-        numerics for Tensor compute, we are NOT willing to make optimziations
+        numerics for Tensor compute, we are NOT willing to make optimizations
         that change numerics for size compute.
         """
 
         _torch_handler_name = name
+        _torch_unpickler = make_opaque_unary_fn
 
         @classmethod
         def eval(cls, a):
@@ -1364,6 +1433,9 @@ def make_opaque_bitwise_fn(name, real_op_name):
     class BitwiseFn(sympy.Function):
         _torch_handler_name = name
         precedence: int = prec
+        _torch_unpickler = functools.partial(
+            make_opaque_bitwise_fn, real_op_name=real_op_name
+        )
 
         @classmethod
         def eval(cls, a, b):
@@ -1379,7 +1451,10 @@ def make_opaque_bitwise_fn(name, real_op_name):
                 return sympy.Integer(getattr(operator, real_op_name)(int(a), int(b)))
             return None
 
-    BitwiseFn.__name__ = "BitwiseFn_" + name
+    nm = "BitwiseFn_" + name
+    BitwiseFn.__name__ = nm
+    BitwiseFn.__qualname__ = nm
+
     return BitwiseFn
 
 

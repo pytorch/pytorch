@@ -1,10 +1,59 @@
+"""Metrics collection and management system for Dynamo.
+
+This module provides context managers for gathering and reporting metrics during
+compilation and runtime.
+
+It includes two main components:
+- MetricsContext: A context manager for collecting metrics during compilation, supporting
+  nested contexts and various metric types (counters, sets, key-value pairs)
+- RuntimeMetricsContext: A specialized context for runtime metrics collection that doesn't
+  require explicit context management
+
+The metrics system enables comprehensive monitoring and analysis of both compilation and
+execution performance.
+"""
+
+from __future__ import annotations
+
+import heapq
+import logging
 import time
-from typing import Any, Callable, Dict, Optional, Type
-from typing_extensions import TypeAlias
+from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing_extensions import Self, TypeAlias
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+from torch.utils._traceback import CapturedTraceback
+
+
+log = logging.getLogger(__name__)
+
+
+class TopN:
+    """
+    Helper to record a list of metrics, keeping only the top N "most expensive" elements.
+    """
+
+    def __init__(self, at_most: int = 25):
+        self.at_most = at_most
+        self.heap: list[tuple[int, Any]] = []
+
+    def add(self, key: Any, val: int) -> None:
+        # Push if we haven't reached the max size, else push and pop the smallest
+        fn = heapq.heappush if len(self.heap) < self.at_most else heapq.heappushpop
+        fn(self.heap, (val, key))
+
+    def __len__(self) -> int:
+        return len(self.heap)
+
+    def __iter__(self) -> Iterator[tuple[Any, int]]:
+        return ((key, val) for val, key in sorted(self.heap, reverse=True))
 
 
 OnExitType: TypeAlias = Callable[
-    [int, int, Dict[str, Any], Optional[Type[BaseException]], Optional[BaseException]],
+    [int, int, dict[str, Any], Optional[type[BaseException]], Optional[BaseException]],
     None,
 ]
 
@@ -18,11 +67,12 @@ class MetricsContext:
         all metrics set during the lifetime of the contextmanager.
         """
         self._on_exit = on_exit
-        self._metrics: Dict[str, Any] = {}
+        self._metrics: dict[str, Any] = {}
         self._start_time_ns: int = 0
         self._level: int = 0
+        self._edits: list[tuple[CapturedTraceback, set[str]]] = []
 
-    def __enter__(self) -> "MetricsContext":
+    def __enter__(self) -> Self:
         """
         Initialize metrics recording.
         """
@@ -36,7 +86,7 @@ class MetricsContext:
 
     def __exit__(
         self,
-        exc_type: Optional[Type[BaseException]],
+        exc_type: Optional[type[BaseException]],
         exc_value: Optional[BaseException],
         _traceback: Any,
     ) -> None:
@@ -46,10 +96,13 @@ class MetricsContext:
         self._level -= 1
         assert self._level >= 0
         if self._level == 0:
-            end_time_ns = time.time_ns()
-            self._on_exit(
-                self._start_time_ns, end_time_ns, self._metrics, exc_type, exc_value
-            )
+            try:
+                end_time_ns = time.time_ns()
+                self._on_exit(
+                    self._start_time_ns, end_time_ns, self._metrics, exc_type, exc_value
+                )
+            except Exception:
+                log.exception("Unexpected exception logging compilation metrics")
 
     def in_progress(self) -> bool:
         """
@@ -67,6 +120,13 @@ class MetricsContext:
             self._metrics[metric] = 0
         self._metrics[metric] += value
 
+    def _render_edits(self, pred: set[str]) -> str:
+        return "\n\n" + "\n\n".join(
+            "Previous Traceback:\n" + "".join(e.format())
+            for e, k in self._edits
+            if k & pred
+        )
+
     def set(self, metric: str, value: Any, overwrite: bool = False) -> None:
         """
         Set a metric to a given value. Raises if the metric has been assigned previously
@@ -76,8 +136,11 @@ class MetricsContext:
             raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
         if metric in self._metrics and not overwrite:
             raise RuntimeError(
-                f"Metric '{metric}' has already been set in the current context"
+                self._render_edits({metric})
+                + f"\n\nRuntimeError: Metric '{metric}' has already been set in the current context "
+                "(see above for current and previous traceback)."
             )
+        self._edits.append((CapturedTraceback.extract(skip=1), {metric}))
         self._metrics[metric] = value
 
     def set_key_value(self, metric: str, key: str, value: Any) -> None:
@@ -94,21 +157,25 @@ class MetricsContext:
             self._metrics[metric] = {}
         self._metrics[metric][key] = value
 
-    def update(self, values: Dict[str, Any]) -> None:
+    def update(self, values: dict[str, Any], overwrite: bool = False) -> None:
         """
         Set multiple metrics directly. This method does NOT increment. Raises if any
-        metric has been assigned previously in the current context.
+        metric has been assigned previously in the current context and overwrite is
+        not set to True.
         """
         if self._level == 0:
             raise RuntimeError("Cannot update metrics outside of a MetricsContext")
         existing = self._metrics.keys() & values.keys()
-        if existing:
+        if existing and not overwrite:
             raise RuntimeError(
-                f"Metric(s) {existing} have already been set in the current context"
+                self._render_edits(set(values.keys()))
+                + f"\n\nRuntimeError: Metric(s) {existing} have already been set in the current context.  "
+                "(see above for current and previous traceback)."
             )
+        self._edits.append((CapturedTraceback.extract(skip=1), set(values.keys())))
         self._metrics.update(values)
 
-    def update_outer(self, values: Dict[str, Any]) -> None:
+    def update_outer(self, values: dict[str, Any]) -> None:
         """
         Update, but only when at the outermost context.
         """
@@ -127,6 +194,16 @@ class MetricsContext:
             self._metrics[metric] = set()
         self._metrics[metric].add(value)
 
+    def add_top_n(self, metric: str, key: Any, val: int) -> None:
+        """
+        Records a metric as a TopN set of values.
+        """
+        if self._level == 0:
+            return
+        if metric not in self._metrics:
+            self._metrics[metric] = TopN()
+        self._metrics[metric].add(key, val)
+
 
 class RuntimeMetricsContext:
     def __init__(self, on_exit: OnExitType):
@@ -136,11 +213,11 @@ class RuntimeMetricsContext:
         context manager.
         """
         self._on_exit = on_exit
-        self._metrics: Dict[str, Any] = {}
+        self._metrics: dict[str, Any] = {}
         self._start_time_ns: int = 0
 
     def increment(
-        self, metric: str, value: int, extra: Optional[Dict[str, Any]]
+        self, metric: str, value: int, extra: Optional[dict[str, Any]] = None
     ) -> None:
         """
         Increment a metric by a given amount.
@@ -162,6 +239,12 @@ class RuntimeMetricsContext:
         Call the on_exit function with the metrics gathered so far and reset.
         """
         if self._metrics:
-            end_time_ns = time.time_ns()
-            self._on_exit(self._start_time_ns, end_time_ns, self._metrics, None, None)
-            self._metrics = {}
+            try:
+                end_time_ns = time.time_ns()
+                self._on_exit(
+                    self._start_time_ns, end_time_ns, self._metrics, None, None
+                )
+            except Exception:
+                log.exception("Unexpected exception logging runtime metrics")
+            finally:
+                self._metrics = {}

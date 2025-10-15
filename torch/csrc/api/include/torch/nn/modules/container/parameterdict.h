@@ -107,7 +107,7 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
     parameters_.clear();
   }
 
-  /// Check if the centain parameter with the key in the ParameterDict
+  /// Check if the certain parameter with the key in the ParameterDict
   bool contains(const std::string& key) const noexcept {
     return parameters_.contains(key);
   }

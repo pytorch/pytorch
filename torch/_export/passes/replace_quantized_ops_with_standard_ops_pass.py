@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import operator
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 import torch.export._trace
@@ -76,20 +76,20 @@ def get_dequantized(
     if qscheme is torch.per_tensor_affine:
         return dequantize_per_tensor(
             val,
-            scale,
-            zero_point,
-            qmin,
-            qmax,
+            scale,  # type: ignore[arg-type]
+            zero_point,  # type: ignore[arg-type]
+            qmin,  # type: ignore[arg-type]
+            qmax,  # type: ignore[arg-type]
             dtype,
         )
     elif qscheme is torch.per_channel_affine:
         return dequantize_per_channel(
             val,
-            scale,
-            zero_point,
-            axis,
-            qmin,
-            qmax,
+            scale,  # type: ignore[arg-type]
+            zero_point,  # type: ignore[arg-type]
+            axis,  # type: ignore[arg-type]
+            qmin,  # type: ignore[arg-type]
+            qmax,  # type: ignore[arg-type]
             dtype,
         )
     else:
@@ -136,13 +136,13 @@ def insert_dequantized_node(
         raise RuntimeError(f"Unsupported dequantization scheme: {qscheme}")
 
 
-def get_qmin_qmax(dtype: torch.dtype) -> Tuple[Union[int, float], Union[int, float]]:
+def get_qmin_qmax(dtype: torch.dtype) -> tuple[Union[int, float], Union[int, float]]:
     return calculate_qmin_qmax(None, None, False, dtype, False)  # type: ignore[arg-type]
 
 
 def insert_qmin_qmax_node(
     gm: torch.fx.GraphModule, dtype_node: Union[torch.dtype, torch.fx.Node]
-) -> Tuple[torch.fx.Node, torch.fx.Node]:
+) -> tuple[torch.fx.Node, torch.fx.Node]:
     q_min_max_node = gm.graph.call_function(
         calculate_qmin_qmax, (None, None, False, dtype_node, False)
     )
@@ -169,7 +169,7 @@ def get_script_object(
 def insert_weight_and_bias_get_attr_node_from_get_attr_to_scriptobject(
     gm: torch.fx.GraphModule,
     param_node: torch.fx.Node,
-) -> Tuple[torch.fx.Node, Optional[torch.fx.Node]]:
+) -> tuple[torch.fx.Node, Optional[torch.fx.Node]]:
     """Directly inline tensor from a get_attr fx node."""
     mod = get_script_object(gm, param_node)
     w_qtensor, b_qtensor = mod.unpack()  # type: ignore[attr-defined]
@@ -186,7 +186,7 @@ def insert_weight_and_bias_get_attr_node_from_get_attr_to_qtensor(
     gm: torch.fx.GraphModule,
     get_attr_to_weight_node: torch.fx.Node,
     get_attr_to_bias_node: Optional[torch.fx.Node],
-) -> Tuple[torch.fx.Node, Optional[torch.fx.Node]]:
+) -> tuple[torch.fx.Node, Optional[torch.fx.Node]]:
     assert isinstance(get_attr_to_weight_node.target, str)
     w_qtensor = getattr(gm, get_attr_to_weight_node.target)
     w_attr_name = f"dequantized_{get_attr_to_weight_node.target}_w"
@@ -209,7 +209,7 @@ def insert_weight_and_bias_get_attr_node(
     b_qtensor: Optional[torch.Tensor],
     w_attr_name: str,
     b_attr_name: str,
-) -> Tuple[torch.fx.Node, Optional[torch.fx.Node]]:
+) -> tuple[torch.fx.Node, Optional[torch.fx.Node]]:
     w_tensor = get_tensor_from_qtensor(w_qtensor)
     _assign_attr(w_tensor, gm, w_attr_name)
     w_tensor_attr = gm.graph.get_attr(w_attr_name)
@@ -269,9 +269,9 @@ def _conv1d_op_with_squeeze(
     inp: torch.Tensor,
     weight: torch.Tensor,
     bias: Optional[torch.Tensor],
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
     groups: int,
 ) -> torch.Tensor:
     # In quantized version, conv1d is emulated using conv2d with squeeze and unsqueeze
@@ -292,7 +292,7 @@ def _conv1d_op_with_squeeze(
 
 
 def _transform_conv_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.Node):
-    """Conv specfic transformation function."""
+    """Conv specific transformation function."""
     assert isinstance(node.target, torch._ops.OpOverload)
     opname = node.target._opname
     scale_node, zero_point_node = node.args[2], node.args[3]
@@ -347,7 +347,7 @@ def _transform_conv_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.No
 
 
 def _transform_linear_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.Node):
-    """Linear specfic transformation function."""
+    """Linear specific transformation function."""
     scale_node, zero_point_node = node.args[2], node.args[3]
 
     inp_node, param_node = node.args[0], node.args[1]
@@ -567,6 +567,7 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
     quantized = False
 
     last_quantized_node = None
+    # pyrefly: ignore  # bad-assignment
     for node in gm.graph.nodes:
         if isinstance(node.target, OpOverload):
             with gm.graph.inserting_before(node):
@@ -629,6 +630,7 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
                     attr_names_to_clean.add(k)
                 if k == "_buffers":
                     buffer_name_to_clean = set()
+                    # pyrefly: ignore  # missing-attribute
                     for b_name, b_value in v.items():
                         if isinstance(b_value, torch.Tensor) and b_value.dtype in [
                             torch.qint8,
@@ -636,6 +638,7 @@ def replace_quantized_ops_with_standard_ops(gm: torch.fx.GraphModule):
                         ]:
                             buffer_name_to_clean.add(b_name)
                     for b_name in buffer_name_to_clean:
+                        # pyrefly: ignore  # missing-attribute
                         v.pop(b_name, None)
             for attr_name in attr_names_to_clean:
                 delattr(submod, attr_name)

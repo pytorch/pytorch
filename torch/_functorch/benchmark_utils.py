@@ -185,8 +185,12 @@ def benchmark_utilization(
     ```
     def f(a):
         return a.sum()
+
+
     a = torch.rand(2**20, device="cuda")
-    utilization, mm_conv_utilization = benchmark_utilization(f, a, "tmp", trace_file_name = "tmp_chrome_trace")
+    utilization, mm_conv_utilization = benchmark_utilization(
+        f, a, "tmp", trace_file_name="tmp_chrome_trace"
+    )
     ```
 
     Args:

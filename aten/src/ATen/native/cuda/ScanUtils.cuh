@@ -451,9 +451,9 @@ void scan_dim(const TensorBase& self, const TensorBase& result,
   TORCH_INTERNAL_ASSERT(result.is_contiguous());
 
   if (self.numel() == self.size(dim)) {
-    if constexpr (std::is_same<BinaryFunction, std::plus<scalar_t>>::value) {
+    if constexpr (std::is_same_v<BinaryFunction, std::plus<scalar_t>>) {
       if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms()) && (self.is_floating_point() || self.is_complex())) {
-# if (defined(CUDA_VERSION) && CUDA_VERSION > 11040) || defined(USE_ROCM)
+#if defined(CUDA_VERSION) || defined(USE_ROCM)
         cuda::cub::inclusive_deterministic_scan(self_->const_data_ptr<scalar_t>(), result.mutable_data_ptr<scalar_t>(), binary_op, self.numel());
 #else
         globalContext().alertNotDeterministic("cumsum_cuda_kernel");

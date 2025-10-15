@@ -10,7 +10,7 @@ import os
 import sys
 import typing
 from abc import abstractmethod
-from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar, Union
+from typing import Any, Callable, Generic, Optional, TypeVar, Union
 from typing_extensions import override, TypeAlias
 
 from torch._dynamo.utils import dynamo_timed
@@ -34,7 +34,7 @@ if config.is_fbcode():
 
     Sample: TypeAlias = Sample_
 else:
-    Sample: TypeAlias = Type[object]  # type: ignore[misc,no-redef]
+    Sample: TypeAlias = type[object]  # type: ignore[misc,no-redef]
 
 
 _T = TypeVar("_T")
@@ -106,7 +106,7 @@ class RemoteCacheSerde(Generic[_T, _U]):
 
 
 JsonDataTy = Optional[
-    Union[int, float, str, bool, Dict[str, "JsonDataTy"], List["JsonDataTy"]]
+    Union[int, float, str, bool, dict[str, "JsonDataTy"], list["JsonDataTy"]]
 ]
 
 
@@ -136,7 +136,7 @@ class RemoteCachePassthroughSerde(RemoteCacheSerde[_T, _T]):
 # To write (`put`), the RemoteCache takes data, uses the RemoteCacheSerde to
 # convert it for the backend and passes it to the backend.
 #
-# Conversly when reading (`get`), the RemoteCache takes data from the backend,
+# Conversely when reading (`get`), the RemoteCache takes data from the backend,
 # uses the RemoteCacheSerde to convert it and returns it.
 #
 # The RemoteCacheBackend is generic on _U - which is the type of data the
@@ -160,6 +160,7 @@ class RemoteCache(Generic[_T]):
             self.backend = override_cls()
         else:
             self.backend = backend
+        # pyrefly: ignore  # invalid-type-var
         self.serde = serde
 
     # See if the cache contains `key`. Returns `None` if the value is not
@@ -170,10 +171,13 @@ class RemoteCache(Generic[_T]):
             try:
                 result = self._get(key, sample)
                 cache_stats.get(type(self).__name__, result)
-            except Exception:
+            except Exception as e:
                 cache_stats.exception(type(self).__name__)
+                if sample:
+                    sample.fail_reason = str(e)
                 raise
-            self._log_sample(sample)
+            finally:
+                self._log_sample(sample)
             return result
 
     # Add `value` to the cache with the key `key`. Note that `None` is not a
@@ -186,10 +190,13 @@ class RemoteCache(Generic[_T]):
             try:
                 self._put(key, value, sample)
                 cache_stats.put(type(self).__name__)
-            except Exception:
+            except Exception as e:
                 cache_stats.exception(type(self).__name__)
+                if sample:
+                    sample.fail_reason = str(e)
                 raise
-            self._log_sample(sample)
+            finally:
+                self._log_sample(sample)
 
     # Used to convert data from the cache into structured data.
     def _decode(self, data: _U, sample: Optional[Sample]) -> _T:  # type: ignore[override]
@@ -239,13 +246,13 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
     A Redis implementation of a remote/distributed cache.
     """
 
+    # pyrefly: ignore  # missing-attribute
     _redis: Optional[redis.Redis] = None
 
     def __init__(self, cache_id: str) -> None:
         super().__init__()
         if not redis:
-            # We had trouble importing redis - just skip init.
-            return
+            raise RuntimeError("redis not available but required for remote cache")
 
         if "TORCHINDUCTOR_REDIS_URL" in os.environ:
             self._redis = redis.Redis.from_url(os.environ["TORCHINDUCTOR_REDIS_URL"])
@@ -262,7 +269,9 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return None
 
         try:
+            # pyrefly: ignore  # missing-attribute
             value = self._redis.get(key)
+        # pyrefly: ignore  # missing-attribute
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
             # first use. Mark is as unavailable now.
@@ -280,7 +289,9 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return
 
         try:
+            # pyrefly: ignore  # missing-attribute
             self._redis.set(key, data)
+        # pyrefly: ignore  # missing-attribute
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
             # first use. Mark is as unavailable now.
@@ -371,7 +382,7 @@ class _CacheStat:
 
 
 class _CacheStats:
-    _stats: Dict[str, _CacheStat]
+    _stats: dict[str, _CacheStat]
 
     def __init__(self) -> None:
         self._stats = collections.defaultdict(_CacheStat)

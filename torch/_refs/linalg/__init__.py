@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from functools import partial
-from typing import Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 import torch._prims as prims
@@ -56,7 +56,7 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
         torch._check(
             utils.get_higher_dtype(dtype, x_dtype) == dtype,
             lambda: f"{fn_name}: the dtype of the input ({x_dtype}) should be convertible "
-            "without narrowing to the specified dtype ({dtype})",
+            f"without narrowing to the specified dtype ({dtype})",
         )
 
 
@@ -97,6 +97,34 @@ def diagonal(
     return torch.diagonal(input, offset=offset, dim1=dim1, dim2=dim2)
 
 
+def _check_vector_norm_args(
+    x: TensorLikeType, ord: Union[float, int] = 2, dim: Optional[DimsType] = None
+):
+    from torch.fx.experimental.symbolic_shapes import sym_or
+
+    if not (ord < 0.0 or ord == float("inf")):
+        return
+
+    torch._check(
+        sym_or(
+            x.numel() != 0,
+            not isinstance(dim, IntLike) and dim is not None and len(dim) != 0,
+        ),
+        lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+        "because the operation does not have an identity",
+    )
+
+    shape = x.shape
+    if dim is not None and not isinstance(dim, IntLike):
+        for d in dim:
+            torch._check(
+                sym_or(x.numel() != 0, d < len(shape) and d >= 0 and shape[d] != 0),
+                lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
+                f"dimension {d} because this dimension is empty and the "
+                "operation does not have an identity",
+            )
+
+
 @register_decomposition(torch._ops.ops.aten.linalg_vector_norm)
 @out_wrapper(exact_dtype=True)
 def vector_norm(
@@ -107,29 +135,15 @@ def vector_norm(
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
-    # Checks
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    if guard_size_oblivious(x.numel() == 0) and (ord < 0.0 or ord == float("inf")):
-        torch._check(
-            dim is not None and len(dim) != 0,
-            lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
-            "because the operation does not have an identity",
-        )
-        shape = x.shape
-        assert dim is not None  # mypy does not seem to be able to see through check?
-        for d in dim:
-            torch._check(
-                shape[d] != 0,
-                lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
-                f"dimension {d} because this dimension is empty and the "
-                "operation does not have an identity",
-            )
+    _check_vector_norm_args(x, ord, dim)
+
     _check_norm_dtype(dtype, x.dtype, "linalg.vector_norm")
 
     computation_dtype, result_dtype = utils.reduction_dtypes(
@@ -151,6 +165,26 @@ def vector_norm(
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
         is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
+        if dim == []:
+            dim = None
+
+        if (dim is None and x.numel() == 1) or (
+            dim is not None
+            and (x.ndim > 0 and all(guard_or_false(x.shape[d] == 1) for d in dim))
+        ):
+            if x.ndim > 64:
+                raise RuntimeError(
+                    f"Received a tensor with {x.ndim} dimensions, but only tensors with up to 64 dims are supported!"
+                )
+            x = torch.abs(x)
+            if keepdim or x.ndim == 0:
+                return to_result_dtype(x).contiguous()
+            elif dim is None:
+                return to_result_dtype(x).flatten()[0]
+            else:
+                new_shape = [s for d, s in enumerate(x.shape) if d not in dim]
+                return to_result_dtype(x.view(new_shape)).contiguous()
+
         if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
@@ -182,15 +216,18 @@ def matrix_norm(
     # shape
     check_is_matrix(A, "linalg.matrix_norm")
     # dim
+    # pyrefly: ignore  # no-matching-overload
     dim = utils.canonicalize_dims(A.ndim, dim)
     if isinstance(dim, Dim):
         dim = (dim,)  # type: ignore[assignment]
     torch._check(
-        len(dim) == 2, lambda: "linalg.matrix_norm: dim must be a 2-tuple. Got {dim}"
+        len(dim) == 2, lambda: f"linalg.matrix_norm: dim must be a 2-tuple. Got {dim}"
     )
     torch._check(
+        # pyrefly: ignore  # index-error
         dim[0] != dim[1],
-        lambda: "linalg.matrix_norm: dims must be different. Got ({dim[0]}, {dim[1]})",
+        # pyrefly: ignore  # index-error
+        lambda: f"linalg.matrix_norm: dims must be different. Got ({dim[0]}, {dim[1]})",
     )
     # dtype arg
     _check_norm_dtype(dtype, A.dtype, "linalg.matrix_norm")
@@ -199,7 +236,7 @@ def matrix_norm(
         # ord
         torch._check(
             ord in ("fro", "nuc"),
-            lambda: "linalg.matrix_norm: Order {ord} not supported.",
+            lambda: f"linalg.matrix_norm: Order {ord} not supported.",
         )
         # dtype
         check_fp_or_complex(
@@ -211,6 +248,7 @@ def matrix_norm(
         else:  # ord == "nuc"
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
+            # pyrefly: ignore  # index-error
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = torch.sum(svdvals(prims.transpose(A, perm)), -1, keepdim)
             if keepdim:
@@ -222,7 +260,7 @@ def matrix_norm(
         abs_ord = abs(ord)
         torch._check(
             abs_ord in (2, 1, float("inf")),
-            lambda: "linalg.matrix_norm: Order {ord} not supported.",
+            lambda: f"linalg.matrix_norm: Order {ord} not supported.",
         )
         # dtype
         check_fp_or_complex(
@@ -234,6 +272,7 @@ def matrix_norm(
         if abs_ord == 2.0:
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
+            # pyrefly: ignore  # index-error
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = max_min(svdvals(prims.transpose(A, perm)), dim=-1)
             if keepdim:
@@ -241,6 +280,7 @@ def matrix_norm(
                 result = prims.transpose(torch.unsqueeze(result, -1), inv_perm)
             return result
         else:  # 1, -1, inf, -inf
+            # pyrefly: ignore  # bad-unpacking
             dim0, dim1 = dim
             if abs_ord == float("inf"):
                 dim0, dim1 = dim1, dim0
@@ -266,12 +306,12 @@ def norm(
             dim = (dim,)  # type: ignore[assignment]
         torch._check(
             len(dim) in (1, 2),
-            lambda: "linalg.norm: If dim is specified, it must be of length 1 or 2. Got {dim}",
+            lambda: f"linalg.norm: If dim is specified, it must be of length 1 or 2. Got {dim}",
         )
     elif ord is not None:
         torch._check(
             A.ndim in (1, 2),
-            lambda: "linalg.norm: If dim is not specified but ord is, the input must be 1D or 2D. Got {A.ndim}D",
+            lambda: f"linalg.norm: If dim is not specified but ord is, the input must be 1D or 2D. Got {A.ndim}D",
         )
 
     if ord is not None and (
@@ -288,7 +328,7 @@ def norm(
 
 # CompositeImplicitAutograd
 @out_wrapper("U", "S", "Vh", exact_dtype=True)
-def svd(A: TensorLikeType, full_matrices: bool = True) -> Tuple[Tensor, Tensor, Tensor]:
+def svd(A: TensorLikeType, full_matrices: bool = True) -> tuple[Tensor, Tensor, Tensor]:
     return prims.svd(A, full_matrices=full_matrices)
 
 

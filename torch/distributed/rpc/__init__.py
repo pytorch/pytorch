@@ -3,8 +3,8 @@ import logging
 import os
 import threading
 import warnings
+from collections.abc import Generator
 from datetime import timedelta
-from typing import Generator, Tuple
 from urllib.parse import urlparse
 
 import torch
@@ -30,6 +30,10 @@ if is_available() and not torch._C._rpc_init():
 
 
 if is_available():
+    _is_tensorpipe_available = hasattr(
+        torch._C._distributed_rpc, "_TensorPipeRpcBackendOptionsBase"
+    )
+
     import numbers
 
     import torch.distributed.autograd as dist_autograd
@@ -37,7 +41,6 @@ if is_available():
     from torch._C._distributed_rpc import (  # noqa: F401
         _cleanup_python_rpc_handler,
         _DEFAULT_INIT_METHOD,
-        _DEFAULT_NUM_WORKER_THREADS,
         _DEFAULT_RPC_TIMEOUT_SEC,
         _delete_all_user_and_unforked_owner_rrefs,
         _destroy_rref_context,
@@ -58,7 +61,6 @@ if is_available():
         _set_and_start_rpc_agent,
         _set_profiler_node_id,
         _set_rpc_timeout,
-        _TensorPipeRpcBackendOptionsBase,
         _UNSET_RPC_TIMEOUT,
         enable_gil_profiling,
         get_rpc_timeout,
@@ -66,9 +68,15 @@ if is_available():
         RemoteProfilerManager,
         RpcAgent,
         RpcBackendOptions,
-        TensorPipeAgent,
         WorkerInfo,
     )
+
+    if _is_tensorpipe_available:
+        from torch._C._distributed_rpc import (  # noqa: F401
+            _DEFAULT_NUM_WORKER_THREADS,
+            _TensorPipeRpcBackendOptionsBase,
+            TensorPipeAgent,
+        )
 
     from . import api, backend_registry, functions
     from .api import *  # noqa: F401,F403
@@ -76,7 +84,7 @@ if is_available():
     from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .server_process_global_profiler import _server_process_global_profile
 
-    rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
+    rendezvous_iterator: Generator[tuple[Store, int, int], None, None]
 
     __all__ += ["init_rpc", "BackendType", "TensorPipeRpcBackendOptions"]
     __all__ = __all__ + api.__all__ + backend_registry.__all__  # noqa: PLE0605

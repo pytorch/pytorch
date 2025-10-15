@@ -1,6 +1,7 @@
 #ifdef USE_C10D_UCC
 
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
@@ -1324,7 +1325,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::gather(
     SAVE_TENSORS(outputs, data->dst);
   } else {
     // for non-root ranks, outputTensors should be an empty list
-    if (outputTensors.size() != 0) {
+    if (!outputTensors.empty()) {
       TORCH_UCC_LOG_ERROR(
           TORCH_UCC_COLL_POST, "requires empty output on non-root");
     }
@@ -1549,7 +1550,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::scatter(
     SAVE_TENSORS(inputTensors[0], data->src);
   } else {
     // for non-root ranks, inputTensors should be an empty list
-    if (inputTensors.size() != 0) {
+    if (!inputTensors.empty()) {
       TORCH_UCC_LOG_ERROR(
           TORCH_UCC_COLL_POST, "requires empty output on non-root");
     }

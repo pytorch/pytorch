@@ -8,23 +8,14 @@ import linecache
 import os
 import sys
 import types
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
-from typing import (
-    Any,
-    BinaryIO,
-    Callable,
-    cast,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 from weakref import WeakValueDictionary
 
 import torch
 from torch.serialization import _get_restore_location, _maybe_decode_ascii
+from torch.types import FileLike
 
 from ._directory_reader import DirectoryReader
 from ._importlib import (
@@ -49,7 +40,7 @@ __all__ = ["PackageImporter"]
 # This is a list of imports that are implicitly allowed even if they haven't
 # been marked as extern. This is to work around the fact that Torch implicitly
 # depends on numpy and package can't track it.
-# https://github.com/pytorch/MultiPy/issues/46
+# https://github.com/pytorch/multipy/issues/46  # codespell:ignore multipy
 IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
     "numpy",
     "numpy.core",
@@ -64,7 +55,7 @@ IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
 # The primary motivation is to enable Numpy upgrade that many modules
 # depend on. The latest release of Numpy removed `numpy.str` and
 # `numpy.bool` breaking unpickling for many modules.
-EXTERN_IMPORT_COMPAT_NAME_MAPPING: Dict[str, Dict[str, Any]] = {
+EXTERN_IMPORT_COMPAT_NAME_MAPPING: dict[str, dict[str, Any]] = {
     "numpy": {
         "str": str,
         "bool": bool,
@@ -90,11 +81,11 @@ class PackageImporter(Importer):
     local to this importer.
     """
 
-    modules: Dict[str, types.ModuleType]
+    modules: dict[str, types.ModuleType]
 
     def __init__(
         self,
-        file_or_buffer: Union[str, torch._C.PyTorchFileReader, os.PathLike, BinaryIO],
+        file_or_buffer: Union[FileLike, torch._C.PyTorchFileReader],
         module_allowed: Callable[[str], bool] = lambda module_name: True,
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
@@ -117,6 +108,7 @@ class PackageImporter(Importer):
             self.filename = "<pytorch_file_reader>"
             self.zip_reader = file_or_buffer
         elif isinstance(file_or_buffer, (os.PathLike, str)):
+            # pyrefly: ignore  # no-matching-overload
             self.filename = os.fspath(file_or_buffer)
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
@@ -395,13 +387,13 @@ class PackageImporter(Importer):
         assert module.__name__ not in _package_imported_modules
         _package_imported_modules[module.__name__] = module
 
-        # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
+        # preemptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
         self._install_on_parent(parent, name, module)
 
         if filename is not None:
             assert mangled_filename is not None
-            # pre-emptively install the source in `linecache` so that stack traces,
+            # preemptively install the source in `linecache` so that stack traces,
             # `inspect`, etc. work.
             assert filename not in linecache.cache  # type: ignore[attr-defined]
             linecache.lazycache(mangled_filename, ns)
@@ -432,7 +424,12 @@ class PackageImporter(Importer):
                         module.__dict__.setdefault(old_name, new_name)
 
                 return module
-        return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore[attr-defined]
+        return self._make_module(
+            name,
+            cur.source_file,  # type: ignore[attr-defined]
+            isinstance(cur, _PackageNode),
+            parent,
+        )
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
         source = self.zip_reader.get_record(fullpath)
@@ -571,7 +568,7 @@ class PackageImporter(Importer):
                     else:
                         where = "``from list''"
                     raise TypeError(
-                        f"Item in {where} must be str, " f"not {type(x).__name__}"
+                        f"Item in {where} must be str, not {type(x).__name__}"
                     )
                 elif x == "*":
                     if not recursive and hasattr(module, "__all__"):
@@ -646,7 +643,7 @@ class PackageImporter(Importer):
             return f"{name.replace('.', '/')}"
 
     def _get_or_create_package(
-        self, atoms: List[str]
+        self, atoms: list[str]
     ) -> "Union[_PackageNode, _ExternNode]":
         cur = self.root
         for i, atom in enumerate(atoms):
@@ -705,7 +702,7 @@ class _PathNode:
 class _PackageNode(_PathNode):
     def __init__(self, source_file: Optional[str]):
         self.source_file = source_file
-        self.children: Dict[str, _PathNode] = {}
+        self.children: dict[str, _PathNode] = {}
 
 
 class _ModuleNode(_PathNode):

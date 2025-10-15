@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from typing import Optional
 
@@ -104,6 +103,7 @@ class Linear(torch.nn.Module):
     r"""
     A quantized sparse linear module with quantized tensor as inputs and outputs.
     """
+
     _version = 1
     _FLOAT_MODULE = torch.nn.Linear
 
@@ -224,7 +224,7 @@ class Linear(torch.nn.Module):
 
         TODO(zaf): Need to add the sparse params to the qconfig
         """
-        assert type(mod) == cls._FLOAT_MODULE, (
+        assert type(mod) is cls._FLOAT_MODULE, (
             cls._get_name() + ".from_float only works for " + cls._FLOAT_MODULE.__name__
         )
         assert hasattr(mod, "sparse_params"), (
@@ -265,7 +265,10 @@ class Linear(torch.nn.Module):
             dtype=dtype,
         )
         qlinear.set_weight_bias(
-            qweight, mod.bias, row_block_size, col_block_size  # type: ignore[arg-type]
+            qweight,
+            mod.bias,
+            row_block_size,  # type: ignore[arg-type]
+            col_block_size,  # type: ignore[arg-type]
         )
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)

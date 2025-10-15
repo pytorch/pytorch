@@ -7,6 +7,7 @@
 
 import torch
 import torch._inductor
+import operator
 
 aten = torch.ops.aten
 prims = torch.ops.prims

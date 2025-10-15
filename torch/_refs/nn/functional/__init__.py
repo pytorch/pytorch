@@ -1,8 +1,10 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable, Optional, Union
+from typing import Concatenate, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._prims as prims
@@ -67,6 +69,9 @@ __all__ = [
     "triplet_margin_loss",
 ]
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 Tensor = torch.Tensor
 aten = torch._ops.ops.aten
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
@@ -129,22 +134,29 @@ def alpha_dropout(
     return self * dropout_mask + b
 
 
-def _inplace_wrapper(fn):
+def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     """
     Given a nn.functional non-linearity, implements its `inplace: bool` argument
     """
 
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
-    def _fn(a, *args, inplace=False, **kwargs):
-        if inplace:
+    def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        # pyrefly: ignore  # unsupported-operation
+        a = args[0]
+        if "inplace" not in kwargs:
+            kwargs["inplace"] = False
+        # pyrefly: ignore  # unsupported-operation
+        if kwargs["inplace"]:
             torch._check(
                 "out" not in kwargs,
                 lambda: "Cannot set inplace=True and pass out= at the same time",
             )
-            return fn(a, *args, inplace=False, out=a, **kwargs)
+            kwargs["inplace"] = False
+            kwargs["out"] = a
+            return fn(*args, **kwargs)
         else:
-            return fn(a, *args, inplace=False, **kwargs)
+            return fn(*args, **kwargs)
 
     return _fn
 
@@ -615,6 +627,7 @@ def smooth_l1_loss(
         )
     else:
         loss = torch.abs(input - target)
+        # pyrefly: ignore  # unsupported-operation
         loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
         return _apply_loss_reduction(loss, reduction)
 
@@ -751,7 +764,7 @@ def _nll_loss_nd(
         batch_size = input.shape[0]
         loss = -input[torch.arange(batch_size), target] * current_weight
     else:
-        # 3D case (N batch size, C classe, K dimensions)
+        # 3D case (N batch size, C classes, K dimensions)
         # input (N batch size, C classes, K)
         batch_size = input.shape[0]
         extent = input.shape[2]

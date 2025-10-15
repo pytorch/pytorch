@@ -12,12 +12,14 @@
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <torch/library.h>
+#include <c10/util/Exception.h>
 
 
+// NOLINTBEGIN(bugprone-unchecked-optional-access)
 namespace at::functorch {
 
 namespace {
-static bool any_has_value(ArrayRef<std::optional<int64_t>> bdims) {
+bool any_has_value(ArrayRef<std::optional<int64_t>> bdims) {
   for (const auto& bdim : bdims) {
     if (bdim.has_value()) {
       return true;
@@ -26,7 +28,7 @@ static bool any_has_value(ArrayRef<std::optional<int64_t>> bdims) {
   return false;
 }
 
-static int64_t get_num_leading_nones(ArrayRef<std::optional<Tensor>> indices) {
+int64_t get_num_leading_nones(ArrayRef<std::optional<Tensor>> indices) {
   int64_t result = 0;
   for (const auto& idx : indices) {
     if (!idx.has_value() || !idx->defined()) {
@@ -38,7 +40,7 @@ static int64_t get_num_leading_nones(ArrayRef<std::optional<Tensor>> indices) {
   return result;
 }
 
-static int64_t get_max_index_logical_dim(
+int64_t get_max_index_logical_dim(
     ArrayRef<std::optional<Tensor>> indices,
     ArrayRef<std::optional<int64_t>> indices_bdims) {
   int64_t max_logical_dim = -1;
@@ -55,7 +57,8 @@ static int64_t get_max_index_logical_dim(
   return max_logical_dim;
 }
 
-static std::vector<std::optional<Tensor>> batchIndices(
+std::vector<std::optional<Tensor>> batchIndices(
+  at::TensorOptions options,
   ArrayRef<std::optional<Tensor>> indices,
   ArrayRef<std::optional<int64_t>> indices_bdims,
   const c10::SymInt& batch_size,
@@ -92,9 +95,10 @@ static std::vector<std::optional<Tensor>> batchIndices(
     if (index.has_value() && index->sym_numel() != 0) {
       const auto idx_bdim = indices_bdims[i];
       indices_.emplace_back(maybePadToLogicalRank(moveBatchDimToFront(index.value(), idx_bdim), idx_bdim, maxLogicalRank));
-      if (index.value().dtype() == kBool && indices_bdims[i].has_value()) {
-        throw std::runtime_error("vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask.");
-      }
+      TORCH_CHECK(
+        !(index.value().dtype() == kBool) || !indices_bdims[i].has_value(),
+        "vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask."
+      );
     } else {
       indices_.push_back(index);
     }
@@ -110,7 +114,7 @@ static std::vector<std::optional<Tensor>> batchIndices(
   } else if (indices_batched && !self_bdim.has_value()) {
     // do nothing
   } else if (indices_batched && (self_bdim.has_value() || values_bdim.has_value())) {
-    auto arange_index = at::arange(0, batch_size);
+    auto arange_index = at::arange(batch_size, options.dtype(kLong));
     while (arange_index.dim() < maxIndexDim) {
       arange_index = arange_index.unsqueeze(-1);
     }
@@ -122,7 +126,7 @@ static std::vector<std::optional<Tensor>> batchIndices(
 
 // Define an "advanced index" to be a selection object that is
 // a non-trivial Tensor (i.e. it does not represent :).
-static bool is_advanced_index(const std::optional<Tensor>& idx) {
+bool is_advanced_index(const std::optional<Tensor>& idx) {
   if (!idx.has_value()) {
     return false;
   }
@@ -133,7 +137,7 @@ static bool is_advanced_index(const std::optional<Tensor>& idx) {
 }
 
 // See NOTE: [advanced indices adjacent] for definition
-static bool are_advanced_indices_adjacent(ArrayRef<std::optional<Tensor>> indices) {
+bool are_advanced_indices_adjacent(ArrayRef<std::optional<Tensor>> indices) {
   int64_t num_advanced_indices_regions = 0;
   bool in_advanced_indices_region = false;
   for (const auto& idx : indices) {
@@ -161,7 +165,7 @@ static bool are_advanced_indices_adjacent(ArrayRef<std::optional<Tensor>> indice
 // - result: Tensor[B, 4, 5, 6, 2, 3, 7, 8]
 //                     -------  ----
 //                     region2  region1
-static Tensor swap_regions(const Tensor& tensor, int64_t first_region_size, int64_t second_region_size) {
+Tensor swap_regions(const Tensor& tensor, int64_t first_region_size, int64_t second_region_size) {
   VmapDimVector permutation(tensor.dim(), 0);
   std::iota(permutation.begin(), permutation.end(), 0);
   std::rotate(
@@ -235,7 +239,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_batch_rule(
   bool advanced_indices_are_adjacent = are_advanced_indices_adjacent(indices);
 
   // Step 1
-  const auto batched_indices = batchIndices(indices, indices_bdims, self_.sym_size(0), self_bdim);
+  const auto batched_indices = batchIndices(self.options(), indices, indices_bdims, self_.sym_size(0), self_bdim);
   auto num_leading_nones = get_num_leading_nones(indices);
   auto max_index_dim = get_max_index_logical_dim(indices, indices_bdims);
 
@@ -383,9 +387,11 @@ namespace {
     // next broadcast all index tensors together
     try {
       indices = at::expand_outplace(indices);
-    } catch (std::exception &e) {
-      TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
-                               " with shapes ");
+    } catch (std::exception&) {
+      TORCH_CHECK_INDEX(
+          false,
+          "shape mismatch: indexing tensors could not be broadcast together"
+          " with shapes ");
     }
     // add missing null Tensors so that it matches self.dim()
     while (indices.size() < static_cast<size_t>(self.dim())) {
@@ -418,7 +424,7 @@ namespace {
     TORCH_INTERNAL_ASSERT(indices.size() == indices_bdims.size());
 
     // we've already made sure that self has bdim at 0.
-    const auto indices_ = batchIndices(indices, indices_bdims, batch_size, /*self_bdim=*/0, values_bdim);
+    const auto indices_ = batchIndices(self.options(), indices, indices_bdims, batch_size, /*self_bdim=*/0, values_bdim);
 
     auto indexed_shape = get_indexed_shape(self_, List<std::optional<Tensor>>(indices_));
 
@@ -547,7 +553,7 @@ Tensor &_index_put_impl__plumbing(Tensor &self, const List<std::optional<Tensor>
   return self;
 }
 
-static Tensor maybe_permute_values(
+Tensor maybe_permute_values(
     const Tensor& values,
     ArrayRef<std::optional<Tensor>> orig_indices,
     ArrayRef<std::optional<int64_t>> orig_indices_bdims) {
@@ -766,6 +772,15 @@ std::tuple<Tensor, std::optional<int64_t>> scatter_add_batch_rule(
     const Tensor& index, std::optional<int64_t> index_bdim,
     const Tensor& src, std::optional<int64_t> src_bdim) {
   return scatter_batch_rule(ATEN_FN(scatter_add),
+                            self, self_bdim, dim, index, index_bdim, src, src_bdim);
+}
+
+std::tuple<Tensor, std::optional<int64_t>> scatter_add__batch_rule(
+    const Tensor& self, std::optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, std::optional<int64_t> index_bdim,
+    const Tensor& src, std::optional<int64_t> src_bdim) {
+  return scatter_batch_rule(ATEN_FN(scatter_add_),
                             self, self_bdim, dim, index, index_bdim, src, src_bdim);
 }
 
@@ -1037,7 +1052,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_add_batch_rule(
                                    other, other_bdim, alpha, false);
 }
 
-static std::tuple<Tensor,Tensor> binary_pointwise_align(
+std::tuple<Tensor,Tensor> binary_pointwise_align(
     const Tensor & self,
     std::optional<int64_t> self_bdim,
     const Tensor & mask,
@@ -1153,7 +1168,9 @@ std::tuple<Tensor, std::optional<int64_t>> index_fill_int_scalar_batch_rule_impl
     return std::make_tuple(self_, 0);
   }
 
-  self_ = self_bdim.has_value() ? self_ : self_.clone();
+  if (!self_bdim.has_value()) {
+    self_ = self_.clone();
+  }
 
   return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value);
 }
@@ -1207,7 +1224,9 @@ std::tuple<Tensor, std::optional<int64_t>> index_fill_int_tensor_batch_rule_impl
     return std::make_tuple(self_, 0);
   }
 
-  self_ = self_bdim.has_value() ? self_ : self_.clone();
+  if (!self_bdim.has_value()) {
+    self_ = self_.clone();
+  }
 
   // calling .item() on value is safe here because value is guaranteed to not be a batched tensor.
   return index_fill_batch_rule_helper(batch_size, self_logical_rank, index_logical_rank, self_, dim, index_, value.item());
@@ -1270,6 +1289,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(scatter, value, scatter_value_batch_rule);
   VMAP_SUPPORT2(scatter, src, scatter_src_batch_rule);
   VMAP_SUPPORT(scatter_add, scatter_add_batch_rule);
+  VMAP_SUPPORT(scatter_add_, scatter_add__batch_rule);
   VMAP_SUPPORT2(scatter, reduce, scatter_reduce_batch_rule);
   VMAP_SUPPORT2(scatter, value_reduce, scatter_value_reduce_batch_rule);
   VMAP_SUPPORT2(scatter_reduce, two, scatter_reduce_two_batch_rule);
@@ -1283,3 +1303,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 }
 
 } // namespace at::functorch
+// NOLINTEND(bugprone-unchecked-optional-access)

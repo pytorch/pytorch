@@ -4,6 +4,7 @@ import pdb
 import sys
 import traceback
 import typing
+from datetime import timedelta
 
 import torch
 
@@ -33,6 +34,7 @@ DistError = torch._C._DistError
 DistBackendError = torch._C._DistBackendError
 DistNetworkError = torch._C._DistNetworkError
 DistStoreError = torch._C._DistStoreError
+QueueEmptyError = torch._C._DistQueueEmptyError
 
 if is_available():
     from torch._C._distributed_c10d import (
@@ -79,9 +81,9 @@ if is_available():
             finally:
                 sys.stdin = _stdin
 
-    _breakpoint_cache: typing.Dict[int, typing.Any] = {}
+    _breakpoint_cache: dict[int, typing.Any] = {}
 
-    def breakpoint(rank: int = 0, skip: int = 0):
+    def breakpoint(rank: int = 0, skip: int = 0, timeout_s=3600):
         """
         Set a breakpoint, but only on a single rank.  All other ranks will wait for you to be
         done with the breakpoint before continuing.
@@ -97,6 +99,13 @@ if is_available():
             if counter <= skip:
                 log.warning("Skip the breakpoint, counter=%d", counter)
                 return
+
+        # avoid having the default timeout (if short) interrupt your debug session
+        if timeout_s is not None:
+            for group in torch.distributed.distributed_c10d._pg_map:
+                torch.distributed.distributed_c10d._set_pg_timeout(
+                    timedelta(seconds=timeout_s), group
+                )
 
         if get_rank() == rank:
             pdb = _DistributedPdb()
@@ -124,6 +133,7 @@ if is_available():
     # Variables prefixed with underscore are not auto imported
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
     # this.
+    # pyrefly: ignore  # deprecated
     from .distributed_c10d import *  # noqa: F403
     from .distributed_c10d import (
         _all_gather_base,
@@ -133,6 +143,7 @@ if is_available():
         _get_process_group_name,
         _rank_not_in_group,
         _reduce_scatter_base,
+        _time_estimator,
         get_node_local_rank,
     )
     from .remote_device import _remote_device

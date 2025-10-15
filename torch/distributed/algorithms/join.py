@@ -2,7 +2,7 @@
 import warnings
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Any, List, NamedTuple, Optional, Type
+from typing import Any, NamedTuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -165,7 +165,7 @@ class Join:
 
     def __init__(
         self,
-        joinables: List[Joinable],
+        joinables: list[Joinable],
         enable: bool = True,
         throw_on_early_termination: bool = False,
         **kwargs,
@@ -210,6 +210,7 @@ class Join:
         """
         process_group = None
         device = None
+        # pyrefly: ignore  # bad-assignment
         for joinable in self._joinables:
             if process_group is None:
                 process_group = joinable.join_process_group
@@ -223,12 +224,11 @@ class Join:
         self._rank = dist.get_rank(self._process_group)
         self._device = device
 
-    def __enter__(self):
-        ...
+    def __enter__(self): ...
 
     def __exit__(
         self,
-        type: Optional[Type[BaseException]],
+        type: Optional[type[BaseException]],
         value: Optional[BaseException],
         traceback: Optional[TracebackType],
     ):

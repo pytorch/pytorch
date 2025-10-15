@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import inspect
 import logging
+from collections.abc import Callable
 from functools import wraps
 from queue import Queue
-from typing import Callable, Dict, List
 
 import torch.nn as nn
 from torch.fx._compatibility import compatibility
@@ -31,6 +31,7 @@ def pass_result_wrapper(fn: Callable) -> Callable:
         wrapped_fn (Callable[Module, PassResult])
     """
     if fn is None:
+        # pyrefly: ignore  # bad-return
         return None
 
     @wraps(fn)
@@ -50,7 +51,7 @@ def pass_result_wrapper(fn: Callable) -> Callable:
 
 
 def _validate_pass_schedule_constraint(
-    constraint: Callable[[Callable, Callable], bool], passes: List[Callable]
+    constraint: Callable[[Callable, Callable], bool], passes: list[Callable]
 ) -> None:
     for i, a in enumerate(passes):
         for j, b in enumerate(passes[i + 1 :]):
@@ -64,8 +65,8 @@ def _validate_pass_schedule_constraint(
 
 
 def _topological_sort_passes(
-    passes: List[Callable], constraints: List[Callable]
-) -> List[Callable]:
+    passes: list[Callable], constraints: list[Callable]
+) -> list[Callable]:
     """
     Args
         passes: Passes that we are ordering
@@ -78,9 +79,9 @@ def _topological_sort_passes(
     if len(constraints) == 0:
         return passes
 
-    # Contruct a graph mapping nodes to a list of their users
-    graph: Dict[Callable, List[Callable]] = {p: [] for p in passes}
-    indegree_map: Dict[Callable, int] = dict.fromkeys(passes, 0)
+    # Construct a graph mapping nodes to a list of their users
+    graph: dict[Callable, list[Callable]] = {p: [] for p in passes}
+    indegree_map: dict[Callable, int] = dict.fromkeys(passes, 0)
     candidates: Queue = Queue()
     for a in passes:
         for b in passes:
@@ -95,8 +96,8 @@ def _topological_sort_passes(
         if indegree_map[a] == 0:
             candidates.put(a)
 
-    visited: Dict[Callable, bool] = dict.fromkeys(passes, False)
-    sorted_passes: List[Callable] = []
+    visited: dict[Callable, bool] = dict.fromkeys(passes, False)
+    sorted_passes: list[Callable] = []
 
     while not candidates.empty():
         p = candidates.get()
@@ -169,8 +170,8 @@ class PassManager:
             checks
     """
 
-    passes: List[Callable[[nn.Module], PassResult]]
-    constraints: List[Callable[[Callable, Callable], bool]]
+    passes: list[Callable[[nn.Module], PassResult]]
+    constraints: list[Callable[[Callable, Callable], bool]]
     _validated: bool = False
     steps: int = 1
 

@@ -39,8 +39,11 @@ SavedVariable::SavedVariable(
     // follow.
     TORCH_CHECK(
         !variable.is_inference(),
-        "Inference tensors cannot be saved for backward. To work around "
-        "you can make a clone to get a normal tensor and use it in autograd.")
+        "Inference tensors cannot be saved for backward. Please do not use "
+        "Tensors created in inference mode in computation tracked by autograd. "
+        "To work around this, you can make a clone to get a normal tensor and "
+        "use it in autograd, or use `torch.no_grad()` instead of "
+        "`torch.inference_mode()`.");
 
     was_default_constructed_ = false;
     saved_version_ = variable._version();
@@ -52,13 +55,15 @@ SavedVariable::SavedVariable(
       TORCH_INTERNAL_ASSERT(!is_leaf_ && is_output);
       weak_grad_fn_ = variable.grad_fn();
     }
-
-    auto maybe_hooks = get_default_hooks();
+    std::unique_ptr<SavedVariableHooks> maybe_hooks =
+        at::SavedTensorDefaultHooks::is_enabled() ? get_default_hooks()
+                                                  : nullptr;
 
     // Avoid wrapped numbers from being leaked to the user
     if (maybe_hooks && !variable.unsafeGetTensorImpl()->is_wrapped_number()) {
       save_metadata(variable);
       set_hooks_and_pack_data(std::move(maybe_hooks), variable);
+      TORCH_INTERNAL_ASSERT(!data_.defined());
       return;
     }
 
@@ -134,9 +139,14 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   // We want grad_fn here to provide the most helpful debug message to the user
   // if versions don't match
 
-  auto grad_fn = is_inplace_on_view_ ? weak_grad_fn_.lock()
-      : !hooks_ ? saved_original_ ? data_.grad_fn() : nullptr
-                : grad_fn_;
+  std::shared_ptr<Node> grad_fn;
+  if (is_inplace_on_view_) {
+    grad_fn = weak_grad_fn_.lock();
+  } else if (!hooks_) {
+    grad_fn = saved_original_ ? data_.grad_fn() : nullptr;
+  } else {
+    grad_fn = grad_fn_;
+  }
 
   if (!is_leaf_ && !grad_fn) {
     // This issue was introduced when we added logic to save the original

@@ -19,18 +19,18 @@ def mark_mixed_dtype(computation_node):
     if computation_node_dtype not in (torch.float16, torch.bfloat16):
         return
 
-    if not len(computation_node.users) == 1:
+    if len(computation_node.users) != 1:
         return
 
     computation_node_user = next(iter(computation_node.users.keys()))
     if not isinstance(computation_node_user.meta["val"], torch.Tensor):
         return
 
-    if not computation_node_user.meta["val"].dtype == torch.float32:
+    if computation_node_user.meta["val"].dtype != torch.float32:
         return
 
     while computation_node_user.target in _binary_ops:
-        if not len(computation_node_user.users) == 1:
+        if len(computation_node_user.users) != 1:
             return
 
         computation_node_user = next(iter(computation_node_user.users.keys()))
@@ -83,7 +83,7 @@ def recover_original_precision_folded_computation_ops(gm):
 _binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
 
 
-@functools.lru_cache(None)
+@functools.cache
 def binary_folding_init():
     _conv_args = [Arg() for _ in range(9)]
     _addmm_args = [Arg() for _ in range(3)]
@@ -188,7 +188,7 @@ def binary_folding_init():
         ):
             return False
 
-        if not len(conv_node.args[1].users) == 1:
+        if len(conv_node.args[1].users) != 1:
             return False
 
         weight_meta_value = conv_node.args[1].meta.get("val")
@@ -242,7 +242,7 @@ def binary_folding_init():
         ):
             return False
 
-        if not len(weight_node.users) == 1:
+        if len(weight_node.users) != 1:
             return False
 
         weight_meta_value = weight_node.meta.get("val")
@@ -484,6 +484,7 @@ def binary_folding_init():
             with graph.inserting_before(reshape_node if reshape_node else binary_node):
                 assert computation_node.target in _computation_ops
                 if computation_node.target == aten.convolution.default:
+                    counters["inductor"]["binary_folding_conv"] += 1
                     new_computation_node = _create_new_conv_node(
                         graph, computation_node, binary_node, other
                     )

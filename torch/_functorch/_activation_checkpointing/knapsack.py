@@ -1,11 +1,9 @@
-from typing import List, Tuple
-
 import torch
 
 
 def greedy_knapsack(
-    memory: List[float], runtimes: List[float], max_memory: float
-) -> Tuple[float, List[int], List[int]]:
+    memory: list[float], runtimes: list[float], max_memory: float
+) -> tuple[float, list[int], list[int]]:
     n = len(runtimes)
     items = list(range(n))
 
@@ -28,8 +26,8 @@ def greedy_knapsack(
 
 
 def ilp_knapsack(
-    memory: List[float], runtimes: List[float], max_memory: float
-) -> Tuple[float, List[int], List[int]]:
+    memory: list[float], runtimes: list[float], max_memory: float
+) -> tuple[float, list[int], list[int]]:
     import numpy as np
 
     try:
@@ -64,19 +62,19 @@ def ilp_knapsack(
 
 
 def dp_knapsack(
-    memory: List[float], runtime: List[float], max_memory: float
-) -> Tuple[float, List[int], List[int]]:
+    memory: list[float], runtime: list[float], max_memory: float
+) -> tuple[float, list[int], list[int]]:
     # Scaling factor to convert floating point weights to integers
     S = 10000
 
     # Quantize the memory weights
     quantized_memory = torch.tensor(
-        [int(round(m * S)) for m in memory], dtype=torch.long, device="cpu"
+        [round(m * S) for m in memory], dtype=torch.long, device="cpu"
     )
     runtimes = torch.tensor(runtime, dtype=torch.float32, device="cpu")
 
     # Quantized pseudopolynomial DP for 0-1 Knapsack
-    quantized_max_memory = int(round(max_memory * S))
+    quantized_max_memory = round(max_memory * S)
 
     n = len(memory)
 

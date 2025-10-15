@@ -25,7 +25,9 @@ namespace torch::utils {
  * UX.
  */
 TORCH_PYTHON_API void device_lazy_init(at::DeviceType device_type);
-void set_requires_device_init(at::DeviceType device_type, bool value);
+TORCH_PYTHON_API void set_requires_device_init(
+    at::DeviceType device_type,
+    bool value);
 
 inline bool is_device_lazy_init_supported(at::DeviceType device_type) {
   // Add more devices here to enable lazy initialization.
@@ -64,5 +66,22 @@ inline void maybe_initialize_device(
 }
 
 bool is_device_initialized(at::DeviceType device_type);
+
+TORCH_PYTHON_API bool is_device_in_bad_fork(at::DeviceType device_type);
+
+TORCH_PYTHON_API void set_device_in_bad_fork(
+    at::DeviceType device_type,
+    bool value);
+
+TORCH_PYTHON_API void register_fork_handler_for_device_init(
+    at::DeviceType device_type);
+
+inline void maybe_register_fork_handler_for_device_init(
+    std::optional<at::DeviceType>& device_type) {
+  if (!device_type.has_value()) {
+    return;
+  }
+  register_fork_handler_for_device_init(device_type.value());
+}
 
 } // namespace torch::utils

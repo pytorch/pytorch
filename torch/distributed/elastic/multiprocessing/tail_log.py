@@ -12,7 +12,7 @@ import os
 import time
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
-from typing import Dict, List, Optional, TextIO, TYPE_CHECKING
+from typing import Optional, TextIO, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
@@ -89,14 +89,15 @@ class TailLog:
     def __init__(
         self,
         name: str,
-        log_files: Dict[int, str],
+        log_files: dict[int, str],
         dst: TextIO,
-        log_line_prefixes: Optional[Dict[int, str]] = None,
+        log_line_prefixes: Optional[dict[int, str]] = None,
         interval_sec: float = 0.1,
     ):
         n = len(log_files)
         self._threadpool = None
         if n > 0:
+            # pyrefly: ignore  # bad-assignment
             self._threadpool = ThreadPoolExecutor(
                 max_workers=n,
                 thread_name_prefix=f"{self.__class__.__qualname__}_{name}",
@@ -106,10 +107,10 @@ class TailLog:
         self._dst = dst
         self._log_files = log_files
         self._log_line_prefixes = log_line_prefixes
-        self._finished_events: Dict[int, Event] = {
+        self._finished_events: dict[int, Event] = {
             local_rank: Event() for local_rank in log_files.keys()
         }
-        self._futs: List[Future] = []
+        self._futs: list[Future] = []
         self._interval_sec = interval_sec
         self._stopped = False
 

@@ -2,9 +2,9 @@
 import logging
 import time
 from collections import defaultdict
+from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import Enum
-from typing import Dict, Iterator, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -28,8 +28,8 @@ class SimpleProfiler:
         H2D = "H2D"
         D2H = "D2H"
 
-    results: Dict[str, float] = defaultdict(float)
-    profiling: Set[str] = set()
+    results: dict[str, float] = defaultdict(float)
+    profiling: set[str] = set()
 
     @classmethod
     def reset(cls) -> None:
@@ -39,11 +39,12 @@ class SimpleProfiler:
     @classmethod
     @contextmanager
     def profile(cls, profile_type: str) -> Iterator[None]:
-        assert profile_type not in cls.profiling, (
-            f"{profile_type} is already being profiled. "
-            "SimpleProfiler does not support profiling multiple instances at "
-            "the same time. "
-        )
+        if profile_type in cls.profiling:
+            raise AssertionError(
+                f"{profile_type} is already being profiled. "
+                "SimpleProfiler does not support profiling multiple instances at "
+                "the same time. "
+            )
 
         cls.profiling.add(profile_type)
         begin = time.monotonic()
@@ -65,10 +66,10 @@ class SimpleProfiler:
 
 def _get_sharded_module_tree_with_module_name_to_fqns(
     model: torch.nn.Module,
-) -> Tuple[str, Dict[str, List[str]]]:
+) -> tuple[str, dict[str, list[str]]]:
     """
     It is used for composable fully_shard() code path, it returns
-      1. sharded module tree info: each line reprents a submodule name that contats the
+      1. sharded module tree info: each line represents a submodule name that contains the
     submodule's FQN and its submodule class name, if the submodule is sharded by `fully_shard`,
     the submodule name will add a postfix with ' FULLY SHARDED'. Each increased tree
     level adds 4 spaces before the printed name. A printed sharded module tree info for a toy model
@@ -129,7 +130,8 @@ def _get_sharded_module_tree_with_module_name_to_fqns(
 
         if handle:
             param = handle.flat_param
-            assert isinstance(param, flat_param_file.FlatParameter)
+            if not isinstance(param, flat_param_file.FlatParameter):
+                raise AssertionError(f"Expected FlatParameter, got {type(param)}")
             global_fqns = [
                 clean_tensor_name(prefix + name) for name in param._fqns
             ]  # prefixed from the top level `model` (i.e. including `prefix`)
@@ -143,10 +145,10 @@ def _get_sharded_module_tree_with_module_name_to_fqns(
         return sharded_tree_info[0], sharded_module_name_to_fqns
 
     # Use List to mutate its value in place while running the recursive functions
-    sharded_tree_info: List[str] = [
+    sharded_tree_info: list[str] = [
         "",
     ]
-    sharded_module_name_to_fqns: Dict[str, List[str]] = {}
+    sharded_module_name_to_fqns: dict[str, list[str]] = {}
     return _apply_to_modules(
         model,
         module_fn,

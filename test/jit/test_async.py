@@ -16,6 +16,7 @@ from typing import List
 
 from torch import Tensor
 from torch.jit import Future
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import _inline_everything, JitTestCase
 
 
@@ -547,8 +548,4 @@ class TestAsync(JitTestCase):
 
 
 if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
+    raise_on_run_directly("test/test_jit.py")

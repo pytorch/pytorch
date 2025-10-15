@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Any, Callable, Dict, List, Optional
+import itertools
+from typing import Any, Callable, Optional
 from unittest.mock import patch
 
 import sympy
@@ -8,28 +9,30 @@ import sympy
 from .. import ir
 from ..select_algorithm import PartialRender
 from ..virtualized import V
+from .common import ArgName
 from .cpp_gemm_template import CppGemmTemplate, GEMM_TEMPLATE
 from .cpp_micro_gemm import LayoutType
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import DTYPE_TO_CPP, GemmBlocking
 
 
+# We pass all sizevars present in BY to the GEMM templates so variables are not renamed in the BMM definition
 GEMM_SINGLE_THREAD_MM_STUB = r"""
 {{kernel.def_kernel(
     inputs={"X": X, "W": W},
-    outputs={"Y": Y},
+    outputs={"Y": Y_2d},
     aliases=aliases,
-    function_name="single_thread_mm",
-    extra_sizevars=[b_index],
+    function_name=kernel_name+"_single_thread_mm",
+    extra_sizevars=BY_sizevars + [b_index],
     placeholder="<SINGLE_THREAD_MM_DEF_FOR_BMM>")}}"""
 
 GEMM_THREADED_MM_STUB = r"""
 {{kernel.def_kernel(
     inputs={"X": X, "W": W},
-    outputs={"Y": Y},
+    outputs={"Y": Y_2d},
     aliases=aliases,
-    function_name="threaded_mm",
-    extra_sizevars=[b_index],
+    function_name=kernel_name+"_threaded_mm",
+    extra_sizevars=BY_sizevars + [b_index],
     placeholder="<THREADED_MM_DEF_FOR_BMM>")}}"""
 
 BMM_TEMPLATE = r"""
@@ -52,7 +55,7 @@ extern "C"
     for (int64_t b_start = 0; b_start < B_single_thread_block; ++b_start) {
         {{template.get_gemm_function_call(
             kernel,
-            "single_thread_mm",
+            kernel_name+"_single_thread_mm",
             "<SINGLE_THREAD_CALL_FOR_BMM>",
             b_index="b_start",
         )}}
@@ -60,7 +63,7 @@ extern "C"
     for (int64_t b_start = B_single_thread_block; b_start < B; ++b_start) {
         {{template.get_gemm_function_call(
             kernel,
-            "threaded_mm",
+            kernel_name+"_threaded_mm",
             "<THREADED_MM_CALL_FOR_BMM>",
             b_index="b_start",
         )}}
@@ -123,18 +126,24 @@ class CppBmmTemplate(CppGemmTemplate):
 
     @staticmethod
     def check_if_block_weight(W, micro_gemm):
-        return micro_gemm.get_b_layout() != LayoutType.NORMAL or (
-            (not W.get_layout().is_contiguous() or W.get_name() in V.graph.constants)  # type: ignore[union-attr]
-            if isinstance(W, ir.IRNode)
-            else not W.is_contiguous()
+        assert isinstance(W, ir.IRNode)
+        _, n = W.get_size()[-2:]
+        result = (
+            not W.get_layout().is_contiguous()
+            or W.get_name() in V.graph.constants
+            or (
+                n % micro_gemm.register_blocking.block_n != 0
+                and micro_gemm.get_b_layout != LayoutType.NORMAL
+            )
         )
+        return result
 
     def get_gemm_function_call(
         self,
         kernel: CppTemplateKernel,
         function_name: str,
         placeholder: str,
-        b_index: int,
+        b_index: str,
     ) -> str:
         """
         Similar to 'def_kernel' in cpp_template_kernel, but instead of generating a function definition,
@@ -148,8 +157,8 @@ class CppBmmTemplate(CppGemmTemplate):
             arg_defs, call_args, _, _ = kernel.args.python_argdefs()
             for i, buf in enumerate(call_args):
                 if buf == self.b_index:
-                    arg_defs[i] = b_index
-            call = f"{function_name}({', '.join(arg_defs)});"
+                    arg_defs[i] = ArgName(b_index)
+            call = f"{function_name}({', '.join(x.full_name() for x in arg_defs)});"
             return call
 
         assert placeholder not in kernel.render_hooks
@@ -168,9 +177,9 @@ class CppBmmTemplate(CppGemmTemplate):
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
         flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
         **kwargs,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         options = super().get_options(
             kernel=kernel,
             template_buffer_node=template_buffer_node,
@@ -182,11 +191,18 @@ class CppBmmTemplate(CppGemmTemplate):
         BX, BW, BY = options["X"], options["W"], options["Y"]
         options["BX"], options["BW"], options["BY"] = BX, BW, BY
         options["BY_2d"] = options["Y_2d"]
-        for kword in ["X", "W", "Y", "GemmOut", "Y_2d"]:
+        for kword in ["X", "W", "GemmOut", "Y_2d"]:
             options[kword] = kernel.select(options[kword], 0, self.b_index)
-        for kword in ["X", "W", "Y"]:
+        for kword in ["X", "W", "Y_2d"]:
             options[kword + "_dtype"] = DTYPE_TO_CPP[options[kword].dtype]
         options["b_index"] = self.b_index
+        options["BY_sizevars"] = [
+            s
+            for sym in itertools.chain(BY.get_size(), BY.get_stride())
+            if isinstance(sym, sympy.Expr)
+            for s in sym.free_symbols
+        ]
+        options["kernel_name"] = kernel.kernel_name
 
         return options
 
@@ -195,7 +211,7 @@ class CppBmmTemplate(CppGemmTemplate):
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
         flag_template_buffer_has_other_users: Optional[bool] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
         **kwargs,
     ) -> str:
         options = self.get_options(

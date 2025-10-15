@@ -18,8 +18,6 @@
 namespace torch::jit {
 namespace mobile {
 
-char const* toString(OpCode op);
-
 namespace {
 
 /**

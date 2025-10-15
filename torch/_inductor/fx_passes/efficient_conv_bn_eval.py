@@ -144,6 +144,7 @@ def efficient_conv_bn_eval_decomposed(
             torch.nn.functional.batch_norm,
         ]
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=efficient_conv_bn_eval_pass,
     extra_check=lambda match: not inductor_config.freezing
     and inductor_config.efficient_conv_bn_eval_fx_passes,
@@ -235,6 +236,7 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
             torch.ops.aten.batch_norm.default,
         ]
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=efficient_conv_bn_eval_pass,
     extra_check=lambda match: not inductor_config.freezing
     and inductor_config.efficient_conv_bn_eval_fx_passes,
@@ -330,6 +332,7 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
             nn.SyncBatchNorm,
         ],
     ),
+    # pyrefly: ignore  # bad-argument-type
     pass_dict=efficient_conv_bn_eval_pass,
     extra_check=lambda match: not inductor_config.freezing
     and inductor_config.efficient_conv_bn_eval_fx_passes,
@@ -380,7 +383,9 @@ def efficient_conv_bn_eval_graph_transform(match: Match, *args, **kwargs):
         # argument. `graph.get_attr` and
         # `graph.call_function` does not allow the `name` argument.
         conv_get_node = graph.create_node(
-            op="get_attr", target=conv_node.target, name="get_conv"  # type: ignore[union-attr]
+            op="get_attr",
+            target=conv_node.target,  # type: ignore[union-attr]
+            name="get_conv",
         )
         bn_get_node = graph.create_node(
             op="get_attr", target=bn_node.target, name="get_bn"

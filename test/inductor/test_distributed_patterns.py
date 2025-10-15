@@ -7,7 +7,7 @@ from torch import nn
 from torch._dynamo import compiled_autograd
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter
-from torch.testing._internal.common_utils import IS_MACOS, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import IS_MACOS, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, requires_gpu
 
 
@@ -29,8 +29,9 @@ def init_fake_distributed(device="cpu"):
         mod.unsharded_weight.untyped_storage().resize_(
             mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
         )
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-            mod.unsharded_weight
+        with (
+            torch.no_grad(),
+            torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight),
         ):
             torch.ops.fsdp.copy_(mod.unsharded_weight, all_gather(mod.sharded_weight))
         mod._parameters["weight"] = mod.unsharded_weight
@@ -52,8 +53,9 @@ def init_fake_distributed(device="cpu"):
         mod.unsharded_weight.untyped_storage().resize_(
             mod.unsharded_weight.nelement() * mod.unsharded_weight.element_size()
         )
-        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-            mod.unsharded_weight
+        with (
+            torch.no_grad(),
+            torch.autograd._unsafe_preserve_version_counter(mod.unsharded_weight),
         ):
             torch.ops.fsdp.copy_(mod.unsharded_weight, all_gather(mod.sharded_weight))
         mod._parameters["weight"] = mod.unsharded_weight
@@ -203,7 +205,6 @@ class DistributedPatternTests(TestCase):
     def test_storage_resize_zero_cpu(self):
         self._test_storage_resize_zero("cpu")
 
-    @skipIfRocm
     @requires_gpu()
     def test_storage_resize_zero_gpu(self):
         self._test_storage_resize_zero(GPU_TYPE)
@@ -228,7 +229,6 @@ class DistributedPatternTests(TestCase):
     def test_storage_resize_nonzero_cpu(self):
         self._test_storage_resize_nonzero("cpu")
 
-    @skipIfRocm
     @requires_gpu()
     def test_storage_resize_nonzero_gpu(self):
         self._test_storage_resize_nonzero(GPU_TYPE)
@@ -242,7 +242,7 @@ class DistributedPatternTests(TestCase):
             x = x.sin()
             v = w._version
             w.copy_(x + 1)
-            torch._C._autograd._unsafe_set_version_counter(w, v)
+            torch._C._autograd._unsafe_set_version_counter((w,), (v,))
             return w, v
 
         for v in (3, 0, 1):
@@ -266,7 +266,7 @@ class DistributedPatternTests(TestCase):
             with torch.no_grad():
                 v = w._version
                 w.copy_(x)
-                torch._C._autograd._unsafe_set_version_counter(w, v)
+                torch._C._autograd._unsafe_set_version_counter((w,), (v,))
             return r
 
         w1 = torch.randn(1, requires_grad=True)
@@ -337,7 +337,9 @@ class DistributedPatternTests(TestCase):
         self.assertEqual(fw_cnt.frame_count, 1)
         self.assertEqual(fw_cnt.op_count, 5)
         self.assertEqual(bw_cnt.frame_count, 2)  # grad=None and grad!=None
-        self.assertEqual(bw_cnt.op_count, 48)
+        self.assertEqual(
+            bw_cnt.op_count, 111
+        )  # Number of ops in the Dynamo-produced graphs
 
     def test_module_backward_hooks_aot(self):
         m1, inp1 = init_module_bw_hooks(True)
@@ -432,6 +434,7 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(r1, r2)
         self._assert_same_grad(p1, p2)
 
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_nn_param_return3(self):
         def fn(x):
             p = torch.nn.Parameter(x + 123)
@@ -448,6 +451,7 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(r1, r2)
         self._assert_same_grad(p1, p2)
 
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_nn_param_return4(self):
         def fn(x):
             p = torch.nn.Parameter(x + 123, requires_grad=False)
@@ -479,7 +483,6 @@ class DistributedPatternTests(TestCase):
         # Recompile on grad==None/grad!=None
         self.assertEqual(bw_cnt.frame_count, 2)
 
-    @skipIfRocm
     @skipIfXpu
     @requires_gpu()
     @torch._functorch.config.patch(recompute_views=True)

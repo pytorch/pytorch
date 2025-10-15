@@ -1,7 +1,12 @@
+from typing import Any
+from typing_extensions import override
+
 import torch
 from torch._inductor.codegen.rocm.rocm_template import ROCmTemplate
 from torch._inductor.ir import IRNode
 from torch._inductor.utils import IndentedBuffer
+
+from .rocm_template import ArgInfo
 
 
 class CKTemplate(ROCmTemplate):
@@ -16,8 +21,10 @@ class CKTemplate(ROCmTemplate):
         torch.bfloat16: "BF16",
         torch.int32: "I32",
         torch.int8: "I8",
-        torch.float8_e4m3fnuz: "F8",
-        torch.float8_e5m2fnuz: "BF8",
+        torch.float8_e4m3fnuz: "F8",  # gfx94
+        torch.float8_e4m3fn: "F8",  # gfx95
+        torch.float8_e5m2fnuz: "BF8",  # gfx94
+        torch.float8_e5m2: "BF8",  # gfx95
     }
 
     def header(self) -> IndentedBuffer:
@@ -90,3 +97,14 @@ class CKTemplate(ROCmTemplate):
             return ptr
         else:
             return f"({self._TORCH_DTYPE_TO_CK.get(node.get_dtype())}*)({ptr})"
+
+    @override
+    def get_runtime_arg_info(self) -> list[ArgInfo]:
+        return [ArgInfo("kBatch", "int32_t")]
+
+    @override
+    def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
+        """
+        Helper method to retrieve runtime args from generate kwargs
+        """
+        return [kwargs[arg.name] for arg in self.get_runtime_arg_info()]

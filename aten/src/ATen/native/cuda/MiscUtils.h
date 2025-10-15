@@ -4,8 +4,8 @@
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 static inline int cuda_int_cast(int64_t value, const char* varname) {
   auto result = static_cast<int>(value);
@@ -28,5 +28,4 @@ static inline Storage pin_memory(int64_t size) {
       /*resizable=*/false);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

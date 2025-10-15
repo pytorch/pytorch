@@ -4,7 +4,7 @@ import operator
 import re
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from torch.autograd.profiler import profile
 from torch.profiler import DeviceType
@@ -52,7 +52,7 @@ class Interval:
 
 
 class EventKey:
-    def __init__(self, event):
+    def __init__(self, event) -> None:
         self.event = event
 
     def __hash__(self):
@@ -61,10 +61,10 @@ class EventKey:
     def __eq__(self, other):
         return self.event.id == other.event.id
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.event.name}"
 
-    def intervals_overlap(self, intervals: List[Interval]):
+    def intervals_overlap(self, intervals: list[Interval]):
         overlap_time = 0
         intervals = sorted(intervals, key=lambda x: x.start)
 
@@ -98,19 +98,19 @@ class EventKey:
 
 
 class BasicEvaluation:
-    def __init__(self, prof: profile):
+    def __init__(self, prof: profile) -> None:
         self.profile = prof
-        self.metrics: Dict[EventKey, EventMetrics] = {}
+        self.metrics: dict[EventKey, EventMetrics] = {}
         self.compute_self_time()
         self.event_keys = sorted(
             (e for e in self.metrics.keys()), key=lambda x: x.event.start_time_ns
         )
         self.events = [e.event for e in self.event_keys]
-        self.cuda_events: List[_KinetoEvent] = []
+        self.cuda_events: list[_KinetoEvent] = []
         self.queue_depth_list = self.compute_queue_depth()
         self.compute_idle_time()
 
-    def compute_self_time(self):
+    def compute_self_time(self) -> None:
         """
         Computes event's self time(total time - time in child ops).
         """
@@ -124,9 +124,9 @@ class BasicEvaluation:
             for child_event in curr_event.children:
                 self_time -= child_event.duration_time_ns
                 stack.append(child_event)
-            assert (
-                EventKey(curr_event) not in self.metrics
-            ), f"Duplicate id: {curr_event.id}, {curr_event.name}"
+            assert EventKey(curr_event) not in self.metrics, (
+                f"Duplicate id: {curr_event.id}, {curr_event.name}"
+            )
             self.metrics[EventKey(curr_event)] = EventMetrics(self_time_ns=self_time)
             self.metrics[
                 EventKey(curr_event)
@@ -142,12 +142,29 @@ class BasicEvaluation:
         cuda_event_list = self.profile.kineto_results.events()
 
         def is_cuda_launch_kernel(e):
-            # TODO: find a better way to identify cudaLaunchKernel
-            return e.name == "cudaLaunchKernel"
+            """Check if the event is a CUDA launch kernel."""
+            launch_patterns = {
+                "cudaLaunchKernel",  # Standard CUDA
+                "cudaLaunchKernelExC",  # Extended C
+                "__cudaLaunchKernel",  # Internal
+                "cudaLaunchCooperativeKernel",  # Collaborative (single-device)
+                "cudaLaunchCooperativeKernelMultiDevice",  # Collaborative (multi-devices)
+            }
+            name = str(getattr(e, "name", e))
+            return any(name.startswith(pattern) for pattern in launch_patterns)
 
         def is_cuda_kernel(e):
-            # TODO: find a better way to identify CUDA Kernel
-            return e.device_type() == DeviceType.CUDA and "mem" not in e.name.lower()
+            """Check if the event is a CUDA runtime kernel."""
+            # Check if the kernel is CUDA
+            if e.device_type() != DeviceType.CUDA:
+                return False
+
+            name = str(getattr(e, "name", e)).lower()
+
+            # Exclude memory operations
+            exclude_patterns = {"mem", "cpy", "alloc", "free"}
+
+            return not any(pattern in name for pattern in exclude_patterns)
 
         cuda_launch_events = sorted(
             (e for e in cuda_event_list if is_cuda_launch_kernel(e)),
@@ -162,7 +179,7 @@ class BasicEvaluation:
             cuda_launch_events + cuda_kernel_events, key=lambda x: x.start_ns()
         )
 
-        kernel_mapping: Dict[_KinetoEvent, int] = {}
+        kernel_mapping: dict[_KinetoEvent, int] = {}
         last_mapped_kernel = 0
         for cuda_launch_event in cuda_launch_events:
             index = index_of_first_match(
@@ -188,12 +205,13 @@ class BasicEvaluation:
                 return event.start_time_ns
             raise Exception("Unknown Event Type")  # noqa: TRY002
 
-        queue_depth_list: List[Interval] = []
+        queue_depth_list: list[Interval] = []
         all_events.sort(key=new_old_event_comparator)
         for event in all_events:
             # Find latest cuda kernel event
             if hasattr(event, "start_us"):
                 start_time = event.start_us() * 1000
+                # pyrefly: ignore  # missing-attribute
                 end_time = (event.start_us() + event.duration_us()) * 1000
                 # Find current spawned cuda kernel event
                 if event in kernel_mapping and kernel_mapping[event] is not None:
@@ -210,8 +228,7 @@ class BasicEvaluation:
 
             while (
                 current_kernel_index < len(cuda_kernel_events)
-                and (cuda_kernel_events[current_kernel_index].start_ns())
-                <= start_time  # type: ignore[possibly-undefined]
+                and (cuda_kernel_events[current_kernel_index].start_ns()) <= start_time  # type: ignore[possibly-undefined]
             ):
                 current_kernel_index += 1
             current_queue_depth = spawned_kernel_index - current_kernel_index + 1
@@ -226,14 +243,14 @@ class BasicEvaluation:
 
         return queue_depth_list
 
-    def compute_idle_time(self):
+    def compute_idle_time(self) -> None:
         """
         Computes idle time of the profile.
         """
         # Based on queue_depth_list, we can calculate idle time for all the events
         idle = False
         idle_start = 0
-        idle_intervals: List[Interval] = []
+        idle_intervals: list[Interval] = []
         if self.queue_depth_list and self.events:
             idle_intervals += [
                 Interval(self.events[0].start_time_ns, self.queue_depth_list[0].start),
@@ -335,11 +352,11 @@ class BasicEvaluation:
 
         output += "\n".join(
             [
-                f"""{'-'*80}
+                f"""{"-" * 80}
 Event:                {event}
 Source code location: {source_code_location(event.event)}
 Percentage idle time: {self.metrics[event].fraction_idle_time * 100:.2f}%
-{'-'*80}"""
+{"-" * 80}"""
                 for event in event_list
             ]
         )
@@ -378,7 +395,7 @@ def source_code_location(event):
 # https://github.com/pytorch/pytorch/issues/75504
 # TODO(dberard) - deprecate / remove workaround for CUDA >= 12, when
 # we stop supporting older CUDA versions.
-def _init_for_cuda_graphs():
+def _init_for_cuda_graphs() -> None:
     from torch.autograd.profiler import profile
 
     with profile():

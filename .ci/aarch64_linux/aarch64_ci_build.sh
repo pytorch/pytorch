@@ -3,21 +3,26 @@ set -eux -o pipefail
 
 GPU_ARCH_VERSION=${GPU_ARCH_VERSION:-}
 
+# Set CUDA architecture lists to match x86 build_cuda.sh
+if [[ "$GPU_ARCH_VERSION" == *"12.6"* ]]; then
+    export TORCH_CUDA_ARCH_LIST="8.0;9.0"
+elif [[ "$GPU_ARCH_VERSION" == *"12.8"* ]]; then
+    export TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;12.0"
+elif [[ "$GPU_ARCH_VERSION" == *"12.9"* ]]; then
+    export TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;12.0"
+elif [[ "$GPU_ARCH_VERSION" == *"13.0"* ]]; then
+    export TORCH_CUDA_ARCH_LIST="8.0;9.0;10.0;11.0;12.0+PTX"
+fi
+
+# Compress the fatbin with -compress-mode=size for CUDA 13
+if [[ "$DESIRED_CUDA" == *"13"* ]]; then
+    export TORCH_NVCC_FLAGS="-compress-mode=size"
+    # Bundle ptxas into the cu13 wheel, see https://github.com/pytorch/pytorch/issues/163801
+    export BUILD_BUNDLE_PTXAS=1
+fi
+
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 source $SCRIPTPATH/aarch64_ci_setup.sh
-
-tagged_version() {
-  GIT_DESCRIBE="git --git-dir /pytorch/.git describe --tags --match v[0-9]*.[0-9]*.[0-9]*"
-  if ${GIT_DESCRIBE} --exact >/dev/null; then
-    ${GIT_DESCRIBE}
-  else
-    return 1
-  fi
-}
-
-if tagged_version >/dev/null; then
-  export OVERRIDE_PACKAGE_VERSION="$(tagged_version | sed -e 's/^v//' -e 's/-.*$//')"
-fi
 
 ###############################################################################
 # Run aarch64 builder python
@@ -27,13 +32,22 @@ cd /
 # on the mounted pytorch repo
 git config --global --add safe.directory /pytorch
 pip install -r /pytorch/requirements.txt
-pip install auditwheel
+pip install auditwheel==6.2.0 wheel
 if [ "$DESIRED_CUDA" = "cpu" ]; then
     echo "BASE_CUDA_VERSION is not set. Building cpu wheel."
-    #USE_PRIORITIZED_TEXT_FOR_LD for enable linker script optimization https://github.com/pytorch/pytorch/pull/121975/files
-    USE_PRIORITIZED_TEXT_FOR_LD=1 python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn
+    python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn
 else
     echo "BASE_CUDA_VERSION is set to: $DESIRED_CUDA"
-    #USE_PRIORITIZED_TEXT_FOR_LD for enable linker script optimization https://github.com/pytorch/pytorch/pull/121975/files
-    USE_PRIORITIZED_TEXT_FOR_LD=1 python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn --enable-cuda
+    export USE_SYSTEM_NCCL=1
+
+    # Check if we should use NVIDIA libs from PyPI (similar to x86 build_cuda.sh logic)
+    if [[ -z "$PYTORCH_EXTRA_INSTALL_REQUIREMENTS" ]]; then
+        echo "Bundling CUDA libraries with wheel for aarch64."
+    else
+        echo "Using nvidia libs from pypi for aarch64."
+        echo "Updated PYTORCH_EXTRA_INSTALL_REQUIREMENTS for aarch64: $PYTORCH_EXTRA_INSTALL_REQUIREMENTS"
+        export USE_NVIDIA_PYPI_LIBS=1
+    fi
+
+    python /pytorch/.ci/aarch64_linux/aarch64_wheel_ci_build.py --enable-mkldnn --enable-cuda
 fi

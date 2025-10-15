@@ -52,6 +52,9 @@ class StmtNode : public Stmt {
     visitor->visit(static_to<Op>(getptr()));
   }
   StmtPtr accept_mutator(IRMutator* mutator) override;
+  friend Op;
+
+ private:
   StmtNode() = default;
 };
 
@@ -583,7 +586,7 @@ class TORCH_API LoopOptions {
     }
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-    static const char* kBlockIndexNames[] = {
+    static constexpr const char* kBlockIndexNames[] = {
         "blockIdx.x",
         "blockIdx.y",
         "blockIdx.z",
@@ -626,7 +629,7 @@ class TORCH_API LoopOptions {
     }
 
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-    static const char* kThreadIndexNames[] = {
+    static constexpr const char* kThreadIndexNames[] = {
         "threadIdx.x", "threadIdx.y", "threadIdx.z", "threadIdx.w"};
 
     if (gpu_thread_index_ < IDX_X || gpu_thread_index_ > IDX_MAX) {

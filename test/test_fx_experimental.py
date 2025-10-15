@@ -9,9 +9,11 @@ import pickle
 import sys
 import sympy
 import tempfile
+import typing
 import unittest
 from types import BuiltinFunctionType
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import NamedTuple, Optional, Union
+from collections.abc import Callable
 
 import torch
 import torch.fx.experimental.meta_tracer
@@ -52,7 +54,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, get_new_module_tests
-from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
+from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase, TEST_WITH_CROSSREF
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
 
@@ -321,7 +323,7 @@ class TestFXExperimental(JitTestCase):
             """Given a fx module, generate node latency for each node
             based on the size of each node
             """
-            node_to_latency_mapping: Dict[Node, NodeLatency] = {}
+            node_to_latency_mapping: dict[Node, NodeLatency] = {}
             for node in fx_module.graph.nodes:
                 if node.op not in {"output", "placeholder", "get_attr"}:
                     if node.size_bytes.total_size == node.size_bytes.output_size:
@@ -376,7 +378,7 @@ class TestFXExperimental(JitTestCase):
                 return add_5
 
         def get_node_to_latency_mapping(fx_module: GraphModule):
-            node_to_latency_mapping: Dict[Node, NodeLatency] = {}
+            node_to_latency_mapping: dict[Node, NodeLatency] = {}
             for node in fx_module.graph.nodes:
                 if node.op not in {"output", "placeholder", "get_attr"}:
                     if node.size_bytes.total_size == node.size_bytes.output_size:
@@ -790,6 +792,46 @@ terrible spacing
 
         self.assertEqual(orig_out, submodules_out)
 
+    def test_split_module_input_names(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, a0, a1, b0, b1, c0, c1):
+                x = x + (a0 ** 2) + (a1 / 2)
+                x = x + (b0 ** 2) + (b1 / 2)
+                x = x + (c0 ** 2) + (c1 / 2)
+                return x
+
+        mod = Mod()
+        traced = torch.fx.symbolic_trace(mod)
+
+        seen = 0
+
+        def split(n):
+            nonlocal seen
+            result = seen // 4
+            seen += 1
+            return result
+
+        split = split_module(traced, mod, split, keep_original_input_name=False)
+
+        # All the submodules should take in the inputs in the same order.
+        args = [torch.tensor(2.), torch.tensor(3.), torch.tensor(4.)]
+        output0 = split.submod_0(*args)
+        output1 = split.submod_1(*args)
+        output2 = split.submod_2(*args)
+        self.assertEqual(output0, output1)
+        self.assertEqual(output1, output2)
+
+        # Each submodule should have normalized input names
+        def check_ph(gm):
+            nodes = list(gm.graph.nodes)
+            self.assertEqual(nodes[0].target, "arg_0")
+            self.assertEqual(nodes[1].target, "arg_1")
+            self.assertEqual(nodes[2].target, "arg_2")
+
+        check_ph(split.submod_0)
+        check_ph(split.submod_1)
+        check_ph(split.submod_2)
+
     def test_split_module_dead_code(self):
         class ModWithDeadCode(torch.nn.Module):
             def forward(self, x):
@@ -921,6 +963,95 @@ terrible spacing
 
         # `keep_original_order=True`
         _test_split_graph(split_module(g, None, split_callback=lambda _ : 0, keep_original_order=True))
+
+    @unittest.skipIf(TEST_WITH_CROSSREF, "See https://github.com/pytorch/pytorch/issues/160077")
+    def test_split_module_symint_dependency_handling(self):
+        # Based on the code from - transformers/models/granitemoe/modeling_granitemoe.py
+        class GraniteMoeTopKGating(torch.nn.Module):
+            def __init__(self, input_size: int, num_experts: int, top_k: int):
+                super().__init__()
+
+                self.num_experts = num_experts
+                self.input_size = input_size
+                self.top_k = top_k
+
+                self.layer = torch.nn.Linear(input_size, num_experts, bias=False)
+
+            def forward(self, hidden_states):
+                # compute the top_k routing decision
+                logits = self.layer(hidden_states).float()  # [batch_size x seq_len, num_experts]
+                top_k_logits, top_k_indices = logits.topk(self.top_k, dim=1)  # [num_tokens, top_k]
+                top_k_gates = torch.softmax(top_k_logits, dim=1).type_as(hidden_states)  # [num_tokens, top_k]
+
+                # compute number of input given to each expert
+                zeros = torch.zeros(
+                    [top_k_gates.size(0), self.num_experts], dtype=top_k_gates.dtype, device=top_k_gates.device
+                )  # [num_tokens, num_experts]
+                gates = zeros.scatter(1, top_k_indices, 1)  # [num_tokens, num_experts]
+                expert_size = gates.long().sum(0)  # [num_experts,]
+                expert_size = expert_size.tolist()
+
+                # sort and group input tokens according to expert assignment
+                top_k_experts = top_k_indices.flatten()  # [num_tokens * top_k]
+                _, index_sorted_experts = top_k_experts.sort(0)  # [num_tokens * top_k]
+                batch_index = index_sorted_experts.div(self.top_k, rounding_mode="trunc")  # [num_tokens * top_k]
+
+                # gather the gate values for grouped input tokens
+                top_k_gates = top_k_gates.flatten()  # [num_tokens * top_k]
+                batch_gates = top_k_gates[index_sorted_experts]  # [num_tokens * top_k]
+
+                return index_sorted_experts, batch_index, batch_gates, expert_size, logits
+
+        class GraniteMoeMoE(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+                self.input_size = 32
+                self.num_local_experts = 4
+
+                num_experts_per_tok = 2
+                self.router = GraniteMoeTopKGating(
+                    input_size=self.input_size,
+                    num_experts=self.num_local_experts,
+                    top_k=num_experts_per_tok,
+                )
+
+            def forward(self, layer_input):
+                _, batch_index, _, expert_size, _ = self.router(layer_input)
+                expert_inputs = layer_input[batch_index]
+                return expert_inputs.split(expert_size, dim=0)
+
+        moe = GraniteMoeMoE()
+        inp = torch.randn([32, 32])
+
+        expected = moe(inp)
+
+        PARTITION_ID = 0
+        PARTITION_OPS_CTR = 0
+        NODE_PARTITION_MAP = {}
+
+        # `callback` is called multiple times with same `node` in `split_module`.
+        # Cache the result such that partition id is consistent across calls.
+        def callback(node) -> int:
+            nonlocal PARTITION_ID, PARTITION_OPS_CTR, NODE_PARTITION_MAP
+            if node in NODE_PARTITION_MAP:
+                return NODE_PARTITION_MAP[node]
+
+            if PARTITION_OPS_CTR % 5 == 0:
+                PARTITION_ID += 1
+
+            PARTITION_OPS_CTR += 1
+
+            NODE_PARTITION_MAP[node] = PARTITION_ID
+            return PARTITION_ID
+
+        def backend(gm, inps):
+            split_gm = split_module(gm, root_m=None, split_callback=callback,
+                                    keep_original_order=True, keep_original_node_name=True)
+            return split_gm
+
+        actual = torch.compile(moe, backend=backend)(inp)
+        torch.testing.assert_close(actual, expected)
 
     def test_normalize_binary_operators(self):
         ops_to_test = {
@@ -1119,7 +1250,7 @@ class {test_classname}(torch.nn.Module):
 
     def test_normalize_args_perserve_type(self):
         class MyModule(torch.nn.Module):
-            def forward(self, a: List[torch.Tensor]):
+            def forward(self, a: list[torch.Tensor]):
                 return torch.add(a[0], a[1])
 
         m = MyModule()
@@ -1128,7 +1259,7 @@ class {test_classname}(torch.nn.Module):
 
         for node in traced.graph.nodes:
             if node.op == "placeholder":
-                self.assertEqual(node.type, List[torch.Tensor])
+                self.assertEqual(node.type, list[torch.Tensor])
 
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
@@ -1192,7 +1323,16 @@ class {test_classname}(torch.nn.Module):
             y: float
 
         class MyModule(torch.nn.Module):
-            def forward(self, inp: Tuple[CustomType, torch.Tensor], inp2: List[CustomType], inp3: CustomNamedTuple):
+            def forward(self, inp: tuple[CustomType, torch.Tensor], inp2: list[CustomType], inp3: CustomNamedTuple):
+                inp_0 = inp[0]
+                inp_1 = inp[1]
+                inp2_0 = inp2[0]
+                inp3_x = inp3.x
+                inp3_y = inp3.y
+                return inp_0 + inp_1 + inp2_0 + inp3_x + inp3_y
+
+        class MyModule2(torch.nn.Module):
+            def forward(self, inp: tuple[CustomType, torch.Tensor], inp2: list[CustomType], inp3: CustomNamedTuple):
                 inp_0 = inp[0]
                 inp_1 = inp[1]
                 inp2_0 = inp2[0]
@@ -1201,6 +1341,20 @@ class {test_classname}(torch.nn.Module):
                 return inp_0 + inp_1 + inp2_0 + inp3_x + inp3_y
 
         my_module = MyModule()
+        my_module_traced = torch.fx.symbolic_trace(my_module)
+
+        # by default, fx transform loses type annotation of getitem nodes.
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                assert node.type is None
+
+        annotate_getitem_nodes(my_module_traced.graph)
+
+        for node in my_module_traced.graph.nodes:
+            if node.target == operator.getitem:
+                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
+
+        my_module = MyModule2()
         my_module_traced = torch.fx.symbolic_trace(my_module)
 
         # by default, fx transform loses type annotation of getitem nodes.
@@ -1274,7 +1428,7 @@ class {test_classname}(torch.nn.Module):
             return part_idx
 
         # split module in module with submodules
-        qualname_map : Dict[str, str] = {}
+        qualname_map : dict[str, str] = {}
         module_with_submodules = split_module(
             my_module_traced, my_module, split_callback, qualname_map
         )
@@ -1325,7 +1479,7 @@ class {test_classname}(torch.nn.Module):
             self.assertEqual(module.Foo()(t), mod(t))
 
     def test_fetch(self):
-        attrs_for_lowering: Dict[str, List[str]] = {
+        attrs_for_lowering: dict[str, list[str]] = {
             "torch.nn.modules.conv.Conv2d": [
                 "weight",
                 "bias",
@@ -1501,35 +1655,60 @@ class {test_classname}(torch.nn.Module):
             (int, type(torch.float)),
             (Union[int, float], int),
             (Union[int, float], float),
-            (List[int], int),
-            (List[int], create_type_hint([int, int])),
-            (List[int], create_type_hint((int, int))),
-            (List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
+            (list[int], int),
+            (list[int], create_type_hint([int, int])),
+            (list[int], create_type_hint((int, int))),
+            (list[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),
             (
-                List[torch.Tensor],
+                list[torch.Tensor],
                 create_type_hint([torch.nn.Parameter, torch.nn.Parameter]),
             ),
             (torch.Tensor, torch.nn.Parameter),
-            (List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
-            (List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
-            (List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
+            (list[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),
+            (list[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),
+            (list[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),
             (
-                List[torch.Tensor],
+                list[torch.Tensor],
                 create_type_hint((torch.nn.Parameter, torch.nn.Parameter)),
             ),
             (torch.Tensor, torch.nn.Parameter),
-            (List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
-            (List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
-            (Optional[List[torch.Tensor]], List[torch.Tensor]),
-            (Optional[List[int]], List[int]),
+            (list[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),
+            (list[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),
+            (Optional[list[torch.Tensor]], list[torch.Tensor]),
+            (Optional[list[int]], list[int]),
+        ] + [
+            # pre-PEP585 signatures
+            (typing.List[int], int),  # noqa: UP006
+            (typing.List[int], create_type_hint([int, int])),  # noqa: UP006
+            (typing.List[int], create_type_hint((int, int))),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.Tensor])),  # noqa: UP006
+            (
+                typing.List[torch.Tensor],  # noqa: UP006
+                create_type_hint([torch.nn.Parameter, torch.nn.Parameter]),
+            ),
+            (typing.List[torch.Tensor], create_type_hint([torch.nn.Parameter, torch.Tensor])),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint([torch.Tensor, torch.nn.Parameter])),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.Tensor))),  # noqa: UP006
+            (
+                typing.List[torch.Tensor],  # noqa: UP006
+                create_type_hint((torch.nn.Parameter, torch.nn.Parameter)),
+            ),
+            (typing.List[torch.Tensor], create_type_hint((torch.nn.Parameter, torch.Tensor))),  # noqa: UP006
+            (typing.List[torch.Tensor], create_type_hint((torch.Tensor, torch.nn.Parameter))),  # noqa: UP006
+            (Optional[typing.List[torch.Tensor]], typing.List[torch.Tensor]),  # noqa: UP006
+            (Optional[typing.List[int]], typing.List[int]),  # noqa: UP006
         ]
+
         for sig_type, arg_type in should_be_equal:
             self.assertTrue(type_matches(sig_type, arg_type))
 
         should_fail = [
             (int, float),
             (Union[int, float], str),
-            (List[torch.Tensor], List[int]),
+            (list[torch.Tensor], typing.List[int]),  # noqa: UP006
+        ] + [
+            # pre-PEP585 signatures
+            (list[torch.Tensor], list[int]),
         ]
 
         for sig_type, arg_type in should_fail:

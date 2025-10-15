@@ -5,11 +5,12 @@ import collections
 import dataclasses
 import itertools
 import pprint
-from typing import Any, Dict, Iterable, List, Optional, Protocol
+from typing import Any, Optional, Protocol, TYPE_CHECKING
 
 import sympy
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
@@ -23,6 +24,10 @@ from .wrapper import (
     NullLine,
     ReuseLine,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 @dataclasses.dataclass
@@ -138,6 +143,17 @@ class Allocation(AllocationTreeNode):
     allocated: bool = False
     pool: Optional[AllocationPool] = None
     offset: Optional[sympy.Expr] = None
+    earliest_available: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        has_unbacked_sym = False
+        for s in self.node.get_layout().size:
+            if free_unbacked_symbols(s):
+                has_unbacked_sym = True
+                break
+
+        if has_unbacked_sym:
+            self.earliest_available = self.get_live_ranges().begin
 
     @property
     def device(self):
@@ -182,6 +198,9 @@ class Allocation(AllocationTreeNode):
             f"offset={self.offset})"
         )
 
+    def get_earliest_available(self):
+        return self.earliest_available
+
 
 @dataclasses.dataclass
 class Empty(AllocationTreeNode):
@@ -210,8 +229,7 @@ class MemorySplitProtocol(Protocol):
     get_size_hint: CachedMethod[[], int]
     get_symbolic_size: CachedMethod[[], sympy.Expr]
 
-    def _allocate(self, block: Allocation, is_last: bool) -> bool:
-        ...
+    def _allocate(self, block: Allocation, is_last: bool) -> bool: ...
 
 
 class ClearCacheOnAllocateMixin(MemorySplitProtocol):
@@ -241,7 +259,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
          a.get_live_ranges().overlaps(b.get_live_ranges())
     """
 
-    allocations: List[AllocationTreeNode]
+    allocations: list[AllocationTreeNode]
 
     def _allocate(self, block: Allocation, is_last: bool):
         slot_size = self.get_size_hint()
@@ -371,17 +389,29 @@ class AllocationPool:
     can_expand: bool = True
     restrict_live_range: Optional[LiveRange] = None
     name: Optional[str] = None
-    names_to_del: List[str] = dataclasses.field(default_factory=list)
-    creation_cache: Dict[str, str] = dataclasses.field(default_factory=dict)
+    names_to_del: list[str] = dataclasses.field(default_factory=list)
+    creation_cache: dict[str, str] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for block in self.root.allocations:
+            if isinstance(block, Allocation):
+                self.update_restrict_live_range(block)
 
     def allocate(self, block: Allocation, is_last: bool):
-        if self.restrict_live_range and not self.restrict_live_range.contains(
-            block.live_range
+        if (
+            self.restrict_live_range is not None
+            and not self.restrict_live_range.contains(block.live_range)
         ):
+            return False
+
+        block_earliest_available = block.get_earliest_available()
+        pool_begin = self.root.get_live_ranges().begin
+        if block_earliest_available and block_earliest_available > pool_begin:
             return False
 
         is_last = self.can_expand and is_last
         if self.root.allocate(block, is_last):
+            self.update_restrict_live_range(block)
             return True
 
         if is_last:
@@ -389,9 +419,22 @@ class AllocationPool:
 
         return False
 
+    def update_restrict_live_range(self, block: Allocation):
+        if block_earliest_available := block.get_earliest_available():
+            if self.restrict_live_range is None:
+                self.restrict_live_range = LiveRange(
+                    block_earliest_available, float("inf")
+                )
+            else:
+                self.restrict_live_range = LiveRange(
+                    min(self.restrict_live_range.begin, block_earliest_available),
+                    self.restrict_live_range.end,
+                )
+
     def allocate_at_end(self, block):
         block.mark_allocated()
         self.root = TemporalSplit([SpatialSplit(self.root, TemporalSplit([block]))])
+        self.update_restrict_live_range(block)
         return True
 
     def finalize(self, name):
@@ -405,7 +448,6 @@ class AllocationPool:
         nbytes = self.root.get_symbolic_size()
         for block in self.root.allocations:
             if isinstance(block, Allocation) and nbytes == block.get_symbolic_size():
-                # optimization: fuse first allocation and pool creation
                 node = block.node
                 code.writeline(
                     wrapper.make_allocation(
@@ -416,7 +458,6 @@ class AllocationPool:
                         stride=tuple(node.get_stride()),
                     )
                 )
-                self.creation_cache[block.codegen_alloc_from_pool(wrapper)] = self.name
                 return
         else:
             code.writeline(
@@ -445,7 +486,7 @@ class AllocationPools:
     Collection of many AllocationPool objects grouped by device.
     """
 
-    device_to_pools: Dict[torch.device, List[AllocationPool]] = dataclasses.field(
+    device_to_pools: dict[torch.device, list[AllocationPool]] = dataclasses.field(
         default_factory=dict
     )
 
@@ -574,7 +615,10 @@ class AllocFromPoolLine(PoolMemoryPlanningLine):
             pool.codegen_create(self.wrapper, code)
 
         pool.names_to_del.extend(self.group.names)
-        alloc_from_pool = allocation.codegen_alloc_from_pool(self.wrapper)
+        alloc_from_pool, allocation_lines_to_write = allocation.codegen_alloc_from_pool(
+            self.wrapper
+        )
+        code.writelines(allocation_lines_to_write)
         if alloc_from_pool in pool.creation_cache:
             code.writeline(
                 self.wrapper.make_tensor_alias(
@@ -609,9 +653,9 @@ class MemoryPlanner:
 
     wrapper: Any
     pools: AllocationPools = dataclasses.field(default_factory=AllocationPools)
-    buffer_groups: Optional[List[BufferGroup]] = None
+    buffer_groups: Optional[list[BufferGroup]] = None
 
-    def plan(self, lines: List[Any]) -> List[Any]:
+    def plan(self, lines: list[Any]) -> list[Any]:
         """Call all the memory planning passes in sequence"""
         lines = [*lines]
         self.drop_removed_buffers(lines)
@@ -714,8 +758,8 @@ class MemoryPlanner:
         for group in self.buffer_groups:
             group.make_allocation()
 
-        outputs: List[Allocation] = []
-        intermediates: List[Allocation] = []
+        outputs: list[Allocation] = []
+        intermediates: list[Allocation] = []
         for group in self.buffer_groups:
             assert group.allocation
             if group.is_output and config.memory_pool != "combined":

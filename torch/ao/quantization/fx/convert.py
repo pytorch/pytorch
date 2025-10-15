@@ -3,7 +3,7 @@
 import copy
 import operator
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
@@ -62,6 +62,10 @@ from .utils import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
 __all__ = [
     "convert",
     "convert_custom_module",
@@ -91,9 +95,10 @@ _QSCHEME_TO_CHOOSE_QPARAMS_OP = {
 def _replace_observer_with_quantize_dequantize_node_decomposed(
     model: torch.fx.GraphModule,
     node: Node,
-    modules: Dict[str, torch.nn.Module],
-    node_name_to_scope: Dict[str, Tuple[str, type]],
-    node_name_to_qconfig: Dict[str, QConfigAny],
+    modules: dict[str, torch.nn.Module],
+    node_name_to_scope: dict[str, tuple[str, type]],
+    node_name_to_qconfig: dict[str, QConfigAny],
+    model_device: Optional[torch.device] = None,
 ) -> None:
     """Replace activation_post_process module call node with quantize and
     dequantize node working with decomposed Tensor
@@ -210,7 +215,11 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                     # sure that the default overload can be used.
                     # TODO: maybe need more complex attr name here
                     qparam_node = create_getattr_from_value(
-                        model, graph, module_path + prefix + key, value_or_node
+                        model,
+                        graph,
+                        module_path + prefix + key,
+                        value_or_node,
+                        model_device,
                     )
                     quantize_op_inputs.append(qparam_node)
                 else:
@@ -359,9 +368,10 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
 def _replace_observer_with_quantize_dequantize_node(
     model: torch.fx.GraphModule,
     node: Node,
-    modules: Dict[str, torch.nn.Module],
-    node_name_to_scope: Dict[str, Tuple[str, type]],
-    node_name_to_qconfig: Dict[str, QConfigAny],
+    modules: dict[str, torch.nn.Module],
+    node_name_to_scope: dict[str, tuple[str, type]],
+    node_name_to_qconfig: dict[str, QConfigAny],
+    model_device: Optional[torch.device] = None,
 ) -> None:
     """Replace activation_post_process module call node with quantize and
     dequantize node
@@ -442,7 +452,11 @@ def _replace_observer_with_quantize_dequantize_node(
                     # For scale and zero_point values we register them as buffers in the root module.
                     # TODO: maybe need more complex attr name here
                     qparam_node = create_getattr_from_value(
-                        model, graph, module_path + prefix + key, value_or_node
+                        model,
+                        graph,
+                        module_path + prefix + key,
+                        value_or_node,
+                        model_device,
                     )
                     quantize_op_inputs.append(qparam_node)
                 else:
@@ -509,9 +523,9 @@ def _replace_observer_or_dequant_stub_with_dequantize_node(
     node: Node, graph: Graph
 ) -> None:
     call_custom_module_node = node.args[0]
-    assert isinstance(
-        call_custom_module_node, Node
-    ), f"Expecting the for call custom module node to be a Node, but got {call_custom_module_node}"
+    assert isinstance(call_custom_module_node, Node), (
+        f"Expecting the for call custom module node to be a Node, but got {call_custom_module_node}"
+    )
     node.replace_all_uses_with(call_custom_module_node)
     graph.erase_node(node)
     _insert_dequantize_node(call_custom_module_node, graph)
@@ -532,7 +546,7 @@ def _is_conversion_supported(activation_post_process: torch.nn.Module) -> bool:
 
 
 def _has_none_qconfig(
-    node: Argument, node_name_to_qconfig: Dict[str, QConfigAny]
+    node: Argument, node_name_to_qconfig: dict[str, QConfigAny]
 ) -> bool:
     """Check if a node has a qconfig of None, i.e. user requested to not quantize
     the node
@@ -589,9 +603,9 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> No
 
 def _get_module_path_and_prefix(
     obs_node: Node,
-    node_name_to_scope: Dict[str, Tuple[str, type]],
-    node_name_to_qconfig: Dict[str, QConfigAny],
-) -> Tuple[str, str]:
+    node_name_to_scope: dict[str, tuple[str, type]],
+    node_name_to_qconfig: dict[str, QConfigAny],
+) -> tuple[str, str]:
     """Given and observer node, get the `Scope` or the fully qualified name for
     the submodule containing the observed node, also return a prefix of "_input"
     when the observed node is an input of a F.linear op, and not the output of another
@@ -604,9 +618,9 @@ def _get_module_path_and_prefix(
     # operator (they can be the same)
     # this flag identifies if the observer is inserted only because the observed node is
     # the input of the next operator
-    assert isinstance(
-        observed_node, Node
-    ), f"Expecting observed node to be a Node, but got {observed_node}"
+    assert isinstance(observed_node, Node), (
+        f"Expecting observed node to be a Node, but got {observed_node}"
+    )
     is_input_observer_only = (
         node_name_to_qconfig[observed_node.name] is None
         if observed_node.name in node_name_to_qconfig
@@ -654,7 +668,7 @@ def _insert_dequantize_node(node: Node, graph: Graph) -> None:
 
 
 def _maybe_get_observer_for_node(
-    node: Node, modules: Dict[str, torch.nn.Module]
+    node: Node, modules: dict[str, torch.nn.Module]
 ) -> Optional[torch.nn.Module]:
     """
     If the node is observed, return the observer
@@ -670,7 +684,7 @@ def _maybe_get_observer_for_node(
 
 def convert_standalone_module(
     node: Node,
-    modules: Dict[str, torch.nn.Module],
+    modules: dict[str, torch.nn.Module],
     model: torch.fx.GraphModule,
     is_reference: bool,
     backend_config: Optional[BackendConfig],
@@ -734,12 +748,13 @@ def convert_standalone_module(
 
 def convert_weighted_module(
     node: Node,
-    modules: Dict[str, torch.nn.Module],
-    observed_node_names: Set[str],
-    node_name_to_qconfig: Dict[str, QConfigAny],
+    modules: dict[str, torch.nn.Module],
+    observed_node_names: set[str],
+    node_name_to_qconfig: dict[str, QConfigAny],
     backend_config: BackendConfig,
     is_decomposed: bool = False,
     is_reference: bool = False,
+    model_device: Optional[torch.device] = None,
 ) -> None:
     """Convert a weighted module to reference quantized module in the model
     If the QConfig of a QAT module is not set, the module will still be converted to
@@ -828,7 +843,10 @@ def convert_weighted_module(
         is_ptq = weight_post_process is None
         if is_ptq:
             weight_post_process = qconfig.weight()  # type: ignore[union-attr, operator]
-            device = assert_and_get_unique_device(float_module)
+            if model_device is not None:
+                device = model_device
+            else:
+                device = assert_and_get_unique_device(float_module)
             if device:
                 weight_post_process.to(device)
 
@@ -865,9 +883,9 @@ def convert_weighted_module(
     ref_qmodule_cls = root_module_to_quantized_reference_module.get(
         type_before_parametrizations(float_module), None
     )
-    assert (
-        ref_qmodule_cls is not None
-    ), f"No reference quantized module class configured for {type_before_parametrizations(float_module)}"
+    assert ref_qmodule_cls is not None, (
+        f"No reference quantized module class configured for {type_before_parametrizations(float_module)}"
+    )
     ref_qmodule = ref_qmodule_cls.from_float(float_module, wq_or_wq_dict)  # type: ignore[attr-defined]
     if fused_module is not None:
         fused_module[0] = ref_qmodule  # type: ignore[operator]
@@ -887,9 +905,9 @@ def _remove_previous_dequantize_in_custom_module(
                  \\ - dequantize
     """
     # expecting the input node for a custom module node to be a Node
-    assert isinstance(
-        prev_node, Node
-    ), f"Expecting the argument for custom module node to be a Node, but got {prev_node}"
+    assert isinstance(prev_node, Node), (
+        f"Expecting the argument for custom module node to be a Node, but got {prev_node}"
+    )
     if prev_node.op == "call_method" and prev_node.target == "dequantize":
         node.replace_input_with(prev_node, prev_node.args[0])
         # Remove the dequantize node if it doesn't have other users
@@ -900,9 +918,9 @@ def _remove_previous_dequantize_in_custom_module(
 def convert_custom_module(
     node: Node,
     graph: Graph,
-    modules: Dict[str, torch.nn.Module],
-    custom_module_class_mapping: Dict[QuantType, Dict[Type, Type]],
-    statically_quantized_custom_module_nodes: Set[Node],
+    modules: dict[str, torch.nn.Module],
+    custom_module_class_mapping: dict[QuantType, dict[type, type]],
+    statically_quantized_custom_module_nodes: set[Node],
 ) -> None:
     """Converts an observed custom module to a quantized custom module based on
     `custom_module_class_mapping`
@@ -986,11 +1004,11 @@ def convert_custom_module(
 def convert(
     model: GraphModule,
     is_reference: bool = False,
-    convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
+    convert_custom_config: Union[ConvertCustomConfig, dict[str, Any], None] = None,
     is_standalone_module: bool = False,
     _remove_qconfig_flag: bool = True,
-    qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
-    backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
+    qconfig_mapping: Union[QConfigMapping, dict[str, Any], None] = None,
+    backend_config: Union[BackendConfig, dict[str, Any], None] = None,
     is_decomposed: bool = False,
     keep_original_weights: bool = False,
 ) -> GraphModule:
@@ -1060,14 +1078,16 @@ def convert(
 
     assert _is_observed_module(model), "incoming model must be produced by prepare_fx"
     observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
-    node_name_to_scope: Dict[
-        str, Tuple[str, type]
-    ] = observed_graph_module_attrs.node_name_to_scope
+    node_name_to_scope: dict[str, tuple[str, type]] = (
+        observed_graph_module_attrs.node_name_to_scope
+    )
     prepare_custom_config: PrepareCustomConfig = (
         observed_graph_module_attrs.prepare_custom_config
     )
-    observed_node_names: Set[str] = observed_graph_module_attrs.observed_node_names
-    node_name_to_qconfig: Dict[str, QConfigAny] = observed_graph_module_attrs.node_name_to_qconfig  # type: ignore[assignment]
+    observed_node_names: set[str] = observed_graph_module_attrs.observed_node_names
+    node_name_to_qconfig: dict[str, QConfigAny] = (
+        observed_graph_module_attrs.node_name_to_qconfig
+    )  # type: ignore[assignment]
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -1083,14 +1103,18 @@ def convert(
     # TODO refactor this code once we update the prepare logic to have additional information on
     # which graph nodes have been observed and share that with convert to decide which observers to ignore.
     if qconfig_mapping:
-        prepare_qconfig_mapping: QConfigMapping = observed_graph_module_attrs.qconfig_mapping  # type: ignore[assignment]
+        prepare_qconfig_mapping: QConfigMapping = (
+            observed_graph_module_attrs.qconfig_mapping
+        )  # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
 
         if observed_graph_module_attrs.is_qat:
             _update_qconfig_for_qat(qconfig_mapping, backend_config)
         _update_qconfig_for_fusion(model, qconfig_mapping)
 
-        _compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
+        _compare_prepare_convert_qconfig_mappings(
+            prepare_qconfig_mapping, qconfig_mapping
+        )  # type: ignore[arg-type]
         convert_node_name_to_qconfig = _generate_node_name_to_qconfig(
             model, modules_copy, model.graph, qconfig_mapping, node_name_to_scope
         )
@@ -1098,9 +1122,9 @@ def convert(
         # all the values either match what was set in prepare node_name_to_qconfig
         # or are set to None in the convert_node_name_to_qconfig.
         for k, v in node_name_to_qconfig.items():
-            assert (
-                k in convert_node_name_to_qconfig
-            ), f"Expected key {k} in convert node_name_to_qconfig"
+            assert k in convert_node_name_to_qconfig, (
+                f"Expected key {k} in convert node_name_to_qconfig"
+            )
             if convert_node_name_to_qconfig[k] is not None:
                 assert qconfig_equals(v, convert_node_name_to_qconfig[k]), (
                     f"Expected k {k} to have the same value in prepare and convert QConfigMappings, "
@@ -1127,8 +1151,8 @@ def convert(
     # additional state to override inputs to be quantized, if specified
     # by the user
     placeholder_node_seen_cnt = 0
-    input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
-    output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
+    input_quantized_idxs: list[int] = prepare_custom_config.input_quantized_indexes
+    output_quantized_idxs: list[int] = prepare_custom_config.output_quantized_indexes
 
     root_module_to_quantized_reference_module = (
         get_root_module_to_quantized_reference_module(backend_config)
@@ -1137,7 +1161,8 @@ def convert(
     root_module_classes = tuple(root_module_to_quantized_reference_module.keys())
     qat_module_classes = get_qat_module_classes(backend_config)
     fused_module_classes = get_fused_module_classes(backend_config)
-    statically_quantized_custom_module_nodes: Set[Node] = set()
+    statically_quantized_custom_module_nodes: set[Node] = set()
+    model_device = assert_and_get_unique_device(model)
 
     for node in list(model.graph.nodes):
         if node.op == "placeholder":
@@ -1191,6 +1216,7 @@ def convert(
                             modules,
                             node_name_to_scope,
                             node_name_to_qconfig,
+                            model_device,
                         )
                     else:
                         _replace_observer_with_quantize_dequantize_node(
@@ -1199,6 +1225,7 @@ def convert(
                             modules,
                             node_name_to_scope,
                             node_name_to_qconfig,
+                            model_device,
                         )
             elif isinstance(mod, DeQuantStub):
                 _replace_observer_or_dequant_stub_with_dequantize_node(
@@ -1228,6 +1255,7 @@ def convert(
                     backend_config,
                     is_decomposed,
                     is_reference,
+                    model_device,
                 )
             elif type_before_parametrizations(mod) in custom_module_classes:
                 convert_custom_module(

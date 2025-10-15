@@ -26,7 +26,7 @@ PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
   if (!self)
     throw python_error();
   auto self_ = reinterpret_cast<THPGenerator*>(self.get());
-  self_->cdata = std::move(cdata);
+  self_->cdata = cdata;
   return self.release();
 }
 
@@ -82,9 +82,11 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
 
   HANDLE_TH_ERRORS
   if (!THPVariable_Check(_new_state)) {
-    throw torch::TypeError(
-        "expected a torch.ByteTensor, but got %s",
-        Py_TYPE(_new_state)->tp_name);
+    TORCH_CHECK_TYPE(
+        false,
+        fmt::format(
+            "expected a torch.ByteTensor, but got {}",
+            Py_TYPE(_new_state)->tp_name));
   }
   auto self = (THPGenerator*)_self;
   auto& gen = self->cdata;
@@ -99,7 +101,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
   END_HANDLE_TH_ERRORS
 }
 
-uint64_t unpack_uint64(PyObject* pyobj) {
+static uint64_t unpack_uint64(PyObject* pyobj) {
   uint64_t unsigned_obj = 0;
   try {
     // First try to interpret as unsigned long
@@ -225,7 +227,7 @@ static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
+static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = (THPGenerator*)_self;
   auto& gen = self->cdata;
@@ -304,7 +306,7 @@ static struct PyMemberDef THPGenerator_members[] = {
     {"_cdata", T_ULONGLONG, offsetof(THPGenerator, cdata), READONLY, nullptr},
     {nullptr}};
 
-PyTypeObject THPGeneratorType = {
+static PyTypeObject THPGeneratorType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C.Generator", /* tp_name */
     sizeof(THPGenerator), /* tp_basicsize */
@@ -355,12 +357,12 @@ bool THPGenerator_init(PyObject* module) {
   return true;
 }
 
-void set_pyobj(const Generator& self, PyObject* pyobj) {
+static void set_pyobj(const Generator& self, PyObject* pyobj) {
   TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined generator");
   self.set_pyobj(pyobj);
 }
 
-PyObject* pyobj(const Generator& self) {
+static PyObject* pyobj(const Generator& self) {
   TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined generator");
   return self.pyobj();
 }
@@ -380,8 +382,10 @@ PyObject* THPGenerator_Wrap(const Generator& gen) {
 
 at::Generator THPGenerator_Unwrap(PyObject* state) {
   if (!Py_IS_TYPE(state, &THPGeneratorType)) {
-    throw torch::TypeError(
-        "expected a Generator, but got %s", Py_TYPE(state)->tp_name);
+    TORCH_CHECK_TYPE(
+        false,
+        fmt::format(
+            "expected a Generator, but got {}", Py_TYPE(state)->tp_name));
   }
   return reinterpret_cast<THPGenerator*>(state)->cdata;
 }

@@ -593,6 +593,22 @@ class TestNNParametrization(NNTestCase):
             parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
         self.assertFalse(parametrize.is_parametrized(module))
 
+        class ChangeDeviceInverse(nn.Module):
+            def forward(self, x):
+                return x.float()
+
+            def right_inverse(self, w):
+                return w.to(torch.device("meta"))
+
+        # For parametrizations that return one tensor, right_inverse may not change the device
+        with self.assertRaisesRegex(
+            ValueError, "outputs one tensor, it may not change the device"
+        ):
+            parametrize.register_parametrization(
+                module, "weight", ChangeDeviceInverse()
+            )
+        self.assertFalse(parametrize.is_parametrized(module))
+
         # Doesn't return a tensor
         class NotTensor(nn.Module):
             def forward(self, x):
@@ -1475,9 +1491,9 @@ class TestNNParametrization(NNTestCase):
             snm.load_state_dict(non_strict_state_dict, strict=False)
             del non_strict_state_dict["parametrizations.weight.0._v"]
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            non_strict_state_dict[
-                "weight"
-            ] = snm.weight.detach().clone()  # set W as a buffer
+            non_strict_state_dict["weight"] = (
+                snm.weight.detach().clone()
+            )  # set W as a buffer
             snm.load_state_dict(non_strict_state_dict, strict=False)
             del non_strict_state_dict._metadata[
                 "parametrizations.weight.0"
@@ -1652,7 +1668,7 @@ class TestNNParametrization(NNTestCase):
                 if can_initialize:
                     assert_weight_allclose_Q(m.weight, w_init)
 
-                # Intializing with a given orthogonal matrix works
+                # Initializing with a given orthogonal matrix works
                 X = torch.randn_like(m.weight)
                 if wide_matrix:
                     X = X.mT
@@ -1669,7 +1685,7 @@ class TestNNParametrization(NNTestCase):
                     with self.assertRaisesRegex(NotImplementedError, msg):
                         m.weight = w_new
 
-                # Intializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
+                # Initializing with a non-orthogonal matrix makes m.weight be the Q part of the given matrix
                 w_new = torch.randn_like(m.weight)
                 if can_initialize:
                     m.weight = w_new

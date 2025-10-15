@@ -6,7 +6,8 @@
 
 import argparse
 import logging
-from typing import Optional, Sequence
+from collections.abc import Sequence
+from typing import Optional
 
 from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 
@@ -66,19 +67,26 @@ class JobConfig:
         )
         self.parser.add_argument("-j", "--just_print_entries", action="store_true")
         self.parser.add_argument("-v", "--verbose", action="store_true")
+        self.parser.add_argument("--print_stack_trace", action="store_true")
+        self.parser.add_argument(
+            "--mismatch_cap",
+            type=int,
+            default=10,
+            help="Maximum number of mismatches we print (from earliest).",
+        )
 
     def parse_args(
         self: "JobConfig", args: Optional[Sequence[str]]
     ) -> argparse.Namespace:
         args = self.parser.parse_args(args)
         if args.selected_ranks is not None:
-            assert (
-                args.just_print_entries
-            ), "Not support selecting ranks without printing entries"
+            assert args.just_print_entries, (
+                "Not support selecting ranks without printing entries"
+            )
         if args.pg_filters is not None:
-            assert (
-                args.just_print_entries
-            ), "Not support selecting pg filters without printing entries"
+            assert args.just_print_entries, (
+                "Not support selecting pg filters without printing entries"
+            )
         if args.verbose:
             logger.set_log_level(logging.DEBUG)
         return args

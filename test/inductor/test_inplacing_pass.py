@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-from typing import List
 
 import torch
 import torch._inductor.config as inductor_config
@@ -362,7 +361,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         with inductor_config.patch({"enable_auto_functionalized_v2": True}):
 
             @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
-            def mutate_op(y: List[Tensor]) -> None:
+            def mutate_op(y: list[Tensor]) -> None:
                 y[0].add_(2)
                 y[1].add_(3)
 
@@ -389,7 +388,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         with inductor_config.patch({"enable_auto_functionalized_v2": False}):
 
             @torch.library.custom_op("mylib::mutate_op", mutates_args={"y"})
-            def mutate_op(y: List[Tensor]) -> None:
+            def mutate_op(y: list[Tensor]) -> None:
                 y[0].add_(2)
                 y[1].add_(3)
 
@@ -413,6 +412,31 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
             # Both list inputs failed to reinplace. So we should have emitted clones for them.
             self.assertEqual(post_grad_graphs.count("aten.clone"), 2)
+
+    def test_generalized_scatter(self):
+        # This is an integration test for the reinplacing pass.
+        def fn(x_1):
+            a = torch.ones([2, 3])
+            c = torch.ones(2)
+            a[:, 0].copy_(c)
+
+            d = a.clone()
+            e = torch.ops.aten.as_strided.default(d, [2], [3], 0)
+            f = e.clone()
+
+            g = torch.zeros(2)
+            e.copy_(g)
+
+            h = torch.zeros(2, 3)
+            h[:, 0].copy_(f)
+
+            add_1 = d + h
+            return add_1
+
+        x = torch.randn(2, 3)
+        expected = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="inductor")(x)
+        self.assertEqual(result, expected)
 
     @parametrize(
         "factory_op",

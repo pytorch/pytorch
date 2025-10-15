@@ -15,7 +15,8 @@ namespace torch::jit::fuser::onednn {
 // being created for each device. The device handle passed from PyTorch allows
 // oneDNN Graph implementation to work on the device specified by PyTorch, which
 // is currently CPU, so we only have one engine.
-// Ref: https://spec.oneapi.io/onednn-graph/latest/programming_model.html#engine
+// Ref:
+// https://oneapi-spec.uxlfoundation.org/specifications/oneapi/latest/elements/onednn/source/graph/programming_model#engine
 struct Engine {
   // CPU engine singleton
   static dnnl::engine& getEngine();

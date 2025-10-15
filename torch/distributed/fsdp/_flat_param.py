@@ -4,24 +4,10 @@ import functools
 import logging
 import os
 import warnings
+from collections.abc import Callable, Generator, Iterator, Sequence
 from enum import auto, Enum
 from itertools import accumulate, chain
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Dict,
-    Generator,
-    Iterator,
-    List,
-    NamedTuple,
-    no_type_check,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, cast, NamedTuple, no_type_check, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -195,12 +181,12 @@ class FlatParamShardMetadata(NamedTuple):
             original parameter.
     """
 
-    param_names: Tuple[str, ...]
-    param_shapes: Tuple[torch.Size, ...]
-    param_strides: Tuple[Tuple[int, ...], ...]
-    param_contiguities: Tuple[bool, ...]
-    param_numels: Tuple[int, ...]
-    param_offsets: Tuple[Tuple[int, int], ...]
+    param_names: tuple[str, ...]
+    param_shapes: tuple[torch.Size, ...]
+    param_strides: tuple[tuple[int, ...], ...]
+    param_contiguities: tuple[bool, ...]
+    param_numels: tuple[int, ...]
+    param_offsets: tuple[tuple[int, int], ...]
 
 
 class _FlatParameterMeta(_ParameterMeta):
@@ -287,7 +273,7 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
             shard parameter info; see :class:`_ShardParamInfo` for details.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo` for details.
-        _modules (Set[nn.Module]): Modules that contain some original parameter
+        _modules (set[nn.Module]): Modules that contain some original parameter
             that is flattened into the flat parameter.
 
         _shard_numel_padded (int): Numel padded for this rank's sharded flat
@@ -344,37 +330,38 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
     _padded_unsharded_size: torch.Size
     _sharded_size: torch.Size
     _num_params: int
-    _param_infos: Tuple[ParamInfo, ...]
-    _shapes: Tuple[torch.Size, ...]
-    _strides: Tuple[Tuple[int, ...], ...]
-    _contiguities: Tuple[bool, ...]
-    _fqns: Tuple[str, ...]
-    _param_extensions: Tuple[Optional[Any], ...]
-    _numels_with_padding: Tuple[int, ...]
-    _numels: Tuple[int, ...]
-    _shard_param_infos: Tuple[_ShardParamInfo, ...]
-    _shared_param_infos: Tuple[SharedParamInfo, ...]
-    _modules: Set[nn.Module]
+    _param_infos: tuple[ParamInfo, ...]
+    _shapes: tuple[torch.Size, ...]
+    _strides: tuple[tuple[int, ...], ...]
+    _contiguities: tuple[bool, ...]
+    _fqns: tuple[str, ...]
+    _param_extensions: tuple[Optional[Any], ...]
+    _numels_with_padding: tuple[int, ...]
+    _numels: tuple[int, ...]
+    _shard_param_infos: tuple[_ShardParamInfo, ...]
+    _shared_param_infos: tuple[SharedParamInfo, ...]
+    _modules: set[nn.Module]
     _shard_numel_padded: int
     _local_shard: Tensor
     _full_param_padded: Tensor
     _full_prec_full_param_padded: Tensor
     # Eager only
-    _post_backward_hook_state: Tuple[Any, Any]
+    _post_backward_hook_state: tuple[Any, Any]
     # Compile only
     _post_backward_hook_handle: Any
     _mp_shard: Tensor
     _cpu_grad: Tensor
     _saved_grad_shard: Tensor
-    _params: Optional[List[nn.Parameter]]
-    _shared_params: Optional[List[nn.Parameter]]
-    _tensors: Optional[List[Optional[Tensor]]]
-    _is_grad_none_mask: Optional[List[bool]]
+    _params: Optional[list[nn.Parameter]]
+    _shared_params: Optional[list[nn.Parameter]]
+    _tensors: Optional[list[Optional[Tensor]]]
+    _is_grad_none_mask: Optional[list[bool]]
 
-    _is_padding_mask: List[bool]
+    _is_padding_mask: list[bool]
 
     def __new__(cls, data=None, requires_grad=True):
-        assert cls is FlatParameter, "subclasses FlatParameter not supported"
+        if cls is not FlatParameter:
+            raise AssertionError("subclasses FlatParameter not supported")
         r = nn.Parameter.__new__(nn.Parameter, data, requires_grad)  # type: ignore[call-arg]
         r._is_flat_param = True  # type: ignore[attr-defined]
         return r
@@ -386,17 +373,17 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
     def _init_metadata(
         cls,
         self,
-        param_infos: List[ParamInfo],
-        numels: List[int],
-        shapes: List[torch.Size],
-        strides: List[Tuple[int, ...]],
-        contiguities: List[bool],
-        fqns: List[str],
-        shared_param_infos: List[SharedParamInfo],
-        param_extensions: List[Optional[Any]],
-        params: Optional[List[nn.Parameter]],
-        shared_params: Optional[List[nn.Parameter]],
-        is_padding_mask: List[bool],
+        param_infos: list[ParamInfo],
+        numels: list[int],
+        shapes: list[torch.Size],
+        strides: list[tuple[int, ...]],
+        contiguities: list[bool],
+        fqns: list[str],
+        shared_param_infos: list[SharedParamInfo],
+        param_extensions: list[Optional[Any]],
+        params: Optional[list[nn.Parameter]],
+        shared_params: Optional[list[nn.Parameter]],
+        is_padding_mask: list[bool],
     ) -> None:
         """
         Initialize attributes holding metadata about the original parameters comprising the flat parameter.
@@ -412,11 +399,26 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         Args:
             See the Attributes in the class docstring.
         """
-        assert len(param_infos) == len(shapes)
-        assert len(param_infos) == len(strides)
-        assert len(param_infos) == len(contiguities)
-        assert len(param_infos) == len(fqns)
-        assert len(param_infos) == len(param_extensions)
+        if len(param_infos) != len(shapes):
+            raise AssertionError(
+                f"Expected param_infos length {len(param_infos)} to match shapes length {len(shapes)}"
+            )
+        if len(param_infos) != len(strides):
+            raise AssertionError(
+                f"Expected param_infos length {len(param_infos)} to match strides length {len(strides)}"
+            )
+        if len(param_infos) != len(contiguities):
+            raise AssertionError(
+                f"Expected param_infos length {len(param_infos)} to match contiguities length {len(contiguities)}"
+            )
+        if len(param_infos) != len(fqns):
+            raise AssertionError(
+                f"Expected param_infos length {len(param_infos)} to match fqns length {len(fqns)}"
+            )
+        if len(param_infos) != len(param_extensions):
+            raise AssertionError(
+                f"Expected param_infos length {len(param_infos)} to match param_extensions length {len(param_extensions)}"
+            )
         self._num_params = len(param_infos)
         self._param_infos = param_infos
         self._shapes = shapes
@@ -426,28 +428,38 @@ class FlatParameter(nn.Parameter, metaclass=_FlatParameterMeta):
         self._param_extensions = param_extensions
         self._is_padding_mask = is_padding_mask
 
-        numels_without_padding: List[int] = []
+        numels_without_padding: list[int] = []
         for numel, is_padding in zip(numels, is_padding_mask):
             if not is_padding:
                 numels_without_padding.append(numel)
         self._numels = tuple(numels_without_padding)
         self._numels_with_padding = tuple(numels)
-        assert len(self._numels) == self._num_params
+        if len(self._numels) != self._num_params:
+            raise AssertionError(
+                f"Expected _numels length {len(self._numels)} to equal _num_params {self._num_params}"
+            )
 
         self._shared_param_infos = tuple(shared_param_infos)
         self._modules = {pi.module for pi in self._param_infos}.union(
             {spi.module for spi in self._shared_param_infos}
         )
-        assert (params is None) == (shared_params is None)
-        if params is not None:
-            assert shared_params is not None and len(shared_params) == len(
-                shared_param_infos
+        if (params is None) != (shared_params is None):
+            raise AssertionError(
+                "Expected params and shared_params to both be None or both be not None"
             )
+        if params is not None:
+            if shared_params is None or len(shared_params) != len(shared_param_infos):
+                raise AssertionError(
+                    f"Expected shared_params to be not None and have length {len(shared_param_infos)}, got {shared_params}"
+                )
             self._params = []
             for param, is_padding in zip(params, is_padding_mask):
                 if not is_padding:
                     self._params.append(param)
-            self._shared_params = shared_params
+            if shared_params is not None:
+                self._shared_params = shared_params
+            else:
+                self._shared_params = []
             # Mark the original parameters to avoid flattening them into
             # another `FlatParameter` during recursive construction
             for param in chain(self._params, self._shared_params):
@@ -553,11 +565,12 @@ class FlatParamHandle:
         # Only align addresses for `use_orig_params=True` (for now)
         align_addresses = use_orig_params
         self._init_get_unflat_views_fn(align_addresses)
+        # pyrefly: ignore  # read-only
         self.device = device
         self._device_handle = _FSDPDeviceHandle.from_device(self.device)
         self.process_group = process_group
         if self._use_fake_all_gather or self._use_fake_reduce:
-            self._fake_process_group = FakeProcessGroup(
+            self._fake_process_group = FakeProcessGroup._create_internal(
                 rank=process_group.rank(), world_size=process_group.size()
             )
         self.rank = process_group.rank()
@@ -592,7 +605,8 @@ class FlatParamHandle:
         # before `_init_flat_param()`, which performs the actual validation
         self._orig_param_dtype = params[0].dtype
         self._init_param_reduce_dtypes(mp_param_dtype, mp_reduce_dtype)
-        assert self._fwd_bwd_param_dtype is not None  # mypy
+        if self._fwd_bwd_param_dtype is None:
+            raise AssertionError("Expected _fwd_bwd_param_dtype to be not None")  # mypy
         self._aligned_numel = (
             _get_aligned_numel(unsharded_dtype=self._fwd_bwd_param_dtype)
             if align_addresses
@@ -600,9 +614,15 @@ class FlatParamHandle:
         )
         self._fsdp_extension = fsdp_extension
         self._init_flat_param_and_metadata(
-            params, fully_sharded_module, self._aligned_numel, use_orig_params  # type: ignore[arg-type]
+            params,
+            fully_sharded_module,
+            self._aligned_numel,
+            use_orig_params,  # type: ignore[arg-type]
         )
         self._use_unsharded_views(as_params=False)
+
+    def __repr__(self):
+        return f"FlatParamHandle(flat_param.fqns={self.flat_param._fqns})"
 
     def _init_setattr_fns(self):
         use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"
@@ -624,7 +644,7 @@ class FlatParamHandle:
 
     def _init_flat_param_and_metadata(
         self,
-        params: List[Union[Tensor, nn.Parameter]],
+        params: list[Union[Tensor, nn.Parameter]],
         module: nn.Module,
         aligned_numel: int,
         use_orig_params: bool,
@@ -653,20 +673,20 @@ class FlatParamHandle:
         params_set = set(params)
         # For alignment padding, only `numels` gets strictly non-`None`
         # elements, and all other lists get `None` elements for padding.
-        param_infos: List[ParamInfo] = []
-        numels: List[int] = []
-        shapes: List[torch.Size] = []
-        strides: List[Tuple[int, ...]] = []
-        contiguities: List[bool] = []
-        fqns: List[str] = []
-        shared_param_infos: List[SharedParamInfo] = []
-        shared_param_memo: Dict[
-            Union[Tensor, nn.Parameter], Tuple[nn.Module, str, str]
+        param_infos: list[ParamInfo] = []
+        numels: list[int] = []
+        shapes: list[torch.Size] = []
+        strides: list[tuple[int, ...]] = []
+        contiguities: list[bool] = []
+        fqns: list[str] = []
+        shared_param_infos: list[SharedParamInfo] = []
+        shared_param_memo: dict[
+            Union[Tensor, nn.Parameter], tuple[nn.Module, str, str]
         ] = {}
-        params_to_flatten: List[Union[Tensor, nn.Parameter]] = []
-        shared_params: List[Union[Tensor, nn.Parameter]] = []
-        param_extensions: List[Any] = []
-        is_padding_mask: List[bool] = []
+        params_to_flatten: list[Union[Tensor, nn.Parameter]] = []
+        shared_params: list[Union[Tensor, nn.Parameter]] = []
+        param_extensions: list[Any] = []
+        is_padding_mask: list[bool] = []
         total_numel = total_numel_without_padding = 0
         for submodule_name, submodule in module.named_modules(remove_duplicate=False):
             for param_name, param in _named_parameters_with_duplicates(
@@ -779,8 +799,8 @@ class FlatParamHandle:
         )
 
     def _validate_tensors_to_flatten(
-        self, tensors: List[Union[Tensor, nn.Parameter]]
-    ) -> Tuple:
+        self, tensors: list[Union[Tensor, nn.Parameter]]
+    ) -> tuple:
         """Validate the tensors to flatten and returns any necessary metadata."""
         dtype: Optional[torch.dtype] = None
         # Return as the logical OR over each tensor's value
@@ -814,12 +834,13 @@ class FlatParamHandle:
             dtype = tensor.dtype
             flat_param_requires_grad = flat_param_requires_grad or tensor.requires_grad
             device = tensor.device
-        assert flat_param_requires_grad is not None, "Requires non-empty `tensors` list"
+        if flat_param_requires_grad is None:
+            raise AssertionError("Requires non-empty `tensors` list")
         return dtype, flat_param_requires_grad, device
 
     def flatten_tensors(
         self,
-        tensors: List[Tensor],
+        tensors: list[Tensor],
         aligned_numel: int,
     ) -> Tensor:
         """
@@ -841,7 +862,7 @@ class FlatParamHandle:
                 f"Expects non-negative `aligned_numel` but got {aligned_numel}"
             )
         dtype, _, device = self._validate_tensors_to_flatten(tensors)
-        flat_tensors: List[Tensor] = []
+        flat_tensors: list[Tensor] = []
         if aligned_numel > 0:
             total_numel = 0
             for tensor in tensors:
@@ -876,7 +897,7 @@ class FlatParamHandle:
 
     def flatten_tensors_into_flat_param(
         self,
-        tensors: List[Tensor],
+        tensors: list[Tensor],
         aligned_numel: int,
         requires_grad: bool,
     ) -> FlatParameter:
@@ -915,8 +936,10 @@ class FlatParamHandle:
         else:
             self._fwd_bwd_param_dtype = mp_param_dtype or self._orig_param_dtype
             self._reduce_dtype = mp_reduce_dtype or self._orig_param_dtype
-        assert self._fwd_bwd_param_dtype is not None
-        assert self._reduce_dtype is not None
+        if self._fwd_bwd_param_dtype is None:
+            raise AssertionError("Expected _fwd_bwd_param_dtype to be not None")
+        if self._reduce_dtype is None:
+            raise AssertionError("Expected _reduce_dtype to be not None")
 
     ###################################
     # SHARD INITIALIZATION & METADATA #
@@ -992,9 +1015,10 @@ class FlatParamHandle:
         shard_param_infos = self._get_shard_metadata(
             unsharded_start_idx, unsharded_end_idx
         )
-        assert (
-            len(shard_param_infos) == flat_param._num_params
-        ), f"Expects length {flat_param._num_params} but got {len(shard_param_infos)}"
+        if len(shard_param_infos) != flat_param._num_params:
+            raise AssertionError(
+                f"Expects length {flat_param._num_params} but got {len(shard_param_infos)}"
+            )
         flat_param._shard_param_infos = shard_param_infos  # type: ignore[attr-defined]
         flat_param._shard_numel_padded = numel_padded  # type: ignore[attr-defined]
 
@@ -1002,7 +1026,7 @@ class FlatParamHandle:
         self,
         unsharded_start_idx: int,
         unsharded_end_idx: int,
-    ) -> Tuple[_ShardParamInfo, ...]:
+    ) -> tuple[_ShardParamInfo, ...]:
         """
         Compute the shard metadata based on ``unsharded_start_idx`` and ``unsharded_end_idx`` (inclusive).
 
@@ -1010,10 +1034,11 @@ class FlatParamHandle:
         unsharded flat parameter specifying the shard.
         """
         flat_param_offsets = self._get_flat_param_offsets()
-        assert len(flat_param_offsets) == len(
-            self.flat_param._numels_with_padding
-        ), f"Expected {len(self.flat_param._numels_with_padding)} but got {len(flat_param_offsets)}"
-        shard_param_infos: List[_ShardParamInfo] = []
+        if len(flat_param_offsets) != len(self.flat_param._numels_with_padding):
+            raise AssertionError(
+                f"Expected {len(self.flat_param._numels_with_padding)} but got {len(flat_param_offsets)}"
+            )
+        shard_param_infos: list[_ShardParamInfo] = []
         sharded_flat_param_numel = unsharded_end_idx - unsharded_start_idx + 1
         # `unsharded_param_start_idx` and `unsharded_param_end_idx` are indices
         # into the unsharded flat parameter (inclusive) of the given parameter
@@ -1040,12 +1065,13 @@ class FlatParamHandle:
                         unsharded_start_idx - unsharded_param_start_idx
                     )
                     offset_in_shard = 0
-                assert (
+                if not (
                     offset_in_shard >= 0 and offset_in_shard < sharded_flat_param_numel
-                ), (
-                    f"Invalid `offset_in_shard` of {offset_in_shard} for "
-                    f"sharded flat parameter with {sharded_flat_param_numel} numel"
-                )
+                ):
+                    raise AssertionError(
+                        f"Invalid `offset_in_shard` of {offset_in_shard} for "
+                        f"sharded flat parameter with {sharded_flat_param_numel} numel"
+                    )
                 intra_param_end_idx = (
                     min(unsharded_param_end_idx, unsharded_end_idx)
                     - unsharded_param_start_idx
@@ -1066,7 +1092,7 @@ class FlatParamHandle:
         tensor: Tensor,
         rank: int,
         world_size: int,
-    ) -> Tuple[Tensor, int]:
+    ) -> tuple[Tensor, int]:
         """
         Return the unpadded shard of ``tensor`` for the given ``rank`` and ``world_size``.
 
@@ -1089,9 +1115,10 @@ class FlatParamHandle:
         else:
             chunk = chunks[rank]
         numel_to_pad = chunks[0].numel() - chunk.numel()
-        assert (
-            numel_to_pad >= 0
-        ), "Chunk's size should be at most the first chunk's size"
+        if numel_to_pad < 0:
+            raise AssertionError(
+                "Chunk's size should be at most the first chunk's size"
+            )
         return chunk, numel_to_pad
 
     @staticmethod
@@ -1099,7 +1126,7 @@ class FlatParamHandle:
         tensor: Tensor,
         rank: int,
         world_size: int,
-    ) -> Tuple[Tensor, int]:
+    ) -> tuple[Tensor, int]:
         """
         Return the shard of ``tensor`` with padding for the given ``rank`` and ``world_size`` and the numel padded for that shard.
 
@@ -1122,15 +1149,19 @@ class FlatParamHandle:
         This requires ``tensor`` to have 1D shape and ensures that the returned
         shape is 1D.
         """
-        assert len(tensor.shape) == 1, f"{tensor.shape}"
+        if len(tensor.shape) != 1:
+            raise AssertionError(f"Expected 1D tensor shape, got {tensor.shape}")
         unpadded_sharded_tensor, numel_to_pad = FlatParamHandle._get_unpadded_shard(
             tensor, rank, world_size
         )
         unpadded_sharded_size = unpadded_sharded_tensor.size()
-        assert len(unpadded_sharded_size) == 1, f"{unpadded_sharded_size}"
+        if len(unpadded_sharded_size) != 1:
+            raise AssertionError(
+                f"Expected 1D unpadded_sharded_size, got {unpadded_sharded_size}"
+            )
         return torch.Size([unpadded_sharded_size[0] + numel_to_pad])
 
-    def _get_flat_param_offsets(self) -> List[Tuple[int, int]]:
+    def _get_flat_param_offsets(self) -> list[tuple[int, int]]:
         """
         Return [start, end] offsets of each original parameter's flattened data in the unsharded flat parameter (without padding).
 
@@ -1229,14 +1260,12 @@ class FlatParamHandle:
         flat_param._local_shard = flat_param.data
         if self._offload_params:
             # Pin the memory for faster H2D transfer
-            flat_param._local_shard = flat_param._local_shard.pin_memory(
-                device=self.device
-            )
+            flat_param._local_shard = flat_param._local_shard.pin_memory()
             # Pre-allocate the sharded gradient on CPU to enable non-blocking
             # D2H transfer during the backward pass
             flat_param._cpu_grad = torch.zeros_like(
                 flat_param._local_shard, device=cpu_device
-            ).pin_memory(device=self.device)
+            ).pin_memory()
         if self._uses_param_mixed_precision:
             # For parameter mixed precision, we maintain a low precision
             # sharded tensor on the compute device to be all-gathered (for
@@ -1318,7 +1347,8 @@ class FlatParamHandle:
         self._check_low_precision_shard()
         flat_param = self.flat_param
         _alloc_storage(
-            flat_param._mp_shard, flat_param._local_shard.size()  # type: ignore[attr-defined]
+            flat_param._mp_shard,
+            flat_param._local_shard.size(),  # type: ignore[attr-defined]
         )
         # `copy_()` implicitly casts to the low precision
         flat_param._mp_shard.copy_(  # type: ignore[attr-defined]
@@ -1514,7 +1544,8 @@ class FlatParamHandle:
         # default stream suffices since the default stream waits for the
         # unshard stream.
         _no_dispatch_record_stream(
-            self.flat_param._mp_shard, self._device_handle.current_stream()  # type: ignore[attr-defined]
+            self.flat_param._mp_shard,
+            self._device_handle.current_stream(),  # type: ignore[attr-defined]
         )
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
@@ -1609,8 +1640,7 @@ class FlatParamHandle:
                 f"but got {flat_param.grad.device}",
             )
             prev_iter_synced_gradients = (
-                flat_param.grad.size()
-                == flat_param._local_shard.size()  # type: ignore[attr-defined]
+                flat_param.grad.size() == flat_param._local_shard.size()  # type: ignore[attr-defined]
             )
             if prev_iter_synced_gradients:
                 # TODO (awgu): Gradient accumulation outside `no_sync()`
@@ -1684,8 +1714,7 @@ class FlatParamHandle:
                     cast_grad_to_param_dtype_if_needed(flat_param)
         else:
             _p_assert(
-                not self.uses_sharded_strategy
-                or not flat_param._post_backward_called,  # type: ignore[attr-defined]
+                not self.uses_sharded_strategy or not flat_param._post_backward_called,  # type: ignore[attr-defined]
                 "All sharded parameters that received a gradient in the "
                 "post-backward should use `_saved_grad_shard`",
             )
@@ -1886,7 +1915,7 @@ class FlatParamHandle:
     def _get_unflat_views_aligned(
         self,
         tensor: Optional[Tensor] = None,
-    ) -> List[Tensor]:
+    ) -> list[Tensor]:
         """
         Return unflattened ``Tensor`` views into ``tensor`` with handling for padding.
 
@@ -1897,11 +1926,11 @@ class FlatParamHandle:
         flat_param = self.flat_param
         if tensor is None:
             tensor = flat_param
-        splits: List[Tensor] = torch.split(
+        splits: list[Tensor] = torch.split(
             tensor, flat_param._numels_with_padding, dim=0
         )
         idx = 0
-        views: List[Tensor] = []
+        views: list[Tensor] = []
         for split, is_padding in zip(splits, flat_param._is_padding_mask):
             if is_padding:
                 continue
@@ -2068,7 +2097,7 @@ class FlatParamHandle:
             _p_assert(
                 hasattr(module, param_name),
                 f"{module_name + '.' + param_name if module_name else param_name} is missing",
-            )  # did not save FQN info in `_shared_param_infos`
+            )
             param = getattr(module, param_name)
             prim_param = getattr(prim_module, prim_param_name)
             if (
@@ -2139,7 +2168,8 @@ class FlatParamHandle:
                 offset = shard_param_info.offset_in_shard
                 numel_in_shard = shard_param_info.numel_in_shard
                 param.data = flat_param[offset : offset + numel_in_shard]
-        assert self.flat_param._shared_params is not None
+        if self.flat_param._shared_params is None:
+            raise AssertionError("Expected _shared_params to be not None")
         for i, (
             param,
             (param_name, module, _, prim_param_name, prim_module, _),
@@ -2203,7 +2233,8 @@ class FlatParamHandle:
                         )
                 else:
                     param.grad = None
-        assert flat_param._shared_params is not None
+        if flat_param._shared_params is None:
+            raise AssertionError("Expected _shared_params to be not None")
         for param, (_, _, _, prim_param_name, prim_module, _) in zip(
             flat_param._shared_params, flat_param._shared_param_infos
         ):
@@ -2304,8 +2335,9 @@ class FlatParamHandle:
                 flat_param._params[i] = param
             if needs_param_writeback:
                 expected_shape = torch.Size([numel_in_shard])
+                src = param if self.uses_sharded_strategy else param.view(-1)
                 self._writeback_tensor(
-                    param, flat_param, i, expected_shape, offset_in_shard, True
+                    src, flat_param, i, expected_shape, offset_in_shard, True
                 )
                 wroteback = True
 
@@ -2337,8 +2369,13 @@ class FlatParamHandle:
                     if flat_param_grad is None:
                         flat_param_grad = torch.zeros_like(flat_param)
                     expected_shape = torch.Size([numel_in_shard])
+                    src = (
+                        param.grad
+                        if self.uses_sharded_strategy
+                        else param.grad.view(-1)
+                    )
                     self._writeback_tensor(
-                        param.grad,
+                        src,
                         flat_param_grad,
                         i,
                         expected_shape,
@@ -2411,7 +2448,8 @@ class FlatParamHandle:
             dst_tensor[offset : offset + expected_shape.numel()].copy_(src_tensor)
         else:
             dst_tensor[offset : offset + expected_shape.numel()].zero_()
-            assert self.flat_param._is_grad_none_mask is not None
+            if self.flat_param._is_grad_none_mask is None:
+                raise AssertionError("Expected _is_grad_none_mask to be not None")
             self.flat_param._is_grad_none_mask[tensor_index] = True
 
     def _reset_flat_param_grad_info_if_needed(self):
@@ -2430,7 +2468,8 @@ class FlatParamHandle:
         if not self._use_orig_params:
             return
         flat_param = self.flat_param
-        assert flat_param._params is not None  # mypy
+        if flat_param._params is None:
+            raise AssertionError("Expected _params to be not None")  # mypy
         all_grad_none = True
         requires_grad = False
         for param in flat_param._params:
@@ -2464,7 +2503,7 @@ class FlatParamHandle:
             else:
                 self._use_unsharded_views(as_params=True)
 
-    def _get_modules(self) -> Set[nn.Module]:
+    def _get_modules(self) -> set[nn.Module]:
         """Return a :class:`set` of the modules whose parameters are included in this handle's flat parameter."""
         return {pi.module for pi in self.flat_param._param_infos}.union(
             {spi.module for spi in self.flat_param._shared_param_infos}
@@ -2485,7 +2524,7 @@ class FlatParamHandle:
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
         return tensor.size() == sharded_size
 
-    def param_module_names(self) -> Iterator[Tuple[str, str]]:
+    def param_module_names(self) -> Iterator[tuple[str, str]]:
         shared_param_infos = [
             ParamInfo(param_name, module, module_name)
             for (
@@ -2501,7 +2540,7 @@ class FlatParamHandle:
             param_name, _, module_name = param_info  # type: ignore[misc]
             yield (param_name, module_name)
 
-    def shared_param_module_names(self) -> Iterator[Tuple[str, str]]:
+    def shared_param_module_names(self) -> Iterator[tuple[str, str]]:
         for param_name, _, module_name in [
             ParamInfo(param_name, module, module_name)
             for (
@@ -2516,11 +2555,12 @@ class FlatParamHandle:
             yield (param_name, module_name)
 
     @property
-    def _fqns_in_shard(self) -> List[str]:
+    def _fqns_in_shard(self) -> list[str]:
         """Return the FQNs of the parameters present in this rank's shard."""
-        fqns_in_shard: List[str] = []
+        fqns_in_shard: list[str] = []
         for fqn, shard_param_info in zip(
-            self.flat_param._fqns, self.flat_param._shard_param_infos  # type: ignore[attr-defined]
+            self.flat_param._fqns,
+            self.flat_param._shard_param_infos,  # type: ignore[attr-defined]
         ):
             if shard_param_info.in_shard:
                 fqns_in_shard.append(fqn)
@@ -2573,12 +2613,16 @@ class FlatParamHandle:
             "Expects to only be called in the post-backward after gradient computation",
         )
         flat_param = self.flat_param
-        assert flat_param._params is not None  # mypy
+        if flat_param._params is None:
+            raise AssertionError("Expected _params to be not None")  # mypy
         for i, param in enumerate(flat_param._params):  # type: ignore[arg-type]
             # As long as the parameter requires gradient, it should receive a
             # meaningful gradient (even if the gradient happens to be zeros)
             if param.requires_grad:
-                assert flat_param._is_grad_none_mask is not None  # mypy
+                if flat_param._is_grad_none_mask is None:
+                    raise AssertionError(
+                        "Expected _is_grad_none_mask to be not None"
+                    )  # mypy
                 flat_param._is_grad_none_mask[i] = False
 
     #######################
@@ -2710,8 +2754,8 @@ def _safe_setattr_tensor_or_param(
 
 
 def _convert_to_params(
-    tensors: List[Union[torch.Tensor, nn.Parameter]]
-) -> List[nn.Parameter]:
+    tensors: list[Union[torch.Tensor, nn.Parameter]],
+) -> list[nn.Parameter]:
     return [t if isinstance(t, nn.Parameter) else nn.Parameter(t) for t in tensors]
 
 
@@ -2758,7 +2802,7 @@ def _construct_padding_tensor(
 
 
 # Use `lru_cache(1)` to only log the warning once (assuming the fixed warning
-# messasge is passed in)
+# message is passed in)
 @functools.lru_cache(1)
 def _warn_skip_writeback_check(log: logging.Logger, warning: str):
     logger.warning(warning)

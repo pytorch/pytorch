@@ -24,7 +24,7 @@ namespace at::native {
 namespace {
 
 template <typename scalar_t>
-static void adaptive_avg_pool3d_out_frame(
+void adaptive_avg_pool3d_out_frame(
     const scalar_t* input_p,
     scalar_t* output_p,
     int64_t sizeD,
@@ -176,7 +176,7 @@ void adaptive_avg_pool3d_out_cpu_template(
 }
 
 template <typename scalar_t>
-static void adaptive_avg_pool3d_backward_out_frame(
+void adaptive_avg_pool3d_backward_out_frame(
     scalar_t* gradInput_p,
     const scalar_t* gradOutput_p,
     int64_t sizeD,
@@ -235,6 +235,8 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
   auto gradOutput = gradOutput_.contiguous();
 
   adaptive_pool_empty_output_check(gradOutput_, "adaptive_avg_pool3d_backward");
+  TORCH_CHECK(input.dim() == gradOutput_.dim(),
+    __func__, ": Expected dimensions ", input.dim(), " for `gradOutput_` but got dimensions ", gradOutput_.dim());
 
   /* sizes */
   int64_t sizeD = input.size(-4);

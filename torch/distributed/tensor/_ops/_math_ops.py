@@ -1,18 +1,19 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, List, Optional, Sequence, Tuple, Union
+from typing import cast, Optional, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
+    OpSpec,
     OpStrategy,
     PlacementList,
-    PlacementStrategy,
     RuntimeSchemaInfo,
     TupleStrategy,
 )
@@ -21,6 +22,7 @@ from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     is_tensor_evenly_shardable,
+    is_tensor_evenly_shardable_on_dim,
     normalize_dim,
     normalize_dims,
     register_op_strategy,
@@ -102,7 +104,10 @@ class _NormPartial(Partial):
                 raise NotImplementedError(f"Unsupported norm type:: {self.norm_type}")
             elif self.norm_type == 1:
                 return tensor / mesh.size(mesh_dim)
-            assert isinstance(self.norm_type, (int, float))
+            if not isinstance(self.norm_type, (int, float)):
+                raise AssertionError(
+                    f"Expected int or float, got {type(self.norm_type)}"
+                )
             return tensor / math.pow(mesh.size(mesh_dim), 1 / self.norm_type)
         raise NotImplementedError(self.reduce_op)
 
@@ -113,7 +118,8 @@ class _NormPartial(Partial):
         mesh_dim: int,
         shard_spec: Placement,
     ) -> torch.Tensor:
-        assert isinstance(shard_spec, Shard), f"{shard_spec}"
+        if not isinstance(shard_spec, Shard):
+            raise AssertionError(f"Expected Shard, got {type(shard_spec)}")
         tensor = self._pre_reduce_transform(tensor)
         reduced_tensor = super()._reduce_shard_value(tensor, mesh, mesh_dim, shard_spec)
         return self._post_reduce_transform(reduced_tensor)
@@ -127,15 +133,23 @@ class _NormPartial(Partial):
 
     def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
         if self.reduce_op == "sum":
-            assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
+            if not isinstance(self.norm_type, (int, float)):
+                raise AssertionError(
+                    f"Expected int or float, got {type(self.norm_type)}"
+                )
             if self.norm_type != 0 and self.norm_type != 1:
+                # pyrefly: ignore  # unsupported-operation
                 return tensor**self.norm_type
         return tensor
 
     def _post_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
         if self.reduce_op == "sum":
-            assert isinstance(self.norm_type, (int, float)), f"{self.norm_type}"
+            if not isinstance(self.norm_type, (int, float)):
+                raise AssertionError(
+                    f"Expected int or float, got {type(self.norm_type)}"
+                )
             if self.norm_type != 0 and self.norm_type != 1:
+                # pyrefly: ignore  # unsupported-operation
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 
@@ -148,11 +162,11 @@ class _NormPartial(Partial):
         return 1 + hash(self.norm_type)
 
 
-def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
+def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[list[int]]:
     if dims_arg is None:
         return None
-    dims = cast(List[int], as_list(dims_arg))
-    dims = cast(List[int], normalize_dims(dims, ndim))
+    dims = cast(list[int], as_list(dims_arg))
+    dims = cast(list[int], normalize_dims(dims, ndim))
     empty_dims = [[0], [-1], []]
     if ndim == 0 and dims_arg in empty_dims:
         return None
@@ -160,8 +174,8 @@ def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
 
 
 def _infer_reduce_dims_map(
-    reduction_dims: List[int], input_ndim: int, keep_dim=False
-) -> List[int]:
+    reduction_dims: list[int], input_ndim: int, keep_dim=False
+) -> list[int]:
     reduction_dims_map = []
     new_dim_count = 0
     for input_dim in range(input_ndim):
@@ -178,8 +192,8 @@ def _infer_reduce_dims_map(
 
 def _replicate_dims_start_at(
     placements: Sequence[Placement], start_dim: int = 0
-) -> Tuple[Placement, ...]:
-    new_placements: List[Placement] = []
+) -> tuple[Placement, ...]:
+    new_placements: list[Placement] = []
     for p in placements:
         if p.is_partial() or (isinstance(p, Shard) and p.dim >= start_dim):
             new_placements.append(Replicate())  # make it replicate
@@ -190,9 +204,9 @@ def _replicate_dims_start_at(
 
 # return new_placements which align with placements but skip the skipped_dim
 def _skip_dim(
-    placements: Tuple[Placement, ...], skipped_dim: int
-) -> Tuple[Placement, ...]:
-    new_placements: List[Placement] = []
+    placements: tuple[Placement, ...], skipped_dim: int
+) -> tuple[Placement, ...]:
+    new_placements: list[Placement] = []
     for p in placements:
         if isinstance(p, Shard) and p.dim >= skipped_dim:
             new_placements.append(Shard(p.dim - 1))
@@ -202,10 +216,10 @@ def _skip_dim(
 
 
 def replicate_reduction_dims(
-    placements: Tuple[Placement, ...], reduction_dims: List[int]
-) -> Tuple[Placement, ...]:
+    placements: tuple[Placement, ...], reduction_dims: list[int]
+) -> tuple[Placement, ...]:
     # replicate the reduction dims if not reduction_linear
-    new_placements: List[Placement] = []
+    new_placements: list[Placement] = []
 
     for p in placements:
         if p.is_partial():
@@ -219,20 +233,21 @@ def replicate_reduction_dims(
 
 
 def map_placements_after_reduction(
-    placements: Tuple[Placement, ...],
-    reduction_dims: List[int],
-    reduction_dims_map: List[int],
+    placements: tuple[Placement, ...],
+    reduction_dims: list[int],
+    reduction_dims_map: list[int],
     reduction_op: ReductionOpType,
-) -> Tuple[Placement, ...]:
+) -> tuple[Placement, ...]:
     """
     Map each placement based on the output shape after reduction.
     """
-    new_placements: List[Placement] = []
+    new_placements: list[Placement] = []
     for placement in placements:
         if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
         else:
-            assert isinstance(placement, Shard)
+            if not isinstance(placement, Shard):
+                raise AssertionError(f"Expected Shard, got {type(placement)}")
             shard_dim = placement.dim
             new_shard_dim = reduction_dims_map[shard_dim]
             if new_shard_dim == -1 or shard_dim in reduction_dims:
@@ -251,9 +266,8 @@ def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
 
 
 def common_reduction_strategy(
-    mesh: DeviceMesh,
     input_strategy: OpStrategy,
-    reduce_dims: List[int],
+    reduce_dims: list[int],
     keep_dim: bool = False,
     reduction_linear: bool = True,
     reduction_op: ReductionOpType = "sum",
@@ -267,20 +281,29 @@ def common_reduction_strategy(
     # by default follow reduction input strategy
     reduction_strategy = OpStrategy([])
 
-    for strtg in input_strategy.strategies:
+    for op_spec in input_strategy.strategies:
+        if reduction_op == "avg":
+            output_spec = op_spec.output_spec
+            local_shape = list(output_spec.tensor_meta.shape)  # type:ignore[union-attr]
+            for dim in reduce_dims:
+                if not is_tensor_evenly_shardable_on_dim(local_shape, output_spec, dim):
+                    # reduce(avg) is not linear for unevenly sharded tensors
+                    reduction_linear = False
+                    break
+
         if not reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
             input_placements = replicate_reduction_dims(
-                strtg.output_spec.placements, reduce_dims
+                op_spec.output_spec.placements, reduce_dims
             )
         else:
-            input_placements = strtg.output_spec.placements
+            input_placements = op_spec.output_spec.placements
 
         input_spec = DTensorSpec(
-            mesh=mesh,
+            mesh=input_strategy.mesh,
             placements=input_placements,
-            tensor_meta=strtg.output_spec.tensor_meta,
+            tensor_meta=op_spec.output_spec.tensor_meta,
         )
 
         reduce_dims_map = _infer_reduce_dims_map(reduce_dims, input_spec.ndim, keep_dim)
@@ -289,9 +312,9 @@ def common_reduction_strategy(
         )
         redistribute_cost = [generate_redistribute_costs(input_strategy, input_spec)]
         reduction_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=DTensorSpec(
-                    mesh=mesh,
+                    mesh=input_strategy.mesh,
                     placements=out_placements,
                 ),
                 input_specs=(input_spec,),
@@ -307,9 +330,14 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.all.dim: "sum",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
+    aten.any.default: "sum",
+    aten.any.dim: "sum",
+    aten.any.out: "sum",
+    # These are only valid when there is no padding
     aten.prod.default: "product",
     aten.prod.dim_int: "product",
     aten.prod.int_out: "product",
+    # avg is only linear when there is no padding
     aten.mean.default: "avg",
     aten.mean.dim: "avg",
     aten.mean.out: "avg",
@@ -319,9 +347,6 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.min.default: "min",
     aten.min.dim: "min",
     aten.min.out: "min",
-    aten.any.default: "sum",
-    aten.any.dim: "sum",
-    aten.any.out: "sum",
     aten.amax.default: "max",
     aten.amax.out: "max",
     aten.amin.default: "min",
@@ -332,10 +357,12 @@ LINEAR_REDUCTION_OP_MAP = {
 @register_op_strategy(
     list(LINEAR_REDUCTION_OP_MAP.keys()), schema_info=RuntimeSchemaInfo(1)
 )
-def linear_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def linear_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
-    assert isinstance(input_strategy, OpStrategy)
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+
     dims = None
     if len(op_schema.args_schema) > 1:
         dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
@@ -345,7 +372,6 @@ def linear_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
     reduction_op = LINEAR_REDUCTION_OP_MAP[op_schema.op]
     return common_reduction_strategy(
-        mesh,
         input_strategy,
         reduce_dims,
         keep_dim=keep_dim,
@@ -354,14 +380,30 @@ def linear_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     )
 
 
+@register_op_strategy(aten.cumsum.default, schema_info=RuntimeSchemaInfo(1))
+def cumsum_strategy(op_schema: OpSchema) -> OpStrategy:
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+    dim = args_schema[1]
+    if not isinstance(dim, int):
+        raise AssertionError(f"Expected int, got {type(dim)}")
+
+    return common_reduction_strategy(
+        input_strategy, [dim], keep_dim=True, reduction_linear=False
+    )
+
+
 @register_op_strategy(
     [aten.var.correction, aten.var.correction_out],
     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
 )
-def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
-    assert isinstance(input_strategy, OpStrategy)
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
     dims = None
     if len(op_schema.args_schema) > 1:
         dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
@@ -370,25 +412,27 @@ def var_reduction_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
     keep_dim = cast(bool, op_schema.kwargs_schema.get("keepdim", False))
     return common_reduction_strategy(
-        mesh, input_strategy, reduce_dims, keep_dim=keep_dim, reduction_linear=False
+        input_strategy, reduce_dims, keep_dim=keep_dim, reduction_linear=False
     )
 
 
 @register_op_strategy(
     [aten.linalg_vector_norm.default], schema_info=RuntimeSchemaInfo(1)
 )
-def vector_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
-    assert isinstance(input_strategy, OpStrategy)
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
-    assert isinstance(norm_type, (int, float, str)), f"{norm_type}"
+    if not isinstance(norm_type, (int, float, str)):
+        raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
     dim = args_schema[2] if len(args_schema) > 2 else None
     keepdim = args_schema[3] if len(args_schema) > 3 else False
     dims = _infer_reduction_dims(dim, input_strategy.ndim)
     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
     return common_reduction_strategy(
-        mesh,
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
@@ -400,25 +444,29 @@ def vector_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 @register_op_strategy(
     [aten._foreach_norm.Scalar], schema_info=RuntimeSchemaInfo(1, needs_pytree=True)
 )
-def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrategy:
+def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
-    assert isinstance(input_tuple_strategy, TupleStrategy)
+    if not isinstance(input_tuple_strategy, TupleStrategy):
+        raise AssertionError(
+            f"Expected TupleStrategy, got {type(input_tuple_strategy)}"
+        )
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
-    assert isinstance(norm_type, (int, float, str)), f"{norm_type}"
-    output_tuple_strategy_childs: List[OpStrategy] = []
-    for op_strategy in input_tuple_strategy.childs:
-        assert isinstance(op_strategy, OpStrategy), f"{op_strategy}"
+    if not isinstance(norm_type, (int, float, str)):
+        raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
+    output_tuple_strategy_children: list[OpStrategy] = []
+    for op_strategy in input_tuple_strategy.children:
+        if not isinstance(op_strategy, OpStrategy):
+            raise AssertionError(f"Expected OpStrategy, got {type(op_strategy)}")
         reduce_dims = list(range(op_strategy.ndim))
         output_strategy = common_reduction_strategy(
-            mesh,
             op_strategy,
             reduce_dims,
             reduction_linear=True,
             reduction_op=NormReduction(norm_type),
         )
-        output_tuple_strategy_childs.append(output_strategy)
-    return TupleStrategy(output_tuple_strategy_childs)
+        output_tuple_strategy_children.append(output_strategy)
+    return TupleStrategy(output_tuple_strategy_children)
 
 
 @register_op_strategy(
@@ -443,15 +491,18 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
     ],
     schema_info=RuntimeSchemaInfo(1),
 )
-def linalg_replicate_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def linalg_replicate_strategy(op_schema: OpSchema) -> OpStrategy:
     """
     Since we do not have a simple way to compute some linear algebra operations
     like SVD or QR decomposition, always fall back to replicate.
     """
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
-    assert isinstance(input_strategy, OpStrategy), f"{input_strategy}"
-    output_strategies: List[PlacementStrategy] = []
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+    mesh = input_strategy.mesh
+
+    output_strategies: list[OpSpec] = []
     for placement_strategy in input_strategy.strategies:
         replicate_placements = tuple(Replicate() for _ in range(mesh.ndim))
         replicate_spec = DTensorSpec(
@@ -462,7 +513,7 @@ def linalg_replicate_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
         redistribute_cost = [
             generate_redistribute_costs(input_strategy, replicate_spec)
         ]
-        replicate_strategy = PlacementStrategy(
+        replicate_strategy = OpSpec(
             output_specs=replicate_spec,
             input_specs=(replicate_spec,),
             redistribute_cost=redistribute_cost,
@@ -475,9 +526,10 @@ def linalg_replicate_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     [aten._log_softmax.default, aten._softmax.default, aten._safe_softmax.default],
     schema_info=RuntimeSchemaInfo(1),
 )
-def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def softmax_strategy(op_schema: OpSchema) -> OpStrategy:
     input_strategy, softmax_dim, *_ = op_schema.args_schema
     input_strategy = cast(OpStrategy, input_strategy)
+
     softmax_dim = cast(int, softmax_dim)
     softmax_dim = normalize_dim(softmax_dim, input_strategy.ndim)
 
@@ -488,7 +540,7 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
         # make sure input is replicated along the softmax dim
         input_target_spec = DTensorSpec(
-            mesh=mesh,
+            mesh=input_strategy.mesh,
             placements=replicate_reduction_dims(
                 input_src_spec.placements, [softmax_dim]
             ),
@@ -499,7 +551,7 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         )
         output_target_spec = input_target_spec
         output_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=output_target_spec,
                 input_specs=[input_target_spec],
                 redistribute_cost=redistribute_costs,
@@ -516,7 +568,7 @@ def softmax_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
     ],
     schema_info=RuntimeSchemaInfo(2),
 )
-def softmax_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+def softmax_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     grad_out_strategy, out_strategy, softmax_dim, _ = op_schema.args_schema
     grad_out_strategy = cast(OpStrategy, grad_out_strategy)
     out_strategy = cast(OpStrategy, out_strategy)
@@ -538,14 +590,25 @@ def softmax_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
 
         # make sure inputs are replicated along the softmax dim
         tgt_spec = DTensorSpec(
-            mesh=mesh,
+            mesh=grad_out_strategy.mesh,
             placements=replicate_reduction_dims(src_spec.placements, [softmax_dim]),
+        )
+        new_grad_out_spec = DTensorSpec(
+            mesh=tgt_spec.mesh,
+            placements=tgt_spec.placements,
+            tensor_meta=grad_out_src_spec.tensor_meta,
+        )
+        new_out_spec = DTensorSpec(
+            mesh=tgt_spec.mesh,
+            placements=tgt_spec.placements,
+            tensor_meta=out_src_spec.tensor_meta,
         )
         redist_grad_out_cost = generate_redistribute_costs(grad_out_strategy, tgt_spec)
         redist_out_cost = generate_redistribute_costs(out_strategy, tgt_spec)
         grad_in_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=tgt_spec,
+                input_specs=(new_grad_out_spec, new_out_spec),
                 redistribute_cost=[redist_grad_out_cost, redist_out_cost],
             )
         )
@@ -557,8 +620,12 @@ def softmax_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     [aten.nll_loss_forward.default, aten.nll_loss2d_forward.default],
     schema_info=RuntimeSchemaInfo(3),
 )
-def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    assert len(op_schema.args_schema) == 5
+def nll_loss_forward_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+
+    if not len(op_schema.args_schema) == 5:
+        raise AssertionError(f"Expected 5 args, got {len(op_schema.args_schema)}")
+
     (
         input_strategy,
         target_strategy,
@@ -607,7 +674,10 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
         # weight tensor, if given, has to be a Tensor of size input_shape[channel_dim]
         # make sure it is replicated
         if weight_strategy is not None:
-            assert isinstance(weight_strategy, OpStrategy)
+            if not isinstance(weight_strategy, OpStrategy):
+                raise AssertionError(
+                    f"Expected OpStrategy, got {type(weight_strategy)}"
+                )
             weight_src_spec = weight_strategy.strategies[idx].output_spec
             weight_expected_spec = DTensorSpec(
                 mesh=mesh,
@@ -664,7 +734,7 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
             )
 
         output_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=(output_expected_spec, total_weight_expected_spec),
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
@@ -678,8 +748,12 @@ def nll_loss_forward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrate
     [aten.nll_loss_backward.default, aten.nll_loss2d_backward.default],
     schema_info=RuntimeSchemaInfo(4),
 )
-def nll_loss_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    assert len(op_schema.args_schema) == 7
+def nll_loss_backward_strategy(op_schema: OpSchema) -> OpStrategy:
+    # backward op does not need to validate the mesh since forward op has already done it
+    mesh = op_schema.get_mesh_from_args(validate=False)
+
+    if not len(op_schema.args_schema) == 7:
+        raise AssertionError(f"Expected 7 args, got {len(op_schema.args_schema)}")
     (
         grad_out_strategy,
         input_strategy,
@@ -748,7 +822,10 @@ def nll_loss_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrat
         # weight tensor, if given, has to be a Tensor of size input_shape[channel_dim]
         # make sure it is replicated
         if weight_strategy is not None:
-            assert isinstance(weight_strategy, OpStrategy)
+            if not isinstance(weight_strategy, OpStrategy):
+                raise AssertionError(
+                    f"Expected OpStrategy, got {type(weight_strategy)}"
+                )
             weight_src_spec = weight_strategy.strategies[idx].output_spec
             weight_expected_spec = DTensorSpec(
                 mesh=mesh,
@@ -776,7 +853,7 @@ def nll_loss_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrat
 
         grad_in_expected_spec = input_expected_spec
         grad_in_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=grad_in_expected_spec,
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
@@ -786,34 +863,53 @@ def nll_loss_backward_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrat
     return grad_in_strategy
 
 
-@register_op_strategy(
-    [aten.native_layer_norm.default],
-    schema_info=RuntimeSchemaInfo(1),
-)
-def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    # args must be: input, normalized_shape, weight, bias, eps
-    # for None weight and bias, their corresponding objects will
-    # be None as well. layer_norm_strategy returns one OpStrategy
-    # for the triple return values (out, mean, rstd).
-    assert len(op_schema.args_schema) == 5
-    (
-        input_strategy,
-        normalized_shape,
-        weight_strategy,
-        bias_strategy,
-        _,
-    ) = op_schema.args_schema
+def _common_norm_forward_strategy(
+    op_schema: OpSchema,
+    rms_norm: bool = False,
+) -> OpStrategy:
+    """Common forward strategy logic for layer_norm and rms_norm."""
+    mesh = op_schema.get_mesh_from_args()
 
-    # the current layer norm implementation requires that all
+    if not rms_norm:
+        # layer_norm args: input, normalized_shape, weight, bias, eps
+        # for None weight and bias, their corresponding objects will
+        # be None as well. layer_norm_strategy returns one OpStrategy
+        # for the triple return values (out, mean, rstd).
+        if not len(op_schema.args_schema) == 5:
+            raise AssertionError(f"Expected 5 args, got {len(op_schema.args_schema)}")
+        (
+            input_strategy,
+            normalized_shape,
+            weight_strategy,
+            bias_strategy,
+            _,
+        ) = op_schema.args_schema
+    else:
+        # rms_norm args: input, normalized_shape, weight, eps
+        if not len(op_schema.args_schema) == 4:
+            raise AssertionError(f"Expected 4 args, got {len(op_schema.args_schema)}")
+        (
+            input_strategy,
+            normalized_shape,
+            weight_strategy,
+            _,
+        ) = op_schema.args_schema
+        bias_strategy = None
+
+    # the current norm implementation requires that all
     # input DTensor's sharding must be in form of OpStrategy
-    assert isinstance(input_strategy, OpStrategy)
-    assert isinstance(normalized_shape, (int, Sequence, torch.Size))
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+    if not isinstance(normalized_shape, (int, Sequence, torch.Size)):
+        raise AssertionError(
+            f"Expected int, Sequence, or torch.Size, got {type(normalized_shape)}"
+        )
     normalized_size = normalize_to_torch_size(normalized_shape)
 
     input_ndim = input_strategy.ndim
     axis = input_ndim - len(normalized_size)
 
-    # we use OpStrategy because the output (out, mean, rstd)
+    # we use OpStrategy because the output values (out, mean, rstd)
     # should have the same placements
     output_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
@@ -835,7 +931,10 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         )
 
         if weight_strategy is not None:
-            assert isinstance(weight_strategy, OpStrategy)
+            if not isinstance(weight_strategy, OpStrategy):
+                raise AssertionError(
+                    f"Expected OpStrategy, got {type(weight_strategy)}"
+                )
             weight_src_spec = weight_strategy.strategies[idx].output_spec
 
             # for the weight tensor, we replicate it on all dims if necessary
@@ -852,7 +951,8 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
             )
 
         if bias_strategy is not None:
-            assert isinstance(bias_strategy, OpStrategy)
+            if not isinstance(bias_strategy, OpStrategy):
+                raise AssertionError(f"Expected OpStrategy, got {type(bias_strategy)}")
             bias_src_spec = bias_strategy.strategies[idx].output_spec
 
             # for the bias tensor, we replicate it on all dims if necessary
@@ -871,7 +971,7 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
         # the output spec is the same as input spec
         output_target_spec = input_target_spec
         output_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=output_target_spec,
                 input_specs=op_args_target_specs,
                 redistribute_cost=redistribute_costs,
@@ -882,44 +982,98 @@ def layer_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [aten.native_layer_norm_backward.default],
-    schema_info=RuntimeSchemaInfo(2),
+    [aten.native_layer_norm.default],
+    schema_info=RuntimeSchemaInfo(1),
 )
-def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    # args must be: grad_out, input, normalized_shape, mean, rstd,
-    # weight, bias, output_mask. For None weight and bias, their
-    # corresponding objects will be None as well.
-    assert len(op_schema.args_schema) == 8
-    (
-        grad_out_strategy,
-        input_strategy,
-        normalized_shape,
-        mean_strategy,
-        rstd_strategy,
-        weight_strategy,
-        bias_strategy,
-        output_mask,
-    ) = op_schema.args_schema
+def layer_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_forward_strategy(op_schema)
 
-    assert isinstance(grad_out_strategy, OpStrategy)
-    assert isinstance(input_strategy, OpStrategy)
-    assert isinstance(mean_strategy, OpStrategy)
-    assert isinstance(rstd_strategy, OpStrategy)
 
-    assert isinstance(normalized_shape, (int, Sequence, torch.Size))
+@register_op_strategy(
+    [aten._fused_rms_norm.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def fused_rms_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_forward_strategy(op_schema, rms_norm=True)
+
+
+def _common_norm_backward_strategy(
+    op_schema: OpSchema,
+    rms_norm: bool = False,
+) -> OpStrategy:
+    """Common backward strategy logic for layer_norm and rms_norm."""
+    # backward op does not need to validate the mesh since forward op has already done it
+    mesh = op_schema.get_mesh_from_args(validate=False)
+
+    if not rms_norm:
+        # layer_norm args: grad_out, input, normalized_shape, mean, rstd,
+        # weight, bias, output_mask. For None weight and bias, their
+        # corresponding objects will be None as well.
+        if not len(op_schema.args_schema) == 8:
+            raise AssertionError(f"Expected 8 args, got {len(op_schema.args_schema)}")
+        (
+            grad_out_strategy,
+            input_strategy,
+            normalized_shape,
+            mean_strategy,
+            rstd_strategy,
+            weight_strategy,
+            bias_strategy,
+            output_mask,
+        ) = op_schema.args_schema
+    else:
+        # rms_norm args: grad_out, input, normalized_shape, rstd,
+        if not len(op_schema.args_schema) == 6:
+            raise AssertionError(f"Expected 6 args, got {len(op_schema.args_schema)}")
+        (
+            grad_out_strategy,
+            input_strategy,
+            normalized_shape,
+            rstd_strategy,
+            weight_strategy,
+            output_mask,
+        ) = op_schema.args_schema
+        mean_strategy = None
+        bias_strategy = None
+
+    if not isinstance(grad_out_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(grad_out_strategy)}")
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+    if not isinstance(rstd_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(rstd_strategy)}")
+    if mean_strategy is not None:
+        if not isinstance(mean_strategy, OpStrategy):
+            raise AssertionError(f"Expected OpStrategy, got {type(mean_strategy)}")
+
+    if not isinstance(normalized_shape, (int, Sequence, torch.Size)):
+        raise AssertionError(
+            f"Expected int, Sequence, or torch.Size, got {type(normalized_shape)}"
+        )
     normalized_size = normalize_to_torch_size(normalized_shape)
     input_ndim = input_strategy.ndim
     axis = input_ndim - len(normalized_size)
     outer_dims = list(range(axis))
 
-    assert isinstance(output_mask, List) and len(output_mask) == 3
+    if not rms_norm:
+        if not (isinstance(output_mask, list) and len(output_mask) == 3):
+            raise AssertionError(
+                f"Expected output_mask to be list of length 3, got {type(output_mask)} "
+                f"of length {len(output_mask) if isinstance(output_mask, list) else 'N/A'}"
+            )
+    else:
+        if not (isinstance(output_mask, list) and len(output_mask) == 2):
+            raise AssertionError(
+                f"Expected output_mask to be list of length 2, got {type(output_mask)} "
+                f"of length {len(output_mask) if isinstance(output_mask, list) else 'N/A'}"
+            )
 
-    # output triple: (d_input, d_weight, d_bias)
+    # output tuple: (d_input, d_weight[, d_bias])
     out_tuple_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
-        # args for PlacementStrategy
-        output_specs_list: List[Optional[DTensorSpec]] = []
-        input_specs_list: List[DTensorSpec] = []
+        # args for OpSpec
+        output_specs_list: list[Optional[DTensorSpec]] = []
+        input_specs_list: list[DTensorSpec] = []
         redistribute_costs = []
 
         input_src_spec = input_placement_strategy.output_spec
@@ -955,17 +1109,23 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             generate_redistribute_costs(input_strategy, input_target_spec)
         )
 
-        # arg: mean, rstd
-        mean_src_spec = mean_strategy.strategies[idx].output_spec
-        input_specs_list.append(mean_src_spec)
-        redistribute_costs.append([0.0 for _ in mean_strategy.strategies])
+        # arg: mean
+        if not rms_norm:
+            if mean_strategy is None:
+                raise AssertionError("Expected mean_strategy to not be None")
+            mean_src_spec = mean_strategy.strategies[idx].output_spec
+            input_specs_list.append(mean_src_spec)
+            redistribute_costs.append([0.0 for _ in mean_strategy.strategies])
+
+        # arg: rstd
         rstd_src_spec = rstd_strategy.strategies[idx].output_spec
         input_specs_list.append(rstd_src_spec)
         redistribute_costs.append([0.0 for _ in rstd_strategy.strategies])
 
         def _add_target_input_spec(strategy) -> DTensorSpec:
             # shared logic for setting the weight and bias target input specs
-            assert isinstance(strategy, OpStrategy)
+            if not isinstance(strategy, OpStrategy):
+                raise AssertionError(f"Expected OpStrategy, got {type(strategy)}")
             src_spec = strategy.strategies[idx].output_spec
             # no need to redistribute since they should be replicated in forward pass
             input_specs_list.append(src_spec)
@@ -974,6 +1134,7 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
 
         # arg: weight
         # d_weight = sum(grad_out * (input - mean) / rstd, outer_dim, keepdim=False)
+        # For RMS norm, mean is 0, so it's just: sum(grad_out * input / rstd, outer_dim, keepdim=False)
         if weight_strategy is not None:
             weight_src_spec = _add_target_input_spec(weight_strategy)
             # TODO: now d_weight spec follows input spec w/ a reduction.
@@ -993,39 +1154,44 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
             )
             output_specs_list.append(weight_out_spec if output_mask[1] else None)
         else:
-            assert (
-                output_mask[1] is False
-            ), "output_mask[1] should not be `True` while weight argument is `None` in native_layer_norm_backward."
+            if not rms_norm:
+                error_msg = "output_mask[1] should not be `True` while weight argument is `None` in native_layer_norm_backward."
+            else:
+                error_msg = "output_mask[1] should not be `True` while weight argument is `None` in _fused_rms_norm_backward."
+            if output_mask[1] is not False:
+                raise AssertionError(error_msg)
             output_specs_list.append(None)
 
         # arg: bias
         # d_bias = sum(grad_out, outer_dim, keepdim=False)
-        if bias_strategy is not None:
-            bias_src_spec = _add_target_input_spec(bias_strategy)
-            # d_bias spec follows a reduction over grad_out
-            inp_placements = _replicate_dims_start_at(
-                grad_out_target_spec.placements, axis
-            )
-            reduce_dims_map = _infer_reduce_dims_map(
-                outer_dims, grad_out_target_spec.ndim, False
-            )
-            out_placements = map_placements_after_reduction(
-                inp_placements, outer_dims, reduce_dims_map, "sum"
-            )
-            bias_out_spec = DTensorSpec(
-                mesh=mesh,
-                placements=out_placements,
-                tensor_meta=bias_src_spec.tensor_meta,
-            )
-            output_specs_list.append(bias_out_spec if output_mask[2] else None)
-        else:
-            assert (
-                output_mask[2] is False
-            ), "output_mask[2] should not be `True` while bias argument is `None` in native_layer_norm_backward."
-            output_specs_list.append(None)
+        if not rms_norm:
+            if bias_strategy is not None:
+                bias_src_spec = _add_target_input_spec(bias_strategy)
+                # d_bias spec follows a reduction over grad_out
+                inp_placements = _replicate_dims_start_at(
+                    grad_out_target_spec.placements, axis
+                )
+                reduce_dims_map = _infer_reduce_dims_map(
+                    outer_dims, grad_out_target_spec.ndim, False
+                )
+                out_placements = map_placements_after_reduction(
+                    inp_placements, outer_dims, reduce_dims_map, "sum"
+                )
+                bias_out_spec = DTensorSpec(
+                    mesh=mesh,
+                    placements=out_placements,
+                    tensor_meta=bias_src_spec.tensor_meta,
+                )
+                output_specs_list.append(bias_out_spec if output_mask[2] else None)
+            else:
+                if output_mask[2] is not False:
+                    raise AssertionError(
+                        "output_mask[2] should not be `True` while bias argument is `None` in native_layer_norm_backward."
+                    )
+                output_specs_list.append(None)
 
         out_tuple_strategy.strategies.append(
-            PlacementStrategy(
+            OpSpec(
                 output_specs=tuple(output_specs_list),
                 input_specs=input_specs_list,
                 redistribute_cost=redistribute_costs,
@@ -1036,30 +1202,139 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
 
 
 @register_op_strategy(
+    [aten.native_layer_norm_backward.default],
+    schema_info=RuntimeSchemaInfo(2),
+)
+def layer_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_backward_strategy(op_schema)
+
+
+@register_op_strategy(
+    [aten._fused_rms_norm_backward.default],
+    schema_info=RuntimeSchemaInfo(2),
+)
+def fused_rms_norm_bwd_strategy(op_schema: OpSchema) -> OpStrategy:
+    return _common_norm_backward_strategy(op_schema, rms_norm=True)
+
+
+def sort_strategy(op_schema: OpSchema, sort_dim: int) -> OpStrategy:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    sort_dim = normalize_dim(sort_dim, input_strategy.ndim)
+    single_mesh_dim_strategies = []
+    all_replicate: PlacementList = [Replicate()] * 3
+    single_mesh_dim_strategies.append(all_replicate)
+    for dim in range(input_strategy.ndim):
+        if dim != sort_dim:
+            dim_shardings: PlacementList = [Shard(dim)] * 3
+            single_mesh_dim_strategies.append(dim_shardings)
+    return expand_to_full_mesh_op_strategy(
+        input_strategy.mesh, op_schema, single_mesh_dim_strategies, input_index=2
+    )
+
+
+@register_op_strategy(
     [aten.topk.default],
     schema_info=RuntimeSchemaInfo(2),
 )
-def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
-    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+def topk_strategy(op_schema: OpSchema) -> OpStrategy:
     topk_dim = (
         cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
     )
-    topk_dim = normalize_dim(topk_dim, input_strategy.ndim)
+    return sort_strategy(op_schema, topk_dim)
 
-    single_mesh_dim_strategies = []
 
-    # two outputs (values, indices), 1 input
-    # replicate always works
-    all_replicate: PlacementList = [Replicate()] * 3
-    single_mesh_dim_strategies.append(all_replicate)
+@register_op_strategy(
+    aten.sort.default,
+    schema_info=RuntimeSchemaInfo(
+        1,
+    ),
+)
+def sort_default_strategy(op_schema: OpSchema) -> OpStrategy:
+    # mostly copy paste from topk_strategy
+    input_strategy = op_schema.args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+    sort_dim = -1
+    if len(op_schema.args_schema) > 1:
+        sort_dim = cast(int, op_schema.args_schema[1])
+    return sort_strategy(op_schema, sort_dim)
 
-    # every dim except topk dim should work
-    for dim in range(input_strategy.ndim):
-        if dim != topk_dim:
-            dim_shardings: PlacementList = [Shard(dim)] * 3
+
+@register_op_strategy(
+    aten.sort.stable,
+    schema_info=RuntimeSchemaInfo(
+        1,
+        static_kwargkey=["dim", "descending", "stable"],
+    ),
+)
+def sort_stable_strategy(op_schema: OpSchema) -> OpStrategy:
+    # mostly copy paste from topk_strategy
+    input_strategy = op_schema.args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+    sort_dim = -1
+    if "dim" in op_schema.kwargs_schema:
+        sort_dim = cast(int, op_schema.kwargs_schema["dim"])
+    return sort_strategy(op_schema, sort_dim)
+
+
+@register_op_strategy(
+    [aten.histc.default],
+    # strategy choice depends on the value of 'min' and 'max' kwargs, which are position 2 and 3
+    schema_info=RuntimeSchemaInfo(2),
+)
+def histc_strategy(op_schema: OpSchema) -> OpStrategy:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    single_mesh_dim_strategies: list[PlacementList] = []
+    single_mesh_dim_strategies.append([Replicate(), Replicate()])
+
+    # histc can support sharded input and partial output on any input dim, provided the min and max
+    # values are user-specified.  If not user-specified, the true min and max of the data in each local
+    # tensor will be used to compute bin boundaries, which will not be the same across ranks, leading to
+    # an incorrect final result
+    if len(op_schema.args_schema) == 4:
+        for dim in range(input_strategy.ndim):
+            dim_shardings: PlacementList = [Partial(), Shard(dim)]
             single_mesh_dim_strategies.append(dim_shardings)
-    # TODO: topk on sharded dim requries non-trival reduction, address it later
 
     return expand_to_full_mesh_op_strategy(
-        mesh, op_schema, single_mesh_dim_strategies, input_index=2
+        input_strategy.mesh, op_schema, single_mesh_dim_strategies
+    )
+
+
+@register_op_strategy(
+    [aten.logsumexp.default],
+    schema_info=RuntimeSchemaInfo(
+        # static_argnum is the position where non-Tensor args beings.
+        static_argnum=1,
+        # static_kwargkey is the name of kwargs to hash (which determines
+        # whether sharding prop can be cached).
+        static_kwargkey=["keepdim"],
+    ),
+)
+def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
+    """Implements the sharding propagation strategy for logsumexp."""
+
+    # args_schema contains all but the DTensor args (e.g., dim, keepdim).
+    args_schema = op_schema.args_schema
+    if not len(args_schema) > 1:
+        raise AssertionError(
+            f"Expected more than 1 arg (input and dim are required), got {len(args_schema)}"
+        )
+
+    input_strategy = args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+
+    dims_arg = args_schema[1]
+    reduce_dims = _infer_reduction_dims(dims_arg, input_strategy.ndim)
+    if reduce_dims is None:
+        raise AssertionError("Expected reduce_dims to not be None")
+
+    keep_dim = cast(bool, op_schema.kwargs_schema.get("keepdim", False))
+    return common_reduction_strategy(
+        input_strategy,
+        reduce_dims,
+        keep_dim=keep_dim,
+        reduction_linear=False,
     )

@@ -2,11 +2,9 @@
 import collections
 import functools
 import inspect
-import sys
 import textwrap
 import types
 import warnings
-from typing import Dict, List, Set, Type
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -130,6 +128,7 @@ _constant_types = (
     torch.device,
     torch.layout,
     torch.dtype,
+    torch.qscheme,
 )
 
 
@@ -158,8 +157,6 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
 
 
 def get_annotations(obj):
-    if sys.version_info < (3, 10):
-        return getattr(obj, "__annotations__", {})
     # In Python-3.10+ it is recommended to use inspect.get_annotations
     # See https://docs.python.org/3.10/howto/annotations.html
     # But also, in 3.10 annotations from base class are not inherited
@@ -371,7 +368,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 hint = (
                     "(This function exists as an attribute on the Python module, "
                     "but we failed to compile it to a TorchScript function. "
-                    f"\nThe error stack is reproduced here:\n{e}"
+                    f"\nThe error stack is reproduced here:\n{e})"
                 )
                 concrete_type_builder.add_failed_attribute(name, hint)
 
@@ -421,8 +418,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
 
 class ConcreteTypeStore:
-    type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
-    methods_compiled: Set[torch._C.ConcreteModuleType]
+    type_store: dict[type[Module], list[torch._C.ConcreteModuleType]]
+    methods_compiled: set[torch._C.ConcreteModuleType]
 
     def __init__(self) -> None:
         # Python module type => List[ConcreteModuleType)]
@@ -431,7 +428,7 @@ class ConcreteTypeStore:
         self.methods_compiled = set()
 
     def get_or_create_concrete_type(self, nn_module):
-        """Infer a ConcreteType from this `nn.Module` instance. Underlying JIT types are re-used if possible."""
+        """Infer a ConcreteType from this `nn.Module` instance. Underlying JIT types are reused if possible."""
         concrete_type_builder = infer_concrete_type_builder(nn_module)
 
         nn_module_type = type(nn_module)
@@ -502,7 +499,7 @@ def get_module_concrete_type(nn_module, share_types=True):
         # Look into the store of cached JIT types
         concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
     else:
-        # Get a concrete type directly, without trying to re-use an existing JIT
+        # Get a concrete type directly, without trying to reuse an existing JIT
         # type from the type store.
         concrete_type_builder = infer_concrete_type_builder(nn_module, share_types)
         concrete_type_builder.set_poisoned()
@@ -588,9 +585,9 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         #    recursively scripting them.
         for name, sub_concrete_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
-            assert isinstance(
-                orig_value, Module
-            ), f"Expected Module but got {type(orig_value)}"
+            assert isinstance(orig_value, Module), (
+                f"Expected Module but got {type(orig_value)}"
+            )
             module_type = sub_concrete_type.jit_type
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
@@ -750,6 +747,7 @@ def get_overload_annotations(mod, jit_ignored_properties):
             if method_overloads is None:
                 continue
 
+            # pyrefly: ignore  # missing-attribute
             if item.__func__ in method_overloads:
                 raise RuntimeError(
                     _jit_internal.get_overload_no_implementation_error_message(
@@ -766,7 +764,7 @@ def get_overload_annotations(mod, jit_ignored_properties):
 def get_overload_name_mapping(overload_info):
     # Same format as __overloads__
     # original function => [overload names]
-    overload_name_mappings: Dict[str, List[str]] = {}
+    overload_name_mappings: dict[str, list[str]] = {}
     for orig_fn, overloads in overload_info.items():
         original_name = orig_fn.__name__
         if original_name not in overload_name_mappings:
@@ -836,7 +834,7 @@ def infer_methods_to_compile(nn_module):
     check_module_initialized(nn_module)
     ignored_properties = jit_ignored_properties(nn_module)
 
-    methods: List[str] = []
+    methods: list[str] = []
     if hasattr(nn_module, "forward") and not _jit_internal.is_ignored_fn(
         nn_module.forward
     ):
@@ -873,7 +871,7 @@ def infer_methods_to_compile(nn_module):
 
     # Unique the methods. We don't want to use a set to store the methods because it
     # introduces non-determinism to compile order.
-    uniquer: Set[str] = set()
+    uniquer: set[str] = set()
     uniqued_methods = []
     for name in filtered_methods:
         if name in uniquer:
@@ -888,7 +886,7 @@ def infer_methods_to_compile(nn_module):
 def get_hook_stubs(nn_module):
     """Return forward hook and pre_hook ScriptModuleStubs."""
     check_module_initialized(nn_module)
-    hook_map: Dict = {}
+    hook_map: dict = {}
 
     hook_stubs = []
     for hook in nn_module._forward_hooks.values():

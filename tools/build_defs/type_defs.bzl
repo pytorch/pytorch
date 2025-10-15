@@ -83,7 +83,7 @@ def is_bool(arg):
     """Checks if provided instance is a boolean value.
 
     Args:
-      arg: An instance ot check. type: Any
+      arg: An instance to check. type: Any
 
     Returns:
       True for boolean values, False otherwise. rtype: bool
@@ -96,7 +96,7 @@ def is_number(arg):
     """Checks if provided instance is a number value.
 
     Args:
-      arg: An instance ot check. type: Any
+      arg: An instance to check. type: Any
 
     Returns:
       True for number values, False otherwise. rtype: bool
@@ -109,7 +109,7 @@ def is_struct(arg):
     """Checks if provided instance is a struct value.
 
     Args:
-      arg: An instance ot check. type: Any
+      arg: An instance to check. type: Any
 
     Returns:
       True for struct values, False otherwise. rtype: bool

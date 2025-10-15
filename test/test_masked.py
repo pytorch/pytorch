@@ -5,7 +5,7 @@
 
 import itertools
 import torch
-from typing import List, Any
+from typing import Any
 from functools import wraps
 import unittest
 from torch.testing._internal.common_utils import skipIfTorchDynamo
@@ -57,7 +57,7 @@ def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
        [[op([1, 2], *args0, **kwargs, dim=None, keepdim=False)]
         [op([3, 4, 5], *args0, **kwargs, dim=None, keepdim=False)]]
 
-      where args0 is args where dim value is replased with None if
+      where args0 is args where dim value is replaced with None if
       present.
 
       Using the same example data, if the op is called with dim=(0, 1)
@@ -100,7 +100,7 @@ def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
     # dimensions along which the reduction operation is applied:
     dim_ = torch.masked._canonical_dim(dim, input.ndim)
     # slices in product(*ranges) define all elementary slices:
-    ranges: List[Any] = []
+    ranges: list[Any] = []
     # shape of output for the keepdim=True case:
     shape = []
     for i in range(input.ndim):

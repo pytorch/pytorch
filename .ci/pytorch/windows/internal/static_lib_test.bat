@@ -37,7 +37,7 @@ if "%DEBUG%" == "1" (
 if not "%CUDA_VERSION%" == "cpu" (
     rmdir /s /q magma_%CUDA_PREFIX%_%BUILD_TYPE%
     del magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z
-    curl -k https://s3.amazonaws.com/ossci-windows/magma_%MAGMA_VERSION%_%CUDA_PREFIX%_%BUILD_TYPE%.7z -o magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_%MAGMA_VERSION%_%CUDA_PREFIX%_%BUILD_TYPE%.7z -o magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z & REM @lint-ignore
     7z x -aoa magma_%CUDA_PREFIX%_%BUILD_TYPE%.7z -omagma_%CUDA_PREFIX%_%BUILD_TYPE%
     set LIB=%CD%\magma_%CUDA_PREFIX%_%BUILD_TYPE%\lib;%LIB%
 )
@@ -63,7 +63,7 @@ if errorlevel 1 exit /b 1
 call %CONDA_HOME%\condabin\activate.bat testenv
 if errorlevel 1 exit /b 1
 
-call conda install  -y -q -c conda-forge libuv=1.39
+call conda install  -y -q -c conda-forge libuv=1.51
 call conda install -y -q intel-openmp
 
 echo "install and test libtorch"

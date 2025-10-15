@@ -115,7 +115,7 @@ index a5007ffc..13fa07fc 100644
  	if (!fp) {
 -		fprintf(stderr, "%s: %s\n", AMDGPU_ASIC_ID_TABLE,
 -			strerror(errno));
-+		fprintf(stderr, "amdgpu.ids: No such file or directory\n");
++		//fprintf(stderr, "amdgpu.ids: No such file or directory\n");
  		return;
  	}
 

@@ -25,7 +25,7 @@ def is_masked_tensor(obj: Any, /) -> TypeIs["MaskedTensor"]:
 
         >>> # xdoctest: +SKIP
         >>> from torch.masked import MaskedTensor
-        >>> data = torch.arange(6).reshape(2,3)
+        >>> data = torch.arange(6).reshape(2, 3)
         >>> mask = torch.tensor([[True, False, False], [True, True, False]])
         >>> mt = MaskedTensor(data, mask)
         >>> is_masked_tensor(mt)
@@ -170,11 +170,12 @@ class MaskedTensor(torch.Tensor):
         if data.requires_grad:
             warnings.warn(
                 "It is not recommended to create a MaskedTensor with a tensor that requires_grad. "
-                "To avoid this, you can use data.clone().detach()",
+                "To avoid this, you can use data.detach().clone()",
                 UserWarning,
                 stacklevel=2,
             )
-        return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
+        # pyrefly: ignore  # bad-argument-type
+        return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)
 
     def _preprocess_data(self, data, mask):
         from .._ops import _sparse_coo_where, _sparse_csr_where
@@ -197,7 +198,7 @@ class MaskedTensor(torch.Tensor):
     def _validate_members(self):
         data = self._masked_data
         mask = self.get_mask()
-        if type(data) != type(mask):
+        if type(data) is not type(mask):
             raise TypeError(
                 f"data and mask must have the same type. Got {type(data)} and {type(mask)}"
             )
@@ -243,10 +244,12 @@ class MaskedTensor(torch.Tensor):
 
         class Constructor(torch.autograd.Function):
             @staticmethod
+            # pyrefly: ignore  # bad-override
             def forward(ctx, data, mask):
                 return MaskedTensor(data, mask)
 
             @staticmethod
+            # pyrefly: ignore  # bad-override
             def backward(ctx, grad_output):
                 return grad_output, None
 
@@ -304,7 +307,7 @@ class MaskedTensor(torch.Tensor):
         return MaskedTensor(fn(data), mask)
 
     @classmethod
-    def __torch_dispatch__(cls, func, types, args, kwargs):
+    def __torch_dispatch__(cls, func, types, args, kwargs):  # type: ignore[override]
         func = func.overloadpacket
 
         from ._ops_refs import _MASKEDTENSOR_DISPATCH_TABLE
@@ -333,10 +336,12 @@ class MaskedTensor(torch.Tensor):
     def get_data(self):
         class GetData(torch.autograd.Function):
             @staticmethod
+            # pyrefly: ignore  # bad-override
             def forward(ctx, self):
                 return self._masked_data.detach()
 
             @staticmethod
+            # pyrefly: ignore  # bad-override
             def backward(ctx, grad_output):
                 if is_masked_tensor(grad_output):
                     return grad_output
@@ -355,5 +360,5 @@ class MaskedTensor(torch.Tensor):
 
     # Update later to support more sparse layouts
     @property
-    def is_sparse(self):
+    def is_sparse(self):  # type: ignore[override]
         return self.is_sparse_coo() or self.is_sparse_csr()

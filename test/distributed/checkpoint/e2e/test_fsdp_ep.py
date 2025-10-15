@@ -2,10 +2,10 @@
 
 import torch
 import torch.nn as nn
-from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import get_state_dict
-from torch.distributed.device_mesh import _mesh_resources, init_device_mesh
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.tensor import DTensor
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -61,20 +61,20 @@ class TopModel(nn.Module):
 class TestFSDPWithEP(DTensorTestBase, VerifyStateDictMixin):
     @property
     def world_size(self) -> int:
-        return min(8, torch.cuda.device_count())
+        return min(8, torch.accelerator.device_count())
 
     @with_comms
     @skip_if_lt_x_gpu(8)
     @with_temp_dir
     def test_e2e(self):
-        model = TopModel(self.rank).cuda()
+        model = TopModel(self.rank).to(self.device_type)
 
         mesh_fsdp_tp = init_device_mesh(
             self.device_type, (2, 4), mesh_dim_names=("dp", "tp")
         )
-        # TODO: we are using an internal API atm. Change to a publich API once it is ready.
-        mesh_fsdp_ep = _mesh_resources.create_child_mesh(mesh_fsdp_tp, ("dp",))
-        del _mesh_resources.child_to_parent_mapping[mesh_fsdp_ep]
+        # TODO: we are using an internal API atm. Change to a public API once it is ready.
+        mesh_fsdp_ep = mesh_fsdp_tp["dp"]
+        mesh_fsdp_ep._root_mesh = None
 
         mesh_fsdp = init_device_mesh(self.device_type, (8,))
         for i, l in enumerate(model.second.ep_layers):

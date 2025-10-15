@@ -54,7 +54,7 @@ inline int end_index(int out_idx, int out_len, int in_len) {
 
 // adaptive avg pool for 2D and 3D inputs
 template <typename scalar_t>
-static void adaptive_avg_pool_single_out_frame(
+void adaptive_avg_pool_single_out_frame(
     scalar_t* input_p,
     scalar_t* output_p,
     int64_t sizeC,
@@ -105,11 +105,9 @@ static void adaptive_avg_pool_single_out_frame(
 
             /* compute local average: */
             int64_t sum = 0;
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            int id, ih, iw;
-            for (id = 0; id < kD; id++) {
-              for (ih = 0; ih < kH; ih++) {
-                for (iw = 0; iw < kW; iw++) {
+            for (int id = 0; id < kD; id++) {
+              for (int ih = 0; ih < kH; ih++) {
+                for (int iw = 0; iw < kW; iw++) {
                   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
                   int64_t val = (ip +
                                  id * istrideD +

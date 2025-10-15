@@ -2,7 +2,7 @@
 
 
 import torch
-from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.misc_patterns import numpy_compat_normalization
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
@@ -111,6 +111,33 @@ class TestSplitCatFxPasses(TestCase):
             self.assertEqual(
                 counters["inductor"]["normalization_pass"],
                 expected_split_norm_count,
+                msg=f"for {fn}",
+            )
+            counters.clear()
+
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_cat_normalization(self):
+        def caoncat_only(x):
+            return torch.concat(list(torch.split(x, 2, 1)), dim=1)
+
+        args = [
+            torch.randn(2, 32),
+        ]
+        for fn, dynamic, expected_cat_norm_count in [
+            (caoncat_only, False, 2),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn, dynamic=dynamic)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["normalization_pass"],
+                expected_cat_norm_count,
                 msg=f"for {fn}",
             )
             counters.clear()
@@ -300,8 +327,6 @@ class TestSplitCatFxPasses(TestCase):
                 counters["inductor"]["merge_splits_pass"],
                 expected_split_merged,
             )
-            if expected_split_merged > 0:
-                self.assertIn("merge_splits_pass_pre_grad", optimus_scuba_log)
             counters.clear()
 
     @patch

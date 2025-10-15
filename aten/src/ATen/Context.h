@@ -4,6 +4,7 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/LinalgBackend.h>
+#include <ATen/ROCmFABackend.h>
 #include <ATen/SDPBackend.h>
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
@@ -24,16 +25,33 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
+#include <c10/util/hash.h>
 #include <c10/util/irange.h>
 
 #include <cstdint>
+#include <map>
 #include <mutex>
+#include <unordered_map>
 
 namespace at {
 
 class Tensor;
 
 enum class TORCH_API Float32MatmulPrecision { HIGHEST, HIGH, MEDIUM };
+
+enum class CuBLASReductionOption : uint8_t {
+  AllowReducedPrecisionWithSplitK = 0,
+  DisallowReducedPrecisionAllowSplitK = 1,
+  DisallowReducedPrecisionDisallowSplitK = 2,
+};
+enum class TORCH_API Float32Backend { GENERIC, CUDA, MKLDNN };
+enum class TORCH_API Float32Op { ALL, CONV, RNN, MATMUL };
+enum class TORCH_API Float32Precision { NONE, IEEE, TF32, BF16 };
+
+TORCH_API Float32Backend str2backend(const std::string& name);
+TORCH_API Float32Op str2op(const std::string& name);
+TORCH_API Float32Precision str2precision(const std::string& name);
+TORCH_API std::string precision2str(Float32Precision prec);
 
 class TORCH_API Context {
  public:
@@ -100,11 +118,20 @@ class TORCH_API Context {
             opt_device_type.value())) { // passed device not an accelerator
       return false;
     }
+    if (!init_[static_cast<int8_t>(opt_device_type.value())].test_once()) {
+      // If the device is not initialized, no pointer can be pinned for it
+      return false;
+    }
     return getAcceleratorHooksInterface(opt_device_type).isPinnedPtr(data);
   }
 
   Allocator* getPinnedMemoryAllocator(
       std::optional<c10::DeviceType> device_type = std::nullopt) {
+    auto opt_device_type =
+        device_type.has_value() ? device_type : at::getAccelerator();
+    if (opt_device_type) {
+      lazyInitDevice(opt_device_type.value());
+    }
     return getAcceleratorHooksInterface(device_type).getPinnedMemoryAllocator();
   }
 
@@ -121,6 +148,8 @@ class TORCH_API Context {
   static bool hasKleidiAI();
   static bool hasLAPACK();
   static bool hasMKLDNN();
+  static bool ckSupported();
+  static bool hasEigenSparse();
   static bool hasMAGMA() {
     return detail::getCUDAHooks().hasMAGMA();
   }
@@ -150,6 +179,12 @@ class TORCH_API Context {
   }
   static bool hasROCM() {
     return detail::getCUDAHooks().hasROCM();
+  }
+  static bool hasCKSDPA() {
+    return detail::getCUDAHooks().hasCKSDPA();
+  }
+  static bool hasCKGEMM() {
+    return detail::getCUDAHooks().hasCKGEMM();
   }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
@@ -191,13 +226,15 @@ class TORCH_API Context {
   bool userEnabledMkldnn() const;
   void setUserEnabledMkldnn(bool e);
   bool benchmarkCuDNN() const;
-  void setBenchmarkCuDNN(bool);
+  void setBenchmarkCuDNN(bool /*b*/);
   int benchmarkLimitCuDNN() const;
-  void setBenchmarkLimitCuDNN(int);
+  void setBenchmarkLimitCuDNN(int /*b*/);
+  bool immediateMiopen() const;
+  void setImmediateMiopen(bool /*b*/);
   bool deterministicCuDNN() const;
-  void setDeterministicCuDNN(bool);
+  void setDeterministicCuDNN(bool /*b*/);
   bool deterministicMkldnn() const;
-  void setDeterministicMkldnn(bool);
+  void setDeterministicMkldnn(bool /*b*/);
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
 
@@ -215,29 +252,32 @@ class TORCH_API Context {
   void setSDPPriorityOrder(const std::vector<int64_t>& order);
   std::array<at::SDPBackend, at::num_sdp_backends> sDPPriorityOrder();
 
-  void setSDPUseFlash(bool);
+  void setSDPUseFlash(bool /*e*/);
   bool userEnabledFlashSDP() const;
 
-  void setSDPUseMemEfficient(bool);
+  void setSDPUseMemEfficient(bool /*e*/);
   bool userEnabledMemEfficientSDP() const;
 
-  void setSDPUseMath(bool);
+  void setSDPUseMath(bool /*e*/);
   bool userEnabledMathSDP() const;
 
-  void setSDPUseCuDNN(bool);
+  void setSDPUseCuDNN(bool /*e*/);
   bool userEnabledCuDNNSDP() const;
 
-  void setAllowFP16BF16ReductionMathSDP(bool);
+  void setAllowFP16BF16ReductionMathSDP(bool /*e*/);
   bool allowFP16BF16ReductionMathSDP() const;
 
-  void setSDPUseOverrideable(bool);
+  void setSDPUseOverrideable(bool /*e*/);
   bool userEnabledOverrideableSDP() const;
 
   at::LinalgBackend linalgPreferredBackend() const;
-  void setLinalgPreferredBackend(at::LinalgBackend);
+  void setLinalgPreferredBackend(at::LinalgBackend /*b*/);
 
   at::BlasBackend blasPreferredBackend();
-  void setBlasPreferredBackend(at::BlasBackend);
+  void setBlasPreferredBackend(at::BlasBackend /*b*/);
+
+  at::ROCmFABackend getROCmFAPreferredBackend();
+  void setROCmFAPreferredBackend(at::ROCmFABackend /*b*/);
 
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -270,9 +310,9 @@ class TORCH_API Context {
 
   bool deterministicAlgorithms() const;
   bool deterministicAlgorithmsWarnOnly() const;
-  void setDeterministicAlgorithms(bool, bool);
+  void setDeterministicAlgorithms(bool /*b*/, bool /*warn_only*/);
   bool deterministicFillUninitializedMemory() const;
-  void setDeterministicFillUninitializedMemory(bool);
+  void setDeterministicFillUninitializedMemory(bool /*b*/);
 
   // Note [Writing Nondeterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -286,13 +326,7 @@ class TORCH_API Context {
   //
   // * Throw an error when `Context::deterministicAlgorithms()` is true. Most
   //   of the time, this should be accomplished by calling
-  //   `at::globalContext().alertNotDeterminstic()`.  However, if the
-  //   nondeterministic behavior is caused by the CuBLAS workspace
-  //   configuration in CUDA >= 10.2,
-  //   `at::globalContext().alertCuBLASConfigNotDeterministic()` should be
-  //   called instead (in this case, a comment explaining why the operation is
-  //   nondeterministic is not necessary). See below for details on these
-  //   methods.
+  //   `at::globalContext().alertNotDeterminstic().
   //
   // * Have an entry in the list of nondeterministic PyTorch operations in the
   //   docstring of `use_deterministic_algorithms()` in torch/__init__.py
@@ -316,23 +350,42 @@ class TORCH_API Context {
   // Throws an error if `Context::deterministicAlgorithms()` is true
   static void alertNotDeterministic(std::string_view const& caller);
 
-  // Throws an error if `Context::deterministicAlgorithms()` is true, CUDA
-  // >= 10.2, and CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or
-  // ":4096:8". For more details:
-  // https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
-  void alertCuBLASConfigNotDeterministic() const;
-
   void setFloat32MatmulPrecision(const std::string& s);
-  bool allowTF32CuDNN() const;
-  void setAllowTF32CuDNN(bool);
+  void setFloat32Precision(
+      Float32Backend backend,
+      Float32Op op,
+      Float32Precision p);
+  bool allowTF32CuDNN(std::optional<Float32Op> op = std::nullopt) const;
+  void setAllowTF32CuDNN(bool /*b*/);
+  bool allowTF32OneDNN() const;
+  void setAllowTF32OneDNN(bool /*b*/);
   bool allowTF32CuBLAS() const;
-  void setAllowTF32CuBLAS(bool);
+  void setAllowTF32CuBLAS(bool /*b*/);
   Float32MatmulPrecision float32MatmulPrecision() const;
-  void setFloat32MatmulPrecision(Float32MatmulPrecision p);
-  bool allowFP16ReductionCuBLAS() const;
-  void setAllowFP16ReductionCuBLAS(bool);
-  bool allowBF16ReductionCuBLAS() const;
-  void setAllowBF16ReductionCuBLAS(bool);
+  Float32Precision float32Precision(Float32Backend backend, Float32Op op) const;
+  CuBLASReductionOption allowFP16ReductionCuBLAS() const;
+  void setAllowFP16ReductionCuBLAS(
+      bool allow_reduced_precision,
+      bool allow_splitk = true);
+  CuBLASReductionOption allowBF16ReductionCuBLAS() const;
+  void setAllowBF16ReductionCuBLAS(
+      bool allow_reduced_precision,
+      bool allow_splitk = true);
+  bool allowFP16AccumulationCuBLAS() const;
+  void setAllowFP16AccumulationCuBLAS(bool /*b*/);
+
+  // Matmuls can use a so-called "persistent" kernel which launches one CUDA
+  // block for each SM on the GPU, and each block then iterates over multiple
+  // output tiles. This allows to use software pipelining to hide the begin/end
+  // latencies (e.g., epilogue), especially when only one tile fits per SM.
+  // However, if some SMs are busy (e.g., with a background NCCL kernel), the
+  // matmul's blocks will be scheduled in two waves and, in the absence of some
+  // smart load balancing, the kernel will take twice as long. This flag allows
+  // to make matmuls target only a subset of the SMs, so they can fully schedule
+  // even next to a comms kernel, and only be a few percent slower.
+  std::optional<int32_t> _SMCarveout_EXPERIMENTAL() const;
+  void _setSMCarveout_EXPERIMENTAL(std::optional<int32_t> /*c*/);
+
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
@@ -352,7 +405,7 @@ class TORCH_API Context {
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
   bool allowFP16ReductionCPU() const;
-  void setAllowFP16ReductionCPU(bool);
+  void setAllowFP16ReductionCPU(bool /*b*/);
 
   // Preserved for BC
   void lazyInitCUDA() {
@@ -382,7 +435,6 @@ class TORCH_API Context {
   }
 
  private:
-  static bool checkCuBLASConfigDeterministic();
   std::array<c10::once_flag, at::COMPILE_TIME_MAX_DEVICE_TYPES> init_;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
@@ -394,49 +446,70 @@ class TORCH_API Context {
       at::SDPBackend::flash_attention,
       at::SDPBackend::efficient_attention,
       at::SDPBackend::math,
-      at::SDPBackend::cudnn_attention};
+      at::SDPBackend::cudnn_attention,
+      at::SDPBackend::overrideable};
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
   bool enabled_cudnnSDP = true;
   bool enabled_overrideable = true;
   bool allow_fp16_bf16_reduction_mathSDP = false;
-#ifdef USE_ROCM
-  bool benchmark_cudnn = true;
-#else
   bool benchmark_cudnn = false;
-#endif
+  bool immediate_miopen = false;
   Float32MatmulPrecision float32_matmul_precision =
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH
       : at::Float32MatmulPrecision::HIGHEST;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
-  bool allow_fp16_reduction_cublas = true;
-  bool allow_bf16_reduction_cublas = true;
+  CuBLASReductionOption allow_fp16_reduction_cublas =
+      CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  CuBLASReductionOption allow_bf16_reduction_cublas =
+      CuBLASReductionOption::AllowReducedPrecisionWithSplitK;
+  bool allow_fp16_accumulation_cublas = false;
+  std::optional<int32_t> sm_carveout = std::nullopt;
   bool enabled_mkldnn = true;
+  bool allow_tf32_onednn = false;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
-      c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true
+      (c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true ||
+       c10::utils::check_env("TORCH_LINALG_PREFER_HIPSOLVER") == true) // alias
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
   at::BlasBackend blas_preferred_backend =
-#ifdef USE_ROCM
-      (c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") != false)
-#else
-      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true)
-#endif
+      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
+       c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true) // alias
       ? at::BlasBackend::Cublaslt
-      : at::BlasBackend::Cublas;
+      : at::BlasBackend::Default;
+  at::ROCmFABackend rocm_fa_preferred_backend =
+      c10::utils::check_env("TORCH_ROCM_FA_PREFER_CK") == true
+      ? at::ROCmFABackend::Ck
+      : at::ROCmFABackend::Default;
 #ifdef C10_MOBILE
   bool release_original_weights = true;
 #else
   bool release_original_weights = false;
 #endif
   bool display_vmap_fallback_warnings_ = false;
-  std::optional<at::QEngine> quantized_engine = std::nullopt;
+  std::atomic<at::QEngine> quantized_engine = at::QEngine::NoQEngine;
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
+
+  using Key = std::pair<Float32Backend, Float32Op>;
+  std::unordered_map<Key, Float32Precision, c10::hash<Key>> fp32_precision = {
+      {{Float32Backend::GENERIC, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::CONV}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::RNN}, Float32Precision::NONE},
+      {{Float32Backend::MKLDNN, Float32Op::MATMUL}, Float32Precision::NONE},
+      {{Float32Backend::CUDA, Float32Op::ALL}, Float32Precision::NONE},
+      {{Float32Backend::CUDA, Float32Op::CONV}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::RNN}, Float32Precision::TF32},
+      {{Float32Backend::CUDA, Float32Op::MATMUL},
+       float32_matmul_precision == at::Float32MatmulPrecision::HIGHEST
+           ? Float32Precision::NONE
+           : Float32Precision::TF32},
+  };
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
@@ -519,7 +592,8 @@ inline size_t getNumGPUs() {
   // devices for a specific device type, add that function to the
   // relevant library (e.g., similar to at::cuda::device_count())
   if (hasCUDA() && hasHIP()) {
-    throw std::runtime_error(
+    TORCH_CHECK(
+        false,
         "Enabling both CUDA and HIP in ATen is not supported, as HIP masquerades "
         "to be CUDA (e.g., when you say CUDA, on a HIP build of ATen, this actually "
         "means HIP.  Rebuild PyTorch with one or the other disabled.");
@@ -548,6 +622,10 @@ inline bool hasLAPACK() {
   return globalContext().hasLAPACK();
 }
 
+inline bool hasEigenSparse() {
+  return globalContext().hasEigenSparse();
+}
+
 inline bool hasMAGMA() {
   return globalContext().hasMAGMA();
 }
@@ -557,45 +635,28 @@ inline bool hasMKLDNN() {
 }
 
 inline void manual_seed(uint64_t seed) {
-  auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
   {
+    auto gen = globalContext().defaultGenerator(c10::DeviceType::CPU);
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen.mutex());
     gen.set_current_seed(seed);
   }
-  // NB: Sometimes we build with CUDA, but we don't have any GPUs
-  // available. In that case, we must not seed CUDA; it will fail!
-  const auto cuda_num_gpus = detail::getCUDAHooks().deviceCount();
-  if (hasCUDA() && cuda_num_gpus > 0) {
-    for (const auto i : c10::irange(cuda_num_gpus)) {
-      auto cuda_gen = globalContext().defaultGenerator(
-          Device(at::kCUDA, static_cast<c10::DeviceIndex>(i)));
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(cuda_gen.mutex());
-        cuda_gen.set_current_seed(seed);
-      }
-    }
-  }
 
-  const auto xpu_num_gpus = detail::getXPUHooks().deviceCount();
-  if (hasXPU() && xpu_num_gpus) {
-    for (const auto i : c10::irange(xpu_num_gpus)) {
-      auto xpu_gen = globalContext().defaultGenerator(
-          Device(at::kXPU, static_cast<c10::DeviceIndex>(i)));
-      {
-        // See Note [Acquire lock when using random generators]
-        std::lock_guard<std::mutex> lock(xpu_gen.mutex());
-        xpu_gen.set_current_seed(seed);
-      }
-    }
+  const auto opt_device_type = at::getAccelerator();
+  if (!opt_device_type.has_value()) {
+    return;
   }
-
-  if (hasMPS()) {
-    auto mps_gen = globalContext().defaultGenerator(c10::DeviceType::MPS);
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(mps_gen.mutex());
-    mps_gen.set_current_seed(seed);
+  const auto num_gpus = globalContext()
+                            .getAcceleratorHooksInterface(opt_device_type)
+                            .deviceCount();
+  for (const auto i : c10::irange(num_gpus)) {
+    auto gen = globalContext().defaultGenerator(
+        Device(opt_device_type.value(), static_cast<c10::DeviceIndex>(i)));
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      gen.set_current_seed(seed);
+    }
   }
 }
 
@@ -629,5 +690,4 @@ struct TORCH_API ROCmBackwardPassGuard {
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
 };
-
 } // namespace at

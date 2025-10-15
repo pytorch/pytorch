@@ -6,9 +6,10 @@ This module stores various pieces of Python-global state relating to the JIT.
 This is not intended to be imported directly; please the exposed
 functionalities in `torch.jit`.
 """
+
 import os
 import weakref
-from typing import Any, Dict, Type
+from typing import Any
 
 import torch
 
@@ -62,8 +63,8 @@ _python_cu = torch._C.CompilationUnit()
 
 
 # python class => ScriptClass mapping
-_script_classes: Dict[Type[Any], Type[Any]] = {}
-_name_to_pyclass: Dict[str, Type[Any]] = {}
+_script_classes: dict[type[Any], type[Any]] = {}
+_name_to_pyclass: dict[str, type[Any]] = {}
 
 
 def _add_script_class(python_class, script_class):
@@ -75,11 +76,11 @@ def _get_script_class(python_class):
     override = getattr(python_class, "_jit_override_qualname", None)
     if override is not None:
         python_class = _get_python_class(override)
-    return _script_classes.get(python_class, None)
+    return _script_classes.get(python_class)
 
 
 def _get_python_class(qualified_name):
-    return _name_to_pyclass.get(qualified_name, None)
+    return _name_to_pyclass.get(qualified_name)
 
 
 def _clear_class_state():

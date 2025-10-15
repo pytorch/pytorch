@@ -6,7 +6,7 @@ import itertools
 import os
 import re
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any
 
 
 # We also check that there are [not] cxx11 symbols in libtorch
@@ -32,6 +32,9 @@ LIBTORCH_NAMESPACE_LIST = (
     "torch::",
 )
 
+# Patterns for detecting statically linked libstdc++ symbols
+STATICALLY_LINKED_CXX11_ABI = [re.compile(r".*recursive_directory_iterator.*")]
+
 
 def _apply_libtorch_symbols(symbols):
     return [
@@ -46,19 +49,24 @@ LIBTORCH_PRE_CXX11_PATTERNS = _apply_libtorch_symbols(PRE_CXX11_SYMBOLS)
 
 
 @functools.lru_cache(100)
-def get_symbols(lib: str) -> List[Tuple[str, str, str]]:
+def get_symbols(lib: str) -> list[tuple[str, str, str]]:
     from subprocess import check_output
 
     lines = check_output(f'nm "{lib}"|c++filt', shell=True)
     return [x.split(" ", 2) for x in lines.decode("latin1").split("\n")[:-1]]
 
 
-def grep_symbols(lib: str, patterns: List[Any]) -> List[str]:
+def grep_symbols(
+    lib: str, patterns: list[Any], symbol_type: str | None = None
+) -> list[str]:
     def _grep_symbols(
-        symbols: List[Tuple[str, str, str]], patterns: List[Any]
-    ) -> List[str]:
+        symbols: list[tuple[str, str, str]], patterns: list[Any]
+    ) -> list[str]:
         rc = []
         for _s_addr, _s_type, s_name in symbols:
+            # Filter by symbol type if specified
+            if symbol_type and _s_type != symbol_type:
+                continue
             for pattern in patterns:
                 if pattern.match(s_name):
                     rc.append(s_name)
@@ -80,7 +88,19 @@ def grep_symbols(lib: str, patterns: List[Any]) -> List[str]:
         return functools.reduce(list.__add__, (x.result() for x in tasks), [])
 
 
-def check_lib_symbols_for_abi_correctness(lib: str, pre_cxx11_abi: bool = True) -> None:
+def check_lib_statically_linked_libstdc_cxx_abi_symbols(lib: str) -> None:
+    cxx11_statically_linked_symbols = grep_symbols(
+        lib, STATICALLY_LINKED_CXX11_ABI, symbol_type="T"
+    )
+    num_statically_linked_symbols = len(cxx11_statically_linked_symbols)
+    print(f"num_statically_linked_symbols (T): {num_statically_linked_symbols}")
+    if num_statically_linked_symbols > 0:
+        raise RuntimeError(
+            f"Found statically linked libstdc++ symbols (recursive_directory_iterator): {cxx11_statically_linked_symbols[:100]}"
+        )
+
+
+def check_lib_symbols_for_abi_correctness(lib: str) -> None:
     print(f"lib: {lib}")
     cxx11_symbols = grep_symbols(lib, LIBTORCH_CXX11_PATTERNS)
     pre_cxx11_symbols = grep_symbols(lib, LIBTORCH_PRE_CXX11_PATTERNS)
@@ -88,28 +108,12 @@ def check_lib_symbols_for_abi_correctness(lib: str, pre_cxx11_abi: bool = True) 
     num_pre_cxx11_symbols = len(pre_cxx11_symbols)
     print(f"num_cxx11_symbols: {num_cxx11_symbols}")
     print(f"num_pre_cxx11_symbols: {num_pre_cxx11_symbols}")
-    if pre_cxx11_abi:
-        if num_cxx11_symbols > 0:
-            raise RuntimeError(
-                f"Found cxx11 symbols, but there shouldn't be any, see: {cxx11_symbols[:100]}"
-            )
-        if num_pre_cxx11_symbols < 1000:
-            raise RuntimeError("Didn't find enough pre-cxx11 symbols.")
-        # Check for no recursive iterators, regression test for https://github.com/pytorch/pytorch/issues/133437
-        rec_iter_symbols = grep_symbols(
-            lib, [re.compile("std::filesystem::recursive_directory_iterator.*")]
+    if num_pre_cxx11_symbols > 0:
+        raise RuntimeError(
+            f"Found pre-cxx11 symbols, but there shouldn't be any, see: {pre_cxx11_symbols[:100]}"
         )
-        if len(rec_iter_symbols) > 0:
-            raise RuntimeError(
-                f"recursive_directory_iterator in used pre-CXX11 binaries, see; {rec_iter_symbols}"
-            )
-    else:
-        if num_pre_cxx11_symbols > 0:
-            raise RuntimeError(
-                f"Found pre-cxx11 symbols, but there shouldn't be any, see: {pre_cxx11_symbols[:100]}"
-            )
-        if num_cxx11_symbols < 100:
-            raise RuntimeError("Didn't find enought cxx11 symbols")
+    if num_cxx11_symbols < 100:
+        raise RuntimeError("Didn't find enough cxx11 symbols")
 
 
 def main() -> None:
@@ -121,9 +125,9 @@ def main() -> None:
         else:
             install_root = Path(distutils.sysconfig.get_python_lib()) / "torch"
 
-    libtorch_cpu_path = install_root / "lib" / "libtorch_cpu.so"
-    pre_cxx11_abi = "cxx11-abi" not in os.getenv("DESIRED_DEVTOOLSET", "")
-    check_lib_symbols_for_abi_correctness(libtorch_cpu_path, pre_cxx11_abi)
+    libtorch_cpu_path = str(install_root / "lib" / "libtorch_cpu.so")
+    check_lib_symbols_for_abi_correctness(libtorch_cpu_path)
+    check_lib_statically_linked_libstdc_cxx_abi_symbols(libtorch_cpu_path)
 
 
 if __name__ == "__main__":

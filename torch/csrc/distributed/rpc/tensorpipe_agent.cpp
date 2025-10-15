@@ -131,6 +131,7 @@ std::vector<c10::Device> getDevicesOfTensors(
   devices.reserve(deviceCount);
   for (const auto idx : c10::irange(indexBitset.size())) {
     if (indexBitset[idx]) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       devices.emplace_back(impl->type(), static_cast<c10::DeviceIndex>(idx));
     }
   }
@@ -262,10 +263,12 @@ constexpr static int kNumUvThreads = 16;
 
 std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
+  contexts.reserve(kNumUvThreads);
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
+  listeners.reserve(kNumUvThreads);
   for ([[maybe_unused]] const auto laneIdx : c10::irange(kNumUvThreads)) {
     auto context = tensorpipe::transport::uv::create();
-    std::string address = TensorPipeAgent::guessAddress();
+    const std::string& address = TensorPipeAgent::guessAddress();
     contexts.push_back(std::move(context));
     listeners.push_back(contexts.back()->listen(address));
   }
@@ -371,7 +374,7 @@ void TensorPipeAgent::checkAndSetStaticGroup(
       isStaticGroupKey, std::vector<uint8_t>(), isStaticGroupVec);
   std::string returnedVal = std::string(returnedVec.begin(), returnedVec.end());
   // In both cases, the returned value should be the value of isStaticGroupStr,
-  // otherwise there is a discrepency with initialization among one of the
+  // otherwise there is a discrepancy with initialization among one of the
   // members
   TORCH_CHECK(
       returnedVal == isStaticGroupStr,

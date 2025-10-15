@@ -78,15 +78,13 @@ DynamicType::~DynamicType() {
   arguments_.~Arguments();
 }
 
-std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
+SingletonOrSharedTypePtr<const DynamicType> DynamicType::create(const Type& other) {
   if (auto dynRaw = other.castRaw<DynamicType>()) {
     TORCH_INTERNAL_ASSERT(
         !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
         other.str());
-  }
-  if (auto dyn = other.cast<DynamicType>()) {
-    return dyn;
+    return SingletonTypePtr<const DynamicType>(dynRaw);
   }
   return std::shared_ptr<const DynamicType>(new DynamicType{other});
 }
@@ -179,7 +177,7 @@ bool DynamicType::equals(const Type& rhs) const {
   return equals(*create(rhs));
 }
 
-bool DynamicType::isSubtypeOfExt(const Type& rhs, std::ostream*) const {
+bool DynamicType::isSubtypeOfExt(const Type& rhs, std::ostream* /*why_not*/) const {
   auto other = create(rhs);
   if (tag_ == other->tag_) {
     if (equals(*other)) {
@@ -373,7 +371,7 @@ DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::create(
 }
 
 DynamicTypePtr ivalue::TupleTypeFactory<c10::DynamicType>::fallback(
-    const Type&) {
+    const Type& /*unused*/) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
   return nullptr;
 }

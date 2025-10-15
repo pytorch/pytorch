@@ -1,5 +1,8 @@
 # mypy: allow-untyped-defs
+from typing import Optional, Union
+
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
 from torch.distributions.gumbel import euler_constant
@@ -25,14 +28,22 @@ class Weibull(TransformedDistribution):
     Args:
         scale (float or Tensor): Scale parameter of distribution (lambda).
         concentration (float or Tensor): Concentration parameter of distribution (k/shape).
+        validate_args (bool, optional): Whether to validate arguments. Default: None.
     """
+
     arg_constraints = {
         "scale": constraints.positive,
         "concentration": constraints.positive,
     }
+    # pyrefly: ignore  # bad-override
     support = constraints.positive
 
-    def __init__(self, scale, concentration, validate_args=None):
+    def __init__(
+        self,
+        scale: Union[Tensor, float],
+        concentration: Union[Tensor, float],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.scale, self.concentration = broadcast_all(scale, concentration)
         self.concentration_reciprocal = self.concentration.reciprocal()
         base_dist = Exponential(
@@ -42,6 +53,7 @@ class Weibull(TransformedDistribution):
             PowerTransform(exponent=self.concentration_reciprocal),
             AffineTransform(loc=0, scale=self.scale),
         ]
+        # pyrefly: ignore  # bad-argument-type
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -59,11 +71,11 @@ class Weibull(TransformedDistribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.scale * torch.exp(torch.lgamma(1 + self.concentration_reciprocal))
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return (
             self.scale
             * ((self.concentration - 1) / self.concentration)
@@ -71,7 +83,7 @@ class Weibull(TransformedDistribution):
         )
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.scale.pow(2) * (
             torch.exp(torch.lgamma(1 + 2 * self.concentration_reciprocal))
             - torch.exp(2 * torch.lgamma(1 + self.concentration_reciprocal))

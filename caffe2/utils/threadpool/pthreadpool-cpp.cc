@@ -1,8 +1,7 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <caffe2/utils/threadpool/thread_pool_guard.h>
+#include <caffe2/utils/threadpool/ThreadPool.h>
 #include <c10/util/Exception.h>
-
-#include <atomic>
 
 namespace {
 // After fork, the child process inherits the data-structures of the parent
@@ -101,9 +100,6 @@ PThreadPool* pthreadpool(size_t thread_count) {
   }
   return threadpool.get();
 }
-
-// Forward declaration
-size_t getDefaultNumThreads();
 
 PThreadPool* pthreadpool() {
   return pthreadpool(getDefaultNumThreads());

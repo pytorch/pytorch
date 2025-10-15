@@ -1,11 +1,87 @@
+import ast
 import contextlib
+import inspect
 import threading
-from typing import Any, Callable, Generator, Iterable, Optional, Union
+from collections.abc import Callable, Generator, Iterable
+from typing import Any, Optional, Union
 
 from torch.utils._exposed_in import exposed_in
 
-from .custom_ops import custom_op
+from .custom_ops import custom_op, CustomOpDef
 from .infer_schema import infer_schema
+
+
+triton_ops_to_kernels: dict[str, list[object]] = {}
+
+
+def get_triton_kernels_for_op(name: str) -> list[object]:
+    return triton_ops_to_kernels.get(name, [])
+
+
+def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
+    """
+    Inspect the source of an arbitrary callable passed to torch._library.triton_op,
+    and grab all of the triton kernels that are wrapped inside of it.
+
+    TODO: This check is best effort. It does *not* handle the case where the triton
+    kernel is hidden behind recursive function calls.
+    """
+
+    def find_triton_kernels(fn: Callable[..., Any]) -> list[object]:
+        try:
+            source = inspect.getsource(fn)
+        except (OSError, TypeError):
+            return []  # Source code not available
+
+        from torch._inductor.utils import IndentedBuffer
+
+        buffer = IndentedBuffer()
+        buffer.splice(source, strip=True)
+        tree = ast.parse(buffer.getrawvalue())
+
+        # Visitor to collect function calls and triton kernels
+        class Visitor(ast.NodeVisitor):
+            def __init__(self) -> None:
+                self.triton_kernels: list[Any] = []
+
+            def visit_Call(self, node: ast.Call) -> None:
+                triton_func_names = ("capture_triton", "wrap_triton")
+                if isinstance(node.func, ast.Attribute):
+                    attr = node.func
+                    if (
+                        isinstance(attr.value, ast.Attribute)
+                        and isinstance(attr.value.value, ast.Name)
+                        and attr.value.value.id == "torch"
+                        and attr.value.attr == "_library"
+                        and attr.attr in triton_func_names
+                    ):
+                        if node.args and isinstance(node.args[0], ast.Name):
+                            self.triton_kernels.append(node.args[0].id)
+
+                # Catch capture_triton, wrap_triton that's been
+                # imported directly
+                elif isinstance(node.func, ast.Name):
+                    if node.func.id in triton_func_names:
+                        if node.args and isinstance(node.args[0], ast.Name):
+                            self.triton_kernels.append(node.args[0].id)
+
+                self.generic_visit(node)
+
+        collector = Visitor()
+        collector.visit(tree)
+        closure_vars = inspect.getclosurevars(fn)
+        resolved = []
+        # First, resolve triton kernel names
+        for name in collector.triton_kernels:
+            if name in closure_vars.nonlocals:
+                resolved.append(closure_vars.nonlocals[name])
+            elif name in closure_vars.globals:
+                resolved.append(closure_vars.globals[name])
+            elif name in closure_vars.builtins:
+                resolved.append(closure_vars.builtins[name])
+        return resolved
+
+    return find_triton_kernels(fn)
 
 
 @exposed_in("torch.library")
@@ -39,7 +115,7 @@ def triton_op(
 
     Note that ``fn`` must only consist of calls to PyTorch-understood
     operators and triton kernels. Any triton kernels called inside ``fn``
-    must be wrapped in a call to :func:`torch._library.wrap_triton``.
+    must be wrapped in a call to :func:`torch.library.wrap_triton`.
 
     Args:
         name (str): A name for the custom op that looks like "{namespace}::{name}",
@@ -60,7 +136,7 @@ def triton_op(
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
-        >>> from torch._library import triton_op, wrap_triton
+        >>> from torch.library import triton_op, wrap_triton
         >>>
         >>> import triton
         >>> from triton import language as tl
@@ -106,7 +182,7 @@ def triton_op(
 
     """
 
-    def dec(fn: Callable) -> Any:
+    def dec(fn: Callable[..., object]) -> CustomOpDef:
         def backend_fn(*args, **kwargs):  # type: ignore[no-untyped-def]
             # Optimization: we're passing regular Tensors into the triton kernel, so
             # no need to go through HOP dispatch
@@ -130,15 +206,52 @@ def triton_op(
         # - With torch.compile, this means that the backend (usually Inductor)
         #   can see a call to the triton kernel(s) and so it can directly optimize
         #   them by inlining them into the lowering process.
-        # - With post-dispatch torch.export, this means that there will
-        #   be a call(s) to the triton_kernel_wrapper_functional HOP in the
-        #   graph (that we have yet to figure out how to serialize).
         def functional_decomp(  # type: ignore[no-untyped-def]
-            mode, _, types, args, kwargs
+            mode, op, types, args, kwargs
         ):
-            with mode:
-                return fn(*args, **kwargs)
+            # NOTE [Export custom triton op]
+            # For torch.export (strict and non-strict), we don't do functional decomposition.
+            # Instead, we preserve the custom triton ops as custom ops. This is because we want
+            # the exported program to be high-level and serializable. If we decompose
+            # the custom op to a functional hop and make it a node in exported program,
+            # we need to figure out ways of serializing the hop and its arguments, which can be triton.jited
+            # functions and triton dtypes. This is undesireble because:
+            # - it can be tedious to maintain a layer that serializes the jited function (e.g. with a string) and dtypes.
+            # - exported program will contain the implementation detail (e.g. triton source code) for a specific
+            #   backend (GPU), which is probably at a wrong level of abstraction.
+            # - changes to triton or the serialization logic for triton arguments can be BC breaking
+            #
+            # In the short term, we expect users to have a separate aot_compile stage that compiles the exported program
+            # into a Cubin file on the same machine that users call export, which does autotuning and removes triton
+            # dependency and serve the model with Cubin. This guarantees that triton changes won't break BC.
+            # In the long term, we may export multiple cubins for the triton op directly
+            from torch.export._trace import custom_triton_ops_decomposition_disabled
 
+            if custom_triton_ops_decomposition_disabled():
+                return mode.__torch_dispatch__(op, types, args, kwargs)
+            else:
+                # TODO: https://github.com/pytorch/pytorch/issues/160333
+                # We should deduplicate the unrecognized_types logic.
+                import torch._subclasses
+
+                unrecognized_types = [
+                    t
+                    for t in types
+                    if not issubclass(t, torch._subclasses.FakeTensor)
+                    and t
+                    not in [
+                        torch.Tensor,
+                        torch._subclasses.functional_tensor.FunctionalTensor,
+                    ]
+                ]
+
+                if unrecognized_types:
+                    return NotImplemented
+                with mode:
+                    return fn(*args, **kwargs)
+
+        triton_kernels = get_inner_triton_kernels(fn)
+        triton_ops_to_kernels[name] = triton_kernels
         result.register_torch_dispatch(FunctionalTensorMode, functional_decomp)
         return result
 

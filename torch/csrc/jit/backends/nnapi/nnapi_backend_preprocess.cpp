@@ -26,7 +26,7 @@ namespace py = pybind11;
 // torch.tensor([[1.0, -1.0, 2.0, -2.0]]).unsqueeze(-1).unsqueeze(-1)
 //
 // In the future, preprocess will accept a dedicated object
-c10::IValue preprocess(
+static c10::IValue preprocess(
     const torch::jit::Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
     const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
@@ -43,7 +43,7 @@ c10::IValue preprocess(
   // Test that method_compile_spec contains the necessary keys and
   // Tensor/TensorList input
   c10::IValue inp;
-  std::string error = "";
+  std::string error;
   if (!method_compile_spec.contains("forward")) {
     error = R"(method_compile_spec does not contain the "forward" key.)";
   } else {

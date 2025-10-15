@@ -240,7 +240,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(
       const StmtPtr& A) const;
   // TODO: this will return only the AccessInfo for A. It's included for
-  // completeness but be aware it wont return accesses used in the computation
+  // completeness but be aware it won't return accesses used in the computation
   // of A.
   std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(
       const ExprPtr& A) const;

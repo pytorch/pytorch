@@ -382,7 +382,8 @@ static bool use_mkldnn(const Tensor& input) {
   return (input.is_mkldnn()) || // input is mkldnn Tensor
     (input.device().is_cpu() &&
     (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
-    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
+    ((input.scalar_type() == kHalf) && mkldnn_fp16_device_check()) ||
+    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float16/float32
 }
 #endif
 
@@ -573,13 +574,13 @@ Tensor math_mish_backward(
 }
 
 template <typename scalar_t>
-inline void _rrelu_with_noise_train(
+static void _rrelu_with_noise_train(
     Tensor& output,
     const Tensor& input,
     Tensor& noise,
     const Scalar& lower_,
     const Scalar& upper_,
-    std::optional<Generator> generator) {
+    const std::optional<Generator>& generator) {
   using opmath_t = at::opmath_type<scalar_t>;
   opmath_t lower = lower_.to<opmath_t>();
   opmath_t upper = upper_.to<opmath_t>();
@@ -669,6 +670,8 @@ Tensor rrelu_with_noise_backward(
 }
 
 Tensor rrelu(const Tensor & self, const Scalar& lower, const Scalar& upper, bool training, std::optional<Generator> generator) {
+  TORCH_CHECK(std::isfinite(lower.to<double>()), "rrelu: lower bound must be finite, got ", lower.to<double>());
+  TORCH_CHECK(std::isfinite(upper.to<double>()), "rrelu: upper bound must be finite, got ", upper.to<double>());
   TORCH_CHECK(lower.to<double>() <= upper.to<double>(), "Lower bound should be less than or equal to the upper bound")
   auto noise = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::rrelu_with_noise(self, noise, lower, upper, training, std::move(generator));

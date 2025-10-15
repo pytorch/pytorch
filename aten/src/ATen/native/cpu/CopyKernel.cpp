@@ -15,12 +15,12 @@ namespace at::native {
 inline namespace CPU_CAPABILITY {
 
 namespace {
-static bool reduced_input(ScalarType input_t, ScalarType output_t) {
+bool reduced_input(ScalarType input_t, ScalarType output_t) {
   return !at::isFloat8Type(input_t) && at::isReducedFloatingType(input_t) &&
       output_t == kFloat;
 }
 
-static bool reduced_output(ScalarType input_t, ScalarType output_t) {
+bool reduced_output(ScalarType input_t, ScalarType output_t) {
   return !at::isFloat8Type(output_t) && at::isReducedFloatingType(output_t) &&
       input_t == kFloat;
 }
@@ -204,12 +204,12 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
 #define _AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                                       \
         AT_DISPATCH_V2(TYPE, NAME, AT_WRAP(__VA_ARGS__),                                       \
             kComplexHalf, kHalf, kBool,              \
-            kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
+            kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), \
+            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #define _AT_DISPATCH_ALL_TYPES_NO_CF(TYPE, NAME, ...)              \
         AT_DISPATCH_V2(TYPE, NAME, AT_WRAP(__VA_ARGS__),                    \
-            kBool, kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, \
-            kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
+            kBool, kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), \
+            AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
 #define _AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                                               \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                                               \

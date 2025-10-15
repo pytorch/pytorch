@@ -24,12 +24,15 @@ struct TORCH_API GloballyUniqueId final {
   GloballyUniqueId(worker_id_t createdOn, local_id_t localId);
   GloballyUniqueId(const GloballyUniqueId& other) = default;
   GloballyUniqueId& operator=(const GloballyUniqueId& other) = delete;
+  GloballyUniqueId(GloballyUniqueId&& other) = default;
+  GloballyUniqueId& operator=(GloballyUniqueId&& other) = delete;
+  ~GloballyUniqueId() = default;
 
   bool operator==(const GloballyUniqueId& other) const;
   bool operator!=(const GloballyUniqueId& other) const;
 
   at::IValue toIValue() const;
-  static GloballyUniqueId fromIValue(const at::IValue&);
+  static GloballyUniqueId fromIValue(const at::IValue& /*ivalue*/);
 
   struct Hash {
     size_t operator()(const GloballyUniqueId& key) const {

@@ -1,14 +1,14 @@
 # mypy: allow-untyped-defs
 import functools
+from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Callable, Dict
 
 import torch
 from torch._decomp import decomposition_table
 from torch.utils._pytree import tree_map_only
 
 
-HANDLED_FUNCTIONS: Dict[Callable, torch.autograd.Function] = {}
+HANDLED_FUNCTIONS: dict[Callable, torch.autograd.Function] = {}
 
 aten = torch._ops.ops.aten
 # __torch_function__ runs before the pydispatcher so we need to manually use the same
@@ -72,8 +72,10 @@ def allow_smaller_batches(args, kwargs):
 
 @contextmanager
 def setup_rnn(use_input_variant, args, kwargs):
-    with batch_second(args, kwargs) if use_input_variant else allow_smaller_batches(
-        args, kwargs
+    with (
+        batch_second(args, kwargs)
+        if use_input_variant
+        else allow_smaller_batches(args, kwargs)
     ):
         yield
 
@@ -129,7 +131,9 @@ class ExpandedWeight(torch.Tensor):
             # in aten, choosing the input or data variants is done by parsing logic. This mimics some of that
             decomp_opts = expanded_weights_rnn_decomps[func]
             use_input_variant = isinstance(
-                args[2], list
+                # pyrefly: ignore  # index-error
+                args[2],
+                list,
             )  # data variant uses a list here
             decomp = decomp_opts[0] if use_input_variant else decomp_opts[1]
 
@@ -150,23 +154,23 @@ class ExpandedWeight(torch.Tensor):
         )
 
     @property
-    def dtype(self):
+    def dtype(self):  # type: ignore[override]
         return self.orig_weight.dtype
 
     @property
-    def data(self):
+    def data(self):  # type: ignore[override]
         return self.orig_weight.data
 
     @property
-    def shape(self):
+    def shape(self):  # type: ignore[override]
         return self.orig_weight.shape
 
     @property
-    def device(self):
+    def device(self):  # type: ignore[override]
         return self.orig_weight.device
 
     @property
-    def is_cuda(self):
+    def is_cuda(self):  # type: ignore[override]
         return self.orig_weight.is_cuda
 
     def data_ptr(self):

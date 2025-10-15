@@ -127,6 +127,10 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#if AT_USE_EIGEN_SPARSE()
+#include <ATen/native/sparse/eigen/SparseBlasImpl.h>
+#endif
+
 #include <algorithm>
 
 namespace at {
@@ -219,7 +223,7 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
 }
 
 template <typename op_t>
-Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
+static Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
   // NOTE: intersection_binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
   const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::result_type(sparse, scalar));
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
@@ -233,7 +237,7 @@ Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Te
 }
 
 template <typename op_t>
-Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const string& op_name, const op_t& op) {
+static Tensor& intersection_binary_op_with_wrapped_scalar_(Tensor& sparse, const Tensor& scalar, const std::string& op_name, const op_t& op) {
   // NOTE: intersection_binary_op_with_wrapped_scalar_ assumes scalar.numel() == 1.
   const auto broadcasted_shape = infer_size(sparse.sizes(), scalar.sizes());
   if (sparse.sizes() != broadcasted_shape) {
@@ -344,7 +348,7 @@ Tensor sparse_mask_sparse_compressed(
   }
 
   if (!mask.numel() || !mask._nnz()) {
-    return mask.clone().to(self.device(), self.scalar_type());
+    return mask.to(self.device(), self.scalar_type(), /*non_blocking=*/false, /*copy=*/true);
   }
 
   if (self.layout() == kStrided) {
@@ -522,7 +526,7 @@ CREATE_UNARY_UFUNC_FUNCTIONAL(isnan)
 CREATE_UNARY_UFUNC_FUNCTIONAL(isinf)
 
 template <typename scalar_t>
-void addmm_out_sparse_csr_native_cpu(
+static void addmm_out_sparse_csr_native_cpu(
     const Tensor& sparse,
     const Tensor& dense,
     const Tensor& r,
@@ -536,7 +540,12 @@ void addmm_out_sparse_csr_native_cpu(
   auto values = sparse.values();
 
   scalar_t cast_alpha = alpha.to<scalar_t>();
-  r.mul_(beta);
+  // If beta is zero NaN and Inf should not be propagated to the result
+  if (beta.toComplexDouble() == 0.) {
+    r.zero_();
+  } else {
+    r.mul_(beta);
+  }
   AT_DISPATCH_INDEX_TYPES(
       col_indices.scalar_type(), "csr_mm_crow_indices", [&]() {
         auto csr_accessor = csr.accessor<index_t, 1>();
@@ -647,6 +656,15 @@ Tensor& addmm_out_sparse_compressed_cpu(
     }
     return result;
   }
+
+#if AT_USE_EIGEN_SPARSE()
+  if ((result.layout() == kSparseCsr || result.layout() == kSparseCsc) &&
+      (mat1.layout() == kSparseCsr || mat1.layout() == kSparseCsc) &&
+      (mat2.layout() == kSparseCsr || mat2.layout() == kSparseCsc)) {
+    sparse::impl::eigen::addmm_out_sparse(mat1, mat2, result, alpha, beta);
+    return result;
+  }
+#endif
 
 #if !AT_USE_MKL_SPARSE()
   // The custom impl addmm_out_sparse_csr_native_cpu only supports CSR @
@@ -1312,18 +1330,18 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_
 
 template <typename scalar_t>
 struct ReductionAddOp {
-  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+  scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
     return a + b;
   }
-  inline scalar_t identity() const { return 0; }
+  scalar_t identity() const { return 0; }
 };
 
 template <typename scalar_t>
 struct ReductionMulOp {
-  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+  scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
     return a * b;
   }
-  inline scalar_t identity() const { return 1; }
+  scalar_t identity() const { return 1; }
 };
 
 }  // namespace

@@ -27,7 +27,7 @@ class OptionalArrayRef final {
 
   constexpr OptionalArrayRef() noexcept = default;
 
-  constexpr OptionalArrayRef(std::nullopt_t) noexcept {}
+  constexpr OptionalArrayRef(std::nullopt_t /*unused*/) noexcept {}
 
   OptionalArrayRef(const OptionalArrayRef& other) = default;
 
@@ -89,7 +89,7 @@ class OptionalArrayRef final {
 
   // Assignment
 
-  constexpr OptionalArrayRef& operator=(std::nullopt_t) noexcept {
+  constexpr OptionalArrayRef& operator=(std::nullopt_t /*unused*/) noexcept {
     wrapped_opt_array_ref = std::nullopt;
     return *this;
   }
@@ -162,6 +162,7 @@ class OptionalArrayRef final {
   }
 
   constexpr const ArrayRef<T>& value() const& {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return wrapped_opt_array_ref.value();
   }
 

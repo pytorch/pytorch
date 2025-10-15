@@ -27,7 +27,7 @@ C10_CUDA_API DeviceIndex device_count_ensure_non_zero();
 
 C10_CUDA_API DeviceIndex current_device();
 
-C10_CUDA_API void set_device(DeviceIndex device);
+C10_CUDA_API void set_device(DeviceIndex device, const bool force = false);
 
 C10_CUDA_API void device_synchronize();
 
@@ -38,7 +38,8 @@ C10_CUDA_API cudaError_t GetDeviceCount(int* dev_count);
 
 C10_CUDA_API cudaError_t GetDevice(DeviceIndex* device);
 
-C10_CUDA_API cudaError_t SetDevice(DeviceIndex device);
+C10_CUDA_API cudaError_t
+SetDevice(DeviceIndex device, const bool force = false);
 
 C10_CUDA_API cudaError_t MaybeSetDevice(DeviceIndex device);
 
@@ -89,8 +90,17 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     (*interp)->trace_gpu_stream_synchronization(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
-#if defined(TORCH_HIP_VERSION) && (TORCH_HIP_VERSION >= 301)
-  C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
+#if defined(USE_ROCM) && USE_ROCM
+  // As of ROCm 6.4.1, HIP runtime does not raise an error during capture of
+  // hipMemcpyWithStream which is a synchronous call. Thus, we add a check
+  // here explicitly.
+  hipStreamCaptureStatus captureStatus;
+  C10_CUDA_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+  if (C10_LIKELY(captureStatus == hipStreamCaptureStatusNone)) {
+    C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
+  } else {
+    C10_CUDA_CHECK(hipErrorStreamCaptureUnsupported);
+  }
 #else
   C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
   C10_CUDA_CHECK(cudaStreamSynchronize(stream));

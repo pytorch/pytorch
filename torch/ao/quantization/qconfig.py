@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import copy
+import sys
 import warnings
 from collections import namedtuple
-from typing import Any, Optional, Type, Union
+from typing import Any, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -82,6 +83,7 @@ __all__ = [
 ]
 
 
+# pyrefly: ignore  # invalid-inheritance
 class QConfig(namedtuple("QConfig", ["activation", "weight"])):
     """
     Describes how to quantize a layer or a part of the network by providing
@@ -98,9 +100,12 @@ class QConfig(namedtuple("QConfig", ["activation", "weight"])):
 
       my_qconfig = QConfig(
           activation=MinMaxObserver.with_args(dtype=torch.qint8),
-          weight=default_observer.with_args(dtype=torch.qint8))
+          weight=default_observer.with_args(dtype=torch.qint8),
+      )
 
     """
+
+    __slots__ = ()
 
     def __new__(cls, activation, weight):
         # catch common mistakes
@@ -116,6 +121,7 @@ class QConfig(namedtuple("QConfig", ["activation", "weight"])):
     "`QConfigDynamic` is going to be deprecated in PyTorch 1.12, please use `QConfig` instead",
     category=FutureWarning,
 )
+# pyrefly: ignore  # invalid-inheritance
 class QConfigDynamic(namedtuple("QConfigDynamic", ["activation", "weight"])):
     """
     Describes how to dynamically quantize a layer or a part of the network by providing
@@ -132,6 +138,8 @@ class QConfigDynamic(namedtuple("QConfigDynamic", ["activation", "weight"])):
 
       my_qconfig = QConfigDynamic(weight=default_observer.with_args(dtype=torch.qint8))
     """
+
+    __slots__ = ()
 
     def __new__(cls, activation=torch.nn.Identity, weight=torch.nn.Identity):
         # catch common mistakes
@@ -557,13 +565,18 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig], mod: torch.nn.Module) -> N
                 torch.ao.quantization.MovingAveragePerChannelMinMaxObserver,
             ),
         )
-        assert (
-            not is_per_channel
-        ), "Per channel weight observer is not supported yet for ConvTranspose{n}d."
+        assert not is_per_channel, (
+            "Per channel weight observer is not supported yet for ConvTranspose{n}d."
+        )
 
 
-QConfigAny = Optional[QConfig]
-QConfigAny.__module__ = "torch.ao.quantization.qconfig"
+if sys.version_info < (3, 12):
+    QConfigAny = Optional[QConfig]
+    QConfigAny.__module__ = "torch.ao.quantization.qconfig"
+else:
+    from typing import TypeAliasType
+
+    QConfigAny = TypeAliasType("QConfigAny", Optional[QConfig])
 
 
 def _add_module_to_qconfig_obs_ctr(
@@ -613,7 +626,7 @@ def _add_module_to_qconfig_obs_ctr(
 
 
 _ObserverOrFakeQuantizeConstructor = Union[
-    _PartialWrapper, Type[ObserverBase], Type[FakeQuantizeBase]
+    _PartialWrapper, type[ObserverBase], type[FakeQuantizeBase]
 ]
 
 

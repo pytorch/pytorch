@@ -21,7 +21,7 @@ class TORCH_API LazyGraphExecutor {
   };
 
   // Register a lazy graph executor instance that can be retrieved using Get()
-  static void Register(LazyGraphExecutor*);
+  static void Register(LazyGraphExecutor* /*executor*/);
   static LazyGraphExecutor* Get();
 
   virtual ~LazyGraphExecutor() = default;
@@ -130,6 +130,11 @@ class TORCH_API LazyGraphExecutor {
   ComputationCache* GetComputationCache();
 
   hash_t GetGraphHash(const std::vector<LazyTensorPtr>& tensors);
+
+  // Clear the computation cache.
+  void ClearComputationCache();
+  // Remove a specific computation cache entry from its hash.
+  void RemoveFromComputationCache(const hash_t& hash);
 
  protected:
   // TODO(alanwaketan): Revisit if all of them need to be accessible to

@@ -1,11 +1,14 @@
 #include <sstream>
 
+#ifndef ROCM_ON_WINDOWS
 #ifdef TORCH_CUDA_USE_NVTX3
 #include <nvtx3/nvtx3.hpp>
 #else
 #include <nvToolsExt.h>
 #endif
-
+#else // ROCM_ON_WINDOWS
+#include <c10/util/Exception.h>
+#endif // ROCM_ON_WINDOWS
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
@@ -33,7 +36,7 @@ static void cudaCheck(cudaError_t result, const char* file, int line) {
     } else {
       ss << cudaGetErrorString(result);
     }
-    throw std::runtime_error(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 }
 #define TORCH_CUDA_CHECK(result) cudaCheck(result, __FILE__, __LINE__);
@@ -71,6 +74,7 @@ struct CUDAMethods : public ProfilerStubs {
     return ms * 1000.0;
   }
 
+#ifndef ROCM_ON_WINDOWS
   void mark(const char* name) const override {
     ::nvtxMark(name);
   }
@@ -82,6 +86,20 @@ struct CUDAMethods : public ProfilerStubs {
   void rangePop() const override {
     ::nvtxRangePop();
   }
+#else // ROCM_ON_WINDOWS
+  static void printUnavailableWarning() {
+    TORCH_WARN_ONCE("Warning: roctracer isn't available on Windows");
+  }
+  void mark(const char* name) const override {
+    printUnavailableWarning();
+  }
+  void rangePush(const char* name) const override {
+    printUnavailableWarning();
+  }
+  void rangePop() const override {
+    printUnavailableWarning();
+  }
+#endif
 
   void onEachDevice(std::function<void(int)> op) const override {
     at::cuda::OptionalCUDAGuard device_guard;

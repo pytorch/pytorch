@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
-from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.nn.functional as F
@@ -104,44 +105,9 @@ def broadcast_shapes(*shapes):
     # This wrapper exists to support variadic args.
     # TODO Move this to C++ once the jit has better support for torch.Size.
     if not torch.jit.is_tracing():
-        max_len = 0
-        for shape in shapes:
-            if isinstance(shape, (int, torch.SymInt)):
-                if max_len < 1:
-                    max_len = 1
-            elif isinstance(shape, (tuple, list)):
-                s = len(shape)
-                if max_len < s:
-                    max_len = s
-        result = [1] * max_len
-
-        from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
-        for shape in shapes:
-            if isinstance(shape, (int, torch.SymInt)):
-                shape = (shape,)
-            if isinstance(shape, (tuple, list)):
-                for i in range(-1, -1 - len(shape), -1):
-                    if shape[i] < 0:
-                        raise RuntimeError(
-                            f"Trying to create tensor with negative dimension ({shape[i]}): ({shape[i]})"
-                        )
-                    # NB: result is initialized to 1 so this is effectively an
-                    # equals one test
-                    if guard_size_oblivious(shape[i] == 1) or guard_size_oblivious(
-                        shape[i] == result[i]
-                    ):
-                        continue
-                    if result[i] != 1:
-                        raise RuntimeError(
-                            "Shape mismatch: objects cannot be broadcast to a single shape"
-                        )
-                    result[i] = shape[i]
-            else:
-                raise RuntimeError(
-                    "Input shapes should be of type ints, a tuple of ints, or a list of ints, got ",
-                    shape,
-                )
+        result = torch._refs._broadcast_shapes(*shapes)
+        if result is None:
+            return torch.Size([])
         return torch.Size(result)
     else:
         # with implementation above, torch.jit.trace hardcodes the sizes which makes subsequent replays fail
@@ -154,9 +120,9 @@ def broadcast_shapes(*shapes):
 
 def split(
     tensor: Tensor,
-    split_size_or_sections: Union[int, List[int]],
+    split_size_or_sections: Union[int, list[int]],
     dim: int = 0,
-) -> Tuple[Tensor, ...]:
+) -> tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
     If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
@@ -397,7 +363,7 @@ def einsum(*args: Any) -> Tensor:
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         _operands = operands[0]
-        # recurse incase operands contains value that has torch function
+        # recurse in case operands contains value that has torch function
         # in the original implementation this line is omitted
         return einsum(equation, *_operands)
 
@@ -413,7 +379,7 @@ def einsum(*args: Any) -> Tensor:
             equation, *operands, optimize=opt_einsum.strategy
         )[0]
         # flatten path for dispatching to C++
-        path = [item for pair in tupled_path for item in pair]
+        path = [*itertools.chain.from_iterable(tupled_path)]
     return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
 
 
@@ -421,13 +387,13 @@ def einsum(*args: Any) -> Tensor:
 if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
     def meshgrid(
-        *tensors: Union[Tensor, List[Tensor]], indexing: Optional[str] = None
-    ) -> Tuple[Tensor, ...]:
+        *tensors: Union[Tensor, list[Tensor]], indexing: Optional[str] = None
+    ) -> tuple[Tensor, ...]:
         return _meshgrid(*tensors, indexing=indexing)
 
 else:
 
-    def meshgrid(*tensors, indexing: Optional[str] = None) -> Tuple[Tensor, ...]:
+    def meshgrid(*tensors, indexing: Optional[str] = None) -> tuple[Tensor, ...]:
         r"""Creates grids of coordinates specified by the 1D inputs in `attr`:tensors.
 
         This is helpful when you want to visualize data over some
@@ -550,6 +516,7 @@ def stft(
     normalized: bool = False,
     onesided: Optional[bool] = None,
     return_complex: Optional[bool] = None,
+    align_to_window: Optional[bool] = None,
 ) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
@@ -697,6 +664,11 @@ def stft(
             normalized=normalized,
             onesided=onesided,
             return_complex=return_complex,
+            align_to_window=align_to_window,
+        )
+    if center and align_to_window is not None:
+        raise RuntimeError(
+            "stft align_to_window should only be set when center = false"
         )
     # NOTE: Do not edit. This code will be removed once the forward-compatibility
     #       period is over for PR #73432
@@ -715,6 +687,7 @@ def stft(
         normalized,
         onesided,
         return_complex,
+        align_to_window,
     )
 
 
@@ -807,7 +780,7 @@ if TYPE_CHECKING:
     # done by the caller of the _impl function
     _unique_impl_out = Any
 else:
-    _unique_impl_out = Tuple[Tensor, Tensor, Tensor]
+    _unique_impl_out = tuple[Tensor, Tensor, Tensor]
 
 
 def _unique_impl(
@@ -817,7 +790,7 @@ def _unique_impl(
     return_counts: bool = False,
     dim: Optional[int] = None,
 ) -> _unique_impl_out:
-    r"""unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None) -> Tuple[Tensor, Tensor, Tensor]
+    r"""unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None) -> tuple[Tensor, Tensor, Tensor]
 
     Returns the unique elements of the input tensor.
 
@@ -1056,7 +1029,7 @@ def _return_counts(
     return_counts=False,
     dim=None,
 ):
-    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, bool, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -1088,7 +1061,7 @@ def _return_inverse(
     return_counts=False,
     dim=None,
 ):
-    # type: (Tensor, bool, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, bool, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
         return _unique_impl(input, sorted, return_inverse, return_counts, dim)
@@ -1140,7 +1113,7 @@ def _consecutive_return_counts(
     return_counts=False,
     dim=None,
 ):
-    # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
@@ -1172,7 +1145,7 @@ def _consecutive_return_inverse(
     return_counts=False,
     dim=None,
 ):
-    # type: (Tensor, bool, bool, Optional[int]) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, bool, bool, Optional[int]) -> tuple[Tensor, Tensor]
 
     if has_torch_function_unary(input):
         return _unique_consecutive_impl(input, return_inverse, return_counts, dim)
@@ -1236,7 +1209,7 @@ else:
     def tensordot(  # noqa: F811
         a,
         b,
-        dims: Tuple[List[int], List[int]],
+        dims: tuple[list[int], list[int]],
         out: Optional[torch.Tensor] = None,
     ):
         pass
@@ -1245,7 +1218,7 @@ else:
     def tensordot(  # noqa: F811
         a,
         b,
-        dims: List[List[int]],
+        dims: list[list[int]],
         out: Optional[torch.Tensor] = None,
     ):
         pass
@@ -1322,13 +1295,13 @@ def tensordot(  # noqa: F811
     if not isinstance(dims, (tuple, list, torch.Tensor, int, torch.SymInt)):
         raise RuntimeError(
             "tensordot expects dims to be int or "
-            + "Tuple[List[int], List[int]] or "
-            + "List[List[int]] containing two lists, but got "
+            + "tuple[list[int], list[int]] or "
+            + "list[list[int]] containing two lists, but got "
             + f"dims={dims}"
         )
 
-    dims_a: List[int] = []
-    dims_b: List[int] = []
+    dims_a: list[int] = []
+    dims_b: list[int] = []
 
     if isinstance(dims, (tuple, list)):
         dims_a, dims_b = dims
@@ -1337,8 +1310,8 @@ def tensordot(  # noqa: F811
         num_elements = dims.numel()
         if num_elements > 1:
             assert dims.size()[0] == 2
-            dims_a = torch.jit.annotate(List[int], dims[0].tolist())
-            dims_b = torch.jit.annotate(List[int], dims[1].tolist())
+            dims_a = torch.jit.annotate(list[int], dims[0].tolist())
+            dims_b = torch.jit.annotate(list[int], dims[1].tolist())
         else:
             dims_val = int(dims.item())
             if dims_val < 0:
@@ -1438,8 +1411,13 @@ def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     r"""Computes batched the p-norm distance between each pair of the two collections of row vectors.
 
     Args:
-        x1 (Tensor): input tensor of shape :math:`B \times P \times M`.
-        x2 (Tensor): input tensor of shape :math:`B \times R \times M`.
+        x1 (Tensor): input tensor where the last two dimensions represent the points and the feature dimension respectively.
+            The shape can be :math:`D_1 \times D_2 \times \cdots \times D_n \times P \times M`,
+            where :math:`P` is the number of points and :math:`M` is the feature dimension.
+        x2 (Tensor): input tensor where the last two dimensions also represent the points and the feature dimension respectively.
+            The shape can be :math:`D_1' \times D_2' \times \cdots \times D_m' \times R \times M`,
+            where :math:`R` is the number of points and :math:`M` is the feature dimension,
+            which should match the feature dimension of `x1`.
         p: p value for the p-norm distance to calculate between each vector pair
             :math:`\in [0, \infty]`.
         compute_mode:
@@ -1495,7 +1473,7 @@ def atleast_1d(*tensors):
     Input tensors with one or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 1-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1516,6 +1494,8 @@ def atleast_1d(*tensors):
         >>> y = torch.tensor(1.)
         >>> torch.atleast_1d((x, y))
         (tensor([0.5000]), tensor([1.]))
+        >>> torch.atleast_1d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1531,7 +1511,7 @@ def atleast_2d(*tensors):
     Input tensors with two or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 2-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1554,6 +1534,8 @@ def atleast_2d(*tensors):
         >>> y = torch.tensor(1.)
         >>> torch.atleast_2d((x, y))
         (tensor([[0.5000]]), tensor([[1.]]))
+        >>> torch.atleast_2d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1569,7 +1551,7 @@ def atleast_3d(*tensors):
     Input tensors with three or more dimensions are returned as-is.
 
     Args:
-        input (Tensor or list of Tensors)
+        input (Tensor or sequence of Tensors): tensor(s) to be converted to at least 3-dimensional.
 
     Returns:
         output (Tensor or tuple of Tensors)
@@ -1600,6 +1582,8 @@ def atleast_3d(*tensors):
         >>> y = torch.tensor(1.0)
         >>> torch.atleast_3d((x, y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
+        >>> torch.atleast_3d()
+        ()
     """
     # This wrapper exists to support variadic args.
     if has_torch_function(tensors):
@@ -1786,6 +1770,7 @@ def norm(  # noqa: F811
     if input.layout == torch.strided and input.device.type in (
         "cpu",
         "cuda",
+        "xpu",
         "meta",
         torch.utils.backend_registration._privateuse1_backend_name,
     ):
@@ -1799,7 +1784,9 @@ def norm(  # noqa: F811
 
         if isinstance(p, str):
             if p == "fro" and (
-                dim is None or isinstance(dim, (int, torch.SymInt)) or len(dim) <= 2
+                dim is None
+                or isinstance(dim, (int, torch.SymInt))
+                or len(dim) <= 2  # pyrefly: ignore  # bad-argument-type
             ):
                 if out is None:
                     return torch.linalg.vector_norm(
@@ -1896,7 +1883,7 @@ def norm(  # noqa: F811
 def unravel_index(
     indices: Tensor,
     shape: Union[int, Sequence[int], torch.Size],
-) -> Tuple[Tensor, ...]:
+) -> tuple[Tensor, ...]:
     r"""Converts a tensor of flat indices into a tuple of coordinate tensors that
     index into an arbitrary tensor of the specified shape.
 
@@ -1955,7 +1942,7 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
     torch._check_type(
         not indices.is_complex()
         and not indices.is_floating_point()
-        and not indices.dtype == torch.bool,
+        and indices.dtype != torch.bool,
         lambda: f"expected 'indices' to be integer dtype, but got {indices.dtype}",
     )
 
@@ -1965,7 +1952,7 @@ def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
     )
 
     if isinstance(shape, (int, torch.SymInt)):
-        shape = torch.Size([shape])
+        shape = torch.Size([shape])  # pyrefly: ignore  # bad-argument-type
     else:
         for dim in shape:
             torch._check_type(
@@ -2041,7 +2028,7 @@ def chain_matmul(*matrices, out=None):
 
 
 def _lu_impl(A, pivot=True, get_infos=False, out=None):
-    # type: (Tensor, bool, bool, Any) -> Tuple[Tensor, Tensor, Tensor]
+    # type: (Tensor, bool, bool, Any) -> tuple[Tensor, Tensor, Tensor]
     r"""Computes the LU factorization of a matrix or batches of matrices
     :attr:`A`. Returns a tuple containing the LU factorization and
     pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
@@ -2090,7 +2077,8 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
     Args:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
-        pivot (bool, optional): controls whether pivoting is done. Default: ``True``
+        pivot (bool, optional): Whether to compute the LU decomposition with partial pivoting, or the regular LU
+                                decomposition. :attr:`pivot`\ `= False` not supported on CPU. Default: `True`.
         get_infos (bool, optional): if set to ``True``, returns an info IntTensor.
                                     Default: ``False``
         out (tuple, optional): optional output tuple. If :attr:`get_infos` is ``True``,
@@ -2143,7 +2131,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 if TYPE_CHECKING:
     _ListOrSeq = Sequence[Tensor]
 else:
-    _ListOrSeq = List[Tensor]
+    _ListOrSeq = list[Tensor]
 
 
 def _check_list_size(out_len: int, get_infos: bool, out: _ListOrSeq) -> None:
@@ -2159,7 +2147,7 @@ def _check_list_size(out_len: int, get_infos: bool, out: _ListOrSeq) -> None:
 
 
 def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
-    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor]
+    # type: (Tensor, bool, bool, Optional[tuple[Tensor, Tensor, Tensor]]) -> tuple[Tensor, Tensor, Tensor]
     if has_torch_function_unary(A):
         return handle_torch_function(
             lu, (A,), A, pivot=pivot, get_infos=get_infos, out=out
@@ -2175,7 +2163,7 @@ def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
 
 
 def _lu_no_infos(A, pivot=True, get_infos=False, out=None):
-    # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
+    # type: (Tensor, bool, bool, Optional[tuple[Tensor, Tensor]]) -> tuple[Tensor, Tensor]
     # need to check for torch_function here so that we exit if
     if has_torch_function_unary(A):
         return handle_torch_function(

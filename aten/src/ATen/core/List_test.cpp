@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 
 using namespace c10;
+using std::string;
 
 // NOLINTBEGIN(performance-move-const-arg, bugprone-use-after-move, *analyzer*Move)
 TEST(ListTestIValueBasedList, givenEmptyList_whenCallingEmpty_thenReturnsTrue) {

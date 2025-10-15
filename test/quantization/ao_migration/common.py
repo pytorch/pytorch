@@ -1,5 +1,5 @@
 import importlib
-from typing import List, Optional
+from typing import Optional
 
 from torch.testing._internal.common_utils import TestCase
 
@@ -8,7 +8,7 @@ class AOMigrationTestCase(TestCase):
     def _test_function_import(
         self,
         package_name: str,
-        function_list: List[str],
+        function_list: list[str],
         base: Optional[str] = None,
         new_package_name: Optional[str] = None,
     ):
@@ -32,7 +32,7 @@ class AOMigrationTestCase(TestCase):
             )
 
     def _test_dict_import(
-        self, package_name: str, dict_list: List[str], base: Optional[str] = None
+        self, package_name: str, dict_list: list[str], base: Optional[str] = None
     ):
         r"""Tests individual function list import by comparing the functions
         and their hashes."""
@@ -47,6 +47,6 @@ class AOMigrationTestCase(TestCase):
             new_dict = getattr(new_location, dict_name)
             assert old_dict == new_dict, f"Dicts don't match: {dict_name}"
             for key in new_dict.keys():
-                assert (
-                    old_dict[key] == new_dict[key]
-                ), f"Dicts don't match: {dict_name} for key {key}"
+                assert old_dict[key] == new_dict[key], (
+                    f"Dicts don't match: {dict_name} for key {key}"
+                )

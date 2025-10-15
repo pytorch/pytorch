@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
+    skipIfRocm,
     TEST_WITH_TSAN,
     TestCase,
 )
@@ -168,11 +169,12 @@ class DistributedUtilTest(TestCase):
             server_port=pick_free_port,
             timeout=1,
         )
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(DistNetworkError):
             create_c10d_store(
                 is_server=True, server_addr=server_addr, server_port=store1.port
             )
 
+    @skipIfRocm
     def test_port_already_in_use_on_worker(self):
         sock = get_socket_with_port()
         with closing(sock):

@@ -22,6 +22,7 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
+#include <torch/library.h>
 #include <optional>
 #include <string>
 #include <vector>
@@ -85,8 +86,6 @@ namespace torch::jit {
 using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
-
-OpCode parseOpCode(const char* str);
 
 TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
@@ -215,7 +214,7 @@ class BytecodeDeserializer final {
       mobile::Function* function);
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
-  std::unique_ptr<PyTorchStreamReader> reader_{};
+  std::unique_ptr<PyTorchStreamReader> reader_;
   std::optional<at::Device> device_;
   uint64_t module_load_options_;
   // From `version` or `.data/version` in model.ptl and it's compute
@@ -646,6 +645,9 @@ mobile::Module _load_for_mobile(
     std::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
+  torch::initialize_torch_libraries();
+#endif
   auto observer = torch::observerConfig().getModuleObserver();
   if (observer) {
     extra_files.insert(std::make_pair("model_path", filename));

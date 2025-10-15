@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
-from typing import Any, Callable, Dict, Optional, Tuple
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 import torch.fx
@@ -38,7 +39,7 @@ class NormalizeArgs(Transformer):
         self, module: torch.fx.GraphModule, normalize_to_only_use_kwargs: bool = True
     ):
         super().__init__(module)
-        self.node_map: Dict[Proxy, Node] = {}
+        self.node_map: dict[Proxy, Node] = {}
         self.normalize_to_only_use_kwargs = normalize_to_only_use_kwargs
 
     def run_node(self, n: Node) -> Any:
@@ -46,12 +47,12 @@ class NormalizeArgs(Transformer):
 
         def get_type(arg):
             if isinstance(arg, fx.Node):
-                return n.meta["type"] if "type" in n.meta else None
+                return n.meta.get("type")
             return type(arg)
 
         arg_types = map_aggregate(n.args, get_type)
         assert isinstance(arg_types, tuple)
-        arg_types = tuple([create_type_hint(i) for i in arg_types])
+        arg_types = tuple(create_type_hint(i) for i in arg_types)
         kwarg_types = {k: get_type(v) for k, v in kwargs.items()}
         if n.op == "call_function":
             out = self.call_function(n.target, args, kwargs, arg_types, kwarg_types)
@@ -66,10 +67,10 @@ class NormalizeArgs(Transformer):
     def call_function(
         self,
         target: Target,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Any],
-        arg_types: Optional[Tuple[Any, ...]] = None,
-        kwarg_types: Optional[Dict[str, Any]] = None,
+        args: tuple[Argument, ...],
+        kwargs: dict[str, Any],
+        arg_types: Optional[tuple[Any, ...]] = None,
+        kwarg_types: Optional[dict[str, Any]] = None,
     ):
         assert callable(target)
         new_args_and_kwargs = normalize_function(
@@ -89,7 +90,7 @@ class NormalizeArgs(Transformer):
             return super().call_function(target, args, kwargs)
 
     def call_module(
-        self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
     ):
         assert isinstance(target, str)
         new_args_and_kwargs = normalize_module(
@@ -124,7 +125,7 @@ class NormalizeOperators(AnnotateTypesWithSchema):
         traced = NormalizeOperators(traced).transform()
     """
 
-    binary_magic_method_remap: Dict[
+    binary_magic_method_remap: dict[
         Callable[[Any, Any], Any], Callable[[Any, Any], Any]
     ] = {
         torch.add: operator.add,
@@ -142,7 +143,7 @@ class NormalizeOperators(AnnotateTypesWithSchema):
     }
 
     def call_function(
-        self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
     ):
         # Normalize operators according to the magic methods implemented on tensors here:
         # https://github.com/pytorch/pytorch/blob/28c5d90b679c6b38bf4183ec99f16d933c2f1bcd/tools/autograd/templates/python_variable_methods.cpp#L1137 # noqa: B950

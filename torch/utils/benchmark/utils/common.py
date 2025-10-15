@@ -8,7 +8,8 @@ import shutil
 import tempfile
 import textwrap
 import time
-from typing import cast, Any, DefaultDict, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import cast, Any, Optional
+from collections.abc import Iterable, Iterator
 import uuid
 
 import torch
@@ -79,13 +80,13 @@ class Measurement:
     (including a detailed __repr__) for downstream consumers.
     """
     number_per_run: int
-    raw_times: List[float]
+    raw_times: list[float]
     task_spec: TaskSpec
-    metadata: Optional[Dict[Any, Any]] = None  # Reserved for user payloads.
+    metadata: Optional[dict[Any, Any]] = None  # Reserved for user payloads.
 
     def __post_init__(self) -> None:
-        self._sorted_times: Tuple[float, ...] = ()
-        self._warnings: Tuple[str, ...] = ()
+        self._sorted_times: tuple[float, ...] = ()
+        self._warnings: tuple[str, ...] = ()
         self._median: float = -1.0
         self._mean: float = -1.0
         self._p25: float = -1.0
@@ -107,7 +108,7 @@ class Measurement:
     # selected an appropriate number_per_run then this is a non-issue, and
     # forcing users to handle that division would result in a poor experience.
     @property
-    def times(self) -> List[float]:
+    def times(self) -> list[float]:
         return [t / self.number_per_run for t in self.raw_times]
 
     @property
@@ -144,7 +145,7 @@ class Measurement:
         n_total = len(self._sorted_times)
         lower_bound = int(n_total // 4)
         upper_bound = int(torch.tensor(3 * n_total / 4).ceil())
-        interquartile_points: Tuple[float, ...] = self._sorted_times[lower_bound:upper_bound]
+        interquartile_points: tuple[float, ...] = self._sorted_times[lower_bound:upper_bound]
         std = torch.tensor(interquartile_points).std(unbiased=False).item()
         sqrt_n = torch.tensor(len(interquartile_points)).sqrt().item()
 
@@ -227,18 +228,18 @@ class Measurement:
         return "\n".join(l for l in repr_str.splitlines(keepends=False) if skip_line not in l)
 
     @staticmethod
-    def merge(measurements: Iterable["Measurement"]) -> List["Measurement"]:
+    def merge(measurements: Iterable["Measurement"]) -> list["Measurement"]:
         """Convenience method for merging replicates.
 
         Merge will extrapolate times to `number_per_run=1` and will not
         transfer any metadata. (Since it might differ between replicates)
         """
-        grouped_measurements: DefaultDict[TaskSpec, List[Measurement]] = collections.defaultdict(list)
+        grouped_measurements: collections.defaultdict[TaskSpec, list[Measurement]] = collections.defaultdict(list)
         for m in measurements:
             grouped_measurements[m.task_spec].append(m)
 
-        def merge_group(task_spec: TaskSpec, group: List["Measurement"]) -> "Measurement":
-            times: List[float] = []
+        def merge_group(task_spec: TaskSpec, group: list["Measurement"]) -> "Measurement":
+            times: list[float] = []
             for m in group:
                 # Different measurements could have different `number_per_run`,
                 # so we call `.times` which normalizes the results.
@@ -254,7 +255,7 @@ class Measurement:
         return [merge_group(t, g) for t, g in grouped_measurements.items()]
 
 
-def select_unit(t: float) -> Tuple[str, float]:
+def select_unit(t: float) -> tuple[str, float]:
     """Determine how to scale times for O(1) magnitude.
 
     This utility is used to format numbers for human consumption.
@@ -275,13 +276,14 @@ def unit_to_english(u: str) -> str:
 
 def trim_sigfig(x: float, n: int) -> float:
     """Trim `x` to `n` significant figures. (e.g. 3.14159, 2 -> 3.10000)"""
-    assert n == int(n)
+    if n != int(n):
+        raise AssertionError("Number of significant figures must be an integer")
     magnitude = int(torch.tensor(x).abs().log10().ceil().item())
     scale = 10 ** (magnitude - n)
     return float(torch.tensor(x / scale).round() * scale)
 
 
-def ordered_unique(elements: Iterable[Any]) -> List[Any]:
+def ordered_unique(elements: Iterable[Any]) -> list[Any]:
     return list(collections.OrderedDict(dict.fromkeys(elements)).keys())
 
 
@@ -311,8 +313,10 @@ def _make_temp_dir(prefix: Optional[str] = None, gc_dev_shm: bool = False) -> st
     use_dev_shm: bool = (os.getenv("BENCHMARK_USE_DEV_SHM") or "").lower() in ("1", "true")
     if use_dev_shm:
         root = "/dev/shm/pytorch_benchmark_utils"
-        assert os.name == "posix", f"tmpfs (/dev/shm) is POSIX only, current platform is {os.name}"
-        assert os.path.exists("/dev/shm"), "This system does not appear to support tmpfs (/dev/shm)."
+        if os.name != "posix":
+            raise AssertionError(f"tmpfs (/dev/shm) is POSIX only, current platform is {os.name}")
+        if not os.path.exists("/dev/shm"):
+            raise AssertionError("This system does not appear to support tmpfs (/dev/shm).")
         os.makedirs(root, exist_ok=True)
 
         # Because we're working in shared memory, it is more important than

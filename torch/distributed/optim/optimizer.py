@@ -1,9 +1,8 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import logging
 from collections import defaultdict
 from threading import Lock
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.distributed.autograd as dist_autograd
@@ -52,8 +51,8 @@ class _ScriptLocalOptimizer(nn.Module):
     def step(self, autograd_ctx_id: int):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
         # apply functional optimizer step with a list of gradients
-        grads: List[Optional[Tensor]] = [
-            all_local_grads[p] if p in all_local_grads else None
+        grads: list[Optional[Tensor]] = [
+            all_local_grads[p] if p in all_local_grads else None  # noqa: SIM401
             for p in self._local_params
         ]
 

@@ -1,6 +1,5 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 from torch import Tensor
 
@@ -24,7 +23,7 @@ class AdamW(Adam):
         self,
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
-        betas: Tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
+        betas: tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 1e-2,
         amsgrad: bool = False,
@@ -50,9 +49,17 @@ class AdamW(Adam):
             decoupled_weight_decay=True,
         )
 
+    # Preserve decoupled_weight_decay from AdamW for backwards compatibility. The following
+    # guarantees that decoupled_weight_decay will always be True for loading any state into
+    # AdamW
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        for group in self.param_groups:
+            group["decoupled_weight_decay"] = True
+
 
 AdamW.__doc__ = (
-    r"""Implements AdamW algorithm.
+    r"""Implements AdamW algorithm, where weight decay does not accumulate in the momentum nor variance.
 
     .. math::
        \begin{aligned}
@@ -95,8 +102,9 @@ AdamW.__doc__ = (
         lr (float, Tensor, optional): learning rate (default: 1e-3). A tensor LR
             is not yet supported for all our implementations. Please use a float
             LR if you are not also specifying fused=True or capturable=True.
-        betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.999))
+        betas (tuple[Union[float, Tensor], Union[float, Tensor]], optional):
+            coefficients used for computing running averages of gradient and
+            its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay coefficient (default: 1e-2)
@@ -121,12 +129,12 @@ AdamW.__doc__ = (
 
 # @_disable_dynamo_if_unsupported logic occurs in the decorator that's applied to F.adam
 def adamw(
-    params: List[Tensor],
-    grads: List[Tensor],
-    exp_avgs: List[Tensor],
-    exp_avg_sqs: List[Tensor],
-    max_exp_avg_sqs: List[Tensor],
-    state_steps: List[Tensor],
+    params: list[Tensor],
+    grads: list[Tensor],
+    exp_avgs: list[Tensor],
+    exp_avg_sqs: list[Tensor],
+    max_exp_avg_sqs: list[Tensor],
+    state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     foreach: Optional[bool] = None,
@@ -138,8 +146,8 @@ def adamw(
     has_complex: bool = False,
     *,
     amsgrad: bool,
-    beta1: float,
-    beta2: float,
+    beta1: Union[float, Tensor],
+    beta2: Union[float, Tensor],
     lr: Union[float, Tensor],
     weight_decay: float,
     eps: float,

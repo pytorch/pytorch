@@ -32,7 +32,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       at::Tensor nested_strides,
       at::Tensor storage_offsets);
   // assume contiguous, `nested_strides` and `offsets`
-  // can be infered from `nested_sizes`
+  // can be inferred from `nested_sizes`
   explicit NestedTensorImpl(
       const at::Tensor& buffer,
       const at::Tensor& nested_sizes);
@@ -115,7 +115,8 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   // with real implementations
   int64_t numel_custom() const override;
   c10::SymInt sym_numel_custom() const override;
-  bool is_contiguous_custom(MemoryFormat) const override;
+  c10::SymBool sym_is_contiguous_custom(
+      MemoryFormat /*memory_format*/) const override;
   int64_t size_custom(int64_t d) const override {
     return this->size(d);
   }

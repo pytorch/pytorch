@@ -14,4 +14,6 @@ TEST(GenericMathTest, div_floor_test) {
   EXPECT_DOUBLE_EQ(c10::div_floor_floating(5., -2.), -3.);
   EXPECT_EQ(c10::div_floor_integer(5, 2), 2);
   EXPECT_EQ(c10::div_floor_integer(5, -2), -3);
+  EXPECT_EQ(c10::div_mod(-9, -3), 0);
+  EXPECT_EQ(c10::div_mod(-9., -3.), 0.);
 }

@@ -3,24 +3,11 @@ import copy
 import functools
 import logging
 import warnings
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, field
-from typing import (
-    Any,
-    cast,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    NamedTuple,
-    no_type_check,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from itertools import chain
+from typing import Any, cast, NamedTuple, no_type_check, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -67,11 +54,11 @@ logger = logging.getLogger(__name__)
 class FSDPParamInfo:
     state: _FSDPState
     handle: FlatParamHandle
-    param_indices: Dict[str, int]
-    param_requires_grad: List[bool]
+    param_indices: dict[str, int]
+    param_requires_grad: list[bool]
 
 
-def sorted_items(dictionary: Dict[str, Any]) -> Iterator[Tuple[str, Any]]:
+def sorted_items(dictionary: dict[str, Any]) -> Iterator[tuple[str, Any]]:
     keys = sorted(dictionary.keys())
     for k in keys:
         yield k, dictionary[k]
@@ -98,9 +85,9 @@ class _ConsolidatedOptimState:
             name to its value.
     """
 
-    tensor_state: Dict[str, torch.Tensor] = field(default_factory=dict)
-    zero_dim_tensor_state: Dict[str, torch.Tensor] = field(default_factory=dict)
-    non_tensor_state: Dict[str, Any] = field(default_factory=dict)
+    tensor_state: dict[str, torch.Tensor] = field(default_factory=dict)
+    zero_dim_tensor_state: dict[str, torch.Tensor] = field(default_factory=dict)
+    non_tensor_state: dict[str, Any] = field(default_factory=dict)
 
 
 class _PosDimTensorInfo(NamedTuple):
@@ -126,17 +113,17 @@ class _OptimStateKey(NamedTuple):
     IDs to make it independent of each rank's own optimizer construction.
     """
 
-    unflat_param_names: Tuple[str, ...]
+    unflat_param_names: tuple[str, ...]
     is_fsdp_managed: bool
 
 
 def _unflatten_optim_state(
     fsdp_param_info: FSDPParamInfo,
-    flat_param_state: Dict[str, Any],
+    flat_param_state: dict[str, Any],
     to_save: bool,
     shard_state: bool,
     cpu_offload: bool,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Unflattens the optimizer state, consisting of the "state" part and the
     "param_groups" part. Unflattening the "state" part involves consolidating
@@ -159,9 +146,8 @@ def _unflatten_optim_state(
         dict will need to map these entries using the proper unflattened
         parameter IDs.
     """
-    assert (
-        not shard_state or to_save
-    ), "If ``shard_state`` is True, ``to_save`` has to be True."
+    if shard_state and not to_save:
+        raise AssertionError("If ``shard_state`` is True, ``to_save`` has to be True.")
     consolidated_state = _communicate_optim_state(
         fsdp_param_info,
         flat_param_state,
@@ -191,7 +177,7 @@ def _is_zero_dim_tensor(x: Any) -> bool:
 
 def _communicate_optim_state(
     fsdp_param_info: FSDPParamInfo,
-    flat_param_state: Dict[str, Any],
+    flat_param_state: dict[str, Any],
 ) -> _ConsolidatedOptimState:
     """
     Communicates the optimizer state for a flat parameter across ranks. All
@@ -232,9 +218,8 @@ def _communicate_optim_state(
             ):
                 tensor_state[state_name] = value
                 continue
-            assert (
-                fsdp_state.compute_device is not None
-            ), "compute_device has not been initialized"
+            if fsdp_state.compute_device is None:
+                raise AssertionError("compute_device has not been initialized")
             if value.device.type != fsdp_state.compute_device.type:
                 value = value.to(fsdp_state.compute_device)
             # Assume that positive-dimension tensor optimizer state
@@ -263,7 +248,7 @@ def _unflatten_communicated_optim_state(
     fsdp_param_info: FSDPParamInfo,
     state: _ConsolidatedOptimState,
     shard_state: bool,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Unflattens the communicated optimizer state (given by ``tensor_state``,
     ``non_tensor_state``, and ``zero_dim_tensor_state``) for a single flat
@@ -284,8 +269,8 @@ def _unflatten_communicated_optim_state(
     fsdp_state = fsdp_param_info.state
     handle = fsdp_param_info.handle
     flat_param = handle.flat_param
-    unflat_param_state: List[Dict[str, Any]] = []
-    flat_param_views: Dict[str, Iterator] = {}
+    unflat_param_state: list[dict[str, Any]] = []
+    flat_param_views: dict[str, Iterator] = {}
     num_unflat_params = flat_param._num_params
     tensor_state, zero_dim_tensor_state, non_tensor_state = (
         state.tensor_state,
@@ -307,7 +292,10 @@ def _unflatten_communicated_optim_state(
             if shard_state:
                 osd_config = fsdp_state._optim_state_dict_config
                 if getattr(osd_config, "_use_dtensor", False):
-                    assert fsdp_state._device_mesh is not None
+                    if fsdp_state._device_mesh is None:
+                        raise AssertionError(
+                            f"Expected _device_mesh to be not None, got {fsdp_state._device_mesh}"
+                        )
                     optim_state = _ext_chunk_dtensor(
                         optim_state,
                         fsdp_state.rank,
@@ -315,7 +303,10 @@ def _unflatten_communicated_optim_state(
                         fsdp_state._fsdp_extension,
                     )
                 else:
-                    assert fsdp_state.process_group is not None
+                    if fsdp_state.process_group is None:
+                        raise AssertionError(
+                            f"Expected process_group to be not None, got {fsdp_state.process_group}"
+                        )
                     optim_state = _ext_chunk_tensor(
                         optim_state,
                         fsdp_state.rank,
@@ -327,21 +318,19 @@ def _unflatten_communicated_optim_state(
             unflat_state_param[state_name] = optim_state
 
         # Add zero-dimension tensor state: take the target rank's value
-        for state_name, zero_dim_tensor in sorted_items(zero_dim_tensor_state):
-            unflat_state_param[state_name] = zero_dim_tensor
+        unflat_state_param.update(sorted_items(zero_dim_tensor_state))
         # Add non-tensor state: take the target rank's value
-        for state_name, non_tensor in sorted_items(non_tensor_state):
-            unflat_state_param[state_name] = non_tensor
+        unflat_state_param.update(sorted_items(non_tensor_state))
         unflat_param_state.append(unflat_state_param)
     return unflat_param_state
 
 
 def _broadcast_processed_state(
     fsdp_state: _FSDPState,
-    optim_state: Dict[str, Any],
+    optim_state: dict[str, Any],
     group: Optional[dist.ProcessGroup],
-) -> Dict[str, Any]:
-    objects: List[Any] = [None]
+) -> dict[str, Any]:
+    objects: list[Any] = [None]
     if dist.get_rank(group) == 0:
         objects[0] = tree_map_only(
             torch.Tensor,
@@ -364,10 +353,11 @@ def _broadcast_state(
         tensor = state.to(fsdp_state.compute_device)
     else:
         if isinstance(state, torch.Tensor):
-            assert state.dim() == 0, (
-                "For non-zero ranks, a tensor state should have zero dimension, "
-                "but got the state with shape {state.shape()}."
-            )
+            if state.dim() != 0:
+                raise AssertionError(
+                    "For non-zero ranks, a tensor state should have zero dimension, "
+                    f"but got the state with shape {state.shape}."
+                )
             return state
         elif not isinstance(state, _PosDimTensorInfo):
             return state
@@ -381,8 +371,8 @@ def _broadcast_state(
 def _shard_orig_param_state(
     fsdp_param_info: FSDPParamInfo,
     fqn: str,
-    optim_state: Dict[str, Any],
-) -> Dict[str, Any]:
+    optim_state: dict[str, Any],
+) -> dict[str, Any]:
     """
     Shard the optimizer state for the original parameter with the name ``fqn``.
     This API should only be used when ``use_orig_params`` is True.
@@ -399,7 +389,7 @@ def _shard_orig_param_state(
     if not shard_param_info.in_shard:
         return {}
     # Flatten and shard the state.
-    new_optim_state: Dict[str, Any] = {}
+    new_optim_state: dict[str, Any] = {}
     intra_param_start_idx = shard_param_info.intra_param_start_idx
     intra_param_end_idx = shard_param_info.intra_param_end_idx
     for state_name, value in optim_state.items():
@@ -408,19 +398,22 @@ def _shard_orig_param_state(
             and value.dim() > 0
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
-            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1].clone()  # type: ignore[operator]
+            value = value.flatten()[
+                intra_param_start_idx : intra_param_end_idx  # type: ignore[operator]
+                + 1
+            ].clone()
         new_optim_state[state_name] = value
     return new_optim_state
 
 
 def _flatten_optim_state_dict(
-    optim_state_dict: Dict[str, Any],
+    optim_state_dict: dict[str, Any],
     model: nn.Module,
     use_orig_params: bool = False,
     optim: Optional[torch.optim.Optimizer] = None,
     rank0_only: bool = False,
     group: Optional[dist.ProcessGroup] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Flattens the full optimizer state dict, still keying by unflattened parameter
     names.
@@ -438,7 +431,7 @@ def _flatten_optim_state_dict(
     Note that ``_flatten_tensor_optim_state`` does not need ``optim`` to
     flatten/shard the state. However, NamedOptimizer and KeyedOptimizer require
     all the states even if the corresponding parameters are empty. To this end,
-    ``optim`` will be used to to get the initial state of the empty parameters.
+    ``optim`` will be used to get the initial state of the empty parameters.
     ``optim`` should only be non-None if the ``optim` is KeyedOptimizer or
     NamedOptimizer.
 
@@ -462,7 +455,7 @@ def _flatten_optim_state_dict(
         unflat_osd = _broadcast_processed_state(fsdp_state, unflat_osd, group=group)
 
     # Construct the "state" part
-    flat_osd_state: Dict[Union[_OptimStateKey, str], Any] = {}
+    flat_osd_state: dict[Union[_OptimStateKey, str], Any] = {}
     unflat_osd_state = unflat_osd["state"]
     all_state_keys = set(unflat_osd_state.keys())
 
@@ -503,9 +496,10 @@ def _flatten_optim_state_dict(
             if flat_state:
                 flat_osd_state[key] = flat_state
             elif use_orig_params:
-                assert (
-                    len(fqns) == 1
-                ), f"use_orig_params is True but there are multiple FQNs, {fqns}."
+                if len(fqns) != 1:
+                    raise AssertionError(
+                        f"use_orig_params is True but there are multiple FQNs, {fqns}."
+                    )
                 if optim is not None:  # NamedOptimizer or KeyedOptimizer case.
                     state = optim.state.get(param, None)  # type: ignore[call-overload]
                     if state is not None:
@@ -521,7 +515,8 @@ def _flatten_optim_state_dict(
                     "use_orig_params=True."
                 )
         else:  # do not flatten non-FSDP parameters' states
-            assert len(fqns) == 1
+            if len(fqns) != 1:
+                raise AssertionError(f"Expected len(fqns) == 1, got {len(fqns)}")
             key = _OptimStateKey(tuple(fqns), False)
             flat_osd_state[key] = copy.copy(unflat_osd_state[fqn])
 
@@ -558,9 +553,9 @@ def _flatten_optim_state_dict(
 
 def _flatten_optim_state(
     fsdp_param_info: FSDPParamInfo,
-    unflat_osd_state: Dict[str, Dict[str, Any]],
-    unflat_param_names: List[str],
-) -> Dict[str, Any]:
+    unflat_osd_state: dict[str, dict[str, Any]],
+    unflat_param_names: list[str],
+) -> dict[str, Any]:
     """
     Flattens the optimizer state in ``full_optim_state_dict`` for a single
     flat parameter in ``fsdp_param_info`` corresponding to the unflattened
@@ -583,15 +578,16 @@ def _flatten_optim_state(
     handle = fsdp_param_info.handle
     flat_param = handle.flat_param
     num_unflat_params = len(unflat_param_names)
-    assert num_unflat_params > 0, (
-        "Expects at least one unflattened parameter corresponding to the "
-        "flat parameter"
-    )
+    if num_unflat_params <= 0:
+        raise AssertionError(
+            "Expects at least one unflattened parameter corresponding to the flat parameter"
+        )
     unflat_param_shapes = flat_param._shapes
     num_unflat_param_shapes = len(unflat_param_shapes)
-    assert (
-        num_unflat_params == num_unflat_param_shapes
-    ), f"Expects {num_unflat_params} shapes but got {num_unflat_param_shapes}"
+    if num_unflat_params != num_unflat_param_shapes:
+        raise AssertionError(
+            f"Expects {num_unflat_params} shapes but got {num_unflat_param_shapes}"
+        )
 
     # Check if these unflattened parameters have any optimizer state
     has_state = [
@@ -616,6 +612,7 @@ def _flatten_optim_state(
     ]
     # Check that the unflattened parameters have the same state names
     state_names = None
+    # pyrefly: ignore  # bad-assignment
     for unflat_param_state in unflat_param_states:
         if unflat_param_state is None:
             continue
@@ -627,10 +624,11 @@ def _flatten_optim_state(
                     "Differing optimizer state names for the unflattened "
                     f"parameters: {unflat_param_names}"
                 )
-    assert state_names is not None
+    if state_names is None:
+        raise AssertionError(f"Expected state_names to be not None, got {state_names}")
 
     # Flatten the state
-    flat_state: Dict[str, Optional[torch.Tensor]] = {}
+    flat_state: dict[str, Optional[torch.Tensor]] = {}
     for state_name in state_names:
         state_values = [
             unflat_param_state[state_name] if unflat_param_state is not None else None
@@ -684,7 +682,10 @@ def _flatten_optim_state(
                 unflat_param_names,
             )
         else:
-            assert are_non_tensors
+            if not are_non_tensors:
+                raise AssertionError(
+                    f"Expected are_non_tensors to be True, got {are_non_tensors}"
+                )
             flat_state[state_name] = _flatten_non_tensor_optim_state(
                 state_name,
                 state_values,
@@ -696,8 +697,8 @@ def _flatten_optim_state(
 
 def _flatten_tensor_optim_state(
     state_name: str,
-    pos_dim_tensors: List[torch.Tensor],
-    unflat_param_names: List[str],
+    pos_dim_tensors: list[torch.Tensor],
+    unflat_param_names: list[str],
     unflat_param_shapes: Sequence[torch.Size],
     handle: FlatParamHandle,
 ) -> torch.Tensor:
@@ -772,17 +773,17 @@ def _flatten_tensor_optim_state(
     ]
     flat_tensor = handle.flatten_tensors(tensors_to_flatten, handle._aligned_numel)
     flat_param_shape = flat_param._unpadded_unsharded_size  # type: ignore[attr-defined]
-    assert flat_tensor.shape == flat_param_shape, (
-        f"tensor optim state: {flat_tensor.shape} "
-        f"flat parameter: {flat_param_shape}"
-    )
+    if flat_tensor.shape != flat_param_shape:
+        raise AssertionError(
+            f"tensor optim state: {flat_tensor.shape} flat parameter: {flat_param_shape}"
+        )
     return flat_tensor
 
 
 def _flatten_zero_dim_tensor_optim_state(
     state_name: str,
-    zero_dim_tensors: List[torch.Tensor],
-    unflat_param_names: List[str],
+    zero_dim_tensors: list[torch.Tensor],
+    unflat_param_names: list[str],
 ) -> torch.Tensor:
     """
     Flattens the zero-dimension tensor optimizer state given by the values
@@ -835,8 +836,8 @@ def _flatten_zero_dim_tensor_optim_state(
 
 def _flatten_non_tensor_optim_state(
     state_name: str,
-    non_tensors: List[Any],
-    unflat_param_names: List[str],
+    non_tensors: list[Any],
+    unflat_param_names: list[str],
 ) -> Any:
     """
     Flattens the non-tensor optimizer state given by the values ``non_tensors``
@@ -873,18 +874,18 @@ def _flatten_non_tensor_optim_state(
 
 
 def _rekey_sharded_optim_state_dict(
-    sharded_osd: Dict[str, Any],
+    sharded_osd: dict[str, Any],
     model: nn.Module,
     optim: torch.optim.Optimizer,
     optim_input: Optional[
         Union[
-            List[Dict[str, Any]],
+            list[dict[str, Any]],
             Iterable[nn.Parameter],
         ]
     ],
     using_optim_input: bool,
     is_named_optimizer: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Rekeys the optimizer state dict from unflattened parameter names to flat
     parameter IDs according to the calling rank's ``optim``, which may be
@@ -893,8 +894,8 @@ def _rekey_sharded_optim_state_dict(
     """
     param_to_fqns = _get_param_to_fqns(model)
     flat_param_to_fqn = _get_flat_param_to_fqn(model)
-    param_to_param_key: Dict[nn.Parameter, Union[int, str]] = cast(
-        Dict[nn.Parameter, Union[int, str]],
+    param_to_param_key: dict[nn.Parameter, Union[int, str]] = cast(
+        dict[nn.Parameter, Union[int, str]],
         (
             _get_param_to_param_id_from_optim_input(model, optim_input)
             if using_optim_input
@@ -906,12 +907,15 @@ def _rekey_sharded_optim_state_dict(
     # All parameter keys in `param_to_param_key` should be in
     # `param_to_fqns` -- strict inequality follows when not all parameters are
     # passed to the optimizer
-    assert len(param_to_param_key) <= len(param_to_fqns)
+    if len(param_to_param_key) > len(param_to_fqns):
+        raise AssertionError(
+            f"Expected len(param_to_param_key) <= len(param_to_fqns), got {len(param_to_param_key)} > {len(param_to_fqns)}"
+        )
 
-    unflat_param_names_to_flat_param_key: Dict[
-        Tuple[str, ...], Union[int, str]
+    unflat_param_names_to_flat_param_key: dict[
+        tuple[str, ...], Union[int, str]
     ] = {}  # for "state"
-    unflat_param_name_to_flat_param_key: Dict[
+    unflat_param_name_to_flat_param_key: dict[
         str, Union[int, str]
     ] = {}  # for "param_groups"
     for param, unflat_param_names in param_to_fqns.items():
@@ -924,7 +928,7 @@ def _rekey_sharded_optim_state_dict(
             unflat_param_name_to_flat_param_key[unflat_param_name] = flat_param_key
 
     sharded_osd_state = sharded_osd["state"]
-    rekeyed_osd_state: Dict[Union[str, int], Any] = {}
+    rekeyed_osd_state: dict[Union[str, int], Any] = {}
     for key, param_state in sharded_osd_state.items():
         if isinstance(key, str):
             rekeyed_osd_state[key] = param_state
@@ -932,11 +936,12 @@ def _rekey_sharded_optim_state_dict(
         flat_param_key = unflat_param_names_to_flat_param_key.get(
             key.unflat_param_names, key.unflat_param_names
         )
+        # pyrefly: ignore  # unsupported-operation
         rekeyed_osd_state[flat_param_key] = param_state
 
     # Only process param_groups if it exists in sharded_osd
     if "param_groups" in sharded_osd:
-        rekeyed_osd_param_groups: List[Dict[str, Any]] = []
+        rekeyed_osd_param_groups: list[dict[str, Any]] = []
         for unflat_param_group in sharded_osd["param_groups"]:
             flat_param_group = copy.deepcopy(unflat_param_group)
             flat_param_keys = sorted(
@@ -956,11 +961,11 @@ def _get_param_id_to_param_from_optim_input(
     model: nn.Module,
     optim_input: Optional[
         Union[
-            List[Dict[str, Any]],
+            list[dict[str, Any]],
             Iterable[nn.Parameter],
         ]
     ] = None,
-) -> Dict[int, nn.Parameter]:
+) -> dict[int, nn.Parameter]:
     """
     Constructs a mapping from parameter IDs to parameters. This may be used
     both for models with ``FlatParameter`` s and without.
@@ -994,7 +999,8 @@ def _get_param_id_to_param_from_optim_input(
     if optim_input is None:
         return dict(enumerate(model.parameters()))
     try:
-        params = cast(List[nn.Parameter], list(optim_input))
+        # pyrefly: ignore  # no-matching-overload
+        params = cast(list[nn.Parameter], list(optim_input))
     except TypeError as e:
         raise TypeError(
             "Optimizer input should be an iterable of Tensors or dicts, "
@@ -1013,21 +1019,22 @@ def _get_param_id_to_param_from_optim_input(
         raise TypeError("Optimizer input should be an iterable of Tensors or dicts")
     if all_tensors:
         return dict(enumerate(params))
-    assert all_dicts
-    param_id_to_param: List[nn.Parameter] = []
+    if not all_dicts:
+        raise AssertionError(f"Expected all_dicts to be True, got {all_dicts}")
+    param_id_to_param: list[nn.Parameter] = []
     for param_group in params:
         has_params_key = "params" in param_group  # type: ignore[operator]
-        assert has_params_key, (
-            'A parameter group should map "params" to a list of the '
-            "parameters in the group"
-        )
+        if not has_params_key:
+            raise AssertionError(
+                'A parameter group should map "params" to a list of the parameters in the group'
+            )
         # Implicitly map `flat_param_id` (current length of the list) to
         # `param`
         param_id_to_param.extend(param_group["params"])  # type: ignore[index]
     return dict(enumerate(param_id_to_param))
 
 
-def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[FlatParameter, str]:
+def _get_flat_param_to_fqn(model: torch.nn.Module) -> dict[FlatParameter, str]:
     """
     Constructs a mapping from ``FlatParameter`` to a cleaned (devoid of prefixes
     from wrappers) fully qualified name (FQN). Note that this FQN is "non-canonical"
@@ -1054,7 +1061,7 @@ def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[FlatParameter, str]:
     def return_fn(flat_param_to_fqn):
         return flat_param_to_fqn
 
-    flat_param_to_fqn_ret: Dict[FlatParameter, str] = {}
+    flat_param_to_fqn_ret: dict[FlatParameter, str] = {}
     return _apply_to_modules(
         model,
         module_fn,
@@ -1068,37 +1075,48 @@ def _get_param_key_to_param(
     optim: torch.optim.Optimizer,
     model: Optional[nn.Module] = None,
     is_named_optimizer: bool = False,
-    param_to_fqns: Optional[Dict[nn.Parameter, List[str]]] = None,
-    flat_param_to_fqn: Optional[Dict[FlatParameter, str]] = None,
-) -> Dict[Union[int, str], nn.Parameter]:
+    param_to_fqns: Optional[dict[nn.Parameter, list[str]]] = None,
+    flat_param_to_fqn: Optional[dict[FlatParameter, str]] = None,
+) -> dict[Union[int, str], nn.Parameter]:
     """
     Constructs a mapping from parameter keys to parameters. For the regular
     optimizers, the keys are parameter IDs. For NamedOptimizer, the keys
     are FQNs. This API may be used both for models with ``FlatParameter`` s and
     without.
     """
-    clean_fqn_to_curr_fqn: Dict[str, str] = {}
+    clean_fqn_to_curr_fqn: dict[str, str] = {}
     if is_named_optimizer:
-        assert (
-            param_to_fqns is not None and flat_param_to_fqn is not None
-        ), "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
-        assert model is not None
+        if param_to_fqns is None or flat_param_to_fqn is None:
+            raise AssertionError(
+                "The optimizer is a NamedOptimizer, `param_to_fqns` must not be None."
+            )
+        if model is None:
+            raise AssertionError(f"Expected model to be not None, got {model}")
         for key, _ in _named_parameters_with_duplicates(model):
             clean_fqn_to_curr_fqn[clean_tensor_name(key)] = key
 
-    param_key_to_param: Dict[Union[str, int], nn.Parameter] = {}
+    param_key_to_param: dict[Union[str, int], nn.Parameter] = {}
     pid = 0
     for param_group in optim.param_groups:
         if is_named_optimizer:
             for param in param_group["params"]:
-                assert flat_param_to_fqn is not None
+                if flat_param_to_fqn is None:
+                    raise AssertionError(
+                        f"Expected flat_param_to_fqn to be not None, got {flat_param_to_fqn}"
+                    )
                 if param in flat_param_to_fqn:
                     # FlatParameter case
                     key = flat_param_to_fqn[param]
                 else:
-                    assert param_to_fqns is not None
+                    if param_to_fqns is None:
+                        raise AssertionError(
+                            f"Expected param_to_fqns to be not None, got {param_to_fqns}"
+                        )
                     # use_orig_params case
-                    assert len(param_to_fqns[param]) == 1
+                    if len(param_to_fqns[param]) != 1:
+                        raise AssertionError(
+                            f"Expected len(param_to_fqns[param]) == 1, got {len(param_to_fqns[param])}"
+                        )
                     key = param_to_fqns[param][0]
                 try:
                     key = clean_fqn_to_curr_fqn[key]
@@ -1119,9 +1137,9 @@ def _get_param_to_param_key(
     optim: torch.optim.Optimizer,
     model: Optional[nn.Module] = None,
     is_named_optimizer: bool = False,
-    param_to_fqns: Optional[Dict[nn.Parameter, List[str]]] = None,
-    flat_param_to_fqn: Optional[Dict[FlatParameter, str]] = None,
-) -> Dict[nn.Parameter, Union[int, str]]:
+    param_to_fqns: Optional[dict[nn.Parameter, list[str]]] = None,
+    flat_param_to_fqn: Optional[dict[FlatParameter, str]] = None,
+) -> dict[nn.Parameter, Union[int, str]]:
     """
     Constructs the inverse mapping of :func:`_get_param_key_to_param`. This API
     only supports the case where `optim` is a regular optimizer, not NamedOptimizer.
@@ -1137,25 +1155,25 @@ def _get_param_to_param_id_from_optim_input(
     model: nn.Module,
     optim_input: Optional[
         Union[
-            List[Dict[str, Any]],
+            list[dict[str, Any]],
             Iterable[nn.Parameter],
         ]
     ] = None,
-) -> Dict[nn.Parameter, int]:
+) -> dict[nn.Parameter, int]:
     """Constructs the inverse mapping of :func:`_get_param_id_to_param_from_optim_input`."""
     param_id_to_param = _get_param_id_to_param_from_optim_input(model, optim_input)
     return {param: param_id for param_id, param in param_id_to_param.items()}
 
 
 def _check_missing_keys_on_rank(
-    r0_optim_state_keys: List[_OptimStateKey],
-    optim_state_key_to_param_key: Dict[_OptimStateKey, Union[str, int]],
-    param_key_to_param: Dict[Union[str, int], nn.Parameter],
+    r0_optim_state_keys: list[_OptimStateKey],
+    optim_state_key_to_param_key: dict[_OptimStateKey, Union[str, int]],
+    param_key_to_param: dict[Union[str, int], nn.Parameter],
     group: Optional[dist.ProcessGroup],
 ) -> None:
     # Ensure that all ranks have at least the optimizer states needed by
     # rank 0's optimizer
-    missing_keys: List[_OptimStateKey] = []
+    missing_keys: list[_OptimStateKey] = []
     for r0_optim_state_key in r0_optim_state_keys:
         if r0_optim_state_key not in optim_state_key_to_param_key:
             # A parameter from rank 0's optimizer does not exist for this
@@ -1164,9 +1182,8 @@ def _check_missing_keys_on_rank(
             continue
         param_key = optim_state_key_to_param_key[r0_optim_state_key]
         if isinstance(param_key, int):
-            assert param_key >= 0 and param_key < len(
-                param_key_to_param
-            ), "Check the `param_key_to_param` construction"
+            if not (param_key >= 0 and param_key < len(param_key_to_param)):
+                raise AssertionError("Check the `param_key_to_param` construction")
     # We cannot use FSDPState.compute_device as this API is a global view.
     device = _get_pg_default_device(group)
     num_missing = torch.tensor([len(missing_keys)], dtype=torch.int32, device=device)
@@ -1180,7 +1197,7 @@ def _check_missing_keys_on_rank(
             "are missing some of those states"
         )
         for rank, keys in enumerate(obj_list):
-            keys = cast(List[_OptimStateKey], keys)
+            keys = cast(list[_OptimStateKey], keys)
             if len(keys) > 0:
                 error_msg += (
                     f"\nRank {rank} is missing states for the parameters: "
@@ -1190,13 +1207,13 @@ def _check_missing_keys_on_rank(
 
 
 def _map_param_key_to_optim_keys(
-    optim_state_dict: Dict[str, Any],
+    optim_state_dict: dict[str, Any],
     group: Optional[dist.ProcessGroup],
-    param_key_to_param: Dict[Union[int, str], nn.Parameter],
-    param_to_fqns: Dict[nn.Parameter, List[str]],
-    fqn_to_fsdp_param_info: Dict[str, FSDPParamInfo],
+    param_key_to_param: dict[Union[int, str], nn.Parameter],
+    param_to_fqns: dict[nn.Parameter, list[str]],
+    fqn_to_fsdp_param_info: dict[str, FSDPParamInfo],
     merge_keys: bool = False,
-) -> Tuple[List[_OptimStateKey], Dict[_OptimStateKey, Union[int, str]]]:
+) -> tuple[list[_OptimStateKey], dict[_OptimStateKey, Union[int, str]]]:
     """
     Construct the local mapping between the ``_OptimStateKey`` and parameter keys
     and all the ``_OptimStateKey`` across ranks. If ``merge_keys`` is False, rank0
@@ -1204,8 +1221,8 @@ def _map_param_key_to_optim_keys(
     Note that ``merge_keys`` should equal to ``use_orig_params``.
     """
     rank = dist.get_rank(group)
-    optim_state_key_to_param_key: Dict[_OptimStateKey, Union[int, str]] = {}  # local
-    all_optim_state_keys: List[_OptimStateKey] = []
+    optim_state_key_to_param_key: dict[_OptimStateKey, Union[int, str]] = {}  # local
+    all_optim_state_keys: list[_OptimStateKey] = []
 
     for param_key, param in param_key_to_param.items():
         # Do not include parameters without state to avoid empty mappings
@@ -1215,10 +1232,10 @@ def _map_param_key_to_optim_keys(
         fqns = param_to_fqns[param]
         is_fsdp_managed = isinstance(param, FlatParameter)
         if is_fsdp_managed:
-            assert fqns[0] in fqn_to_fsdp_param_info, (
-                fqns[0],
-                list(fqn_to_fsdp_param_info.keys()),
-            )
+            if fqns[0] not in fqn_to_fsdp_param_info:
+                raise AssertionError(
+                    f"Expected {fqns[0]} to be in fqn_to_fsdp_param_info, got keys: {list(fqn_to_fsdp_param_info.keys())}"
+                )
         is_fsdp_managed = fqns[0] in fqn_to_fsdp_param_info
         optim_state_key = _OptimStateKey(
             unflat_param_names=tuple(fqns),
@@ -1229,20 +1246,21 @@ def _map_param_key_to_optim_keys(
         optim_state_key_to_param_key[optim_state_key] = param_key
 
     if merge_keys:
-        all_keys: List[List[_OptimStateKey]] = [
+        all_keys: list[list[_OptimStateKey]] = [
             [] for _ in range(dist.get_world_size(group))
         ]
         dist.all_gather_object(all_keys, all_optim_state_keys, group=group)
-        merge_all_optim_state_keys = [
-            key for local_keys in all_keys for key in local_keys
-        ]
+        merge_all_optim_state_keys = [*chain.from_iterable(all_keys)]
         all_optim_state_keys = sorted(set(merge_all_optim_state_keys))
     else:
-        key_obj_list: List[Optional[List[_OptimStateKey]]] = (
+        key_obj_list: list[Optional[list[_OptimStateKey]]] = (
             [all_optim_state_keys] if rank == 0 else [None]
         )
         dist.broadcast_object_list(key_obj_list, src=0, group=group)
-        assert key_obj_list[0] is not None
+        if key_obj_list[0] is None:
+            raise AssertionError(
+                f"Expected key_obj_list[0] to be not None, got {key_obj_list[0]}"
+            )
         all_optim_state_keys = key_obj_list[0]
         _check_missing_keys_on_rank(
             all_optim_state_keys,
@@ -1255,11 +1273,11 @@ def _map_param_key_to_optim_keys(
 
 
 def _unflatten_param_groups(
-    state_dict: Dict[str, Any],
-    param_key_to_param: Dict[Union[int, str], nn.Parameter],
-    param_to_fqns: Dict[nn.Parameter, List[str]],
-) -> List[Dict[str, Any]]:
-    param_groups: List[Dict[str, Any]] = []
+    state_dict: dict[str, Any],
+    param_key_to_param: dict[Union[int, str], nn.Parameter],
+    param_to_fqns: dict[nn.Parameter, list[str]],
+) -> list[dict[str, Any]]:
+    param_groups: list[dict[str, Any]] = []
     for flat_param_group in state_dict["param_groups"]:
         unflat_param_group = copy.deepcopy(flat_param_group)
         param_group_params = [
@@ -1270,22 +1288,20 @@ def _unflatten_param_groups(
             param_to_fqns[param] for param in param_group_params
         ]
         unflat_param_group["params"] = [
-            unflat_param_name
-            for unflat_param_names in nested_unflat_param_names
-            for unflat_param_name in unflat_param_names
+            *chain.from_iterable(nested_unflat_param_names)
         ]  # flatten the list of lists
         param_groups.append(unflat_param_group)
     return param_groups
 
 
-def _is_named_optimizer(optim_state_dict: Dict[str, Any]) -> bool:
+def _is_named_optimizer(optim_state_dict: dict[str, Any]) -> bool:
     """
     Returns whether the state_dict is from a NamedOptimizer.
     This function checks that the keys in the state_dict['state'] are strings
     (which usually are FQNs) versus integers (which usually refer to param_ids
     from a vanilla torch.optim.Optimizer).
     """
-    state = optim_state_dict.get("state", None)
+    state = optim_state_dict.get("state")
     if not state:
         # If we cannot find a state, assume it is not NamedOptimizer as
         # NamedOptimizer has eager initialization.
@@ -1300,22 +1316,22 @@ def _is_named_optimizer(optim_state_dict: Dict[str, Any]) -> bool:
 @dataclass
 class StateInfo:
     # The key of these dictionaries are the state name, e.g., `exp_avg`.
-    tensors: Dict[str, _PosDimTensorInfo]
-    scalar_tensors: Dict[str, torch.Tensor]
-    non_tensors: Dict[str, Any]
+    tensors: dict[str, _PosDimTensorInfo]
+    scalar_tensors: dict[str, torch.Tensor]
+    non_tensors: dict[str, Any]
 
 
 def _allgather_state_info(
     fsdp_state: _FSDPState,
-    input_states: Dict[str, Any],
-) -> List[Dict[str, StateInfo]]:
+    input_states: dict[str, Any],
+) -> list[dict[str, StateInfo]]:
     """
     Given the ``input_states``, allgather StateInfo for each state. The function
     uses all_gather_object to gather StateInfo so no GPU tensors are sent.
     """
 
-    processed_state_dict: Dict[str, StateInfo] = {}
-    gathered_state_info: List[Dict[str, StateInfo]] = [
+    processed_state_dict: dict[str, StateInfo] = {}
+    gathered_state_info: list[dict[str, StateInfo]] = [
         {} for _ in range(fsdp_state.world_size)
     ]
 
@@ -1344,10 +1360,10 @@ def _allgather_state_info(
 
 def _convert_all_state_info(
     fsdp_param_info: FSDPParamInfo,
-    gathered_state_info: List[Dict[str, StateInfo]],
-    input_states: Dict[str, Any],
-    output_states: Dict[str, Dict[str, Any]],
-) -> Tuple[Optional[torch.dtype], Dict[str, List[Optional[torch.Tensor]]]]:
+    gathered_state_info: list[dict[str, StateInfo]],
+    input_states: dict[str, Any],
+    output_states: dict[str, dict[str, Any]],
+) -> tuple[Optional[torch.dtype], dict[str, list[Optional[torch.Tensor]]]]:
     """
     Given the ``gathered_state_info`` and ``input_states``, the API converted
     the StateInfo into the original state if the state is not a non-scalar
@@ -1355,20 +1371,20 @@ def _convert_all_state_info(
     ``state_buffer`` in a correct order for later allgather purpose.
     """
 
-    state_buffers: Dict[str, List[Optional[torch.Tensor]]] = {}
+    state_buffers: dict[str, list[Optional[torch.Tensor]]] = {}
 
     for fqn, gathered_state in output_states.items():
         state_info = [s[fqn] for s in gathered_state_info]
         all_tensor_states = sorted(
             {n for state in state_info for n in state.tensors.keys()}
         )
-        empty_ranks: Set[int] = set()
+        empty_ranks: set[int] = set()
         dtype: Optional[torch.dtype] = None
         # First check all the non-scalar states and get the information of
         # states on each rank.
         for state_name in all_tensor_states:
             numels = []
-            _empty_ranks: Set[int] = set()
+            _empty_ranks: set[int] = set()
             for rank, object_state in enumerate(state_info):
                 numels.append(0)
                 info = object_state.tensors.get(state_name, None)
@@ -1377,11 +1393,17 @@ def _convert_all_state_info(
                     if not dtype:
                         dtype = info.dtype
                     else:
-                        assert dtype == info.dtype
+                        if dtype != info.dtype:
+                            raise AssertionError(
+                                f"Expected dtype == info.dtype, got {dtype} != {info.dtype}"
+                            )
                 if numels[-1] == 0:
                     _empty_ranks.add(rank)
 
-            assert not empty_ranks or empty_ranks == _empty_ranks
+            if not (not empty_ranks or empty_ranks == _empty_ranks):
+                raise AssertionError(
+                    f"Expected empty_ranks to be empty or equal to _empty_ranks, got {empty_ranks} vs {_empty_ranks}"
+                )
             empty_ranks = _empty_ranks
             if state_name not in state_buffers:
                 state_buffers[state_name] = [
@@ -1403,23 +1425,26 @@ def _convert_all_state_info(
                 continue
             for name, non_tensor_value in object_state.non_tensors.items():
                 curr_non_tensor_value = gathered_state.get(name, None)
-                assert (
+                if not (
                     curr_non_tensor_value is None
                     or curr_non_tensor_value == non_tensor_value
-                ), (
-                    f"Rank {rank} has different values for {name}: {non_tensor_value}."
-                    + f" Other ranks: {curr_non_tensor_value}"
-                )
+                ):
+                    raise AssertionError(
+                        f"Rank {rank} has different values for {name}: {non_tensor_value}."
+                        + f" Other ranks: {curr_non_tensor_value}"
+                    )
                 gathered_state[name] = non_tensor_value
 
             for name, scalar_tensor_value in object_state.scalar_tensors.items():
                 curr_scalar_tensor_value = gathered_state.get(name, None)
-                assert curr_scalar_tensor_value is None or torch.equal(
-                    scalar_tensor_value, curr_scalar_tensor_value
-                ), (
-                    f"Rank {rank} has different values for {name}: {scalar_tensor_value}."
-                    + f" Other ranks: {curr_scalar_tensor_value}"
-                )
+                if not (
+                    curr_scalar_tensor_value is None
+                    or torch.equal(scalar_tensor_value, curr_scalar_tensor_value)
+                ):
+                    raise AssertionError(
+                        f"Rank {rank} has different values for {name}: {scalar_tensor_value}."
+                        + f" Other ranks: {curr_scalar_tensor_value}"
+                    )
                 gathered_state[name] = scalar_tensor_value
 
     return dtype, state_buffers  # type: ignore[possibly-undefined]
@@ -1427,7 +1452,7 @@ def _convert_all_state_info(
 
 def _unflatten_orig_param_states(
     fsdp_param_info: FSDPParamInfo,
-    output_states: Dict[str, Dict[str, Any]],
+    output_states: dict[str, dict[str, Any]],
     state_name: str,
     shard_state: bool,
     to_save: bool,
@@ -1435,7 +1460,7 @@ def _unflatten_orig_param_states(
 ) -> None:
     """
     Given a output state dict, ``output_states``, which the keys are FQNs to the
-    original parameters (not FlatParameters nor parmeter ID), and the values
+    original parameters (not FlatParameters nor parameter ID), and the values
     are gathered states, unflatten the states to the original dimensions.
 
     This function performs the unflattening process in-place.
@@ -1470,7 +1495,10 @@ def _unflatten_orig_param_states(
         if shard_state:
             osd_config = fsdp_state._optim_state_dict_config
             if getattr(osd_config, "_use_dtensor", False):
-                assert fsdp_state._device_mesh is not None
+                if fsdp_state._device_mesh is None:
+                    raise AssertionError(
+                        f"Expected _device_mesh to be not None, got {fsdp_state._device_mesh}"
+                    )
                 value = _ext_chunk_dtensor(
                     value,
                     fsdp_state.rank,
@@ -1478,7 +1506,10 @@ def _unflatten_orig_param_states(
                     fsdp_state._fsdp_extension,
                 )
             else:
-                assert fsdp_state.process_group is not None
+                if fsdp_state.process_group is None:
+                    raise AssertionError(
+                        f"Expected process_group to be not None, got {fsdp_state.process_group}"
+                    )
                 value = _ext_chunk_tensor(
                     value,
                     fsdp_state.rank,
@@ -1499,12 +1530,12 @@ def _unflatten_orig_param_states(
 
 def _allgather_orig_param_states(
     fsdp_param_info: FSDPParamInfo,
-    gathered_state_info: List[Dict[str, StateInfo]],
-    input_states: Dict[str, Any],
+    gathered_state_info: list[dict[str, StateInfo]],
+    input_states: dict[str, Any],
     shard_state: bool,
     to_save: bool,
     cpu_offload: bool,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """
     Given the ``gathered_state_info`` and ``input_states``, the API allgathers
     all tensor states and restore non-tensor states from ``gathered_state_info``.
@@ -1516,7 +1547,7 @@ def _allgather_orig_param_states(
             fsdp_state._device_handle.memory_summary(),
         )
 
-    output_states: Dict[str, Dict[str, Any]] = {fqn: {} for fqn in input_states.keys()}
+    output_states: dict[str, dict[str, Any]] = {fqn: {} for fqn in input_states.keys()}
 
     dtype, state_buffers = _convert_all_state_info(
         fsdp_param_info, gathered_state_info, input_states, output_states
@@ -1525,9 +1556,8 @@ def _allgather_orig_param_states(
     if len(state_buffers) == 0:
         return output_states
 
-    has_state_params: List[bool] = [
-        True if fqn in output_states else False
-        for fqn, idx in fsdp_param_info.param_indices.items()
+    has_state_params: list[bool] = [
+        fqn in output_states for fqn, idx in fsdp_param_info.param_indices.items()
     ]
 
     # Loop through the ``state_buffers`` and construct the flattened, concatenated,
@@ -1546,7 +1576,7 @@ def _allgather_orig_param_states(
     # Synchronize can be slow but this will be easier for us to debug.
     fsdp_state._device_handle.synchronize()
     for state_name, buffers in state_buffers.items():
-        local_buffers: List[torch.Tensor] = []
+        local_buffers: list[torch.Tensor] = []
         begin = fsdp_state.rank * flat_param._sharded_size.numel()
         # End is inclusive.
         end = begin + flat_param._sharded_size.numel() - 1
@@ -1614,24 +1644,26 @@ def _allgather_orig_param_states(
             sum(t.numel() for t in local_buffers)
         )
 
-        assert flat_param._shard_numel_padded == shard_numel_padded, (
-            "Manually calculated _sharded_numel_padded is incorrect. "
-            f"_shard_numel_padded={flat_param._shard_numel_padded}, "
-            f"shard_numel_padded={shard_numel_padded}, "
-            f"_sharded_size.numel={flat_param._sharded_size.numel()}, "
-            f"_numels_with_padding={flat_param._numels_with_padding}, "
-            f"begin={begin}, end={end},"
-        )
+        if flat_param._shard_numel_padded != shard_numel_padded:
+            raise AssertionError(
+                "Manually calculated _sharded_numel_padded is incorrect. "
+                f"_shard_numel_padded={flat_param._shard_numel_padded}, "
+                f"shard_numel_padded={shard_numel_padded}, "
+                f"_sharded_size.numel={flat_param._sharded_size.numel()}, "
+                f"_numels_with_padding={flat_param._numels_with_padding}, "
+                f"begin={begin}, end={end},"
+            )
         if shard_numel_padded > 0:
             # Add right-handed padding.
             local_buffers.append(empty_func(shard_numel_padded))
         local_shard = torch.cat(local_buffers)
-        assert local_shard.numel() * fsdp_state.world_size == gathered_tensor.numel(), (
-            "The size of local shard times the world size should equal to the "
-            "gathered tensor size. The inconsistency may be from a bug of "
-            "FlatParameter's metadata or the reconstruction logic in optimizer "
-            "state dict."
-        )
+        if local_shard.numel() * fsdp_state.world_size != gathered_tensor.numel():
+            raise AssertionError(
+                "The size of local shard times the world size should equal to the "
+                "gathered tensor size. The inconsistency may be from a bug of "
+                "FlatParameter's metadata or the reconstruction logic in optimizer "
+                "state dict."
+            )
         fsdp_state._device_handle.synchronize()
         with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
             dist.all_gather_into_tensor(
@@ -1643,11 +1675,12 @@ def _allgather_orig_param_states(
         unpadded_tensor = gathered_tensor[: flat_param._unpadded_unsharded_size.numel()]
         flat_param_handle = fsdp_param_info.handle
         orig_states = flat_param_handle._get_unflat_views_aligned(unpadded_tensor)
-        assert len(orig_states) == len(fsdp_param_info.param_indices), (
-            "The number of parameters from FlatParameter is not consistent to "
-            "the number of states used by optimizer state dict reconstruction "
-            "logic."
-        )
+        if len(orig_states) != len(fsdp_param_info.param_indices):
+            raise AssertionError(
+                "The number of parameters from FlatParameter is not consistent to "
+                "the number of states used by optimizer state dict reconstruction "
+                "logic."
+            )
         for fqn, idx in fsdp_param_info.param_indices.items():
             if fsdp_param_info.param_requires_grad[idx] or fqn in output_states:
                 output_states[fqn][state_name] = orig_states[idx]
@@ -1667,14 +1700,14 @@ def _allgather_orig_param_states(
 
 def _gather_all_orig_param_state(
     fsdp_param_info: FSDPParamInfo,
-    input_states: Dict[str, Any],
+    input_states: dict[str, Any],
     shard_state: bool,
     to_save: bool,
     cpu_offload: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Given a optimizer state dict, ``input_states``, which the keys are FQNs to the
-    original parameters (not FlatParameters nor parmeter ID), gather all the
+    original parameters (not FlatParameters nor parameter ID), gather all the
     states and unflatten them to the original dimensions. Note that all the
     params referred by the ``input_states`` must be managed by FSDP.
     """
@@ -1716,25 +1749,25 @@ def _gather_all_orig_param_state(
 
 
 def _convert_state_with_orig_params(
-    all_optim_state_keys: List[_OptimStateKey],
-    optim_state_key_to_param_key: Dict[_OptimStateKey, Union[int, str]],
-    fqn_to_fsdp_param_info: Dict[str, FSDPParamInfo],
-    optim_state_dict: Dict[Union[str, int], Any],
+    all_optim_state_keys: list[_OptimStateKey],
+    optim_state_key_to_param_key: dict[_OptimStateKey, Union[int, str]],
+    fqn_to_fsdp_param_info: dict[str, FSDPParamInfo],
+    optim_state_dict: dict[Union[str, int], Any],
     to_save: bool,
     shard_state: bool,
     cpu_offload: bool = True,
-) -> Dict[str, Any]:
-    fsdp_osd_state: Dict[str, Any] = {}
+) -> dict[str, Any]:
+    fsdp_osd_state: dict[str, Any] = {}
     # This variable is used to deduplicate the FSDPParamInfo as one FSDPParamInfo
     # usually corresponds to multiple parameters. We could not use FSDPParamInfo
     # as the key because FSDPParamInfo is not hashable. As a result, we fall back
     # to `id(FSDPParamInfo)`, which the type is an integer.
-    all_states: Dict[int, Dict[str, Any]] = {}
+    all_states: dict[int, dict[str, Any]] = {}
     # Iterate in rank 0's flat parameter ID order to ensure aligned all-gathers
     # across ranks
     for optim_state_key in all_optim_state_keys:
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
-            optim_state_key, None
+            optim_state_key
         )
 
         if param_key is None and not optim_state_key.is_fsdp_managed:
@@ -1742,7 +1775,7 @@ def _convert_state_with_orig_params(
 
         if optim_state_key.is_fsdp_managed:
             fqn = optim_state_key.unflat_param_names[0]
-            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn, None)
+            fsdp_param_info = fqn_to_fsdp_param_info.get(fqn)
             if fsdp_param_info is None:
                 # This can happen if the not all FSDP instances have all the
                 # parameters. This can happen with FSDP + some MPMD style
@@ -1757,7 +1790,10 @@ def _convert_state_with_orig_params(
             all_states[id(fsdp_param_info)][fqn] = state
 
         elif to_save:
-            assert len(optim_state_key.unflat_param_names) == 1
+            if len(optim_state_key.unflat_param_names) != 1:
+                raise AssertionError(
+                    f"Expected len(optim_state_key.unflat_param_names) == 1, got {len(optim_state_key.unflat_param_names)}"
+                )
             unflat_param_name = optim_state_key.unflat_param_names[0]
             with SimpleProfiler.profile("none_fsdp_managed_copy"):
                 param_key = cast(Union[str, int], param_key)
@@ -1777,10 +1813,11 @@ def _convert_state_with_orig_params(
     for _all_states in all_states.values():
         fqn = next(iter(_all_states.keys()))
         fsdp_param_info = fqn_to_fsdp_param_info[fqn]
-        assert len(fsdp_param_info.param_requires_grad) > 0, (
-            "With use_orig_params, FSDPParamInfo should have requires_grad "
-            "information. However, the length is zero."
-        )
+        if len(fsdp_param_info.param_requires_grad) <= 0:
+            raise AssertionError(
+                "With use_orig_params, FSDPParamInfo should have requires_grad "
+                "information. However, the length is zero."
+            )
         for key, idx in fsdp_param_info.param_indices.items():
             if key in _all_states:
                 continue
@@ -1807,26 +1844,27 @@ def _convert_state_with_orig_params(
 
 
 def _convert_state_with_flat_params(
-    all_optim_state_keys: List[_OptimStateKey],
-    optim_state_key_to_param_key: Dict[_OptimStateKey, Union[int, str]],
-    fqn_to_fsdp_param_info: Dict[str, FSDPParamInfo],
-    optim_state_dict: Dict[Union[str, int], Any],
+    all_optim_state_keys: list[_OptimStateKey],
+    optim_state_key_to_param_key: dict[_OptimStateKey, Union[int, str]],
+    fqn_to_fsdp_param_info: dict[str, FSDPParamInfo],
+    optim_state_dict: dict[Union[str, int], Any],
     to_save: bool,
     shard_state: bool,
     cpu_offload: bool = True,
-) -> Dict[str, Any]:
-    fsdp_osd_state: Dict[str, Any] = {}
+) -> dict[str, Any]:
+    fsdp_osd_state: dict[str, Any] = {}
     # Iterate in rank 0's flat parameter ID order to ensure aligned all-gathers
     # across ranks
     for optim_state_key in all_optim_state_keys:
         param_key: Union[str, int, None] = optim_state_key_to_param_key.get(
-            optim_state_key, None
+            optim_state_key
         )
 
-        assert param_key is not None, (
-            "If use_orig_params is False, we must be able to find the "
-            f"corresponding param id. {optim_state_key} {param_key}"
-        )
+        if param_key is None:
+            raise AssertionError(
+                "If use_orig_params is False, we must be able to find the "
+                f"corresponding param id. {optim_state_key} {param_key}"
+            )
 
         if optim_state_key.is_fsdp_managed:
             # If there are multiple unflat_param_names (not use_orig_params),
@@ -1842,14 +1880,22 @@ def _convert_state_with_flat_params(
                 cpu_offload,
             )
             if to_save:
-                assert len(unflat_state) == len(optim_state_key.unflat_param_names)
-                for unflat_param_name, unflat_param_state in zip(
-                    optim_state_key.unflat_param_names,
-                    unflat_state,
-                ):
-                    fsdp_osd_state[unflat_param_name] = unflat_param_state
+                if len(unflat_state) != len(optim_state_key.unflat_param_names):
+                    raise AssertionError(
+                        f"Expected len(unflat_state) == len(optim_state_key.unflat_param_names), "
+                        f"got {len(unflat_state)} != {len(optim_state_key.unflat_param_names)}"
+                    )
+                fsdp_osd_state.update(
+                    zip(
+                        optim_state_key.unflat_param_names,
+                        unflat_state,
+                    )
+                )
         elif to_save:
-            assert len(optim_state_key.unflat_param_names) == 1
+            if len(optim_state_key.unflat_param_names) != 1:
+                raise AssertionError(
+                    f"Expected len(optim_state_key.unflat_param_names) == 1, got {len(optim_state_key.unflat_param_names)}"
+                )
             unflat_param_name = optim_state_key.unflat_param_names[0]
             fsdp_osd_state[unflat_param_name] = copy.copy(optim_state_dict[param_key])
             if cpu_offload:
@@ -1867,10 +1913,10 @@ def _convert_state_with_flat_params(
 def _optim_state_dict(
     model: nn.Module,
     optim: torch.optim.Optimizer,
-    optim_state_dict: Dict[str, Any],
+    optim_state_dict: dict[str, Any],
     optim_input: Optional[
         Union[
-            List[Dict[str, Any]],
+            list[dict[str, Any]],
             Iterable[nn.Parameter],
         ]
     ],
@@ -1880,7 +1926,7 @@ def _optim_state_dict(
     using_optim_input: bool,
     use_orig_params: bool = False,
     cpu_offload: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Consolidates the optimizer state and returns it as a :class:`dict`
     following the convention of :meth:`torch.optim.Optimizer.state_dict`,
@@ -1941,7 +1987,7 @@ def _optim_state_dict(
         is_named_optimizer = _is_named_optimizer(optim_state_dict)
 
         param_key_to_param = cast(
-            Dict[Union[int, str], nn.Parameter],
+            dict[Union[int, str], nn.Parameter],
             (
                 _get_param_id_to_param_from_optim_input(model, optim_input)
                 if using_optim_input
@@ -1986,7 +2032,7 @@ def _optim_state_dict(
     if not to_save:
         return {}
 
-    fsdp_osd: Dict[str, Any] = {"state": fsdp_osd_state}
+    fsdp_osd: dict[str, Any] = {"state": fsdp_osd_state}
 
     flat_param_fqns = set(flat_param_to_fqn.values())
     for key, value in optim_state_dict["state"].items():
@@ -2020,7 +2066,7 @@ def _optim_state_dict(
     return fsdp_osd
 
 
-def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
+def _get_fqn_to_fsdp_param_info(model: nn.Module) -> dict[str, FSDPParamInfo]:
     """
     Construct the mapping from a param's fqn to its corresponding ``FSDPParamInfo``
     if the param is managed by FSDP. Shared parameters, or original parameters that
@@ -2045,7 +2091,10 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         for idx, local_fqn in enumerate(flat_param._fqns):
             fqn = clean_tensor_name(prefix + local_fqn)
             if fqn in fqn_to_param_info:
-                assert fqn_to_param_info[fqn].handle.flat_param is flat_param, fqn
+                if fqn_to_param_info[fqn].handle.flat_param is not flat_param:
+                    raise AssertionError(
+                        f"Expected fqn_to_param_info[fqn].handle.flat_param is flat_param for {fqn}"
+                    )
             fqn_to_param_info[fqn] = fsdp_param_info
             fsdp_param_info.param_indices[fqn] = idx
             if flat_param._params is not None:
@@ -2056,7 +2105,7 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
     def return_fn(fqn_to_param_info):
         return fqn_to_param_info
 
-    fqn_to_param_info: Dict[str, FSDPParamInfo] = {}
+    fqn_to_param_info: dict[str, FSDPParamInfo] = {}
     # FlatParameter._fqns stores the local fqn, starting from the root of the
     # FSDP. Using _apply_to_modules() with model (may not be the FSDP root
     # module) allows us to construct the global fqn.
@@ -2074,7 +2123,7 @@ def _set_optim_use_dtensor(
     fsdp_state: _FSDPState,
     state_dict_settings: StateDictSettings,
 ) -> None:
-    # If device_mesh is passed in when initalizing FSDP, we automatically turn the
+    # If device_mesh is passed in when initializing FSDP, we automatically turn the
     # _use_dtensor flag to be true for ShardedOptimStateDictConfig() if state_dict_type
     # has to be set to SHARDED_STATE_DICT.
     if getattr(fsdp_state, "_device_mesh", None):

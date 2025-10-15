@@ -8,7 +8,7 @@ goto submodule
 
 :clone_pytorch
 
-git clone https://github.com/%PYTORCH_REPO%/%MODULE_NAME%
+git clone https://github.com/%PYTORCH_REPO%/%MODULE_NAME% & REM @lint-ignore
 
 cd %MODULE_NAME%
 

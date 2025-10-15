@@ -2,11 +2,14 @@
 """
 Utils shared by different modes of quantization (eager/graph)
 """
+
 import functools
+import sys
 import warnings
 from collections import OrderedDict
+from collections.abc import Callable
 from inspect import getfullargspec, signature
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
@@ -14,8 +17,16 @@ from torch.fx import Node
 from torch.nn.utils.parametrize import is_parametrized
 
 
-NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
-NodePattern.__module__ = "torch.ao.quantization.utils"
+if sys.version_info < (3, 12):
+    NodePattern = Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
+    NodePattern.__module__ = "torch.ao.quantization.utils"
+else:
+    from typing import TypeAliasType
+
+    NodePattern = TypeAliasType(
+        "NodePattern", Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
+    )
+
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
 # Define separately to prevent circular imports.
@@ -27,10 +38,27 @@ QuantizerCls = Any
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
-Pattern = Union[
-    Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any
-]
-Pattern.__module__ = "torch.ao.quantization.utils"
+
+if sys.version_info < (3, 12):
+    Pattern = Union[
+        Callable,
+        tuple[Callable, Callable],
+        tuple[Callable, tuple[Callable, Callable]],
+        Any,
+    ]
+    Pattern.__module__ = "torch.ao.quantization.utils"
+else:
+    from typing import TypeAliasType
+
+    Pattern = TypeAliasType(
+        "Pattern",
+        Union[
+            Callable,
+            tuple[Callable, Callable],
+            tuple[Callable, tuple[Callable, Callable]],
+            Any,
+        ],
+    )
 
 
 # TODO: maybe rename this to MatchInputNode
@@ -414,9 +442,9 @@ def check_min_max_valid(min_val: torch.Tensor, max_val: torch.Tensor) -> bool:
 
         assert min_val <= max_val, f"min {min_val} should be less than max {max_val}"
     else:
-        assert torch.all(
-            min_val <= max_val
-        ), f"min {min_val} should be less than max {max_val}"
+        assert torch.all(min_val <= max_val), (
+            f"min {min_val} should be less than max {max_val}"
+        )
 
     return True
 
@@ -427,7 +455,7 @@ def calculate_qmin_qmax(
     has_customized_qrange: bool,
     dtype: torch.dtype,
     reduce_range: bool,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     r"""Calculates actual qmin and qmax based on the quantization range,
     observer datatype and if range is reduced.
     """
@@ -451,13 +479,13 @@ def calculate_qmin_qmax(
 
         qrange_len = initial_quant_max - initial_quant_min + 1
         if dtype in [torch.qint8, torch.int8]:
-            assert (
-                0 < qrange_len <= 256
-            ), "quantization range should be positive and not exceed the maximum bit range (=256)."
+            assert 0 < qrange_len <= 256, (
+                "quantization range should be positive and not exceed the maximum bit range (=256)."
+            )
         elif dtype in [torch.qint32, torch.int32]:
-            assert (
-                0 < qrange_len <= 2**32
-            ), "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
+            assert 0 < qrange_len <= 2**32, (
+                "quantization range should be positive and not exceed the maximum bit range (=4294967296)."
+            )
         if reduce_range:
             quant_min, quant_max = quant_min // 2, quant_max // 2
     else:
@@ -474,9 +502,9 @@ def calculate_qmin_qmax(
                 quant_min, quant_max = 0, 255
         elif dtype in [torch.qint32, torch.int32]:
             quant_min, quant_max = -1 * (2**31), (2**31) - 1
-        elif dtype in [torch.uint16]:
+        elif dtype == torch.uint16:
             quant_min, quant_max = 0, 2**16 - 1
-        elif dtype in [torch.int16]:
+        elif dtype == torch.int16:
             quant_min, quant_max = -(2**15), 2**15 - 1
         else:
             quant_min, quant_max = 0, 15
@@ -532,7 +560,7 @@ def _get_path_of_module(
     return None
 
 
-def _get_signature_locals(f: Callable, loc: Dict[str, Any]) -> Dict[str, Any]:
+def _get_signature_locals(f: Callable, loc: dict[str, Any]) -> dict[str, Any]:
     """Get local keyword arguments
 
     Example::
@@ -567,7 +595,7 @@ def _get_default_kwargs(f: Callable) -> "OrderedDict[str, Any]":
     return OrderedDict(kwargs)
 
 
-def _normalize_kwargs(func: Callable, loc: Dict[str, Any]) -> "OrderedDict[str, Any]":
+def _normalize_kwargs(func: Callable, loc: dict[str, Any]) -> "OrderedDict[str, Any]":
     """Given a function and local function arguments, normalize the keyword
     arguments by filling in default arguments from function signature
 
@@ -605,17 +633,17 @@ def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
     """
     # The variable names are prefixed with "initial" because their values (qmin and qmax) might be adjusted
     # based on whether quantization range is reduced and the datatype (signed/unsigned) used by the observer.
-    assert (
-        quant_min <= 0 <= quant_max
-    ), "Used-specified quantization range must include 0."
-    assert (
-        quant_min < quant_max
-    ), "qmin must be strictly less than qmax for user-specified quantization range."
+    assert quant_min <= 0 <= quant_max, (
+        "Used-specified quantization range must include 0."
+    )
+    assert quant_min < quant_max, (
+        "qmin must be strictly less than qmax for user-specified quantization range."
+    )
 
 
 # Functionally equivalent to '_calculate_qparams' in observer.py. Observers must be torchscriptable however and qscheme
 # as far as I can tell is not allowed to passed as a parameter in torchscript functions. This makes refactoring observer
-# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikey to change
+# to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikely to change
 # (last update over 1 year ago) and when torchscript is fully deprecated we can refactor. TODO(jakeszwe, jerryzh168)
 def determine_qparams(
     min_val: torch.Tensor,
@@ -626,7 +654,7 @@ def determine_qparams(
     eps: torch.Tensor,
     has_customized_qrange: bool,
     qscheme: torch.qscheme = torch.per_tensor_affine,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     r"""Calculates the quantization parameters, given min and max
     value tensors. Works for both per tensor and per channel cases
 
@@ -709,8 +737,8 @@ def _get_num_pos_args(f: Callable) -> int:
 
 
 def get_fqn_to_example_inputs(
-    model: torch.nn.Module, example_inputs: Tuple[Any, ...]
-) -> Dict[str, Tuple[Any, ...]]:
+    model: torch.nn.Module, example_inputs: tuple[Any, ...]
+) -> dict[str, tuple[Any, ...]]:
     """Given a model and its example inputs, return a dictionary from
     fully qualified name of submodules to example_inputs for that submodule,
     e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
@@ -790,6 +818,20 @@ def _assert_and_get_unique_device(module: torch.nn.Module) -> Any:
     return device
 
 
+DEPRECATION_WARNING = (
+    "torch.ao.quantization is deprecated and will be removed in 2.10. \n"
+    "For migrations of users: \n"
+    "1. Eager mode quantization (torch.ao.quantization.quantize, "
+    "torch.ao.quantization.quantize_dynamic), please migrate to use torchao eager mode "
+    "quantize_ API instead \n"
+    "2. FX graph mode quantization (torch.ao.quantization.quantize_fx.prepare_fx,"
+    "torch.ao.quantization.quantize_fx.convert_fx, please migrate to use torchao pt2e quantization "
+    "API instead (prepare_pt2e, convert_pt2e) \n"
+    "3. pt2e quantization has been migrated to torchao (https://github.com/pytorch/ao/tree/main/torchao/quantization/pt2e) \n"
+    "see https://github.com/pytorch/ao/issues/2259 for more details"
+)
+
+
 __all__ = [
     "NodePattern",
     "Pattern",
@@ -819,4 +861,5 @@ __all__ = [
     "to_underlying_dtype",
     "determine_qparams",
     "validate_qmin_qmax",
+    "DEPRECATION_WARNING",
 ]

@@ -8,10 +8,16 @@ Python polyfills for common builtins.
 
 # mypy: allow-untyped-defs
 
+import types
+from collections import OrderedDict
+from collections.abc import Hashable, Iterable, MutableMapping, Sequence
 from itertools import repeat as _repeat
-from typing import Any, Callable, List, Sequence, TYPE_CHECKING
+from operator import eq, ne
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
+
+from ..utils import dict_keys
 
 
 if TYPE_CHECKING:
@@ -19,12 +25,14 @@ if TYPE_CHECKING:
     # See also the POLYFILLED_MODULE_NAMES in torch/_dynamo/polyfills/loader.py
     # Put the submodules here to avoid circular imports
     from . import (
+        _collections as _collections,
         builtins as builtins,
         functools as functools,
         itertools as itertools,
         operator as operator,
         os as os,
         pytree as pytree,
+        struct as struct,
         sys as sys,
     )
 
@@ -70,88 +78,195 @@ def radians(x):
     return math.pi / 180.0 * x
 
 
+def impl_CONTAINS_OP_fallback(a, b):
+    # performs fallback "a in b"
+    if hasattr(b, "__iter__"):
+        # use __iter__ if __contains__ is not available
+        for x in b:
+            if x == a:
+                return True
+        return False
+    raise TypeError(f"argument of type {type(b)} is not iterable")
+
+
 def accumulate_grad(x, new_grad):
-    new_grad = torch.clone(new_grad)
+    # polyfills according to the Gradient Layout Contract
+    if new_grad is None:
+        return
+    new_grad_strided = torch.empty_like(x)
+    new_grad_strided.copy_(new_grad)
     if x.grad is None:
-        x.grad = new_grad
+        x.grad = new_grad_strided
+    elif torch.is_grad_enabled():
+        x.grad = x.grad + new_grad_strided
     else:
-        x.grad.add_(new_grad)
+        x.grad.add_(new_grad_strided)
 
 
+# This mirrors
+# https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
     """emulate `(1,2,3) > (1,2)` etc"""
+
+    # Optimization: For equality, short-circuit if lengths differ
+    # This avoids iterating through elements and triggering guards on SymInts
+    left_len = len(left)
+    right_len = len(right)
+
+    if op is eq and left_len != right_len:
+        return False
+    if op is ne and left_len != right_len:
+        return True
+
+    # Apply `op` to the first pair that differ
     for a, b in zip(left, right):
         if a != b:
             return op(a, b)
-    return op(len(left), len(right))
+
+    # No more pairs to compare, so compare sizes.
+    return op(left_len, right_len)
 
 
-def set_isdisjoint(set1, set2):
-    for x in set1:
-        if x in set2:
+def dict___eq__(d, other):
+    if (len(d) != len(other)) or (d.keys() != other.keys()):
+        return False
+
+    if all(isinstance(a, OrderedDict) for a in (d, other)):
+        return list(d.items()) == list(other.items())
+
+    for k, v in d.items():
+        if v != other[k]:
             return False
+
     return True
 
 
-def set_intersection(set1, set2):
+def set_symmetric_difference(set1, set2):
+    symmetric_difference_set = set()
+    for x in set1:
+        if x not in set2:
+            symmetric_difference_set.add(x)
+    for x in set2:
+        if x not in set1:
+            symmetric_difference_set.add(x)
+    return symmetric_difference_set
+
+
+def set_symmetric_difference_update(set1, set2):
+    result = set1.symmetric_difference(set2)
+    set1.clear()
+    set1.update(result)
+
+
+def set_isdisjoint(set1, set2):
+    if not isinstance(set2, Iterable):
+        raise TypeError(f"'{type(set2)}' object is not iterable")
+
+    for x in set1:
+        for y in set2:
+            if not isinstance(y, Hashable):
+                raise TypeError(f"unhashable type: '{type(y)}'")
+            if x == y:
+                return False
+    return True
+
+
+def set_intersection(set1, *others):
+    if len(others) == 0:
+        return set1.copy()
+
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
+
+    # return a new set with elements common in all sets
     intersection_set = set()
     for x in set1:
-        if x in set2:
+        for set2 in others:
+            if not any(x == y for y in set2):
+                break
+        else:
             intersection_set.add(x)
     return intersection_set
 
 
-def set_union(set1, set2):
-    union_set = set1.copy()
-    set_update(union_set, set2)
-    return union_set
+def set_intersection_update(set1, *others):
+    result = set1.intersection(*others)
+    set1.clear()
+    set1.update(result)
 
 
-def set_update(set1, set2):
-    for x in set2:
-        if x not in set1:
-            set1.add(x)
-    return set1
+def set_union(set1, *others):
+    # frozenset also uses this function
+    if len(others) == 0:
+        return set1.copy()
+
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.union expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
+
+    union_set = set(set1.copy())
+    for set2 in others:
+        set_update(union_set, set2)
+
+    # frozenset also uses this function
+    return type(set1)(union_set)
 
 
-def set_difference(set1, set2):
+def set_update(set1, *others):
+    if len(others) == 0:
+        return set1
+
+    for set2 in others:
+        for x in set2:
+            if x not in set1:
+                set1.add(x)
+
+
+def set_difference(set1, *others):
+    if len(others) == 0:
+        return set1.copy()
+
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
+
     difference_set = set()
     for x in set1:
-        if x not in set2:
+        for set2 in others:
+            if x in set2:
+                break
+        else:
             difference_set.add(x)
     return difference_set
 
 
-def dropwhile(predicate, iterable):
-    # dropwhile(lambda x: x<5, [1,4,6,4,1]) -> 6 4 1
-    iterable = iter(iterable)
-    for x in iterable:
-        if not predicate(x):
-            yield x
-            break
-    yield from iterable
+def set_difference_update(set1, *others):
+    result = set1.difference(*others)
+    set1.clear()
+    set1.update(result)
 
 
-def zip_longest(*iterables, fillvalue=None):
-    # Create a list of iterators from the input iterables
-    iterators = [iter(it) for it in iterables]
-    result = []
-    while True:
-        row = []
-        active = False
-        for it in iterators:
-            try:
-                # Try to get the next item from the iterator
-                value = next(it)
-                row.append(value)
-                active = True
-            except StopIteration:
-                # If the iterator is exhausted, use the fillvalue
-                row.append(fillvalue)
-        if not active:
-            break
-        result.append(tuple(row))
-    return result
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
+
+
+def assert_multi_line_equal(self_, first, second, msg=None):
+    return self_.assertTrue(first == second, msg)
+
+
+# The original impl. uses difflib
+def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
+    return self_.assertTrue(seq1 == seq2, msg)
 
 
 def getattr_and_trace(*args, **kwargs):
@@ -178,9 +293,36 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     return obj
 
 
+# Used with something like dict(obj)
+def construct_dict(cls, /, *args, **kwargs):
+    dst = cls.__new__(cls)
+
+    if args:
+        src = args[0]
+
+        if not isinstance(src, Iterable):
+            raise TypeError(f"{type(src)} object is not iterable")
+
+        # Ensure that the overridden __iter__ method is invoked
+        if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):
+            for key in src:
+                # This will inline the __getitem__ of the src object
+                dst[key] = src[key]
+        else:
+            # likely a sequence like tuple of pairs
+            for key, value in src:
+                dst[key] = value
+
+    if kwargs:
+        for key in kwargs:
+            dst[key] = kwargs[key]
+
+    return dst
+
+
 def foreach_map_fn(*args):
     op = args[0]
-    new_args: List[Any] = []
+    new_args: list[Any] = []
     at_least_one_list = False
     for arg in args[1:]:
         if not isinstance(arg, (list, tuple)):
@@ -224,14 +366,52 @@ def predicate(obj: Any) -> bool:
     return False
 
 
-def object_eq(self, other):
-    # Mirrors CPython implementation:
-    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6228-L6233
-    return self is other
+def cmp_eq(a, b):
+    # Note that the commented `is` check should ideally be removed. This is a
+    # CPython optimization that skips the __eq__ checks it the obj id's are
+    # same. But, these lines adds many `is` nodes in the Fx graph for
+    # SymNodeVariable. For now, we can just skip this check. This is STILL
+    # correct because one of the __eq__ checks will pass later, just could be
+    # slow in some corner cases.
+    # if a is b:
+    #     return True
+    result = a.__eq__(b)
+    if result is NotImplemented:
+        result = b.__eq__(a)
+    return result is not NotImplemented and result
 
 
-def object_ne(self, other):
-    # Mirrors CPython implementation:
-    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6235-L6255
-    # Using `==` is important because `self` might have a user-defined `__eq__`.
-    return not (self == other)
+def cmp_ne(a, b):
+    # Check if __ne__ is overridden
+    if isinstance(type(a).__ne__, types.FunctionType):
+        return a.__ne__(b)
+    return not cmp_eq(a, b)
+
+
+def cmp_lt(a, b):
+    result = a.__lt__(b)
+    if result is NotImplemented:
+        raise TypeError(f"{type(a)} does not support the < operator")
+    return result
+
+
+def cmp_le(a, b):
+    # Check if __le__ is overridden
+    if isinstance(type(a).__le__, types.FunctionType):
+        return a.__le__(b)
+    return cmp_eq(a, b) or cmp_lt(a, b)
+
+
+def cmp_gt(a, b):
+    # Check if __gt__ is overridden
+    if isinstance(type(a).__gt__, types.FunctionType):
+        return a.__gt__(b)
+    # a > b is equivalent to b < a
+    return cmp_lt(b, a)
+
+
+def cmp_ge(a, b):
+    # Check if __ge__ is overridden
+    if isinstance(type(a).__ge__, types.FunctionType):
+        return a.__ge__(b)
+    return cmp_eq(a, b) or cmp_gt(a, b)

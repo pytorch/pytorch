@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import operator
-from typing import List
 
 import torch
 from torch._higher_order_ops.effects import _get_schema, with_effects
@@ -22,9 +21,9 @@ def _remove_effect_tokens_from_graph_helper(
     inputs_to_lifted_custom_objs = ep.graph_signature.inputs_to_lifted_custom_objs
 
     output_node = None
-    with_effect_nodes: List[torch.fx.Node] = []
+    with_effect_nodes: list[torch.fx.Node] = []
 
-    # Output node need to check its args agianst output_token_names (collected from output_spec)
+    # Output node need to check its args against output_token_names (collected from output_spec)
     # Therefore, we only need to find the top-levele output node
     output_node = next(reversed(ep.graph_module.graph.find_nodes(op="output")))
     for module in ep.graph_module.modules():
@@ -54,13 +53,13 @@ def _remove_effect_tokens_from_graph_helper(
         assert isinstance(func, (torch._ops.OpOverload, torch._ops.HigherOrderOperator))
 
         if func == torch.ops.higher_order.call_torchbind:
-            custom_obj_meta = node.args[2].meta["val"]
+            custom_obj_meta = node.args[2].meta["val"]  # type: ignore[union-attr]
             assert isinstance(custom_obj_meta, CustomObjArgument)
             if custom_obj_meta.fake_val:
                 custom_obj = custom_obj_meta.fake_val
-            elif node.args[2].name in inputs_to_lifted_custom_objs:
+            elif node.args[2].name in inputs_to_lifted_custom_objs:  # type: ignore[union-attr]
                 custom_obj = ep.constants[
-                    inputs_to_lifted_custom_objs[node.args[2].name]
+                    inputs_to_lifted_custom_objs[node.args[2].name]  # type: ignore[union-attr]
                 ]
             else:
                 raise RuntimeError(f"Unable to find custom obj for node {node}")
@@ -72,6 +71,13 @@ def _remove_effect_tokens_from_graph_helper(
             new_node = ep.graph.call_function(func, node.args[2:], node.kwargs)
         for k, v in node.meta.items():
             new_node.meta[k] = v
+            if k == "unbacked_bindings":
+                # Remove the extra layer for effect token
+                old_bindings = new_node.meta[k]
+                new_bindings = {
+                    k: path[1:] if path else path for k, path in old_bindings.items()
+                }
+                new_node.meta[k] = new_bindings
 
         node.replace_all_uses_with(new_node)
 
@@ -120,15 +126,15 @@ def _remove_effect_tokens_from_graph_helper(
 
 def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
     """
-    Removes the existance of tokens from the exported program, including:
+    Removes the existence of tokens from the exported program, including:
     - Removes the input and output tokens
     - Replaces with_effects(token, func, args) with just func(args)
 
     This function does an inplace modification on the given ExportedProgram.
     """
     num_tokens: int = 0
-    input_token_names: List[str] = []
-    new_input_specs: List[InputSpec] = []
+    input_token_names: list[str] = []
+    new_input_specs: list[InputSpec] = []
     for inp in ep.graph_signature.input_specs:
         if inp.kind == InputKind.TOKEN:
             num_tokens += 1
@@ -138,8 +144,8 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
             new_input_specs.append(inp)
 
     num_out_tokens: int = 0
-    new_output_specs: List[OutputSpec] = []
-    output_token_names: List[OutputSpec] = []
+    new_output_specs: list[OutputSpec] = []
+    output_token_names: list[OutputSpec] = []
     for out in ep.graph_signature.output_specs:
         if out.kind == OutputKind.TOKEN:
             num_out_tokens += 1

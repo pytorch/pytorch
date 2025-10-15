@@ -1,3 +1,4 @@
+#include <c10/util/env.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/cache.h>
 #include <torch/csrc/lazy/core/config.h>
@@ -5,7 +6,6 @@
 #include <torch/csrc/lazy/core/ir_metadata.h>
 
 // Enables caching on for dynamic shapes (aka disable hash on shapes)
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 // clang-format off
 C10_DEFINE_bool(
     ltc_enable_dynamic_shapes,
@@ -57,7 +57,7 @@ hash_t OpKind::hash() const {
 }
 
 bool Node::enableDynamicShape() {
-  static bool enabled = std::getenv("LTC_ENABLE_DYNAMIC_SHAPES") != nullptr;
+  static bool enabled = c10::utils::has_env("LTC_ENABLE_DYNAMIC_SHAPES");
   return enabled || FLAGS_ltc_enable_dynamic_shapes;
 }
 

@@ -89,7 +89,7 @@ For reference, here’s a full list of view ops in PyTorch:
    When accessing the contents of a tensor via indexing, PyTorch follows Numpy behaviors
    that basic indexing returns views, while advanced indexing returns a copy.
    Assignment via either basic or advanced indexing is in-place. See more examples in
-   `Numpy indexing documentation <https://docs.scipy.org/doc/numpy/reference/arrays.indexing.html>`_.
+   `Numpy indexing documentation <https://numpy.org/doc/stable/user/basics.indexing.html>`_.
 
 It's also worth mentioning a few ops with special behaviors:
 

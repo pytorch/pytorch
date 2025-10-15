@@ -7,14 +7,14 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   do_update_viablestrict:
     permissions:
       id-token: write
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
     environment: ${{ (github.event_name == 'schedule') && 'mergebot' || '' }}
     steps:
       - name: Update viable/strict
@@ -23,14 +23,14 @@ jobs:
         with:
           repository: pytorch/pytorch
           stable-branch: viable/strict
-          requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\"]'
+          requires: '[\"pull\", \"trunk\", \"lint\",  \"linux-aarch64\"]'
           secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
           clickhouse-url: ${{ secrets.CLICKHOUSE_URL }}
           clickhouse-username: ${{ secrets.CLICKHOUSE_VIABLESTRICT_USERNAME }}
           clickhouse-password: ${{ secrets.CLICKHOUSE_VIABLESTRICT_PASSWORD }}
 
       - name: Authenticate to AWS with OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           role-to-assume: arn:aws:iam::308535385114:role/upload_to_ossci_raw_job_status
           aws-region: us-east-1
@@ -48,4 +48,7 @@ jobs:
             echo "{\"sha\": \"${LATEST_SHA}\", \"repository\":\"pytorch/pytorch\", \"timestamp\": ${TIME}}" > "/tmp/${LATEST_SHA}.json"
             pip install awscli==1.29.40
             aws s3 cp "/tmp/${LATEST_SHA}.json" "s3://ossci-raw-job-status/stable_pushes/pytorch/pytorch/${LATEST_SHA}.json"
+            # Push new viable/strict tag
+            cd pytorch/pytorch
+            git push origin "${LATEST_SHA}:refs/tags/viable/strict/${TIME}"
           fi

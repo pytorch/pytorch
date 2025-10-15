@@ -11,10 +11,14 @@ import time
 from base64 import b64decode, b64encode
 from typing import Optional
 
-import etcd  # type: ignore[import]
-
 # pyre-ignore[21]: Could not find name `Store` in `torch.distributed`.
 from torch.distributed import Store
+
+
+try:
+    import etcd  # type: ignore[import]
+except ModuleNotFoundError:
+    from . import _etcd_stub as etcd
 
 
 # Delay (sleep) for a small random amount to reduce CAS failures.
@@ -145,9 +149,9 @@ class EtcdStore(Store):
     # In case of `str`, utf-8 encoding is assumed.
     #
     def _encode(self, value) -> str:
-        if type(value) == bytes:
+        if type(value) is bytes:
             return b64encode(value).decode()
-        elif type(value) == str:
+        elif type(value) is str:
             return b64encode(value.encode()).decode()
         raise ValueError("Value must be of type str or bytes")
 
@@ -156,9 +160,9 @@ class EtcdStore(Store):
     # Return type is `bytes`, which is more convenient with the Store interface.
     #
     def _decode(self, value) -> bytes:
-        if type(value) == bytes:
+        if type(value) is bytes:
             return b64decode(value)
-        elif type(value) == str:
+        elif type(value) is str:
             return b64decode(value.encode())
         raise ValueError("Value must be of type str or bytes")
 

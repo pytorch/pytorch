@@ -5,14 +5,16 @@ from collections import deque, OrderedDict
 from contextlib import ContextDecorator, contextmanager, nullcontext
 from copy import deepcopy
 from functools import partial
-from typing import Tuple
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.utils.checkpoint import CheckpointError
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class MemoryDelta(ContextDecorator):
@@ -23,16 +25,16 @@ class MemoryDelta(ContextDecorator):
 
     def __enter__(self):
         self.active_memory_enter = (
-            torch.cuda.memory_stats()["active_bytes.all.current"]
-            if self.device.type == "cuda"
+            torch.accelerator.memory_stats()["active_bytes.all.current"]
+            if self.device.type == "cuda" or self.device.type == "xpu"
             else 0
         )
         return self
 
     def __exit__(self, *exc):
         self.active_memory_exit = (
-            torch.cuda.memory_stats()["active_bytes.all.current"]
-            if self.device.type == "cuda"
+            torch.accelerator.memory_stats()["active_bytes.all.current"]
+            if self.device.type == "cuda" or self.device.type == "xpu"
             else 0
         )
 
@@ -70,7 +72,7 @@ class MultiOutputModel(nn.Module):
         self.w1 = nn.Parameter(torch.randn((100, 100), device=device))
         self.w2 = nn.Parameter(torch.randn((100, 100), device=device))
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         z = x @ self.w1
         z = nn.functional.relu(z)
         z = z @ self.w2
@@ -82,7 +84,7 @@ class MultiInputModel(nn.Module):
         super().__init__()
         self.w = nn.Parameter(torch.randn((100, 100), device=device))
 
-    def forward(self, xs: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
+    def forward(self, xs: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
         assert len(xs) == 2, f"Expects 2 args but got {len(xs)}"
         x, y = xs
         z = x + y
@@ -127,7 +129,7 @@ class TestCheckpoint(TestCase):
             loss2 = net2(x2).sum()
         loss2.backward()
 
-        if x.is_cuda:
+        if x.is_cuda or x.is_xpu:
             self.assertTrue(mem2.delta() < mem1.delta())
 
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
@@ -138,10 +140,10 @@ class TestCheckpoint(TestCase):
         net = ToyModel()
         self._test_tensor_only(net, x)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda/xpu")
     def test_tensor_only_gpu(self):
-        x = torch.randn(20, 100, device="cuda:0")
-        net = ToyModel().to("cuda:0")
+        x = torch.randn(20, 100, device=f"{device_type}:0")
+        net = ToyModel().to(f"{device_type}:0")
         self._test_tensor_only(net, x)
 
     def test_random_cpu(self):

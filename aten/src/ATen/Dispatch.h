@@ -6,7 +6,6 @@
 #include <c10/util/Half.h>
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/complex.h>
-#include <c10/util/string_view.h>
 
 #ifdef __CUDACC__
 #include <cuda.h> // For CUDA_VERSION
@@ -201,7 +200,7 @@ inline at::ScalarType scalar_type(at::ScalarType s) {
     switch (_st) {                                                          \
       __VA_ARGS__                                                           \
       default:                                                              \
-        TORCH_CHECK(                                                        \
+        TORCH_CHECK_NOT_IMPLEMENTED(                                        \
             false,                                                          \
             '"',                                                            \
             at_dispatch_name,                                               \

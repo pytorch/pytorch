@@ -108,7 +108,7 @@ struct FusedAdamMathFunctor {
       "depth of 4 for Adam, depth of 5 for Adam with AMSGrad.");
   using opmath_t = at::opmath_type<scalar_type>;
   C10_DEVICE __forceinline__ void operator()(
-      int chunk_size,
+      int64_t chunk_size,
       FusedOptimizerTensorListMetadata<depth>& tl,
       const float* lr_ptr,
       const double& lr,

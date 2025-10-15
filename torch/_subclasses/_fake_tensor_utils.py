@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Type, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch import SymInt
 from torch.fx.experimental.sym_node import SymNode
 from torch.types import py_sym_types, PySymType
-from torch.utils._backport_slots import dataclass_slots
 
 
 if TYPE_CHECKING:
@@ -18,8 +17,7 @@ if TYPE_CHECKING:
     from .fake_tensor import _DispatchCacheKey, _MetadataIntLike
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DeconstructedSymNode:
     """
     Represents a SymNode without the associated ShapeEnv
@@ -35,7 +33,12 @@ class _DeconstructedSymNode:
     @staticmethod
     def from_node(node: SymNode) -> _DeconstructedSymNode:
         return _DeconstructedSymNode(
-            node._expr, node.pytype, node._hint, node.constant, node.fx_node
+            node._expr,
+            node.pytype,
+            node._hint,
+            node.constant,
+            # pyrefly: ignore  # bad-argument-type
+            node.fx_node,
         )
 
     def extract(self, shape_env: ShapeEnv) -> SymNode:
@@ -73,14 +76,13 @@ class _DeconstructedSymNode:
         return hash((self._expr, self.pytype, self._hint, self.constant, self.fx_node))
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _DeconstructedSymType:
     """
     Represents a SymInt, SymFloat, SymBool without the associated ShapeEnv
     """
 
-    ty: Type[PySymType]
+    ty: type[PySymType]
     node: _DeconstructedSymNode
 
     @staticmethod
@@ -103,14 +105,12 @@ class _DeconstructedSymType:
         return NotImplemented
 
 
-@dataclass_slots
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _InputBackref:
     value: int
 
 
-@dataclass_slots
-@dataclass
+@dataclass(slots=True)
 class _PySymInputStub:
     """
     Represents a SymInt in the cached key. Needed because SymInt doesn't
@@ -172,8 +172,7 @@ class _PySymInputStub:
             return self.value.node._value_hash()
 
 
-@dataclass_slots
-@dataclass
+@dataclass(slots=True)
 class _SymIntOutputStub:
     """
     Represents a SymInt in the cached output.
@@ -207,8 +206,7 @@ class _SymIntOutputStub:
         raise NotImplementedError
 
 
-@dataclass_slots
-@dataclass
+@dataclass(slots=True)
 class _CacheKeyState:
     """
     State used while building our cache key.
@@ -216,7 +214,12 @@ class _CacheKeyState:
 
     # We track the SymNodes so when we get the output we can see if it exactly
     # matches one of the inputs so we can uncache it properly.
-    sym_node_lookup: Dict[int, int]  # id(SymNode) -> index
+    sym_node_lookup: dict[int, int]  # id(SymNode) -> index
+
+    # This is a list of all seen input sympy.Symbols. We use it when building
+    # the cache entry to see if the output value has any symbols that we didn't
+    # see on input. See _has_unrepresented_symbols().
+    known_symbols: set[sympy.Symbol]
 
     # There are cases where we're asked to perform an op when we have no
     # ShapeEnv on the FakeTensorMode - but for SymNodes we MUST have a
@@ -226,6 +229,7 @@ class _CacheKeyState:
 
     def __init__(self, shape_env: Optional[ShapeEnv] = None) -> None:
         self.sym_node_lookup = {}
+        self.known_symbols = set()
         self.shape_env = shape_env
 
     def cache_on_shape_env(self) -> bool:
@@ -241,12 +245,13 @@ class _CacheKeyState:
         """
         return bool(self.sym_node_lookup)
 
-    def convert_sym_int(self, result: List[object], arg: SymInt) -> None:
+    def convert_sym_int(self, result: list[object], arg: SymInt) -> None:
         node_id = id(arg.node)
         if node_id in self.sym_node_lookup:
             result.append(_InputBackref(self.sym_node_lookup[node_id]))
         else:
             self.sym_node_lookup[node_id] = len(result)
+            self.known_symbols.update(arg.node.expr.free_symbols)
             if self.shape_env is None:
                 self.shape_env = arg.node.shape_env
             result.append(_PySymInputStub(arg))

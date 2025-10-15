@@ -1,18 +1,22 @@
 # mypy: allow-untyped-defs
 import importlib
+import logging
 from abc import ABC, abstractmethod
+
+# pyrefly: ignore  # missing-module-attribute
 from pickle import (  # type: ignore[attr-defined]
     _getattribute,
     _Pickler,
-    whichmodule as _pickle_whichmodule,
+    whichmodule as _pickle_whichmodule,  # pyrefly: ignore  # missing-module-attribute
 )
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
 
 
 __all__ = ["ObjNotFoundError", "ObjMismatchError", "Importer", "OrderedImporter"]
+log = logging.getLogger(__name__)
 
 
 class ObjNotFoundError(Exception):
@@ -44,7 +48,7 @@ class Importer(ABC):
         assert obj1 is obj2
     """
 
-    modules: Dict[str, ModuleType]
+    modules: dict[str, ModuleType]
 
     @abstractmethod
     def import_module(self, module_name: str) -> ModuleType:
@@ -53,7 +57,7 @@ class Importer(ABC):
         The contract is the same as for importlib.import_module.
         """
 
-    def get_name(self, obj: Any, name: Optional[str] = None) -> Tuple[str, str]:
+    def get_name(self, obj: Any, name: Optional[str] = None) -> tuple[str, str]:
         """Given an object, return a name that can be used to retrieve the
         object from this environment.
 
@@ -184,7 +188,7 @@ class OrderedImporter(Importer):
     """
 
     def __init__(self, *args):
-        self._importers: List[Importer] = list(args)
+        self._importers: list[Importer] = list(args)
 
     def _is_torchpackage_dummy(self, module):
         """Returns true iff this module is an empty PackageNode in a torch.package.
@@ -203,6 +207,20 @@ class OrderedImporter(Importer):
         if not hasattr(module, "__file__"):
             return True
         return module.__file__ is None
+
+    def get_name(self, obj: Any, name: Optional[str] = None) -> tuple[str, str]:
+        for importer in self._importers:
+            try:
+                return importer.get_name(obj, name)
+            except (ObjNotFoundError, ObjMismatchError) as e:
+                warning_message = (
+                    f"Tried to call get_name with obj {obj}, "
+                    f"and name {name} on {importer} and got {e}"
+                )
+                log.warning(warning_message)
+        raise ObjNotFoundError(
+            f"Could not find obj {obj} and name {name} in any of the importers {self._importers}"
+        )
 
     def import_module(self, module_name: str) -> ModuleType:
         last_err = None

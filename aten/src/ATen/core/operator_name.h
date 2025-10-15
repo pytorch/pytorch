@@ -2,12 +2,12 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/string_view.h>
 
 #include <cstring>
 #include <optional>
 #include <ostream>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace c10 {
@@ -83,7 +83,7 @@ inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
 }
 
 TORCH_API std::string toString(const OperatorName& opName);
-TORCH_API std::ostream& operator<<(std::ostream&, const OperatorName&);
+TORCH_API std::ostream& operator<<(std::ostream& /*os*/, const OperatorName& /*opName*/);
 
 } // namespace c10
 

@@ -43,9 +43,9 @@ class TestRun:
         exs = set(excluded or [])
 
         if "::" in name:
-            assert (
-                not included and not excluded
-            ), "Can't specify included or excluded tests when specifying a test class in the file name"
+            assert not included and not excluded, (
+                "Can't specify included or excluded tests when specifying a test class in the file name"
+            )
             self.test_file, test_class = name.split("::")
             ins.add(test_class)
         else:
@@ -148,9 +148,9 @@ class TestRun:
             return copy(self)
 
         # If not, ensure we have the same file
-        assert (
-            self.test_file == other.test_file
-        ), f"Can't exclude {other} from {self} because they're not the same test file"
+        assert self.test_file == other.test_file, (
+            f"Can't exclude {other} from {self} because they're not the same test file"
+        )
 
         # 4 possible cases:
 
@@ -285,7 +285,7 @@ class ShardedTest:
         if not isinstance(other, ShardedTest):
             raise NotImplementedError
 
-        # This is how the list was implicity sorted when it was a NamedTuple
+        # This is how the list was implicitly sorted when it was a NamedTuple
         if self.name != other.name:
             return self.name < other.name
         if self.shard != other.shard:

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Dict, Tuple
 
 import torch
 from torch._dynamo.utils import counters
@@ -13,7 +12,7 @@ from ..pattern_matcher import fwd_only, register_replacement
 aten = torch.ops.aten
 
 
-@functools.lru_cache(None)
+@functools.cache
 def _misc_patterns_init():
     from .joint_graph import patterns as joint_graph_patterns
     from .post_grad import pass_patterns as post_grad_patterns_all
@@ -45,10 +44,13 @@ def _misc_patterns_init():
         )
 
     register_replacement(
+        # pyrefly: ignore  # bad-argument-type
         randperm_index_add_pattern,
+        # pyrefly: ignore  # bad-argument-type
         randperm_index_add_replacement,
         [torch.empty(4, 8, device=device), torch.empty(2, 8, device=device)],
         fwd_only,
+        # pyrefly: ignore  # bad-argument-type
         [post_grad_patterns, joint_graph_patterns],
     )
 
@@ -61,24 +63,27 @@ def _misc_patterns_init():
         return torch.ops.aten._unsafe_index(x, (index,)), index
 
     register_replacement(
+        # pyrefly: ignore  # bad-argument-type
         randperm_index_pattern,
+        # pyrefly: ignore  # bad-argument-type
         randperm_index_replacement,
         [torch.empty(4, 8, device=device)],
         fwd_only,
+        # pyrefly: ignore  # bad-argument-type
         [post_grad_patterns, joint_graph_patterns],
         scalar_workaround={"slice_shape": 42},
     )
 
 
 class NumpyCompatNormalization:
-    numpy_compat: Dict[str, Tuple[str, ...]] = {
+    numpy_compat: dict[str, tuple[str, ...]] = {
         "dim": ("axis",),
         "keepdim": ("keepdims",),
         "input": ("x", "a", "x1"),
         "other": ("x2",),
     }
-    inverse_mapping: Dict[str, str]
-    cache: Dict["torch.fx.graph.Target", OrderedSet[str]]
+    inverse_mapping: dict[str, str]
+    cache: dict["torch.fx.graph.Target", OrderedSet[str]]
 
     def __init__(self) -> None:
         self.cache = {}  # callable -> tuple of replaceable args e.g. ["axis"]

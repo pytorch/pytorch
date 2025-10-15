@@ -290,7 +290,7 @@ def reduce_tensor(tensor):
     # 0xE000 ->  --------CUDA allocation-----
     #
     # To send tensor1, the following info are required from sender to receiver for
-    # storage recontruction.
+    # storage reconstruction.
     #   1. cudaIpcMemHandle of 0xA000(which can be mapped to a basePtr in receiver process).
     #      basePtr may not be exactly 0xA000 since it's a different process.
     #   2. offset(0xA100) of storage1 in the CUDA allocation.

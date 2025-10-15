@@ -1,7 +1,6 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 
 import itertools
-import logging
 import re
 
 import torch
@@ -18,12 +17,7 @@ from torch.testing._internal.common_pruning import (
     MockSparseLinear,
     SimpleLinear,
 )
-from torch.testing._internal.common_utils import TestCase
-
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 class TestBaseSparsifier(TestCase):
@@ -297,7 +291,7 @@ class TestWeightNormSparsifier(TestCase):
             assert hasattr(module.parametrizations["weight"][0], "mask")
             # Check parametrization exists and is correct
             assert is_parametrized(module, "weight")
-            assert type(module.parametrizations.weight[0]) == FakeSparsity
+            assert type(module.parametrizations.weight[0]) is FakeSparsity
 
     def test_mask_squash(self):
         model = SimpleLinear()
@@ -421,7 +415,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
             assert hasattr(module.parametrizations["weight"][0], "mask")
             # Check parametrization exists and is correct
             assert is_parametrized(module, "weight")
-            assert type(module.parametrizations.weight[0]) == FakeSparsity
+            assert type(module.parametrizations.weight[0]) is FakeSparsity
 
     def test_mask_squash(self):
         model = SimpleLinear()
@@ -484,3 +478,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
                         assert mask[row, col] == 1
                     else:
                         assert mask[row, col] == 0
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

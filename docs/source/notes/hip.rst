@@ -141,7 +141,7 @@ Currently, only the "nccl" and "gloo" backends for torch.distributed are support
 CUDA API to HIP API mappings in C++
 -----------------------------------
 
-Please refer: https://rocmdocs.amd.com/en/latest/Programming_Guides/HIP_API_Guide.html
+Please refer: https://rocm.docs.amd.com/projects/HIP/en/latest/reference/api_syntax.html
 
 NOTE: The CUDA_VERSION macro, cudaRuntimeGetVersion and cudaDriverGetVersion APIs do not
 semantically map to the same values as HIP_VERSION macro, hipRuntimeGetVersion and
@@ -179,3 +179,30 @@ by recompiling the PyTorch from source.
 Please add below line as an argument to cmake command parameters::
 
     -DROCM_FORCE_ENABLE_GPU_ASSERTS:BOOL=ON
+
+Enabling/Disabling ROCm Composable Kernel
+-----------------------------------------
+
+Enabling composable_kernel (CK) for both SDPA and GEMMs is a two-part process. First the user must have built
+pytorch while setting the corresponding environment variable to '1'
+
+SDPA:
+``USE_ROCM_CK_SDPA=1``
+
+GEMMs:
+``USE_ROCM_CK_GEMM=1``
+
+Second, the user must explicitly request that CK be used as the backend library via the corresponding python
+call
+
+SDPA:
+``setROCmFAPreferredBackend('<choice>')``
+
+GEMMs:
+``setBlasPreferredBackend('<choice>')``
+
+To enable CK in either scenario, simply pass 'ck' to those functions.
+
+In order to set the backend to CK, the user MUST have built with the correct environment variable. If not,
+PyTorch will print a warning and use the "default" backend. For GEMMs, this will route to hipblas and
+for SDPA it routes to aotriton.

@@ -5,9 +5,10 @@ import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import partial
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Optional
 from typing_extensions import Self
 from warnings import warn
 
@@ -21,6 +22,8 @@ from torch._C._profiler import (
     _ExperimentalConfig,
     _remove_execution_trace_observer,
 )
+from torch._environment import is_fbcode
+from torch._utils_internal import profiler_allow_cudagraph_cupti_lazy_reinit_cuda12
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
 
@@ -142,7 +145,7 @@ class _KinetoProfile:
         execution_trace_observer: Optional[_ITraceObserver] = None,
         acc_events: bool = False,
         custom_trace_id_callback: Optional[Callable[[], str]] = None,
-    ):
+    ) -> None:
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
         self.with_flops = with_flops
@@ -154,28 +157,40 @@ class _KinetoProfile:
         self.acc_events = acc_events
         self.custom_trace_id_callback = custom_trace_id_callback
         self.profiler: Optional[prof.profile] = None
+        self.has_cudagraphs = False
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
         if ProfilerActivity.CUDA in self.activities:
+            # pyrefly: ignore  # bad-assignment
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
+            # pyrefly: ignore  # bad-assignment
             self.use_device = "xpu"
         elif ProfilerActivity.MTIA in self.activities:
+            # pyrefly: ignore  # bad-assignment
             self.use_device = "mtia"
+        elif ProfilerActivity.HPU in self.activities:
+            # pyrefly: ignore  # bad-assignment
+            self.use_device = "hpu"
         elif ProfilerActivity.PrivateUse1 in self.activities:
+            # pyrefly: ignore  # bad-assignment
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
-        self.preset_metadata: Dict[str, str] = {}
+        self.preset_metadata: dict[str, str] = {}
 
-    def start(self):
+    def start(self) -> None:
         self.prepare_trace()
         self.start_trace()
 
-    def stop(self):
+    def stop(self) -> None:
         self.stop_trace()
 
-    def prepare_trace(self):
+    def prepare_trace(self) -> None:
+        if hasattr(torch, "_inductor"):
+            import torch._inductor.config as inductor_config
+
+            self.has_cudagraphs = inductor_config.triton.cudagraphs
         if (self.profiler is None) or (not self.acc_events):
             self.profiler = prof.profile(
                 use_cpu=(ProfilerActivity.CPU in self.activities),
@@ -192,7 +207,7 @@ class _KinetoProfile:
             )
         self.profiler._prepare_trace()
 
-    def start_trace(self):
+    def start_trace(self) -> None:
         if self.execution_trace_observer:
             self.execution_trace_observer.start()
         assert self.profiler is not None
@@ -216,23 +231,29 @@ class _KinetoProfile:
                     "distributedInfo", json.dumps(dist_info, cls=_NumpyEncoder)
                 )
 
-            if hasattr(torch, "_inductor"):
-                import torch._inductor.config as inductor_config
+            cuda_version = None
+            if hasattr(torch, "version"):
+                from torch.torch_version import TorchVersion
 
-                if inductor_config.triton.cudagraphs:
-                    os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
-                    self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
-                    # FIXME: CUDA Graph does not work well with CUPTI teardown.
-                    #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
-                    #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
-                    # Workaround: turn off CUPTI teardown when using CUDA Graphs.
-                    os.environ["TEARDOWN_CUPTI"] = "0"
+                cuda_version = TorchVersion(getattr(torch.version, "cuda", "0.0"))
+
+            if self.has_cudagraphs and (
+                (cuda_version and cuda_version < "12.6")
+                or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
+            ):
+                os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
+                self.add_metadata_json("DISABLE_CUPTI_LAZY_REINIT", "1")
+                # FIXME: CUDA Graph does not work well with CUPTI teardown.
+                #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
+                #   2) crashes on 2nd non-lazy CUPTI re-init after teardown (CUDA 12)
+                # Workaround: turn off CUPTI teardown when using CUDA Graphs.
+                os.environ["TEARDOWN_CUPTI"] = "0"
 
             # Insert the preset user metadata to the trace
             for k, v in self.preset_metadata.items():
                 self.add_metadata_json(k, v)
 
-    def stop_trace(self):
+    def stop_trace(self) -> None:
         if self.execution_trace_observer:
             self.execution_trace_observer.stop()
         assert self.profiler is not None
@@ -268,7 +289,7 @@ class _KinetoProfile:
 
     def toggle_collection_dynamic(
         self, enable: bool, activities: Iterable[ProfilerActivity]
-    ):
+    ) -> None:
         """Toggle collection of activities on/off at any point of collection. Currently supports toggling Torch Ops
         (CPU) and CUDA activity supported in Kineto
 
@@ -300,17 +321,22 @@ class _KinetoProfile:
         self.profiler.toggle_collection_dynamic(enable, activities)
 
     def key_averages(
-        self, group_by_input_shape: bool = False, group_by_stack_n: int = 0
+        self,
+        group_by_input_shape: bool = False,
+        group_by_stack_n: int = 0,
+        group_by_overload_name: bool = False,
     ):
-        """Averages events, grouping them by operator name and (optionally) input shapes and
-        stack.
+        """Averages events, grouping them by operator name and (optionally) input shapes, stack
+        and overload name.
 
         .. note::
             To use shape/stack functionality make sure to set record_shapes/with_stack
             when creating profiler context manager.
         """
         assert self.profiler
-        return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
+        return self.profiler.key_averages(
+            group_by_input_shape, group_by_stack_n, group_by_overload_name
+        )
 
     def events(self):
         """
@@ -320,7 +346,7 @@ class _KinetoProfile:
         assert self.profiler
         return self.profiler.function_events
 
-    def add_metadata(self, key: str, value: str):
+    def add_metadata(self, key: str, value: str) -> None:
         """
         Adds a user defined metadata with a string key and a string value
         into the trace file
@@ -328,14 +354,14 @@ class _KinetoProfile:
         wrapped_value = '"' + value.replace('"', '\\"') + '"'
         torch.autograd._add_metadata_json(key, wrapped_value)
 
-    def add_metadata_json(self, key: str, value: str):
+    def add_metadata_json(self, key: str, value: str) -> None:
         """
         Adds a user defined metadata with a string key and a valid json value
         into the trace file
         """
         torch.autograd._add_metadata_json(key, value)
 
-    def preset_metadata_json(self, key: str, value: str):
+    def preset_metadata_json(self, key: str, value: str) -> None:
         """
         Preset a user defined metadata when the profiler is not started
         and added into the trace file later.
@@ -359,6 +385,7 @@ class _KinetoProfile:
         }
         if backend == "nccl":
             nccl_version = torch.cuda.nccl.version()
+            # pyrefly: ignore  # unsupported-operation
             dist_info["nccl_version"] = ".".join(str(v) for v in nccl_version)
         return dist_info
 
@@ -394,11 +421,11 @@ class _KinetoProfile:
         Output: Memory timeline written as gzipped JSON, JSON, or HTML.
         """
         # Default to device 0, if unset. Fallback on cpu.
-        if device is None and self.use_device and self.use_device != "cuda":
-            device = self.use_device + ":0"
-
         if device is None:
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            if self.use_device and self.use_device != "cuda":
+                device = self.use_device + ":0"
+            else:
+                device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
         # Construct the memory timeline plot data
         self.mem_tl = MemoryProfileTimeline(self._memory_profile())
@@ -506,7 +533,6 @@ def tensorboard_trace_handler(
     ``worker_name`` should be unique for each worker in distributed scenario,
     it will be set to '[hostname]_[pid]' by default.
     """
-    import os
     import socket
     import time
 
@@ -603,8 +629,7 @@ class profile(_KinetoProfile):
             ]
         ) as p:
             code_to_profile()
-        print(p.key_averages().table(
-            sort_by="self_cuda_time_total", row_limit=-1))
+        print(p.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1))
 
     Using the profiler's ``schedule``, ``on_trace_ready`` and ``step`` functions:
 
@@ -614,16 +639,17 @@ class profile(_KinetoProfile):
         # on different iterations of the training loop;
         # trace_handler is called every time a new trace becomes available
         def trace_handler(prof):
-            print(prof.key_averages().table(
-                sort_by="self_cuda_time_total", row_limit=-1))
+            print(
+                prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=-1)
+            )
             # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step_num) + ".json")
+
 
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA,
             ],
-
             # In this example with wait=1, warmup=1, active=2, repeat=1,
             # profiler will skip the first step/iteration,
             # start warming up on the second, record
@@ -631,20 +657,15 @@ class profile(_KinetoProfile):
             # after which the trace will become available
             # and on_trace_ready (when set) is called;
             # the cycle repeats starting with the next step
-
-            schedule=torch.profiler.schedule(
-                wait=1,
-                warmup=1,
-                active=2,
-                repeat=1),
-            on_trace_ready=trace_handler
+            schedule=torch.profiler.schedule(wait=1, warmup=1, active=2, repeat=1),
+            on_trace_ready=trace_handler,
             # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
             # used when outputting for tensorboard
-            ) as p:
-                for iter in range(N):
-                    code_iteration_to_profile(iter)
-                    # send a signal to the profiler that the next iteration has started
-                    p.step()
+        ) as p:
+            for iter in range(N):
+                code_iteration_to_profile(iter)
+                # send a signal to the profiler that the next iteration has started
+                p.step()
 
     The following sample shows how to setup up an Execution Trace Observer (`execution_trace_observer`)
 
@@ -681,7 +702,7 @@ class profile(_KinetoProfile):
         # deprecated:
         use_cuda: Optional[bool] = None,
         custom_trace_id_callback: Optional[Callable[[], str]] = None,
-    ):
+    ) -> None:
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
             warn(
@@ -722,8 +743,8 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
         self.step_rec_fn: Optional[prof.record_function] = None
 
-        self.action_map: Dict[
-            Tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]
+        self.action_map: dict[
+            tuple[ProfilerAction, Optional[ProfilerAction]], list[Any]
         ] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.
             (ProfilerAction.NONE, ProfilerAction.NONE): [],
@@ -797,7 +818,7 @@ class profile(_KinetoProfile):
         if self.execution_trace_observer:
             self.execution_trace_observer.cleanup()
 
-    def start(self):
+    def start(self) -> None:
         self._transit_action(ProfilerAction.NONE, self.current_action)
         if self.record_steps:
             self.step_rec_fn = prof.record_function(
@@ -805,12 +826,12 @@ class profile(_KinetoProfile):
             )
             self.step_rec_fn.__enter__()
 
-    def stop(self):
+    def stop(self) -> None:
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         self._transit_action(self.current_action, None)
 
-    def step(self):
+    def step(self) -> None:
         """
         Signals the profiler that the next profiling step has started.
         """
@@ -821,7 +842,10 @@ class profile(_KinetoProfile):
         self.current_action = self.schedule(self.step_num)
 
         self._transit_action(prev_action, self.current_action)
-        prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
+        if os.environ.get("KINETO_USE_DAEMON", "") or (
+            is_fbcode() and os.environ.get("KINETO_FORCE_STEP_HOOK", "")
+        ):
+            prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
 
         if self.record_steps:
             self.step_rec_fn = prof.record_function(
@@ -829,7 +853,7 @@ class profile(_KinetoProfile):
             )
             self.step_rec_fn.__enter__()
 
-    def set_custom_trace_id_callback(self, callback):
+    def set_custom_trace_id_callback(self, callback) -> None:
         """
         Sets a callback to be called when a new trace ID is generated.
         """
@@ -843,11 +867,11 @@ class profile(_KinetoProfile):
             return None
         return self.profiler.trace_id
 
-    def _trace_ready(self):
+    def _trace_ready(self) -> None:
         if self.on_trace_ready:
             self.on_trace_ready(self)
 
-    def _transit_action(self, prev_action, current_action):
+    def _transit_action(self, prev_action, current_action) -> None:
         action_list = self.action_map.get((prev_action, current_action))
         if action_list:
             for action in action_list:
@@ -883,8 +907,9 @@ class ExecutionTraceObserver(_ITraceObserver):
         self.extra_resources_collection = False
         self.resources_dir: str = ""
         self.output_file_path: str = ""
+        self.output_file_path_observer: str = ""
 
-    def __del__(self):
+    def __del__(self) -> None:
         """
         Calls unregister_callback() to make sure to finalize outputs.
         """
@@ -937,8 +962,17 @@ class ExecutionTraceObserver(_ITraceObserver):
         Adds ET observer to record function callbacks. The data will be
         written to output_file_path.
         """
+
+        def get_temp_uncompressed_file() -> str:
+            fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
+            fp.close()
+            return fp.name
+
         if not self._registered:
             self.output_file_path = output_file_path
+            if output_file_path.endswith(".gz"):
+                output_file_path = get_temp_uncompressed_file()
+            self.output_file_path_observer = output_file_path
             self._registered = _add_execution_trace_observer(output_file_path)
         return self
 
@@ -987,12 +1021,12 @@ class ExecutionTraceObserver(_ITraceObserver):
                 return None
         return resource_dir
 
-    def unregister_callback(self):
+    def unregister_callback(self) -> None:
         """
         Removes ET observer from record function callbacks.
         """
 
-        def _save_triton_kernels():
+        def _save_triton_kernels() -> None:
             try:
                 resource_dir = self.get_resources_dir()
             except Exception as e:
@@ -1019,13 +1053,25 @@ class ExecutionTraceObserver(_ITraceObserver):
                 dst = os.path.join(resource_dir, name)
                 shutil.copyfile(kernel_file, dst)
 
+        def _save_gz_file(uncompressed_file: str, output_file: str) -> None:
+            print(f"Execution Trace: compressing {uncompressed_file} to {output_file}")
+            with open(uncompressed_file, "rb") as fin:
+                with gzip.open(output_file, "wb") as fout:
+                    fout.writelines(fin)
+            os.remove(uncompressed_file)
+
         if self._registered:
             self.stop()
+
             try:
                 _save_triton_kernels()
             except Exception as e:
                 warn(f"Execution trace failed to save kernels: {e}")
+
             _remove_execution_trace_observer()
+            if self.output_file_path.endswith("gz"):
+                _save_gz_file(self.output_file_path_observer, self.output_file_path)
+
             self._registered = False
 
     @property
@@ -1041,7 +1087,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         return self._execution_trace_running
 
-    def start(self):
+    def start(self) -> None:
         """
         Starts to capture.
         """
@@ -1050,7 +1096,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             self._execution_trace_running = True
             self._record_pg_config()
 
-    def stop(self):
+    def stop(self) -> None:
         """
         Stops to capture.
         """
@@ -1058,7 +1104,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             _disable_execution_trace_observer()
             self._execution_trace_running = False
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """
         Calls unregister_callback() to make sure to finalize outputs.
         """

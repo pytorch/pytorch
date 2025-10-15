@@ -45,6 +45,7 @@ namespace c10 {
   _(VE, extra)                                  \
   _(Lazy, extra)                                \
   _(MTIA, extra)                                \
+  _(MAIA, extra)                                \
   _(PrivateUse1, extra)                         \
   _(PrivateUse2, extra)                         \
   _(PrivateUse3, extra)                         \
@@ -179,13 +180,6 @@ enum class DispatchKey : uint16_t {
   // TODO: put this in BackendComponents
   FPGA, // Xilinx support lives out of tree at
   // https://gitlab.com/pytorch-complex/vitis_kernels
-
-  // TODO: put this in BackendComponents
-  // MAIA backend lives out of tree
-  // - test/cpp_extensions/maia_extension.cpp
-  // - test/test_torch.py
-  // - aten/src/ATen/test/extension_backend_test.cpp
-  MAIA,
 
   Vulkan, // TODO: put this in BackendComponents
   Metal, // TODO: put this in BackendComponents
@@ -353,6 +347,8 @@ enum class DispatchKey : uint16_t {
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
+  AutocastMTIA,
+  AutocastMAIA,
   AutocastXPU,
   AutocastIPU,
   AutocastHPU,
@@ -594,10 +590,12 @@ constexpr uint16_t num_runtime_entries = num_functionality_keys +
 constexpr uint16_t full_backend_mask =
     (static_cast<uint16_t>(1) << num_backends) - 1;
 
-C10_API const char* toString(DispatchKey);
-C10_API const char* toString(BackendComponent);
-C10_API std::ostream& operator<<(std::ostream&, DispatchKey);
-C10_API std::ostream& operator<<(std::ostream&, BackendComponent);
+C10_API const char* toString(DispatchKey /*t*/);
+C10_API const char* toString(BackendComponent /*t*/);
+C10_API std::ostream& operator<<(std::ostream& /*str*/, DispatchKey /*rhs*/);
+C10_API std::ostream& operator<<(
+    std::ostream& /*str*/,
+    BackendComponent /*rhs*/);
 
 C10_API DispatchKey getAutogradKeyFromBackend(BackendComponent k);
 

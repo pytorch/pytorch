@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -25,7 +25,7 @@ torch.serialization.add_safe_globals([_NestedTensor, _rebuild_njt])
 
 
 def as_nested_tensor(
-    ts: Union[Tensor, List[Tensor], Tuple[Tensor, ...]],
+    ts: Union[Tensor, list[Tensor], tuple[Tensor, ...]],
     dtype: Optional[DType] = None,
     device: Optional[Device] = None,
     layout=None,
@@ -392,8 +392,8 @@ def nested_tensor_from_jagged(
         offsets (optional :class:`torch.Tensor`): Offsets into the jagged dimension of shape B + 1.
         lengths (optional :class:`torch.Tensor`): Lengths of the batch elements of shape B.
         jagged_dim (optional int): Indicates which dimension in values is the packed jagged
-            dimension. If None, this is set to dim=1 (i.e. the dimension immediately following
-            the batch dimension). Default: None
+            dimension. Must be >= 1 as the batch dimension (dim=0) cannot be ragged.
+            If None, this is set to dim=1 (i.e. the dimension immediately following the batch dimension). Default: None
         min_seqlen (optional int): If set, uses the specified value as the cached minimum sequence
             length for the returned nested tensor. This can be a useful alternative to computing
             this value on-demand, possibly avoiding a GPU -> CPU sync. Default: None
@@ -450,6 +450,8 @@ def nested_tensor_from_jagged(
 
     if jagged_dim is None:
         jagged_dim = 1
+    elif jagged_dim < 1:
+        raise ValueError(f"Expected jagged_dim >=1, but got {jagged_dim}.")
 
     from torch.nested._internal.nested_tensor import (
         nested_view_from_values_offsets_lengths,
@@ -477,25 +479,23 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
 
     Example::
 
-    >>> tensor = torch.randn(3, 3)
-    >>> mask = torch.tensor(
-    ...     [[False, False, True], [True, False, True], [False, False, True]]
-    ... )
-    >>> nt = torch.nested.masked_select(tensor, mask)
-    >>> nt.shape
-    torch.Size([3, j4])
-    >>> # Length of each item in the batch:
-    >>> nt.offsets().diff()
-    tensor([1, 2, 1])
+        >>> tensor = torch.randn(3, 3)
+        >>> mask = torch.tensor([[False, False, True], [True, False, True], [False, False, True]])
+        >>> nt = torch.nested.masked_select(tensor, mask)
+        >>> nt.shape
+        torch.Size([3, j4])
+        >>> # Length of each item in the batch:
+        >>> nt.offsets().diff()
+        tensor([1, 2, 1])
 
-    >>> tensor = torch.randn(6, 5)
-    >>> mask = torch.tensor([False])
-    >>> nt = torch.nested.masked_select(tensor, mask)
-    >>> nt.shape
-    torch.Size([6, j5])
-    >>> # Length of each item in the batch:
-    >>> nt.offsets().diff()
-    tensor([0, 0, 0, 0, 0, 0])
+        >>> tensor = torch.randn(6, 5)
+        >>> mask = torch.tensor([False])
+        >>> nt = torch.nested.masked_select(tensor, mask)
+        >>> nt.shape
+        torch.Size([6, j5])
+        >>> # Length of each item in the batch:
+        >>> nt.offsets().diff()
+        tensor([0, 0, 0, 0, 0, 0])
     """
     if tensor.layout != torch.strided:
         raise RuntimeError(

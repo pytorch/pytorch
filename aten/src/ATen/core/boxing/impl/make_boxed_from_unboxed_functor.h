@@ -105,7 +105,7 @@ using supported_primitive_arg_types = guts::typelist::typelist<
 // So a valid input type is one that our boxed functor wrapper can
 // unbox from an IValue into a C++ value.
 //
-// Whereas a valid output type is one that our wrapper can recieve
+// Whereas a valid output type is one that our wrapper can receive
 // as a C++ value from the unboxed functor, and box into an IValue.
 
 //
@@ -226,7 +226,7 @@ template <class T, bool AllowDeprecatedTypes>
 struct assert_is_valid_input_type<
     T,
     AllowDeprecatedTypes,
-    std::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
+    std::enable_if_t<std::is_same_v<std::vector<bool>, T>>> {
   static_assert(
       guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported input type: vector<bool>. Please use List<bool> instead.");
@@ -363,7 +363,7 @@ template <class T, bool AllowDeprecatedTypes>
 struct assert_is_valid_output_type<
     T,
     AllowDeprecatedTypes,
-    std::enable_if_t<std::is_same<std::vector<bool>, T>::value>> {
+    std::enable_if_t<std::is_same_v<std::vector<bool>, T>>> {
   static_assert(
       guts::false_t<T>::value,
       "You tried to register a kernel with an unsupported output type: vector<bool>. Please use List<bool> instead.");
@@ -546,23 +546,22 @@ struct wrap_kernel_functor_unboxed_<
     ReturnType(ParameterTypes...)>
     final {
   static_assert(
-      std::is_same<
+      std::is_same_v<
           ReturnType,
-          typename guts::infer_function_traits_t<KernelFunctor>::return_type>::
-          value,
+          typename guts::infer_function_traits_t<KernelFunctor>::return_type>,
       "Return type mismatch");
   static_assert(
-      std::is_same<
+      std::is_same_v<
           guts::typelist::typelist<ParameterTypes...>,
           typename guts::infer_function_traits_t<
-              KernelFunctor>::parameter_types>::value,
+              KernelFunctor>::parameter_types>,
       "Parameter types mismatch");
 
   // See [Note: Argument forwarding in the dispatcher] for why ParameterTypes
   // doesn't use &&
   static ReturnType call(
       OperatorKernel* functor,
-      DispatchKeySet,
+      DispatchKeySet /*unused*/,
       ParameterTypes... args) {
     KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
     // Note [Plumbing Keys Through The Dispatcher 2]
@@ -588,16 +587,15 @@ struct wrap_kernel_functor_unboxed_<
     ReturnType(DispatchKeySet, ParameterTypes...)>
     final {
   static_assert(
-      std::is_same<
+      std::is_same_v<
           ReturnType,
-          typename guts::infer_function_traits_t<KernelFunctor>::return_type>::
-          value,
+          typename guts::infer_function_traits_t<KernelFunctor>::return_type>,
       "Return type mismatch");
   static_assert(
-      std::is_same<
+      std::is_same_v<
           guts::typelist::typelist<DispatchKeySet, ParameterTypes...>,
           typename guts::infer_function_traits_t<
-              KernelFunctor>::parameter_types>::value,
+              KernelFunctor>::parameter_types>,
       "Parameter types mismatch");
 
   // See [Note: Argument forwarding in the dispatcher] for why ParameterTypes
@@ -631,8 +629,8 @@ call_functor_with_args_from_stack_(
     OperatorKernel* functor,
     DispatchKeySet dispatchKeySet,
     Stack* stack,
-    std::index_sequence<ivalue_arg_indices...>,
-    guts::typelist::typelist<ArgTypes...>*) {
+    std::index_sequence<ivalue_arg_indices...> /*unused*/,
+    guts::typelist::typelist<ArgTypes...>* /*unused*/) {
   (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would
                  // be unused and we have to silence the compiler warning.
 
@@ -710,7 +708,7 @@ struct push_outputs<std::tuple<OutputTypes...>, AllowDeprecatedTypes> final {
   static void call_(
       std::tuple<OutputTypes...>&& output,
       Stack* stack,
-      std::index_sequence<indices...>) {
+      std::index_sequence<indices...> /*unused*/) {
     torch::jit::push(
         *stack,
         return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::call(
@@ -720,7 +718,7 @@ struct push_outputs<std::tuple<OutputTypes...>, AllowDeprecatedTypes> final {
   static void copy_(
       const std::tuple<OutputTypes...>& output,
       Stack* stack,
-      std::index_sequence<indices...>) {
+      std::index_sequence<indices...> /*unused*/) {
     torch::jit::push(
         *stack,
         return_to_ivalue<OutputTypes, AllowDeprecatedTypes>::copy(
@@ -743,7 +741,7 @@ struct make_boxed_from_unboxed_functor final {
 
   static void call(
       OperatorKernel* functor,
-      const OperatorHandle&,
+      const OperatorHandle& /*unused*/,
       DispatchKeySet dispatchKeySet,
       Stack* stack) {
     using ReturnType =

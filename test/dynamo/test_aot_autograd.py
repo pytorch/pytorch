@@ -318,7 +318,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         compare_equal_outs_and_grads(self, F(), fxy, (x, y))
         compare_equal_outs_and_grads(self, F(), fxy, (x, z))
         self.assertIn(
-            """tensor 'L['y']' requires_grad mismatch. expected requires_grad=1""",
+            """tensor 'y' requires_grad mismatch. expected requires_grad=1""",
             failure_reason,
         )
 
@@ -436,7 +436,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         fxx(x3, x3)
         fxx(x4, y4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""L['x'] is L['y']""", failure_reason)
+        self.assertIn("""x is y""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args_param_non_tensor_arg(self):
@@ -470,7 +470,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """L['a'] is L['b']""",
+            """a is b""",
             failure_reason,
         )
 
@@ -487,7 +487,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(c3, c3, 3, 3)
         f(c4, d4, 3, 3)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""L['a'] is L['b']""", failure_reason)
+        self.assertIn("""a is b""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_with_global(self):
@@ -524,7 +524,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """L['a'] is L['b']""",
+            """a is b""",
             failure_reason,
         )
 
@@ -560,7 +560,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f([3, 2, 1], [4, 5, 6], a2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """L['a'] is L['b']""",
+            """a is b""",
             failure_reason,
         )
 
@@ -610,7 +610,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """L['a'] is L['b']""",
+            """a is b""",
             failure_reason,
         )
 
@@ -627,7 +627,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(c3, c3)
         f(c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""L['a'] is L['b']""", failure_reason)
+        self.assertIn("""a is b""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args(self):
@@ -659,7 +659,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
-            """L['a'] is L['b']""",
+            """a is b""",
             failure_reason,
         )
 
@@ -676,7 +676,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         f(a3, b3, c3, c3)
         f(a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""L['c'] is L['d']""", failure_reason)
+        self.assertIn("""c is d""", failure_reason)
 
     def test_alias_inputs(self):
         def fn():
@@ -713,6 +713,42 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         y = torch.ones(1, requires_grad=True)
         compiled_fn = torch.compile(fn, backend="aot_eager")
         out = compiled_fn(x, y)
+        out.sum().backward()
+
+    def test_joint_custom_pass(self):
+        is_called = False
+
+        def joint_custom_pass(joint_gm: torch.fx.GraphModule, joint_inputs):
+            nonlocal is_called
+            is_called = True
+
+            self.assertTrue(isinstance(joint_gm, torch.fx.GraphModule))
+
+            self.assertTrue(isinstance(joint_inputs, tuple))
+            # first input is list of primals
+            self.assertTrue(isinstance(joint_inputs[0], list))
+            # second input is list of tangents
+            self.assertTrue(isinstance(joint_inputs[1], list))
+
+            return joint_gm
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        x = torch.randn(10, requires_grad=False)
+        compiled_fn = torch.compile(M(), backend="aot_eager")
+
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
+            _ = compiled_fn(x)
+        # x doesn't require grad, shouldn't trigger joint graph compiler
+        self.assertFalse(is_called)
+
+        y = torch.randn(10, requires_grad=True)
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
+            out = compiled_fn(y)
+        # y requires grad, should trigger joint graph compiler
+        self.assertTrue(is_called)
         out.sum().backward()
 
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
@@ -880,43 +916,41 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
             dedent(
                 """\
 SeqNr|OrigAten|SrcFn|FwdSrcFn
-0|aten.convolution.default|l__self___conv1|
-0|aten.add.Tensor|l__self___bn1|
-1|aten._native_batch_norm_legit_functional.default|l__self___bn1|
-2|aten.relu.default|l__self___relu1|
-2|aten.detach.default|l__self___relu1|
-2|aten.detach.default|l__self___relu1|
+0|aten.convolution.default|conv2d|
+0|aten.add.Tensor|add_|
+1|aten._native_batch_norm_legit_functional.default|batch_norm|
+2|aten.relu.default|relu|
+2|aten.detach.default|relu|
 3|aten.add.Tensor|add|
 4|aten.view.default|flatten|
-5|aten.view.default|l__self___fc1|
-6|aten.t.default|l__self___fc1|
-7|aten.addmm.default|l__self___fc1|
-8|aten.view.default|l__self___fc1|
-9|aten.sub.Tensor|l__self___loss_fn|
-10|aten.abs.default|l__self___loss_fn|
-11|aten.mean.default|l__self___loss_fn|
-11|aten.ones_like.default||l__self___loss_fn
-11|aten.expand.default||l__self___loss_fn
-11|aten.div.Scalar||l__self___loss_fn
-10|aten.sgn.default||l__self___loss_fn
-10|aten.mul.Tensor||l__self___loss_fn
-8|aten.view.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.mm.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.mm.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.sum.dim_IntList||l__self___fc1
-7|aten.view.default||l__self___fc1
-6|aten.t.default||l__self___fc1
-5|aten.view.default||l__self___fc1
-4|aten.view.default||
-2|aten.detach.default||l__self___relu1
-2|aten.detach.default||l__self___relu1
-2|aten.threshold_backward.default||l__self___relu1
-1|aten.native_batch_norm_backward.default||l__self___bn1
-0|aten.convolution_backward.default||l__self___conv1
-11|aten.add.Tensor||l__self___loss_fn
+5|aten.view.default|linear|
+6|aten.t.default|linear|
+7|aten.addmm.default|linear|
+8|aten.view.default|linear|
+9|aten.sub.Tensor|l1_loss|
+10|aten.abs.default|l1_loss|
+11|aten.mean.default|l1_loss|
+11|aten.ones_like.default||l1_loss
+11|aten.expand.default||l1_loss
+11|aten.div.Scalar||l1_loss
+10|aten.sgn.default||l1_loss
+10|aten.mul.Tensor||l1_loss
+8|aten.view.default||linear
+7|aten.t.default||linear
+7|aten.mm.default||linear
+7|aten.t.default||linear
+7|aten.mm.default||linear
+7|aten.t.default||linear
+7|aten.sum.dim_IntList||linear
+7|aten.view.default||linear
+6|aten.t.default||linear
+5|aten.view.default||linear
+4|aten.view.default||flatten
+2|aten.detach.default||relu
+2|aten.threshold_backward.default||relu
+1|aten.native_batch_norm_backward.default||batch_norm
+0|aten.convolution_backward.default||conv2d
+11|aten.add.Tensor||l1_loss
 """
             ),
         )
@@ -1213,7 +1247,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch(donated_buffer=True)
     def test_donated_buffer1(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         @torch.compile()
         def relu(x):
@@ -1233,9 +1267,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer2(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        # we will re-use the graph for g across f1 and f2
+        # we will reuse the graph for g across f1 and f2
         @torch.compile()
         def g(activation, param2):
             return torch.matmul(activation, param2)
@@ -1255,9 +1289,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer3(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        # we will re-use the graph for g across f1 and f2
+        # we will reuse the graph for g across f1 and f2
         @torch.compile()
         def g(activation, param2):
             return torch.matmul(activation, param2)
@@ -1278,7 +1312,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer4(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
@@ -1309,7 +1343,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer5(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         @torch.compile()
         def f(x, z):
@@ -1339,6 +1373,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_donated_buffer6(self):
         if is_dynamic_shape_test(self._testMethodName):
             # parameters should not be dynamic shape
@@ -1346,7 +1381,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             #    SymNodeVariable() is not a constant
             return
 
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         def fn(x):
             p = torch.nn.Parameter(x + 123)
@@ -1416,6 +1451,33 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         for _ in range(5):
             out.backward(retain_graph=True)
         out.backward()
+
+    def test_autograd_function_tangent_mutation(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone(), x.clone()
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1.copy_(grad2)
+
+        def f(x):
+            return Foo.apply(x)
+
+        x = torch.randn(4, requires_grad=True)
+        x_ref = x.clone().detach().requires_grad_()
+
+        out_ref = f(x_ref)
+        out = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+
+        self.assertEqual(out_ref, out)
+        self.assertEqual(x_ref, x)
+
+        (out[0] + out[1]).sum().backward()
+        (out_ref[0] + out_ref[1]).sum().backward()
+
+        self.assertEqual(x_ref.grad, x.grad)
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer_with_retain_or_create_graph4(self):
@@ -1496,7 +1558,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         )
         self.assertExpectedInline(
             guard_failure,
-            """0/0: check_overlapping(overlapping=[L['args'][1], L['args'][2]], non_overlapping=[L['args'][0]])""",
+            """0/0: check_overlapping(overlapping=[args[1], args[2]], non_overlapping=[args[0]])""",
         )
 
     def test_different_inputs_overlapping_set_with_mutation(self):
@@ -1519,7 +1581,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         )
         self.assertExpectedInline(
             guard_failure,
-            """0/0: check_overlapping(overlapping=[L['a'], L['b']], non_overlapping=[L['c'], L['d']])""",
+            """0/0: check_overlapping(overlapping=[a, b], non_overlapping=[c, d])""",
         )
 
     def _test_no_storage_overlap_guards(self, f, argsfn):
@@ -1621,6 +1683,40 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         # Note: this is an arbitrary number. So, we might have to change it in the future.
         # However, at the time this change was introduced, it went down from 15154 to 403.
         self.assertLess(len(shape_env_guards), 1000)
+
+    # See # https://github.com/pytorch/pytorch/issues/164814
+    def test_aot_autograd_stride_reconstruction_on_zero_dim_dynamic_shaped_tensor(
+        self,
+    ) -> None:
+        def repro(sentinel: torch.Tensor, skip_squeeze: bool = False) -> torch.Tensor:
+            x = torch.unique(torch.ones(1))
+            x = torch.reshape(x, [1])
+            if not skip_squeeze:
+                x = torch.squeeze(x)  # 0-d tensor
+            return x * sentinel
+
+        # Grad required to trigger the issue (need to replay stride)
+        sentinel = torch.tensor(1.0, requires_grad=True)
+        eager_sq = repro(sentinel)
+        comp_aot_sq = torch.compile(repro, backend="aot_eager", fullgraph=True)(
+            sentinel
+        )
+        comp_ind_sq = torch.compile(repro, backend="inductor", fullgraph=True)(sentinel)
+        self.assertEqual(eager_sq, comp_aot_sq)
+        self.assertEqual(eager_sq, comp_ind_sq)
+        self.assertEqual(eager_sq.stride(), comp_ind_sq.stride())
+
+        # Now check semantics preserved when skipping squeeze
+        eager_no_sq = repro(sentinel, skip_squeeze=True)
+        comp_aot_no_sq = torch.compile(repro, backend="aot_eager", fullgraph=True)(
+            sentinel, skip_squeeze=True
+        )
+        comp_ind_no_sq = torch.compile(repro, backend="inductor", fullgraph=True)(
+            sentinel, skip_squeeze=True
+        )
+        self.assertEqual(eager_no_sq, comp_aot_no_sq)
+        self.assertEqual(eager_no_sq, comp_ind_no_sq)
+        self.assertEqual(eager_no_sq.stride(), comp_ind_no_sq.stride())
 
 
 if __name__ == "__main__":

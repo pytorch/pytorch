@@ -19,7 +19,6 @@ def define_targets(rules):
             "CAFFE2_BUILD_SHARED_LIBS",
             "CAFFE2_PERF_WITH_AVX",
             "CAFFE2_PERF_WITH_AVX2",
-            "CAFFE2_USE_EXCEPTION_PTR",
             "CAFFE2_USE_CUDNN",
             "USE_MKLDNN",
             "CAFFE2_USE_ITT",
@@ -73,12 +72,14 @@ def define_targets(rules):
         "--install_dir=$(RULEDIR)",
         "--source-path aten/src/ATen",
         "--aoti_install_dir=$(RULEDIR)/torch/csrc/inductor/aoti_torch/generated"
-    ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
+    ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []) + ["--mtia"])
 
     gen_aten_outs_cuda = (
         GENERATED_H_CUDA + GENERATED_CPP_CUDA + GENERATED_AOTI_CUDA_CPP +
         aten_ufunc_generated_cuda_sources()
     )
+
+    gen_aten_outs_mtia = GENERATED_H_MTIA + GENERATED_CPP_MTIA
 
     gen_aten_outs = (
         GENERATED_H + GENERATED_H_CORE +
@@ -87,7 +88,7 @@ def define_targets(rules):
         aten_ufunc_generated_cpu_sources() +
         aten_ufunc_generated_cpu_kernel_sources() + [
             "Declarations.yaml",
-        ] + gen_aten_outs_cuda
+        ] + gen_aten_outs_cuda + gen_aten_outs_mtia
     )
 
     rules.genrule(
@@ -117,6 +118,9 @@ def define_targets(rules):
             ":LazyNonNativeIr.h",
             ":RegisterDispatchDefinitions.ini",
             ":RegisterDispatchKey.cpp",
+            ":ViewMetaClassesPythonBinding.cpp",
+            ":ViewMetaClasses.cpp",
+            ":ViewMetaClasses.h",
             ":native_functions.yaml",
             ":shape_inference.h",
             ":tags.yaml",
@@ -138,18 +142,6 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
     )
 
-    rules.genrule(
-        name = "version_h",
-        srcs = [
-            ":torch/csrc/api/include/torch/version.h.in",
-            ":version.txt",
-        ],
-        outs = ["torch/csrc/api/include/torch/version.h"],
-        cmd = "$(execpath //tools/setup_helpers:gen_version_header) " +
-              "--template-path $(location :torch/csrc/api/include/torch/version.h.in) " +
-              "--version-path $(location :version.txt) --output-path $@ ",
-        tools = ["//tools/setup_helpers:gen_version_header"],
-    )
 
 #
 # ATen generated code
@@ -169,6 +161,7 @@ GENERATED_H = [
     "FunctionalInverses.h",
     "RedispatchFunctions.h",
     "RegistrationDeclarations.h",
+    "ViewMetaClasses.h",
     "VmapGeneratedPlumbing.h",
 ]
 
@@ -202,37 +195,50 @@ GENERATED_H_CUDA = [
 ]
 
 GENERATED_CPP_CUDA = [
-    "RegisterCUDA.cpp",
-    "RegisterNestedTensorCUDA.cpp",
-    "RegisterSparseCUDA.cpp",
-    "RegisterSparseCsrCUDA.cpp",
-    "RegisterQuantizedCUDA.cpp",
+    "RegisterCUDA_0.cpp",
+    "RegisterNestedTensorCUDA_0.cpp",
+    "RegisterSparseCUDA_0.cpp",
+    "RegisterSparseCsrCUDA_0.cpp",
+    "RegisterQuantizedCUDA_0.cpp",
+]
+
+GENERATED_H_MTIA = [
+    "MTIAFunctions.h",
+    "MTIAFunctions_inl.h",
+]
+
+GENERATED_CPP_MTIA = [
+    "RegisterMTIA_0.cpp",
 ]
 
 GENERATED_CPP = [
     "Functions.cpp",
     "RegisterBackendSelect.cpp",
-    "RegisterCPU.cpp",
-    "RegisterQuantizedCPU.cpp",
-    "RegisterNestedTensorCPU.cpp",
-    "RegisterSparseCPU.cpp",
-    "RegisterSparseCsrCPU.cpp",
-    "RegisterMkldnnCPU.cpp",
-    "RegisterCompositeImplicitAutograd.cpp",
-    "RegisterCompositeImplicitAutogradNestedTensor.cpp",
-    "RegisterZeroTensor.cpp",
-    "RegisterMeta.cpp",
-    "RegisterQuantizedMeta.cpp",
-    "RegisterNestedTensorMeta.cpp",
-    "RegisterSparseMeta.cpp",
-    "RegisterCompositeExplicitAutograd.cpp",
-    "RegisterCompositeExplicitAutogradNonFunctional.cpp",
+    "RegisterCPU_0.cpp",
+    "RegisterCPU_1.cpp",
+    "RegisterCPU_2.cpp",
+    "RegisterCPU_3.cpp",
+    "RegisterQuantizedCPU_0.cpp",
+    "RegisterNestedTensorCPU_0.cpp",
+    "RegisterSparseCPU_0.cpp",
+    "RegisterSparseCsrCPU_0.cpp",
+    "RegisterMkldnnCPU_0.cpp",
+    "RegisterCompositeImplicitAutograd_0.cpp",
+    "RegisterCompositeImplicitAutogradNestedTensor_0.cpp",
+    "RegisterZeroTensor_0.cpp",
+    "RegisterMeta_0.cpp",
+    "RegisterQuantizedMeta_0.cpp",
+    "RegisterNestedTensorMeta_0.cpp",
+    "RegisterSparseMeta_0.cpp",
+    "RegisterCompositeExplicitAutograd_0.cpp",
+    "RegisterCompositeExplicitAutogradNonFunctional_0.cpp",
     "CompositeViewCopyKernels.cpp",
     "RegisterSchema.cpp",
     "RegisterFunctionalization_0.cpp",
     "RegisterFunctionalization_1.cpp",
     "RegisterFunctionalization_2.cpp",
     "RegisterFunctionalization_3.cpp",
+    "ViewMetaClasses.cpp",
 ]
 
 GENERATED_CPP_CORE = [
@@ -294,6 +300,7 @@ _GENERATED_AUTOGRAD_PYTHON_CPP = [
     "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
     "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
     "torch/csrc/autograd/generated/python_variable_methods.cpp",
+    "torch/csrc/functionalization/generated/ViewMetaClassesPythonBinding.cpp"
 ]
 
 GENERATED_AUTOGRAD_PYTHON = _GENERATED_AUTOGRAD_PYTHON_HEADERS + _GENERATED_AUTOGRAD_PYTHON_CPP

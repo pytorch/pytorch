@@ -40,7 +40,7 @@ retry () {
 if [[ "$#" != 3 ]]; then
   if [[ -z "${DESIRED_PYTHON:-}" || -z "${DESIRED_CUDA:-}" || -z "${PACKAGE_TYPE:-}" ]]; then
     echo "USAGE: run_tests.sh  PACKAGE_TYPE  DESIRED_PYTHON  DESIRED_CUDA"
-    echo "The env variable PACKAGE_TYPE must be set to 'conda' or 'manywheel' or 'libtorch'"
+    echo "The env variable PACKAGE_TYPE must be set to 'manywheel' or 'libtorch'"
     echo "The env variable DESIRED_PYTHON must be set like '2.7mu' or '3.6m' etc"
     echo "The env variable DESIRED_CUDA must be set like 'cpu' or 'cu80' etc"
     exit 1
@@ -74,12 +74,13 @@ else
 fi
 
 # Environment initialization
+retry pip install -qUr requirements-build.txt
 if [[ "$(uname)" == Darwin ]]; then
     # Install the testing dependencies
-    retry conda install -yq future hypothesis ${NUMPY_PACKAGE} ${PROTOBUF_PACKAGE} pytest setuptools six typing_extensions pyyaml
+    retry pip install -q future hypothesis ${NUMPY_PACKAGE} ${PROTOBUF_PACKAGE} pytest
 else
     retry pip install -qr requirements.txt || true
-    retry pip install -q hypothesis protobuf pytest setuptools || true
+    retry pip install -q hypothesis protobuf pytest || true
     numpy_ver=1.15
     case "$(python --version 2>&1)" in
       *2* | *3.5* | *3.6*)
@@ -91,7 +92,6 @@ fi
 
 echo "Testing with:"
 pip freeze
-conda list || true
 
 ##############################################################################
 # Smoke tests

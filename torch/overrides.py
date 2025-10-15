@@ -27,8 +27,10 @@ import contextlib
 import functools
 import types
 import warnings
+from collections.abc import Callable, Iterable
 from functools import wraps
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Type
+from typing import Any, Optional, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 from torch._C import (
@@ -57,12 +59,15 @@ __all__ = [
     "enable_reentrant_dispatch",
 ]
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
 
 def _disable_user_warnings(
-    func: Callable,
+    func: Callable[_P, _R],
     regex: str = ".*is deprecated, please use.*",
     module: str = "torch",
-) -> Callable:
+) -> Callable[_P, _R]:
     """
     Decorator that temporarily disables ``UserWarning``s for the given ``module`` if the warning message matches the
     given ``regex`` pattern.
@@ -83,7 +88,7 @@ def _disable_user_warnings(
     """
 
     @wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message=regex, module=module
@@ -93,15 +98,15 @@ def _disable_user_warnings(
     return wrapper
 
 
-@functools.lru_cache(None)
+@functools.cache
 @_disable_user_warnings
-def get_ignored_functions() -> Set[Callable]:
+def get_ignored_functions() -> set[Callable]:
     """
     Return public functions that cannot be overridden by ``__torch_function__``.
 
     Returns
     -------
-    Set[Callable]
+    set[Callable]
         A tuple of functions that are publicly available in the torch API but cannot
         be overridden with ``__torch_function__``. Mostly this is because none of the
         arguments of these functions are tensors or tensor-likes.
@@ -244,6 +249,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.has_torch_function_unary,
         torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
+        torch.nn.functional.scaled_grouped_mm,
+        torch.nn.functional.scaled_mm,
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
         torch.nn.functional.tanh,
@@ -357,6 +364,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._view_func,
         Tensor._view_func_unsafe,
         Tensor._rev_view_func_unsafe,
+        Tensor._dtensor__new__,
         Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
         Tensor._has_symbolic_sizes_strides.__get__,
@@ -373,8 +381,8 @@ def get_ignored_functions() -> Set[Callable]:
     }
 
 
-@functools.lru_cache(None)
-def get_default_nowrap_functions() -> Set[Callable]:
+@functools.cache
+def get_default_nowrap_functions() -> set[Callable]:
     """
     Return public functions that do not wrap in a subclass when invoked by
     the default ``Tensor.__torch_function__`` that preserves subclasses.  Typically,
@@ -399,9 +407,9 @@ def get_default_nowrap_functions() -> Set[Callable]:
     }
 
 
-@functools.lru_cache(None)
+@functools.cache
 @_disable_user_warnings
-def get_testing_overrides() -> Dict[Callable, Callable]:
+def get_testing_overrides() -> dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
 
     Returns
@@ -419,7 +427,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     >>> inspect.signature(my_add)
     <Signature (input, other, out=None)>
     """
-    # Every function in the PyTorchAPI that can be overriden needs an entry
+    # Every function in the PyTorchAPI that can be overridden needs an entry
     # in this dict.
     #
     # Optimally we would use inspect to get the function signature and define
@@ -427,7 +435,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
     # function signatures for native kernels that can be consumed by inspect.
     # See Issue #28233.
     Tensor = torch.Tensor
-    ret: Dict[Callable, Callable] = {
+    ret: dict[Callable, Callable] = {
         torch.abs: lambda input, out=None: -1,
         torch.absolute: lambda input, out=None: -1,
         torch.adaptive_avg_pool1d: lambda input, output_size: -1,
@@ -494,7 +502,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.bitwise_left_shift: lambda input, other, out=None: -1,
         torch.bitwise_right_shift: lambda input, other, out=None: -1,
         torch.block_diag: lambda *tensors: -1,
-        torch.bmm: lambda input, mat2, out=None: -1,
+        torch.bmm: lambda input, mat2, out_dtype=None, out=None: -1,
         torch.broadcast_tensors: lambda *tensors: -1,
         torch.broadcast_to: lambda self, size: -1,
         torch.bucketize: lambda input, boundaries, out_int32=False, right=False, out=None: -1,
@@ -575,7 +583,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.divide: lambda input, other, rounding_mode=None, out=None: -1,
         torch.dot: lambda input, other, out=None: -1,
         torch.dropout: lambda input, p, train, inplace=False: -1,
-        torch.dsmm: lambda input, mat2: -1,
+        torch.dsmm: lambda input, mat2, out_dtype=None: -1,
         torch.hsmm: lambda mat1, mat2: -1,
         torch.dsplit: lambda input, indices_or_sections: -1,
         torch.dstack: lambda tensors, out=None: -1,
@@ -604,8 +612,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.fused_moving_avg_obs_fake_quant: (
             lambda x, observer_on, fake_quant_on, averaging_const, running_min, running_max, scale, zero_point, quant_min, quant_max, ch_axis, per_row_fake_quant=False, symmetric_quant=False: -1  # noqa: B950
         ),
-        torch.fbgemm_linear_fp16_weight: lambda input, packed_weight, bias: -1,
-        torch.fbgemm_linear_fp16_weight_fp32_activation: lambda input, packed_weight, bias: -1,
+        torch.fbgemm_linear_fp16_weight: lambda input, packed_weight, bias, output: -1,
+        torch.fbgemm_linear_fp16_weight_fp32_activation: lambda input, packed_weight, bias, output: -1,
         torch.fbgemm_linear_int8_weight: lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1,  # noqa: B950
         torch.fbgemm_linear_int8_weight_fp32_activation: (
             lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1
@@ -670,6 +678,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.gt: lambda input, other, out=None: -1,
         torch.greater: lambda input, other, out=None: -1,
         torch.hardshrink: lambda input, lambd=0.5: -1,
+        torch.hash_tensor: lambda input, dim=None, keepdim=False, mode=0, out=None: -1,
         torch.heaviside: lambda input, values, out=None: -1,
         torch.hinge_embedding_loss: lambda input, target, margin=1.0, size_average=None, reduce=None, reduction="mean": -1,  # noqa: B950
         torch.histc: lambda input, bins=100, min=0, max=0, out=None: -1,
@@ -799,7 +808,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.miopen_rnn: (
             lambda input, weight, weight_stride0, hx, cx, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state: -1  # noqa: B950
         ),
-        torch.mm: lambda input, mat2, out=None: -1,
+        torch.mm: lambda input, mat2, out_dtype=None, out=None: -1,
         torch.mode: lambda input, dim=-1, keepdim=False, out=None: -1,
         torch.movedim: lambda input, source, destination: -1,
         torch.moveaxis: lambda input, source, destination: -1,
@@ -815,6 +824,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch._native_batch_norm_legit: lambda input, weight, bias, training, momentum, eps: -1,
         torch.native_dropout: lambda input, p, train: -1,
         torch.native_layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
+        torch._fused_rms_norm: lambda input, normalized_shape, weight=None, eps=1e-05: -1,
         torch.native_group_norm: lambda input, weight, bias, N, C, HxW, group, eps: -1,
         torch.native_norm: lambda input, p=2, dim=None, keepdim=False, dtype=None: -1,
         torch.native_channel_shuffle: lambda input, groups: -1,
@@ -1113,8 +1123,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.sinh: lambda input, out=None: -1,
         torch.slogdet: lambda input: -1,
         torch.linalg.slogdet: lambda input: -1,
-        torch.smm: lambda input, mat2: -1,
-        torch.spmm: lambda input, mat2: -1,
+        torch.smm: lambda input, mat2, out_dtype=None: -1,
+        torch.spmm: lambda input, mat2, out_dtype=None: -1,
         torch.softmax: lambda input, dim, dtype=None: -1,
         torch.linalg.solve: lambda A, B, left=True, out=None: -1,
         torch.linalg.solve_ex: lambda A, B, left=True, check_errors=False, out=None: -1,
@@ -1129,7 +1139,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.std: lambda input, dim=None: -1,
         torch.std_mean: lambda input, dim=None: -1,
         torch.stft: (
-            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode="reflect", normalized=False, onesided=True, return_complex=None: -1  # noqa: B950
+            lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode="reflect", normalized=False, onesided=True, return_complex=None, align_to_window=None: -1  # noqa: B950
         ),
         torch.sub: lambda input, other, out=None: -1,
         torch.subtract: lambda input, other, out=None: -1,
@@ -1343,6 +1353,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._grad.__get__: lambda self: -1,
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
+        Tensor.grad_dtype.__get__: lambda self: -1,
         Tensor._version.__get__: lambda self: -1,
         Tensor._autocast_to_reduced_precision: lambda self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype: -1,
         Tensor._autocast_to_full_precision: lambda self, cuda_enabled, cpu_enabled: -1,
@@ -1447,7 +1458,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.long: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.map_: lambda self, tensor, callable: -1,
         Tensor.map2_: lambda self, x, y, callable: -1,
-        Tensor.mm: lambda self, mat2: -1,
+        Tensor.mm: lambda self, mat2, out_dtype=None: -1,
         Tensor.module_load: lambda self, other, assign=False: -1,
         Tensor.narrow_copy: lambda self, dimension, start, length: -1,
         Tensor.ndimension: lambda self: -1,
@@ -1506,8 +1517,9 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.view: lambda self, shape: -1,
         Tensor.view_as: lambda self, other: -1,
         Tensor.zero_: lambda self: -1,
-        Tensor.__dlpack__: lambda self, stream=None: -1,
+        Tensor.__dlpack__: lambda self, stream=None, max_version=None, dl_device=None, copy=None: -1,
         Tensor.__dlpack_device__: lambda self: -1,
+        Tensor.index: lambda self, a, b: -1,
         torch.linalg.lstsq: lambda self, b, cond=None, driver=None: -1,
     }  # fmt: skip
 
@@ -1590,8 +1602,8 @@ def wrap_torch_function(dispatcher: Callable):
 
 def _get_overloaded_args(
     relevant_args: Iterable[Any],
-    get_type_fn: Optional[Callable[[Any], Type]] = None,
-) -> List[Any]:
+    get_type_fn: Optional[Callable[[Any], type]] = None,
+) -> list[Any]:
     """Returns a list of arguments on which to call __torch_function__.
 
     Checks arguments in relevant_args for __torch_function__ implementations,
@@ -1632,8 +1644,8 @@ def _get_overloaded_args(
     if not torch._C._is_torch_function_enabled():
         return []
     # Runtime is O(num_arguments * num_unique_types)
-    overloaded_types: Set[Type] = set()
-    overloaded_args: List[Any] = []
+    overloaded_types: set[type] = set()
+    overloaded_args: list[Any] = []
     for arg in relevant_args:
         arg_type = get_type_fn(arg)
         # We only collect arguments if they have a unique type, which ensures
@@ -1803,10 +1815,10 @@ has_torch_function_variadic = _add_docstr(
 )
 
 
-@functools.lru_cache(None)
-def _get_overridable_functions() -> (
-    Tuple[Dict[Any, List[Callable]], Dict[Callable, str]]
-):
+@functools.cache
+def _get_overridable_functions() -> tuple[
+    dict[Any, list[Callable]], dict[Callable, str]
+]:
     overridable_funcs = collections.defaultdict(list)
     index = {}
     tested_namespaces = [
@@ -1876,7 +1888,7 @@ def _get_overridable_functions() -> (
             if ignore:
                 continue
 
-            # cannot be overriden by __torch_function__
+            # cannot be overridden by __torch_function__
             if func in get_ignored_functions():
                 msg = (
                     "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
@@ -1891,7 +1903,7 @@ def _get_overridable_functions() -> (
 
 
 @_disable_user_warnings
-def get_overridable_functions() -> Dict[Any, List[Callable]]:
+def get_overridable_functions() -> dict[Any, list[Callable]]:
     """List functions that are overridable via __torch_function__
 
     Returns
@@ -1924,8 +1936,8 @@ def resolve_name(f):
     return _get_overridable_functions()[1].get(f)
 
 
-@functools.lru_cache(None)
-def _get_tensor_methods() -> Set[Callable]:
+@functools.cache
+def _get_tensor_methods() -> set[Callable]:
     """Returns a set of the overridable methods on ``torch.Tensor``"""
     overridable_funcs = get_overridable_functions()
     methods = set(overridable_funcs[torch.Tensor])
@@ -1998,7 +2010,7 @@ def is_tensor_like(inp):
 class TorchFunctionMode:
     """
     A ``TorchFunctionMode`` allows you to override the meaning of all
-    ``__torch_function__`` overrideable functions within a dynamic scope,
+    ``__torch_function__`` overridable functions within a dynamic scope,
     without having to actually create a tensor subclass or manually
     monkey-patch functions in the PyTorch API.  Some common situations
     where you should use a mode:

@@ -2,9 +2,10 @@
 # mypy: allow-untyped-defs
 import collections
 import copyreg
+from collections.abc import Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Dict, Optional, Sequence, Tuple, Union
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -25,7 +26,7 @@ __all__ = [
 ]
 
 _cache_enabled = 0
-_cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
+_cache: dict[tuple[int, str], Optional[Tensor]] = {}
 
 
 @contextmanager
@@ -45,6 +46,7 @@ def cached():
     .. code-block:: python
 
         import torch.nn.utils.parametrize as P
+
         ...
         with P.cached():
             output = model(inputs)
@@ -165,9 +167,7 @@ class ParametrizationList(ModuleList):
                         pass
                 # else, or if it throws, we assume that right_inverse is the identity
 
-        if not isinstance(new, Tensor) and not isinstance(
-            new, collections.abc.Sequence
-        ):
+        if not isinstance(new, Tensor) and not isinstance(new, Sequence):
             raise ValueError(
                 "'right_inverse' must return a Tensor or a Sequence of tensors (list, tuple...). "
                 f"Got {type(new).__name__}"
@@ -179,15 +179,28 @@ class ParametrizationList(ModuleList):
 
         # Register the tensor(s)
         if self.is_tensor:
+            # pyrefly: ignore  # missing-attribute
             if original.dtype != new.dtype:
                 raise ValueError(
                     "When `right_inverse` outputs one tensor, it may not change the dtype.\n"
                     f"original.dtype: {original.dtype}\n"
+                    # pyrefly: ignore  # missing-attribute
                     f"right_inverse(original).dtype: {new.dtype}"
                 )
+
+            # pyrefly: ignore  # missing-attribute
+            if original.device != new.device:
+                raise ValueError(
+                    "When `right_inverse` outputs one tensor, it may not change the device.\n"
+                    f"original.device: {original.device}\n"
+                    # pyrefly: ignore  # missing-attribute
+                    f"right_inverse(original).device: {new.device}"
+                )
+
             # Set the original to original so that the user does not need to re-register the parameter
             # manually in the optimiser
             with torch.no_grad():
+                # pyrefly: ignore  # bad-argument-type
                 _maybe_set(original, new)
             _register_parameter_or_buffer(self, "original", original)
         else:
@@ -388,6 +401,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
         if torch.jit.is_scripting():
             raise RuntimeError("Parametrization is not working with scripting.")
         parametrization = self.parametrizations[tensor_name]
+        # pyrefly: ignore  # redundant-condition
         if _cache_enabled:
             if torch.jit.is_scripting():
                 # Scripting
@@ -520,24 +534,26 @@ def register_parametrization(
         >>> print(torch.allclose(m.weight, m.weight.T))  # m.weight is now symmetric
         True
         >>> A = torch.rand(5, 5)
-        >>> A = A + A.T   # A is now symmetric
+        >>> A = A + A.T  # A is now symmetric
         >>> m.weight = A  # Initialize the weight to be the symmetric matrix A
         >>> print(torch.allclose(m.weight, A))
         True
 
         >>> class RankOne(nn.Module):
         >>>     def forward(self, x, y):
-        >>>         # Form a rank 1 matrix multiplying two vectors
+        >>> # Form a rank 1 matrix multiplying two vectors
         >>>         return x.unsqueeze(-1) @ y.unsqueeze(-2)
         >>>
         >>>     def right_inverse(self, Z):
-        >>>         # Project Z onto the rank 1 matrices
+        >>> # Project Z onto the rank 1 matrices
         >>>         U, S, Vh = torch.linalg.svd(Z, full_matrices=False)
-        >>>         # Return rescaled singular vectors
+        >>> # Return rescaled singular vectors
         >>>         s0_sqrt = S[0].sqrt().unsqueeze(-1)
         >>>         return U[..., :, 0] * s0_sqrt, Vh[..., 0, :] * s0_sqrt
         >>>
-        >>> linear_rank_one = P.register_parametrization(nn.Linear(4, 4), "weight", RankOne())
+        >>> linear_rank_one = P.register_parametrization(
+        ...     nn.Linear(4, 4), "weight", RankOne()
+        ... )
         >>> print(torch.linalg.matrix_rank(linear_rank_one.weight).item())
         1
 
@@ -595,9 +611,9 @@ def register_parametrization(
 
         # add the new parametrization to the parametrization list
         assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
-        module.parametrizations[tensor_name].append(parametrization)
+        module.parametrizations[tensor_name].append(parametrization)  # type: ignore[operator]
         # If unsafe was True in previous parametrization, keep it enabled
-        module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr]
+        module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr, operator]
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter
@@ -685,8 +701,10 @@ def remove_parametrizations(
     # Fetch the original tensor
     assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
     parametrizations = module.parametrizations[tensor_name]
+    # pyrefly: ignore  # invalid-argument
     if parametrizations.is_tensor:
         original = parametrizations.original
+        assert isinstance(original, torch.Tensor), "is_tensor promised us a Tensor"
         if leave_parametrized:
             with torch.no_grad():
                 t = getattr(module, tensor_name)
@@ -793,7 +811,9 @@ def transfer_parametrizations_and_params(
                 )
 
             # apply the params's parametrizations to to_module
-            for param_func in from_module.parametrizations[parameter_name]:
+            for param_func in from_module.parametrizations[  # type: ignore[attr-defined]
+                parameter_name
+            ]:
                 register_parametrization(to_module, parameter_name, param_func)
             assert isinstance(to_module.parametrizations, ModuleDict)  # for mypy
 

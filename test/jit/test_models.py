@@ -7,27 +7,23 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.testing._internal.common_cuda import tf32_on_and_off
 from torch.testing._internal.common_utils import (
     enable_profiling_mode_for_profiling_tests,
     GRAPH_EXECUTOR,
     ProfilingMode,
+    raise_on_run_directly,
     set_default_dtype,
+    slowTest,
+    suppress_warnings,
 )
 
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.common_utils import slowTest, suppress_warnings
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 try:
     import torchvision
@@ -84,7 +80,7 @@ class TestModels(JitTestCase):
                     nn.ReLU(True),
                     # state size. (ngf) x 32 x 32
                     nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
-                    nn.Tanh()
+                    nn.Tanh(),
                     # state size. (nc) x 64 x 64
                 )
 
@@ -487,6 +483,7 @@ class TestModels(JitTestCase):
         self._test_super_resolution(self, device="cpu")
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
+    @tf32_on_and_off(0.02)
     def test_super_resolution_cuda(self):
         # XXX: export_import on CUDA modules doesn't work (#11480)
         self._test_super_resolution(self, device="cuda", check_export_import=False)
@@ -754,3 +751,7 @@ class TestModels(JitTestCase):
         m = self.createFunctionFromGraph(g)
         with torch.random.fork_rng(devices=[]):
             self.assertEqual(outputs, m(*inputs))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

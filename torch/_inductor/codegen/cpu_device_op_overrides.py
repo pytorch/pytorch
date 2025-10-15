@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from textwrap import dedent
 
 from .common import DeviceOpOverrides, register_device_op_overrides
@@ -11,6 +13,9 @@ class CpuDeviceOpOverrides(DeviceOpOverrides):
                 return 0
             """
         )
+
+    def cpp_kernel_type(self) -> str:
+        return "void*"
 
     def set_device(self, device_idx: int) -> str:
         return "pass"

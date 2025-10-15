@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/custom_class.h>
 #include <string>
+#include <unordered_set>
 
 using c10::AliasInfo;
 using c10::AwaitType;
@@ -33,6 +34,7 @@ using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
+using c10::SymBoolType;
 using c10::SymIntType;
 using c10::TensorType;
 using c10::TupleType;
@@ -40,6 +42,25 @@ using c10::UnionType;
 using c10::VarType;
 
 namespace torch::jit {
+
+static std::unordered_set<std::string>& getOpaqueTypes() {
+  static std::unordered_set<std::string> global_opaque_types;
+  return global_opaque_types;
+}
+
+void registerOpaqueType(const std::string& type_name) {
+  auto& global_opaque_types = getOpaqueTypes();
+  auto [_, inserted] = global_opaque_types.insert(type_name);
+  if (!inserted) {
+    throw std::runtime_error(
+        "Type '" + type_name + "' is already registered as an opaque type");
+  }
+}
+
+bool isRegisteredOpaqueType(const std::string& type_name) {
+  auto& global_opaque_types = getOpaqueTypes();
+  return global_opaque_types.find(type_name) != global_opaque_types.end();
+}
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
@@ -66,6 +87,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"int", c10::TypeFactory::get<IntType>()},
       {"SymInt", c10::TypeFactory::get<SymIntType>()},
       {"bool", c10::TypeFactory::get<BoolType>()},
+      {"SymBool", c10::TypeFactory::get<SymBoolType>()},
       {"None", c10::TypeFactory::get<NoneType>()},
       {"NoneType", c10::TypeFactory::get<NoneType>()},
       {"Capsule", c10::TypeFactory::get<CapsuleType>()},
@@ -79,12 +101,17 @@ TypePtr SchemaTypeParser::parseBaseType() {
   }
   std::string text = tok.text();
 
+  // Check if this type is registered as an opaque type first
+  if (isRegisteredOpaqueType(text)) {
+    return c10::PyObjectType::get();
+  }
+
   auto it = type_map.find(text);
   if (it == type_map.end()) {
     if (allow_typevars_ && !text.empty() && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
-      return c10::TypeFactory::createNamed<VarType>(text);
+      return c10::TypeFactory::createNamed<VarType>(std::move(text));
     }
     if (text == "double") {
       throw(
@@ -116,9 +143,9 @@ TypePtr SchemaTypeParser::parseBaseType() {
 // Tensor(a! -> a|b) // Tensor is in set a, written to,
 //                      and after the write is in set a AND b.
 std::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
-  AliasInfo alias_info;
   if (L.nextIf('(')) {
     // optional 'alias set annotation'
+    AliasInfo alias_info;
     parseList(TK_NOTHING, '|', TK_NOTHING, [&] {
       if (L.nextIf('*')) {
         alias_info.addBeforeSet(AliasInfo::wildcardSet());
@@ -153,15 +180,16 @@ std::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
       }
     }
     L.expect(')');
+    return alias_info;
   } else if (L.nextIf('!')) {
+    AliasInfo alias_info;
     alias_info.addBeforeSet(
         Symbol::fromQualString("alias::$" + std::to_string(next_id++)));
     alias_info.setIsWrite(true);
+    return alias_info;
   } else {
     return std::nullopt;
   }
-
-  return alias_info;
 }
 
 std::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
@@ -194,11 +222,11 @@ std::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
       const std::string& num = L.expect(TK_NUMBER).text();
       try {
         device_idx = static_cast<c10::DeviceIndex>(std::stoi(num));
-      } catch (const std::invalid_argument& e) {
+      } catch (const std::invalid_argument&) {
         throw(
             ErrorReport(L.cur())
             << "Device index cannot be converted to integer");
-      } catch (const std::out_of_range& e) {
+      } catch (const std::out_of_range&) {
         throw(ErrorReport(L.cur()) << "Device index is too long");
       }
     }
@@ -217,11 +245,11 @@ std::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   const std::string& num = L.expect(TK_NUMBER).text();
   try {
     return (bool)std::stoi(num);
-  } catch (const std::invalid_argument& e) {
+  } catch (const std::invalid_argument&) {
     throw(
         ErrorReport(L.cur())
         << "Field requires_grad cannot be converted to integer");
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     throw(ErrorReport(L.cur()) << "Field requires_grad is too long");
   }
 }
@@ -277,11 +305,11 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
           try {
             auto stride = std::stoll(num);
             strides.push_back(stride);
-          } catch (const std::invalid_argument& e) {
+          } catch (const std::invalid_argument&) {
             throw(
                 ErrorReport(L.cur())
                 << "The stride value cannot be converted to int");
-          } catch (const std::out_of_range& e) {
+          } catch (const std::out_of_range&) {
             throw(ErrorReport(L.cur()) << "The stride is too big");
           }
         });
@@ -307,7 +335,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       return;
     }
     bool shape_symbol = false;
-    if (L.cur().kind == TK_IDENT && L.cur().text() == "SS") {
+    if (L.cur().kind == TK_IDENT && L.cur().text_view() == "SS") {
       L.next();
       L.expect('(');
       L.expect('-');
@@ -317,9 +345,9 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     int64_t dim = 0;
     try {
       dim = std::stoll(num);
-    } catch (const std::invalid_argument& e) {
+    } catch (const std::invalid_argument&) {
       throw(ErrorReport(L.cur()) << "The number can't be converted to int");
-    } catch (const std::out_of_range& e) {
+    } catch (const std::out_of_range&) {
       throw(ErrorReport(L.cur()) << "Number is too big");
     }
     if (shape_symbol) {
@@ -376,35 +404,38 @@ SchemaTypeParser::parseFakeAndRealType() {
     });
     fake_value = real_value =
         c10::TypeFactory::create<TupleType>(std::move(types));
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Future") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Future") {
     L.next(); // Future
     L.expect('(');
     auto p = parseType();
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<FutureType>(subtype);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Await") {
+    fake_value = real_value =
+        c10::TypeFactory::create<FutureType>(std::move(subtype));
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Await") {
     L.next(); // Await
     L.expect('(');
     auto p = parseType();
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<AwaitType>(subtype);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
+    fake_value = real_value =
+        c10::TypeFactory::create<AwaitType>(std::move(subtype));
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "RRef") {
     L.next(); // RRef
     L.expect('(');
     auto p = parseType();
     auto subtype = std::move(p.first);
     auto subalias = std::move(p.second);
     L.expect(')');
-    fake_value = real_value = c10::TypeFactory::create<RRefType>(subtype);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Tensor") {
+    fake_value = real_value =
+        c10::TypeFactory::create<RRefType>(std::move(subtype));
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Tensor") {
     L.next();
     fake_value = real_value = c10::TypeFactory::get<TensorType>();
     alias_info = parseAliasAnnotation();
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Dict") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Dict") {
     L.next();
     L.expect('(');
     auto key_type = parseType().first;
@@ -412,9 +443,9 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto value_type = parseType().first;
     L.expect(')');
     alias_info = parseAliasAnnotation();
-    fake_value = real_value =
-        c10::TypeFactory::create<DictType>(key_type, value_type);
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
+    fake_value = real_value = c10::TypeFactory::create<DictType>(
+        std::move(key_type), std::move(value_type));
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "Union") {
     L.next();
     L.expect('(');
     std::vector<TypePtr> types;
@@ -432,7 +463,7 @@ SchemaTypeParser::parseFakeAndRealType() {
       parseTensorDType(L.cur().text())) {
     fake_value = real_value = parseRefinedTensor();
     alias_info = parseAliasAnnotation();
-  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "__torch__") {
+  } else if (L.cur().kind == TK_IDENT && L.cur().text_view() == "__torch__") {
     L.next();
     L.expect('.');
     auto torch_tok = L.expect(TK_IDENT);
@@ -477,8 +508,8 @@ SchemaTypeParser::parseFakeAndRealType() {
     if (L.cur().kind == '[' && L.lookahead().kind == ']') {
       L.next(); // [
       L.next(); // ]
-      fake_value = c10::TypeFactory::create<ListType>(fake_value);
-      real_value = c10::TypeFactory::create<ListType>(real_value);
+      fake_value = c10::TypeFactory::create<ListType>(std::move(fake_value));
+      real_value = c10::TypeFactory::create<ListType>(std::move(real_value));
       auto container = parseAliasAnnotation();
       if (alias_info) {
         if (!container) {

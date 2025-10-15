@@ -31,7 +31,11 @@
 
 // for validators
 #ifdef USE_ROCM
+#ifdef _WIN32
+#include <hip/hip_version.h>
+#else
 #include <rocm-core/rocm_version.h>
+#endif
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
 #include <hipblaslt/hipblaslt.h>
@@ -46,7 +50,13 @@ TuningContext* getTuningContext() {
 }
 
 std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
-  return stream << entry.key_ << "," << entry.time_;
+  static const bool blaslog = c10::utils::get_env("PYTORCH_TUNABLEOP_BLAS_LOG") == "1";
+  if (!blaslog) {
+    return stream << entry.key_ << "," << entry.time_;
+  }
+  else {
+    return stream << entry.key_ << "," << entry.time_ << ",BLAS_PARAMS: " << entry.blas_sig_;
+  }
 }
 
 // TuningResultsManager
@@ -107,7 +117,8 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
   AddImpl(op_signature, params_signature, std::move(best), it->second);
 }
 
-void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature) {
+void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
+    const std::string& params_signature, const std::string& blas_signature) {
   std::scoped_lock l{lock_};
   if (!untuned_file.good()) {
     TORCH_WARN_ONCE("failed to open file for writing; untuned gemm will not be saved");
@@ -127,7 +138,13 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
     }
 
     if (isNew) {
-      untuned_file << op_signature << "," << params_signature << std::endl;
+      static const bool blaslog = c10::utils::get_env("PYTORCH_TUNABLEOP_BLAS_LOG") == "1";
+      if (!blaslog) {
+        untuned_file << op_signature << "," << params_signature << std::endl;
+      }
+      else {
+        untuned_file << op_signature << "," << params_signature << ",BLAS_PARAMS: " << blas_signature << std::endl;
+      }
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
   }
@@ -203,15 +220,17 @@ TuningResultsValidator::TuningResultsValidator() {
       []() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
 #ifdef USE_ROCM
-  // rocm
+  // hip
   {
-    std::string rocm_version = ROCM_BUILD_INFO;
+    // HIP version is more accurate than ROCm version.  User's environment could be a stock
+    // ROCm install but with a mix of newer components, making ROCm version meaningless.
+    std::string hip_version = c10::str(TORCH_HIP_VERSION);
     RegisterValidator(
-       "ROCM_VERSION",
-       [rocm_version]() { return rocm_version; },
-       [rocm_version](auto&& k) {
-        TUNABLE_LOG1("ROCM_VERSION validation: expect ", k, " to match ", rocm_version);
-        return rocm_version == k ? OK : FAIL;
+       "HIP_VERSION",
+       [hip_version]() { return hip_version; },
+       [hip_version](auto&& k) {
+        TUNABLE_LOG1("HIP_VERSION validation: expect ", k, " to match ", hip_version);
+        return hip_version == k ? OK : FAIL;
       });
   }
   // gfx arch
@@ -227,15 +246,10 @@ TuningResultsValidator::TuningResultsValidator() {
   }
   // rocblas
   {
-#define STRINGIFY(s) #s
-#define XSTRINGIFY(s) STRINGIFY(s)
-    std::string rocblas_version = c10::str(
-        XSTRINGIFY(ROCBLAS_VERSION_MAJOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_MINOR), ".",
-        XSTRINGIFY(ROCBLAS_VERSION_PATCH), "-",
-        XSTRINGIFY(ROCBLAS_VERSION_TWEAK));
-#undef XSTRINGIFY
-#undef STRINGIFY
+    size_t rocblas_version_size;
+    rocblas_get_version_string_size(&rocblas_version_size);
+    std::string rocblas_version(rocblas_version_size - 1, '\0');
+    rocblas_get_version_string(rocblas_version.data(), rocblas_version_size);
     RegisterValidator(
         "ROCBLAS_VERSION",
         [rocblas_version]() { return rocblas_version; },
@@ -390,8 +404,6 @@ TuningContext::TuningContext() :
     max_warmup_iterations_{0},
     icache_flush_{true},
     rotating_buffer_size_{-1},
-    filename_{},
-    untuned_file_{},
     results_count_from_input_file_{0},
     is_shutting_down_{false}
 {
@@ -459,6 +471,8 @@ void TuningContext::EnableRecordUntuned(bool value) {
     TUNABLE_LOG1("Enable Record Untuned for TunableOp");
   } else {
     TUNABLE_LOG1("Disable Record Untuned for TunableOp");
+    TUNABLE_LOG1("Closing Untuned GEMM Results File");
+    untuned_file_.close();
   }
 }
 
@@ -506,8 +520,8 @@ void TuningContext::EnableNumericsCheck(bool value) {
 }
 
 bool TuningContext::IsNumericsCheckEnabled() const {
-  const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
-  if (env != nullptr && strcmp(env, "1") == 0) {
+  const auto env = c10::utils::get_env("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
+  if (env == "1") {
     return true;
   }
   return numerics_check_enable_;

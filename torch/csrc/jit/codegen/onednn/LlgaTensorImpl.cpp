@@ -31,7 +31,7 @@ dnnl::engine& Engine::getEngine() {
   static dnnl::graph::allocator alloc{
       pytorch_default_allocator, pytorch_default_deallocator};
   static dnnl::engine cpu_engine = dnnl::graph::make_engine_with_allocator(
-      dnnl::engine::kind::cpu, /* device_id = */ 0, alloc);
+      dnnl::engine::kind::cpu, /* index = */ 0, alloc);
   return cpu_engine;
 }
 

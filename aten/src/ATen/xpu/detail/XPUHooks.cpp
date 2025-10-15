@@ -3,7 +3,6 @@
 #include <ATen/xpu/XPUDevice.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <ATen/xpu/detail/XPUHooks.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Logging.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 
@@ -85,9 +84,14 @@ bool XPUHooks::isPinnedPtr(const void* data) const {
       sycl::get_pointer_type(data, c10::xpu::get_device_context());
 }
 
+bool XPUHooks::isAvailable() const {
+  return at::xpu::is_available();
+}
+
 bool XPUHooks::hasPrimaryContext(DeviceIndex device_index) const {
-  // The default context is utilized for each device. So it always returns true.
-  return true;
+  // The default context is utilized for each device.
+  // So it always returns true if a device is available.
+  return isAvailable();
 }
 
 DeviceIndex XPUHooks::deviceCount() const {

@@ -3,7 +3,6 @@
 import unittest
 from collections.abc import Sequence
 from functools import partial
-from typing import List
 
 import numpy as np
 
@@ -103,8 +102,9 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
         for mask in _generate_masked_op_mask(
             sample_input.input.shape, device, **kwargs
         ):
-            sample_input_args, sample_input_kwargs = sample_input.args, dict(
-                mask=mask, **sample_input.kwargs
+            sample_input_args, sample_input_kwargs = (
+                sample_input.args,
+                dict(mask=mask, **sample_input.kwargs),
             )
             yield SampleInput(
                 sample_input.input.detach().requires_grad_(requires_grad),
@@ -225,8 +225,9 @@ def sample_inputs_masked_norm(op_info, device, dtype, requires_grad, **kwargs):
             op_info, device, dtype, requires_grad, **kwargs
         ):
             sample_input_args, sample_input_kwargs = (
-                ord,
-            ) + sample_input.args, sample_input.kwargs.copy()
+                (ord,) + sample_input.args,
+                sample_input.kwargs.copy(),
+            )
             yield SampleInput(
                 sample_input.input.clone().requires_grad_(requires_grad),
                 args=sample_input_args,
@@ -277,8 +278,9 @@ def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs
             for mask in _generate_masked_op_mask(
                 sample_input.input.shape, device, **kwargs
             ):
-                sample_input_args, sample_input_kwargs = sample_input.args, dict(
-                    mask=mask, **sample_input.kwargs
+                sample_input_args, sample_input_kwargs = (
+                    sample_input.args,
+                    dict(mask=mask, **sample_input.kwargs),
                 )
                 yield SampleInput(
                     sample_input.input.detach().requires_grad_(requires_grad),
@@ -363,10 +365,11 @@ def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs)
         for mask in _generate_masked_op_mask(
             sample_input.input.shape, device, **kwargs
         ):
-            if type(mask) != torch.Tensor:
+            if type(mask) is not torch.Tensor:
                 continue
-            sample_input_args, sample_input_kwargs = sample_input.args, dict(
-                mask=mask, **sample_input.kwargs
+            sample_input_args, sample_input_kwargs = (
+                sample_input.args,
+                dict(mask=mask, **sample_input.kwargs),
             )
             if "keepdim" in sample_input_kwargs:
                 sample_input_kwargs.pop("keepdim")
@@ -424,7 +427,7 @@ def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwar
             )
 
 
-op_db: List[OpInfo] = [
+op_db: list[OpInfo] = [
     ReductionOpInfo(
         "masked.sum",
         ref=reference_reduction_numpy(np.sum),
@@ -769,26 +772,8 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         promotes_int_to_float=True,
-        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         skips=(
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestReductions",
-                "test_ref_duplicate_values",
-                dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestReductions",
-                "test_reference_masked",
-                dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestReductions",
-                "test_ref_small_input",
-                dtypes=(torch.bool,),
-            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestNormalizeOperators",

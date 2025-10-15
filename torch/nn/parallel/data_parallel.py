@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import operator
 import warnings
+from collections.abc import Sequence
 from itertools import chain
-from typing import Any, Dict, Generic, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import Any, Generic, Optional, TypeVar, Union
 
 import torch
 from torch._utils import (
@@ -159,6 +160,7 @@ class DataParallel(Module, Generic[T]):
         self.module = module
         self.device_ids = [_get_device_index(x, True) for x in device_ids]
         self.output_device = _get_device_index(output_device, True)
+        # pyrefly: ignore  # read-only
         self.src_device_obj = torch.device(device_type, self.device_ids[0])
 
         if device_type == "cuda":
@@ -172,6 +174,7 @@ class DataParallel(Module, Generic[T]):
             if not self.device_ids:
                 return self.module(*inputs, **kwargs)
 
+            # pyrefly: ignore  # bad-argument-type
             for t in chain(self.module.parameters(), self.module.buffers()):
                 if t.device != self.src_device_obj:
                     raise RuntimeError(
@@ -195,20 +198,20 @@ class DataParallel(Module, Generic[T]):
 
     def replicate(
         self, module: T, device_ids: Sequence[Union[int, torch.device]]
-    ) -> List[T]:
+    ) -> list[T]:
         return replicate(module, device_ids, not torch.is_grad_enabled())
 
     def scatter(
         self,
-        inputs: Tuple[Any, ...],
-        kwargs: Optional[Dict[str, Any]],
+        inputs: tuple[Any, ...],
+        kwargs: Optional[dict[str, Any]],
         device_ids: Sequence[Union[int, torch.device]],
     ) -> Any:
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
     def parallel_apply(
         self, replicas: Sequence[T], inputs: Sequence[Any], kwargs: Any
-    ) -> List[Any]:
+    ) -> list[Any]:
         return parallel_apply(
             replicas, inputs, kwargs, self.device_ids[: len(replicas)]
         )
@@ -258,8 +261,10 @@ def data_parallel(
 
     device_ids = [_get_device_index(x, True) for x in device_ids]
     output_device = _get_device_index(output_device, True)
+    # pyrefly: ignore  # no-matching-overload
     src_device_obj = torch.device(device_type, device_ids[0])
 
+    # pyrefly: ignore  # bad-argument-type
     for t in chain(module.parameters(), module.buffers()):
         if t.device != src_device_obj:
             raise RuntimeError(

@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import numpy as np
 
 import torch
@@ -21,7 +19,7 @@ class AdaptiveRoundingLoss(torch.nn.Module):
         self,
         max_iter: int,
         warm_start: float = 0.2,
-        beta_range: Tuple[int, int] = (20, 2),
+        beta_range: tuple[int, int] = (20, 2),
         reg_param: float = 0.001,
     ) -> None:
         super().__init__()
@@ -39,9 +37,9 @@ class AdaptiveRoundingLoss(torch.nn.Module):
         Major logics copied from official Adaround Implementation.
         Apply rounding regularization to the input tensor V.
         """
-        assert (
-            curr_iter < self.max_iter
-        ), "Current iteration strictly les sthan max iteration"
+        assert curr_iter < self.max_iter, (
+            "Current iteration strictly les sthan max iteration"
+        )
         if curr_iter < self.warm_start * self.max_iter:
             return torch.tensor(0.0)
         else:
@@ -56,7 +54,7 @@ class AdaptiveRoundingLoss(torch.nn.Module):
                 1 + np.cos(rel_iter * np.pi)
             )
 
-            # A rectified sigmoid for soft-quantization as formualted [23] in https://arxiv.org/pdf/2004.10568.pdf
+            # A rectified sigmoid for soft-quantization as formulated [23] in https://arxiv.org/pdf/2004.10568.pdf
             h_alpha = torch.clamp(
                 torch.sigmoid(V) * (ADAROUND_ZETA - ADAROUND_GAMMA) + ADAROUND_GAMMA,
                 min=0,
@@ -87,7 +85,7 @@ class AdaptiveRoundingLoss(torch.nn.Module):
         original_output: torch.Tensor,
         V: torch.Tensor,
         curr_iter: int,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Compute the asymmetric reconstruction formulation as eq [25]
         """

@@ -79,7 +79,7 @@ if TEST_SCIPY:
 class TestBinaryUfuncs(TestCase):
     # Generic tests for elementwise binary (AKA binary universal (u) functions (funcs))
     # TODO: below contiguous tensor results are compared with a variety of noncontiguous results.
-    #   It would be interesting to have the lhs and rhs have different discontiguities.
+    #   It would be interesting to have the lhs and rhs have different discontinuities.
 
     # Helper for comparing torch tensors and NumPy arrays
     # TODO: should this or assertEqual also validate that strides are equal?
@@ -1480,8 +1480,8 @@ class TestBinaryUfuncs(TestCase):
                     self.assertRaisesRegex(RuntimeError, regex, base.pow_, exponent)
                 elif torch.can_cast(torch.result_type(base, exponent), base.dtype):
                     actual2 = actual.pow_(exponent)
-                    self.assertEqual(actual, expected)
-                    self.assertEqual(actual2, expected)
+                    self.assertEqual(actual, expected.to(actual))
+                    self.assertEqual(actual2, expected.to(actual2))
                 else:
                     self.assertRaisesRegex(
                         RuntimeError,
@@ -1688,12 +1688,11 @@ class TestBinaryUfuncs(TestCase):
 
     @onlyCUDA
     @dtypes(torch.complex64, torch.complex128)
-    def test_pow_cuda_complex_extremal_failing(self, device, dtype):
+    def test_pow_cuda_complex_extremal_passing(self, device, dtype):
         t = torch.tensor(complex(-1.0, float("inf")), dtype=dtype, device=device)
-        with self.assertRaises(AssertionError):
-            cuda_out = t.pow(2)
-            cpu_out = t.cpu().pow(2)
-            self.assertEqual(cpu_out, cuda_out)
+        cuda_out = t.pow(2)
+        cpu_out = t.cpu().pow(2)
+        self.assertEqual(cpu_out, cuda_out)
 
     @skipIfTorchDynamo()
     @onlyNativeDeviceTypes
@@ -2522,7 +2521,7 @@ class TestBinaryUfuncs(TestCase):
             # Verify Value
             self.assertEqual(torch_result, expected)
             # Verify Sign
-            # Use double copysign to verify the correctnes of 0.0 and -0.0, since
+            # Use double copysign to verify the correctness of 0.0 and -0.0, since
             # it always True for self.assertEqual(0.0 == -0.0). So, we use 1 as the
             # magnitude to verify the sign between torch and numpy results, elementwise.
             # Special case: NaN conversions between FP32 and FP16 is not bitwise
@@ -3519,6 +3518,24 @@ class TestBinaryUfuncs(TestCase):
                 expected = torch.lerp(xref, yref, wref).to(dtype)
                 self.assertEqual(actual, expected, atol=0.0, rtol=0.0)
 
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_lerp_weight_scalar_tensor_promotion(self, device, dtype):
+        start = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        end = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        weight = torch.rand((), dtype=torch.float, device=device)
+
+        actual = torch.lerp(start, end, weight)
+        expected = start + weight.to(dtype) * (end - start)
+        self.assertEqual(expected, actual)
+
+    @dtypes(torch.double, torch.cfloat, torch.cdouble)
+    def test_lerp_weight_tensor_promotion_error(self, device, dtype):
+        start = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        end = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        weight = torch.rand((5, 5), dtype=torch.float, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected dtype"):
+            torch.lerp(start, end, weight)
+
     def _test_logaddexp(self, device, dtype, base2):
         if base2:
             ref_func = np.logaddexp2
@@ -4145,7 +4162,7 @@ class TestBinaryUfuncs(TestCase):
             for i in complex_exponents if exp_dtype.is_complex else exponents:
                 out_dtype_scalar_exp = (
                     torch.complex128
-                    if base_dtype.is_complex or type(i) == complex
+                    if base_dtype.is_complex or type(i) is complex
                     else torch.float64
                 )
                 expected_scalar_exp = torch.from_numpy(np.float_power(to_np(base), i))
@@ -4173,7 +4190,7 @@ class TestBinaryUfuncs(TestCase):
         for i in complex_exponents if base_dtype.is_complex else exponents:
             out_dtype_scalar_base = (
                 torch.complex128
-                if exp_dtype.is_complex or type(i) == complex
+                if exp_dtype.is_complex or type(i) is complex
                 else torch.float64
             )
             expected_scalar_base = torch.from_numpy(np.float_power(i, to_np(exp)))
@@ -4188,9 +4205,9 @@ class TestBinaryUfuncs(TestCase):
     def test_float_power_exceptions(self, device):
         def _promo_helper(x, y):
             for i in (x, y):
-                if type(i) == complex:
+                if type(i) is complex:
                     return torch.complex128
-                elif type(i) == torch.Tensor and i.is_complex():
+                elif type(i) is torch.Tensor and i.is_complex():
                     return torch.complex128
             return torch.double
 

@@ -29,12 +29,14 @@ InputMetadata::InputMetadata(
     const at::TensorOptions& options,
     MetadataShape input_shape,
     bool is_tensor_subclass,
-    bool is_nested)
+    bool is_nested,
+    std::optional<at::ScalarType> grad_dtype)
     : options_{options},
       shape_{std::move(input_shape)},
       is_tensor_subclass_{is_tensor_subclass},
       is_nested_{is_nested},
-      was_default_constructed_{false} {
+      was_default_constructed_{false},
+      grad_dtype_{grad_dtype} {
   auto device_ = options.device();
   stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
 }
@@ -44,7 +46,8 @@ InputMetadata::InputMetadata(const at::Tensor& t)
           t.options(),
           compute_variant_shape(t),
           is_python_dispatch(t),
-          t.is_nested()) {}
+          t.is_nested(),
+          t.grad_dtype()) {}
 
 at::Tensor InputMetadata::zeros_like() const {
   TORCH_CHECK(
@@ -91,10 +94,10 @@ at::Tensor InputMetadata::maybe_reduce(
     const auto& target = desired[target_dim - i - 1];
     // The conditions here are written carefully so that we are able to
     // infer deferred runtime asserts
-    if (TORCH_GUARD_SIZE_OBLIVIOUS(size.sym_eq(1))) {
+    if (TORCH_GUARD_OR_FALSE(size.sym_eq(1))) {
       // NB: we could short circuit this once needs_reduce is true but there's
       // no point since the reduction function will guard on this anyway
-      if (!c10::definitely_true(size.sym_eq(target), __FILE__, __LINE__)) {
+      if (!c10::guard_or_false(size.sym_eq(target), __FILE__, __LINE__)) {
         needs_reduce = true;
       }
     } else {

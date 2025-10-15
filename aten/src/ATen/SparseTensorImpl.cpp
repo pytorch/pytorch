@@ -108,7 +108,7 @@ void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, cons
   AT_ASSERT(device() == values_.device());
   AT_ASSERT(values_.device() == indices_.device());
 
-  coalesced_ = TORCH_GUARD_SIZE_OBLIVIOUS(sym_nnz().sym_lt(2));
+  coalesced_ = TORCH_GUARD_OR_FALSE(sym_nnz().sym_lt(2));
 }
 
 

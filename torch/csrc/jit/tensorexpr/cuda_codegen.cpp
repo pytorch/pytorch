@@ -843,14 +843,14 @@ static std::ostream& operator<<(
   return out;
 }
 
-static const char* device_resource_string = R"(
+static constexpr const char* device_resource_string = R"(
 #define NAN __int_as_float(0x7fffffff)
 #define POS_INFINITY __int_as_float(0x7f800000)
 #define NEG_INFINITY __int_as_float(0xff800000)
 
 )";
 
-static const char* shared_resource_string = R"(
+static constexpr const char* shared_resource_string = R"(
 template<typename T>
 __device__ T maximum(T a, T b) {
   return isnan(a) ? a : (a > b ? a : b);
@@ -1082,8 +1082,7 @@ void CudaCodeGen::call_with_numel(void** args, int64_t numel) {
   // https://stackoverflow.com/questions/34388712/cannot-understand-how-jcuda-culaunchkernel-work
   std::vector<void*> ptr_to_args(buffer_args.size());
   for (size_t i = 0; i < buffer_args.size(); i++) {
-    ptr_to_args[i] =
-        buffer_args[i].isVar() ? args[i] : const_cast<void**>(&args[i]);
+    ptr_to_args[i] = buffer_args[i].isVar() ? args[i] : (&args[i]);
   }
 
   const auto device = this->device().index();
@@ -1286,7 +1285,7 @@ void CudaCodeGen::CompileToNVRTC(
   args.push_back("-hip-pch");
 #else
   const std::string compute = std::string("--gpu-architecture=") +
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+#if !defined(USE_ROCM)
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
       // (since older driver doesn't necessarily recognize PTX emitted by new
@@ -1321,7 +1320,7 @@ void CudaCodeGen::CompileToNVRTC(
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size = 0;
   std::vector<char> ptx;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+#if !defined(USE_ROCM)
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
   auto getSize = compile_to_sass

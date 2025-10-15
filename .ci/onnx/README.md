@@ -10,5 +10,3 @@ example: `py2-cuda9.0-cudnn7-ubuntu16.04`. The Docker images that are
 built on Jenkins and are used in triggered builds already have this
 environment variable set in their manifest. Also see
 `./docker/jenkins/*/Dockerfile` and search for `BUILD_ENVIRONMENT`.
-
-Our Jenkins installation is located at https://ci.pytorch.org/jenkins/.

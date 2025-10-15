@@ -1,20 +1,10 @@
 # mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
+from collections.abc import Callable, Sequence
 from functools import lru_cache, partial, wraps
 from itertools import chain
-from typing import (
-    Callable,
-    Dict,
-    FrozenSet,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 
@@ -44,9 +34,9 @@ _P = ParamSpec("_P")
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
-global_decomposition_table: Dict[
-    str, Dict[torch._ops.OperatorBase, Callable]
-] = defaultdict(dict)
+global_decomposition_table: dict[str, dict[torch._ops.OperatorBase, Callable]] = (
+    defaultdict(dict)
+)
 
 decomposition_table = global_decomposition_table["post_autograd"]
 pre_autograd_decomposition_table = global_decomposition_table["pre_autograd"]
@@ -78,7 +68,7 @@ def _add_op_to_registry(registry, op, fn):
     If op is OpOverload, it will be added to the registry directly.
     If op is OpOverloadPacket, all the valid op_overloads in the packet will be added to the registry.
     """
-    overloads: List[Union[torch._ops.OperatorBase]] = []
+    overloads: list[Union[torch._ops.OperatorBase]] = []
     if isinstance(op, HigherOrderOperator):
         # There's no concept of overloads for HigherOrderOperator
         registry[op] = fn
@@ -134,7 +124,8 @@ def _convert_out_params(f):
         # Drop the out parameter and concatenate the new kwargs in the signature
         params = chain((v for k, v in sig.parameters.items() if k != "out"), out_params)
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
+            parameters=params,  # type: ignore[arg-type]
+            return_annotation=sig.return_annotation,
         )
         # Drop the out parameter and concatenate the new kwargs in the annotations
         _fn.__annotations__ = {k: v for k, v in f.__annotations__.items() if k != "out"}
@@ -170,7 +161,8 @@ def _convert_out_params(f):
             (v for k, v in sig.parameters.items() if k != "out"), (out_param,)
         )
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
+            parameters=params,  # type: ignore[arg-type]
+            return_annotation=sig.return_annotation,
         )
 
         # Drop the out parameter and concatenate the new kwargs in the annotations
@@ -232,7 +224,7 @@ def register_decomposition(
 def get_decompositions(
     aten_ops: Sequence[Union[torch._ops.OperatorBase, OpOverloadPacket]],
     type: str = "post_autograd",
-) -> Dict[torch._ops.OperatorBase, Callable]:
+) -> dict[torch._ops.OperatorBase, Callable]:
     """
     Retrieve a dictionary of decompositions corresponding to the list of
     operator overloads and overload packets passed as input.  Overload
@@ -248,10 +240,11 @@ def get_decompositions(
 
     registry = global_decomposition_table[type]
     packets_to_overloads = defaultdict(list)
+
     for opo in registry:
         if isinstance(opo, (OpOverload, OpOverloadPacket)):
             packets_to_overloads[opo.overloadpacket].append(opo)
-    decompositions: Dict[torch._ops.OperatorBase, Callable] = {}
+    decompositions: dict[torch._ops.OperatorBase, Callable] = {}
     for op in aten_ops:
         if isinstance(op, OpOverloadPacket) and op in packets_to_overloads:
             for op_overload in packets_to_overloads[op]:
@@ -262,7 +255,7 @@ def get_decompositions(
 
 
 def remove_decompositions(
-    decompositions: Dict[torch._ops.OperatorBase, Callable],
+    decompositions: dict[torch._ops.OperatorBase, Callable],
     aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
 ) -> None:
     """
@@ -296,9 +289,9 @@ def core_aten_decompositions() -> "CustomDecompTable":
 # list was copied from torch/_inductor/decomposition.py
 # excluding decompositions that results in prim ops
 # Resulting opset of decomposition is core aten ops
-def _core_aten_decompositions_post_autograd() -> (
-    Dict[torch._ops.OperatorBase, Callable]
-):
+def _core_aten_decompositions_post_autograd() -> dict[
+    torch._ops.OperatorBase, Callable
+]:
     aten = torch.ops.aten
     return get_decompositions(
         [
@@ -340,7 +333,6 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.diagonal_copy,
             aten.dot,
             aten.vdot,
-            aten.elu,
             aten.elu_,
             aten.elu_backward,
             aten._embedding_bag,
@@ -412,6 +404,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.max_unpool3d,
             aten.mish,
             aten.mish_,
+            aten.mish_backward,
             aten.mse_loss,
             aten.mse_loss_backward,
             aten.multi_margin_loss,
@@ -427,6 +420,8 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.native_dropout_backward,
             aten.native_group_norm_backward,
             aten.native_layer_norm_backward,
+            aten._fused_rms_norm,
+            aten._fused_rms_norm_backward,
             aten.new_empty,
             aten.new_full,
             aten.new_ones,
@@ -482,6 +477,7 @@ def _core_aten_decompositions_post_autograd() -> (
             aten.silu,
             aten.silu_,
             aten.silu_backward.grad_input,
+            aten.silu_backward,
             aten.sinc,
             aten.sinc_,
             aten.slice_backward,
