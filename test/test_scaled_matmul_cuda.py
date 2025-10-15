@@ -268,18 +268,6 @@ def addmm_float8_unwrapped(
     )
     return output
 
-def mm_float8(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    a_scale: torch.Tensor,
-    b_scale: torch.Tensor,
-    output_dtype: torch.dtype,  # output dtype
-    output_scale: Optional[torch.Tensor] = None,  # output scale, precomputed
-) -> torch.Tensor:
-    return addmm_float8_unwrapped(
-        a, a_scale, b, b_scale, output_dtype, output_scale
-    )
-
 def to_fp8_saturated(
     x: torch.Tensor,
     fp8_dtype: torch.dtype
@@ -619,12 +607,12 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
+        out_scaled_mm = scaled_mm_wrap(
             x_fp8,
             y_fp8,
-            a_scale=x_scale,
-            b_scale=y_scale,
-            output_dtype=output_dtype
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
@@ -671,12 +659,12 @@ class TestFP8Matmul(TestCase):
         y_fp8 = to_fp8_saturated(y * y_scale, input_dtype)
 
         # Calculate actual F8 mm
-        out_scaled_mm = mm_float8(
+        out_scaled_mm = scaled_mm_wrap(
             x_fp8,
             y_fp8,
-            a_scale=x_scale,
-            b_scale=y_scale,
-            output_dtype=output_dtype
+            scale_a=x_scale.reciprocal(),
+            scale_b=y_scale.reciprocal(),
+            out_dtype=output_dtype
         )
 
         # Calculate emulated F8 mm
@@ -938,8 +926,12 @@ class TestFP8Matmul(TestCase):
 
         def test():
             # Calculate actual F8 mm
-            out_scaled_mm = mm_float8(
-                x_fp8, y_fp8, a_scale=x_scales, b_scale=y_scales, output_dtype=output_dtype
+            out_scaled_mm = scaled_mm_wrap(
+                x_fp8,
+                y_fp8,
+                scale_a=x_scales.reciprocal(),
+                scale_b=y_scales.reciprocal(),
+                out_dtype=output_dtype
             )
 
             # Calculate emulated F8 mm
@@ -1064,11 +1056,11 @@ class TestFP8Matmul(TestCase):
         scaled_mm_wrap(
             x_fp8,
             y_fp8.t(),
-            a_scale=x_scales,
+            scale_a=x_scales,
             scale_recipe_a=lhs_recipe,
-            b_scale=y_scales.t(),
+            scale_b=y_scales.t(),
             scale_recipe_b=rhs_recipe,
-            output_dtype=output_dtype,
+            out_dtype=output_dtype,
         )
 
         # Verify that emulated F8 mm doesn't error

@@ -2053,6 +2053,33 @@ _scaled_rowwise_rowwise(
   return out;
 }
 
+// Check the shapes & sizes of scales for deepseek-style (1x128, 128x128) scaling.
+// Wraps check_size_stride for easier integration, correctly handles cases where a dimension of the scale == 1,
+// and strides become somewhat meaningless
+void _check_deepseek_scale_stride(const Tensor& scale, const Tensor& t, const ScalingType scale_type) {
+  if (scale_type == ScalingType::BlockWise1x128) {
+    TORCH_CHECK_VALUE(check_size_stride(scale, 0, t.size(0), 1),
+        "at dim=0 scale should have ", t.size(0), "elements and stride(0) ", 1, "if ", t.size(0), " > 1 - Got: ",
+        "shape=", scale.sizes(), ", stride=", scale.strides());
+    auto expected_size = ceil_div<int64_t>(t.size(1), 128);
+    TORCH_CHECK_VALUE(check_size_stride(scale, 1, expected_size, t.size(0)),
+        "at dim=1 scale should have ", expected_size, "elements and stride ", t.size(0), "if ", expected_size, " > 1 - Got: ",
+        "shape=", scale.sizes(), ", stride=", scale.strides());
+  } else if (scale_type == ScalingType::BlockWise128x128) {
+      TORCH_CHECK_VALUE(check_size_stride(
+          scale,
+          0,
+          ceil_div<int64_t>(t.size(0), 128),
+          ceil_div<int64_t>(t.size(1), 128)),
+        "at dim=0 scale should have ", ceil_div<int64_t>(t.size(0), 128), "elements and stride(0) ", ceil_div<int64_t>(t.size(1), 128), "if ", ceil_div<int64_t>(t.size(0), 128), " > 1 - Got: ",
+        "shape=", scale.sizes(), ", stride=", scale.strides());
+      TORCH_CHECK(check_size_stride(
+          scale, 1, ceil_div<int64_t>(t.size(1), 128), 1),
+        "at dim=1 scale should have ", ceil_div<int64_t>(t.size(1), 128), "elements and stride(1) ", 1, "if ", ceil_div<int64_t>(t.size(1), 128), " > 1 - Got: ",
+        "shape=", scale.sizes(), ", stride=", scale.strides());
+  }
+}
+
 Tensor&
 _scaled_block1x128_block1x128(
           const Tensor& mat_a, const Tensor& mat_b,
@@ -2070,13 +2097,12 @@ _scaled_block1x128_block1x128(
   TORCH_CHECK_VALUE(scale_b.sizes()[0] == ceil_div<int64_t>(mat_b.sizes()[0], 128) && scale_b.sizes()[1] == mat_b.sizes()[1] && scale_b.scalar_type() == kFloat,
       "scale_b must have shape ", ceil_div<int64_t>(mat_b.sizes()[0], 128), " x ", mat_b.sizes()[1], " Float elements, got ", scale_b.sizes())
 
-  TORCH_CHECK(scale_a.stride(0) == 1, "expected scale_a.stride(0) to be 1, but got ", scale_a.stride(0));
-  TORCH_CHECK(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
-  TORCH_CHECK(scale_b.stride(0) == scale_b.size(1),
-      "expected scale_b.stride(0) to be ", scale_b.size(1), ", but got ", scale_b.size(1));
-
   auto scaling_choice_a = ScalingType::BlockWise1x128;
   auto scaling_choice_b = ScalingType::BlockWise1x128;
+
+  // Check scale strides (including stride=1 small cases)
+  _check_deepseek_scale_stride(scale_a, mat_a, scaling_choice_a);
+  _check_deepseek_scale_stride(scale_b.t(), mat_b.t(), scaling_choice_b);
 
   _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
@@ -2093,6 +2119,8 @@ _scaled_block128x128_block1x128(
           Tensor& out) {
   // Restrictions:
   // A, B are FP8, scales are fp32, shape K//128
+  std::cout << "mat_b: " << mat_b.dim() << ", " << mat_b.sizes() << ", " << mat_b.strides() << std::endl;
+  std::cout << "scale_b: " << scale_b.dim() << ", " << scale_b.sizes() << ", " << scale_b.strides() << std::endl;
   TORCH_CHECK_VALUE(isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()), "mat_a and mat_b must be fp8 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
   TORCH_CHECK_VALUE(scale_a.sizes()[0] == ceil_div<int64_t>(mat_a.sizes()[0], 128) && scale_a.sizes()[1] == ceil_div<int64_t>(mat_a.sizes()[1], 128) && scale_a.scalar_type() == kFloat,
@@ -2100,13 +2128,12 @@ _scaled_block128x128_block1x128(
   TORCH_CHECK_VALUE(scale_b.sizes()[0] == ceil_div<int64_t>(mat_b.sizes()[0], 128) && scale_b.sizes()[1] == mat_b.sizes()[1] && scale_b.scalar_type() == kFloat,
       "scale_b must have shape ", ceil_div<int64_t>(mat_b.sizes()[0], 128), " x ", mat_b.sizes()[1], " Float elements, got ", scale_b.sizes())
 
-  TORCH_CHECK_VALUE(scale_a.stride(1) == 1, "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1));
-  TORCH_CHECK_VALUE(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
-  TORCH_CHECK_VALUE(scale_b.stride(0) == scale_b.size(1),
-      "expected scale_b.stride(0) to be ", scale_b.size(1), ", but got ", scale_b.stride(0));
-
   auto scaling_choice_a = ScalingType::BlockWise128x128;
   auto scaling_choice_b = ScalingType::BlockWise1x128;
+
+  // Check scale strides (including stride=1 small cases)
+  _check_deepseek_scale_stride(scale_a, mat_a, scaling_choice_a);
+  _check_deepseek_scale_stride(scale_b.t(), mat_b.t(), scaling_choice_b);
 
   _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
@@ -2130,13 +2157,12 @@ _scaled_block1x128_block128x128(
   TORCH_CHECK_VALUE(scale_b.sizes()[0] == mat_b.sizes()[0] / 128 && scale_b.sizes()[1] == mat_b.sizes()[1] / 128 && scale_b.scalar_type() == kFloat,
       "scale_b must have shape ", mat_b.sizes()[0] / 128, " x ", mat_b.sizes()[1] / 128, " Float elements, got ", scale_b.sizes())
 
-  TORCH_CHECK_VALUE(scale_a.stride(0) == 1, "expected scale_a.stride(0) to be 1, but got ", scale_a.stride(0));
-  TORCH_CHECK_VALUE(scale_b.stride(0) == 1, "expected scale_b.stride(0) to be 1, but got ", scale_b.stride(0));
-  TORCH_CHECK_VALUE(scale_b.stride(1) == scale_b.size(0),
-      "expected scale_b.stride(1) to be ", scale_b.size(0), ", but got ", scale_b.stride(1));
-
   auto scaling_choice_a = ScalingType::BlockWise1x128;
   auto scaling_choice_b = ScalingType::BlockWise128x128;
+
+  // Check scale strides (including stride=1 small cases)
+  _check_deepseek_scale_stride(scale_a, mat_a, scaling_choice_a);
+  _check_deepseek_scale_stride(scale_b.t(), mat_b.t(), scaling_choice_b);
 
   _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, use_fast_accum, out);
 
