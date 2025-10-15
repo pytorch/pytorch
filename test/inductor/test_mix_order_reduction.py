@@ -11,6 +11,7 @@ import torch._inductor.config as inductor_config
 from torch._inductor import metrics, utils
 from torch._dynamo.utils import same
 from torch.testing import FileCheck
+import torch.nn.functional as F
 
 @instantiate_parametrized_tests
 class MixOrderReductionTest(TestCase):
@@ -70,6 +71,37 @@ class MixOrderReductionTest(TestCase):
         ref = fwd_bwd(f)
         act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
         
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        FileCheck().check_count("@triton.jit", 1, exactly=True).run(bwd_wrapper)
+
+    @inductor_config.patch(split_reductions=False)
+    def test_layer_norm_bwd(self):
+        def f(x, w, b, eps):
+            return F.layer_norm(x, x.shape[-1:], w, b, eps)
+            
+        def fwd_bwd(f):
+            x.grad = None
+            w.grad = None
+            b.grad = None
+            out = f(x, w, b, eps)
+            out.backward(dy)
+            return x.grad, w.grad, b.grad
+        
+        # M, N = 1152 * 500, 384
+        M, N = 32768, 768
+        xdtype = torch.float
+        wbdtype = torch.float
+        x = torch.randn(M, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
+        w = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
+        b = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
+        dy = torch.randn_like(x)
+        eps = 1e-5
+        
+        opt_f = torch.compile(f)
+        
+        ref = fwd_bwd(f)
+        act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
+
         self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
         FileCheck().check_count("@triton.jit", 1, exactly=True).run(bwd_wrapper)
 
