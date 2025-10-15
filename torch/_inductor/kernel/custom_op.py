@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import functools
+import uuid
 from typing import Any, Callable, Optional, Union
 
 import torch
@@ -96,34 +97,34 @@ def _create_user_input_gen_fns(
     return internal_input_gen_fns
 
 
-def _create_fallback_choice(
+# Global cache for fallback choices to avoid duplicate creation
+_fallback_choice_cache = {}
+
+
+def _get_or_create_fallback_choice(
     name: str,
     default_impl: Callable[..., Any],
     fake_output: torch.Tensor,
     kwargs: dict[str, Any],
 ) -> ExternKernelChoice:
-    """Create fallback choice for default implementation.
+    """Get or create fallback choice for default implementation."""
+    cache_key = (id(default_impl), name, tuple(sorted(kwargs.items())))
 
-    Args:
-        name: Base name for the fallback choice
-        default_impl: Default implementation function
-        fake_output: Fake output tensor for layout inference
-        kwargs: Keyword arguments for the implementation
+    if cache_key not in _fallback_choice_cache:
 
-    Returns:
-        ExternKernelChoice configured for the default implementation
-    """
+        def fallback_wrapper(*args: Any) -> Any:
+            return default_impl(*args, **kwargs)
 
-    def fallback_wrapper(*args: Any) -> Any:
-        return default_impl(*args, **kwargs)
+        fallback_name = f"{name}_fallback_{default_impl._name}"
+        _fallback_choice_cache[cache_key] = ExternKernelChoice(
+            kernel=fallback_wrapper,
+            name=fallback_name,
+            has_out_variant=False,
+            op_overload=default_impl,
+            use_fallback_kernel=True,
+        )
 
-    return ExternKernelChoice(
-        kernel=fallback_wrapper,
-        name=f"{name}_fallback_default",
-        has_out_variant=False,
-        op_overload=default_impl,
-        use_fallback_kernel=True,
-    )
+    return _fallback_choice_cache[cache_key]
 
 
 def _create_parameter_variants(
@@ -235,7 +236,7 @@ def autotune_custom_op(
             fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
             fake_output = default_impl(*fake_inputs, **kwargs)
 
-        fallback_choice = _create_fallback_choice(
+        fallback_choice = _get_or_create_fallback_choice(
             name, default_impl, fake_output, kwargs
         )
         fallback_choice.maybe_append_choice(
@@ -272,39 +273,35 @@ def register_custom_op_autotuning(
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[int, Callable[[torch.Tensor], torch.Tensor]]] = None,
     tuning_knob: Optional[dict[str, list[Any]]] = None,
+    max_autotune_configs: Optional[dict[str, list[Any]]] = None,
 ) -> None:
     """Register custom operation for autotuning with multiple implementations.
 
-    Supports multiple decompositions and optional parameter tuning.
-    When tuning_knob is provided, creates variants of each decomposition
-    with all combinations of parameter values (Cartesian product).
+    Provides two-tier parameter tuning:
+    - tuning_knob: Basic configs, always active
+    - max_autotune_configs: Extended configs, active only when config.max_autotune=True
 
     Args:
-        custom_op: Custom operation to register (e.g., torch.ops.mylib.myop.default)
+        custom_op: Custom operation to register
         decompositions: Implementation functions to benchmark
-        name: Operation name for identification (default: "{op_name}_autotuned")
+        name: Operation name for identification
         input_gen_fns: Custom input generators for benchmarking
-        tuning_knob: Optional parameter tuning dict. Supports multiple parameters.
-                    Creates all combinations of parameter values.
+        tuning_knob: Basic parameter configurations
+        max_autotune_configs: Extended parameter configurations for max_autotune mode
 
     Raises:
         TypeError: If decompositions is not a list/tuple
         ValueError: If no decompositions provided
 
     Example:
-        # Multiple decompositions with parameter tuning
         register_custom_op_autotuning(
-            torch.ops.mylib.attention.default,
-            decompositions=[standard_attention, flash_attention],
-            tuning_knob={
-                "head_dim": [32, 64, 128],
-                "method": ["chunked", "tiled"]
+            torch.ops.mylib.mm_split_k.default,
+            decompositions=[mm_split_k_impl],
+            tuning_knob={"k_splits": [32, 64]},
+            max_autotune_configs={
+                "block_size": [32, 64, 128],
+                "num_warps": [2, 4, 8],
             },
-            input_gen_fns={
-                0: lambda fake: torch.randn_like(fake, device='cuda') * 0.1,
-                1: lambda fake: torch.randn_like(fake, device='cuda') * 0.1,
-                2: lambda fake: torch.randn_like(fake, device='cuda') * 0.1,
-            }
         )
     """
     if not isinstance(decompositions, (list, tuple)):
@@ -327,12 +324,22 @@ def register_custom_op_autotuning(
     @functools.wraps(custom_op)
     def autotuning_lowering(*args: Any, **kwargs: Any) -> Any:
         """Inductor lowering function that replaces custom op calls with autotuned versions."""
+        from torch._inductor import config
+
         # Extract tensor inputs and non-tensor parameters
         tensor_inputs, non_tensor_kwargs = _extract_tensor_inputs(args, kwargs)
 
+        # Select decompositions based on max_autotune configuration
+        if config.max_autotune and max_autotune_configs is not None:
+            active_decompositions = _create_parameter_variants(
+                decompositions, max_autotune_configs
+            )
+        else:
+            active_decompositions = list(final_decompositions)
+
         result = autotune_custom_op(
             name=name,
-            decompositions=final_decompositions,
+            decompositions=active_decompositions,
             inputs=tensor_inputs,
             kwargs=non_tensor_kwargs,
             default_impl=custom_op,

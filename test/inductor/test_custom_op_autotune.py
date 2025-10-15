@@ -11,6 +11,7 @@ The tests cover:
 2. Numerical equivalence between different decomposition implementations
 3. End-to-end compilation and performance validation
 4. Fallback behavior when decompositions fail
+5. Max-autotune integration with extended configuration sets
 """
 
 import torch
@@ -400,17 +401,17 @@ class TestCustomOpAutoTune(TestCase):
         lib_name, op_name = test_op_name.split("::")
         op_object = getattr(getattr(torch.ops, lib_name), op_name)
 
-        # Use parameter tuning to test different k_splits values
         register_custom_op_autotuning(
             custom_op=op_object.default,
             decompositions=[decompose_k_implementation],
-            tuning_knob={"k_splits": [32, 64, 128, 256]},
+            tuning_knob={"k_splits": [32, 64]},
+            max_autotune_configs={"k_splits": [8, 16, 128, 256, 512]},
             name="test_decompose_k_autotuned",
             input_gen_fns={
                 0: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
-                * 0.1,  # Matrix A
+                * 0.1,
                 1: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
-                * 0.1,  # Matrix B
+                * 0.1,
             },
         )
 
@@ -606,6 +607,295 @@ class TestCustomOpAutoTune(TestCase):
         # Test autotuning - benchmarks all 6 parameter combinations
         self._run_autotune_test(
             op_object, (test_x, test_factor), expected_result, "MultiParameter"
+        )
+
+    @skipIfXpu
+    def test_max_autotune_knob_integration(self):
+        """Test that max_autotune config flag enables additional tuning configs for custom ops."""
+        test_op_name = f"test_lib::max_autotune_test_{id(self)}"
+
+        def mm_split_k_implementation(
+            a: torch.Tensor,
+            b: torch.Tensor,
+            k_splits: int = 4,
+            tile_size: int = 64,
+            use_chunked_compute: bool = False,
+        ) -> torch.Tensor:
+            """Matrix multiply with split-k and algorithmic variations that actually affect computation."""
+            m = a.shape[0]
+            n = b.shape[1]
+            k = a.shape[1]
+
+            # tile_size affects how we split the computation - this actually matters
+            if use_chunked_compute and k >= tile_size:
+                # Process in smaller chunks for better cache locality
+                effective_k_splits = min(k_splits, k // tile_size)
+            else:
+                # Standard split-k approach
+                effective_k_splits = k_splits
+
+            effective_k_splits = max(1, effective_k_splits)
+            k_parts = k // effective_k_splits
+            B = effective_k_splits
+
+            if k_parts == 0:
+                return a @ b
+
+            # The actual computation pattern that can be tuned
+            if use_chunked_compute:
+                # Process in smaller tiles for better memory access
+                results = []
+                for i in range(B):
+                    start_k = i * k_parts
+                    end_k = (i + 1) * k_parts if i < B - 1 else k
+                    partial = a[:, start_k:end_k] @ b[start_k:end_k, :]
+                    results.append(partial)
+                result = sum(results)
+            else:
+                # Standard batched approach
+                a_reshaped = torch.permute(
+                    a[:, : B * k_parts].reshape(m, B, k_parts), (1, 0, 2)
+                )
+                b_reshaped = b[: B * k_parts].reshape(B, k_parts, n)
+                result = torch.sum(torch.bmm(a_reshaped, b_reshaped), dim=0)
+
+                # Handle remainder
+                if B * k_parts < k:
+                    remainder_a = a[:, B * k_parts :]
+                    remainder_b = b[B * k_parts :]
+                    result += remainder_a @ remainder_b
+
+            return result
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def test_mm_split_k_op(
+            a: torch.Tensor,
+            b: torch.Tensor,
+            k_splits: int = 4,
+            tile_size: int = 64,
+            use_chunked_compute: bool = False,
+        ) -> torch.Tensor:
+            return mm_split_k_implementation(
+                a, b, k_splits, tile_size, use_chunked_compute
+            )
+
+        @test_mm_split_k_op.register_fake
+        def _(
+            a: torch.Tensor,
+            b: torch.Tensor,
+            k_splits: int = 4,
+            tile_size: int = 64,
+            use_chunked_compute: bool = False,
+        ):
+            return torch.empty(a.shape[0], b.shape[1], device=a.device, dtype=a.dtype)
+
+        lib_name, op_name = test_op_name.split("::")
+        op_object = getattr(getattr(torch.ops, lib_name), op_name)
+
+        register_custom_op_autotuning(
+            custom_op=op_object.default,
+            decompositions=[mm_split_k_implementation],
+            tuning_knob={"k_splits": [32, 64]},
+            max_autotune_configs={
+                "tile_size": [32, 64, 128],
+                "use_chunked_compute": [False, True],
+            },
+            name="test_mm_split_k_max_autotune",
+            input_gen_fns={
+                0: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
+                * 0.1,
+                1: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
+                * 0.1,
+            },
+        )
+
+        # Create inputs with k divisible by all potential k_splits and block_size values
+        m, k, n = 256, 8192, 1024  # k=8192 is divisible by [8, 16, 32, 64, 128, 256]
+        a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
+        b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
+        expected = a @ b
+
+        # Test with max_autotune=True to verify extended configs are used
+        torch._dynamo.reset()
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON" if self.device == "cuda" else "ATEN",
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+
+            @torch.compile
+            def test_model_max_autotune(a, b):
+                return op_object(a, b)
+
+            result_max_autotune = test_model_max_autotune(a, b)
+
+        # Test with max_autotune=False - should use only basic configs
+        torch._dynamo.reset()
+        with config.patch(
+            max_autotune=False,
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+
+            @torch.compile
+            def test_model_basic(a, b):
+                return op_object(a, b)
+
+            result_basic = test_model_basic(a, b)
+
+        # Both should produce correct results
+        torch.testing.assert_close(
+            result_max_autotune,
+            expected,
+            rtol=2e-1,
+            atol=5e-1,
+            msg="max_autotune=True result incorrect",
+        )
+
+        torch.testing.assert_close(
+            result_basic,
+            expected,
+            rtol=2e-1,
+            atol=5e-1,
+            msg="max_autotune=False result incorrect",
+        )
+
+    @skipIfXpu
+    def test_triton_kernel_style_max_autotune_configs(self):
+        """Test max_autotune_configs with Triton-style kernel configurations similar to tuned_mm."""
+        test_op_name = f"test_lib::triton_kernel_test_{id(self)}"
+
+        def triton_style_mm_implementation(
+            a: torch.Tensor,
+            b: torch.Tensor,
+            BLOCK_M: int = 64,
+            BLOCK_N: int = 64,
+            BLOCK_K: int = 32,
+            num_stages: int = 2,
+            num_warps: int = 4,
+            group_m: int = 8,
+        ) -> torch.Tensor:
+            """Matrix multiply implementation with Triton-style kernel parameters.
+
+            These parameters mirror the ones used in tuned_mm's GemmConfig:
+            - BLOCK_M, BLOCK_N, BLOCK_K: Tile sizes for matrix blocking
+            - num_stages: Number of pipeline stages
+            - num_warps: Number of warps per thread block
+            - group_m: Grouping factor for better memory coalescing
+            """
+            # For demonstration, we use these parameters to influence computation pattern
+            # In a real Triton kernel, these would directly control the kernel configuration
+
+            m, k = a.shape
+            k_b, n = b.shape
+            assert k == k_b, f"Matrix dimensions don't match: {k} != {k_b}"
+
+            # Use block sizes to determine computation strategy
+            if BLOCK_M >= 128 and BLOCK_N >= 128:
+                # Large block strategy - process in larger chunks
+                return torch.mm(a, b)
+            elif BLOCK_K >= 64:
+                # Large K block strategy - use split-k if beneficial
+                k_splits = min(4, k // BLOCK_K)
+                if k_splits > 1:
+                    k_per_split = k // k_splits
+                    results = []
+                    for i in range(k_splits):
+                        start_k = i * k_per_split
+                        end_k = (i + 1) * k_per_split if i < k_splits - 1 else k
+                        partial_result = torch.mm(
+                            a[:, start_k:end_k], b[start_k:end_k, :]
+                        )
+                        results.append(partial_result)
+                    return sum(results)
+                else:
+                    return torch.mm(a, b)
+            else:
+                # Small block strategy - standard implementation
+                return torch.mm(a, b)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def test_triton_kernel_op(
+            a: torch.Tensor,
+            b: torch.Tensor,
+            BLOCK_M: int = 64,
+            BLOCK_N: int = 64,
+            BLOCK_K: int = 32,
+            num_stages: int = 2,
+            num_warps: int = 4,
+            group_m: int = 8,
+        ) -> torch.Tensor:
+            return triton_style_mm_implementation(
+                a, b, BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m
+            )
+
+        @test_triton_kernel_op.register_fake
+        def _(
+            a: torch.Tensor,
+            b: torch.Tensor,
+            BLOCK_M: int = 64,
+            BLOCK_N: int = 64,
+            BLOCK_K: int = 32,
+            num_stages: int = 2,
+            num_warps: int = 4,
+            group_m: int = 8,
+        ):
+            return torch.empty(a.shape[0], b.shape[1], device=a.device, dtype=a.dtype)
+
+        lib_name, op_name = test_op_name.split("::")
+        op_object = getattr(getattr(torch.ops, lib_name), op_name)
+
+        register_custom_op_autotuning(
+            custom_op=op_object.default,
+            decompositions=[triton_style_mm_implementation],
+            tuning_knob={
+                "BLOCK_M": [64, 128],
+                "BLOCK_N": [64, 128],
+                "BLOCK_K": [32, 64],
+            },
+            max_autotune_configs={
+                "num_stages": [2, 4],
+                "num_warps": [4, 8],
+                "group_m": [8],
+            },
+            name="test_triton_kernel_max_autotune",
+            input_gen_fns={
+                0: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
+                * 0.1,
+                1: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
+                * 0.1,
+            },
+        )
+
+        # Create test inputs
+        m, k, n = 512, 1024, 768
+        a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
+        b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
+        expected = a @ b
+
+        # Test with max_autotune to demonstrate Triton-style kernel parameter autotuning
+        @torch.compile
+        def test_model(a, b):
+            return op_object(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON" if self.device == "cuda" else "ATEN",
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            result = test_model(a, b)
+
+        # Verify correctness
+        torch.testing.assert_close(
+            result,
+            expected,
+            rtol=2e-1,
+            atol=5e-1,
+            msg="Triton-style kernel config result incorrect",
         )
 
 

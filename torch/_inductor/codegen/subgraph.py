@@ -107,11 +107,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                     assert ar.stride() == example_inp.stride()
 
         with V.set_graph_handler(bm_graph_lowering):
-            # Don't bother autotuning on Triton here
+            # Allow Triton autotuning for custom ops when max_autotune is enabled
             with inductor_config.patch(
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
+                max_autotune=config.max_autotune,
+                max_autotune_gemm=config.max_autotune_gemm,
+                max_autotune_gemm_backends=config.max_autotune_gemm_backends,
             ):
                 bm_graph_lowering.run(*self.example_inputs)
                 mod = bm_graph_lowering.compile_to_module()
