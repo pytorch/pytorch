@@ -241,6 +241,7 @@ def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -
 
 __all__ = [
     "empty_cache",
+    "get_per_process_memory_fraction",
     "max_memory_allocated",
     "max_memory_reserved",
     "mem_get_info",
