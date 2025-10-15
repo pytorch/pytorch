@@ -63,6 +63,7 @@ from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
+    autograd_would_have_decomposed,
     TorchDispatchMode,
 )
 from torch.utils._stats import count
@@ -908,11 +909,16 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
-        torch.ops.aten.size.default,
-        torch.ops.aten.stride.default,
-        torch.ops.aten.storage_offset.default,
-    ]:
+    if (
+        not pre_dispatch
+        and func
+        not in [
+            torch.ops.aten.size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.storage_offset.default,
+        ]
+        and autograd_would_have_decomposed(func, flat_args_kwargs)
+    ):
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -1793,17 +1799,14 @@ class _ModuleStackTracer(PythonKeyTracer):
         self.enable_attr_proxy = False
         self.submodule_paths = {}
         for name, m in self.scope_root.named_modules(remove_duplicate=False):
-            # pyrefly: ignore  # unsupported-operation
             if m in self.submodule_paths:
                 log.info(
                     "Shared module found between %s and %s, AttrProxy is enabled.",
-                    # pyrefly: ignore  # unsupported-operation
                     self.submodule_paths[m],
                     name,
                 )
                 self.enable_attr_proxy = True
             else:
-                # pyrefly: ignore  # unsupported-operation
                 self.submodule_paths[m] = name
 
         self.proxy_paths: WeakKeyDictionary[_AttrProxy, str] = WeakKeyDictionary()
@@ -2232,9 +2235,9 @@ class _MakefxTracer:
             self.fake_tensor_mode = parent_tracer.fake_tensor_mode
 
             def _create_sub_fx_tracer(parent_tracer: _ProxyTracer) -> PythonKeyTracer:
-                if type(parent_tracer) == PythonKeyTracer:
+                if type(parent_tracer) is PythonKeyTracer:
                     return PythonKeyTracer()
-                elif type(parent_tracer) == _ModuleStackTracer:
+                elif type(parent_tracer) is _ModuleStackTracer:
                     return _ModuleStackTracer(parent_tracer.scope_root)
                 else:
                     raise RuntimeError(
@@ -2365,6 +2368,7 @@ class _MakefxTracer:
         ):
             from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
+            # pyrefly: ignore  # unbound-name
             insert_deferred_runtime_asserts(t, fake_mode.shape_env, "reenter_make_fx")
             t.recompile()
         # TODO: kind of a bad way to do it, should maybe figure out a better way

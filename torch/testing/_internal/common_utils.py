@@ -95,13 +95,14 @@ from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 from torch.utils import cpp_extension
 try:
-    import pytest
+    import pytest  # type: ignore[import-not-found]
     has_pytest = True
 except ImportError:
     has_pytest = False
 
 
 SEED = 1234
+MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
 MI200_ARCH = ("gfx90a")
 NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
@@ -2093,6 +2094,21 @@ def skipIfWindows(func=None, *, msg="test doesn't currently work on the Windows 
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if IS_WINDOWS:  # noqa: F821
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
+
+def skipIfWindowsXPU(func=None, *, msg="test doesn't currently work on the Windows stack"):
+    def dec_fn(fn):
+        reason = f"skipIfWindowsXPU: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if IS_WINDOWS and torch.xpu.is_available():  # noqa: F821
                 raise unittest.SkipTest(reason)
             else:
                 return fn(*args, **kwargs)
@@ -4242,7 +4258,7 @@ class TestCase(expecttest.TestCase):
             self.assertEqual(x, y, msg, atol=atol, rtol=rtol, **kwargs)
 
     def assertEqualTypeString(self, x, y) -> None:
-        # This API is used simulate deprecated x.type() == y.type()
+        # This API is used simulate deprecated x.type() is y.type()
         self.assertEqual(x.device, y.device)
         self.assertEqual(x.dtype, y.dtype)
         self.assertEqual(x.is_sparse, y.is_sparse)
@@ -5124,7 +5140,7 @@ def gradcheck(fn, inputs, **kwargs):
 
     for key, value in default_values.items():
         # default value override values explicitly set to None
-        k = kwargs.get(key, None)
+        k = kwargs.get(key)
         kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
@@ -5144,7 +5160,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
 
     for key, value in default_values.items():
         # default value override values explicitly set to None
-        k = kwargs.get(key, None)
+        k = kwargs.get(key)
         kwargs[key] = k if k is not None else value
 
     return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)

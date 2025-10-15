@@ -155,11 +155,12 @@ ignore = [
     "E402",
     "C408", # C408 ignored because we like the dict keyword argument syntax
     "E501", # E501 is not flexible enough, we're using B950 instead
-    "E721",
     "E741",
     "EXE001",
     "F405",
     "FURB122", # writelines
+    # these ignores are from flake8-logging-format; please fix!
+    "G101",
     # these ignores are from ruff NPY; please fix!
     "NPY002",
     # these ignores are from ruff PERF; please fix!
