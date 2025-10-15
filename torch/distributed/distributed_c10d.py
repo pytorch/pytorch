@@ -1139,6 +1139,23 @@ def _check_tensor_list(param, param_name) -> None:
         )
 
 
+def _check_rank_world_size_values(
+    rank: int,
+    world_size: int,
+    *,
+    local_rank: Optional[int] = None,
+) -> None:
+    """Validate rank and world size values for logical consistency."""
+    if rank < 0:
+        raise ValueError(f"rank must be non-negative, got {rank}")
+    if world_size < 1:
+        raise ValueError(f"world_size must be at least 1, got {world_size}")
+    if rank >= world_size:
+        raise ValueError(f"rank ({rank}) must be less than world_size ({world_size})")
+    if local_rank is not None and local_rank < 0:
+        raise ValueError(f"local_rank must be non-negative, got {local_rank}")
+
+
 def _group_or_default_group(group: Optional[ProcessGroup] = None) -> ProcessGroup:
     if group is None or group is GroupMember.WORLD:
         group = _get_default_group()
@@ -1670,8 +1687,7 @@ def init_process_group(
     )
 
     if store is not None:
-        assert world_size > 0, "world_size must be positive if using store"
-        assert rank >= 0, "rank must be non-negative if using store"
+        _check_rank_world_size_values(rank, world_size)
     elif init_method is None:
         init_method = "env://"
 
@@ -5379,11 +5395,13 @@ def _new_group_with_tag(
             )
         # check ranks' sanity
         for rank in ranks:
-            if rank < 0 or rank >= global_world_size:
+            try:
+                _check_rank_world_size_values(rank, global_world_size)
+            except ValueError as error:
                 raise ValueError(
                     "The new group's rank should be within "
                     "the world_size set by init_process_group"
-                )
+                ) from error
         if global_rank in ranks:
             group_rank = ranks.index(global_rank)
         else:
