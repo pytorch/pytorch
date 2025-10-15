@@ -446,6 +446,8 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
 template at::Tensor fromDLPackImpl<DLManagedTensor>(DLManagedTensor* src, std::function<void(void*)> deleter);
 template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(DLManagedTensorVersioned* src, std::function<void(void*)> deleter);
 
+} // namespace
+
 void toDLPackNonOwning(const Tensor& src, DLTensor* out) {
   // Fill in the pre-allocated DLTensor struct with direct pointers
   // This is a non-owning conversion - the caller owns the tensor
