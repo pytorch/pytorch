@@ -46,6 +46,14 @@ from torch.testing._internal.common_utils import (
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+current_pythonpath = os.environ.get("PYTHONPATH", "")
+repo_root_str = str(REPO_ROOT)
+if repo_root_str not in current_pythonpath:
+    if current_pythonpath:
+        os.environ["PYTHONPATH"] = f"{repo_root_str}:{current_pythonpath}"
+    else:
+        os.environ["PYTHONPATH"] = repo_root_str
+
 from tools.stats.import_test_stats import (
     ADDITIONAL_CI_FILES_FOLDER,
     TEST_CLASS_TIMES_FILE,
