@@ -678,7 +678,7 @@ class ShardedTensor(ShardedTensorBase):
         copy_tensor = kwargs.get("copy", False)
         non_blocking = kwargs.get("non_blocking", False)
         memory_format = kwargs.get("memory_format", torch.preserve_format)
-        process_group = kwargs.get("process_group", None)
+        process_group = kwargs.get("process_group")
 
         if (
             not copy_tensor
