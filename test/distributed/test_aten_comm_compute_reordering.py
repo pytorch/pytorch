@@ -69,6 +69,8 @@ def get_patches():
         "force_disable_caches": True,
         # Messes up existing test strings
         "test_configs.aten_fx_overlap_insert_overlap_deps": False,
+        # interferes with testing, / custom estimation
+        "test_configs.assume_bucketing_reduces_latency": False,
     }
 
 
@@ -362,6 +364,8 @@ def get_bucket_patches(compute_multiplier=1.0):
         "force_disable_caches": True,
         # messes up test strings
         "test_configs.aten_fx_overlap_insert_overlap_deps": False,
+        # interferes with testing, / custom estimation
+        "test_configs.assume_bucketing_reduces_latency": False,
     }
 
 
@@ -577,7 +581,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(get_bucket_patches(2.0))
-    def test_bucketing_split_for_overlap_blocking(self):
+    def test_bucketing_split_for_overlap_blocking_no_deps(self):
         """Test that 4 independent all-gathers split into 2+2 buckets for better overlap with compute."""
 
         def func(a, b, c, d, *, ranks):

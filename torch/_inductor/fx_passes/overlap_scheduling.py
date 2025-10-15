@@ -462,15 +462,20 @@ class OverlapScheduler:
 
         if is_wait_tensor(node):
             info = self.collective_info[self.wait_to_start[node]]
-            # TODO: we could consider even deferring waits that are not potentially hidden
-            # so as to overlap comm with itself. although exposed comms should bucketed with each other.
-            overlappable = info.is_exposed and node in self.potentially_hidden_waits
+            # defer waits locally if they are exposed.
+            compute_local_priority = int(info.is_exposed)
         else:
-            overlappable = self.in_overlappable_collective_unary_chain(node)
+            # if we're scheduling this collective via its score, then it was not
+            # hidden and pre-fetched. we might as well maximize overlap for the
+            # local, non-mm nodes prior to the next compute node.
+            if self.in_overlappable_collective_unary_chain(node):
+                compute_local_priority = 1
+            else:
+                compute_local_priority = 0
 
         return (
             self.compute_index_domination[node],  # what index compute it blocks
-            overlappable,  # Defer hideable collective ops
+            compute_local_priority,  # collective_start=-1, wait=1, or neither=0
             self.node_idx[node],  # Original order for stability
         )
 
@@ -700,6 +705,9 @@ class OverlapScheduler:
         Check if there's an in-flight collective that can be bucketed with the given node. If so, assume they will bucket.
         This is a optimistic heuristic to account for latency reduction with bucketing. The two nodes may not get bucketed.
         """
+        if not torch._inductor.config.test_configs.assume_bucketing_reduces_latency:
+            return False
+
         key = bucket_key(node)
         if key is None:
             return False
