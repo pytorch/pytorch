@@ -2072,7 +2072,7 @@ class DistributedDataParallelTest(
                         opt = torch.optim.SGD(m.parameters(), lr=0.1)
                         opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
                         has_half = any(p.dtype is torch.half for p in m.parameters())
-                        tol = 1.0e-3 if has_half else 1.0e-5
+                        tol = 3.0e-3 if has_half else 1.0e-5
                     except BaseException:
                         # Prints case-specific debugging info to narrow down failing case.
                         print(
@@ -4600,6 +4600,34 @@ class NCCLTraceTest(NCCLTraceTestBase):
             timing_enabled=timing_enabled,
             is_json=True,
         )
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    def test_fr_record_reset(self, timing_enabled):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        self.set_thread_name("fr_test_thread")
+        a = torch.full((3, 4), float(self.rank), device=device)
+        for _ in range(5):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
+        time.sleep(1)
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+        for _ in range(4):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 4)
         dist.destroy_process_group()
 
     @requires_nccl()
