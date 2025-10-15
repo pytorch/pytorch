@@ -619,8 +619,8 @@ class TestTorchDlPack(TestCase):
 
             // Test 3: managed_tensor_from_py_object_no_sync
             {
-                std::unique_ptr<PyObject, decltype(&Py_DECREF)> py_obj(
-                    THPVariable_Wrap(tensor), &Py_DECREF);
+                std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                    THPVariable_Wrap(tensor), &Py_DecRef);
                 TORCH_CHECK(py_obj.get() != nullptr, "Failed to wrap tensor to PyObject");
 
                 DLManagedTensorVersioned* out_tensor = nullptr;
@@ -661,8 +661,8 @@ class TestTorchDlPack(TestCase):
 
             // Test 4: managed_tensor_to_py_object_no_sync
             {
-                std::unique_ptr<PyObject, decltype(&Py_DECREF)> py_obj(
-                    THPVariable_Wrap(tensor), &Py_DECREF);
+                std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                    THPVariable_Wrap(tensor), &Py_DecRef);
                 TORCH_CHECK(py_obj.get() != nullptr, "Failed to wrap tensor to PyObject");
 
                 DLManagedTensorVersioned* managed_tensor = nullptr;
@@ -672,8 +672,8 @@ class TestTorchDlPack(TestCase):
                 TORCH_CHECK(managed_tensor != nullptr,
                             "from_py_object_no_sync returned NULL");
 
-                std::unique_ptr<PyObject, decltype(&Py_DECREF)> py_obj_out(
-                    nullptr, &Py_DECREF);
+                std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj_out(
+                    nullptr, &Py_DecRef);
                 PyObject* py_obj_out_raw = nullptr;
                 result = api->managed_tensor_to_py_object_no_sync(
                     managed_tensor, reinterpret_cast<void**>(&py_obj_out_raw));
@@ -701,8 +701,8 @@ class TestTorchDlPack(TestCase):
 
             // Test 5: dltensor_from_py_object_no_sync (non-owning conversion)
             {
-                std::unique_ptr<PyObject, decltype(&Py_DECREF)> py_obj(
-                    THPVariable_Wrap(tensor), &Py_DECREF);
+                std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
+                    THPVariable_Wrap(tensor), &Py_DecRef);
                 TORCH_CHECK(py_obj.get() != nullptr, "Failed to wrap tensor to PyObject");
 
                 DLTensor dltensor;
