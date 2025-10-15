@@ -1,3 +1,4 @@
+import functools
 import inspect
 import time
 from functools import cached_property, wraps
@@ -21,6 +22,40 @@ MILLISECONDS_PER_SECOND = 1000
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+
+def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
+    from torch._inductor import config
+
+    if config.test_configs.distort_benchmarking_result == "":
+        return fn
+
+    def distort(
+        ms: Union[list[float], tuple[float], float],
+    ) -> Union[list[float], tuple[float], float]:
+        if isinstance(ms, (list, tuple)):
+            return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
+
+        distort_method = config.test_configs.distort_benchmarking_result
+        assert isinstance(ms, float)
+        if distort_method == "inverse":
+            return 1.0 / ms if ms else 0.0
+        elif distort_method == "random":
+            import random
+
+            return random.random()
+        else:
+            raise RuntimeError(f"Unrecognized distort method {distort_method}")
+
+    @functools.wraps(fn)
+    def wrapper(
+        *args: list[Any], **kwargs: dict[str, Any]
+    ) -> Union[list[float], tuple[float], float]:
+        ms = fn(*args, **kwargs)
+
+        return distort(ms)
+
+    return wrapper
 
 
 def may_ban_benchmarking() -> None:
@@ -57,6 +92,11 @@ def time_and_count(
 
 
 class Benchmarker:
+    """
+    A device-agnostic benchmarking utility for measuring the runtime of
+    inductor generated callables.
+    """
+
     def __init__(self: Self) -> None:
         pass
 
@@ -64,8 +104,9 @@ class Benchmarker:
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: tuple[Any, ...],
-        fn_kwargs: dict[str, Any],
+        fn_args: Optional[tuple[Any, ...]] = None,
+        fn_kwargs: Optional[dict[str, Any]] = None,
+        device: Optional[Union[str, torch.device]] = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark `fn(*fn_args, *fn_kwargs)` and return the runtime, in milliseconds (the
@@ -74,7 +115,8 @@ class Benchmarker:
         device-specific implementations, like `benchmark_cpu` and `benchmark_gpu`. Raises
         `ValueError(...)` if we can't safely infer the device type of `fn`; for example,
         if multiple device types are found in `fn_args` and `fn_kwargs`, or if no device
-        types are found.
+        types are found. To bypass device inference, provide the device to the `device`
+        parameter.
 
         Arguments:
         - fn: The function to benchmark.
@@ -82,26 +124,52 @@ class Benchmarker:
         - fn_kwargs: The function's kwargs.
 
         Keyword Arguments:
+        - device: Which device to use for benchmarking. If not provided the device will be attempted
+        to be inferred from `fn_args` and `fn_kwargs`.
         - **kwargs: The benchmarking implementation's kwargs.
 
         Returns:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
-        inferred_device = None
-        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
-            if not isinstance(arg_or_kwarg, torch.Tensor):
-                continue
-            if inferred_device is None:
-                inferred_device = arg_or_kwarg.device
-            elif arg_or_kwarg.device != inferred_device:
+        inferred_device: Optional[torch.device] = None
+        if device is not None:
+            inferred_device = (
+                torch.device(device) if isinstance(device, str) else device
+            )
+        else:
+            if fn_args is None and fn_kwargs is None:
                 raise ValueError(
-                    "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                    "`fn_args` and `fn_kwargs` cannot both be None if `device` is not provided."
                 )
+
+            fn_args = fn_args or tuple()
+            fn_kwargs = fn_kwargs or {}
+            for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
+                if not isinstance(arg_or_kwarg, torch.Tensor):
+                    continue
+                if inferred_device is None:
+                    inferred_device = arg_or_kwarg.device
+                elif arg_or_kwarg.device != inferred_device:
+                    raise ValueError(
+                        "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                    )
+
         if inferred_device is None:
             raise ValueError(
-                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
+                "Can't safely infer the device type of `fn` with no device types"
+                " in `fn_args` or `fn_kwargs` and `device` not explicitly provided!"
+                " You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."
             )
-        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+
+        fn_args = fn_args or tuple()
+        fn_kwargs = fn_kwargs or {}
+
+        # No need to wrap if the callable takes no arguments
+        if len(fn_args) == 0 and len(fn_kwargs) == 0:
+            _callable = fn
+        else:
+            _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+
         if inferred_device == torch.device("cpu"):
             return self.benchmark_cpu(_callable, **kwargs)
         # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
@@ -159,6 +227,7 @@ class TritonBenchmarker(Benchmarker):
             raise NotImplementedError("requires Triton") from e
         return do_bench
 
+    @may_distort_benchmarking_result
     @time_and_count
     def benchmark_gpu(
         self: Self,
@@ -227,6 +296,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
             ]
         )
 
+    @may_distort_benchmarking_result
     @time_and_count
     def benchmark_gpu(  # type: ignore[override]
         self: Self,
