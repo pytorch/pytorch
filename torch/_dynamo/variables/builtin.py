@@ -2055,7 +2055,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_zip(self, tx: "InstructionTranslator", *args, **kwargs):
         if kwargs:
-            if len(kwargs) != 1 or "strict" not in kwargs:
+            if not (len(kwargs) == 1 and "strict" in kwargs):
                 msg = ConstantVariable.create(
                     f"zip() should only have 'strict' keyword argument, but ({len(kwargs)} given)"
                 )
