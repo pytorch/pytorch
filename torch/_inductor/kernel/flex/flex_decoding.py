@@ -20,6 +20,7 @@ from ...select_algorithm import (
 from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
+    freeze_irnodes,
     get_fwd_subgraph_outputs,
     load_template,
     maybe_realize,
@@ -208,6 +209,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
+    freeze_irnodes(score_mod_other_buffers)
+    freeze_irnodes(mask_mod_other_buffers)
+
     choices: list[Any] = []
     dtype = key.get_dtype()
     head_dim = V.graph.sizevars.guard_int(key.get_size()[-1])
@@ -363,6 +367,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     ]
 
     inputs_for_flex_decoding = (
+        # pyrefly: ignore  # unsupported-operation
         [
             query,
             key,

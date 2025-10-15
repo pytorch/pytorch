@@ -5,7 +5,6 @@ import sysconfig
 from typing import Any, Optional
 
 import torch.distributed as dist
-from torch.distributed._distributed_c10d import _nvshmemx_cumodule_init
 from torch.utils._triton import has_triton
 
 
@@ -155,6 +154,8 @@ def _nvshmem_init_hook(*args, **kwargs) -> None:  # type: ignore[no-untyped-def]
     A hook function to initialize the CUModule created by `triton.jit` with
     NVSHMEM device context
     """
+    from torch._C._distributed_c10d import _nvshmemx_cumodule_init
+
     jit_function = kwargs["fn"].jit_function
     fn_name = jit_function.fn.__name__
 
@@ -349,6 +350,60 @@ if has_triton():
                     core.dtype("int64"),  # size in bytes
                     core.dtype("int32"),  # pe number
                 ): ("nvshmemx_getmem_block", core.dtype("int32"))
+            },
+            is_pure=False,
+            _semantic=_semantic,
+        )
+
+    @triton.jit  # type: ignore[misc]
+    def get_nbi(dest, source, nelems, pe):  # type: ignore[no-untyped-def]
+        """
+        Get tensor data from a remote PE to local PE, non-blocking.
+
+        Different from the `get` function, this function returns after
+        initiating the operation. The operation is considered complete after a
+        subsequent call to `quiet`.
+
+        Args:
+            dest: Destination tensor on the local PE. Type must match source.
+            source: Source tensor on the remote PE containing data to be copied.
+            nelems: Number of elements to transfer.
+            pe: PE number of the remote PE (0 ≤ pe < nvshmem_n_pes()).
+
+        Notes:
+            - Performs compile-time type checking between dest and source tensors.
+            - Automatically calculates byte size from tensor type and element count.
+
+        Example:
+            ```
+            # Get 100 elements from PE 0
+            nvshmem.get_nbi(dest, src, 100, 0)
+            # Some independent computation which overlaps with the get operation
+            ...
+            # Wait for completion of the get operation
+            nvshmem.quiet()
+            ```
+        """
+        tl.static_assert(dest.type == source.type)
+        nbytes = nelems * dest.type.element_ty.itemsize
+        return getmem_block_extern_wrapper(
+            dest.to(tl.int64), source.to(tl.int64), nbytes.to(tl.int64), pe
+        )
+
+    @core.extern
+    def getmem_nbi_block_extern_wrapper(dest, source, size_bytes, pe, _semantic=None):  # type: ignore[no-untyped-def]
+        """Low-level extern wrapper for NVSHMEM get"""
+        return core.extern_elementwise(
+            "",
+            "",
+            [dest, source, size_bytes, pe],
+            {
+                (
+                    core.dtype("int64"),  # dest ptr
+                    core.dtype("int64"),  # source ptr
+                    core.dtype("int64"),  # size in bytes
+                    core.dtype("int32"),  # pe number
+                ): ("nvshmemx_getmem_nbi_block", core.dtype("int32"))
             },
             is_pure=False,
             _semantic=_semantic,

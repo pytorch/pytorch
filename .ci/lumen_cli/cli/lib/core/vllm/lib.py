@@ -72,7 +72,7 @@ def sample_vllm_test_library():
                     ]
                 ),
                 "pytest -v -s entrypoints/llm/test_generate.py",
-                "VLLM_USE_V1=0 pytest -v -s entrypoints/offline_mode",
+                "pytest -v -s entrypoints/offline_mode",
             ],
         },
         "vllm_regression_test": {
@@ -143,7 +143,7 @@ def sample_vllm_test_library():
                 "pytest -v -s compile/test_decorator.py",
             ],
         },
-        "vllm_languagde_model_test_extended_generation_28_failure_test": {
+        "vllm_language_model_test_extended_generation_28_failure_test": {
             "title": "Language Models Test (Extended Generation) 2.8 release failure",
             "id": "vllm_languagde_model_test_extended_generation_28_failure_test",
             "package_install": [

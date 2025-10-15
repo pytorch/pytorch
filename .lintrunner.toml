@@ -18,6 +18,7 @@ exclude_patterns = [
     'torch/_inductor/autoheuristic/artifacts/**',
     'scripts/**',
     'test/generated_type_hints_smoketest.py',
+    'test/test_torchfuzz_repros.py',
     # CPython tests
     'test/dynamo/cpython/**',
     # Tests from the NumPy test suite
@@ -27,6 +28,7 @@ exclude_patterns = [
     'torch/lib/**',
     'venv/**',
     '**/*.pyi',
+    "tools/experimental/torchfuzz/**",
     'tools/test/test_selective_build.py',
 ]
 command = [
@@ -49,7 +51,7 @@ init_command = [
     'mccabe==0.7.0',
     'pycodestyle==2.14.0',
     'pyflakes==3.4.0',
-    'torchfix==0.4.0 ; python_version >= "3.9" and python_version < "3.13"',
+    'torchfix==0.4.0 ; python_version >= "3.10" and python_version < "3.13"',
 ]
 
 
@@ -153,7 +155,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
+    'numpy==1.26.4 ; python_version >= "3.10" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
     'expecttest==0.3.0',
     'mypy==1.16.0',
@@ -196,6 +198,7 @@ exclude_patterns = [
     'tools/test/gen_operators_yaml_test.py',
     'tools/test/gen_oplist_test.py',
     'tools/test/test_selective_build.py',
+    'tools/experimental/torchfuzz/**',
 ]
 command = [
     'python3',
@@ -1259,6 +1262,7 @@ exclude_patterns = [
     'test/test_masked.py',
     'test/test_maskedtensor.py',
     'test/test_matmul_cuda.py',
+    'test/test_scaled_matmul_cuda.py',
     'test/test_meta.py',
     'test/test_metal.py',
     'test/test_mkl_verbose.py',
@@ -1452,7 +1456,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'usort==1.0.8.post1',
     'isort==6.0.1',
-    'ruff==0.12.9',  # sync with RUFF
+    'ruff==0.13.1',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1569,6 +1573,7 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'test/dynamo/cpython/**',
+    'test/test_torchfuzz_repros.py',
     'scripts/**',
     'third_party/**',
     'fb/**',
@@ -1586,7 +1591,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.12.9',  # sync with PYFMT
+    'ruff==0.13.1',  # sync with PYFMT
 ]
 is_formatter = true
 
