@@ -91,9 +91,6 @@ bool cudnn_is_acceptable(const TensorBase& self) {
     return false;
   if (!self.is_cuda())
     return false;
-  auto st = self.scalar_type();
-  if (!(st == kDouble || st == kFloat || st == kHalf))
-    return false;
   if (!detail::getCUDAHooks().compiledWithCuDNN())
     return false;
   // cuDNN functions like grid_sampler returns CUDNN_STATUS_BAD_PARAM on empty
