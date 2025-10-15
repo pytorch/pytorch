@@ -436,12 +436,13 @@ def get_proxy_slot(
 
 
 @functools.cache
-def _sympy_handlers():
+def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
     Returns a dict converting sympy functions to python operators
     (i.e. `sympy.Mul` -> `operator.mul`)
     """
     import torch.utils._sympy.interp
+
     handlers = {}
     for k, v in torch.utils._sympy.interp.handlers().items():
         op = getattr(operator, v, None)
@@ -533,7 +534,10 @@ def _build_proxy_for_sym_expr(
         args.append(arg_value)
     args = tuple(args)
 
-    func: OpOverload | None = _sympy_handlers().get(expr.func)
+    func: OpOverload | None = _sympy_handlers().get(expr.func)  # type: ignore[assignment]
+    if not func:
+        # Handler not found
+        return None
 
     if out is None:
         out = func(*args)
