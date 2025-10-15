@@ -14,6 +14,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import tree_map
 from torch.utils._traceback import CapturedTraceback
 
+
 if TYPE_CHECKING:
     from torch.distributed._tools.mod_tracker import ModTracker
 
@@ -361,7 +362,7 @@ class DebugMode(TorchDispatchMode):
 
         self.record_nn_module = record_nn_module
 
-        self.module_tracker: Optional["ModTracker"] = None
+        self.module_tracker: Optional[ModTracker] = None
         if self.record_nn_module:
             self.module_tracker_setup()
 
