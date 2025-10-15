@@ -1416,7 +1416,7 @@ class SIMDScheduling(BaseScheduling):
 
     def _codegen_mix_order_reduction(self, node1, node2):
         if not V.graph.sizevars.statically_known_gt(node1.group[1][0], node1.group[1][1]):
-            return _codegen_mix_order_reduction(node2, node1)
+            return self._codegen_mix_order_reduction(node2, node1)
 
         assert V.graph.sizevars.statically_known_gt(node1.group[1][0], node1.group[1][1])
 
@@ -1459,8 +1459,10 @@ class SIMDScheduling(BaseScheduling):
             V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
             # a extra sum
+            assert len(node2.get_buffer_names()) == 1
+            bufname = tuple(node2.get_buffer_names())[0]
             V.graph.wrapper_code.writeline(
-                "buf1 = workspace_0.view(-1, 768).sum(dim=0)",
+                f"{bufname} = workspace_0.view(-1, 768).sum(dim=0)",
             )
             self.free_buffers_in_scheduler()
         else:

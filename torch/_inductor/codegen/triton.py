@@ -4058,8 +4058,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.splice(self.post_loop_store)
 
                 # TODO: find the tmp0 name from cache
+                # TODO: no need to sum if XBLOCK == 0
                 self.body.writeline(
-                    "accum += tmp0",
+                    "accum += tmp0.sum(axis=0)",
                 )
             # buf2 is the intermediate buffer
             # var = self.args.output("buf2")
@@ -4368,7 +4369,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         metadata, and benchmarking infra.
         """
 
-        self.args.workspace(self.numels["r0_"] * ((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size), False, dtype=torch.float)
+        if self.mix_order_reduction:
+            self.args.workspace(self.numels["r0_"] * ((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size), False, dtype=torch.float)
 
         code = IndentedBuffer()
 

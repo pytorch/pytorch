@@ -144,6 +144,9 @@ class MixOrderReduction:
         index = found_dep.index
         var_ranges = node.read_writes.var_ranges
 
+        if not var_ranges:
+            var_ranges = node.snodes[0].read_writes.var_ranges
+
         if not (set(var_ranges) - set(index.free_symbols)):
             return True
 
@@ -172,6 +175,8 @@ class MixOrderReduction:
     # TODO add a cache
     @classmethod
     def can_fuse(cls, node1, node2):
+        if not config.triton.mix_order_reduction:
+            return False
         if not node1.is_reduction() or not node2.is_reduction():
             return False
 
@@ -180,11 +185,9 @@ class MixOrderReduction:
             return False
 
         # check common buffer accesses
-        common_read = MixOrderReduction.get_common_read(node1, node2)
-        if len(common_read) != 1:
-            return False;
-        assert len(common_read) == 1
-        common_read = common_read[0]
+        common_reads = MixOrderReduction.get_common_read(node1, node2)
+        if len(common_reads) == 0:
+            return False
 
         g1 = node1.group[1]
         nrow = max(g1[0], g1[1])
@@ -197,7 +200,8 @@ class MixOrderReduction:
             return False
 
         contiguous_node = node1 if node1.group[1][1] == ncol else node2
-        return cls.is_contiguous_load(common_read, contiguous_node)
+
+        return all(cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads)
    
     @classmethod
     def are_mix_order_reductions(cls, node1, node2):

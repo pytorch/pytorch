@@ -3130,7 +3130,7 @@ def _persistent_reduction_configs(
             configs = configs[:1]
         else:
             x_block = 8
-            if xnumel // x_block < 128 or loads_and_stores >= 5 or inductor_meta["grid_type"] == "MixOrderReductionGrid":
+            if xnumel // x_block < 128 or loads_and_stores >= 5:
                 x_block = 1
 
             configs = [
@@ -3490,7 +3490,7 @@ class Grid2DWithYZOverflow(GridExpr):
 
 class MixOrderReductionGrid(GridExpr):
     def generate(self, meta: dict[str, int]) -> None:
-        assert meta.get("XBLOCK") == 1
+        assert self.inductor_meta.get("RSPLIT_SIZE") % meta.get("XBLOCK") == 0  # TODO will remove
         self.x_grid = self.ceildiv("xnumel", self.inductor_meta.get("RSPLIT_SIZE"))
 
 class CooperativeReductionGrid(GridExpr):
