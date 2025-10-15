@@ -12630,6 +12630,126 @@ class TestCommon(TestCase):
             cpu_tensor = ones("cpu")
             self.assertEqual(mps_tensor.cpu(), cpu_tensor)
 
+
+class TestGraphCache(TestCaseMPS):
+    """Test suite for MPSGraph and MPSKernel cache management APIs.
+
+    Tests the three new Python APIs:
+    - torch.mps.empty_graph_cache()
+    - torch.mps.graph_cache_size()
+    - torch.mps.kernel_cache_size()
+
+    These APIs expose the underlying C++ implementations:
+    - MPSHooks::emptyGraphCache()
+    - MPSHooks::graphCacheSize()
+    - MPSHooks::kernelCacheSize()
+    """
+
+    def test_graph_cache_size_returns_int(self):
+        """Test that graph_cache_size() returns a non-negative integer."""
+        size = torch.mps.graph_cache_size()
+        self.assertIsInstance(size, int)
+        self.assertGreaterEqual(size, 0)
+
+    def test_kernel_cache_size_returns_int(self):
+        """Test that kernel_cache_size() returns a non-negative integer."""
+        size = torch.mps.kernel_cache_size()
+        self.assertIsInstance(size, int)
+        self.assertGreaterEqual(size, 0)
+
+    def test_empty_graph_cache_callable(self):
+        """Test that empty_graph_cache() executes without errors."""
+        torch.mps.synchronize()
+        torch.mps.empty_graph_cache()
+        # Should complete without raising exceptions
+
+    def test_empty_graph_cache_clears_graph_cache(self):
+        """Test that empty_graph_cache() clears the graph cache to zero."""
+        # Perform some operations to populate cache
+        x = torch.randn(10, 10, device='mps')
+        y = x @ x
+        torch.mps.synchronize()
+
+        # Clear the cache
+        torch.mps.empty_graph_cache()
+
+        # Verify cache is empty
+        size_after = torch.mps.graph_cache_size()
+        self.assertEqual(size_after, 0,
+            "Graph cache should be empty after empty_graph_cache()")
+
+    def test_empty_graph_cache_clears_kernel_cache(self):
+        """Test that empty_graph_cache() clears the kernel cache to zero."""
+        # Perform some operations to populate cache
+        x = torch.randn(10, 10, device='mps')
+        y = torch.relu(x)
+        torch.mps.synchronize()
+
+        # Clear the cache
+        torch.mps.empty_graph_cache()
+
+        # Verify kernel cache is empty
+        size_after = torch.mps.kernel_cache_size()
+        self.assertEqual(size_after, 0,
+            "Kernel cache should be empty after empty_graph_cache()")
+
+    def test_operations_work_after_cache_clear(self):
+        """Test that operations execute correctly after clearing cache."""
+        # Create input and compute result before clearing
+        x = torch.randn(10, 10, device='mps')
+        y_before = x @ x
+        torch.mps.synchronize()
+
+        # Clear cache
+        torch.mps.empty_graph_cache()
+
+        # Same operation on same input should produce same result
+        y_after = x @ x
+        torch.mps.synchronize()
+
+        self.assertEqual(y_before, y_after,
+            "Results should be identical before and after cache clearing")
+
+    def test_multiple_clear_operations_safe(self):
+        """Test that calling empty_graph_cache() multiple times is safe."""
+        for _ in range(3):
+            torch.mps.empty_graph_cache()
+
+        # Verify caches remain empty
+        self.assertEqual(torch.mps.graph_cache_size(), 0)
+        self.assertEqual(torch.mps.kernel_cache_size(), 0)
+
+    def test_cache_clear_with_synchronize(self):
+        """Test the recommended pattern: synchronize before clearing cache."""
+        # Create async work
+        x = torch.randn(100, 100, device='mps')
+        y = x @ x
+
+        # Synchronize then clear
+        torch.mps.synchronize()
+        torch.mps.empty_graph_cache()
+
+        # Verify clearing succeeded
+        self.assertEqual(torch.mps.graph_cache_size(), 0)
+        self.assertEqual(torch.mps.kernel_cache_size(), 0)
+
+    def test_empty_cache_integration(self):
+        """Test that empty_cache() and empty_graph_cache() work together."""
+        # Create some operations
+        x = torch.randn(50, 50, device='mps')
+        y = x @ x
+        torch.mps.synchronize()
+
+        # Clear both caches
+        torch.mps.empty_graph_cache()
+        torch.mps.empty_cache()
+
+        # Verify graph cache is cleared
+        graph_size = torch.mps.graph_cache_size()
+        self.assertEqual(graph_size, 0,
+            "Graph cache should be empty after clearing")
+
+
 class TestMetalLibrary(TestCaseMPS):
     def test_metal_arange(self):
         x = torch.zeros(12, device="mps", dtype=torch.half)
@@ -12850,6 +12970,7 @@ instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
 instantiate_parametrized_tests(TestSDPA)
 instantiate_parametrized_tests(TestSmoothL1Loss)
+instantiate_parametrized_tests(TestGraphCache)
 instantiate_parametrized_tests(TestMetalLibrary)
 
 if __name__ == "__main__":
