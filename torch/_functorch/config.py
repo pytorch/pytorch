@@ -4,8 +4,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Callable
-
 
 """
 Global flags for aot autograd
@@ -15,12 +13,17 @@ import os
 import sys
 from typing import Literal, Optional, TYPE_CHECKING
 
+import torch._functorch.custom_graph_pass
 from torch.utils._config_module import Config, install_config_module
 
 
 # [@compile_ignored: debug]
-_save_config_ignore = [
+_save_config_ignore: list[str] = [
     # callable not serializeable
+    "joint_custom_pass",
+]
+
+_cache_config_ignore_prefix: list[str] = [
     "joint_custom_pass",
 ]
 
@@ -367,9 +370,8 @@ _sync_decision_cross_ranks = False
 # "all" - no filtering, everything saved for backward.
 saved_tensors_hooks_filtering_mode = "donated"
 
-
 # This callback is invoked on the joint graph before partitioning
-joint_custom_pass: Callable = None  # type: ignore[assignment]
+joint_custom_pass: torch._functorch.custom_graph_pass.JointCustomPass = None  # type: ignore[assignment]
 
 
 if TYPE_CHECKING:
