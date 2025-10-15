@@ -150,9 +150,9 @@ class _FromTorchTensor(torch.autograd.Function):
             )
             tensor_shape, tensor_stride = torch.Size(global_shape), tuple(global_stride)
         else:
-            raise RuntimeError(
-                f"Found shape:{shape}, stride:{stride}.",
-                "Please pass both shape and stride at the same time.",
+            raise ValueError(
+                f"Found shape:{shape}, stride:{stride}. "
+                "Please pass both shape and stride at the same time."
             )
 
         if device_mesh.get_coordinate() is None:
@@ -412,7 +412,11 @@ def _prepare_placements_and_shard_order(
                         tensor_dim, split_factor=placement.split_factor
                     )
                 else:
+                    assert type(placement) is Shard, (
+                        "Expected placement to be exactly of type Shard"
+                    )
                     normalized_placements[i] = Shard(tensor_dim)
+
         placement_tuple = tuple(normalized_placements)
 
         if shard_order is None:
@@ -625,7 +629,7 @@ class DTensor(torch.Tensor):
             A :class:`DTensor` object
 
         Raises:
-            RuntimeError: If both ``shape`` and ``stride`` are not provided together,
+            ValueError: If both ``shape`` and ``stride`` are not provided together,
                 or if the device mesh does not contain the current rank.
 
         .. note:: When ``run_check=False``, it is the user's responsibility to ensure the
@@ -638,7 +642,7 @@ class DTensor(torch.Tensor):
         """
         # `local_tensor` argument cannot be DTensor
         if isinstance(local_tensor, DTensor):
-            raise RuntimeError(
+            raise ValueError(
                 f"the local_tensor argument only accepts torch.Tensor but got {type(local_tensor)} value."
             )
 
@@ -1140,13 +1144,25 @@ def distribute_tensor(
         # _StridedShard case
         assert shard_order is None, "shard_order conflicts with _StridedShard"
         for mesh_dim, placement in enumerate(placements_tuple):
-            if placement.is_shard():
-                assert placement.dim >= 0  # type: ignore[attr-defined]
-                placement = cast(Shard, placement)
-                local_tensor = placement._shard_tensor(
-                    local_tensor, device_mesh, mesh_dim, src_data_rank
-                )
-            elif placement.is_replicate():
+            if isinstance(placement, Shard):
+                if isinstance(placement, _StridedShard):
+                    local_tensor = _StridedShard._make_shard_tensor(
+                        placement.dim,
+                        local_tensor,
+                        device_mesh,
+                        mesh_dim,
+                        src_data_rank,
+                        split_factor=placement.split_factor,
+                    )
+                else:
+                    local_tensor = Shard._make_shard_tensor(
+                        placement.dim,
+                        local_tensor,
+                        device_mesh,
+                        mesh_dim,
+                        src_data_rank,
+                    )
+            elif isinstance(placement, Replicate):
                 local_tensor = Replicate._make_replicate_tensor(
                     local_tensor, device_mesh, mesh_dim, src_data_rank
                 )
