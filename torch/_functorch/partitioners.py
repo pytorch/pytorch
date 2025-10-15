@@ -302,7 +302,11 @@ def _must_be_in_forward(node: fx.Node) -> bool:
         isinstance(node.target, torch._ops.OpOverload)
         and node.target._schema.is_mutable
     )
-    return not _has_tag_is_backward(node) and is_mutable
+    return (
+        not _has_tag_is_backward(node)
+        and not _has_tag_must_be_in_backward(node)
+        and is_mutable
+    )
 
 
 def _must_be_in_backward(node: fx.Node) -> bool:
@@ -621,8 +625,7 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     # Use position-based lookup for building output
     # only update the return node args, and remain all other users unchanged
     output_updated_args = [
-        position_to_quant[i] if i in position_to_quant else node
-        for i, node in enumerate(fwd_outputs)
+        position_to_quant.get(i, node) for i, node in enumerate(fwd_outputs)
     ]
     # add the scale nodes to the output find the first sym_node in the output
     idx = find_first_sym_node(output_updated_args)
