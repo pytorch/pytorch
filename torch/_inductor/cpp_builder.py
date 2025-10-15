@@ -348,10 +348,10 @@ def check_mingw_win32_flavor(compiler: str) -> str:
     except Exception as e:
         raise RuntimeError(f"Failed to run {compiler} -v") from e
 
-    flavor: Optional[str] = None
+    flavor: str | None = None
     for line in out.splitlines():
         if "Thread model" in line:
-            flavor = line.split(":")[1].strip().lower()
+            flavor = line.split(":", 1)[-1].strip().lower()
 
     if flavor is None:
         raise RuntimeError(
