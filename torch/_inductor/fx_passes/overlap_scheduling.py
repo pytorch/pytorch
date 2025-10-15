@@ -68,14 +68,14 @@ def get_hint(x: Union[int, torch.SymInt]) -> Optional[int]:
 def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
     with dynamo_timed("collective_compute_do_bench"):
         return functools.partial(
+            # pyrefly: ignore  # bad-argument-type
             torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
             warmup=5,
         )
 
 
-def benchmark_node(n: fx.Node) -> float:
-    if (est := get_custom_estimation(n)) is not None:
-        return est
+def benchmark_node_with_cache_key(n: fx.Node) -> tuple[float, Optional[str]]:
+    assert is_compute_node(n)
 
     from torch._dynamo.testing import rand_strided
 
@@ -83,7 +83,7 @@ def benchmark_node(n: fx.Node) -> float:
     success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(n)
 
     if not success:
-        return 0
+        return 0, None
 
     unbacked_tensor = False
 
@@ -110,15 +110,23 @@ def benchmark_node(n: fx.Node) -> float:
         )
 
         if val := get_cached_node_time(key):
-            return val
+            return val, key
 
         if unbacked_tensor:
-            return 0
+            return 0, key
+
+        if (est := get_custom_estimation(n)) is not None:
+            set_cached_node_time(key, est)
+            return est, key
 
         bench = get_collective_do_bench()
         out = bench(lambda: n.target(*args, **kwargs))  # type: ignore[operator]
         set_cached_node_time(key, out)
-        return out
+        return out, key
+
+
+def benchmark_node(n: fx.Node) -> float:
+    return benchmark_node_with_cache_key(n)[0]
 
 
 @functools.cache
@@ -305,8 +313,50 @@ class OverlapScheduler:
 
         return compute_depth_dominance
 
+    def _align_compute_nodes_runtime_estimations_across_all_distributed_ranks(
+        self,
+    ) -> None:
+        log.info(
+            "Overlap scheduling: Aligning runtime estimations across all distributed ranks"
+        )
+        runtime_estimations_keys: list[Optional[str]] = []
+        runtime_estimations: list[float] = []
+        for n in self.compute_nodes:
+            val, key = benchmark_node_with_cache_key(n)
+            runtime_estimations.append(val)
+            runtime_estimations_keys.append(key)
+
+        import torch.distributed as dist
+        from torch.distributed.distributed_c10d import _get_default_group
+
+        world_size = dist.get_world_size()
+        pg = _get_default_group()
+        with no_dispatch():
+            gathered_runtime_estimations: list[list[float]] = [
+                [] for _ in range(world_size)
+            ]
+            dist.all_gather_object(
+                gathered_runtime_estimations, runtime_estimations, pg
+            )
+            median_runtime_estimations = torch.median(
+                torch.tensor(gathered_runtime_estimations), dim=0
+            ).values.tolist()
+        for key, median_runtime_estimation in zip(
+            runtime_estimations_keys, median_runtime_estimations
+        ):
+            if key is None:
+                continue
+            set_cached_node_time(key, median_runtime_estimation)
+        log.info(
+            "Overlap scheduling: Runtime estimations across all distributed ranks were aligned"
+        )
+
     def run(self) -> torch.fx.GraphModule:
         """Run the scheduling algorithm."""
+        # All ranks must make identical decisions on overlap reordering,
+        # Thus we must have identical runtime estimations across ranks.
+        # For now we do benchmarking only for compute nodes.
+        self._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
 
         while self.ready:
             if self._should_force_wait_for_memory():
@@ -329,9 +379,39 @@ class OverlapScheduler:
                 self._handle_other(node)
 
         self._reorder_graph()
+
         if torch._inductor.config.test_configs.aten_fx_overlap_preserving_bucketing:
             self._bucket_collectives()
+        elif torch._inductor.config.test_configs.aten_fx_overlap_insert_overlap_deps:
+            # If not bucketing, add effect tokens to preserve hiding dependencies
+            self._add_effect_tokens_for_overlap()
+
         return self.gm
+
+    def _add_effect_tokens_for_overlap(self) -> None:
+        """
+        Add effect tokens to preserve hiding dependency relationships when not bucketing.
+
+        This ensures that communication-compute overlap is preserved through effect tokens
+        when overlap preserving bucketing is not enabled.
+        """
+        from torch._inductor.fx_passes.control_dependencies import (
+            preserve_node_ordering,
+        )
+
+        # Collect hiding dependencies: hiding_node -> collective_start, wait -> hiding_node
+        additional_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+
+        for start_node, info in self.collective_info.items():
+            if info.hiding_node and not info.is_exposed:
+                # Compute depends on collective start (compute must wait for collective to start)
+                additional_deps[info.hiding_node].add(start_node)
+                # Wait depends on compute (wait must wait for compute to finish)
+                additional_deps[info.wait_node].add(info.hiding_node)
+
+        # Apply effect tokens to preserve these dependencies
+        if additional_deps:
+            preserve_node_ordering(self.graph, additional_deps)
 
     def _handle_other(self, node: fx.Node) -> None:
         self._schedule(node)
@@ -545,7 +625,7 @@ class OverlapScheduler:
 
             if is_wait_tensor(node):
                 info = self.collective_info[self.wait_to_start[node]]
-                assert not info.hiding_node == curr_compute_node
+                assert info.hiding_node != curr_compute_node
                 self._handle_wait(node)
                 continue
 
@@ -600,6 +680,7 @@ class OverlapScheduler:
             node_ancestors=self.node_ancestors,
             scheduled=self.scheduled,
             max_bucket_memory_gb=1.0,  # Could make this configurable
+            max_coll_distance=self.max_node_distance,
         )
         bucketer.bucket_collectives()
 

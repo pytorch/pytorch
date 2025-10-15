@@ -201,6 +201,19 @@ class TensorVariable(VariableTracker):
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
 
+    def synchronize_attributes(self, tx, target_cls=None):
+        from .builder import get_specialized_props, infer_subclass_type
+
+        if target_cls is None:
+            target_cls = type(self)
+
+        example_value = self.proxy.node.meta.get("example_value")
+        specialized_props = get_specialized_props(
+            target_cls, tx, example_value, infer_subclass_type(example_value)
+        )
+        for k, v in specialized_props.items():
+            setattr(self, k, v)
+
     def debug_repr(self):
         # TODO: strip off fake tensor from repr here
         return repr(self.proxy.node.meta["example_value"])
@@ -503,7 +516,7 @@ class TensorVariable(VariableTracker):
                 # these attributes are implemented under tp_getset, which appear
                 # as `getset_descriptor`s, (compared to, say, methods which appear
                 # as `method_descriptor`s)
-                if type(static_attr) != types.GetSetDescriptorType:
+                if type(static_attr) is not types.GetSetDescriptorType:
                     return None
 
                 proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), name)
@@ -1099,17 +1112,11 @@ class TensorVariable(VariableTracker):
             with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
                 get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
 
-            example_value = self.proxy.node.meta.get("example_value")
-            from .builder import get_specialized_props, infer_subclass_type
+            vt = value
+            if isinstance(vt, variables.lazy.LazyVariableTracker):
+                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
 
-            if isinstance(value, variables.lazy.LazyVariableTracker):
-                value = variables.lazy.LazyVariableTracker.realize_all(value)
-
-            specialized_props = get_specialized_props(
-                type(value), tx, example_value, infer_subclass_type(example_value)
-            )
-            for k, v in specialized_props.items():
-                setattr(self, k, v)
+            self.synchronize_attributes(tx, type(vt))
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
@@ -1354,7 +1361,7 @@ class TensorVariable(VariableTracker):
         if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
             len(args) >= 1
             and all(
-                isinstance(a, ConstantVariable) and a.python_type() == int for a in args
+                isinstance(a, ConstantVariable) and a.python_type() is int for a in args
             )
         ):
             from ..symbolic_convert import InstructionTranslator
@@ -1536,7 +1543,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 explanation=f"Dynamo currently does not support tracing `ndarray.{name}`.",
                 hints=[],
             )
-        elif name in ["__version__"]:
+        elif name == "__version__":
             unimplemented_v2(
                 gb_type="Unsupported ndarray.__version__ access",
                 context=f"var_getattr {self} {name}",

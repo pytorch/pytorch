@@ -285,7 +285,6 @@ class TestInductorDynamic(TestCase):
         def f():
             full = torch.full((), 11)
             i0 = full.item()
-            torch._check_is_size(i0)
             return torch.full((i0,), 0)
 
         opt_f = torch.compile(f, fullgraph=True)
@@ -450,8 +449,6 @@ class TestInductorDynamic(TestCase):
     def test_return_unbacked_view_split(self, device):
         def f(values, length_per_key):
             u0, u1 = length_per_key.tolist()
-            torch._check_is_size(u0)
-            torch._check_is_size(u1)
             v1, v2 = torch.functional.split(values, [u0, u1])
             return v1, v2
 
@@ -483,7 +480,6 @@ class TestInductorDynamic(TestCase):
 
         @torch.library.register_fake("_test::_cat")
         def _cat_fake(t: torch.Tensor, ds: list[int]) -> torch.Tensor:
-            [torch._check_is_size(d) for d in ds]
             return t.new_empty([sum(ds)])
 
         def _cat_setup_context(ctx, inputs, output):
@@ -656,6 +652,33 @@ class TestInductorDynamic(TestCase):
         y = torch.rand([64])
 
         self.assertEqual(foo_c(t, y), foobar(t, y))
+
+    @parametrize("with_replacement", [False, True])
+    def test_dynamic_shapes_r2_matches_eager(self, with_replacement):
+        def _eager(x, r):
+            out = torch.combinations(
+                x.flatten(), r=r, with_replacement=with_replacement
+            )
+            # Canonicalize for stable comparison
+            return out.to(torch.float32).sort(dim=0).values
+
+        def _compiled(r):
+            def fn(x):
+                return torch.combinations(
+                    x.flatten(), r=r, with_replacement=with_replacement
+                )
+
+            # The original bug repro failed under aot_eager + dynamic=True
+            return torch.compile(fn, backend="aot_eager", dynamic=True)
+
+        def _assert_match(compiled, x, r):
+            out = compiled(x)
+            exp = _eager(x, r=r)
+            self.assertEqual(out.to(torch.float32).sort(dim=0).values, exp)
+
+        compiled = _compiled(r=2)
+        _assert_match(compiled, torch.tensor([1, 2, 3, 4], dtype=torch.int64), r=2)
+        _assert_match(compiled, torch.tensor([5, 6, 7], dtype=torch.int64), r=2)
 
     def test_floor(self):
         def fn(x):
@@ -983,7 +1006,6 @@ class TestInductorDynamic(TestCase):
         @torch.compile(fullgraph=True, dynamic=True)
         def f(x):
             a = x.item()
-            torch._check_is_size(a)
             torch._check(a >= 1)
             torch._check(a <= 10)
             return torch.ones(a, a)
@@ -995,8 +1017,6 @@ class TestInductorDynamic(TestCase):
         @torch.compile()
         def f(xt):
             xs = xt.tolist()
-            for x in xs:
-                torch._check_is_size(x)
             y = sum(xs)
             return torch.zeros(y, device=device)
 
