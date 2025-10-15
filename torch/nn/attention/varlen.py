@@ -6,7 +6,7 @@ that calls into the optimized Flash Attention kernels.
 
 import logging
 from functools import lru_cache
-from typing import NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Union
 
 import torch
 
@@ -32,9 +32,7 @@ class AuxRequest(NamedTuple):
     lse: bool = False
 
 
-@torch.library.custom_op(
-    "torch_nn_attention::_varlen_attn", mutates_args={}, device_types=("cuda",)
-)
+@torch.library.custom_op("torch_nn_attention::_varlen_attn", mutates_args={})
 def _varlen_attn(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -86,9 +84,7 @@ def _varlen_attn(
             return_debug_mask=False,
         )
 
-    rng_state_ = torch.zeros(
-        (2,), dtype=torch.uint64, device=query.device
-    ) # hardcoded
+    rng_state_ = torch.zeros((2,), dtype=torch.uint64, device=query.device)  # hardcoded
     return output, softmax_lse, rng_state_
 
 
@@ -203,7 +199,7 @@ def varlen_attn(
     return out
 
 
-def _setup_context(ctx, inputs, output):
+def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal = inputs
     out, lse, rng_state = output
     ctx.query = query
@@ -219,7 +215,9 @@ def _setup_context(ctx, inputs, output):
     ctx.rng_state = rng_state
 
 
-def _backward(ctx, grad_out, grad_lse, grad_rng):
+def _backward(
+    ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor
+) -> tuple[Optional[torch.Tensor], ...]:
     query = ctx.query
     key = ctx.key
     value = ctx.value
