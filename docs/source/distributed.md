@@ -328,10 +328,33 @@ can be `env://`).
   using a full mesh which can greatly improve initialization time for non all2all
   operations.
 
+## Process Topology Information
+
+Call {func}`torch.distributed.get_worker_info` to retrieve a lightweight snapshot of the current
+rank, local rank, and world size. This function works **both before and after process group
+initialization**:
+
+- **Pre-initialization**: Reads from the ``RANK``, ``LOCAL_RANK`` and ``WORLD_SIZE`` environment
+  variables that launchers such as :mod:`torchrun` populate.
+- **Post-initialization**: Queries the active default process group to obtain the current topology.
+
+This is useful for libraries that need to make decisions about device placement, seeding or sharding
+prior to calling :func:`init_process_group`.
+
+```{eval-rst}
+.. autoclass:: DistributedWorkerInfo
+    :members:
+```
+
+```{eval-rst}
+.. autofunction:: get_worker_info
+```
+
 ## Post-Initialization
 
-Once {func}`torch.distributed.init_process_group` was run, the following functions can be used. To
-check whether the process group has already been initialized use {func}`torch.distributed.is_initialized`.
+Once {func}`torch.distributed.init_process_group` has been run, the following functions can be used.
+To check whether the process group has already been initialized use
+{func}`torch.distributed.is_initialized`.
 
 ```{eval-rst}
 .. autoclass:: Backend

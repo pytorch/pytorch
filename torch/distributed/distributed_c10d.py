@@ -16,6 +16,7 @@ import warnings
 from collections import namedtuple
 from collections.abc import Callable
 from datetime import timedelta
+from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
@@ -129,6 +130,8 @@ __all__ = [
     "all_gather_into_tensor",
     "reduce_scatter_tensor",
     "get_node_local_rank",
+    "DistributedWorkerInfo",
+    "get_worker_info",
     "split_group",
 ]
 
@@ -1472,6 +1475,128 @@ def get_node_local_rank(fallback_rank: Optional[int] = None) -> int:
     raise RuntimeError(
         "LOCAL_RANK is not in the environment. Consider passing fallback_rank to allow `get_node_local_rank` to work, "
         "assuming you are not running in a multi-device context and want the code to run locally instead."
+    )
+
+
+@dataclass(frozen=True)
+class DistributedWorkerInfo:
+    """
+    A snapshot of the current process topology.
+
+    Args:
+        rank: Global rank of the process.
+        local_rank: Rank of the process relative to the node.
+        world_size: World size for the job.
+        is_distributed: ``True`` if the world size is greater than 1.
+    """
+
+    rank: int
+    local_rank: int
+    world_size: int
+    is_distributed: bool
+
+
+def get_worker_info(
+    *,
+    fallback_rank: int = 0,
+    fallback_local_rank: int = 0,
+    fallback_world_size: int = 1,
+) -> DistributedWorkerInfo:
+    """
+    Inspect the current process topology even before process group initialization.
+
+    This helper is intended for launchers or libraries that need to decide on
+    device placement, seeding, or sharding prior to calling
+    :func:`init_process_group`. It consults the active process group when one is
+    initialized, otherwise it falls back to the ``RANK``, ``LOCAL_RANK`` and
+    ``WORLD_SIZE`` environment variables populated by launchers such as
+    :mod:`torchrun`.
+
+    **Environment Variable Fallback Logic**:
+
+    - ``rank``: Uses ``RANK`` env var if set, otherwise ``fallback_rank``.
+    - ``local_rank``: Uses ``LOCAL_RANK`` if set, otherwise ``RANK`` if set,
+      otherwise ``fallback_local_rank``. Using ``RANK`` as ``local_rank`` is only
+      correct for single-node setups. Proper launchers should set ``LOCAL_RANK``.
+    - ``world_size``: Uses ``WORLD_SIZE`` if set, otherwise ``fallback_world_size``.
+
+    Args:
+        fallback_rank (int): Value to return when neither an initialized process
+            group nor ``RANK`` env var is available. Default: ``0``.
+        fallback_local_rank (int): Value to return when neither an initialized
+            process group nor ``LOCAL_RANK`` env var is available. Default:
+            ``0``.
+        fallback_world_size (int): Value to return when neither an initialized
+            process group nor ``WORLD_SIZE`` env var is available. Default:
+            ``1``.
+
+    Returns:
+        DistributedWorkerInfo: Snapshot of rank, local rank, world size and a flag
+        indicating whether the process is part of a distributed job.
+
+    Raises:
+        ValueError: If ``RANK``, ``LOCAL_RANK``, or ``WORLD_SIZE`` environment
+            variables are set but contain non-integer values, or if the resolved
+            values are logically inconsistent (e.g., ``rank >= world_size``).
+
+    Note:
+        This function is not thread-safe with respect to concurrent
+        :func:`init_process_group` calls. When querying an initialized process
+        group it always targets the default process group.
+    """
+
+    if is_initialized():
+        rank = get_rank()
+        world_size = get_world_size()
+        try:
+            local_rank = get_node_local_rank(fallback_rank=rank)
+        except RuntimeError:
+            local_rank = rank
+    else:
+        env_rank = os.environ.get("RANK")
+        env_local_rank = os.environ.get("LOCAL_RANK")
+        env_world_size = os.environ.get("WORLD_SIZE")
+
+        rank = int(env_rank) if env_rank is not None else fallback_rank
+        world_size = (
+            int(env_world_size) if env_world_size is not None else fallback_world_size
+        )
+
+        if env_local_rank is not None:
+            local_rank = int(env_local_rank)
+        elif env_rank is not None:
+            local_rank = int(env_rank)
+            if world_size > 1:
+                warnings.warn(
+                    "LOCAL_RANK environment variable not set but RANK indicates "
+                    "distributed job (world_size>1). Using RANK as local_rank may be "
+                    "incorrect in multi-node scenarios. Ensure your launcher sets "
+                    "LOCAL_RANK properly.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        else:
+            local_rank = fallback_local_rank
+
+    # TODO: create a shared helper (e.g., _check_rank_world_size_values) so rank/world_size
+    # validation logic can be reused across distributed APIs.
+    if rank < 0:
+        raise ValueError(f"rank must be non-negative, got {rank}")
+    if local_rank < 0:
+        raise ValueError(f"local_rank must be non-negative, got {local_rank}")
+    if world_size < 1:
+        raise ValueError(f"world_size must be at least 1, got {world_size}")
+    if rank >= world_size:
+        raise ValueError(
+            f"rank ({rank}) must be less than world_size ({world_size}). "
+            "This indicates a launcher misconfiguration."
+        )
+
+    return DistributedWorkerInfo(
+        rank=rank,
+        local_rank=local_rank,
+        world_size=world_size,
+        is_distributed=world_size > 1,
     )
 
 
