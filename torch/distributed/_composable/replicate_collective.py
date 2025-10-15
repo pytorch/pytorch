@@ -8,10 +8,8 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import ReduceScatter
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
-    foreach_reduce_scatter_copy_in,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
-    _get_dim0_padded_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
     compiled_autograd_enabled,
@@ -74,54 +72,23 @@ def foreach_reduce(
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
-    if world_size > 1:
-        for i, (fsdp_param, unsharded_grad) in enumerate(
-            zip(fsdp_params, unsharded_grads)
-        ):
-            if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
-                continue
-            assert unsharded_grad.size(shard_dim) % world_size == 0, (
-                f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-            )
-            chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
-            unsharded_grads[i] = torch.cat(chunks, dim=0)
+    # For replicate params, world_size is always 1, so no padding is needed.
+    # We can work directly with the unsharded gradients by concatenating them.
+    unsharded_sizes = tuple(grad.size() for grad in unsharded_grads)
 
-    padded_unsharded_sizes = tuple(
-        _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
-    )
-    reduce_scatter_input_numel = sum(s.numel() for s in padded_unsharded_sizes)
-    reduce_scatter_output_numel = reduce_scatter_input_numel // world_size
-    reduce_scatter_input = reduce_scatter_comm.allocate(
-        (reduce_scatter_input_numel,),
-        dtype=reduce_dtype,
-        device=device,
-    )
+    # Concatenate gradients directly without padding or allocation overhead
+    reduce_output = torch.cat([grad.flatten() for grad in unsharded_grads])
+    if reduce_output.dtype != reduce_dtype:
+        reduce_output = reduce_output.to(dtype=reduce_dtype)
 
-    foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
-
-    # Only after the copy-in finishes can we free the gradients
+    # Only after concatenation finishes can we free the gradients
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
     all_reduce_event = None
 
     with device_handle.stream(reduce_scatter_stream):
-        reduce_output = reduce_scatter_comm.allocate(
-            (reduce_scatter_output_numel,),
-            dtype=reduce_dtype,
-            device=device,
-        )
-        _div_if_needed(reduce_scatter_input, predivide_factor)
-        if world_size > 1:
-            reduce_scatter_comm(
-                output_tensor=reduce_output,
-                input_tensor=reduce_scatter_input,
-                group=reduce_scatter_group,
-                op=reduce_scatter_op,
-            )
-        else:
-            # For single GPU, just copy the input to output (no actual reduce-scatter needed)
-            reduce_output.copy_(reduce_scatter_input)
+        _div_if_needed(reduce_output, predivide_factor)
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
 
@@ -132,7 +99,7 @@ def foreach_reduce(
             else:
                 partial_reduce_output = reduce_output
             return (
-                reduce_scatter_input,
+                reduce_output,
                 reduce_scatter_event,
                 post_reduce_stream.record_event(),
                 all_reduce_input,
@@ -170,12 +137,9 @@ def foreach_reduce(
         _div_if_needed(reduce_output, postdivide_factor)
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
-        flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
-        for padded_unsharded_size, fsdp_param in zip(
-            padded_unsharded_sizes, fsdp_params
-        ):
-            # Assume even sharding for Shard(i), i > 0; otherwise would require
-            # copy-out for contiguous strides
+        flat_grad_offset = 0
+        for unsharded_size, fsdp_param in zip(unsharded_sizes, fsdp_params):
+            # For replicate params, sharded_size == unsharded_size since world_size == 1
             new_sharded_grad = torch.as_strided(
                 reduce_output,
                 size=fsdp_param.sharded_size,
@@ -212,15 +176,15 @@ def foreach_reduce(
                     or {}
                 ).values():
                     hook(fsdp_param.sharded_param)
-            padded_sharded_numel = padded_unsharded_size.numel() // world_size
-            flat_grad_offset += padded_sharded_numel
+            # For replicate params, no padding so numel is the same as unsharded
+            flat_grad_offset += unsharded_size.numel()
         post_reduce_event = post_reduce_stream.record_event()
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
     # hold refs through the end of backward.
     return (
-        reduce_scatter_input,
+        reduce_output,
         reduce_scatter_event,
         post_reduce_event,
         all_reduce_input,
