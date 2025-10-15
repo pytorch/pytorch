@@ -152,10 +152,7 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
   return ctx;
 }
 
-Device getATenDevice(
-    DLDeviceType type,
-    c10::DeviceIndex index,
-    void* data = nullptr) {
+Device getATenDevice(DLDeviceType type, c10::DeviceIndex index, void* data) {
   switch (type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
