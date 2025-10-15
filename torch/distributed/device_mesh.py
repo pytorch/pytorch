@@ -1260,6 +1260,7 @@ else:
                 tuple(concat_dim_names),
                 _init_backend=False,
                 _layout=concat_mesh_layout,
+                _root_mesh=root_mesh,
             )
             res_submesh._dim_group_names = concat_dim_group_name
             return res_submesh

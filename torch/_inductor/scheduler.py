@@ -474,6 +474,9 @@ class BaseSchedulerNode:
     def is_reduction(self) -> bool:
         return False
 
+    def is_native_matmul(self) -> bool:
+        return False
+
     def is_split_scan(self) -> bool:
         return False
 
@@ -1341,6 +1344,10 @@ class SchedulerNode(BaseSchedulerNode):
         )
         return bool(self.node.get_reduction_type())
 
+    def is_native_matmul(self) -> bool:
+        assert isinstance(self.node, ir.ComputedBuffer), f"{type(self.node)=}"
+        return self.node.get_reduction_type() == "dot"
+
     def is_split_scan(self) -> bool:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer)), (
             f"{type(self.node)=}"
@@ -1675,6 +1682,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @cache_on_self
     def is_reduction(self) -> bool:
         return any(x.is_reduction() for x in self.snodes)
+
+    @cache_on_self
+    def is_native_matmul(self) -> bool:
+        return any(x.is_native_matmul() for x in self.snodes)
 
     @cache_on_self
     def is_split_scan(self) -> bool:
@@ -2271,7 +2282,6 @@ class Scheduler:
                 *V.graph.torchbind_constants.keys(),
             ]
         )
-
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()
@@ -3259,8 +3269,8 @@ class Scheduler:
         device = node_list_1[0].get_device()
         assert device
 
-        # don't support benchmark fusion for CPU right now.
-        if device.type == "cpu":
+        # don't support benchmark fusion for CPU C++ backend right now.
+        if device.type == "cpu" and config.cpu_backend != "triton":
             return True
 
         node_list_2 = node2.get_nodes()
@@ -5559,8 +5569,8 @@ class Scheduler:
         subkernel_nodes = nodes
         device = subkernel_nodes[0].get_device()
 
-        # don't support benchmark fusion for CPU right now.
-        if device is None or device.type == "cpu":
+        # don't support benchmark fusion for CPU C++ backend right now.
+        if device is None or (device.type == "cpu" and config.cpu_backend != "triton"):
             return True
 
         from triton.compiler.errors import CompilationError

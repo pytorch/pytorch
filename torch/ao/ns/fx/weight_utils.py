@@ -268,7 +268,7 @@ def extract_weight_from_node(
         mod = getattr_from_fqn(gm, node.target)
         module_mapping = op_to_type_to_weight_extraction_fn["call_module"]
         for target_mod_type, weight_extraction_fn in module_mapping.items():
-            if type(mod) == target_mod_type:
+            if type(mod) is target_mod_type:
                 weight = weight_extraction_fn(mod)
                 return {
                     "type": res_type,

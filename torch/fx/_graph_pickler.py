@@ -3,7 +3,8 @@ import importlib
 import io
 import pickle
 from abc import abstractmethod
-from typing import Any, Callable, NewType, Optional, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
 import torch

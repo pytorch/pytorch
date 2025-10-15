@@ -296,7 +296,7 @@ static bool isSupportedHipLtROCmArch(int index) {
 #endif
 
 template <typename scalar_t>
-static void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
+void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const scalar_t* bias, cuda::blas::GEMMAndBiasActivationEpilogue activation) {
   bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
   bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
   at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
@@ -1177,7 +1177,7 @@ bool is_blockwise_128x128_scaling(const at::Tensor& t, const at::Tensor& scale) 
           scale,
           0,
           ceil_div<int64_t>(t.size(0), 128),
-          round_up<int64_t>(ceil_div<int64_t>(t.size(1), 128), 4)) &&
+          ceil_div<int64_t>(t.size(1), 128)) &&
       check_size_stride(
           scale, 1, ceil_div<int64_t>(t.size(1), 128), 1));
 }
@@ -1273,6 +1273,10 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   // by decreasing priority. We prefer "simpler" schemes as they are supported
   // more broadly (more GPU archs, more CUDA versions) and because they are more
   // efficient. This tends to matter only for small matmuls (e.g., 1x1x128).
+
+  // List of supported BlockWise pairs for FP8:
+  // https://docs.nvidia.com/cuda/cublas/#element-1d-and-128x128-2d-block-scaling-for-fp8-data-types
+
   auto [scaling_choice_a, scaling_choice_b] = get_joint_scaling(
     {
       std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
