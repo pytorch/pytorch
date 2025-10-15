@@ -667,10 +667,7 @@ def _pipelined_all_gather_and_consume_last_dim(
 
     local_p2p_buf = get_p2p_buf(rank)
 
-    # shards[i] => shard from rank i
-    shards = []
-    for i, c in enumerate(ag_out.chunk(group_size)):
-        shards.append(c)
+    shards = ag_out.chunk(group_size)
 
     copy_shard(dst=local_p2p_buf, src=shard)
     symm_mem.barrier(channel=1)
