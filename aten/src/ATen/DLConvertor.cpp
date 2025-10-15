@@ -446,22 +446,20 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
 template at::Tensor fromDLPackImpl<DLManagedTensor>(DLManagedTensor* src, std::function<void(void*)> deleter);
 template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(DLManagedTensorVersioned* src, std::function<void(void*)> deleter);
 
-void toDLPackNonOwningImpl(const Tensor& src, DLTensor& tensor) {
+void toDLPackNonOwning(const Tensor& src, DLTensor* out) {
   // Fill in the pre-allocated DLTensor struct with direct pointers
   // This is a non-owning conversion - the caller owns the tensor
   // and must keep it alive for the duration of DLTensor usage
-  tensor.data = src.data_ptr();
-  tensor.device = torchDeviceToDLDevice(src.device());
-  tensor.ndim = static_cast<int32_t>(src.dim());
-  tensor.dtype = getDLDataType(src);
+  out->data = src.data_ptr();
+  out->device = torchDeviceToDLDevice(src.device());
+  out->ndim = static_cast<int32_t>(src.dim());
+  out->dtype = getDLDataType(src);
   // sizes() and strides() return pointers to TensorImpl's stable storage
   // which remains valid as long as the tensor is alive
-  tensor.shape = const_cast<int64_t*>(src.sizes().data());
-  tensor.strides = const_cast<int64_t*>(src.strides().data());
-  tensor.byte_offset = 0;
+  out->shape = const_cast<int64_t*>(src.sizes().data());
+  out->strides = const_cast<int64_t*>(src.strides().data());
+  out->byte_offset = 0;
 }
-
-} // namespace
 
 DLManagedTensor* toDLPack(const Tensor& src) {
   return toDLPackImpl<DLManagedTensor>(src);
@@ -469,10 +467,6 @@ DLManagedTensor* toDLPack(const Tensor& src) {
 
 DLManagedTensorVersioned* toDLPackVersioned(const Tensor& src) {
   return toDLPackImpl<DLManagedTensorVersioned>(src);
-}
-
-void toDLPackNonOwning(const Tensor& src, DLTensor& tensor) {
-  toDLPackNonOwningImpl(src, tensor);
 }
 
 Tensor fromDLPack(DLManagedTensor* src, std::function<void(void*)> deleter) {

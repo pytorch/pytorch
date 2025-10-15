@@ -710,7 +710,7 @@ struct TorchDLPackExchangeAPI : public DLPackExchangeAPI {
       // Use handle (non-owning) to avoid unnecessary refcount operations
       py::handle handle(static_cast<PyObject*>(py_obj));
       at::Tensor tensor = handle.cast<at::Tensor>();
-      at::toDLPackNonOwning(tensor, *out);
+      at::toDLPackNonOwning(tensor, out);
       return 0;
     } catch (const std::exception& e) {
       PyErr_SetString(PyExc_RuntimeError, e.what());
