@@ -30,7 +30,6 @@ ReductionType = Literal[
     "min",
     "prod",
     "sum",
-    "dot",
     "xor_sum",
     "online_softmax_reduce",
 ]
@@ -685,10 +684,6 @@ class OpsHandler(Generic[T]):
 
     # halide-only
     def halide_clamp(self, value: T, size: sympy.Expr, check: bool) -> T:
-        raise NotImplementedError
-
-    # triton-only
-    def dot(self, x: T, y: T) -> T:
         raise NotImplementedError
 
     # triton-only

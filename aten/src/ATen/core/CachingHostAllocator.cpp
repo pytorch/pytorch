@@ -6,9 +6,9 @@ namespace at {
 
 namespace {
 
-std::array<HostAllocator*, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+static std::array<HostAllocator*, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     allocator_array{};
-std::array<uint8_t, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+static std::array<uint8_t, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     allocator_priority{};
 
 } // anonymous namespace

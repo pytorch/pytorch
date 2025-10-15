@@ -159,8 +159,7 @@ def compile_timeit_template(*, stmt: str, setup: str, global_setup: str) -> Time
         src: str = f.read()
 
     module = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=False)
-    if not isinstance(module, TimeitModuleType):
-        raise AssertionError("compiled module is not a TimeitModuleType")
+    assert isinstance(module, TimeitModuleType)
     return module
 
 
@@ -170,6 +169,5 @@ def compile_callgrind_template(*, stmt: str, setup: str, global_setup: str) -> s
         src: str = f.read()
 
     target = _compile_template(stmt=stmt, setup=setup, global_setup=global_setup, src=src, is_standalone=True)
-    if not isinstance(target, str):
-        raise AssertionError("compiled target path is not a string")
+    assert isinstance(target, str)
     return target

@@ -611,7 +611,8 @@ def quantize_activation_fw(graph: torch.fx.Graph) -> None:
     # Use position-based lookup for building output
     # only update the return node args, and remain all other users unchanged
     output_updated_args = [
-        position_to_quant.get(i, node) for i, node in enumerate(fwd_outputs)
+        position_to_quant[i] if i in position_to_quant else node
+        for i, node in enumerate(fwd_outputs)
     ]
     # add the scale nodes to the output find the first sym_node in the output
     idx = find_first_sym_node(output_updated_args)
@@ -1025,11 +1026,7 @@ def default_partition(
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
-        elif (
-            "tensor_meta" not in node.meta
-            and node.op == "call_function"
-            and not isinstance(node.meta.get("val"), torch._subclasses.FakeTensor)
-        ):
+        elif "tensor_meta" not in node.meta and node.op == "call_function":
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
             assert all(user.target == operator.getitem for user in users)

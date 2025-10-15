@@ -140,7 +140,6 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner: linux.2xlarge.memory
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang18-asan
       docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-asan

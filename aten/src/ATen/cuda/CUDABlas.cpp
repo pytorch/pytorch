@@ -108,7 +108,7 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
 
 namespace {
 
-cublasOperation_t _cublasOpFromChar(char op) {
+static cublasOperation_t _cublasOpFromChar(char op) {
   // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
   switch (op) {
     case 'n':
@@ -128,7 +128,7 @@ cublasOperation_t _cublasOpFromChar(char op) {
       "_cublasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
-void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
+static void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
   // Note: leading dimensions generally are checked that they are > 0
   // and at least as big the result requires (even if the value won't
   // be used).
@@ -142,7 +142,7 @@ void _cublasAdjustLdLevel2(int64_t m, int64_t n, int64_t* lda) {
     *lda = std::max<int64_t>(m, 1);
 }
 
-void _cublasAdjustLdLevel3(
+static void _cublasAdjustLdLevel3(
     char transa,
     char transb,
     int64_t m,
