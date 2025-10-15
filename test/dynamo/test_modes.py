@@ -790,6 +790,41 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                         torch.ones(2, 2, 2, 2),
                     )
 
+    @requires_gpu
+    def test_set_default_device_with_factory_functions(self):
+        """Test that torch.set_default_device works with tensor factory functions in torch.compile"""
+        torch.set_default_device(GPU_TYPE)
+
+        @torch.compile(fullgraph=True)
+        def fn(input_tensor):
+            # Test various factory functions that should respect default device.
+            # This can be expanded to fully cover all factory functions.
+            t1 = torch.randn(10, 10)
+            t2 = torch.zeros(5, 5)
+            t3 = torch.ones(3, 3)
+            t4 = torch.empty(2, 2)
+            t5 = torch.tensor([1000], dtype=torch.int64)
+
+            result = input_tensor / t5
+            return result, t1, t2, t3, t4
+
+        input_tensor = torch.randn([10, 10], dtype=torch.float32)
+        result, t1, t2, t3, t4 = fn(input_tensor)
+
+        # Verify all tensors are on the correct device
+        self.assertEqual(result.device.type, GPU_TYPE)
+        self.assertEqual(t1.device.type, GPU_TYPE)
+        self.assertEqual(t2.device.type, GPU_TYPE)
+        self.assertEqual(t3.device.type, GPU_TYPE)
+        self.assertEqual(t4.device.type, GPU_TYPE)
+        self.assertEqual(input_tensor.device.type, GPU_TYPE)
+
+        # Verify the computation worked correctly
+        expected = input_tensor / torch.tensor([1000], dtype=torch.int64, device=GPU_TYPE)
+        self.assertEqual(result, expected)
+
+        torch.set_default_device(None)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
