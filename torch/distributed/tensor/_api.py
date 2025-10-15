@@ -909,34 +909,50 @@ class DTensor(torch.Tensor):
             )
 
     @property
-    def shard_order(self) -> ShardOrder:
+    def shard_order(self) -> TensorShardingDict:
         """
-        When a tensor dimension is sharded across multiple mesh axes,
+        The shard order of this DTensor, which specifies how tensor dimensions
+        are sharded across device mesh dimensions.
+
+        When a tensor dimension is sharded across multiple mesh dimensions,
         ``shard_order`` specifies the sequence in which these shardings are
-        applied. This order determines how tensor shards are mapped and
-        distributed across devices.
+        applied. This order determines how tensor shards are distributed across devices.
 
-        ``shard_order`` is a :class:`ShardOrder` (tuple of :class:`ShardOrderEntry` objects),
-        where each ``ShardOrderEntry`` is a named tuple containing:
+        Returns:
+            A dictionary (:class:`TensorShardingDict`) mapping tensor dimensions (int) to
+            sequences of mesh dimensions (list[int]). Each entry indicates that the
+            corresponding tensor dimension is sharded across the specified mesh dimensions
+            in the given order.
 
-        * ``tensor_dim`` (int): The tensor dimension being sharded
-        * ``mesh_dims`` (tuple[int, ...]): The device mesh dimensions across which
-          this tensor dimension is sharded, in execution order (first element is
-          applied first, second element second, etc.)
+            For example, ``{0: [1, 2], 1: [0]}`` means:
+                - Tensor dimension 0 is sharded first over mesh dimension 1, then mesh dimension 2
+                - Tensor dimension 1 is sharded over mesh dimension 0
 
         Example:
-            For a tensor of shape [8, 16] and a 3D device mesh, if dim 0 is
-            sharded over mesh dim 1, and dim 1 is sharded over mesh dim 0 and
-            then mesh dim 2, the shard_order would be::
+            For a tensor of shape [8, 16, 32] on a 3D device mesh with
+            ``placements=[Shard(1), Shard(0), Shard(0)]``::
 
-                shard_order = (
-                    ShardOrderEntry(tensor_dim=0, mesh_dims=(1,)),
-                    ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 2)),
-                )
+                >>> # Tensor dim 0 is sharded over mesh dims 1 and 2
+                >>> # Tensor dim 1 is sharded over mesh dim 0
+                >>> # Tensor dim 2 is not in the dict, meaning it's replicated over all mesh dims
+                >>> dtensor.shard_order
+                {0: [1, 2], 1: [0]}
 
-        .. note:: ``shard_order`` is a read-only property, it can not be set.
+            A tensor dimension not appearing as a key in the returned dictionary means
+            that dimension is replicated (not sharded) across all device mesh dimensions.
+
+        .. note:: ``shard_order`` is a read-only property derived from the DTensor's
+            internal :class:`ShardOrder` specification (a tuple of :class:`ShardOrderEntry`
+            objects). The returned dictionary provides a more user-friendly interface
+            to the underlying shard order information.
+
+        .. note:: If you need to redistribute a DTensor with a different shard order,
+            use the :meth:`redistribute` method with the ``shard_order`` parameter.
         """
-        return self._spec.shard_order
+        tensor_mesh_dim_dict = defaultdict(list)
+        for entry in self._spec.shard_order:
+            tensor_mesh_dim_dict[entry.tensor_dim] = list(entry.mesh_dims)
+        return TensorShardingDict(tensor_mesh_dim_dict)
 
     def __create_write_items__(self, fqn: str, object: Any):
         self._raise_if_contains_partial_placements()
