@@ -490,9 +490,9 @@ if __name__ == "__main__":
         total_memory = torch.xpu.get_device_properties().total_memory
         fraction = 0.5
         orig_fraction = torch.xpu.get_per_process_memory_fraction()
-        with self.assertRaiseRegex(ValueError, "invalid fraction:"):
+        with self.assertRaisesRegex(ValueError, "invalid fraction:"):
             torch.xpu.set_per_process_memory_fraction(-0.1)
-        with self.assertRaiseRegex(ValueError, "invalid fraction:"):
+        with self.assertRaisesRegex(ValueError, "invalid fraction:"):
             torch.xpu.set_per_process_memory_fraction(1.1)
 
         torch.xpu.set_per_process_memory_fraction(fraction)
