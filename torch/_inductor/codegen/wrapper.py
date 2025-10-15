@@ -1407,13 +1407,11 @@ class PythonWrapperCodegen(CodeGen):
     def write_get_raw_stream(self, device_idx: int, graph_name: str) -> str:
         self.write_get_raw_stream_header()
         name = f"stream{device_idx}"
-        if (
-            config.triton.autotune_at_compile_time
-            and not config.triton.autotune_full_graph
-        ):
-            self.kernel_autotune_calls.writeline(
-                f"{name} = get_raw_stream({device_idx})"
-            )
+        if config.triton.autotune_at_compile_time:
+            if not config.triton.autotune_full_graph:
+                self.kernel_autotune_calls.writeline(
+                    f"{name} = get_raw_stream({device_idx})"
+                )
             if V.graph.cpp_wrapper:
                 # For cpp wrapper, no need to continue codegen for the main body
                 return name
