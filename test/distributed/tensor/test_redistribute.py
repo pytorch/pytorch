@@ -1151,7 +1151,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         device_mesh = init_device_mesh(self.device_type, (4, 2))
         x = torch.randn(8, 4, device=self.device_type)
         # specify right-to-left order use _StridedShard
-        strided_placement = [_StridedShard(0, split_factor=2), Shard(0)]
+        strided_placement = [_StridedShard(-2, split_factor=2), Shard(-2)]
         x_strided_dt = distribute_tensor(x, device_mesh, strided_placement)
         # specify right-to-left order use ordered shard
         x_ordered_dt = self.distribute_tensor(
