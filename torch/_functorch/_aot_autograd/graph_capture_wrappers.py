@@ -1342,15 +1342,6 @@ def create_functional_call(
             maybe_disable_thunkify(),
         ):
             if isinstance(mod, torch.fx.GraphModule):
-                if kwargs:
-                    # Handle **kwargs. FX only natively supports positional
-                    # arguments (through placeholders).
-                    arg_list = list(args[params_len:])
-                    arg_list.extend(list(kwargs.values()))
-                    args = tuple(arg_list)
-                else:
-                    args = args[params_len:]
-
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
                     warnings.filterwarnings(
                         "ignore", "Anomaly Detection has been enabled."
@@ -1359,7 +1350,9 @@ def create_functional_call(
                         fake_mode = detect_fake_mode()
                         assert fake_mode is not None
                         fake_mode.epoch += 1
-                        out = PropagateUnbackedSymInts(mod).run(*args)
+                        out = PropagateUnbackedSymInts(mod).run(
+                            *args[params_len:], **kwargs
+                        )
             else:
                 out = mod(*args[params_len:], **kwargs)
 

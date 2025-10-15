@@ -315,19 +315,17 @@ class inner_f(torch.nn.Module):
                 super().__init__()
                 self.linear = nn.Linear(3, 2)
 
-            def forward(self, x, *, scale):
+            def forward(self, x, scale=1.0):
                 return self.linear(x) * scale
 
         model = ModuleWithKwargs()
         inputs = (torch.randn(4, 3),)
-        kwargs = {"scale": torch.tensor(2.0)}
-
-        gm = _dynamo_graph_capture_for_export(model)(*inputs, **kwargs)
+        kwargs = {"scale": 2.0}
 
         with ExitStack() as stack:
             # Export joint with descriptors
             joint_with_descriptors = aot_export_joint_with_descriptors(
-                stack, gm, inputs, kwargs, decompositions=decomposition_table
+                stack, model, inputs, kwargs, decompositions=decomposition_table
             )
 
             # Test the exported graph structure
@@ -335,17 +333,9 @@ class inner_f(torch.nn.Module):
                 print_output=False, expanded_def=True
             )
 
-            # For some reason PYTORCH_TEST_WITH_CROSSREF will add extra spaces.
-            # I tried to fix this in normalize_gm but there are too many files
-            # depending on that behavior..
-            graph_code_str = normalize_gm(graph_code)
-            graph_code_str = "\n".join(
-                [line for line in graph_code_str.split("\n") if len(line.rstrip()) > 0]
-            )
-
             # Expect test on the printed graph
             self.assertExpectedInline(
-                graph_code_str,
+                normalize_gm(graph_code),
                 """\
 class inner_f(torch.nn.Module):
     def forward(
@@ -353,20 +343,19 @@ class inner_f(torch.nn.Module):
         primals,
         tangents,
     ):
-        primals_1: "f32[2, 3]"  # ParamAOTInput(target='L__self___linear.weight')
-        primals_2: "f32[2]"  # ParamAOTInput(target='L__self___linear.bias')
+        primals_1: "f32[2, 3]"  # ParamAOTInput(target='linear.weight')
+        primals_2: "f32[2]"  # ParamAOTInput(target='linear.bias')
         primals_3: "f32[4, 3]"  # PlainAOTInput(idx=0)
-        primals_4: "f32[]"  # PlainAOTInput(idx=1)
         tangents_1: "f32[4, 2]"  # TangentAOTInput(output=PlainAOTOutput(idx=0))
-        primals_1, primals_2, primals_3, primals_4, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
+        primals_1, primals_2, primals_3, primals_4  , tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
         transpose: "f32[3, 2]" = torch.ops.prims.transpose.default(primals_1, [1, 0]);  primals_1 = None
         mm: "f32[4, 2]" = torch.ops.aten.mm.default(primals_3, transpose);  transpose = None
         mul: "f32[4, 2]" = torch.ops.prims.mul.default(mm, 1.0);  mm = None
         mul_1: "f32[2]" = torch.ops.prims.mul.default(primals_2, 1.0);  primals_2 = None
         broadcast_in_dim: "f32[4, 2]" = torch.ops.prims.broadcast_in_dim.default(mul_1, [4, 2], [1]);  mul_1 = None
         add: "f32[4, 2]" = torch.ops.prims.add.default(mul, broadcast_in_dim);  mul = broadcast_in_dim = None
-        mul_2: "f32[4, 2]" = torch.ops.prims.mul.default(add, primals_4);  add = None
-        mul_3: "f32[4, 2]" = torch.ops.prims.mul.default(tangents_1, primals_4);  tangents_1 = primals_4 = None
+        mul_2: "f32[4, 2]" = torch.ops.prims.mul.default(add, 2.0);  add = None
+        mul_3: "f32[4, 2]" = torch.ops.prims.mul.default(tangents_1, 2.0);  tangents_1 = None
         transpose_1: "f32[2, 4]" = torch.ops.prims.transpose.default(mul_3, [1, 0])
         mm_1: "f32[2, 3]" = torch.ops.aten.mm.default(transpose_1, primals_3);  transpose_1 = primals_3 = None
         transpose_2: "f32[3, 2]" = torch.ops.prims.transpose.default(mm_1, [1, 0]);  mm_1 = None
@@ -376,11 +365,12 @@ class inner_f(torch.nn.Module):
         transpose_3: "f32[2, 3]" = torch.ops.prims.transpose.default(transpose_2, [1, 0]);  transpose_2 = None
         return pytree.tree_unflatten([
             mul_2,  # PlainAOTOutput(idx=0)
-            transpose_3,  # GradAOTOutput(grad_of=ParamAOTInput(target='L__self___linear.weight'))
-            as_strided,  # GradAOTOutput(grad_of=ParamAOTInput(target='L__self___linear.bias'))
+            transpose_3,  # GradAOTOutput(grad_of=ParamAOTInput(target='linear.weight'))
+            as_strided,  # GradAOTOutput(grad_of=ParamAOTInput(target='linear.bias'))
             None,  # None
             None,  # None
-        ], self._out_spec)""",
+        ], self._out_spec)
+""",
             )
 
             # Compile the result
