@@ -10,9 +10,9 @@ import torch
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor.device_mesh import _mesh_resources
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -286,20 +286,7 @@ class FSDPParam:
         if self.is_dtensor:
             self._tp_spec = cast(DTensor, param)._spec
             dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)
-            dp_global_mesh = _mesh_resources.get_root_mesh(dp_mesh)
-            tp_global_mesh = _mesh_resources.get_root_mesh(tp_mesh)
-            if dp_global_mesh != tp_global_mesh or (
-                dp_global_mesh is None or tp_global_mesh is None
-            ):
-                raise AssertionError(
-                    "FSDP requires the DP and model parallel TP/EP mesh to have the same parent mesh but got: \n"
-                    f"DP's global mesh: {dp_global_mesh}\nTP/EP's global mesh: {tp_global_mesh}"
-                )
-            name_dims_error = "FSDP requires named DeviceMesh dims for ND parallelism"
-            assert dp_mesh.mesh_dim_names is not None, name_dims_error
-            assert tp_mesh.mesh_dim_names is not None, name_dims_error
-            submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
-            self._spmd_mesh = dp_global_mesh[submesh_names]
+            self._spmd_mesh = DeviceMesh._concatenate([dp_mesh, tp_mesh])
             if len(self._tp_spec.placements) > 2:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP/EP or 2D EP+TP, not {self._tp_spec.placements}"
@@ -812,7 +799,7 @@ class FSDPParam:
             assert mesh.mesh_dim_names is not None
             shard_dim_name = mesh.mesh_dim_names[-1]
 
-            root_mesh = _mesh_resources.get_root_mesh(mesh)
+            root_mesh = mesh._get_root_mesh()
             return root_mesh[shard_dim_name]
 
     def _assert_in_states(self, *states: ShardedState) -> None:
