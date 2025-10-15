@@ -178,7 +178,7 @@ else:
         _layout: _MeshLayout
         _root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its flattened mesh in root mesh.
-        _flatten_mapping: dict[str, "DeviceMesh"] = {}
+        _flatten_mapping: dict[str, "DeviceMesh"]
 
         def __init__(
             self,
@@ -225,6 +225,8 @@ else:
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
             self._thread_id = None
+            # Initialize instance-specific flatten mapping
+            self._flatten_mapping = {}
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
