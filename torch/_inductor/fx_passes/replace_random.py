@@ -91,18 +91,18 @@ def replace_random_passes(gm: torch.fx.GraphModule):
     if config.align_random_eager:
         with GraphTransformObserver(gm, "fuse_offset_creation_pass"):
             count += fuse_offset_creation_pass(gm.graph)
-    #print(f"After replace_random_passes: {gm}")
+
     return count
 
 def fuse_offset_creation_pass(graph: torch.fx.Graph):
     """
     Horizontally fuse all the seed generation on each device
 
-        a = my_triton_op.rand_eager_offset(offset, dev)
-        b = my_triton_op.rand_eager_offset(offset, dev)
+        a = custom_op.rand_eager_offset(offset, dev)
+        b = custom_op.rand_eager_offset(offset, dev)
 
     Becomes:
-        offsets = my_triton_op.rand_eager_offsets([offset1, offset2...], dev)
+        offsets = custom_op.rand_eager_offsets([offset1, offset2...], dev)
         a = inductor_lookup_seed(offsets, 0)
         b = inductor_lookup_seed(offsets, 1)
 
@@ -118,7 +118,6 @@ def fuse_offset_creation_pass(graph: torch.fx.Graph):
 
     for device, offsets in device_offsets.items():
         with graph.inserting_before(offsets[0]):
-            print(f"len(offsets) = {len(offsets)}")
             offs = [n.args[0] for n in offsets]
             combined = graph.call_function(torch.ops.custom_op.rand_eager_offsets.default, (offs, device))
             with V.fake_mode:
