@@ -383,8 +383,8 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(y.stride(), (3,))
         z = from_dlpack(y)
         self.assertEqual(z.shape, (1,))
-        # Stride normalization has been removed, strides should be preserved
-        self.assertEqual(z.stride(), (3,))
+        # gh-83069, make sure __dlpack__ normalizes strides
+        self.assertEqual(z.stride(), (1,))
 
     @skipMeta
     @onlyNativeDeviceTypes

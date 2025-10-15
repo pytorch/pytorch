@@ -31,7 +31,7 @@ using at::sparse::get_sparse_impl;
 
 // ForwardIt: only legacy random access iterator is supported.
 template<class ForwardIt, class T, bool is_lower = true>
-FUNCAPI INLINE
+static FUNCAPI INLINE
 ForwardIt find_bound(ForwardIt first, ForwardIt last, const T& value) {
     ForwardIt RESTRICT it;
     typename std::iterator_traits<ForwardIt>::difference_type count, step;

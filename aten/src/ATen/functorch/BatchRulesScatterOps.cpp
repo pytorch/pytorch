@@ -12,14 +12,13 @@
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <torch/library.h>
-#include <c10/util/Exception.h>
 
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 namespace at::functorch {
 
 namespace {
-bool any_has_value(ArrayRef<std::optional<int64_t>> bdims) {
+static bool any_has_value(ArrayRef<std::optional<int64_t>> bdims) {
   for (const auto& bdim : bdims) {
     if (bdim.has_value()) {
       return true;
@@ -28,7 +27,7 @@ bool any_has_value(ArrayRef<std::optional<int64_t>> bdims) {
   return false;
 }
 
-int64_t get_num_leading_nones(ArrayRef<std::optional<Tensor>> indices) {
+static int64_t get_num_leading_nones(ArrayRef<std::optional<Tensor>> indices) {
   int64_t result = 0;
   for (const auto& idx : indices) {
     if (!idx.has_value() || !idx->defined()) {
@@ -40,7 +39,7 @@ int64_t get_num_leading_nones(ArrayRef<std::optional<Tensor>> indices) {
   return result;
 }
 
-int64_t get_max_index_logical_dim(
+static int64_t get_max_index_logical_dim(
     ArrayRef<std::optional<Tensor>> indices,
     ArrayRef<std::optional<int64_t>> indices_bdims) {
   int64_t max_logical_dim = -1;
@@ -57,7 +56,7 @@ int64_t get_max_index_logical_dim(
   return max_logical_dim;
 }
 
-std::vector<std::optional<Tensor>> batchIndices(
+static std::vector<std::optional<Tensor>> batchIndices(
   at::TensorOptions options,
   ArrayRef<std::optional<Tensor>> indices,
   ArrayRef<std::optional<int64_t>> indices_bdims,
@@ -95,10 +94,9 @@ std::vector<std::optional<Tensor>> batchIndices(
     if (index.has_value() && index->sym_numel() != 0) {
       const auto idx_bdim = indices_bdims[i];
       indices_.emplace_back(maybePadToLogicalRank(moveBatchDimToFront(index.value(), idx_bdim), idx_bdim, maxLogicalRank));
-      TORCH_CHECK(
-        !(index.value().dtype() == kBool) || !indices_bdims[i].has_value(),
-        "vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask."
-      );
+      if (index.value().dtype() == kBool && indices_bdims[i].has_value()) {
+        throw std::runtime_error("vmap: We do not support batching operators that can support dynamic shape. Attempting to batch over indexing with a boolean mask.");
+      }
     } else {
       indices_.push_back(index);
     }
@@ -126,7 +124,7 @@ std::vector<std::optional<Tensor>> batchIndices(
 
 // Define an "advanced index" to be a selection object that is
 // a non-trivial Tensor (i.e. it does not represent :).
-bool is_advanced_index(const std::optional<Tensor>& idx) {
+static bool is_advanced_index(const std::optional<Tensor>& idx) {
   if (!idx.has_value()) {
     return false;
   }
@@ -137,7 +135,7 @@ bool is_advanced_index(const std::optional<Tensor>& idx) {
 }
 
 // See NOTE: [advanced indices adjacent] for definition
-bool are_advanced_indices_adjacent(ArrayRef<std::optional<Tensor>> indices) {
+static bool are_advanced_indices_adjacent(ArrayRef<std::optional<Tensor>> indices) {
   int64_t num_advanced_indices_regions = 0;
   bool in_advanced_indices_region = false;
   for (const auto& idx : indices) {
@@ -165,7 +163,7 @@ bool are_advanced_indices_adjacent(ArrayRef<std::optional<Tensor>> indices) {
 // - result: Tensor[B, 4, 5, 6, 2, 3, 7, 8]
 //                     -------  ----
 //                     region2  region1
-Tensor swap_regions(const Tensor& tensor, int64_t first_region_size, int64_t second_region_size) {
+static Tensor swap_regions(const Tensor& tensor, int64_t first_region_size, int64_t second_region_size) {
   VmapDimVector permutation(tensor.dim(), 0);
   std::iota(permutation.begin(), permutation.end(), 0);
   std::rotate(
@@ -553,7 +551,7 @@ Tensor &_index_put_impl__plumbing(Tensor &self, const List<std::optional<Tensor>
   return self;
 }
 
-Tensor maybe_permute_values(
+static Tensor maybe_permute_values(
     const Tensor& values,
     ArrayRef<std::optional<Tensor>> orig_indices,
     ArrayRef<std::optional<int64_t>> orig_indices_bdims) {
@@ -1052,7 +1050,7 @@ std::tuple<Tensor, std::optional<int64_t>> index_add_batch_rule(
                                    other, other_bdim, alpha, false);
 }
 
-std::tuple<Tensor,Tensor> binary_pointwise_align(
+static std::tuple<Tensor,Tensor> binary_pointwise_align(
     const Tensor & self,
     std::optional<int64_t> self_bdim,
     const Tensor & mask,

@@ -46,7 +46,7 @@ jobs:
       runner: linux.24xlarge.memory
       test-matrix: |
         { include: [
-          { config: "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
+          { config:  "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_basic_models_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_entrypoints_test", shard: 1, num_shards: 1,runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_regression_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
@@ -54,7 +54,7 @@ jobs:
           { config: "vllm_pytorch_compilation_unit_tests", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_multi_model_test_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu"},
-          { config: "vllm_language_model_test_extended_generation_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu"},
+          { config: "vllm_languagde_model_test_extended_generation_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu"},
           { config: "vllm_distributed_test_2_gpu_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_test", shard: 0, num_shards: 4, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
           { config: "vllm_lora_test", shard: 1, num_shards: 4, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },

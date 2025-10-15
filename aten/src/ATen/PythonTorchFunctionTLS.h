@@ -27,7 +27,6 @@ struct TORCH_API PythonTorchFunctionTLS {
   TorchFunctionDisabledState disabled_state_ =
       TorchFunctionDisabledState::ENABLED;
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;
-  friend TORCH_API bool torch_function_mode_enabled();
 };
 
 TORCH_API bool torch_function_mode_enabled();
