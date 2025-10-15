@@ -15194,9 +15194,9 @@ graph():
 
             def forward(self, x):
                 val = x.sin()
-                if TensorDim.DDP in set(["ddp"]):
+                if TensorDim.DDP in {"ddp"}:
                     val += x.cos()
-                if "ddp" in set([TensorDim.DDP]):
+                if "ddp" in {TensorDim.DDP}:
                     val += x.cos()
                 return val
 
