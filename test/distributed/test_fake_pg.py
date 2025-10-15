@@ -273,7 +273,7 @@ class TestFakePG(TestCase):
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        with self.assertRaisesRegex(RuntimeError, r"No constructor defined"):
+        with self.assertRaisesRegex(TypeError, r"No constructor defined"):
             fake_pg = FakeProcessGroup(rank=0, world_size=3)
 
             with SimpleTensorMode():
