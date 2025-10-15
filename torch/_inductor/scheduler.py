@@ -3740,10 +3740,8 @@ class Scheduler:
             device = node1.get_device()
             assert node2.get_device() == device
             node3 = self.get_backend(device).fuse(node1, node2)
-            if node1 in fused_nodes:
-                fused_nodes.remove(node1)
-            if node2 in fused_nodes:
-                fused_nodes.remove(node2)
+            fused_nodes.remove(node1)
+            fused_nodes.remove(node2)
             fused_nodes.add(node3)
             self.name_to_fused_node.update(
                 {n.get_name(): node3 for n in node3.get_nodes()}
@@ -5593,11 +5591,7 @@ class Scheduler:
         if self.default_device_context and config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.write_get_raw_stream_header()
 
-        seen = set()
         for node in nodes:
-            if node.get_name() in seen:
-                continue
-            seen.add(node.get_name()) # TODO remove these
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
