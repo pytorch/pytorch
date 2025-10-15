@@ -1,8 +1,8 @@
 import copy
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Optional
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
@@ -97,7 +97,7 @@ def _tensor_shape_equals(x: object, y: object) -> bool:
         return all_equal
     else:
         log.debug("Comparing non Tensors: %s and %s, they must be equal", x, y)
-        return type(x) == type(y) and x == y
+        return type(x) is type(y) and x == y
 
 
 def _loss_fn(
