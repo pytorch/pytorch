@@ -451,9 +451,9 @@ void toDLPackNonOwningImpl(const Tensor& src, DLTensor& tensor) {
   // This is a non-owning conversion - the caller owns the tensor
   // and must keep it alive for the duration of DLTensor usage
   tensor.data = src.data_ptr();
-  tensor.device = torchDeviceToDLDeviceForDLPackv1(src.device());
+  tensor.device = torchDeviceToDLDevice(src.device());
   tensor.ndim = static_cast<int32_t>(src.dim());
-  tensor.dtype = getDLDataTypeForDLPackv1(src);
+  tensor.dtype = getDLDataType(src);
   // sizes() and strides() return pointers to TensorImpl's stable storage
   // which remains valid as long as the tensor is alive
   tensor.shape = const_cast<int64_t*>(src.sizes().data());
