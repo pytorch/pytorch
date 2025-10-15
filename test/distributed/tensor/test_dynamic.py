@@ -22,8 +22,7 @@ from torch.testing._internal.triton_utils import requires_gpu
 class TestDynamic(DTensorTestBase):
     @requires_gpu
     @with_comms
-    # FIXME: Currently broken for fake tensor cache
-    @parametrize("fake_tensor_cache_enabled", [False])
+    @parametrize("fake_tensor_cache_enabled", [False, True])
     def test_embedding(self, fake_tensor_cache_enabled):
         with patch.object(
             torch._dynamo.config, "fake_tensor_cache_enabled", fake_tensor_cache_enabled
