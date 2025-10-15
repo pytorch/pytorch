@@ -282,7 +282,8 @@ def annotate(annotation_dict: dict):
 
         # Update with all key-value pairs from the input dict
         current_meta["custom"].update(annotation_dict)
-        yield
+        with preserve_node_meta():
+            yield
     finally:
         if has_custom:
             # Restore the original custom dict
