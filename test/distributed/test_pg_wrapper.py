@@ -32,7 +32,16 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         super().setUp()
         self._spawn_processes()
 
-    def _validate_error(self, exception, op_type, rank, tensor, verify_diff=True):
+    def _validate_error(
+        self,
+        exception,
+        op_type,
+        rank,
+        tensor,
+        *,
+        verify_diff=True,
+        expect_remote=True,
+    ):
         err = str(exception)
         self.assertTrue(
             op_type in err, f"Got {err} but expected {op_type} to be in error."
@@ -68,6 +77,16 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
                 self.assertTrue(
                     "Collectives differ in the following" in err, f"Got error {err}"
                 )
+        if expect_remote:
+            self.assertTrue(
+                ", but Rank " in err,
+                f"Missing remote collective fingerprint in error {err}",
+            )
+            self.assertGreaterEqual(
+                err.count("CollectiveFingerPrint"),
+                2,
+                f"Expected remote collective details in error {err}",
+            )
 
     def _test_collective_hang(self, wrapper_pg, use_cuda=False):
         # All ranks besides 1 call allreduce and wrapper_pg should detect a hang
@@ -437,6 +456,33 @@ class ProcessGroupGlooWrapperTest(AbstractProcessGroupWrapperTest):
     def test_collective_shape_mismatch_debug_mode_off(self):
         pg = self._create_wrapper_pg(with_new_group=False)
         self._test_collective_shape_mismatch(pg)
+
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_validate_error_requires_remote_metadata(self):
+        pg = self._create_wrapper_pg(with_new_group=True)
+        tensor = torch.randn(20, 10)
+        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
+            if self.rank == 0:
+                pg.allreduce([tensor])
+            else:
+                pg.reduce([tensor])
+        if self.rank == 0:
+            err_msg = str(cm.exception)
+            marker = ".Collectives differ"
+            if marker in err_msg:
+                prefix, suffix = err_msg.split(marker, 1)
+                if ", but Rank " in prefix:
+                    prefix = prefix.split(", but Rank ")[0]
+                truncated = prefix + marker + suffix
+            else:
+                truncated = err_msg.split(", but Rank ")[0]
+            with self.assertRaises(AssertionError):
+                self._validate_error(
+                    exception=RuntimeError(truncated),
+                    op_type="ALLREDUCE",
+                    rank=self.rank,
+                    tensor=tensor,
+                )
 
     @skip_if_lt_x_gpu(4)
     @with_dist_debug_levels(levels=["DETAIL"])
