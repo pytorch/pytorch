@@ -1400,19 +1400,19 @@ class SIMDScheduling(BaseScheduling):
         return node_schedule
 
     def codegen_mix_order_reduction(self, node):
-        snodes = node.snodes
-        assert len(snodes) == 2
+        # snodes = node.snodes
+        # assert len(snodes) == 2
         # assert isinstance(snodes[0], scheduler.SchedulerNode)
         # assert isinstance(snodes[1], scheduler.SchedulerNode)
 
-        node1, node2 = snodes
+        node1, node2 = node.node1, node.node2
 
         # Make sure there are no producer/consumer relationship
         assert not (node1.ancestors & node2.get_operation_names()) and not (
             node2.ancestors & node1.get_operation_names()
         )
 
-        self._codegen_mix_order_reduction(snodes[0], snodes[1])
+        self._codegen_mix_order_reduction(node1, node2)
 
     def _codegen_mix_order_reduction(self, node1, node2):
         if not V.graph.sizevars.statically_known_gt(node1.group[1][0], node1.group[1][1]):

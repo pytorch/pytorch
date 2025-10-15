@@ -1888,7 +1888,10 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         # TODO: node1, node2 can themself be FusedSchedulerNode
         # assert isinstance(node1, SchedulerNode)
         # assert isinstance(node2, SchedulerNode)
-        super().__init__(node1.scheduler, [node1, node2])
+        self.node1 = node1
+        self.node2 = node2 
+        super().__init__(node1.scheduler, node1.get_nodes() + node2.get_nodes())
+
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
     """
