@@ -107,3 +107,22 @@ def quickfix(*, parent_callback, **kwargs):
     parent_callback(**kwargs)
     cmd = ["uvx", "lintrunner", "--apply-patches"]
     spin.util.run(cmd)
+
+
+@click.command()
+def clean():
+    ignores = Path(".gitignore").read_text(encoding="utf-8")
+    for wildcard in filter(None, ignores.splitlines()):
+        if wildcard.strip().startswith("#"):
+            if "BEGIN NOT-CLEAN-FILES" in wildcard:
+                # Marker is found and stop reading .gitignore.
+                break
+            # Ignore lines which begin with '#'.
+        else:
+            # Don't remove absolute paths from the system
+            wildcard = wildcard.lstrip("./")
+            for filename in glob.iglob(wildcard):
+                try:
+                    os.remove(filename)
+                except OSError:
+                    shutil.rmtree(filename, ignore_errors=True)
