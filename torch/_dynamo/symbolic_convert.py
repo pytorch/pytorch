@@ -188,7 +188,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator, Sequence
+    from collections.abc import Generator, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -4104,7 +4104,7 @@ class InstructionTranslatorBase(
         # in order to generate any nested closures
         self.post_prune_cell_and_freevars = None
         # self.stack: list[VariableTracker] = []
-        self.stack = torch._C._dynamo.Stack(self.compute_stack_capacity(code_options))
+        self.stack = torch._C._dynamo.Stack(self.compute_stack_capacity(code_options))  # type: ignore[assignment]
         self.instruction_pointer = 0
         self.start_point = None
         self.current_instruction = create_instruction("NOP")

@@ -467,19 +467,41 @@ static PySequenceMethods FixedLengthArray_as_sequence = {
 
 static PyTypeObject FixedLengthArrayType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "FixedLengthArray",
-    .tp_basicsize = sizeof(FixedLengthArray),
-    .tp_itemsize = 0,
-    .tp_repr = (reprfunc)FixedLengthArray_repr,
-    // .tp_dealloc = (destructor)FixedLengthArray_dealloc,
-    .tp_as_sequence = &FixedLengthArray_as_sequence,
-    .tp_str = (reprfunc)FixedLengthArray_str,
-    .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
-    .tp_doc = "Fixed length array stack",
-    .tp_iter = (getiterfunc)FixedLengthArray_iter,
-    .tp_methods = FixedLengthArray_methods,
-    .tp_init = (initproc)FixedLengthArray_init,
-    .tp_new = PyType_GenericNew,
+    "FixedLengthArray", /* tp_name */
+    sizeof(FixedLengthArray), /* tp_basicsize */
+    0, /* tp_itemsize */
+    0, /* tp_dealloc */
+    0, /* tp_print (deprecated) */
+    0, /* tp_getattr */
+    0, /* tp_setattr */
+    0, /* tp_reserved */
+    (reprfunc)FixedLengthArray_repr, /* tp_repr */
+    0, /* tp_as_number */
+    &FixedLengthArray_as_sequence, /* tp_as_sequence */
+    0, /* tp_as_mapping */
+    0, /* tp_hash */
+    0, /* tp_call */
+    (reprfunc)FixedLengthArray_str, /* tp_str */
+    0, /* tp_getattro */
+    0, /* tp_setattro */
+    0, /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
+    "Fixed length array stack", /* tp_doc */
+    0, /* tp_traverse */
+    0, /* tp_clear */
+    0, /* tp_richcompare */
+    0, /* tp_weaklistoffset */
+    (getiterfunc)FixedLengthArray_iter, /* tp_iter */
+    0, /* tp_iternext */
+    FixedLengthArray_methods, /* tp_methods */
+    0, /* tp_members */
+    0, /* tp_getset */
+    0, /* tp_base */
+    0, /* tp_dict */
+    0, /* tp_descr_get */
+    0, /* tp_descr_set */
+    0, /* tp_dictoffset */
+    (initproc)FixedLengthArray_init, /* tp_init */
 };
 
 void initDynamoBindings(PyObject* torch) {
