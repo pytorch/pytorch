@@ -1402,8 +1402,8 @@ class SIMDScheduling(BaseScheduling):
     def codegen_mix_order_reduction(self, node):
         snodes = node.snodes
         assert len(snodes) == 2
-        assert isinstance(snodes[0], scheduler.SchedulerNode)
-        assert isinstance(snodes[1], scheduler.SchedulerNode)
+        # assert isinstance(snodes[0], scheduler.SchedulerNode)
+        # assert isinstance(snodes[1], scheduler.SchedulerNode)
 
         node1, node2 = snodes
 
@@ -1420,11 +1420,6 @@ class SIMDScheduling(BaseScheduling):
 
         assert V.graph.sizevars.statically_known_gt(node1.group[1][0], node1.group[1][1])
 
-        # Decide the numel and rnumel
-        common_read = MixOrderReduction.get_common_read(node1, node2)
-        assert len(common_read) == 1
-        common_read = common_read[0]
-
         # decide the split size
         nrow, ncol = node1.group[1]
         split_size = 128 # TODO don't hard code
@@ -1437,6 +1432,7 @@ class SIMDScheduling(BaseScheduling):
             kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel, None)
             kernel = self.create_kernel_choices(kernel_features,
                 [{"x": numel, "r0_": rnumel}], {"features": kernel_features, "tiling_scores": None, "mix_order_reduction": True})[0]
+            # breakpoint()
             # TODO: instead of create the kernel and then change the attributes, let the kernel constructor decides these attributes itself.
             assert kernel.persistent_reduction
             assert kernel.mix_order_reduction

@@ -336,7 +336,7 @@ class InductorChoices:
             return False
         threshold = {
             ReductionHint.INNER: 1024,
-        }.get(features.get_reduction_hint(), 64)
+        }.get(features.get_reduction_hint(), 1024) # TODO: this is needed for rmsnor bwd. The hint is DEFAULT rather than INNER for the reduction computing dx.
 
         if features.get_reduction_hint() not in (
             ReductionHint.INNER,

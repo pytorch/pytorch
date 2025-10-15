@@ -209,26 +209,33 @@ class MixOrderReduction:
 
 
     @classmethod
-    def is_contiguous_load(cls, buf, node):
+    def is_contiguous_load(cls, buf, parent_node):
         from torch._inductor.loop_body import MemoryUsageType
-        loop_body = node._body
-        entries = loop_body.memory_usage[MemoryUsageType.LOAD]
-        index_names = [e.index_name for e in entries if e.buffer_name == buf]
-        if len(index_names) != 1:
-            return False
-        index_name = index_names[0]
-        index_expr = loop_body.indexing_exprs[index_name]
-        var_ranges = loop_body.var_ranges
-        if len(var_ranges) != 2:
-            return False
+        n_congituous_read = 0
+        for node in parent_node.get_nodes():
+            loop_body = node._body
+            entries = loop_body.memory_usage[MemoryUsageType.LOAD]
+            index_names = [e.index_name for e in entries if e.buffer_name == buf]
 
-        var_symbols = list(var_ranges.keys())
-        stride_vars = V.graph.sizevars.stride_vars(
-            index_expr,
-            var_symbols,
-            var_symbols,
-        )
-        return stride_vars[-1] == 1
+            if len(index_names) == 0:
+                continue
+            assert len(index_names) == 1
+            index_name = index_names[0]
+            index_expr = loop_body.indexing_exprs[index_name]
+            var_ranges = loop_body.var_ranges
+            if len(var_ranges) != 2:
+                return False
+    
+            var_symbols = list(var_ranges.keys())
+            stride_vars = V.graph.sizevars.stride_vars(
+                index_expr,
+                var_symbols,
+                var_symbols,
+            )
+            n_congituous_read += (stride_vars[-1] == 1)
+            if n_congituous_read > 0:
+                break
+        return n_congituous_read > 0
 
 @dataclasses.dataclass
 class SchedulerBuffer:
@@ -1858,8 +1865,8 @@ class FusedSchedulerNode(BaseSchedulerNode):
 class FusedMixOrderReductions(FusedSchedulerNode):
     def __init__(self, node1, node2):
         # TODO: node1, node2 can themself be FusedSchedulerNode
-        assert isinstance(node1, SchedulerNode)
-        assert isinstance(node2, SchedulerNode)
+        # assert isinstance(node1, SchedulerNode)
+        # assert isinstance(node2, SchedulerNode)
         super().__init__(node1.scheduler, [node1, node2])
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):

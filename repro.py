@@ -20,6 +20,8 @@ def fwd_bwd(f):
     out.backward(dy)
     return x.grad, w.grad
 
+torch.manual_seed(1337)
+
 # M, N = 1152 * 500, 384
 M, N = 32768, 768
 x = torch.randn(M, N, dtype=torch.bfloat16, device="cuda", requires_grad=True)
