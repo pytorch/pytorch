@@ -5,6 +5,10 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/OpMathType.h>
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
+#include <limits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -23,6 +27,21 @@
 
 namespace at::native {
 namespace mps {
+
+template <typename scalar_t>
+static double clamp_scalar_bound_to_double(const Scalar& bound) {
+  using limits = std::numeric_limits<scalar_t>;
+  if constexpr (limits::has_infinity) {
+    using opmath_t = at::opmath_type<scalar_t>;
+    const double value = bound.to<double>();
+    const opmath_t cast_to_opmath = static_cast<opmath_t>(value);
+    const scalar_t casted = static_cast<scalar_t>(cast_to_opmath);
+    return static_cast<double>(static_cast<opmath_t>(casted));
+  } else {
+    const scalar_t casted = bound.to<scalar_t>();
+    return static_cast<double>(casted);
+  }
+}
 
 struct CachedGraph : public MPSCachedGraph {
   CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -229,18 +248,22 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
   const bool has_max = (max_opt.has_value());
   TORCH_CHECK(has_min || has_max, op_name + ": either min, max or both scalars must be defined")
 
+  auto result_type = output_t.scalar_type();
+
   scalar_t min_scalar = std::numeric_limits<scalar_t>::infinity();
   scalar_t max_scalar = -std::numeric_limits<scalar_t>::infinity();
 
   if (has_min)
-    min_scalar = min_opt.get().to<scalar_t>();
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, result_type, "clamp_min_scalar_mps", [&]() {
+      min_scalar = clamp_scalar_bound_to_double<scalar_t>(min_opt.get());
+    });
   if (has_max)
-    max_scalar = max_opt.get().to<scalar_t>();
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, result_type, "clamp_max_scalar_mps", [&]() {
+      max_scalar = clamp_scalar_bound_to_double<scalar_t>(max_opt.get());
+    });
 
   if (output_t.numel() == 0)
     return;
-
-  auto result_type = output_t.scalar_type();
 
   @autoreleasepool {
     // the optional min/max refs could affect how we build the cached graph

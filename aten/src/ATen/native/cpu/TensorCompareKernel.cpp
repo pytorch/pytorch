@@ -9,10 +9,12 @@
 #include <algorithm>
 #include <utility>
 #include <vector>
+#include <cmath>
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/irange.h>
@@ -27,6 +29,19 @@
 #endif
 
 namespace at::native { namespace {
+
+template <typename scalar_t>
+inline scalar_t clamp_cast_with_infinity(const Scalar& bound) {
+  using limits = std::numeric_limits<scalar_t>;
+  if constexpr (limits::has_infinity) {
+    using opmath_t = at::opmath_type<scalar_t>;
+    const double value = bound.to<double>();
+    const opmath_t cast_to_opmath = static_cast<opmath_t>(value);
+    return static_cast<scalar_t>(cast_to_opmath);
+  } else {
+    return bound.to<scalar_t>();
+  }
+}
 
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 inline void compare_base_kernel_core(
@@ -357,8 +372,8 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
 
 void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, const Scalar& max_) {
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_scalar_cpu", [&]() {
-    const auto min = min_.to<scalar_t>();
-    const auto max = max_.to<scalar_t>();
+    const auto min = clamp_cast_with_infinity<scalar_t>(min_);
+    const auto max = clamp_cast_with_infinity<scalar_t>(max_);
     const Vectorized<scalar_t> min_vec(min);
     const Vectorized<scalar_t> max_vec(max);
       cpu_kernel_vec(iter,
@@ -373,7 +388,7 @@ void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min_, cons
 
 void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_max_scalar_cpu", [&]() {
-    const auto max = max_.to<scalar_t>();
+    const auto max = clamp_cast_with_infinity<scalar_t>(max_);
     const Vectorized<scalar_t> max_vec(max);
     cpu_kernel_vec(iter,
       [=](scalar_t a) -> scalar_t {
@@ -387,7 +402,7 @@ void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) {
 
 void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "clamp_min_scalar_cpu", [&]() {
-    const auto min = min_.to<scalar_t>();
+    const auto min = clamp_cast_with_infinity<scalar_t>(min_);
     const Vectorized<scalar_t> min_vec(min);
     cpu_kernel_vec(iter,
         [=](scalar_t a) -> scalar_t {

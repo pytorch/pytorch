@@ -50,14 +50,14 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     expectedFailureXLA,
     instantiate_device_type_tests,
-    onlyCUDA, onlyCPU,
+    onlyCUDA, onlyCPU, onlyMPS,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
-    get_all_device_types, skipXLA)
+    get_all_device_types, skipXLA, TEST_MPS)
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
-    tf32_on_and_off, TEST_CUDNN, TEST_MULTIGPU,
+    tf32_on_and_off, TEST_CUDNN, TEST_MULTIGPU, TEST_CUDA,
     _create_scaling_case, _create_scaling_models_optimizers)
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 from torch.testing._internal.common_dtype import (
@@ -157,6 +157,177 @@ class TestTorchDeviceType(TestCase):
 
         self.assertIsInstance(torch.inf, float)
         self.assertEqual(torch.inf, math.inf)
+
+    @onlyCPU
+    def test_clamp_half_scalar_bounds_cpu(self, device):
+        x = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float16, device=device)
+        max_scalar = 65505.0
+        min_scalar = -70000.0
+
+        expected_min = torch.tensor(min_scalar, dtype=x.dtype).item()
+        expected_max = torch.tensor(max_scalar, dtype=x.dtype).item()
+
+        self.assertEqual(
+            torch.clamp(x, min=min_scalar, max=max_scalar),
+            torch.clamp(x, min=expected_min, max=expected_max),
+            equal_nan=True,
+        )
+        self.assertEqual(
+            torch.clamp_min(x, min_scalar),
+            torch.clamp_min(x, expected_min),
+        )
+        self.assertEqual(
+            torch.clamp_max(x, max_scalar),
+            torch.clamp_max(x, expected_max),
+        )
+
+        # Infinite bounds should leave the tensor unchanged
+        self.assertEqual(
+            torch.clamp(x, min=float("-inf"), max=float("inf")),
+            x,
+        )
+
+        # NaNs must propagate through the clamp operations
+        x_with_nan = torch.tensor([float("nan"), 1.0], dtype=torch.float16, device=device)
+        out = torch.clamp(x_with_nan, max=max_scalar)
+        self.assertTrue(math.isnan(out[0].item()))
+        self.assertEqual(out[1].item(), torch.clamp(torch.tensor(1.0, dtype=torch.float16, device=device), max=expected_max).item())
+
+        out_min = torch.clamp_min(x_with_nan, min_scalar)
+        self.assertTrue(math.isnan(out_min[0].item()))
+        self.assertEqual(out_min[1].item(), torch.clamp_min(torch.tensor(1.0, dtype=torch.float16, device=device), expected_min).item())
+
+        # NaN bounds should propagate entirely
+        nan_min_out = torch.clamp(x, min=float("nan"), max=max_scalar)
+        self.assertTrue(torch.isnan(nan_min_out).all().item())
+        nan_max_out = torch.clamp(x, min=min_scalar, max=float("nan"))
+        self.assertTrue(torch.isnan(nan_max_out).all().item())
+
+    @onlyCPU
+    def test_clamp_bfloat16_scalar_bounds_cpu(self, device):
+        x = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.bfloat16, device=device)
+        max_scalar = 1e40
+        min_scalar = -1e40
+
+        expected_min = torch.tensor(min_scalar, dtype=x.dtype).item()
+        expected_max = torch.tensor(max_scalar, dtype=x.dtype).item()
+
+        self.assertEqual(
+            torch.clamp(x, min=min_scalar, max=max_scalar),
+            torch.clamp(x, min=expected_min, max=expected_max),
+            equal_nan=True,
+        )
+        self.assertEqual(
+            torch.clamp_min(x, min_scalar),
+            torch.clamp_min(x, expected_min),
+        )
+        self.assertEqual(
+            torch.clamp_max(x, max_scalar),
+            torch.clamp_max(x, expected_max),
+        )
+
+        self.assertEqual(
+            torch.clamp(x, min=float("-inf"), max=float("inf")),
+            x,
+        )
+
+        x_with_nan = torch.tensor([float("nan"), 1.0], dtype=torch.bfloat16, device=device)
+        out = torch.clamp(x_with_nan, max=max_scalar)
+        self.assertTrue(math.isnan(out[0].item()))
+        self.assertEqual(out[1].item(), torch.clamp(torch.tensor(1.0, dtype=torch.bfloat16, device=device), max=expected_max).item())
+
+        out_min = torch.clamp_min(x_with_nan, min_scalar)
+        self.assertTrue(math.isnan(out_min[0].item()))
+        self.assertEqual(out_min[1].item(), torch.clamp_min(torch.tensor(1.0, dtype=torch.bfloat16, device=device), expected_min).item())
+
+        nan_min_out = torch.clamp(x, min=float("nan"), max=max_scalar)
+        self.assertTrue(torch.isnan(nan_min_out).all().item())
+        nan_max_out = torch.clamp(x, min=min_scalar, max=float("nan"))
+        self.assertTrue(torch.isnan(nan_max_out).all().item())
+
+    @onlyMPS
+    def test_clamp_half_scalar_bounds_mps(self, device):
+        x = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float16, device=device)
+        max_scalar = 65505.0
+        min_scalar = -70000.0
+
+        expected_min = torch.tensor(min_scalar, dtype=x.dtype).item()
+        expected_max = torch.tensor(max_scalar, dtype=x.dtype).item()
+
+        self.assertEqual(
+            torch.clamp(x, min=min_scalar, max=max_scalar),
+            torch.clamp(x, min=expected_min, max=expected_max),
+            equal_nan=True,
+        )
+        self.assertEqual(
+            torch.clamp_min(x, min_scalar),
+            torch.clamp_min(x, expected_min),
+        )
+        self.assertEqual(
+            torch.clamp_max(x, max_scalar),
+            torch.clamp_max(x, expected_max),
+        )
+
+        self.assertEqual(
+            torch.clamp(x, min=float("-inf"), max=float("inf")),
+            x,
+        )
+
+        x_with_nan = torch.tensor([float("nan"), 1.0], dtype=torch.float16, device=device)
+        out = torch.clamp(x_with_nan, max=max_scalar)
+        self.assertTrue(torch.isnan(out[0].item()))
+        self.assertEqual(out[1].item(), torch.clamp(torch.tensor(1.0, dtype=torch.float16, device=device), max=expected_max).item())
+
+        out_min = torch.clamp_min(x_with_nan, min_scalar)
+        self.assertTrue(torch.isnan(out_min[0].item()))
+        self.assertEqual(out_min[1].item(), torch.clamp_min(torch.tensor(1.0, dtype=torch.float16, device=device), expected_min).item())
+
+        nan_min_out = torch.clamp(x, min=float("nan"), max=max_scalar)
+        self.assertTrue(torch.isnan(nan_min_out).all().item())
+        nan_max_out = torch.clamp(x, min=min_scalar, max=float("nan"))
+        self.assertTrue(torch.isnan(nan_max_out).all().item())
+
+    @onlyMPS
+    def test_clamp_bfloat16_scalar_bounds_mps(self, device):
+        x = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.bfloat16, device=device)
+        max_scalar = 1e40
+        min_scalar = -1e40
+
+        expected_min = torch.tensor(min_scalar, dtype=x.dtype).item()
+        expected_max = torch.tensor(max_scalar, dtype=x.dtype).item()
+
+        self.assertEqual(
+            torch.clamp(x, min=min_scalar, max=max_scalar),
+            torch.clamp(x, min=expected_min, max=expected_max),
+            equal_nan=True,
+        )
+        self.assertEqual(
+            torch.clamp_min(x, min_scalar),
+            torch.clamp_min(x, expected_min),
+        )
+        self.assertEqual(
+            torch.clamp_max(x, max_scalar),
+            torch.clamp_max(x, expected_max),
+        )
+
+        self.assertEqual(
+            torch.clamp(x, min=float("-inf"), max=float("inf")),
+            x,
+        )
+
+        x_with_nan = torch.tensor([float("nan"), 1.0], dtype=torch.bfloat16, device=device)
+        out = torch.clamp(x_with_nan, max=max_scalar)
+        self.assertTrue(torch.isnan(out[0].item()))
+        self.assertEqual(out[1].item(), torch.clamp(torch.tensor(1.0, dtype=torch.bfloat16, device=device), max=expected_max).item())
+
+        out_min = torch.clamp_min(x_with_nan, min_scalar)
+        self.assertTrue(torch.isnan(out_min[0].item()))
+        self.assertEqual(out_min[1].item(), torch.clamp_min(torch.tensor(1.0, dtype=torch.bfloat16, device=device), expected_min).item())
+
+        nan_min_out = torch.clamp(x, min=float("nan"), max=max_scalar)
+        self.assertTrue(torch.isnan(nan_min_out).all().item())
+        nan_max_out = torch.clamp(x, min=min_scalar, max=float("nan"))
+        self.assertTrue(torch.isnan(nan_max_out).all().item())
 
     @onlyNativeDeviceTypes
     @slowTestIf(IS_WINDOWS)
@@ -6599,6 +6770,30 @@ class TestTorch(TestCase):
             reference[0.0, :, 0.0] = 1
 
     # Test `torch._check*` functions
+    @unittest.skipUnless(TEST_CUDA or TEST_MPS, "CUDA or MPS required")
+    def test_clamp_scalar_saturation_consistency(self):
+        x_cpu = torch.tensor([-1.0, 0.0, 1.0], dtype=torch.float16)
+        device_tensors = {}
+        if TEST_CUDA:
+            device_tensors["cuda"] = x_cpu.cuda()
+        if TEST_MPS:
+            device_tensors["mps"] = x_cpu.to("mps")
+
+        max_values = [65505.0, 1e10, float("inf")]
+        min_values = [-70000.0, -1e10, float("-inf")]
+
+        for max_val in max_values:
+            cpu = torch.clamp(x_cpu, max=max_val)
+            for name, tensor in device_tensors.items():
+                result = torch.clamp(tensor, max=max_val).cpu()
+                self.assertEqual(cpu, result, equal_nan=True, msg=f"Mismatch for device {name}")
+
+        for min_val in min_values:
+            cpu = torch.clamp(x_cpu, min=min_val)
+            for name, tensor in device_tensors.items():
+                result = torch.clamp(tensor, min=min_val).cpu()
+                self.assertEqual(cpu, result, equal_nan=True, msg=f"Mismatch for device {name}")
+
     def test_check(self):
         test_cases = [
             # check function, expected error
