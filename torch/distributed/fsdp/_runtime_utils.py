@@ -103,8 +103,7 @@ def _is_fsdp_root(state: _FSDPState, module: nn.Module) -> bool:
     """
     # Force a lazy initialization to determine the FSDP root
     _lazy_init(state, module)
-    if state._is_root is None:
-        raise AssertionError("Expected _is_root to be set after lazy init")
+    assert state._is_root is not None  # mypy
     return state._is_root
 
 
@@ -241,10 +240,8 @@ def _init_streams(
     Initializes CUDA streams for overlapping communication, computation, and
     data transfers. The streams should be shared across FSDP instances.
     """
-    if not state._is_root:
-        raise AssertionError("Expected state to be root")
-    if not state._device_handle.is_available():
-        raise AssertionError("Expected device handle to be available")
+    assert state._is_root
+    assert state._device_handle.is_available()
     uses_hybrid_sharding = any(
         fsdp_state.sharding_strategy in HYBRID_SHARDING_STRATEGIES
         for fsdp_state in state._all_fsdp_states
@@ -1462,8 +1459,7 @@ def _register_post_backward_hook(
             "register the post-backward hook",
         )
         acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
-        if acc_grad is None:
-            raise AssertionError("Expected acc_grad to be set")
+        assert acc_grad is not None
         hook_handle = acc_grad.register_hook(
             functools.partial(_post_backward_hook, state, handle)
         )
@@ -1505,8 +1501,7 @@ def _register_post_backward_reshard_only_hook(
         inp_tensors = [
             obj for obj in args_flat if torch.is_tensor(obj) and obj.requires_grad
         ]
-    if inp_tensors is None:
-        raise AssertionError("Expected inp_tensors to be set")
+    assert inp_tensors is not None  # mypy
     hook_handle = register_multi_grad_hook(
         inp_tensors, functools.partial(_post_backward_reshard_only_hook, state, handle)
     )
@@ -1604,10 +1599,7 @@ def _get_buffers_and_dtypes_for_computation(
                 continue
             buffers.append(buffer)
             buffer_dtypes.append(fsdp_state.mixed_precision.buffer_dtype)
-    if len(buffers) != len(buffer_dtypes):
-        raise AssertionError(
-            f"Expected buffers and buffer_dtypes to have the same length, got {len(buffers)} and {len(buffer_dtypes)}"
-        )
+    assert len(buffers) == len(buffer_dtypes), f"{len(buffers)} {len(buffer_dtypes)}"
     return buffers, buffer_dtypes
 
 

@@ -19,7 +19,7 @@
 namespace at::native {
 namespace {
 
-void im2col_out_cpu_template(
+static void im2col_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
     IntArrayRef kernel_size,

@@ -505,7 +505,7 @@ if __name__ == "__main__":
 
         application_memory = int(total_memory * 0.51)
         with self.assertRaises(torch.OutOfMemoryError):
-            tensor = torch.empty(application_memory, dtype=torch.int8, device="xpu")
+            _ = torch.empty(application_memory, dtype=torch.int8, device="xpu")
 
         torch.xpu.set_per_process_memory_fraction(1.0)
 
@@ -802,10 +802,6 @@ class TestXPUAPISanity(TestCase):
             torch.xpu.is_bf16_supported(including_emulation=True),
             torch.xpu.is_available(),
         )
-
-    def test_is_tf32_supported(self):
-        if not torch.xpu.is_available():
-            self.assertFalse(torch.xpu.is_tf32_supported())
 
     def test_get_arch_list(self):
         if not torch.xpu._is_compiled():

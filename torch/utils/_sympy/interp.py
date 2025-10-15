@@ -160,8 +160,7 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
     handler = getattr(analysis, handler_name)
     try:
         if handler_name in ASSOCIATIVE_OPS:
-            if len(args) <= 1:
-                raise AssertionError("associative op needs >1 args")
+            assert len(args) > 1
             acc = handler(args[0], args[1])
             for i in range(2, len(args)):
                 acc = handler(acc, args[i])

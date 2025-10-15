@@ -87,9 +87,13 @@ class ReferenceQuantizedModule(torch.nn.Module):
         # for capturing `.item` operations
         self.weight_axis_int: int = self.weight_axis.item()  # type: ignore[operator, assignment]
         # pyrefly: ignore  # bad-assignment
-        self.weight_quant_min: typing.Optional[int] = weight_qparams.get("quant_min")
+        self.weight_quant_min: typing.Optional[int] = weight_qparams.get(
+            "quant_min", None
+        )
         # pyrefly: ignore  # bad-assignment
-        self.weight_quant_max: typing.Optional[int] = weight_qparams.get("quant_max")
+        self.weight_quant_max: typing.Optional[int] = weight_qparams.get(
+            "quant_max", None
+        )
 
     def get_weight(self):
         """

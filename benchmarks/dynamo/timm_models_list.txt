@@ -1,8 +1,6 @@
 adv_inception_v3 128
 beit_base_patch16_224 128
-convnextv2_nano.fcmae_ft_in22k_in1k 128
 deit_base_distilled_patch16_224 128
-deit_tiny_patch16_224.fb_in1k 128
 dm_nfnet_f0 128
 ghostnet_100 512
 inception_v3 128
@@ -14,5 +12,3 @@ repvgg_a2 128
 swin_base_patch4_window7_224 128
 tf_efficientnet_b0 128
 visformer_small 128
-vit_base_patch14_dinov2.lvd142m 128
-vit_base_patch16_siglip_256 128

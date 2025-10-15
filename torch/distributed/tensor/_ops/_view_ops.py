@@ -141,14 +141,10 @@ class Split(DimSpec):
 
     @classmethod
     def new(cls, dim: DimSpec, group_shape: tuple[int, ...], idx: int) -> DimSpec:
-        if not len(group_shape) > 0:
-            raise AssertionError(
-                f"Expected group_shape length > 0, got {len(group_shape)}"
-            )
+        assert len(group_shape) > 0
         if len(group_shape) == 1:
             # not really a group, just return the input dim back
-            if not idx == 0:
-                raise AssertionError(f"Expected idx == 0, got {idx}")
+            assert idx == 0
             return dim
         elif group_shape[idx] == 1:
             return Singleton()
@@ -185,10 +181,7 @@ def dim_atleast_3d(ndim: int) -> DimMap:
 
 def expand(input_shape: Shape, shape: Shape) -> DimMap:
     """Implement broadcast on multiple dimensions."""
-    if not len(shape) >= len(input_shape):
-        raise AssertionError(
-            f"Expected len(shape) >= len(input_shape), got {len(shape)} < {len(input_shape)}"
-        )
+    assert len(shape) >= len(input_shape)
 
     # 1. create padded input dimensions
     padded_input = dim_pad_left(len(input_shape), len(shape))
@@ -197,17 +190,11 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
     for p, desired_s in zip(padded_input, shape):
         if isinstance(p, Singleton):
             actual_s = 1
-            if not desired_s >= 0:
-                raise AssertionError(f"Expected desired_s >= 0, got {desired_s}")
+            assert desired_s >= 0
         else:
-            if not isinstance(p, InputDim):
-                raise AssertionError(f"DimSpec not supported in expand: {p}")
+            assert isinstance(p, InputDim), f"DimSpec not supported in expand: {p}"
             actual_s = input_shape[p.input_dim]
-            if not (actual_s == 1 or desired_s == -1 or desired_s == actual_s):
-                raise AssertionError(
-                    f"Expected actual_s == 1 or desired_s == -1 or "
-                    f"desired_s == actual_s, got actual_s={actual_s}, desired_s={desired_s}"
-                )
+            assert actual_s == 1 or desired_s == -1 or desired_s == actual_s
         mapping.append(
             p
             if desired_s in (1, -1) or desired_s == actual_s
@@ -251,21 +238,12 @@ def dim_movedim(
     input = normalize_dims(input, ndim)
     destination = normalize_dims(destination, ndim)
 
-    if not len(input) == len(destination):
-        raise AssertionError(
-            f"Expected len(input) == len(destination), got {len(input)} != {len(destination)}"
-        )
+    assert len(input) == len(destination)
     input_set = set(input)
-    if not len(input_set) == len(input):
-        raise AssertionError("Found repeated input dims")
-    if not len(set(destination)) == len(destination):
-        raise AssertionError("Found repeated output dims")
-    if not max(input) < ndim:
-        raise AssertionError(f"Expected max(input) < ndim, got {max(input)} >= {ndim}")
-    if not max(destination) < ndim:
-        raise AssertionError(
-            f"Expected max(destination) < ndim, got {max(destination)} >= {ndim}"
-        )
+    assert len(input_set) == len(input), "Found repeated input dims"
+    assert len(set(destination)) == len(destination), "Found repeated output dims"
+    assert max(input) < ndim
+    assert max(destination) < ndim
 
     dest = [-1] * ndim
     for i, d in zip(input, destination):
@@ -281,10 +259,9 @@ def dim_movedim(
 
 def dim_repeat(ndim: int, sizes: Shape) -> DimMap:
     sizes = normalize_sizes(sizes)
-    if not len(sizes) >= ndim:
-        raise AssertionError(
-            f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
-        )
+    assert len(sizes) >= ndim, (
+        f"Number of dimensions of repeat dims {sizes} can not be smaller than number of dimensions of tensor {ndim}."
+    )
     pad = len(sizes) - ndim
     return tuple(Repeat.new(Singleton(), s) for s in sizes[:pad]) + tuple(
         Repeat.new(InputDim(i), s) for i, s in enumerate(sizes[pad:])
@@ -299,18 +276,15 @@ def infer_size(total_size: int, sizes: Shape) -> Shape:
     """
     infers = [i for i, s in enumerate(sizes) if s == -1]
     size = prod(sizes)
-    if not len(infers) <= 1:
-        raise AssertionError("can only infer one size")
+    assert len(infers) <= 1, "can only infer one size"
     if infers:
         size = -size
         missing_size = total_size // size
-        if not total_size % size == 0:
-            raise AssertionError(
-                f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
-            )
+        assert total_size % size == 0, (
+            f"size inferred for -1 is not integral {sizes} should have {total_size} elements."
+        )
         return tuple(s if s != -1 else missing_size for s in sizes)
-    if not size == total_size:
-        raise AssertionError(f"sizes do not match {total_size} vs {size}")
+    assert size == total_size, f"sizes do not match {total_size} vs {size}"
     return sizes
 
 
@@ -346,8 +320,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     from_nelem = prod(from_size)
     to_size = infer_size(from_nelem, normalize_sizes(to_size))
 
-    if not from_nelem == prod(to_size):
-        raise AssertionError("Total view shape does not add up")
+    assert from_nelem == prod(to_size), "Total view shape does not add up"
 
     from_idx = 0
     to_idx = 0
@@ -417,10 +390,8 @@ def dim_tile(ndim: int, dims: tuple[int, ...]) -> DimMap:
 def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
     dim1 = normalize_dim(dim1, ndim)
     dim2 = normalize_dim(dim2, ndim)
-    if not dim1 < ndim:
-        raise AssertionError(f"Expected dim1 < ndim, got {dim1} >= {ndim}")
-    if not dim2 < ndim:
-        raise AssertionError(f"Expected dim2 < ndim, got {dim2} >= {ndim}")
+    assert dim1 < ndim
+    assert dim2 < ndim
     dimmap = [InputDim(i) for i in range(ndim)]
     swapdim = dimmap[dim1]
     dimmap[dim1] = dimmap[dim2]
@@ -519,8 +490,9 @@ def propagate_shape_and_sharding(
     - An output dimension that is a split of the input dimension can only be sharded
       if the leftmost split size is divisible by the mesh dimension
     """
-    if not len(input_src_placements) == len(mesh_sizes):
-        raise AssertionError(f"{input_src_placements} != {mesh_sizes}")
+    assert len(input_src_placements) == len(mesh_sizes), (
+        f"{input_src_placements} != {mesh_sizes}"
+    )
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     mesh_ndim = len(mesh_sizes)
     shardable_dims: dict[int, list[bool]] = {}
@@ -562,8 +534,7 @@ def propagate_shape_and_sharding(
         elif isinstance(cmd, Flatten):
             for i, dim in enumerate(cmd.input_dims):
                 # so far all Flatten is always composed of InputDims; revisit this if needed
-                if not isinstance(dim, InputDim):
-                    raise AssertionError(f"Expected InputDim, got {type(dim)}")
+                assert isinstance(dim, InputDim)
                 can_shard_dim = True
                 shard_mesh_dim, shard_placement = (
                     maybe_get_shard_mesh_dim_and_placement(dim)
@@ -577,10 +548,7 @@ def propagate_shape_and_sharding(
                             "It cannot be performed without redistribution, which is disallowed by the current operator.",
                         )
                 elif input_sharded:
-                    if not (shard_placement is not None and shard_mesh_dim is not None):
-                        raise AssertionError(
-                            "Expected shard_placement and shard_mesh_dim to be not None"
-                        )
+                    assert shard_placement is not None and shard_mesh_dim is not None
                     tensor_dim_size = global_input_shape[shard_placement.dim]
                     mesh_dim_size = mesh_sizes[shard_mesh_dim]
                     if tensor_dim_size % mesh_dim_size != 0:
@@ -593,10 +561,7 @@ def propagate_shape_and_sharding(
                             )
                 shardable_dims[dim.input_dim] = [can_shard_dim] * mesh_ndim
 
-            if not isinstance(cmd.input_dims[0], InputDim):
-                raise AssertionError(
-                    f"Expected InputDim, got {type(cmd.input_dims[0])}"
-                )
+            assert isinstance(cmd.input_dims[0], InputDim)
             return cmd.input_dims[0]
         elif isinstance(cmd, Split):
             in_dim = get_in_dim_to_shard(cmd.input_dim)
@@ -629,10 +594,9 @@ def propagate_shape_and_sharding(
                 for size, shard in zip(mesh_sizes, input_src_placements):
                     if isinstance(shard, Shard) and shard.dim == in_dim:
                         submesh_size *= size
-                if not out_size % submesh_size == 0:
-                    raise AssertionError(
-                        f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
-                    )
+                assert out_size % submesh_size == 0, (
+                    f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
+                )
 
             # we will only shard our first component of the split
             return in_dim if cmd.split_id == 0 else None
@@ -713,8 +677,7 @@ def register_op_strategy_map(
         mesh = op_schema.get_mesh_from_args(validate=False)
 
         global_in_shape = input_strategy.shape
-        if global_in_shape is None:
-            raise AssertionError("Shape required.")
+        assert global_in_shape is not None, "Shape required."
 
         output_strategy = OpStrategy([])
         for input_placement_strategy in input_strategy.strategies:

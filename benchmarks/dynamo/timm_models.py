@@ -271,6 +271,8 @@ class TimmRunner(BenchmarkRunner):
             memory_format=torch.channels_last if channels_last else None,
         )
 
+        self.num_classes = model.num_classes
+
         data_config = resolve_data_config(
             vars(self._args) if timmversion >= "0.8.0" else self._args,
             model=model,
@@ -300,6 +302,7 @@ class TimmRunner(BenchmarkRunner):
         example_inputs = [
             example_inputs,
         ]
+        self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
 
@@ -366,6 +369,11 @@ class TimmRunner(BenchmarkRunner):
             else:
                 tolerance = 1e-2
         return tolerance, cosine
+
+    def _gen_target(self, batch_size, device):
+        return torch.empty((batch_size,) + (), device=device, dtype=torch.long).random_(
+            self.num_classes
+        )
 
     def compute_loss(self, pred):
         # High loss values make gradient checking harder, as small changes in
