@@ -160,6 +160,14 @@ def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed,
     return conv_flop_count(x_shape, w_shape, out_shape, transposed=transposed)
 
 
+@register_flop_formula([aten.add, aten.sub, aten.mul, aten.div, aten.pow, aten.remainder, aten.add_, aten.sub_, aten.mul_, aten.div_, aten.pow_, aten.remainder_])
+def element_wise_flop(x_shape, y_shape, *args, out_shape=None, **kwargs) -> int:
+    """Count flops for element-wise operations."""
+    # pyrefly: ignore  # bad-argument-type
+    broadcasted_shape = torch.broadcast_shapes(x_shape, y_shape)
+    return prod(broadcasted_shape)
+
+
 @register_flop_formula(aten.convolution_backward)
 def conv_backward_flop(
         grad_out_shape,
