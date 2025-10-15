@@ -486,44 +486,16 @@ test_inductor_aoti() {
 }
 
 test_inductor_aoti_cross_compile_for_windows() {
-  # sudo apt-get update
-  # sudo apt-get install -y g++-mingw-w64-x86-64-posix
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  # The artifact is downloaded to win-cuda-libs in the workspace by GitHub Actions
-  # The artifact contains only the .lib files (no directory structure)
-  WIN_CUDA_LIBS_DOWNLOAD_DIR="$(pwd)/win-cuda-libs"
-
-  if [[ ! -d "$WIN_CUDA_LIBS_DOWNLOAD_DIR" ]]; then
-    echo "ERROR: Windows CUDA libs directory not found at $WIN_CUDA_LIBS_DOWNLOAD_DIR"
-    echo "The artifact should have been downloaded by GitHub Actions before running the docker container"
-    exit 1
-  fi
-
-  echo "Contents of downloaded Windows CUDA libs:"
-  ls -lah "$WIN_CUDA_LIBS_DOWNLOAD_DIR/" || true
-
-  # Create the expected directory structure and move CUDA libs to lib/x64
-  WIN_TORCH_LIBS_DIR="$(pwd)/win-cuda-libs-structured"
-  mkdir -p "$WIN_TORCH_LIBS_DIR/lib/x64"
-
-  # Move the downloaded CUDA libs to the expected location
-  if [ -f "$WIN_CUDA_LIBS_DOWNLOAD_DIR/cuda.lib" ]; then
-    mv "$WIN_CUDA_LIBS_DOWNLOAD_DIR/cuda.lib" "$WIN_TORCH_LIBS_DIR/lib/x64/cuda.lib"
-  fi
-  if [ -f "$WIN_CUDA_LIBS_DOWNLOAD_DIR/cudart.lib" ]; then
-    mv "$WIN_CUDA_LIBS_DOWNLOAD_DIR/cudart.lib" "$WIN_TORCH_LIBS_DIR/lib/x64/cudart.lib"
-  fi
-
   # Set WINDOWS_CUDA_HOME environment variable
-  export WINDOWS_CUDA_HOME="$WIN_TORCH_LIBS_DIR"
+  export WINDOWS_CUDA_HOME="$(pwd)/win-torch-wheel-extracted"
 
   echo "WINDOWS_CUDA_HOME is set to: $WINDOWS_CUDA_HOME"
-  echo "Contents of Windows torch libs after restructuring:"
-  ls -lah "$WIN_TORCH_LIBS_DIR/lib/x64/" || true
-  ls -lah "$(pwd)/win-torch-wheel-extracted/torch/lib" || true
+  echo "Contents:"
+  ls -lah "$(pwd)/win-torch-wheel-extracted/lib/x64/" || true
 
   python test/inductor/test_aoti_cross_compile_windows.py -k compile --package-dir "$TEST_REPORTS_DIR" --win-torch-lib-dir "$(pwd)/win-torch-wheel-extracted/torch/lib"
 }
