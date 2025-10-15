@@ -492,7 +492,7 @@ def foreach_reduce(
             force_sum_reduction_for_comms,
         )
     )
-    world_size = reduce_scatter_group.size()
+    world_size = 1  # reduce_scatter_group.size()
     device_handle = _get_device_handle(device.type)
     current_stream = device_handle.current_stream()
 
@@ -690,7 +690,7 @@ def _get_all_gather_input_metadatas(
 
 
 def _get_gradient_divide_factors(
-    reduce_scatter_group: dist.ProcessGroup,
+    reduce_scatter_group: Optional[dist.ProcessGroup],
     all_reduce_group: Optional[dist.ProcessGroup],
     reduce_dtype: torch.dtype,
     device_type: str = "",
@@ -709,8 +709,11 @@ def _get_gradient_divide_factors(
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
     overflow_risk = reduce_dtype not in (torch.float32, torch.bfloat16)
+    if reduce_scatter_group is not None:
+        data_parallel_size = reduce_scatter_group.size()
+    else:
+        data_parallel_size = 1
 
-    data_parallel_size = reduce_scatter_group.size()
     if all_reduce_group is not None:
         data_parallel_size *= all_reduce_group.size()
 

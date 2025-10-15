@@ -120,7 +120,7 @@ class ReplicateTest(MultiProcessTestCase):
             if i % 2 == 0:
                 self.assertTrue("replicate" in _get_registry(layer))
                 for parameter in layer.parameters():
-                    self.assertEqual(parameter.placements, (Replicate(), Shard(dim=0)))
+                    self.assertEqual(parameter.placements, (Replicate(),))
             elif i % 2 == 1:
                 self.assertTrue("fully_shard" in _get_registry(layer))
                 for parameter in layer.parameters():
@@ -197,14 +197,14 @@ class ReplicateTest(MultiProcessTestCase):
         ]
 
         global_mesh = self.init_replicate_tp_mesh()
-        replicate_mesh = global_mesh["replicate", "shard"]
+        replicate_mesh = global_mesh["replicate"]
 
         for layer in layers:
             replicate(layer, device_mesh=replicate_mesh)
 
             for parameter in layer.parameters():
-                self.assertEqual(parameter.device_mesh.shape, (2, 1))
-                self.assertEqual(parameter.placements, (Replicate(), Shard(dim=0)))
+                self.assertEqual(parameter.device_mesh.shape, (2,))
+                self.assertEqual(parameter.placements, (Replicate(),))
 
     @skip_if_lt_x_gpu(2)
     def test_train_replicate_fsdp(self):
@@ -263,7 +263,6 @@ class ReplicateTest(MultiProcessTestCase):
         run_subtests(
             self,
             {
-                "reshard_after_forward": [False, True],
                 "use_activation_checkpointing": [False, True],
                 "mlp_dim": [3, 16, 17],
             },
@@ -273,7 +272,6 @@ class ReplicateTest(MultiProcessTestCase):
     def _test_train_parity_2d_mlp(
         self,
         global_mesh: DeviceMesh,
-        reshard_after_forward: bool,
         use_activation_checkpointing: bool,
         mlp_dim: int,
     ):
@@ -287,13 +285,12 @@ class ReplicateTest(MultiProcessTestCase):
         torch.manual_seed(42)
         model = MLPStack(mlp_dim)
         ref_model = copy.deepcopy(model).cuda()
-        replicate(ref_model, device_mesh=replicate_shard_mesh)
+        replicate(ref_model, device_mesh=replicate_mesh)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
         model.parallelize(
             tp_mesh,
             replicate_shard_mesh,
             use_activation_checkpointing,
-            reshard_after_forward=reshard_after_forward,
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
