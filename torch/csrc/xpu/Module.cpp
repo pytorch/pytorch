@@ -420,6 +420,9 @@ static void initXpuMethodBindings(PyObject* module) {
       [](c10::DeviceIndex device, c10::DeviceIndex peer) {
         return at::xpu::canDeviceAccessPeer(device, peer);
       });
+  m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
+    c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
+  });
 }
 
 // Callback for python part. Used for additional initialization of python

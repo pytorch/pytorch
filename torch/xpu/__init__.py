@@ -520,6 +520,7 @@ from .memory import (
     memory_stats_as_nested_dict,
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
+    set_per_process_memory_fraction,
 )
 from .random import (
     get_rng_state,
@@ -573,6 +574,7 @@ __all__ = [
     "seed",
     "seed_all",
     "set_device",
+    "set_per_process_memory_fraction",
     "set_rng_state",
     "set_rng_state_all",
     "set_stream",

@@ -4,7 +4,7 @@ from typing import Any, Union
 import torch
 from torch.types import Device
 
-from . import _get_device_index, is_initialized
+from . import _get_device_index, _lazy_init, is_initialized
 
 
 _device_t = Union[Device, str, int, None]
@@ -194,6 +194,31 @@ def mem_get_info(device: _device_t = None) -> tuple[int, int]:
     return torch._C._xpu_getMemoryInfo(device)
 
 
+def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -> None:
+    r"""
+    Set the memory fraction for a single process on XPU device.
+    This function limits the amount of memory that the caching allocator can allocate
+    on the specified XPU device. The allowed memory is computed as:
+
+    .. math:: \text{allowed\_memory} = \text{total\_memory} \times \text{fraction}
+
+    If the process attempts to allocate more than this allowed memory,
+    an out-of-memory error will be raised by the allocator.
+
+    Arguments:
+        fraction(float): Range: 0~1. Allowed memory equals total_memory * fraction.
+        device (torch.device or int or str, optional): selected device. It uses the current device,
+            given by :func:`~torch.xpu.current_device`, if :attr:`device` is ``None`` (default).
+
+    .. note:: In general, the total available free memory is less than the total capacity.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    if not isinstance(fraction, float):
+        raise TypeError("Invalid type for fraction argument, must be `float`")
+    torch._C._xpu_setMemoryFraction(fraction, device)
+
+
 __all__ = [
     "empty_cache",
     "max_memory_allocated",
@@ -205,4 +230,5 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
+    "set_per_process_memory_fraction",
 ]
