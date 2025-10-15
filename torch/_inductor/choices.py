@@ -6,6 +6,8 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 import sympy
 
 import torch
+from torch._inductor.runtime.runtime_utils import next_power_of_2
+from torch.utils._sympy.value_ranges import bound_sympy
 
 from . import config
 from .codecache import write_text
@@ -335,6 +337,34 @@ class InductorChoices:
             ReductionHint.INNER: 1024,
         }.get(features.get_reduction_hint(), 64)
 
+        if features.get_reduction_hint() not in (
+            ReductionHint.INNER,
+            ReductionHint.OUTER_TINY,
+        ):
+            bounds = bound_sympy(features.reduction_numel)
+            lower = bounds.lower
+            upper = bounds.upper
+
+            if not all(
+                (
+                    (isinstance(bound, int) or bound.is_constant())
+                    and bound != torch.utils._sympy.numbers.IntInfinity()
+                )
+                for bound in (lower, upper)
+            ):
+                return False
+
+            lower = next_power_of_2(int(lower))
+            upper = next_power_of_2(int(upper))
+
+            # If we are are coalescing on xblock (not ReductionHint.INNER) and this is not a tiny kernel
+            # (not ReductionHint.OUTER_TINY), do not use persistent reduction if it induces tile
+            # quantization. Persistent reduction forces rblock == rnumel, if the bounds between lower
+            # and upper are large, for the lower values we will be masking off large % of read/writes,
+            # when we could expand the coalescing xblock instead.
+            if lower != upper:
+                return False
+
         if cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
             try:
@@ -350,6 +380,7 @@ class InductorChoices:
         # to pick the faster one.
         if config.triton.multi_kernel:
             threshold *= 16
+
         return V.graph.sizevars.statically_known_leq(
             features.reduction_numel, threshold
         )  # type: ignore[arg-types]
@@ -557,6 +588,7 @@ class InductorChoices:
                 and memory_score > 0
             )
 
+        # pyrefly: ignore  # bad-return
         return (
             template_score,
             node1.is_reduction() == node2.is_reduction() and memory_score > 0,

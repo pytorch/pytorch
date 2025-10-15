@@ -12,7 +12,8 @@ import collections
 import contextlib
 import copy
 import re
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 import torch
 
@@ -203,6 +204,7 @@ def collate(
         # check to make sure that the elements in batch have consistent size
         it = iter(batch)
         elem_size = len(next(it))
+        # pyrefly: ignore  # not-iterable
         if not all(len(elem) == elem_size for elem in it):
             raise RuntimeError("each element in list of batch should be of equal size")
         transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.

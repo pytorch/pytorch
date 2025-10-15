@@ -48,6 +48,7 @@ class EventList(list):
     def _remove_dup_nodes(self):
         while True:
             to_delete = set()
+
             for idx in range(len(self)):
                 if (
                     self[idx].cpu_parent is not None
@@ -61,8 +62,11 @@ class EventList(list):
                     to_delete.add(idx)
             if len(to_delete) == 0:
                 break
+
             new_evts = [ev for ind, ev in enumerate(self) if ind not in to_delete]
+
             self.clear()
+
             self.extend(new_evts)
 
     def _populate_cpu_children(self):
@@ -155,10 +159,7 @@ class EventList(list):
             if p is not None:
                 assert p.fwd_thread is not None
                 t = (p.sequence_nr, p.fwd_thread)
-                if t in fwd_stacks:
-                    evt.stack = fwd_stacks[t]
-                else:
-                    evt.stack = []
+                evt.stack = fwd_stacks.get(t, [])
 
     @property
     def self_cpu_time_total(self):
@@ -491,11 +492,14 @@ class FunctionEvent(FormattedTimesMixin):
         concrete_inputs=None,
         kwinputs=None,
         is_user_annotation=False,
+        metadata_json=None,
     ):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
+        # pyrefly: ignore  # bad-assignment
         self.overload_name: str = overload_name
+        # pyrefly: ignore  # bad-assignment
         self.trace_name: str = trace_name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
@@ -504,9 +508,13 @@ class FunctionEvent(FormattedTimesMixin):
         self.count: int = 1
         self.cpu_children: list[FunctionEvent] = []
         self.cpu_parent: Optional[FunctionEvent] = None
+        # pyrefly: ignore  # bad-assignment
         self.input_shapes: tuple[int, ...] = input_shapes
+        # pyrefly: ignore  # bad-assignment
         self.concrete_inputs: list[Any] = concrete_inputs
+        # pyrefly: ignore  # bad-assignment
         self.kwinputs: dict[str, Any] = kwinputs
+        # pyrefly: ignore  # bad-assignment
         self.stack: list = stack
         self.scope: int = scope
         self.use_device: Optional[str] = use_device
@@ -526,6 +534,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.self_cpu_percent = -1
         self.total_cpu_percent = -1
         self.total_device_percent = -1
+        self.metadata_json = metadata_json
 
     def append_kernel(self, name, device, duration):
         assert self.device_type == DeviceType.CPU
@@ -730,6 +739,7 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.self_device_memory_usage += other.self_device_memory_usage
         self.count += other.count
         if self.flops is None:
+            # pyrefly: ignore  # bad-assignment
             self.flops = other.flops
         elif other.flops is not None:
             self.flops += other.flops
@@ -965,6 +975,7 @@ def _build_table(
             "PFLOPs",
         ]
         assert flops > 0
+        # pyrefly: ignore  # no-matching-overload
         log_flops = max(0, min(math.log10(flops) / 3, float(len(flop_headers) - 1)))
         assert log_flops >= 0 and log_flops < len(flop_headers)
         return (pow(10, (math.floor(log_flops) * -3.0)), flop_headers[int(log_flops)])

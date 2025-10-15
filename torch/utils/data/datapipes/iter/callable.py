@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import namedtuple
-from collections.abc import Iterator, Sized
-from typing import Any, Callable, Optional, TypeVar, Union
+from collections.abc import Callable, Iterator, Sized
+from typing import Any, Optional, TypeVar, Union
 
 import torch
 from torch.utils.data._utils.collate import default_collate
@@ -118,6 +118,7 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
                 for idx in sorted(self.input_col[1:], reverse=True):
                     del data[idx]
             else:
+                # pyrefly: ignore  # unsupported-operation
                 data[self.input_col] = res
         else:
             if self.output_col == -1:

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import contextlib
-import itertools
-from typing import Any, Optional, TYPE_CHECKING, Union
+import dataclasses
+from typing import Any, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
 
 import torch._logging
+import torch.distributed as dist
 import torch.fx
-from torch._dynamo.distributed import get_compile_pg
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, select_algorithm
@@ -24,7 +24,7 @@ from .ir import (
     TensorBox,
 )
 from .kernel_inputs import KernelInputs, MMKernelInputs
-from .scheduler import Dep, replace_operation_buffer, SchedulerNode
+from .scheduler import SchedulerNode
 from .virtualized import V
 
 
@@ -32,9 +32,30 @@ if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
 
 
-_DISTRIBUTED_AUTOTUNE_INDEX = "distributed_autotune_index"
-_autotuned_index: Optional[int] = None
+_DISTRIBUTED_AUTOTUNE_KEY = "distributed_autotune"
+_autotuned_index: int | None = None
 _autotuned_local_count: int = 0
+_gc_index: int = 0
+
+_AUTOTUNE_PG: dist.ProcessGroup | None = None
+
+
+@dataclasses.dataclass
+class _DistributedAutotuneInfo:
+    index: int
+    local: bool
+
+
+def get_autotune_pg() -> dist.ProcessGroup | None:
+    if dist.is_available() and dist.is_initialized():
+        global _AUTOTUNE_PG
+        if _AUTOTUNE_PG is None:
+            _AUTOTUNE_PG = dist.distributed_c10d._new_group_with_tag(
+                pg_tag="pt2_distributed_autotune_pg"
+            )
+        return _AUTOTUNE_PG
+
+    return None
 
 
 def schedule(scheduler: torch._inductor.scheduler.Scheduler) -> None:
@@ -54,10 +75,11 @@ def graph_context() -> Generator[None, None, None]:
     Wrapped around processing a graph, sets up figuring out which ranks tune
     which shapes.
     """
-    global _autotuned_index, _autotuned_local_count
+    global _autotuned_index, _autotuned_local_count, _gc_index
     assert _autotuned_index is None
     _autotuned_index = 0
     _autotuned_local_count = 0
+    _gc_index += 1
     try:
         yield
     finally:
@@ -67,7 +89,7 @@ def graph_context() -> Generator[None, None, None]:
 
 def maybe_autotune_remote(
     name: str, choices: list[ChoiceCaller], inputs: list[Buffer], layout: Layout
-) -> Optional[TensorBox | ShapeAsConstantBuffer]:
+) -> TensorBox | ShapeAsConstantBuffer | None:
     """
     Used by an op (like `mm`) to determine if the op should be autotuned
     locally (returns None) or remotely (returns a placeholder Buffer).
@@ -75,19 +97,22 @@ def maybe_autotune_remote(
     if not config.distributed_autotune:
         return None
 
-    if len(choices) == 1:
+    if not (autotune_pg := get_autotune_pg()):
         return None
 
-    if not (compile_pg := get_compile_pg()):
+    if len(choices) <= 1:
         return None
 
     global _autotuned_index, _autotuned_local_count
     assert _autotuned_index is not None
     index = _autotuned_index
     _autotuned_index += 1
+    local = index % autotune_pg.size() == autotune_pg.rank()
 
-    V.current_node.meta[_DISTRIBUTED_AUTOTUNE_INDEX] = index
-    if index % compile_pg.size() == compile_pg.rank():
+    V.current_node.meta[_DISTRIBUTED_AUTOTUNE_KEY] = _DistributedAutotuneInfo(
+        index, local
+    )
+    if local:
         _autotuned_local_count += 1
         return None
 
@@ -123,8 +148,10 @@ class _DistributedAutotuneBuffer(MultiTemplateBuffer):
         self._kernel_name = kernel_name
 
     def _dummy_choice_timings(
-        self, _hint_override: Optional[int]
+        self, _hint_override: int | None
     ) -> dict[ChoiceCaller, float]:
+        # This should never get called. It means that a remote autotune was
+        # scheduled but never filled in.
         raise NotImplementedError
 
     def autotune(self, ser_choice: _SerializedChoice) -> TensorBox:
@@ -155,12 +182,12 @@ def _sync(autotune_results: list[_SerializedChoice]) -> Sequence[_SerializedChoi
     Perform the all_gather to collect the autotune results from all the ranks.
     """
 
-    compile_pg = get_compile_pg()
-    assert compile_pg
+    autotune_pg = get_autotune_pg()
+    assert autotune_pg
 
     # Perform allgather
-    all_states: list[list[_SerializedChoice]] = [None] * compile_pg.size()  # type: ignore[list-item]
-    torch.distributed.all_gather_object(all_states, autotune_results, group=compile_pg)
+    all_states: list[list[_SerializedChoice]] = [None] * autotune_pg.size()  # type: ignore[list-item]
+    torch.distributed.all_gather_object(all_states, autotune_results, group=autotune_pg)
 
     node_count = sum(len(x) for x in all_states)
     # It's faster to briefly lie about the type than to unzip the results and append.
@@ -190,9 +217,7 @@ class _SerializedChoice:
         self.template_uid = _SerializedChoice._template_uid_from_choice(choice)
         self.kwargs = self._compute_kwargs(choice.description)
 
-    def get_choice(
-        self, layout: Layout, inputs: KernelInputs
-    ) -> Optional[ChoiceCaller]:
+    def get_choice(self, layout: Layout, inputs: KernelInputs) -> ChoiceCaller | None:
         """
         Deserialize the ChoiceCaller and return it.
         """
@@ -223,6 +248,8 @@ class _SerializedChoice:
         """
         Given a template description turn it into input kwargs.
         """
+        if not description:
+            return {}
 
         # TODO: It seems like it would be better if the template could provide
         # this directly instead of having to parse a string.
@@ -284,25 +311,39 @@ def _autotune_local_nodes(
     for node in scheduler.nodes:
         if not isinstance(node, SchedulerNode):
             continue
-        if isinstance(node.node, _DistributedAutotuneBuffer):
+
+        if (inner_node := node.node) is None:
             continue
-        if not isinstance(node.node, MultiTemplateBuffer):
+
+        if isinstance(inner_node, _DistributedAutotuneBuffer):
+            # This is marked for remote autotuning.
             continue
+
+        if not isinstance(inner_node, MultiTemplateBuffer):
+            continue
+
+        if (origin_node := inner_node.origin_node) is None:
+            continue
+
+        if (meta := origin_node.meta) is None:
+            continue
+
+        info = meta.get(_DISTRIBUTED_AUTOTUNE_KEY)
+        if info is None:
+            continue
+
+        assert info.local
 
         # We force autotuning here
         # Still takes advantage of async precompile
         # We need all the configs before fusion
-        multi_node = node.node
-        assert multi_node is not None
-        min_choice, _ = multi_node.get_min_choice()
-        assert node.node.origin_node is not None
-        index = node.node.origin_node.meta[_DISTRIBUTED_AUTOTUNE_INDEX]
+        min_choice, _ = inner_node.get_min_choice()
 
-        choice = _SerializedChoice(index, min_choice)
+        choice = _SerializedChoice(info.index, min_choice)
         autotune_results.append(choice)
 
     assert len(autotune_results) == _autotuned_local_count, (
-        f"not enough local autotuned nodes found ({len(autotune_results)} != {_autotuned_local_count})"
+        f"incorrect local autotuned nodes found ({len(autotune_results)} != {_autotuned_local_count})"
     )
     return autotune_results
 
@@ -318,46 +359,17 @@ def _autotune_remote_nodes(
 
     for i, node in enumerate(scheduler.nodes):
         if isinstance(node, SchedulerNode) and isinstance(
-            node.node, _DistributedAutotuneBuffer
+            (dist_node := node.node), _DistributedAutotuneBuffer
         ):
-            assert node.node.origin_node is not None
-            index = node.node.origin_node.meta[_DISTRIBUTED_AUTOTUNE_INDEX]
-            replacement_buf = node.node.autotune(choices_by_index[index])
+            assert dist_node.origin_node is not None
+            info = dist_node.origin_node.meta[_DISTRIBUTED_AUTOTUNE_KEY]
+            out_tensorbox = dist_node.autotune(choices_by_index[info.index])
 
-            out_storage = replacement_buf.data
+            out_storage = out_tensorbox.data
             assert isinstance(out_storage, StorageBox)
             out_buffer = out_storage.data
             assert isinstance(out_buffer, OperationBuffer)
-            assert node.node.layout == out_buffer.layout
-            replace_operation_buffer(node.node, out_buffer)
-            new_scheduler_node = scheduler.create_scheduler_node(out_buffer)
 
-            scheduler.nodes[i] = new_scheduler_node
-            scheduler.name_to_node[node.get_name()] = new_scheduler_node
-            scheduler.name_to_fused_node[node.get_name()] = new_scheduler_node
+            assert out_buffer.layout == dist_node.layout
 
-            # We need to reflect the mutation renames that were recorded in the original node
-            mutation_renames = {}
-            for dep in itertools.chain(node.read_writes.reads, node.unmet_dependencies):
-                if real_name := scheduler.mutation_real_name.get(dep.name, None):
-                    mutation_renames[real_name] = dep.name
-
-            def rename_deps(deps: OrderedSet[Dep]) -> OrderedSet[Dep]:
-                return OrderedSet(dep.rename(mutation_renames) for dep in deps)
-
-            new_scheduler_node.unmet_dependencies = rename_deps(
-                new_scheduler_node.unmet_dependencies
-            )
-            new_scheduler_node.read_writes.reads = rename_deps(
-                new_scheduler_node.read_writes.reads
-            )
-
-            for new_out, old_out in zip(
-                new_scheduler_node.get_outputs(), node.get_outputs()
-            ):
-                scheduler.name_to_buf[old_out.get_name()] = new_out
-                new_out.users = old_out.users
-
-            new_scheduler_node.min_order = node.min_order
-            new_scheduler_node.max_order = node.max_order
-            new_scheduler_node.last_usage = node.last_usage
+            scheduler._replace_node(out_buffer, dist_node, i, node)
