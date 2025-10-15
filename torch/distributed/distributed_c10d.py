@@ -56,6 +56,7 @@ from .rendezvous import register_rendezvous_handler, rendezvous  # noqa: F401
 
 
 __all__ = [
+    "_get_backend_type",
     "Backend",
     "BackendConfig",
     "GroupMember",
@@ -282,15 +283,6 @@ class Backend(str):  # noqa: SLOT000
         MPI: ["cpu", "cuda"],
     }
 
-    backend_type_map: dict[str, ProcessGroup.BackendType] = {
-        UNDEFINED: ProcessGroup.BackendType.UNDEFINED,
-        GLOO: ProcessGroup.BackendType.GLOO,
-        NCCL: ProcessGroup.BackendType.NCCL,
-        XCCL: ProcessGroup.BackendType.XCCL,
-        UCC: ProcessGroup.BackendType.UCC,
-        MPI: ProcessGroup.BackendType.MPI,
-    }
-
     def __new__(cls, name: str):
         """Create and return a new instance of the class."""
         if not isinstance(name, str):
@@ -343,7 +335,6 @@ class Backend(str):  # noqa: SLOT000
             for device in devices:
                 if device not in Backend.default_device_backend_map:
                     Backend.default_device_backend_map[device] = name.lower()
-        Backend.backend_type_map[name.lower()] = ProcessGroup.BackendType.CUSTOM
 
         # Update device capability matrix in Backend class
         if devices is None:
@@ -364,6 +355,55 @@ class Backend(str):  # noqa: SLOT000
             Backend.backend_capability[name.lower()] = devices
 
         Backend._plugins[name.upper()] = Backend._BackendPlugin(func, extended_api)
+
+
+def _get_backend_type(backend_str: str) -> ProcessGroup.BackendType:
+    """Return ProcessGroup.BackendType for ``backend_str`` with strict checks."""
+    backend_key = str(backend_str)
+    enum_name = backend_key.upper()
+    try:
+        return ProcessGroup.BackendType.__members__[enum_name]
+    except KeyError:
+        pass
+
+    if enum_name in Backend._plugins:
+        return ProcessGroup.BackendType.CUSTOM
+
+    plugin_backends = {name.lower() for name in Backend._plugins.keys()}
+    valid_backends = ", ".join(sorted(set(Backend.backend_list) | plugin_backends))
+    raise ValueError(
+        f"Unknown backend '{backend_key}'. Valid backends: {valid_backends}"
+    )
+
+
+def _resolve_default_backend(
+    backend: Backend, backend_config: "BackendConfig"
+) -> ProcessGroup.BackendType:
+    """Determine the default backend type for a ProcessGroup."""
+    backend_str = str(backend)
+    backend_name = backend_str.lower()
+
+    if "," not in backend_str and ":" not in backend_str:
+        if backend_name == Backend.UNDEFINED:
+            device_backends = {
+                str(value) for value in backend_config.get_device_backend_map().values()
+            }
+            if Backend.NCCL in device_backends:
+                return ProcessGroup.BackendType.NCCL
+            return ProcessGroup.BackendType.GLOO
+        return _get_backend_type(backend_str)
+
+    device_backends = {
+        str(value) for value in backend_config.get_device_backend_map().values()
+    }
+    if Backend.NCCL in device_backends:
+        return ProcessGroup.BackendType.NCCL
+
+    plugin_backends = {name.lower() for name in Backend._plugins.keys()}
+    if device_backends & plugin_backends:
+        return ProcessGroup.BackendType.CUSTOM
+
+    return ProcessGroup.BackendType.GLOO
 
 
 class BackendConfig:
@@ -1943,30 +1983,8 @@ def _new_process_group_helper(
         group_size,
     )
     backend_config = BackendConfig(backend)
-    # Set the default backend when single backend is passed in.
-    if "," not in str(backend) and ":" not in str(backend):
-        assert backend in Backend.backend_type_map, f"Unknown backend type {backend}"
-        if backend == Backend.UNDEFINED:
-            # Currently when backend is UNDEFINED, only one backend will be initialized
-            # we use nccl (if cuda is available) or gloo as default backend
-            # so we can correctly call getDefaultBackend which in ProcessGroup.
-            if Backend.NCCL in backend_config.get_device_backend_map().values():
-                pg._set_default_backend(ProcessGroup.BackendType.NCCL)
-            else:
-                pg._set_default_backend(ProcessGroup.BackendType.GLOO)
-        else:
-            pg._set_default_backend(Backend.backend_type_map[backend])
-    # In order to correctly call pg._has_hooks(), we should set the default backend
-    # when multi backend is passed in
-    else:
-        if Backend.NCCL in backend_config.device_backend_map.values():
-            pg._set_default_backend(ProcessGroup.BackendType.NCCL)
-        elif Backend._plugins.keys():
-            custom_backend = next(iter(Backend._plugins.keys()))
-            if custom_backend in backend_config.device_backend_map.values():
-                pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
-        else:
-            pg._set_default_backend(ProcessGroup.BackendType.GLOO)
+    default_backend_type = _resolve_default_backend(backend, backend_config)
+    pg._set_default_backend(default_backend_type)
 
     if device_id:
         pg.bound_device_id = device_id
