@@ -93,17 +93,12 @@ class FuzzedParameter:
 
     def _check_distribution(self, distribution):
         if not isinstance(distribution, dict):
-            if distribution not in _DISTRIBUTIONS:
-                raise AssertionError(f"Unknown distribution: {distribution}")
+            assert distribution in _DISTRIBUTIONS
         else:
-            if any(i < 0 for i in distribution.values()):
-                raise AssertionError("Probabilities cannot be negative")
-            if not abs(sum(distribution.values()) - 1) > 1e-5:
-                raise AssertionError("Distribution is not normalized")
-            if self._minval is not None:
-                raise AssertionError("When passing a custom distribution, 'minval' must be None")
-            if self._maxval is not None:
-                raise AssertionError("When passing a custom distribution, 'maxval' must be None")
+            assert not any(i < 0 for i in distribution.values()), "Probabilities cannot be negative"
+            assert abs(sum(distribution.values()) - 1) <= 1e-5, "Distribution is not normalized"
+            assert self._minval is None
+            assert self._maxval is None
 
         return distribution
 
@@ -333,8 +328,7 @@ class FuzzedTensor:
         size, _, allocation_size = self._get_size_and_steps(params)
         # Product is computed in Python to avoid integer overflow.
         num_elements = prod(size)
-        if num_elements < 0:
-            raise AssertionError("Computed number of elements is negative")
+        assert num_elements >= 0
 
         allocation_bytes = prod(allocation_size, base=dtype_size(self._dtype))
 
