@@ -2053,7 +2053,7 @@ void scaled_gemm(
       alpha_ptr = user_alpha.data_ptr<float>();
       beta_ptr = at::cuda::detail::get_cublas_device_zero();
     } else {
-      alpha_val = *a.data_ptr<float>();
+      alpha_val = a.item<float>();
     }
   }
     // For other data types, use the get_scale_mode function based on scaling type

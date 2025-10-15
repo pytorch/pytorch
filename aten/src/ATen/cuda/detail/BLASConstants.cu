@@ -11,9 +11,9 @@ __device__ __constant__ float cublas_one_device;
 __device__ __constant__ float cublas_zero_device;
 
 float *get_cublas_device_one() {
-  static std::once_flag init_flag;
+  static c10::once_flag init_flag;
 
-  std::call_once(init_flag, []() {
+  c10::call_once(init_flag, []() {
     const float one = 1.f;
     cudaMemcpyToSymbol(cublas_one_device, &one, sizeof(float));
   });
@@ -24,9 +24,9 @@ float *get_cublas_device_one() {
 }
 
 float *get_cublas_device_zero() {
-  static std::once_flag init_flag;
+  static c10::once_flag init_flag;
 
-  std::call_once(init_flag, []() {
+  c10::call_once(init_flag, []() {
     const float zero = 0.f;
     cudaMemcpyToSymbol(cublas_zero_device, &zero, sizeof(float));
   });
@@ -39,9 +39,9 @@ float *get_cublas_device_zero() {
 at::Tensor& get_user_alpha_tensor() {
   static at::Tensor alpha;
 
-  static std::once_flag init_flag;
+  static c10::once_flag init_flag;
 
-  std::call_once(init_flag, []() {
+  c10::call_once(init_flag, []() {
     alpha = at::empty({1}, TensorOptions().device(kCUDA).dtype(kFloat));
   });
 
@@ -51,4 +51,3 @@ at::Tensor& get_user_alpha_tensor() {
 } // namespace detail
 } // namespace cuda
 } // namespace at
-
