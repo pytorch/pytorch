@@ -1072,24 +1072,22 @@ def _context_parallel_buffers(
                 # NOTE: assuming batch dim is 0
                 idx_batch_size = load_balance_indices.size(0)
                 data_batch_size = buffer.size(0)
-                assert idx_batch_size == 1 or idx_batch_size == data_batch_size, (
-                    "Cannot rearrange buffer: "
-                    f"load_balance_indices has shape {load_balance_indices.shape}, "
-                    f"but buffer has shape {buffer.shape}."
-                )
+                if idx_batch_size != 1 and idx_batch_size != data_batch_size:
+                    raise ValueError(
+                        "Cannot rearrange buffer: "
+                        f"load_balance_indices has shape {load_balance_indices.shape}, "
+                        f"but buffer has shape {buffer.shape}."
+                    )
 
                 for i in range(data_batch_size):
-                    if idx_batch_size == 1:  # identical load-balance in batch
-                        # load_balance_indices has shape (1, seq_length)
-                        buffer_batch_i = torch.index_select(
-                            buffer[i], dim=seq_dim - 1, index=load_balance_indices[0]
-                        )
-                    else:
-                        # load_balance_indices has shape (batch_size, seq_length)
-                        buffer_batch_i = torch.index_select(
-                            buffer[i], dim=seq_dim - 1, index=load_balance_indices[i]
-                        )
-
+                    index = (
+                        load_balance_indices[0]  # identical load-balance in batch
+                        if idx_batch_size == 1
+                        else load_balance_indices[i]
+                    )
+                    buffer_batch_i = torch.index_select(
+                        buffer[i], dim=seq_dim - 1, index=index
+                    )
                     buffer[i] = buffer_batch_i
 
             # use DTensor to shard the buffer on sequence dimension, retain the local tensor
@@ -1592,22 +1590,22 @@ def context_parallel_unshard(
             # NOTE: assuming batch dim is 0
             idx_batch_size = restore_indices.size(0)
             data_batch_size = unsharded_b.size(0)
-            assert idx_batch_size == 1 or idx_batch_size == data_batch_size, (
-                "Cannot restore buffer: "
-                f"restore_indices has shape {restore_indices.shape}, "
-                f"but unsharded_b has shape {unsharded_b.shape}."
-            )
+            if idx_batch_size != 1 and idx_batch_size != data_batch_size:
+                raise ValueError(
+                    "Cannot restore buffer: "
+                    f"restore_indices has shape {restore_indices.shape}, "
+                    f"but unsharded_b has shape {unsharded_b.shape}."
+                )
 
             for i in range(data_batch_size):
-                if idx_batch_size == 1:  # identical load-balance in batch
-                    unsharded_b_batch_i = torch.index_select(
-                        unsharded_b[i], dim=dim - 1, index=restore_indices[0]
-                    )
-                else:
-                    unsharded_b_batch_i = torch.index_select(
-                        unsharded_b[i], dim=dim - 1, index=restore_indices[i]
-                    )
-
+                index = (
+                    restore_indices[0]  # identical load-balance in batch
+                    if idx_batch_size == 1
+                    else restore_indices[i]
+                )
+                unsharded_b_batch_i = torch.index_select(
+                    unsharded_b[i], dim=dim - 1, index=index
+                )
                 unsharded_b[i] = unsharded_b_batch_i
 
         unsharded_buffers.append(unsharded_b)

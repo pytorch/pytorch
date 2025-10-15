@@ -2072,6 +2072,9 @@ class test_configs:
     # to be migrated when ready for use
     aten_fx_overlap_preserving_bucketing = False
 
+    # mostly disabled testing
+    assume_bucketing_reduces_latency = True
+
     # to be migrated when ready for use
     # runtime estimation function for ops
     # for user-defined estimation function, pass in the function handle
