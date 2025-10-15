@@ -96,11 +96,17 @@ def _quantize_per_tensor(x, scale, zero_point, quant_min, quant_max):
 
 # Reference method for the per channel gradients of the learnable fake quantize operator
 def _fake_quantize_learnable_per_channel_affine_grad_reference(
-        dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max, device):
+        dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max, device, dtype):
     r"""This method references the following literatures for back propagation on scale and zero point.
     - https://arxiv.org/pdf/1902.08153.pdf
     - https://arxiv.org/pdf/1903.08066.pdf
     """
+    if dtype is torch.bfloat16:
+        dY = dY.to(dtype=torch.float32)
+        X = X.to(dtype=torch.float32)
+        per_channel_scale = per_channel_scale.to(dtype=torch.float32)
+        per_channel_zero_point = per_channel_zero_point.to(dtype=torch.float32)
+
     per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int32)
     grad_X = _fake_quantize_per_channel_affine_grad_reference(
         dY, X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max).to(device)
@@ -152,6 +158,13 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
 
         grad_scale[i] = grad_scale_i
         grad_zero_point[i] = grad_zp_i
+
+    # if dtype is torch.bfloat16, we downcast before returning the gradients to mimic autograd's downcasting
+    if dtype is torch.bfloat16:
+        grad_X = grad_X.to(torch.bfloat16)
+        grad_scale = grad_scale.to(torch.bfloat16)
+        grad_zero_point = grad_zero_point.to(torch.bfloat16)
+
     return grad_X, grad_scale, grad_zero_point
 
 def _get_tensor_min_max(
@@ -900,7 +913,7 @@ class TestFakeQuantizeOps(TestCase):
     def test_backward_per_channel_cachemask_cuda(self):
         self._test_backward_per_channel_cachemask_impl('cuda')
 
-    def _test_learnable_backward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
+    def _test_learnable_backward_per_channel(self, X_base, device, scale_base, zero_point_base, axis, dtype=torch.float32):
         r"""Tests the backward path of the learnable FakeQuantizePerTensorAffine op.
         """
         for n_bits in (4, 8):
@@ -922,7 +935,7 @@ class TestFakeQuantizeOps(TestCase):
 
                 dout = torch.rand(X_curr.shape, dtype=torch.float).to(device)
                 dX, dScale, dZeroPoint = _fake_quantize_learnable_per_channel_affine_grad_reference(
-                    dout, X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, device)
+                    dout, X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, device, dtype)
                 Y_prime.backward(dout)
 
                 dX_expected = dX.to(device).detach()
@@ -931,7 +944,11 @@ class TestFakeQuantizeOps(TestCase):
                 dScale_actual = scale_curr.to(device).grad.detach()
                 dZeroPoint_expected = dZeroPoint.to(device).detach()
                 dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
-                tolerance = 1e-4
+
+                # increasing tolerance for bf16 due to differences in python's x.to(torch.bfloat16) and cpp's x.to(at::kBFloat16)
+                # for example, -0.16749558 gets downcast to -1.68 (after applying grad_factor) in python
+                # in CPP, -1.6752 gets downcast to -1.67
+                tolerance = 1e-2 if dtype is torch.bfloat16 else 1e-4
 
                 self.assertTrue(
                     torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
@@ -961,20 +978,21 @@ class TestFakeQuantizeOps(TestCase):
         self._test_learnable_backward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
 
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
-                                   qparams=hu.qparams(dtypes=torch.quint8)))
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    @unittest.skip(
-        "this is broken without changes to any relevant code, "
-        "we need to remove hypothesis testing in CI")
-    def test_learnable_backward_per_channel_cuda(self, X):
+    def test_learnable_backward_per_channel_cuda(self):
         torch.random.manual_seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, axis, torch_type) = X
-        X_base = torch.tensor(X).to('cuda')
-        scale_base = to_tensor(scale, 'cuda')
-        zero_point_base = to_tensor(zero_point, 'cuda')
-        self._test_learnable_backward_per_channel(
-            X_base, 'cuda', scale_base, zero_point_base, axis)
+
+        x_shape = (2, 1)
+        scale_shape = (2,)
+        zero_point_shape = (2,)
+        axis = 0
+        for dtype in [torch.bfloat16, torch.float32]:
+            X_base = torch.randn(x_shape, dtype=dtype, device='cuda')
+            scale_base = torch.randn(scale_shape, dtype=dtype, device='cuda')
+            zero_point_base = torch.randint(0, 10, zero_point_shape, device='cuda').to(dtype=dtype)
+            self._test_learnable_backward_per_channel(
+                X_base, 'cuda', scale_base, zero_point_base, axis, dtype
+            )
 
     def test_numerical_consistency_per_tensor(self):
         self._test_numerical_consistency('per_tensor')
