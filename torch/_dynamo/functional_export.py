@@ -1,6 +1,8 @@
+import copy
 import inspect
 import logging
 import traceback
+import types
 from collections import namedtuple
 from typing import Any, Callable, Optional, TYPE_CHECKING, Union
 
@@ -408,6 +410,108 @@ def _suggest_or_raise_constraint_violation(
             constraint_violation_error, orig_callable, args, kwargs
         )
         raise constraint_violation_error
+
+
+def dynamo_graph_capture_for_export(
+    mod: Callable[..., Any],
+) -> Callable[..., torch.fx.GraphModule]:
+    def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
+        with (
+            get_metrics_context(),
+            dynamo_timed("fullgraph_capture"),
+        ):
+            out = fullgraph_capture(mod, args, kwargs)
+
+        # TODO filter out side effects.
+
+        backend = out.backend_input.graph_module
+
+        if isinstance(mod, torch.nn.Module):
+            args = (mod,) + args
+        elif inspect.ismethod(mod):
+            args = (mod.__self__,) + args
+
+        flat_real_args, in_spec = pytree.tree_flatten((args, kwargs))
+
+        class Yield(Exception):
+            pass
+
+        class InShuffle(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod = mod
+                self.gm_inputs = None
+
+            def forward(self, *flat_proxy_args):
+                args, kwargs = pytree.tree_unflatten(
+                    [flat_proxy_args[i] for i in range(len(flat_real_args))], in_spec
+                )
+
+                def backend_dummy(*example_inputs):
+                    self.gm_inputs = example_inputs
+                    raise Yield
+
+                out.backend_input.graph_module = backend_dummy
+                try:
+                    out.forward_callable()(*args, **kwargs)
+                except Yield:
+                    assert self.gm_inputs is not None
+                    return self.gm_inputs
+                finally:
+                    out.backend_input.graph_module = backend
+                raise RuntimeError
+
+        in_shuffle_graph = torch.fx.symbolic_trace(InShuffle())
+
+        class OutShuffle(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.num_outputs = len(
+                    next(
+                        iter(reversed(out.backend_input.graph_module.graph.nodes))
+                    ).args[0]
+                )
+                self.out_spec = None
+
+            def forward(self, *flat_proxy_args):
+                def backend_dummy(*example_inputs):
+                    return [flat_proxy_args[i] for i in range(self.num_outputs)]
+
+                out.backend_input.graph_module = backend_dummy
+                try:
+                    results = out.forward_callable()(*args, **kwargs)
+                finally:
+                    out.backend_input.graph_module = backend
+                ret, self.out_spec = pytree.tree_flatten(results)
+                return ret
+
+        out_shuffle = OutShuffle()
+        out_shuffle_graph = torch.fx.symbolic_trace(out_shuffle)
+
+        def pytree_call(*args, **kwargs):
+            import torch.export._unlift
+
+            # TODO guards.
+            flat_args, in_spec_runtime = pytree.tree_flatten((args, kwargs))
+            if not torch.export._unlift.eq_spec(in_spec_runtime, in_spec):
+                raise RuntimeError(
+                    f"Model input mismatch. Expected input spec: {in_spec}. Actual input spec: {in_spec_runtime}"
+                )
+            flat_outs = out.backend_input.graph_module(*in_shuffle_graph(*flat_args))
+            return pytree.tree_unflatten(
+                out_shuffle_graph(*flat_outs), out_shuffle.out_spec
+            )
+
+        if isinstance(mod, torch.nn.Module):
+            compiled_mod = copy.copy(mod)
+            compiled_mod.forward = types.MethodType(pytree_call, mod)
+            return compiled_mod
+        elif inspect.ismethod(mod):
+            return types.MethodType(pytree_call, mod.__self__)
+        else:
+            return pytree_call
+
+    return inner
 
 
 def _dynamo_graph_capture_for_export(

@@ -6,7 +6,7 @@ import unittest
 import torch
 import torch.distributed as dist
 import torch.fx.traceback as fx_traceback
-from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+from torch._dynamo.functional_export import _dynamo_graph_capture_for_export, dynamo_graph_capture_for_export
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch._guards import tracing, TracingContext
@@ -94,6 +94,13 @@ def strict_export_and_aot_export_joint_with_descriptors(model, inputs):
     # between ep.module() and aot_export_joint_with_descriptors.
     # Keeping this here to show the issue.
     return aot_export_joint_with_descriptors_alone(ep.module(), inputs)
+
+
+def graph_capture_and_aot_export_joint_with_descriptors_v2(model, inputs):
+    gm = dynamo_graph_capture_for_export(model)(inputs)
+    fake_mode = gm.meta.get("fake_mode", None)
+    with tracing(TracingContext(fake_mode)):
+        return aot_export_joint_with_descriptors_alone(gm, inputs)
 
 
 def graph_capture_and_aot_export_joint_with_descriptors(model, inputs):
@@ -292,6 +299,7 @@ class DTensorExportTest(TestCase):
     @parametrize(
         "export_fn",
         [
+            graph_capture_and_aot_export_joint_with_descriptors_v2,
             graph_capture_and_aot_export_joint_with_descriptors,
             aot_export_joint_with_descriptors_alone,
         ],
