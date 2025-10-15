@@ -25,6 +25,4 @@ C10_XPU_API void raw_delete(void* ptr);
 
 C10_XPU_API void recordStream(const DataPtr& dataPtr, XPUStream stream);
 
-C10_XPU_API void setMemoryFraction(double fraction, DeviceIndex device);
-
 } // namespace c10::xpu::XPUCachingAllocator
