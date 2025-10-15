@@ -131,7 +131,9 @@ class ExpandedWeight(torch.Tensor):
             # in aten, choosing the input or data variants is done by parsing logic. This mimics some of that
             decomp_opts = expanded_weights_rnn_decomps[func]
             use_input_variant = isinstance(
-                args[2], list
+                # pyrefly: ignore  # index-error
+                args[2],
+                list,
             )  # data variant uses a list here
             decomp = decomp_opts[0] if use_input_variant else decomp_opts[1]
 

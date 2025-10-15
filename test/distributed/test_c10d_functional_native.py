@@ -938,6 +938,9 @@ class CompileTest(TestCase):
         assert "torch.ops._c10d_functional.wait_tensor.default" in code
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        torch._inductor.config.triton.native_matmul, "no extern_kernels.mm"
+    )
     @fresh_cache()
     def test_inductor_reuse_buffer_after_inplace_collective(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
@@ -1121,12 +1124,6 @@ class CompileTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_inductor_all_to_all_single(self):
-        def _tolist_with_constrain_as_size(tensor):
-            lst = tensor.tolist()
-            for elem in lst:
-                torch._check_is_size(elem)
-            return lst
-
         def func(
             input: torch.Tensor,
             output_split_sizes: torch.Tensor,
@@ -1134,8 +1131,8 @@ class CompileTest(TestCase):
         ) -> torch.Tensor:
             output = funcol.all_to_all_single(
                 input,
-                _tolist_with_constrain_as_size(output_split_sizes),
-                _tolist_with_constrain_as_size(input_split_sizes),
+                output_split_sizes.tolist(),
+                input_split_sizes.tolist(),
                 "0",
             )
             return funcol.wait_tensor(output)
