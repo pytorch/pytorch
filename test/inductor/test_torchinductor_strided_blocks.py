@@ -910,7 +910,6 @@ class CommonTemplate:
         msg="AssertionError: Scalars are not equal!, "
         "https://github.com/intel/torch-xpu-ops/issues/2332"
     )
-    @xfail_if_use_tensor_descriptor  # Cannot use TMA API for store with no x dimension.
     @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
     def test_2d_reduction_multi_kernel(self):
         """
@@ -1240,7 +1239,6 @@ class CommonTemplate:
     #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
     # }
     # This is now fixed by ensuring that that wild symbols only match integers
-    @xfail_if_use_tensor_descriptor
     @skipIfXpu(
         msg="Triton issue exposed by new driver, will be resolved after next triton update."
     )
@@ -1422,11 +1420,7 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
             ((128, 128), (0, 1), 3, False),
             ((128, 64), (1, 0), 3, True),
             ((256, 32, 16), (2, 0, 1), 3, True),
-            # After reordering strides for the second input, the innermost block type
-            # needs to be large in order to load 16 bytes:
-            # require 4*((YBLOCK + 31)//32) - 16 >= 0 (element_bytes = 4),
-            # min_block_size = 128 but dim size=16, so there would be redundancy
-            ((16, 32, 256), (2, 0, 1), 2, False),
+            ((16, 32, 256), (2, 0, 1), 3, True),
         ],
     )
     def test_match_with_transpose(
