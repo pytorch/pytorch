@@ -188,7 +188,7 @@ from .variables.user_defined import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Sequence
+    from collections.abc import Generator, Iterator, Sequence
 
     from torch._subclasses.fake_tensor import FakeTensorMode
 
@@ -4058,6 +4058,18 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    @staticmethod
+    def compute_stack_capacity(code_options: dict[str, Any]) -> int:
+        """CPython computes the stack size as the sum of co_stacksize,
+        co_nlocals, co_freevars and co_cellvars.
+        """
+        capacity = 0
+        capacity += code_options["co_stacksize"]
+        capacity += code_options["co_nlocals"]
+        capacity += len(code_options["co_freevars"])
+        capacity += len(code_options["co_cellvars"])
+        return capacity
+
     def __init__(
         self,
         output: OutputGraph,
@@ -4091,7 +4103,8 @@ class InstructionTranslatorBase(
         # used to keep cell/freevars alive after pruning symbolic_locals (prune_dead_locals)
         # in order to generate any nested closures
         self.post_prune_cell_and_freevars = None
-        self.stack: list[VariableTracker] = []
+        # self.stack: list[VariableTracker] = []
+        self.stack = torch._C._dynamo.Stack(self.compute_stack_capacity(code_options))
         self.instruction_pointer = 0
         self.start_point = None
         self.current_instruction = create_instruction("NOP")
