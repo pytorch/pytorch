@@ -176,7 +176,7 @@ jobs:
           .ci/pytorch/win-build.sh
 
       # Collect Windows torch libs and CUDA libs for cross-compilation
-      - name: Collect Windows torch libs for cross-compilation
+      - name: Collect Windows CUDA libs for cross-compilation
         if: steps.build.outcome != 'skipped' && inputs.cuda-version != 'cpu' && inputs.upload-win-cuda-libs-for-cross-compile
         shell: bash
         run: |
@@ -198,8 +198,6 @@ jobs:
           fi
 
           # List collected files
-          echo "Collected Windows torch libs:"
-          ls -lah /c/${{ github.run_id }}/win-cuda-libs/lib/
           echo "Collected CUDA libs:"
           ls -lah /c/${{ github.run_id }}/win-cuda-libs/lib/x64/
 
