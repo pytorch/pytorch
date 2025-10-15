@@ -359,7 +359,7 @@ class TestFuzzerCompileIssues(TestCase):
             t3 = arg1  # size=(1,), stride=(1,), dtype=int64, device=cuda
             t4 = arg2  # size=(1,), stride=(1,), dtype=int64, device=cuda
             t5 = t3 + t3 + t4  # size=(1,), stride=(1,), dtype=int64, device=cuda
-            t6 = torch.exp(
+            t6 = torch.exp(  # noqa: F841
                 t5
             )  # size=(1,), stride=(1,), dtype=int64, device=cuda  # noqa: F841
             t7 = torch.nn.functional.layer_norm(
