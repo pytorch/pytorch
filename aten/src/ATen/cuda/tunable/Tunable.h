@@ -103,10 +103,24 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     void RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature,
       const std::string& params_signature, const std::string& blas_signature);
+
+    void InitRealtimeAppend(
+        const std::string& filename,
+        const std::unordered_map<std::string, std::string>& validators);
+
+    void AppendResultLine(const std::string& op_sig,
+                         const std::string& param_sig,
+                         const ResultEntry& result);
+
+    void CloseRealtimeAppend();  // For clean shutdown
   private:
     std::mutex lock_;
+    std::mutex realtime_file_mutex_;
+    std::unique_ptr<std::ofstream> realtime_out_;
+    std::string realtime_filename_;
     ResultsMap results_;
     UntunedMap untuned_results_;
+    bool validators_written_ = false;
 
 };
 
@@ -185,10 +199,7 @@ class TORCH_CUDA_CPP_API TuningContext {
     void SetFilename(const std::string& filename, bool insert_device_ordinal=false);
     std::string GetFilename() const;
 
-    void WriteFileOnExit(bool value);
-
     bool ReadFile(const std::string& filename={});
-    bool WriteFile(const std::string& filename={});
 
     template<class... Types>
     void Log(int level, Types... args) {
@@ -207,7 +218,6 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool tuning_enable_;
     bool record_untuned_enable_;
     bool manager_initialized_;
-    bool write_file_on_exit_;
     bool numerics_check_enable_;
     int max_tuning_duration_ms_;
     int max_tuning_iterations_;
