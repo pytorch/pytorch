@@ -25,7 +25,7 @@ namespace at::native {
 
 namespace {
 
-Tensor compute_columns2d(
+static Tensor compute_columns2d(
     const Tensor& input,
     IntArrayRef padding,
     IntArrayRef stride,
@@ -93,7 +93,7 @@ Tensor compute_columns2d(
   return columns.contiguous();
 }
 
-inline void slow_conv2d_shape_check(
+static inline void slow_conv2d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -205,7 +205,7 @@ inline void slow_conv2d_shape_check(
   }
 }
 
-inline Tensor view_weight_2d(const Tensor& weight_,
+static inline Tensor view_weight_2d(const Tensor& weight_,
     at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
   Tensor weight = weight_.contiguous(memory_format);
   if (weight.dim() == 4) {
@@ -220,7 +220,7 @@ inline Tensor view_weight_2d(const Tensor& weight_,
 }
 
 template <typename scalar_t>
-void slow_conv2d_update_output_frame(
+static void slow_conv2d_update_output_frame(
     TensorAccessor<const scalar_t, 3> input,
     TensorAccessor<scalar_t, 3> output,
     TensorAccessor<const scalar_t, 2> weight,
@@ -480,7 +480,7 @@ void slow_conv2d_backward_weight_frame(
   }
 }
 
-void slow_conv2d_backward_weight_out_cpu_template(
+static void slow_conv2d_backward_weight_out_cpu_template(
     Tensor& grad_weight,
     const Tensor& input,
     const Tensor& grad_output_,

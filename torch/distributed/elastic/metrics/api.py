@@ -88,7 +88,10 @@ def configure(handler: MetricHandler, group: Optional[str] = None):
 
 
 def getStream(group: str):
-    handler = _metrics_map.get(group, _default_metrics_handler)
+    if group in _metrics_map:
+        handler = _metrics_map[group]
+    else:
+        handler = _default_metrics_handler
     return MetricStream(group, handler)
 
 

@@ -15,7 +15,7 @@ using std::string;
 C10_DEFINE_REGISTRY(C10FlagsRegistry, C10FlagParser, const string&)
 
 namespace {
-bool gCommandLineFlagsParsed = false;
+static bool gCommandLineFlagsParsed = false;
 // Since flags is going to be loaded before logging, we would
 // need to have a stringstream to hold the messages instead of directly
 // using caffe logging.
@@ -23,7 +23,7 @@ std::stringstream& GlobalInitStream() {
   static std::stringstream ss;
   return ss;
 }
-const char* gUsageMessage = "(Usage message not set.)";
+static const char* gUsageMessage = "(Usage message not set.)";
 } // namespace
 
 C10_EXPORT void SetUsageMessage(const string& str) {

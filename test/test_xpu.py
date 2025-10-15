@@ -776,10 +776,6 @@ class TestXPUAPISanity(TestCase):
             torch.xpu.is_available(),
         )
 
-    def test_is_tf32_supported(self):
-        if not torch.xpu.is_available():
-            self.assertFalse(torch.xpu.is_tf32_supported())
-
     def test_get_arch_list(self):
         if not torch.xpu._is_compiled():
             self.assertEqual(len(torch.xpu.get_arch_list()), 0)

@@ -512,7 +512,7 @@ TORCH_IMPL_FUNC(threshold_backward_out_mps)
 }
 
 static MPSGraphTensor* normcdf(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-  // (1.0f + erf(x*SQRT1_2)) * 0.5f;
+  // (1.0f + erf(x*SQRT1_2)) * 0.5f * x;
   auto dataType = [inputTensor dataType];
   const float SQRT1_2 = 0.707106781186547524400844362104849039f;
   MPSGraphTensor* sqrt1_2 = [mpsGraph constantWithScalar:SQRT1_2 shape:@[ @1 ] dataType:dataType];

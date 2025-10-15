@@ -18,7 +18,7 @@ namespace {
 
 using namespace vec;
 
-void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_steps, const Scalar& scalar_step) {
+static void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_steps, const Scalar& scalar_step) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto start = scalar_start.to<accscalar_t>();
@@ -42,7 +42,7 @@ void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scala
   });
 }
 
-void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_end, int64_t steps) {
+static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_end, int64_t steps) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "linspace_cpu", [&]() {
     // step should be of double type for all integral types
     using step_t = std::conditional_t<std::is_integral_v<scalar_t>, double, scalar_t>;
