@@ -1677,6 +1677,16 @@ class FusedSchedulerNode(BaseSchedulerNode):
         nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
         return cls(node1.scheduler, nodes)
 
+    def extract_pw_from_reduction(self):
+        for subnode in self.snodes:
+            assert subnode.is_reduction()
+            subnode.extract_pw_from_reduction()
+        return self
+
+    def swap_pw_red_dimension(self):
+        for subnode in self.snodes:
+            subnode.swap_pw_red_dimension()
+
     @cache_on_self
     def estimate_flops(self) -> int | None:
         # don't increment counters in fused methods so we don't double count
@@ -3727,8 +3737,10 @@ class Scheduler:
             device = node1.get_device()
             assert node2.get_device() == device
             node3 = self.get_backend(device).fuse(node1, node2)
-            fused_nodes.remove(node1)
-            fused_nodes.remove(node2)
+            if node1 in fused_nodes:
+                fused_nodes.remove(node1)
+            if node2 in fused_nodes:
+                fused_nodes.remove(node2)
             fused_nodes.add(node3)
             self.name_to_fused_node.update(
                 {n.get_name(): node3 for n in node3.get_nodes()}
@@ -5578,7 +5590,11 @@ class Scheduler:
         if self.default_device_context and config.triton.autotune_at_compile_time:
             V.graph.wrapper_code.write_get_raw_stream_header()
 
+        seen = set()
         for node in nodes:
+            if node.get_name() in seen:
+                continue
+            seen.add(node.get_name()) # TODO remove these
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(

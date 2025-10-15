@@ -1428,6 +1428,8 @@ class SIMDScheduling(BaseScheduling):
         # TODO: create the intermediate tensor
         if True:
             numel, rnumel = node1.group[1]
+
+            # if isinstance(node2, scheduler.FusedSchedulerNode): breakpoint() # TODO
             node2 = node2.extract_pw_from_reduction()
             node2.swap_pw_red_dimension()
             node_schedule = self.generate_node_schedule(node1.get_nodes() + node2.get_nodes(), numel, rnumel)
@@ -1457,11 +1459,16 @@ class SIMDScheduling(BaseScheduling):
             V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
 
             # a extra sum
-            assert len(node2.get_buffer_names()) == 1
+            assert len(node2.get_buffer_names()) in [1, 2]
             bufname = tuple(node2.get_buffer_names())[0]
             V.graph.wrapper_code.writeline(
-                f"{bufname} = workspace_0.view(-1, 768).sum(dim=0)",
+                f"{bufname} = workspace_0[:{nsplit} * 768].view({nsplit}, 768).sum(dim=0)",
             )
+            if len(node2.get_buffer_names()) == 2:
+                bufname2 = tuple(node2.get_buffer_names())[1]
+                V.graph.wrapper_code.writeline(
+                    f"{bufname2} = workspace_0[{nsplit} * 768:].view({nsplit}, 768).sum(dim=0)",
+                )
             self.free_buffers_in_scheduler()
         else:
             self.codegen_node(node1)

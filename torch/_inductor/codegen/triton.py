@@ -4049,6 +4049,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.body.writeline(
                 f"accum = tl.full([R0_BLOCK], 0.0, tl.float32)[None, :]"
             )
+            if len(self.saved_partial_accumulate) == 2:
+                self.body.writeline(
+                    f"accum2 = tl.full([R0_BLOCK], 0.0, tl.float32)[None, :]"
+                )
             self.body.writeline(
                 f"for suboff in range(0, RSPLIT_SIZE, XBLOCK):"
             )
@@ -4063,19 +4067,28 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.splice(self.stores)
                 self.body.splice(self.post_loop_store)
 
-                assert len(self.saved_partial_accumulate) == 1
+                assert len(self.saved_partial_accumulate) in [1, 2]
                 var = list(self.saved_partial_accumulate.values())[0]
                 # TODO: find the tmp0 name from cache
                 # TODO: no need to sum if XBLOCK == 0
                 self.body.writeline(
                     f"accum += {var}.sum(axis=0)",
                 )
+                if len(self.saved_partial_accumulate) == 2:
+                    var2 = list(self.saved_partial_accumulate.values())[1]
+                    self.body.writeline(
+                        f"accum2 += {var2}.sum(axis=0)",
+                    )
             # buf2 is the intermediate buffer
             # var = self.args.output("buf2")
             # self.store("buf2", None, "accum")
             self.body.writeline(
                 "tl.store(ws_ptr + tl.program_id(0) * r0_numel + r0_index, accum, r0_mask)"
             )
+            if len(self.saved_partial_accumulate) == 2:
+                self.body.writeline(
+                    "tl.store(ws_ptr + (tl.program_id(0) + tl.num_programs(0)) * r0_numel + r0_index, accum2, r0_mask)"
+                )
 
         elif self.inside_reduction and len(loop_trees) > 0:
             # Write the loop headers.
@@ -4378,6 +4391,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         """
 
         if self.mix_order_reduction:
+            self.args.workspace(self.numels["r0_"] * ((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size), False, dtype=torch.float)
+
+            # TODO add multiple workspace only if needed
             self.args.workspace(self.numels["r0_"] * ((self.numels["x"] + self.rsplit_size - 1) // self.rsplit_size), False, dtype=torch.float)
 
         code = IndentedBuffer()

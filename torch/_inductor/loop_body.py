@@ -541,6 +541,10 @@ class LoopBodyBlock:
             if node.target == "store_reduction":
                 assert not store
                 store = node
+        if not red:
+            breakpoint() # TODO
+        assert red
+        assert store
         red_arg = red.args[-1]
         buf = store.args[1]
         ops = store.args[0]
