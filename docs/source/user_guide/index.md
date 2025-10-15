@@ -33,6 +33,13 @@ pytorch_main_components
 
 ```{toctree}
 :maxdepth: 1
+:caption: Torch Compiler
+
+torch_compiler/torch.compiler
+```
+
+```{toctree}
+:maxdepth: 1
 :caption: Developer Notes
 
 ../notes
