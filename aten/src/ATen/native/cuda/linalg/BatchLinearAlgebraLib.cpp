@@ -952,7 +952,7 @@ void _cholesky_inverse_cusolver_potrs_based(Tensor& result, Tensor& infos, bool 
 Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, bool upper) {
   // Check for zero diagonal elements before attempting inversion
   auto diag_elements = result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
-  auto zero_diag_mask = diag_elements.abs().lt(std::numeric_limits<double>::epsilon());
+  auto zero_diag_mask = diag_elements.eq(0);
   if (zero_diag_mask.any().item<bool>()) {
     // Find the first zero diagonal element
     auto zero_positions = zero_diag_mask.nonzero();
