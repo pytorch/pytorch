@@ -857,6 +857,22 @@ class TestNestedTensor(NestedTensorTestCase):
         ):
             torch.cat([x, y], dim=-1)
 
+    # https://github.com/pytorch/pytorch/issues/161812
+    def test_jagged_with_dim_error(self):
+        x = torch.nested.nested_tensor(
+            [torch.ones(3, 2, 3), torch.ones(4, 2, 3)], layout=torch.jagged
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "not supported for NestedTensor on dim=0",
+        ):
+            torch.cat([x, x])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "not supported for NestedTensor on dim=0",
+        ):
+            torch.stack([x, x])
+
     def test_nested_view_from_buffer_overflow_errors(self):
         buffer = torch.tensor([1])
         sizes = torch.tensor([[2**63 - 1], [2**63 - 1], [3]], dtype=torch.int64)

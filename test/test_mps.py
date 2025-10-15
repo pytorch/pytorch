@@ -8125,6 +8125,12 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(out_pos.numel(), 0)
         self.assertEqual(out_neg.numel(), 0)
 
+    def test_empty_dot(self):
+        # just to check that it doesnt crash
+        a = torch.rand((0), device="mps")
+        b = torch.rand((0), device="mps")
+        self.assertEqual(a.dot(b), a.cpu().dot(b.cpu()))
+
 
 class TestLargeTensors(TestCaseMPS):
     @serialTest()
