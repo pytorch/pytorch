@@ -86,44 +86,94 @@ Some of the most commonly used backends include:
 :caption: Getting Started for PyTorch Users
 :maxdepth: 2
 
-torch.compiler_get_started
-torch.compiler_api
-torch.compiler.config
-torch.compiler_dynamic_shapes
-torch.compiler_fine_grain_apis
-torch.compiler_backward
-torch.compiler_aot_inductor
-torch.compiler_inductor_profiling
-torch.compiler_profiling_torch_compile
-torch.compiler_faq
-torch.compiler_troubleshooting
-torch.compiler_performance_dashboard
-torch.compiler_inductor_provenance
+../../torch.compiler_get_started
+../../torch.compiler_api
+../../torch.compiler.config
+../../torch.compiler_dynamic_shapes
+../../torch.compiler_fine_grain_apis
+../../torch.compiler_backward
+../../torch.compiler_aot_inductor
+../../torch.compiler_inductor_profiling
+../../torch.compiler_profiling_torch_compile
+../../torch.compiler_faq
+../../torch.compiler_troubleshooting
+../../torch.compiler_performance_dashboard
+../../torch.compiler_inductor_provenance
+
 ```
 
 ```{toctree}
 :caption: torch.compile Programming Model
 :maxdepth: 2
 
-compile/programming_model
+../../compile/programming_model
 ```
 
 ```{toctree}
 :caption: Deep Dive for PyTorch Developers
 :maxdepth: 1
 
-torch.compiler_dynamo_overview
-torch.compiler_dynamo_deepdive
-torch.compiler_nn_module
-torch.compiler_cudagraph_trees
-torch.compiler_fake_tensor
+../../torch.compiler_dynamo_overview
+../../torch.compiler_dynamo_deepdive
+../../torch.compiler_nn_module
+../../torch.compiler_cudagraph_trees
+../../torch.compiler_fake_tensor
 ```
 
 ```{toctree}
 :caption: HowTo for PyTorch Backend Vendors
 :maxdepth: 1
 
-torch.compiler_custom_backends
-torch.compiler_transformations
-torch.compiler_ir
+../../torch.compiler_custom_backends
+../../torch.compiler_transformations
+../../torch.compiler_ir
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Gettinng Started
+:hidden:
+
+../../torch.compiler_get_started
+
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Core Concepts
+:hidden:
+
+../../torch.compiler_ir
+```
+
+
+```{toctree}
+:maxdepth: 1
+:caption: Performance
+:hidden:
+
+../../torch.compiler_profiling_torch_compile
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Advanced
+:hidden:
+
+../../torch.compiler_dynamic_shapes
+```
+
+```{toctree}
+:maxdepth: 1
+:caption: Troubleshooting
+:hidden:
+
+../../torch.compiler_faq
+```
+```{toctree}
+:maxdepth: 1
+:caption: Reference
+:hidden:
+
+../../torch.compiler_api
 ```

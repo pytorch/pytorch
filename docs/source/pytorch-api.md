@@ -43,7 +43,7 @@ torch.distributed.optim <distributed.optim>
 torch.distributed.pipelining <distributed.pipelining>
 torch.distributed.checkpoint <distributed.checkpoint>
 torch.distributions <distributions>
-torch.compiler <torch.compiler>
+torch.compiler <user_guide/torch_compiler/torch.compiler>
 torch.fft <fft>
 torch.func <func>
 futures
