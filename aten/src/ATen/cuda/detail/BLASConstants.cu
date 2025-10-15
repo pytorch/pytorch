@@ -1,5 +1,6 @@
-#include <ATen/Tensor.h>
 #include <ATen/Functions.h>
+#include <ATen/Tensor.h>
+#include <ATen/cuda/Exceptions.h>
 
 #include <mutex>
 
@@ -15,11 +16,11 @@ float *get_cublas_device_one() {
 
   c10::call_once(init_flag, []() {
     const float one = 1.f;
-    cudaMemcpyToSymbol(cublas_one_device, &one, sizeof(float));
+    AT_CUDA_CHECK(cudaMemcpyToSymbol(cublas_one_device, &one, sizeof(float)));
   });
 
   float *ptr;
-  cudaGetSymbolAddress(reinterpret_cast<void**>(&ptr), cublas_one_device);
+  AT_CUDA_CHECK(cudaGetSymbolAddress(reinterpret_cast<void**>(&ptr), cublas_one_device));
   return ptr;
 }
 
@@ -28,24 +29,24 @@ float *get_cublas_device_zero() {
 
   c10::call_once(init_flag, []() {
     const float zero = 0.f;
-    cudaMemcpyToSymbol(cublas_zero_device, &zero, sizeof(float));
+    AT_CUDA_CHECK(cudaMemcpyToSymbol(cublas_zero_device, &zero, sizeof(float)));
   });
 
   float *ptr;
-  cudaGetSymbolAddress(reinterpret_cast<void**>(&ptr), cublas_zero_device);
+  AT_CUDA_CHECK(cudaGetSymbolAddress(reinterpret_cast<void**>(&ptr), cublas_zero_device));
   return ptr;
 }
 
-at::Tensor& get_user_alpha_tensor() {
-  static at::Tensor alpha;
+float *get_user_alpha_ptr() {
+  static float *alpha_ptr;
 
   static c10::once_flag init_flag;
 
   c10::call_once(init_flag, []() {
-    alpha = at::empty({1}, TensorOptions().device(kCUDA).dtype(kFloat));
+    AT_CUDA_CHECK(cudaMalloc(&alpha_ptr, sizeof(float)));
   });
 
-  return alpha;
+  return alpha_ptr;
 }
 
 } // namespace detail

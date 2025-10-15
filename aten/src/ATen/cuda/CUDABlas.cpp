@@ -2046,7 +2046,8 @@ void scaled_gemm(
 
     // if device-tensor
     if (a.is_cuda()) {
-      at::Tensor& user_alpha = at::cuda::detail::get_user_alpha_tensor();
+      float *user_alpha_ptr = at::cuda::detail::get_user_alpha_ptr();
+      at::Tensor user_alpha = at::from_blob(user_alpha_ptr, {1}, TensorOptions().device(kCUDA).dtype(kFloat));
       user_alpha.copy_(a);
       auto pointer_mode = CUBLASLT_POINTER_MODE_DEVICE;
       computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_POINTER_MODE, pointer_mode);

@@ -8,7 +8,7 @@ namespace detail {
 
 float *get_cublas_device_one();
 float *get_cublas_device_zero();
-Tensor& get_user_alpha_tensor();
+float *get_user_alpha_ptr();
 
 } // namespace detail
 } // namespace cuda
