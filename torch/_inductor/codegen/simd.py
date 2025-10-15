@@ -1428,7 +1428,9 @@ class SIMDScheduling(BaseScheduling):
         # TODO: create the intermediate tensor
         if True:
             numel, rnumel = node1.group[1]
-            node_schedule = self.generate_node_schedule(node1.get_nodes(), numel, rnumel)
+            node2 = node2.extract_pw_from_reduction()
+            node2.swap_pw_red_dimension()
+            node_schedule = self.generate_node_schedule(node1.get_nodes() + node2.get_nodes(), numel, rnumel)
             kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel, None)
             kernel = self.create_kernel_choices(kernel_features,
                 [{"x": numel, "r0_": rnumel}], {"features": kernel_features, "tiling_scores": None, "mix_order_reduction": True})[0]

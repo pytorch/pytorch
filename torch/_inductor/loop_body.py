@@ -132,6 +132,13 @@ class LoopBody:
 
         self.indexing = None
 
+    def extract_pw_from_reduction(self):
+        self.root_block = self.root_block.extract_pw_from_reduction()
+        self.iter_vars = self.iter_vars + self.reduce_vars
+        self.reduce_vars = []
+        self.sizes = (self.sizes[0] + self.sizes[1], tuple())
+        return self
+
     def _init_with_tracing(self, fn, args):
         """Do an FX trace of an arbitrary callable to construct self"""
         self.indexing_exprs = {}
@@ -523,6 +530,29 @@ class LoopBodyBlock:
             # unwrap the return value.
             ops.output(fn(*args))
         self.graph = tracer.graph
+
+    def extract_pw_from_reduction(self):
+        red = None
+        store = None
+        for node in self.graph.nodes:
+            if node.target == "reduction":
+                assert not red
+                red = node
+            if node.target == "store_reduction":
+                assert not store
+                store = node
+        red_arg = red.args[-1]
+        buf = store.args[1]
+        ops = store.args[0]
+
+        with self.graph.inserting_after(store):
+            self.graph.call_method(
+                "partial_accumulate",
+                (ops, buf, red_arg)
+            )
+        self.graph.erase_node(store)
+        self.graph.erase_node(red)
+        return self
 
     def __call__(self):
         graph = self.graph

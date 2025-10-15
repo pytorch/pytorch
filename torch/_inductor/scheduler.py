@@ -1379,6 +1379,17 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
+    # TODO: do similar things for fused node
+    def swap_pw_red_dimension(self):
+        assert len(self._body.sizes[0]) == 2
+        self.apply_new_loop_order([1, 0])
+        assert len(self.group[1]) == 2
+        self.group = self.group[0], (self.group[1][1], self.group[1][0])
+
+    def extract_pw_from_reduction(self):
+        self._body = self._body.extract_pw_from_reduction()
+        return self
+
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
     ) -> None:

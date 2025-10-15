@@ -2740,6 +2740,9 @@ class CSEProxy(DefaultHandler):
     def device_assert_async(self, cond: CSEVariable, msg: str) -> None:
         self.kernel.device_assert_async(cond, msg)
 
+    def partial_accumulate(self, buf, expr) -> None:
+        self.kernel.partial_accumulate(buf, expr)
+
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable) -> None:
         self.kernel.store_buffer_names.add(name)
         self._update_store_cache(name, value)

@@ -1988,6 +1988,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._load_counts: collections.Counter[str] = collections.Counter()
         self._load_index = 0
 
+        self.saved_partial_accumulate = {}
+
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
         self.triton_meta: Optional[dict[str, Any]] = None
@@ -2711,6 +2713,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 f"0; {GDC_LAUNCH} # gdc launch for {result_var}",
             )
             self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
+
+
+    def partial_accumulate(self, name: str, val):
+        self.saved_partial_accumulate[name] = val
 
     def load(self, name: str, index: sympy.Expr):
         """
@@ -4057,10 +4063,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.splice(self.stores)
                 self.body.splice(self.post_loop_store)
 
+                assert len(self.saved_partial_accumulate) == 1
+                var = list(self.saved_partial_accumulate.values())[0]
                 # TODO: find the tmp0 name from cache
                 # TODO: no need to sum if XBLOCK == 0
                 self.body.writeline(
-                    "accum += tmp0.sum(axis=0)",
+                    f"accum += {var}.sum(axis=0)",
                 )
             # buf2 is the intermediate buffer
             # var = self.args.output("buf2")
