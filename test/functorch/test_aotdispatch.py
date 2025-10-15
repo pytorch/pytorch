@@ -8059,7 +8059,7 @@ symbolic_aot_autograd_failures = {
 }
 
 
-def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
+def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False, use_min_cut=True):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
@@ -8090,6 +8090,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
                 skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
+                use_min_cut=use_min_cut,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")
@@ -8189,6 +8190,29 @@ class TestEagerFusionOpInfo(AOTTestCase):
     )
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op, dynamic=True)
+
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @skipOps(
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_default_partition_exhaustive",
+        aot_autograd_failures,
+    )
+    def test_aot_autograd_default_partition_exhaustive(self, device, dtype, op):
+        _test_aot_autograd_helper(self, device, dtype, op, use_min_cut=False)
+
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
+    @patch("functorch.compile.config.debug_assert", True)
+    @skipOps(
+        "TestEagerFusionOpInfo",
+        "test_aot_autograd_symbolic_default_partition_exhaustive",
+        aot_autograd_failures | symbolic_aot_autograd_failures,
+    )
+    def test_aot_autograd_symbolic_default_partition_exhaustive(
+        self, device, dtype, op
+    ):
+        _test_aot_autograd_helper(
+            self, device, dtype, op, dynamic=True, use_min_cut=False
+        )
 
 
 aot_autograd_module_failures = set(
