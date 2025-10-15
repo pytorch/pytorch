@@ -31,28 +31,6 @@ namespace c10 {
 // See [dtype Macros note] in torch/headeronly/core/ScalarType.h
 // regarding macros.
 
-namespace impl {
-
-// These are used to map ScalarTypes to C++ types.
-
-template <c10::ScalarType N>
-struct ScalarTypeToCPPType;
-
-#define SPECIALIZE_ScalarTypeToCPPType(cpp_type, scalar_type) \
-  template <>                                                 \
-  struct ScalarTypeToCPPType<c10::ScalarType::scalar_type> {  \
-    using type = cpp_type;                                    \
-  };
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
-
-#undef SPECIALIZE_ScalarTypeToCPPType
-
-template <c10::ScalarType N>
-using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
-
-} // namespace impl
-
 template <typename T>
 struct CppTypeToScalarType;
 
