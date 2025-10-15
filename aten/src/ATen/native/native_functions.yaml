@@ -4545,6 +4545,7 @@
 - func: _cdist_forward(Tensor x1, Tensor x2, float p, int? compute_mode) -> Tensor
   dispatch:
     CPU, CUDA: _cdist_forward
+    MTIA: _cdist_forward_mtia
     MPS: _cdist_forward_mps
   autogen: _cdist_forward.out
   tags: core

@@ -395,3 +395,4 @@ android/pytorch_android_torchvision/.cxx
 CLAUDE.local.md
 /test_*.py
 /debug_*.py
+CLAUDE_CONTEXT/
