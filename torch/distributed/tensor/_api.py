@@ -782,17 +782,19 @@ def distribute_tensor(
                 placement.dim + tensor.ndim if placement.dim < 0 else placement.dim
             )
             if isinstance(placement, _StridedShard):
-                local_tensor = _StridedShard._make_shard_tensor(
-                    placement_dim,
+                placements[idx] = _StridedShard(
+                    placement_dim, split_factor=placement.split_factor
+                )
+                local_tensor = placement._shard_tensor(
                     local_tensor,
                     device_mesh,
                     idx,
                     src_data_rank,
-                    split_factor=placement.split_factor,
                 )
             else:
-                local_tensor = Shard._make_shard_tensor(
-                    placement_dim, local_tensor, device_mesh, idx, src_data_rank
+                placements[idx] = Shard(placement_dim)
+                local_tensor = placement._shard_tensor(
+                    local_tensor, device_mesh, idx, src_data_rank
                 )
         elif isinstance(placement, Replicate):
             local_tensor = Replicate._make_replicate_tensor(
