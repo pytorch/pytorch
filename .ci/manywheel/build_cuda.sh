@@ -199,7 +199,6 @@ if [[ $CUDA_VERSION == 12* || $CUDA_VERSION == 13* ]]; then
                 "libnvrtc.so.12"
                 "libcupti.so.12")
 
-            # Add libnvToolsExt only if CUDA version is not 12.9
             if [[ $CUDA_VERSION != 12.9* ]]; then
                 DEPS_LIST+=("/usr/local/cuda/lib64/libnvToolsExt.so.1")
                 DEPS_SONAME+=("libnvToolsExt.so.1")
