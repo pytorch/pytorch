@@ -1054,7 +1054,7 @@ int64_t KinetoEvent::privateuse1ElapsedUs() const {
 }
 
 void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
-  return result_->visit(c10::overloaded(
+  result_->visit(c10::overloaded(
       [&in](const ExtraFields<EventType::TorchOp>& e) -> void {
         const size_t n = e.perf_event_counters_->size();
         // should be rare

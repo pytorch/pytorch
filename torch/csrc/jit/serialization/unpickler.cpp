@@ -814,7 +814,8 @@ void Unpickler::readGlobal(
     return;
   } else if (module_name == "torch.distributed.rpc" && class_name == "rref") {
 #ifdef USE_RPC
-    return rebuildRRef();
+    rebuildRRef();
+    return;
 #else
     TORCH_INTERNAL_ASSERT(
         false,

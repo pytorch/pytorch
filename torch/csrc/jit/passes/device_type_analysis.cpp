@@ -162,10 +162,14 @@ struct DeviceTypePropagationPass : public PropertyPropBase {
   void propagateNode(Node* n, bool _ = true) override {
     GRAPH_DEBUG("processNode");
     switch (n->kind()) {
-      case prim::If:
-        return processIf(n);
-      case prim::Loop:
-        return processLoop(n);
+      case prim::If: {
+        processIf(n);
+        return;
+      }
+      case prim::Loop: {
+        processLoop(n);
+        return;
+      }
       case prim::CallMethod:
       case prim::CallFunction:
         return; // Not handled for now
@@ -191,7 +195,8 @@ struct DeviceTypePropagationPass : public PropertyPropBase {
         return; // Not handled for now
       default:
         if (n->kind().is_aten()) {
-          return processAtenOps(n);
+          processAtenOps(n);
+          return;
         } else {
           return; // Not handled for now
         }

@@ -1155,7 +1155,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
   });
 
   m.def("_cudnn_set_conv_benchmark_empty_cache", [](bool enable) {
-    return at::native::_cudnn_set_conv_benchmark_empty_cache(enable);
+    at::native::_cudnn_set_conv_benchmark_empty_cache(enable);
+    return;
   });
 }
 

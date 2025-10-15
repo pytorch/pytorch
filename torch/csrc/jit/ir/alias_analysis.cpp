@@ -632,36 +632,58 @@ void AliasDb::analyzeImpl(Node* node) {
 
   // These nodes are not schematized, so we need to handle them specially
   switch (node->kind()) {
-    case prim::If:
-      return analyzeIf(node);
-    case prim::Loop:
-      return analyzeLoop(node);
+    case prim::If: {
+      analyzeIf(node);
+      return;
+    }
+    case prim::Loop: {
+      analyzeLoop(node);
+      return;
+    }
     case prim::FusionGroup:
     case prim::CudaFusionGroup:
     case prim::oneDNNFusionGroup:
     case prim::FunctionalGraph:
     case prim::DifferentiableGraph:
-    case prim::FallbackGraph:
-      return analyzeSubgraph(node);
-    case prim::fork:
-      return analyzeFork(node);
-    case aten::wait:
-      return analyzeWait(node);
+    case prim::FallbackGraph: {
+      analyzeSubgraph(node);
+      return;
+    }
+    case prim::fork: {
+      analyzeFork(node);
+      return;
+    }
+    case aten::wait: {
+      analyzeWait(node);
+      return;
+    }
     case prim::awaitable:
-    case prim::awaitable_nowait:
-      return analyzeAwaitable(node);
-    case prim::awaitable_wait:
-      return analyzeAwaitableWait(node);
+    case prim::awaitable_nowait: {
+      analyzeAwaitable(node);
+      return;
+    }
+    case prim::awaitable_wait: {
+      analyzeAwaitableWait(node);
+      return;
+    }
     case prim::rpc_async:
     case prim::rpc_sync:
-    case prim::rpc_remote:
-      return analyzeRpcAsync(node);
-    case aten::batch_norm:
-      return analyzeBatchNorm(node);
-    case aten::instance_norm:
-      return analyzeInstanceNorm(node);
-    case prim::GradOf:
-      return analyzeGradOf(node);
+    case prim::rpc_remote: {
+      analyzeRpcAsync(node);
+      return;
+    }
+    case aten::batch_norm: {
+      analyzeBatchNorm(node);
+      return;
+    }
+    case aten::instance_norm: {
+      analyzeInstanceNorm(node);
+      return;
+    }
+    case prim::GradOf: {
+      analyzeGradOf(node);
+      return;
+    }
     case prim::BroadcastMKLDNNTensors: {
       makePointerTo(node->outputs().at(0), node->inputs().at(0));
       makePointerTo(node->outputs().at(1), node->inputs().at(1));
@@ -688,12 +710,16 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::Closure:
     case prim::CreateObject:
     case prim::tolist:
-    case prim::Uninitialized:
-      return analyzeCreator(node);
+    case prim::Uninitialized: {
+      analyzeCreator(node);
+      return;
+    }
     case prim::TupleConstruct:
     case prim::DictConstruct:
-    case prim::ListConstruct:
-      return analyzeContainerConstruct(node);
+    case prim::ListConstruct: {
+      analyzeContainerConstruct(node);
+      return;
+    }
     case prim::TupleUnpack:
     case prim::TupleIndex:
     case prim::TupleSlice:
@@ -703,18 +729,28 @@ void AliasDb::analyzeImpl(Node* node) {
       if (isFrozen_ && node->kind() == prim::GetAttr) {
         auto& ty = node->input()->type();
         if (ty->expectRef<ClassType>().is_module()) {
-          return analyzeCreator(node);
+          analyzeCreator(node);
+          return;
         }
       }
-      return analyzeExtractor(node);
-    case prim::unchecked_cast:
-      return makePointerTo(node->output(), node->input());
-    case prim::ConstantChunk:
-      return analyzeChunk(node);
-    case prim::BroadcastingChunk:
-      return analyzeBroadcastingChunk(node);
-    case prim::SetAttr:
-      return analyzeSetAttr(node);
+      analyzeExtractor(node);
+      return;
+    case prim::unchecked_cast: {
+      makePointerTo(node->output(), node->input());
+      return;
+    }
+    case prim::ConstantChunk: {
+      analyzeChunk(node);
+      return;
+    }
+    case prim::BroadcastingChunk: {
+      analyzeBroadcastingChunk(node);
+      return;
+    }
+    case prim::SetAttr: {
+      analyzeSetAttr(node);
+      return;
+    }
     case prim::profile_ivalue:
     case prim::profile:
       makePointerTo(node->output(), node->inputs().at(0));
@@ -740,11 +776,13 @@ void AliasDb::analyzeImpl(Node* node) {
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
       if (!descend_function_calls_) {
-        return analyzeConservative(node);
+        analyzeConservative(node);
+        return;
       }
       auto g = tryToGraphFunction(node);
       if (!g) {
-        return analyzeConservative(node);
+        analyzeConservative(node);
+        return;
       }
       // this is an unoptimized path - we copy the subgraph for each function
       // call past the first - so we do not generally enable the recursive
@@ -772,7 +810,10 @@ void AliasDb::analyzeImpl(Node* node) {
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
       // NB: update safeToChangeAliasingRelationship if changed
-      return analyzeConservative(node);
+      {
+        analyzeConservative(node);
+        return;
+      }
     case prim::Print:
     case prim::isinstance:
       // These ops do nothing
@@ -821,7 +862,8 @@ void AliasDb::analyzeImpl(Node* node) {
     // operators to get the schemas anymore. We should fix this.
     node->schema(); // fill the schema cache in the Node class
 
-    return analyzeConservative(node);
+    analyzeConservative(node);
+    return;
   }
 
   TORCH_INTERNAL_ASSERT(
@@ -1028,7 +1070,7 @@ void AliasDb::analyzeSubgraph(
 
 void AliasDb::analyzeSubgraph(Node* node) {
   const auto subgraph = node->g(attr::Subgraph);
-  return analyzeSubgraph(node, subgraph);
+  analyzeSubgraph(node, subgraph);
 }
 // For nodes that generate a fresh value from nothing
 void AliasDb::analyzeCreator(Node* node) {

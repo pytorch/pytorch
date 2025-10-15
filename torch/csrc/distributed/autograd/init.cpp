@@ -87,7 +87,8 @@ PyObject* dist_autograd_init(PyObject* _unused, PyObject* noargs) {
   module.def(
       "_release_context",
       [](int64_t context_id) {
-        return DistAutogradContainer::getInstance().releaseContext(context_id);
+        DistAutogradContainer::getInstance().releaseContext(context_id);
+        return;
       },
       py::call_guard<py::gil_scoped_release>());
 

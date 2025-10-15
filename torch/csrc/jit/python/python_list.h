@@ -97,7 +97,7 @@ class ScriptList final {
   // Set the value corresponding to the given index.
   void setItem(diff_type idx, const at::IValue& value) {
     idx = wrap_index(idx);
-    return list_.set(idx, value);
+    list_.set(idx, value);
   }
 
   // Check whether the list contains the given value.

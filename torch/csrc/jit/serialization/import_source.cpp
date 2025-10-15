@@ -281,7 +281,8 @@ void SourceImporterImpl::importNamedType(
   const auto qualified_name =
       QualifiedName(QualifiedName(qualifier), class_def.name().name());
   if (!class_def.superclass().present()) {
-    return importClass(qualified_name, class_def, /*is_module=*/false);
+    importClass(qualified_name, class_def, /*is_module=*/false);
+    return;
   }
   const auto& superclass_name = Var(class_def.superclass().get()).name().name();
   if (superclass_name == "Module") {
@@ -289,7 +290,8 @@ void SourceImporterImpl::importNamedType(
   } else if (superclass_name == "NamedTuple") {
     // NamedTuples have special rules (since they are TupleTypes and not
     // ClassTypes)
-    return importNamedTuple(qualified_name, class_def);
+    importNamedTuple(qualified_name, class_def);
+    return;
   } else if (superclass_name == "Interface") {
     cu_->define_interface(
         qualified_name, class_def, shared_from_this(), /*is_module=*/false);

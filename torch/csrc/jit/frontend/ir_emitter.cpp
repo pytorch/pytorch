@@ -905,7 +905,7 @@ struct to_ir {
   }
 
   void emitStatements(const List<Stmt>& statements) {
-    return emitStatements(statements.begin(), statements.end());
+    emitStatements(statements.begin(), statements.end());
   }
 
   // XXX: Right now closures are not generically implemented and are only used
@@ -3080,7 +3080,8 @@ struct to_ir {
 
   void emitAssignment(const Assign& stmt) {
     if (stmt.lhs_list().size() == 1) {
-      return emitSingleAssignment(stmt);
+      emitSingleAssignment(stmt);
+      return;
     }
     // multiple assign & annotated type not supported in python
     TORCH_INTERNAL_ASSERT(stmt.lhs_list().size() > 1 && !stmt.type().present());

@@ -879,7 +879,7 @@ void AOTIModelPackageLoader::load_constants(
     }
   }
 
-  return runner_->update_constant_buffer(
+  runner_->update_constant_buffer(
       updated_constants_map, use_inactive, check_full_update, user_managed);
 }
 

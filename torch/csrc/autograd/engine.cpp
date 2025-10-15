@@ -1002,14 +1002,14 @@ void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
-  return validate_outputs_impl(edges, grads, format_error);
+  validate_outputs_impl(edges, grads, format_error);
 }
 
 void validate_outputs(
     const std::vector<std::optional<InputMetadata>>& input_metadata,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
-  return validate_outputs_impl(input_metadata, grads, format_error);
+  validate_outputs_impl(input_metadata, grads, format_error);
 }
 
 static variable_list call_function(

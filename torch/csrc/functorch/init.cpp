@@ -366,7 +366,8 @@ static int64_t maybe_get_level(const Tensor& tensor) {
 static void maybe_unsafe_set_level(const Tensor& tensor, int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (batched) {
-    return batched->_unsafe_set_level(level);
+    batched->_unsafe_set_level(level);
+    return;
   }
 }
 
@@ -400,7 +401,7 @@ static void tls_set_vmap_excluded(bool excluded) {
 }
 
 static void _set_dynamic_layer_keys_included(bool value) {
-  return setDynamicLayerFrontBackKeysIncluded(value);
+  setDynamicLayerFrontBackKeysIncluded(value);
 }
 
 static void dump_dls() {

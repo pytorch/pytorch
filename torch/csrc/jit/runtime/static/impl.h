@@ -274,7 +274,7 @@ class TORCH_API ProcessedFunction {
   };
 
   void run(ProcessedNode* pnode) const {
-    return f_(pnode);
+    f_(pnode);
   }
 
   Kind kind() const {

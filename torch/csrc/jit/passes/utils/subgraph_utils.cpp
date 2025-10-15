@@ -282,7 +282,8 @@ void mergeNodeIntoSubgraph(
     bool destroyNode) {
   AT_ASSERT(hasSubgraph(subgraphNode) && toMerge != subgraphNode);
   if (hasSubgraph(toMerge)) {
-    return mergeSubgraph(subgraphNode, toMerge);
+    mergeSubgraph(subgraphNode, toMerge);
+    return;
   }
 
   auto subgraph = getSubgraph(subgraphNode);

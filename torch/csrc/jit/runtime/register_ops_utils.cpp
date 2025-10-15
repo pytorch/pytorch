@@ -211,7 +211,7 @@ void listPopImpl(Stack& stack, const char* empty_message) {
 }
 
 void listPop(Stack& stack) {
-  return listPopImpl(stack, "pop from empty list");
+  listPopImpl(stack, "pop from empty list");
 }
 
 void listClear(Stack& stack) {
