@@ -1144,7 +1144,7 @@ class DiskDynamoCache(DiskDynamoStore):
             package.install(results.backends)
             return package
 
-    def path_prefix(self):
+    def path_prefix(self) -> str:
         return os.path.join(cache_dir(), "dynamo")
 
 
