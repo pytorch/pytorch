@@ -4,6 +4,7 @@
 import contextlib
 import copy
 import dataclasses
+import enum
 import functools
 import logging
 import math
@@ -15190,6 +15191,45 @@ graph():
             self.assertEqual(
                 filtered_nn_module_stack[1], "mod_list_2.slice(4, 5, None).0"
             )
+
+    def test_enum_str(self):
+        class TensorDim(str, enum.Enum):
+            DDP = "ddp"
+            FSDP = "fsdp"
+            CP = "cp"
+            TP = "tp"
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                val = x.sin()
+                if TensorDim.DDP in {"ddp"}:
+                    val += x.cos()
+                if "ddp" in {TensorDim.DDP}:
+                    val += x.cos()
+                return val
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
+        inp = torch.randn(4, 4)
+        gm = export(Foo(), (inp,)).run_decompositions().module()
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
+graph():
+    %x : [num_users=4] = placeholder[target=x]
+    %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%x,), kwargs = {})
+    %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
+    %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %cos_1), kwargs = {})
+    return (add_1,)""",
+        )
+
+        self.assertEqual(gm(inp), Foo()(inp))
 
     def test_split_const_gm_with_lifted_constants(self):
         class Model(torch.nn.Module):
