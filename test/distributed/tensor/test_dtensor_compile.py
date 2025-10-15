@@ -266,6 +266,22 @@ def forward(self, b_parametrizations_buffer_original0, x):
         compiled_out = compiled_fn(mesh)
         self.assertEqual(opt_fn, compiled_out)
 
+    def test_get_local_rank_compile(self):
+        mesh = init_device_mesh(
+            self.device_type, (self.world_size,), mesh_dim_names=("dp",)
+        )
+
+        def fn(x):
+            local_rank = x.device_mesh.get_local_rank("dp")
+            return x * local_rank
+
+        x = DTensor.from_local(torch.rand(4, 4), mesh, [Shard(0)], run_check=False)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_fakify_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
