@@ -2612,7 +2612,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         y, x = 7.0, 11.0
 
-        
         y_ten = torch.tensor([y], dtype=torch.float32, device="cuda")
         x_ten = torch.tensor([x], dtype=torch.float32, device="cuda")
 
