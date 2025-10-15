@@ -20,6 +20,8 @@ from collections.abc import ItemsView, KeysView, Sequence, ValuesView
 from enum import Enum
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
+from torch._C._dynamo import Stack
+
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented_v2
@@ -285,7 +287,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             for key, subvalue in value.__dict__.items():
                 if key not in nonvars:
                     cls.visit(fn, subvalue, cache)
-        elif istype(value, (list, tuple)):
+        elif istype(value, (list, tuple, Stack)):
             for subvalue in value:
                 cls.visit(fn, subvalue, cache)
         elif istype(value, (dict, collections.OrderedDict)):
