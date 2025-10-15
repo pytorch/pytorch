@@ -175,8 +175,6 @@ All python APIs exist in the `torch.cuda.tunable` module.
 | get_filename() -> str | |
 | get_results() -> Tuple[str, str, str, float] | |
 | get_validators() -> Tuple[str, str] | |
-| write_file_on_exit(val: bool) -> None | Default is True. |
-| write_file(filename: Optional[str] = None) -> None | If filename not given, it will call get_filename(). |
 | read_file(filename: Optional[str] = None) -> None | If filename not given, it will call get_filename(). |
 | tune_gemm_in_file(filename: str) -> None | read an untuned file and tune GEMMs in it. |
 | mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None: -> None | read one or more untuned files and tune all unique GEMMs on one or more GPUs. |

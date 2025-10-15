@@ -60,6 +60,7 @@ def _init_model(rank, world_size):
     optim = torch.optim.Adam(model.parameters(), lr=0.0001)
 
     _patch_model_state_dict(model)
+    # pyrefly: ignore  # bad-argument-type
     _patch_optimizer_state_dict(model, optimizers=optim)
 
     return model, optim
@@ -92,6 +93,7 @@ def run(rank, world_size):
     loss_calc = torch.nn.BCELoss()
 
     f = None
+    # pyrefly: ignore  # bad-assignment
     for epoch in range(NUM_EPOCHS):
         try:
             torch.manual_seed(epoch)

@@ -12,6 +12,11 @@ import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.fx_passes.bucketing import is_wait_tensor
+from torch._inductor.fx_passes.memory_estimator import (
+    _is_releasable,
+    build_memory_profile,
+    MemoryTracker,
+)
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 
@@ -68,6 +73,7 @@ def get_hint(x: Union[int, torch.SymInt]) -> Optional[int]:
 def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
     with dynamo_timed("collective_compute_do_bench"):
         return functools.partial(
+            # pyrefly: ignore  # bad-argument-type
             torch._inductor.runtime.benchmarking.benchmarker.benchmark_gpu,
             warmup=5,
         )
@@ -216,6 +222,12 @@ class OverlapScheduler:
         self.collective_info: dict[fx.Node, CollectiveInfo] = {}
         self.unscheduled_collectives: OrderedSet[fx.Node] = OrderedSet()
 
+        # Memory tracking using abstracted MemoryTracker
+        self.original_peak_memory = max(
+            build_memory_profile(self.graph, _is_releasable)
+        )
+        self.memory_tracker = MemoryTracker(self.graph)
+
         self.wait_to_start: dict[fx.Node, fx.Node] = {}
         self._identify_collectives()
 
@@ -326,11 +338,12 @@ class OverlapScheduler:
             runtime_estimations_keys.append(key)
 
         import torch.distributed as dist
+        from torch._subclasses.fake_tensor import unset_fake_temporarily
         from torch.distributed.distributed_c10d import _get_default_group
 
         world_size = dist.get_world_size()
         pg = _get_default_group()
-        with no_dispatch():
+        with unset_fake_temporarily():
             gathered_runtime_estimations: list[list[float]] = [
                 [] for _ in range(world_size)
             ]
@@ -420,6 +433,7 @@ class OverlapScheduler:
         assert node not in self.scheduled
         assert all(n in self.scheduled for n in node.all_input_nodes)
         self.scheduled.add(node)
+        self.memory_tracker.schedule_node(node)
 
         for user in node.users:
             self.in_degree[user] -= 1
@@ -659,6 +673,9 @@ class OverlapScheduler:
             potentially_hidden_collectives
         )
 
+        counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
+        counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
+
         log.info(
             "Overlap scheduling: total exposed %s, total bad exposed %s, total potentially hidden %s",
             len(exposed),
@@ -679,6 +696,7 @@ class OverlapScheduler:
             node_ancestors=self.node_ancestors,
             scheduled=self.scheduled,
             max_bucket_memory_gb=1.0,  # Could make this configurable
+            max_coll_distance=self.max_node_distance,
         )
         bucketer.bucket_collectives()
 

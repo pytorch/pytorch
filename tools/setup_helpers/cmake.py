@@ -326,7 +326,7 @@ class CMake:
 
         # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
         py_lib_path = sysconfig.get_path("purelib")
-        cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH", None)
+        cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH")
         if cmake_prefix_path:
             build_options["CMAKE_PREFIX_PATH"] = (
                 py_lib_path + ";" + cast(str, cmake_prefix_path)
