@@ -409,6 +409,16 @@ class DTensorDeviceOrderAPITest(DTensorContinuousTestBase):
             mesh_shape = (2, self.world_size // 2)
         return init_device_mesh(DTensorContinuousTestBase.device_type(), mesh_shape)
 
+    def test_shard_order_property(self):
+        mesh = self.build_device_mesh((2, self.world_size // 2))
+        input_tensor = torch.randn(8, 6, 5, device=self.device)
+        input_tensor_dt = distribute_tensor(input_tensor, mesh, shard_order={0: [1, 0]})
+        # check if we can reuse the shard_order property
+        input_tensor_dt_reuse = distribute_tensor(
+            input_tensor, mesh, shard_order=input_tensor_dt.shard_order
+        )
+        self.assertEqual(input_tensor_dt._spec, input_tensor_dt_reuse._spec)
+
     def test_neither_placements_nor_shard_order(self):
         """Test that neither placements nor shard_order, use default"""
         mesh = self.build_device_mesh((2, self.world_size // 2))
