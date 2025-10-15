@@ -195,10 +195,17 @@ static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
 #if defined(__linux__)
 struct DumpPipe {
   DumpPipe(int rank) {
+    LOG(INFO) << "DumpPipe works! Rank: " << rank;
     std::string fileStem =
         getCvarString({"TORCH_NCCL_DEBUG_INFO_PIPE_FILE"}, "");
     if (fileStem.empty() ||
         getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
+      if (fileStem.empty()) {
+        LOG(INFO) << "DumpPipe is not enabled. Empty file";
+      }
+      if (getCvarInt({"TORCH_NCCL_TRACE_BUFFER_SIZE"}, 0) <= 0) {
+        LOG(INFO) << "DumpPipe is not enabled. Trace buffer size is 0";
+      }
       return;
     }
     TORCH_CHECK(!fileStem.empty(), "TORCH_NCCL_DEBUG_INFO_PIPE_FILE is empty");
@@ -243,8 +250,11 @@ struct DumpPipe {
 };
 #else
 struct DumpPipe {
-  DumpPipe(int rank) {}
+  DumpPipe(int rank) {
+    LOG(INFO) << rank << ": DumpPipe is only supported on Linux.";
+  }
   bool shouldDump() {
+    LOG(INFO) << "Cannot dump. DumpPipe is only supported on Linux";
     return false;
   }
 };

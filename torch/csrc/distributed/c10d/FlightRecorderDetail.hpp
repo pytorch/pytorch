@@ -214,7 +214,12 @@ void FlightRecorder<EventType>::retire_id(
 
   std::unique_lock<std::mutex> guard(mutex_);
 
-  Entry* entry = &entries_.at(*id % max_entries_);
+  auto idx = *id % max_entries_;
+  if (entries_.size() <= idx) {
+    return;
+  }
+
+  Entry* entry = &entries_.at(idx);
   if (entry->id_ == *id) {
     update_state(*entry);
 
