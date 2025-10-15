@@ -933,7 +933,9 @@ class _PipelineStageBase(ABC):
         prev_stage_peer_rank = self.stage_index_to_group_rank.get(self.stage_index - 1)
 
         recv_tensor = torch.zeros(1, device=self.device, dtype=torch.float32)
-        send_tensor = torch.tensor(self.stage_index, device=self.device, dtype=torch.float32)
+        send_tensor = torch.tensor(
+            self.stage_index, device=self.device, dtype=torch.float32
+        )
         # forward
         if not self.is_first:
             ops.append(
