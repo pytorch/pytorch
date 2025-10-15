@@ -665,17 +665,21 @@ struct ReduceOp {
     }
 
     __syncthreads();
-    // Warp-level reduction for remaining threads
-    // For non-power-of-2 sizes, we start from the next power-of-2 divided by 2
-    // and use a boundary check to avoid out-of-bounds access
-    for (size_t offset = warpSize / 2; offset > 0; offset >>= 1) {
+    // Intra-warp reduction, fix CUDA to have offset decreasing for better numerics
+    // matching Triton, etc.
+    // todo for AMD
+    #ifdef USE_ROCM
+    for (int offset = 1; offset < dim_x; offset <<= 1) {
+    #else
+    int offset = warpSize / 2;
+    while (offset >= dim_x)
+      offset >>= 1;
+    for (; offset > 0; offset >>= 1) {
+    #endif
       #pragma unroll
       for (int i = 0; i < output_vec_size; i++) {
         arg_t other = ops.warp_shfl_down(value[i], offset);
-        // Only combine if the source thread (threadIdx.x + offset) is within bounds
-        if (threadIdx.x + offset < dim_x) {
-          value[i] = ops.combine(value[i], other);
-        }
+        value[i] = ops.combine(value[i], other);
       }
     }
     return value;
