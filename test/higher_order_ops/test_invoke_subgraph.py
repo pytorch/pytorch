@@ -17,6 +17,7 @@ from functorch.compile import aot_function, nop
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
+    empty_line_normalizer,
     InductorAndRecordGraphs,
     normalize_gm,
 )
@@ -2552,7 +2553,9 @@ class TestInvokeSubgraphExport(TestCase):
         self.assertEqual(len(list(ep.graph_module.named_modules())), 2)
 
         self.assertExpectedInline(
-            normalize_gm(ep.graph_module.print_readable(print_output=False)),
+            empty_line_normalizer(
+                normalize_gm(ep.graph_module.print_readable(print_output=False))
+            ),
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, x: "f32[8]", y: "f32[8]"):
@@ -2563,7 +2566,6 @@ class GraphModule(torch.nn.Module):
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', getitem, y);  repeated_subgraph0_1 = getitem = y = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         return (getitem_1,)
-
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
