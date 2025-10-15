@@ -28,6 +28,7 @@ from common_utils import (
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
@@ -2277,9 +2278,7 @@ def forward(self, primals_1):
     view = torch.ops.aten.view.default(mul, [-1])
     select = torch.ops.aten.select.int(mul, 0, 0)
     detach = torch.ops.aten.detach.default(select);  select = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    detach_2 = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-    return (view, mul, detach_2)""",
+    return (view, mul, detach)""",
         )
 
     def test_output_aliases_intermediate_inplace_view(self):
@@ -4944,8 +4943,6 @@ class <lambda>(torch.nn.Module):
     ):
         cos: "f32[2, 2]" = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
 
-        _set_grad_enabled = torch._C._set_grad_enabled(True);  _set_grad_enabled = None
-
         body_graph_0 = self.body_graph_0
         map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
         getitem_2: "f32[2, 2]" = map_impl[0];  map_impl = None
@@ -5139,23 +5136,12 @@ class <lambda>(torch.nn.Module):
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  detach = None
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu)
-        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        detach_4: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_3);  detach_3 = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
-        detach_5: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
-        detach_6: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_5);  detach_5 = None
-        detach_7: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_6);  detach_6 = None
-        detach_8: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_7);  detach_7 = None
-        detach_9: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_8);  detach_8 = None
-        detach_10: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_9);  detach_9 = None
+        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
         ones_like: "f32[]" = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format)
         expand: "f32[1, 3, 3, 3]" = torch.ops.aten.expand.default(ones_like, [1, 3, 3, 3]);  ones_like = None
-        detach_11: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_4);  detach_4 = None
-        detach_12: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_11);  detach_11 = None
-        detach_13: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_12);  detach_12 = None
-        detach_14: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_13);  detach_13 = None
-        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_14, 0);  expand = detach_14 = None
+        detach_3: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
+        threshold_backward: "f32[1, 3, 3, 3]" = torch.ops.aten.threshold_backward.default(expand, detach_3, 0);  expand = detach_3 = None
         native_batch_norm_backward = torch.ops.aten.native_batch_norm_backward.default(threshold_backward, convolution, arg2_1, getitem_3, getitem_4, getitem_1, getitem_2, True, 1e-05, [True, True, True]);  threshold_backward = convolution = arg2_1 = getitem_1 = getitem_2 = None
         getitem_5: "f32[1, 3, 3, 3]" = native_batch_norm_backward[0]
         getitem_6: "f32[3]" = native_batch_norm_backward[1]
@@ -5164,7 +5150,7 @@ class <lambda>(torch.nn.Module):
         getitem_8 = convolution_backward[0];  getitem_8 = None
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
-        return (getitem_3, getitem_4, add, sum_1, detach_10, getitem_9, getitem_10, getitem_6, getitem_7)
+        return (getitem_3, getitem_4, add, sum_1, detach_2, getitem_9, getitem_10, getitem_6, getitem_7)
         """,  # noqa: B950
         )
 
@@ -5232,14 +5218,12 @@ class <lambda>(torch.nn.Module):
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
         detach: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(relu);  relu = None
-        detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
-        detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
         return (
             getitem_3,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=4))
             getitem_4,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=5))
             add,  # InputMutationAOTOutput(mutated_input=PlainAOTInput(idx=6))
             sum_1,  # PlainAOTOutput(idx=0)
-            detach_2,  # PlainAOTOutput(idx=1)
+            detach,  # PlainAOTOutput(idx=1)
         )
         """,  # noqa: B950
         )
@@ -6333,7 +6317,7 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(out_ref[0].b, out_test[0].b)
         self.assertEqual(out_ref[1], out_test[1])
 
-        # We compiled our graph assuming type(grad_out[1]) == torch.Tensor,
+        # We compiled our graph assuming type(grad_out[1]) is torch.Tensor,
         # but we were wrong: in the below tests, it is a subclass.
         # This will eventually require a repartition + recompile
         with self.assertRaisesRegex(
@@ -7198,6 +7182,26 @@ metadata incorrectly.
         x = torch.randn(4, 4)
         torch.compile(fn, backend="inductor", fullgraph=True)(x)
         torch.compile(fn_, backend="inductor", fullgraph=True)(x)
+
+    def test_layer_norm(self):
+        def fn(x):
+            return F.layer_norm(x, normalized_shape=(8,))
+
+        x = torch.randn(2, 4, 8)
+        eager = fn(x)
+        aot_eager = torch.compile(backend="aot_eager")(fn)(x)
+        self.assertEqual(eager, aot_eager, atol=0, rtol=0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_rms_norm(self):
+        # Only CUDA rms norm fails to be decomposed
+        def fn(x):
+            return F.rms_norm(x, normalized_shape=(8,))
+
+        x = torch.randn(2, 4, 8, device="cuda")
+        eager = fn(x)
+        aot_eager = torch.compile(backend="aot_eager")(fn)(x)
+        self.assertEqual(eager, aot_eager, atol=0, rtol=0)
 
     def test_subclass_parameters(self):
         class _M(torch.nn.Module):

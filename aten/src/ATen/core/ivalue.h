@@ -847,7 +847,7 @@ struct TORCH_API IValue final {
   IValue(std::optional<T> v);
   template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::OptionalArrayRef<T> v);
-  IValue(std::nullopt_t);
+  IValue(std::nullopt_t /*unused*/);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);
