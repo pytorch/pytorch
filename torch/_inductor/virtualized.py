@@ -84,6 +84,8 @@ if TYPE_CHECKING:
     from torch._inductor.loop_body import InterpreterShim
     from torch._subclasses import FakeTensorMode
 
+    from .distributed_autotune import _DistributedAutotuneState
+
 threadlocal = local()
 
 T = TypeVar("T")
@@ -198,6 +200,9 @@ _aot_compilation: Virtualized[bool] = Virtualized("aot_compilation", NullHandler
 _current_node: Virtualized[torch.fx.Node] = Virtualized("current_node", NullHandler)
 _local_buffer_context: Virtualized[LocalBufferContext] = Virtualized(
     "local_buffer_context", NullHandler
+)
+_distributed_autotune_state: Virtualized[_DistributedAutotuneState] = Virtualized(
+    "distributed_autotune_state", NullHandler
 )
 
 
@@ -364,6 +369,12 @@ class _V:
     set_local_buffer_context: Callable[[Any], Any] = _local_buffer_context._set_handler
     get_local_buffer_context: Callable[[], Any] = _local_buffer_context._get_handler
     set_choices_handler: Callable[[Any], Any] = _choices._set_handler
+    set_distributed_autotune_state: Callable[[Any], Any] = (
+        _distributed_autotune_state._set_handler
+    )
+    get_distributed_autotune_state: Callable[[], Any] = (
+        _distributed_autotune_state._get_handler
+    )
 
     @property
     def ops(self) -> OpsHandler[Any]:
@@ -422,6 +433,10 @@ class _V:
     @property
     def choices(self) -> InductorChoices:
         return _choices._get_handler()
+
+    @property
+    def distributed_autotune_state(self):
+        return _distributed_autotune_state._get_handler()
 
 
 V = _V()

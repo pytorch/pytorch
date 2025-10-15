@@ -25,7 +25,7 @@ from .ir import (
 )
 from .kernel_inputs import KernelInputs, MMKernelInputs
 from .scheduler import SchedulerNode
-from .virtualized import V
+from .virtualized import V, NullHandler
 
 
 if TYPE_CHECKING:
@@ -33,11 +33,23 @@ if TYPE_CHECKING:
 
 
 _DISTRIBUTED_AUTOTUNE_KEY = "distributed_autotune"
-_autotuned_index: int | None = None
-_autotuned_local_count: int = 0
-_gc_index: int = 0
 
 _AUTOTUNE_PG: dist.ProcessGroup | None = None
+
+
+@dataclasses.dataclass
+class _DistributedAutotuneState:
+    """
+    State used to track autotuning during a graph_context()
+    """
+
+    # This is the next operator index. Used to figure out which rank should do
+    # the autotuning.
+    autotuned_index: int = 0
+
+    # For debugging - used to make sure that we autotune the same number of
+    # local operators that we expected to.
+    autotuned_local_count: int = 0
 
 
 @dataclasses.dataclass
@@ -75,16 +87,12 @@ def graph_context() -> Generator[None, None, None]:
     Wrapped around processing a graph, sets up figuring out which ranks tune
     which shapes.
     """
-    global _autotuned_index, _autotuned_local_count, _gc_index
-    assert _autotuned_index is None
-    _autotuned_index = 0
-    _autotuned_local_count = 0
-    _gc_index += 1
+    assert isinstance(V.get_distributed_autotune_state(), NullHandler)
+    V.set_distributed_autotune_state(_DistributedAutotuneState())
     try:
         yield
     finally:
-        _autotuned_index = None
-        _autotuned_local_count = -1
+        V.set_distributed_autotune_state(NullHandler())
 
 
 def maybe_autotune_remote(
@@ -103,17 +111,16 @@ def maybe_autotune_remote(
     if len(choices) <= 1:
         return None
 
-    global _autotuned_index, _autotuned_local_count
-    assert _autotuned_index is not None
-    index = _autotuned_index
-    _autotuned_index += 1
+    state = V.distributed_autotune_state
+    index = state.autotuned_index
+    state.autotuned_index += 1
     local = index % autotune_pg.size() == autotune_pg.rank()
 
     V.current_node.meta[_DISTRIBUTED_AUTOTUNE_KEY] = _DistributedAutotuneInfo(
         index, local
     )
     if local:
-        _autotuned_local_count += 1
+        state.autotuned_local_count += 1
         return None
 
     return torch._inductor.ir.TensorBox.create(
@@ -342,8 +349,9 @@ def _autotune_local_nodes(
         choice = _SerializedChoice(info.index, min_choice)
         autotune_results.append(choice)
 
-    assert len(autotune_results) == _autotuned_local_count, (
-        f"incorrect local autotuned nodes found ({len(autotune_results)} != {_autotuned_local_count})"
+    state = V.distributed_autotune_state
+    assert len(autotune_results) == state.autotuned_local_count, (
+        f"incorrect local autotuned nodes found ({len(autotune_results)} != {state.autotuned_local_count})"
     )
     return autotune_results
 
