@@ -34,9 +34,14 @@ jobs:
     outputs:
       changed-files-matrix: ${{ steps.output-test-matrix.outputs.changed-files-matrix }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
       - name: Get changed files
         id: get-changed-files
-        uses: ./.github/workflows/_get-changed-files.yml
+        uses: ./.github/actions/get-changed-files
         with:
           all_files: ${{ contains(github.event.pull_request.labels.*.name, 'lint-all-files') || contains(github.event.pull_request.labels.*.name, 'Reverted') || github.event_name == 'push' }}
       - name: Output test-matrix
