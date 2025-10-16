@@ -67,6 +67,10 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
 
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
 OPTIMUS_EXCLUDE_POST_GRAD = [
     "activation_quantization_aten_pass",
     "inductor_autotune_lookup_table",
@@ -3886,3 +3890,10 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
     return dep_name.startswith(
         ("primals_", "arg", "fwd_rng_state", "bwd_rng_state", "tangents")
     )
+
+
+# Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
+def load_template(name: str, template_dir: Path) -> str:
+    """Load a template file and return its content."""
+    with open(template_dir / f"{name}.py.jinja") as f:
+        return f.read()

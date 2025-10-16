@@ -1575,7 +1575,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     if torch._inductor.config:
         try:
             inductor_config_copy = torch._inductor.config.get_config_copy()
-        except (TypeError, AttributeError):
+        except (TypeError, AttributeError, RuntimeError, AssertionError):
             inductor_conf_str = "Inductor Config cannot be pickled"
 
     if inductor_config_copy is not None:
