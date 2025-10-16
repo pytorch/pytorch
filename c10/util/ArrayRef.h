@@ -47,6 +47,8 @@ namespace c10 {
 /// the underlying constexpr calls, we rely on apparent-type dispatch for
 /// inheritance. This should be fine because their memory format is the same,
 /// and it is never incorrect for ArrayRef to call HeaderOnlyArrayRef methods.
+/// However, you should prefer to use ArrayRef when possible, because its use
+/// of TORCH_CHECK will lead to better user-facing error messages.
 template <typename T>
 class ArrayRef final : public HeaderOnlyArrayRef<T> {
  public:
@@ -54,7 +56,6 @@ class ArrayRef final : public HeaderOnlyArrayRef<T> {
   /// SmallVector.
   /// @{
 
-  // Inherits all constructors from HeaderOnlyArrayRef<T>
   using HeaderOnlyArrayRef<T>::HeaderOnlyArrayRef;
 
   /// Construct an ArrayRef from a std::vector.
