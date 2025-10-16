@@ -13,13 +13,13 @@ namespace at::native {
 template <typename scalar_t, typename acc_t = scalar_t, typename out_t = scalar_t>
 struct sum_functor {
   void operator()(TensorIterator& iter) {
-  const bool is_16_bits =
+  constexpr bool is_16_bits =
     ( (std::is_same<at::Half, scalar_t>::value) ||
       (std::is_same<at::BFloat16, scalar_t>::value) );
 #ifdef USE_ROCM
     // Half and BFloat16 can be packed in groups of up to 8 elements and
     // can use *_DWORDX4 instructions to achieve that.
-    if (is_16_bits) {
+    if constexpr (is_16_bits) {
       gpu_reduce_kernel<scalar_t, out_t, /*vt0=*/4, /*input_vec_size=*/8>(
         iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
           return a + b;
@@ -27,8 +27,8 @@ struct sum_functor {
       return;
     }
 #endif
-    if (is_16_bits) {
-      gpu_reduce_kernel<scalar_t, out_t, /*vt0=*/8, /*input_vec_size=*/8>(
+    if constexpr (is_16_bits) {
+      gpu_reduce_kernel<scalar_t, out_t, /*vt0=*/4, /*input_vec_size=*/4>(
         iter, func_wrapper<out_t>([] GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
           return a + b;
         }));
