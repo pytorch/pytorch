@@ -3671,7 +3671,7 @@ class AssociativeScanModels:
                     # Check if val is a list and if it has the same length as combine_fn
                     # If so, then use the individual elements.
                     # If not, duplicate the first element.
-                    if type(val) == list and len(val) == chain_len:
+                    if type(val) is list and len(val) == chain_len:
                         kwargs_el[key] = val[ind]
                     else:
                         kwargs_el[key] = val

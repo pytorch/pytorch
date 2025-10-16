@@ -662,7 +662,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         "comparison",
         [
             subtest(isinstance, "isinstance"),
-            subtest(lambda instance, type_: type(instance) == type_, "equality"),
+            subtest(lambda instance, type_: type(instance) is type_, "equality"),
             subtest(lambda instance, type_: type(instance) is type_, "identity"),
         ],
     )

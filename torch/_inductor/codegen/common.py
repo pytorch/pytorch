@@ -482,15 +482,11 @@ def get_wrapper_codegen_for_device(
 
 
 def get_custom_backend_pass_for_device(device: str) -> Optional[CustomGraphModulePass]:
-    return custom_backend_passes[device] if device in custom_backend_passes else None
+    return custom_backend_passes.get(device)
 
 
 def get_custom_backend_config_for_device(device: str) -> Optional[ConfigModule]:
-    return (
-        custom_backend_codegen_configs[device]
-        if device in custom_backend_codegen_configs
-        else None
-    )
+    return custom_backend_codegen_configs.get(device)
 
 
 @functools.cache
@@ -1090,6 +1086,11 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     def halide_clamp(self, value: OpVarT, size: sympy.Expr, check: bool) -> OpVarT:
         raise NotImplementedError(
             f"{type(self).__name__}: halide_clamp only implemented for Halide backend"
+        )
+
+    def dot(self, x: OpVarT, y: OpVarT) -> OpVarT:
+        raise NotImplementedError(
+            f"{type(self).__name__}: dot only implemented for Triton backend"
         )
 
     def inline_asm_elementwise(
