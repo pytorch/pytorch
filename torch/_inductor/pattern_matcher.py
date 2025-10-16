@@ -2491,11 +2491,7 @@ def remove_implict_edges(graph: torch.fx.Graph) -> None:
     nodes_to_remove = []
 
     for node in graph.nodes:
-        if (
-            node.op == "call_function"
-            and hasattr(node.target, "__name__")
-            and "op_for_dependencies" in str(node.target)
-        ):
+        if node.op == "call_function" and node.target == DEP_OP:
             nodes_to_remove.append(node)
 
     for dep_node in nodes_to_remove:
