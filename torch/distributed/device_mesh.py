@@ -10,8 +10,8 @@ from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
-from torch.distributed._mesh_layout import _MeshLayout, suffix_product
-from torch.distributed._pycute import is_int
+from torch.distributed._mesh_layout import _MeshLayout
+from torch.distributed._pycute import is_int, suffix_product
 from torch.utils._typing_utils import not_none
 
 
@@ -215,16 +215,11 @@ else:
             assert _layout.check_non_overlap(), (
                 "Please use a non-overlapping layout when creating a DeviceMesh."
             )
-            assert _rank_map.ndim == 1, (
-                "The global rank permutation must be 1-dimensional"
-            )
-            assert _rank_map.is_contiguous(), (
-                "The global rank permutation must be contiguous"
-            )
+            assert _rank_map.ndim == 1, "The rank map must be 1-dimensional"
+            assert _rank_map.is_contiguous(), "The rank map must be contiguous"
             assert _rank_map.numel() >= _layout.cosize(), (
-                "The global rank permutation must be large enough for the layout: "
-                f"got {_rank_map.numel()}, "
-                f"expected >= {'*'.join(f'{s}' for s in _layout.top_level_sizes)}"
+                f"The rank map contains {_rank_map.numel()} element, "
+                f"which isn't large enough for layout {_layout}"
             )
 
             self._device_type = device_type
@@ -1303,7 +1298,7 @@ else:
             )
 
         layout = _MeshLayout(tuple(mesh_shape), suffix_product(mesh_shape))
-        # Always initialize the (identity) permutation on CPU, regardless of what the
+        # Always initialize the (identity) rank map on CPU, regardless of what the
         # external device type has been set to be (e.g. meta)
         with torch.device("cpu"):
             rank_map = torch.arange(layout.numel(), dtype=torch.int)
