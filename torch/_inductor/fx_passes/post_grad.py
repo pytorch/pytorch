@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Callable, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -1726,7 +1726,7 @@ class ConstructorMoverPass:
 
         return False
 
-    def get_node_device(self, node: fx.Node) -> Optional[torch.device]:
+    def get_node_device(self, node: fx.Node) -> torch.device | None:
         """
         Get the device of a node.
         """
