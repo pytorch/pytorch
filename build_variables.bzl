@@ -49,6 +49,7 @@ jit_core_headers = [
     "torch/csrc/jit/frontend/error_report.h",
     "torch/csrc/jit/frontend/tree.h",
     "torch/csrc/stable/library.h",
+    "torch/csrc/stable/c/shim.h",
     "torch/custom_class.h",
     "torch/custom_class_detail.h",
     "torch/library.h",
@@ -68,6 +69,8 @@ jit_core_sources = [
 # list for the shared files.
 
 core_sources_common = [
+    # This needs to belong here because it defines the first non-inline virtual
+    # function, which matters for AutogradMetaInterface's vtable.
     "torch/csrc/autograd/autograd_meta.cpp",
     "torch/csrc/autograd/forward_grad.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
@@ -85,6 +88,7 @@ core_sources_common = [
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/profiler/util.cpp",
+    "torch/csrc/shim_common.cpp"
 ]
 
 torch_unpickler_common = [
@@ -913,7 +917,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_torch_functions_manual.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
-    "torch/csrc/distributed/python_placement.cpp",
     "torch/csrc/dynamo/python_compiled_autograd.cpp",
     "torch/csrc/dynamo/cache_entry.cpp",
     "torch/csrc/dynamo/cpp_shim.cpp",

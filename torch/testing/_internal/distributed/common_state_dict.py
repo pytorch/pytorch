@@ -40,7 +40,7 @@ class VerifyStateDictMixin:
         if not options.ignore_frozen_params:
             self.assertEqual(len(msd), len(dist_msd))
         for fqn, param in msd.items():
-            dist_param = dist_msd.get(fqn, None)
+            dist_param = dist_msd.get(fqn)
             if not options.ignore_frozen_params:
                 self.assertIsNotNone(dist_param, f"{fqn=}")
                 try:

@@ -16,6 +16,7 @@
 #endif
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_aten.h>
+#include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/parallel_utils.h>
 #include <torch/headeronly/core/ScalarType.h>
 
@@ -282,7 +283,7 @@ inline void invoke_parallel(
     int64_t begin_tid = begin + tid * chunk_size;
     if (begin_tid < end) {
       try {
-        ThreadIdGuard tid_guard(tid);
+        ThreadIdGuard tid_guard(static_cast<uint64_t>(tid));
         f(begin_tid, std::min(end, chunk_size + begin_tid));
       } catch (...) {
         if (!err_flag.test_and_set()) {
@@ -346,13 +347,13 @@ inline void parallel_for(
   // in order to use the parallel path (otherwise the extension doesn't know
   // how to compile invoke_parallel). This is consistent with the existing
   // semantic.
-  if (aoti_torch_get_intra_op_parallel_enabled() &&
-      ((!aoti_torch_get_parallel_openmp_enabled()) || EXTENSION_HAS_OPENMP)) {
-    aoti_torch_lazy_init_num_threads();
+  if (intra_op_parallel_enabled() &&
+      ((!openmp_is_available()) || EXTENSION_HAS_OPENMP)) {
+    lazy_init_num_threads();
     const auto numiter = end - begin;
     const bool use_parallel =
-        (numiter > grain_size && numiter > 1 &&
-         !aoti_torch_in_parallel_region() && aoti_torch_get_num_threads() > 1);
+        (numiter > grain_size && numiter > 1 && !in_parallel_region() &&
+         get_num_threads() > 1);
     if (!use_parallel) {
       ThreadIdGuard tid_guard(0);
       ParallelGuard guard(true);
@@ -360,7 +361,7 @@ inline void parallel_for(
       return;
     }
 
-    if (aoti_torch_get_parallel_openmp_enabled()) {
+    if (openmp_is_available()) {
       // From above check we know EXTENSION_HAS_OPENMP == 1
       // For parallel openmp path (default), we call internal::invoke_parallel
       // defined in this header so inlining of f still happens
@@ -373,7 +374,7 @@ inline void parallel_for(
       // For parallel native path, we call the shim-ed invoke_parallel, the
       // native invoke_parallel takes in std::function (not templated F) so
       // there's no inlining anyway.
-      TORCH_ERROR_CODE_CHECK(aoti_torch_invoke_parallel(
+      TORCH_ERROR_CODE_CHECK(invoke_parallel(
           begin,
           end,
           grain_size,

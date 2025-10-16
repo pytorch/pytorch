@@ -2,7 +2,6 @@
 
 import math
 from pathlib import Path
-from unittest import skipIf
 
 import torch
 from torch.testing._internal.common_device_type import (
@@ -13,7 +12,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     install_cpp_extension,
-    IS_MACOS,
     IS_WINDOWS,
     run_tests,
     TestCase,
@@ -377,7 +375,6 @@ if not IS_WINDOWS:
         # 2 argument(s) but received 3 argument(s).
         # Declaration: libtorch_agnostic::test_parallel_for(int size, int grain_size) -> Tensor')
         @xfailIfTorchDynamo
-        @skipIf(IS_MACOS, "Default Apple clang/g++ on macos doesn't have -fopenmp flag")
         def test_parallel_for(self, device):
             import libtorch_agnostic
 
