@@ -1,6 +1,6 @@
 import functools
 import os
-from typing import Any, Optional
+from typing import Any
 from typing_extensions import Unpack
 
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
@@ -54,7 +54,19 @@ class StaticallyLaunchedCudaKernel:
             launch_enter = triton_knobs.runtime.launch_enter_hook
             launch_exit = triton_knobs.runtime.launch_exit_hook
 
-        if launch_enter is not None or launch_exit is not None:
+        def hook_is_empty(hook: Any) -> bool:
+            if hook is None:
+                return True
+            if (
+                triton_knobs
+                and (HookChain := getattr(triton_knobs, "HookChain", None)) is not None
+                and isinstance(hook, HookChain)
+            ):
+                # Support hooks after https://github.com/triton-lang/triton/pull/7866
+                return len(hook.calls) == 0
+            return False
+
+        if not hook_is_empty(launch_enter) or not hook_is_empty(launch_exit):
             raise NotImplementedError(
                 "We don't support launch enter or launch exit hooks"
             )
@@ -80,9 +92,7 @@ class StaticallyLaunchedCudaKernel:
         self.has_profile_scratch = needs_scratch_arg("Profile", "profile_scratch_size")
 
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
-        self.function: Optional[int] = (
-            None  # Loaded by load_kernel(on the parent process)
-        )
+        self.function: int | None = None  # Loaded by load_kernel(on the parent process)
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas

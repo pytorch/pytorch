@@ -375,8 +375,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
       // previous iterations, no copy is needed.
       if (!grad.is_alias_of(bucket_view)) {
         if (comm_hook_ == nullptr) {
-          auto wrapped =
-              at::native::wrapped_scalar_tensor(double(1.) / div_factor_);
+          auto wrapped = at::native::wrapped_scalar_tensor(1. / div_factor_);
           if (!grad.requires_grad()) {
             // Divides while copying into the bucket view to save one scan over
             // all the input parameters.

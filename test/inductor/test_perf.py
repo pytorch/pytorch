@@ -1156,11 +1156,13 @@ class InplacingTests(TestCase):
                 torch.compile(f, fullgraph=True),
             )
 
-            # Check that we are allocating the minimum number of intermediate buffers
+            # Check that we are not allocate intermediate buffers
+            # which can be reused.
             matches = re.findall(r"empty_strided_\w+\(", code)
-            self.assertEqual(len(matches), 1)
+            self.assertEqual(len(matches), 0)
+            self.assertEqual("in_out" in code, True)
 
-            self.assertExpectedInline(count_numel(f), """39""")
+            self.assertExpectedInline(count_numel(f), """45""")
 
     @requires_cuda_and_triton
     def test_inplace_triton_kernel_v1(self):

@@ -41,7 +41,7 @@ class TCPServer;
 class TCPClient;
 
 struct SocketAddress {
-  std::string host{};
+  std::string host;
   std::uint16_t port{};
 };
 

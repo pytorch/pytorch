@@ -77,16 +77,19 @@ def tvm(
     opt_level = options.get("opt_level", 3)
 
     if scheduler == "auto_scheduler":
+        # pyrefly: ignore  # import-error
         from tvm import auto_scheduler
 
         log_file = tempfile.NamedTemporaryFile()
 
+        # pyrefly: ignore  # bad-argument-type
         if not os.path.exists(log_file):
             tasks, task_weights = auto_scheduler.extract_tasks(
                 mod["main"], params, target
             )
             if len(tasks) != 0:
                 tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
+                # pyrefly: ignore  # bad-argument-type
                 if not os.path.exists(log_file):
                     assert trials > 0
                     tune_option = auto_scheduler.TuningOptions(
@@ -97,7 +100,9 @@ def tvm(
                     try:
                         tuner.tune(tune_option)
                     except Exception:
+                        # pyrefly: ignore  # bad-argument-type
                         if os.path.exists(log_file):
+                            # pyrefly: ignore  # bad-argument-type
                             os.unlink(log_file)
                         raise
 
@@ -107,6 +112,7 @@ def tvm(
             ):
                 lib = relay.build(mod, target=target, params=params)
     elif scheduler == "meta_schedule":
+        # pyrefly: ignore  # import-error
         from tvm import meta_schedule as ms
 
         with tempfile.TemporaryDirectory() as work_dir:

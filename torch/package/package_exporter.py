@@ -8,12 +8,12 @@ import pickletools
 import platform
 import types
 from collections import defaultdict, OrderedDict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import Any, Callable, cast, IO, Optional, Union
+from typing import Any, cast, IO, Optional, Union
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
@@ -219,7 +219,7 @@ class PackageExporter:
         torch._C._log_api_usage_once("torch.package.PackageExporter")
         self.debug = debug
         if isinstance(f, (str, os.PathLike)):
-            f = os.fspath(f)
+            f = os.fspath(f)  # pyrefly: ignore  # no-matching-overload
             self.buffer: Optional[IO[bytes]] = None
         else:  # is a byte buffer
             self.buffer = f
@@ -652,6 +652,7 @@ class PackageExporter:
             memo: defaultdict[int, str] = defaultdict(None)
             memo_count = 0
             # pickletools.dis(data_value)
+            # pyrefly: ignore  # bad-assignment
             for opcode, arg, _pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
                     if (

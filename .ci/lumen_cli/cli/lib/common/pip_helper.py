@@ -4,7 +4,7 @@ import shlex
 import shutil
 import sys
 from collections.abc import Iterable
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError, version  # noqa: UP035
 from typing import Optional, Union
 
 from cli.lib.common.utils import run_command

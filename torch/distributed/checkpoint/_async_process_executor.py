@@ -113,9 +113,16 @@ class _AsyncCheckpointProcess:
 
     def __del__(self) -> None:
         if self._save_process.is_alive():
-            logger.info("Terminating the checkpoint background process...")
-            self._send(_CheckpointSaveProcessControlOpts.TERMINATE)
-            self._save_process.join()
+            try:
+                logger.info("Terminating the checkpoint background process.")
+                self._send(_CheckpointSaveProcessControlOpts.TERMINATE)
+                self._save_process.join(timeout=5)
+            finally:
+                if self._save_process.is_alive():
+                    logger.warning(
+                        "Checkpoint background process is still alive after termination request. Sending SIGTERM."
+                    )
+                    self._save_process.terminate()
 
     def _send(self, data: Any) -> None:
         self._process_pipe.send(data)
@@ -298,6 +305,7 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
             @_dcp_method_logger(**ckpt_kwargs)
             def create_checkpoint_daemon_process() -> None:
                 global _CHECKPOINT_PROCESS
+                # pyrefly: ignore  # bad-argument-type
                 _CHECKPOINT_PROCESS = _AsyncCheckpointProcess(pg_init_info=pg_init_info)
 
             create_checkpoint_daemon_process()

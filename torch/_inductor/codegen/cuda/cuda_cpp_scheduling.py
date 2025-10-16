@@ -175,6 +175,7 @@ class CUDACPPScheduling(BaseScheduling):
             call_args, kernel_name, arg_signatures, kernel
         )
         with debug_printer_manager:
+            self.codegen_comment(node_schedule, kernel_name)
             kernel.call_kernel(kernel_name, ctb)
 
         V.graph.removed_buffers |= kernel.removed_buffers

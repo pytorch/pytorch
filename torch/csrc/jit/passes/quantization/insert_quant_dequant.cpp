@@ -750,7 +750,7 @@ class InsertQuantDeQuantHelper {
     }
   }
 
-  void collectObserverNodesAndValueToQuantize(Module& module, Value*);
+  void collectObserverNodesAndValueToQuantize(Module& module, Value* /*v*/);
   void cleanup(Module& module, Graph* g);
   void removeObserverNodes(Graph* g);
   void quantizeTensors(Module& module, Graph* g, Value* self);

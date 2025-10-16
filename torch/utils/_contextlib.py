@@ -6,7 +6,8 @@ import functools
 import inspect
 import sys
 import warnings
-from typing import Any, Callable, cast, TypeVar
+from collections.abc import Callable
+from typing import Any, cast, TypeVar
 
 
 # Used for annotating the decorator usage of _DecoratorContextManager (e.g.,
@@ -116,6 +117,7 @@ def context_decorator(ctx, func):
 
     @functools.wraps(func)
     def decorate_context(*args, **kwargs):
+        # pyrefly: ignore  # bad-context-manager
         with ctx_factory():
             return func(*args, **kwargs)
 

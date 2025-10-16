@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import itertools
 import operator
-import sys
 from typing import Callable, Optional, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeAlias
 
@@ -28,6 +27,7 @@ __all__ = [
     "islice",
     "tee",
     "zip_longest",
+    "pairwise",
 ]
 
 
@@ -163,20 +163,16 @@ def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
-if sys.version_info >= (3, 10):
-
-    @substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
-    def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
-        a = None
-        first = True
-        for b in iterable:
-            if first:
-                first = False
-            else:
-                yield a, b  # type: ignore[misc]
-            a = b
-
-    __all__ += ["pairwise"]
+@substitute_in_graph(itertools.pairwise, is_embedded_type=True)  # type: ignore[arg-type]
+def pairwise(iterable: Iterable[_T], /) -> Iterator[tuple[_T, _T]]:
+    a = None
+    first = True
+    for b in iterable:
+        if first:
+            first = False
+        else:
+            yield a, b  # type: ignore[misc]
+        a = b
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.tee
@@ -200,6 +196,7 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def zip_longest(
     iter1: Iterable[_T1],
     /,
@@ -209,6 +206,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def zip_longest(
     iter1: Iterable[_T1],
     iter2: Iterable[_T2],
@@ -217,6 +215,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def zip_longest(
     iter1: Iterable[_T1],
     iter2: Iterable[_T2],
@@ -227,6 +226,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def zip_longest(
     iter1: Iterable[_T],
     iter2: Iterable[_T],
@@ -237,6 +237,7 @@ def zip_longest(
 
 
 @overload
+# pyrefly: ignore  # inconsistent-overload
 def zip_longest(
     iter1: Iterable[_T],
     iter2: Iterable[_T],

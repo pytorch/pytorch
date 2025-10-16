@@ -657,8 +657,8 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
     case 4:
       return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
   }
-  throw std::runtime_error(
-      "Unhandled vec_shuffle_down value " + std::to_string(n));
+
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
 }
 #endif
 
@@ -682,8 +682,8 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
       return vec_t(_mm512_permutexvar_ps(
           _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
   }
-  throw std::runtime_error(
-      "Unhandled vec_shuffle_down value " + std::to_string(n));
+
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
 }
 #endif
 

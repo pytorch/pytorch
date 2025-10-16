@@ -71,7 +71,7 @@ class Type {
 // These are all the constant types that are allowed as attributes on Nodes.
 struct None {};
 // None always equals itself
-inline bool operator==(const None&, const None&) {
+inline bool operator==(const None& /*unused*/, const None& /*unused*/) {
   return true;
 }
 
@@ -441,6 +441,11 @@ class Graph {
   void removeNode(Node* node);
 
   void applyDevicePlacement(const Placement& placement);
+
+  // Override all weights in the graph if matching name is found in the map.
+  void overrideWeightsDevice(
+      const std::unordered_map<std::string, std::optional<c10::Device>>&
+          submodNameToDevice);
 
   std::string getUniqueValueName();
 

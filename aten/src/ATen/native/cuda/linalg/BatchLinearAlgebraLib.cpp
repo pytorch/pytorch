@@ -127,8 +127,7 @@ void apply_ldl_solve_cusolver(
     const Tensor& pivots,
     const Tensor& B,
     bool upper) {
-#if !(defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && \
-    CUSOLVER_VERSION >= 11102)
+#if !(defined(CUDART_VERSION) && defined(CUSOLVER_VERSION))
   TORCH_CHECK(
       false,
       "Calling torch.linalg.ldl_solve on a CUDA tensor requires compiling ",
@@ -663,7 +662,7 @@ void svd_cusolver(const Tensor& A,
   const auto n = A.size(-1);
   const auto k = std::min(m, n);
 
-  static const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
+  static constexpr const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
 
   // The default heuristic is to use gesvdj driver
 #ifdef USE_ROCM

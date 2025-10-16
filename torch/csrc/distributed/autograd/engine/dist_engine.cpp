@@ -65,7 +65,7 @@ class DistAccumulateGradCaptureHook
     for (const auto& hook : accumulateGrad_->post_hooks()) {
       (*hook)(kEmptyOutput, inputGrads);
     }
-    return inputGrads[0];
+    return std::move(inputGrads[0]);
   }
 
  private:

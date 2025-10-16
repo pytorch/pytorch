@@ -64,7 +64,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
   // create sparse descriptor, dtype
   cusparseLtMatDescriptor_t sparse_input_descriptor;
   cudaDataType type;
-  auto compression_factor = 9;
 
   #ifdef USE_ROCM
   TORCH_CHECK(isHipSparseLtSupported());
@@ -73,7 +72,6 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
   switch (sparse_input.scalar_type()) {
     case at::ScalarType::Char:
       type = CUDA_R_8I;
-      compression_factor = 10;
       break;
     case at::ScalarType::Half:
       type = CUDA_R_16F;
@@ -89,17 +87,12 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602 && !defined(USE_ROCM)
     case at::ScalarType::Float8_e4m3fn:
       type = CUDA_R_8F_E4M3;
-      compression_factor = 10;
       break;
 #endif
     default:
       TORCH_CHECK(false, "Unsupported dtype for cuSPARSELt/hipSparseLt compressed matrix");
       break;
   }
-
-  // create a new compressed tensor with the same dtype as
-  auto compressed_tensor =
-      sparse_input.new_empty(sparse_input.numel() * compression_factor / 16);
 
   TORCH_CUDASPARSE_CHECK(cusparseLtStructuredDescriptorInit(
       &handle,
@@ -120,6 +113,15 @@ at::Tensor _cslt_compress(const Tensor& sparse_input) {
       &sparse_input_descriptor,
       &compressed_size,
       &compressed_buffer_size));
+
+  // create a new compressed tensor with the same dtype as the input,
+  // and with packed data/metadata stored in an array with original
+  // number of rows, and sufficient columns to provide compressed_size
+  // buffer (in bytes)
+  size_t orig_m = sparse_input.size(0);
+  size_t div = orig_m * sparse_input.itemsize();
+  size_t new_n = (compressed_size + div - 1) / div; // ceil(s,d) = (s+d-1)/d
+  auto compressed_tensor = sparse_input.new_empty({(int64_t)orig_m, (int64_t)new_n});
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto compressedBufferPtr = allocator.allocate(compressed_buffer_size);
@@ -153,7 +155,7 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     TORCH_CUDASPARSE_CHECK(cusparseLtInit(&handle));
     handle_initialized = true;
   }
-  // cupsarselt constructs
+  // cuSPARSELt constructs
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulPlan_t plan;
   cusparseLtMatmulAlgSelection_t alg_sel;
@@ -165,7 +167,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
   cudaDataType output_type;
   cudaDataType C_type;
   cusparseComputeType compute_type;
-  auto compression_factor = 9;
 
   #ifdef USE_ROCM
   TORCH_CHECK(isHipSparseLtSupported());
@@ -177,7 +178,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       output_type = CUDA_R_8I;
       C_type = CUDA_R_8I;
       compute_type = CUSPARSE_COMPUTE_32I;
-      compression_factor = 10;
       break;
 
 // cuSPARSELt v0.5.2 onwards changes CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUT_16F
@@ -210,7 +210,6 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
       output_type = CUDA_R_8F_E4M3;
       C_type = CUDA_R_16F;
       compute_type = CUSPARSE_COMPUTE_32F;
-      compression_factor = 10;
       break;
 #endif
 // cuSPARSELt <= v0.5.2 uses CUSPARSE_COMPUTE_TF32, CUSPARSE_COMPUTE_16F
@@ -300,9 +299,10 @@ std::tuple<at::Tensor, int64_t, int64_t, int64_t, int64_t> _cslt_sparse_mm_impl(
     }
   }
 
+  TORCH_INTERNAL_ASSERT(compressed_A.dim() == 2); // encoded M x S
   int64_t k = dense_B.size(0);
   int64_t n = dense_B.size(1);
-  int64_t m = (compressed_A.numel() * 16 / compression_factor) / k;
+  int64_t m = compressed_A.size(0);
 
   // initialize sparse descriptor
   cusparseLtMatDescriptor_t sparse_input_descriptor;

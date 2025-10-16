@@ -7,7 +7,7 @@ import operator
 from collections.abc import Generator
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, Callable, cast, Union
 
 import torch
 import torch.fx as fx
@@ -40,8 +40,8 @@ def move_block_before(block: list[fx.Node], target_node: fx.Node) -> None:
 def call_function(
     graph: fx.Graph,
     target: Union[str, Callable[..., Any]],
-    args: Optional[tuple[fx.node.Argument, ...]] = None,
-    kwargs: Optional[dict[str, fx.node.Argument]] = None,
+    args: tuple[fx.node.Argument, ...] | None = None,
+    kwargs: dict[str, fx.node.Argument] | None = None,
 ) -> fx.Node:
     # We accept target as a str to avoid typing error as the type of
     # a node.target is Union[str, Callable[..., Any]].
@@ -70,7 +70,7 @@ class CommBlock:
     outputs: OrderedSet[fx.Node]
 
 
-def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
+def get_comm_block(comm_node: fx.Node) -> CommBlock | None:
     """
     Given a collective node (e.g., allreduce), find out all the nodes belong to
     this communication.
@@ -150,7 +150,7 @@ def get_comm_block(comm_node: fx.Node) -> Optional[CommBlock]:
 def get_all_comm_blocks(
     graph: fx.Graph,
     comm_ops: tuple[torch._ops.OpOverload, ...],
-    comm_filter: Optional[Callable[..., bool]] = None,
+    comm_filter: Callable[..., bool] | None = None,
 ) -> list[CommBlock]:
     if comm_filter is None:
 
@@ -215,6 +215,7 @@ def _fuse_allreduce_by_concat(
 
     # Move the fused all_reduce and its args to right after the input node
     nodes_to_move = cat_inputs + [cat_node, div_node, fused_comm_node, fused_wait_node]
+    # pyrefly: ignore  # bad-argument-type
     move_block_after(nodes_to_move, last_input_node)
 
     return CommBlock(
@@ -307,6 +308,7 @@ def _scatter_fused_allreduce_waits(
     # in orig_comm_blocks. This index will be later used to determine what users
     # nodes need to be move to maintain a correct topological sort order.
     last_wait_node_idx = 0
+    # pyrefly: ignore  # bad-assignment
     for node in graph.nodes:
         last_wait_node_idx = max(
             node_indices.get(node, last_wait_node_idx), last_wait_node_idx
@@ -356,6 +358,7 @@ def _scatter_fused_allreduce_waits(
             user_node = nodes.popleft()
             if not isinstance(user_node, fx.Node):
                 continue
+            # pyrefly: ignore  # unsupported-operation
             if node_indices[user_node] < last_wait_node_idx:
                 incorrect_order_nodes.append(user_node)
                 nodes.extend(list(user_node.users))

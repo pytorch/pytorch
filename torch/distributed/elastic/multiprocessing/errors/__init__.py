@@ -54,11 +54,12 @@ import os
 import signal
 import socket
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.utils.logging import get_logger

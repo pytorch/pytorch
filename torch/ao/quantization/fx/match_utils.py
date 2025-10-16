@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import sys
-from collections.abc import Iterable
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Iterable
+from typing import Any, Optional
 
 import torch
 from torch.ao.quantization.qconfig import QConfigAny
@@ -51,7 +51,7 @@ def _is_match(modules, node, pattern, max_uses=sys.maxsize):
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
         if node.op != "call_module":
             return False
-        if not type_before_parametrizations(modules[node.target]) == self_match:
+        if type_before_parametrizations(modules[node.target]) != self_match:
             return False
     elif callable(self_match):
         if node.op != "call_function" or node.target is not self_match:
@@ -168,7 +168,7 @@ def _find_matches(
     for node in reversed(graph.nodes):
         if node.name not in match_map and node.name not in all_matched:
             for pattern, quantize_handler_cls in patterns.items():
-                root_node_getter = root_node_getter_mapping.get(pattern, None)
+                root_node_getter = root_node_getter_mapping.get(pattern)
                 if _is_match(modules, node, pattern) and node.name not in match_map:
                     matched_node_pattern: list[Node] = []
                     record_match(pattern, node, node, matched_node_pattern, match_map)

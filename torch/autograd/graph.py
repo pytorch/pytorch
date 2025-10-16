@@ -4,18 +4,24 @@ import functools
 import logging
 import threading
 from collections import defaultdict, deque
-from collections.abc import Generator, Iterable, Iterator, MutableMapping, Sequence
+from collections.abc import (
+    Callable,
+    Generator,
+    Iterable,
+    Iterator,
+    MutableMapping,
+    Sequence,
+)
 from typing import (
     Any,
-    Callable,
     cast,
     Literal,
     NamedTuple,
     Optional,
     TYPE_CHECKING,
+    TypeAlias,
     Union,
 )
-from typing_extensions import TypeAlias
 from weakref import WeakKeyDictionary, WeakValueDictionary
 
 import torch
@@ -223,6 +229,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
 
     # Note that output_nr default to 0 which is the right value
     # for the AccumulateGrad node.
+    # pyrefly: ignore  # bad-argument-type
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
 
 
@@ -525,6 +532,7 @@ def register_multi_grad_hook(
                     "expected this hook to be called inside a backward call"
                 )
                 count[id] = count.get(id, 0)
+                # pyrefly: ignore  # unsupported-operation
                 buffer[id] = buffer.get(id, [None] * len_tensors)
 
                 with lock:

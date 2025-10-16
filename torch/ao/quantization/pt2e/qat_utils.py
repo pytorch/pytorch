@@ -3,7 +3,8 @@ import copy
 import dataclasses
 import itertools
 import operator
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F

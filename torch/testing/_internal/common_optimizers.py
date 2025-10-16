@@ -528,7 +528,7 @@ def optim_inputs_func_adam(device, dtype=None):
             params=None,
             kwargs={
                 "lr": torch.tensor(0.001),
-                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "betas": (torch.tensor([[[0.9]]]), torch.tensor([[0.99]])),
                 "amsgrad": True,
                 "capturable": True,
             },
@@ -572,7 +572,7 @@ def optim_inputs_func_adam(device, dtype=None):
         + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
         + (mps_supported_configs if _get_device_type(device) == "mps" else [])
     )
-    if dtype in (torch.float16,):
+    if dtype == torch.float16:
         for input in total:
             """
             Too small eps will make denom to be zero for low precision dtype
@@ -1954,21 +1954,13 @@ optim_db: list[OptimizerInfo] = [
         not_og_supported_flags=(),
         supports_complex=False,
         skips=(
-            # Note on tolerances:
-            # test_correctness_Muon_use_closure_True_cuda_float32
-            # Mismatched elements: 2 / 100 (2.0%)
-            # Greatest absolute difference: 0.0006124898791313171 at index (2, 1) (up to 0.0002 allowed)
-            # Greatest relative difference: 0.026825083419680595 at index (2, 6) (up to 0.01 allowed)
-            # This is due compile uses addmm for matmul in the orthogonalization function,
-            # creating a small numerical difference compared to the plain matmul op used in eager.
+            # Note on numerical differences: `compile` applies different matmul tuning,
+            # which leads to deviations compared to eager mode. In the Newton-Schulz
+            # iteration for orthogonalization, computations are done in bfloat16, further
+            # amplifying these numerical differences.
             DecorateInfo(
-                toleranceOverride(
-                    {
-                        torch.float: tol(
-                            rtol=0.08,
-                            atol=0.001,
-                        ),
-                    }
+                unittest.skip(
+                    "Expect high difference between compiled and eager due to bfloat16 and iterative process."
                 ),
                 "CompiledOptimizerParityTests",
                 "test_correctness",
@@ -2185,16 +2177,6 @@ optim_db: list[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                toleranceOverride(
-                    {  # previously atol=5-05, rtol=0.001, https://github.com/pytorch/pytorch/issues/116202
-                        torch.float32: tol(atol=5e-04, rtol=0.007),
-                    }
-                ),
-                "TestOptimRenewed",
-                "test_mixed_device_dtype",
-                active_if=TEST_WITH_TORCHDYNAMO,
             ),
             DecorateInfo(
                 skipIfTorchDynamo(

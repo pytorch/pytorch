@@ -5,7 +5,7 @@ torchrun --standalone --nnodes=1 --nproc-per-node=4 comm_mode_features_example.p
 
 import argparse
 import os
-from typing import Callable, Union
+from typing import TYPE_CHECKING, Union
 
 import torch
 import torch.nn as nn
@@ -24,6 +24,10 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
 )
 from torch.utils.checkpoint import checkpoint
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def get_device_type() -> str:

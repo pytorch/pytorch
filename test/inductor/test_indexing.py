@@ -254,6 +254,46 @@ class TestIndexingSimplification(InductorTestCase):
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
 
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_floordiv_div_sympy_is_integer_bug(self):
+        def foo(arg0, arg1, arg2, arg3, arg4, sentinel):
+            t0 = arg0
+            t1 = t0.reshape((28, 24, 3, 127))
+            t2 = t1.var(dim=2)
+            t3 = arg1
+            t4 = arg2
+            t5 = torch.nn.functional.embedding(
+                torch.clamp(t3, 0, t4.size(0) - 1).to(torch.long), t4
+            )
+            t6 = arg3
+            t7 = torch.nn.functional.pad(t6, [0, 1], mode="constant", value=0.0)
+            t8 = arg4
+            t9 = t8.sum(dim=1)
+            t10 = torch.baddbmm(t5, t7, t9)
+            t11 = torch.cat([t2, t10], dim=0)
+            output = t11 + sentinel
+            return output
+
+        arg0 = torch.rand(
+            [36, 7112, 1, 1], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        arg1 = torch.randint(0, 512, [30, 24], dtype=torch.int64, device=GPU_TYPE)
+        arg2 = torch.rand(
+            [512, 127], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        arg3 = torch.rand(
+            [30, 24, 15], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        arg4 = torch.rand(
+            [30, 4, 16, 127], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        sentinel = torch.tensor(
+            0.0, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, sentinel)
+        out_compiled.sum().backward()
+
 
 class ExprPrinterTests(InductorTestCase):
     def test_print_pow(self):

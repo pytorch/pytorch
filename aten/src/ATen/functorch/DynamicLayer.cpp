@@ -465,11 +465,11 @@ static void dynamicLayerBack(const c10::OperatorHandle& op, torch::jit::Stack* s
 
 // used for functions that have aliasing operations but should be treated like they're out of place (i.e. lift_fresh)
 static void dynamicLayerBackGradSpecialCase(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  return dynamicLayerBack(op, stack, true);
+  dynamicLayerBack(op, stack, true);
 }
 
 static void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  return dynamicLayerBack(op, stack, false);
+  dynamicLayerBack(op, stack, false);
 }
 
 TORCH_LIBRARY_IMPL(_, FuncTorchDynamicLayerFrontMode, m) {

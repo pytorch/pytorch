@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import functools
 import typing_extensions
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch._dynamo as torchdynamo
@@ -35,6 +35,8 @@ from torch.fx._compatibility import compatibility
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
     from torch.fx import Node
 

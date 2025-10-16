@@ -267,6 +267,7 @@ def _get_or_create_constant(
     # float representation of complex numbers
     if isinstance(arg, complex):
         # Convert the complex number to a float
+        # pyrefly: ignore  # bad-assignment
         arg = (arg.real, arg.imag)
 
     if isinstance(arg, list):

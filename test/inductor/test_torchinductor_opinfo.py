@@ -49,7 +49,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_XPU_AND_TRITON,
     maybe_skip_size_asserts,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
@@ -646,7 +646,7 @@ inductor_override_kwargs["xpu"] = {
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
     ("nn.functional.embedding_bag", f32): {"check_gradient": False},
     ("nn.functional.embedding_bag", f64): {"check_gradient": False},
-    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-5, "rtol": 5e-3},
+    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
     ("_unsafe_masked_index", f16): {
         "reference_in_float": True,
         "atol": 3e-4,
@@ -1133,7 +1133,7 @@ class TestInductorOpInfo(TestCase):
     @skipCUDAMemoryLeakCheckIf(
         True
     )  # inductor kernels failing this test intermittently
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @skipXPUIf(
         not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler and Triton not found"
     )

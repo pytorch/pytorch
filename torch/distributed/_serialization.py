@@ -57,10 +57,13 @@ class _PseudoZipFile:
         for entry in entries:
             data = f.read(entry.length)
             if entry.is_storage:
-                storage = torch.frombuffer(
-                    data,
-                    dtype=torch.uint8,
-                ).untyped_storage()
+                if entry.length == 0:
+                    storage = torch.UntypedStorage(0)
+                else:
+                    storage = torch.frombuffer(
+                        data,
+                        dtype=torch.uint8,
+                    ).untyped_storage()
 
                 self.records[entry.key] = (
                     storage,

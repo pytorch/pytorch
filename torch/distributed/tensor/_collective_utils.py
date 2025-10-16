@@ -10,6 +10,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
 from torch._C._distributed_c10d import _resolve_process_group
 from torch._logging import warning_once
+from torch.distributed._local_tensor import local_tensor_mode
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
@@ -40,7 +41,7 @@ def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
 
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
-    if mesh.device_type == "cpu":
+    if mesh.device_type == "cpu" and local_tensor_mode() is None:
         # Gloo does not support alltoall, so falling back to allgather + chunk
         warning_once(
             logger,

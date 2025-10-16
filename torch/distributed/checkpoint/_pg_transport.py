@@ -1,11 +1,11 @@
 import logging
 import pickle
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Callable, cast, Optional, TypeVar, Union
+from typing import cast, Optional, TypeVar, Union
 
 import torch
 from torch.distributed import ProcessGroup, Work
@@ -227,6 +227,7 @@ class PGTransport:
         self._work: list[Work] = []
         self._pg = pg
         self._timeout = timeout
+        # pyrefly: ignore  # read-only
         self._device = device
         self._state_dict = state_dict
 

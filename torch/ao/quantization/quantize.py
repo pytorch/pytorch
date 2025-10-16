@@ -237,7 +237,7 @@ def _add_observer_(
 
     for name, child in module.named_children():
         # TODO remove Dropout special after codebase stable
-        if type_before_parametrizations(child) in [nn.Dropout]:
+        if type_before_parametrizations(child) is nn.Dropout:
             continue
         elif issubclass(
             type_before_parametrizations(child), (nnq.FloatFunctional, nnq.QFunctional)

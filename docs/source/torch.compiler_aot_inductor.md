@@ -2,11 +2,6 @@
 
 # AOTInductor: Ahead-Of-Time Compilation for Torch.Export-ed Models
 
-```{warning}
-AOTInductor and its related features are in prototype status and are
-subject to backwards compatibility breaking changes.
-```
-
 AOTInductor is a specialized version of
 [TorchInductor](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747),
 designed to process exported PyTorch models, optimize them, and produce shared libraries as well
@@ -73,6 +68,10 @@ with torch.no_grad():
         # [Optional] Specify the generated shared library path. If not specified,
         # the generated artifact is stored in your system temp directory.
         package_path=os.path.join(os.getcwd(), "model.pt2"),
+        # [Optional] Specify Inductor configs
+        # This specific max_autotune option will turn on more extensive kernel autotuning for
+        # better performance.
+        inductor_configs={"max_autotune": True,},
     )
 ```
 

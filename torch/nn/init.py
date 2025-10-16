@@ -2,7 +2,8 @@
 
 import math
 import warnings
-from typing import Callable, Literal, Optional as _Optional, TypeVar, Union
+from collections.abc import Callable
+from typing import Literal, Optional as _Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -499,6 +500,7 @@ def xavier_normal_(
 
 
 def _calculate_correct_fan(tensor: Tensor, mode: _FanMode) -> int:
+    # pyrefly: ignore  # bad-assignment
     mode = mode.lower()
     valid_modes = ["fan_in", "fan_out"]
     if mode not in valid_modes:
@@ -704,7 +706,7 @@ def sparse_(
         raise ValueError("Only tensors with 2 dimensions are supported")
 
     rows, cols = tensor.shape
-    num_zeros = int(math.ceil(sparsity * rows))
+    num_zeros = math.ceil(sparsity * rows)
 
     with torch.no_grad():
         tensor.normal_(0, std, generator=generator)

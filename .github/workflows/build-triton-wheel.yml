@@ -50,12 +50,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
         device: ["cuda", "rocm", "xpu", "aarch64"]
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
           - device: "rocm"
-            rocm_version: "6.4"
+            rocm_version: "7.0"
             runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
           - device: "cuda"
             rocm_version: ""
@@ -108,9 +108,6 @@ jobs:
 
           # Determine python executable for given version
           case $PY_VERS in
-          3.9)
-            PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
-            ;;
           3.10)
             PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
             ;;
@@ -194,7 +191,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
         device: ["xpu"]
     timeout-minutes: 40
     env:

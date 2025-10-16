@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
+from collections.abc import Callable
 
 import torch
 import torch._dynamo
@@ -14,6 +15,7 @@ _warned_tensor_cores = False
 _default_float_32_precision = torch.get_float32_matmul_precision()
 
 try:
+
     from tabulate import tabulate
 
     HAS_TABULATE = True
@@ -168,6 +170,7 @@ if HAS_TABULATE:
                             _disable_tensor_cores()
                             table.append([
                                 ("Training" if optimizer else "Inference"),
+                                # pyrefly: ignore  # redundant-condition
                                 backend if backend else "-",
                                 mode if mode is not None else "-",
                                 f"{compilation_time} ms " if compilation_time else "-",
@@ -188,4 +191,5 @@ if HAS_TABULATE:
                     ])
 
 
+        # pyrefly: ignore  # not-callable
         return tabulate(table, headers=field_names, tablefmt="github")

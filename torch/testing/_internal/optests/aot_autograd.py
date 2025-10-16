@@ -64,7 +64,13 @@ def aot_autograd_check(
         return func(*c_args, **c_kwargs)
 
     compiled_f = compiled_function(
-        func_no_tensors, nop, nop, dynamic=dynamic, partition_fn=min_cut_rematerialization_partition)
+        func_no_tensors,
+        nop,
+        nop,
+        dynamic=dynamic,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True
+    )
 
     out = wrapper_set_seed(func_no_tensors, args)
     if check_gradients == "auto":

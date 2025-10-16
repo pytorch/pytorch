@@ -10,7 +10,6 @@
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
-#include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -68,29 +67,6 @@ c10::MaybeOwned<Tensor> prepare_dense_matrix_for_cusparse(
   }
 }
 
-// This function is used for old CUDA Toolkit versions that doesn't support new cuSPARSE Generic API
-void addmm_out_legacy(
-    const at::sparse_csr::SparseCsrTensor& mat1,
-    const Tensor& mat2,
-    const Scalar& beta,
-    const Scalar& alpha,
-    const Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
-  auto nnz = mat1._nnz();
-  auto m = mat1.size(0);
-  auto k = mat1.size(1);
-  auto n = mat2.size(1);
-  auto crow_indices = mat1.crow_indices().to(kInt);
-  auto col_indices = mat1.col_indices().to(kInt);
-  auto values = mat1.values();
-  auto mat2_ = at::native::expect_resolved_conj(mat2);
-  auto result_ = at::native::expect_resolved_conj(result);
-  at::native::s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, result, beta, *result_, alpha, crow_indices, col_indices, values, *mat2_);
-  if (!result.is_same(*result_)) {
-    result.copy_(*result_);
-  }
-}
-
 c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_cusparse(
     const Tensor& tensor) {
   if (tensor.is_non_overlapping_and_dense()) {
@@ -115,15 +91,6 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
       input.col_indices().resize_({nnz}),
       input.values().resize_({nnz}),
       input.sizes());
-}
-
-void inline bsrsv2_bsrsm2_may_need_to_sync() {
-#if defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11703
-  // cusparse bsrsv2 and bsrsm2 have a synchronization issue that may cause illegal memory access in cuda <= 11.6.x
-  // See https://github.com/pytorch/pytorch/issues/71297
-  ::c10::cuda::device_synchronize();
-#endif
-  // else: do nothing!
 }
 
 void block_sparse_triangular_solve_vec(
@@ -246,7 +213,6 @@ void block_sparse_triangular_solve_vec(
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
 
-        bsrsv2_bsrsm2_may_need_to_sync();
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
@@ -387,7 +353,6 @@ void block_sparse_triangular_solve_mat(
             CUSPARSE_SOLVE_POLICY_NO_LEVEL,
             work_data.get());
 
-        bsrsv2_bsrsm2_may_need_to_sync();
       });
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
@@ -582,9 +547,6 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
-  addmm_out_legacy(mat1, mat2, beta, alpha, result);
-#else
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);
   c10::MaybeOwned<Tensor> mat2_ = prepare_dense_matrix_for_cusparse(mat2);
 
@@ -683,7 +645,6 @@ void spmm(
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
-#endif // !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
 }
 
 void spgemm(
@@ -692,12 +653,6 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-  // older versions of cusparse on Windows segfault for complex128 dtype
-#if defined(_WIN32) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11400
-  TORCH_CHECK(
-      !(A.scalar_type() == ScalarType::ComplexDouble),
-      "Sparse multiplication with complex128 dtype inputs is not supported with current CUDA version. Please upgrade to CUDA Toolkit 11.2.1+");
-#endif
 
   IntArrayRef A_sizes = A.sizes();
   auto ndim = A.dim();
@@ -855,7 +810,8 @@ void addmm_out_sparse_csr(
   if (mat1.layout() == kSparseBsr) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided)
-        return block_sparse_mm(input, mat1, mat2, beta, alpha, result);
+         { block_sparse_mm(input, mat1, mat2, beta, alpha, result); return;
+}
     }
   }
 
@@ -864,13 +820,13 @@ void addmm_out_sparse_csr(
       if (result.layout() == kStrided) {
         auto result_t = result.transpose(-2, -1);
         auto input_t = (result.is_same(input) ? result_t : input.transpose(-2, -1));
-        return block_sparse_mm(
+        block_sparse_mm(
             input_t,
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result_t);
+            result_t); return;
       }
     }
   }
@@ -885,41 +841,41 @@ void addmm_out_sparse_csr(
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kStrided) {
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spmm(
+        spmm(
             mat2.transpose(0, 1).to_sparse_csr(),
             mat1.transpose(0, 1),
             beta,
             alpha,
-            result.transpose(0, 1));
+            result.transpose(0, 1)); return;
       }
     }
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kStrided) {
-        return spmm(
+        spmm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result.transpose(-2, -1));
+            result.transpose(-2, -1)); return;
       }
     }
   }
   if (mat1.layout() == kSparseCsr) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
-        return spmm(mat1, mat2, beta, alpha, result);
+        spmm(mat1, mat2, beta, alpha, result); return;
       }
     }
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr) {
-        return spgemm(mat1, mat2, beta, alpha, result);
+        spgemm(mat1, mat2, beta, alpha, result); return;
       }
     }
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
         // TODO: Add native CSC support via cuSPARSE if supported.
         // CSR @ CSC kernel would be very fast due to format alignment
-        return spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result);
+        spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result); return;
       }
     }
   }
@@ -927,27 +883,28 @@ void addmm_out_sparse_csr(
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+        spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result); return;
       }
     }
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr)
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+         { spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result); return;
+}
     }
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
         // TODO: Add native CSC support via cuSPARSE if supported.
-        return spgemm(
-            mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
+        spgemm(
+            mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result); return;
       }
       if (result.layout() == kSparseCsc) {
-        return spgemm(
+        spgemm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
             alpha,
-            result.transpose(-2, -1));
+            result.transpose(-2, -1)); return;
       }
     }
   }
@@ -978,15 +935,8 @@ void addmv_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result) {
   if (mat.layout() == kSparseBsr) {
-    return block_sparse_mv(mat, vec, beta, alpha, result);
+    block_sparse_mv(mat, vec, beta, alpha, result); return;
   }
-#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
-  TORCH_CHECK(
-      false,
-      "Calling addmv on a sparse GPU tensor requires compiling ",
-      "PyTorch with CUDA 10.2+ (CUDA 11+ on Windows). ",
-      "Please use PyTorch built with newer CUDA version.");
-#else
   cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
   c10::MaybeOwned<Tensor> result_ = prepare_dense_vector_for_cusparse(result);
@@ -997,11 +947,10 @@ void addmv_out_sparse_csr(
   auto descX = at::cuda::sparse::CuSparseDnVecDescriptor(*vec_);
   auto descY = at::cuda::sparse::CuSparseDnVecDescriptor(*result_);
 
-  // cusparseSpMVAlg_t was updated in cuda 11.2.1 (cusparse 11.4.0)
-#if CUSPARSE_VERSION >= 11400
-  cusparseSpMVAlg_t alg = CUSPARSE_SPMV_ALG_DEFAULT;
-#else
+#ifdef USE_ROCM
   cusparseSpMVAlg_t alg = CUSPARSE_MV_ALG_DEFAULT;
+#else
+  cusparseSpMVAlg_t alg = CUSPARSE_SPMV_ALG_DEFAULT;
 #endif
 
   // SpMV doesn't support uniform precision computation
@@ -1054,7 +1003,6 @@ void addmv_out_sparse_csr(
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
-#endif // !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
 }
 
 /*
@@ -1267,17 +1215,13 @@ void triangular_solve_out_sparse_csr(
   }
   if (A.layout() == kSparseBsr) {
     if (B.size(-1) == 1) {
-      return block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular);
+      block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular); return;
     } else {
-      return block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular);
+      block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular); return;
     }
   }
-#if !AT_USE_CUSPARSE_GENERIC_SPSV()
-  TORCH_CHECK(
-      false,
-      "Calling triangular solve on a sparse GPU tensor requires compiling ",
-      "PyTorch with at least CUDA 11.3. ",
-      "Please use PyTorch built with newer CUDA version.");
+#ifdef USE_ROCM
+  TORCH_CHECK(false, "ROCm is not supported");
 #else
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
   // It should be possible to use mixed memory format
@@ -1344,13 +1288,6 @@ void triangular_solve_out_sparse_csr(
               desc_spsv.descriptor()));
         });
   } else {
-#if !AT_USE_CUSPARSE_GENERIC_SPSM()
-    TORCH_CHECK(
-        false,
-        "Calling triangular solve on a sparse GPU tensor requires compiling ",
-        "PyTorch with at least CUDA 11.3.1. ",
-        "Please use PyTorch built with newer CUDA version.");
-#else
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
         X.scalar_type(), "triangular_solve_out_sparse_csr_cuda_impl", [&] {
           scalar_t alpha = 1;
@@ -1404,12 +1341,11 @@ void triangular_solve_out_sparse_csr(
               CUSPARSE_SPSM_ALG_DEFAULT,
               desc_spsm.descriptor()));
         });
-#endif // !AT_USE_CUSPARSE_GENERIC_SPSM()
   }
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
-#endif // !AT_USE_CUSPARSE_GENERIC_SPSV()
+#endif
 }
 
 void sampled_addmm_out_sparse_csr(
@@ -1418,13 +1354,6 @@ void sampled_addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if !(AT_USE_CUSPARSE_GENERIC_SDDMM() || AT_USE_HIPSPARSE_GENERIC_API())
-  TORCH_CHECK(
-      false,
-      "Calling sampled_addmm with sparse GPU tensors requires compiling ",
-      "PyTorch with CUDA 11.2.1+. ",
-      "Please use PyTorch built with newer CUDA version.");
-#else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == Layout::Strided);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(B.layout() == Layout::Strided);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C.is_sparse_csr());
@@ -1499,7 +1428,6 @@ void sampled_addmm_out_sparse_csr(
               buffer.get()));
         }
       });
-#endif
 }
 
 } // namespace at::native::sparse::impl::cuda

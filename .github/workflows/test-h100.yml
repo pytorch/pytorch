@@ -61,3 +61,15 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.test-matrix }}
     secrets: inherit
+
+  linux-jammy-cuda12_8-py3_10-gcc11-sm90-FA3-ABI-stable-test:
+    name: linux-jammy-cuda12_8-py3_10-gcc11-sm90-FA3-ABI-stable-test
+    uses: ./.github/workflows/_linux-test-stable-fa3.yml
+    needs:
+      - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
+      timeout-minutes: 30
+      s3-bucket: gha-artifacts
+    secrets: inherit

@@ -7,14 +7,14 @@ except ImportError:
     import test_unflatten  # @manual=fbcode//caffe2/test:test_export-library
     import testing  # @manual=fbcode//caffe2/test:test_export-library
 
-from torch.export import export_for_training
+from torch.export import export
 
 
 test_classes = {}
 
 
 def mocked_training_ir_export(*args, **kwargs):
-    return export_for_training(*args, **kwargs, strict=True)
+    return export(*args, **kwargs, strict=True)
 
 
 def make_dynamic_cls(cls):

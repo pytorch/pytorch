@@ -166,6 +166,10 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
+  virtual bool supportsBFloat16RNNWithCuDNN() const {
+    return false;
+  }
+
   virtual long versionCuDNN() const {
     TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }

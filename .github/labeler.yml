@@ -130,3 +130,6 @@
 - torch/csrc/inductor/aoti_include/**
 - torchgen/aoti/**
 - torchgen/gen_aoti_c_shim.py
+
+"ciflow/vllm":
+- .github/ci_commit_pins/vllm.txt

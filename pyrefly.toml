@@ -1,3 +1,5 @@
+# A Pyrefly configuration for PyTorch
+# Based on https://github.com/pytorch/pytorch/blob/main/mypy.ini
 project-includes = [
     "torch",
     "caffe2",
@@ -5,13 +7,47 @@ project-includes = [
     "test/test_bundled_inputs.py",
     "test/test_complex.py",
     "test/test_datapipe.py",
-    "test/test_futures.py",
+    # "test/test_futures.py", # uncomment when enabling pyrefly
     "test/test_numpy_interop.py",
+    # We exclude test_torch.py because it is full of errors, but most functions lack type signatures,
+    # and mypy.ini specifies `check_untyped_defs = False` for this file.
+    # If you check even the unannotated stuff mypy produces 322 errors.
+    # "test/test_torch.py",
     "test/test_type_hints.py",
     "test/test_type_info.py",
-    "test/test_utils.py",
+    # "test/test_utils.py", # uncomment when enabling pyrefly
 ]
 project-excludes = [
+  # ==== below will be enabled directory by directory ====
+  # ==== to test Pyrefly on a specific directory, simply comment it out ====
+  "torch/_inductor/runtime",
+  "torch/_inductor/codegen",
+  # formatting issues, will turn on after adjusting where suppressions can be
+  # in import statements
+  "torch/linalg/__init__.py",
+  "torch/package/importer.py",
+  "torch/package/_package_pickler.py",
+  "torch/jit/annotations.py",
+  "torch/utils/data/datapipes/_typing.py",
+  "torch/nn/functional.py",
+  "torch/_export/utils.py",
+  "torch/fx/experimental/unification/multipledispatch/__init__.py",
+  "torch/nn/modules/__init__.py",
+  "torch/nn/modules/rnn.py", # only remove when parsing errors are fixed
+  "torch/_inductor/codecache.py",
+  "torch/distributed/elastic/metrics/__init__.py",
+  # ====
+  "benchmarks/instruction_counts/main.py",
+  "benchmarks/instruction_counts/definitions/setup.py",
+  "benchmarks/instruction_counts/applications/ci.py",
+  "benchmarks/instruction_counts/core/api.py",
+  "benchmarks/instruction_counts/core/expand.py",
+  "benchmarks/instruction_counts/core/types.py",
+  "benchmarks/instruction_counts/core/utils.py",
+  "benchmarks/instruction_counts/definitions/standard.py",
+  "benchmarks/instruction_counts/definitions/setup.py",
+  "benchmarks/instruction_counts/execution/runner.py",
+  "benchmarks/instruction_counts/execution/work.py",
   "torch/include/**",
   "torch/csrc/**",
   "torch/distributed/elastic/agent/server/api.py",
@@ -81,19 +117,20 @@ ignore-missing-imports = [
     "onnx.*",
     "onnxruntime.*",
     "onnxscript.*",
-    "redis.*"
+    "redis.*",
 ]
-
-untyped_def_behavior = "check-and-infer-return-any"
-
-# Shut off noisy errors
+# By default, mypy does not check untyped definitions.
+# However, mypy has a configuration called check_untyped_defs which is used
+# to typecheck the interior of untyped functions.
+untyped-def-behavior = "check-and-infer-return-any"
+# In lots of places they define their attributes in `_init` or similar.
+# https://github.com/pytorch/pytorch/blob/75f3e5a88df60caef27fd9c9df3fd51161378fcc/torch/fx/experimental/symbolic_shapes.py#L3632C1-L3633C1
+errors.implicitly-defined-attribute = false
+# In many methods that are overridden, parameters are renamed.
+# We can come up with a codemod for this in the future
+errors.bad-param-name-override = false
+# Mypy doesn't require that imports are explicitly imported, so be compatible with that.
+# Might be a good idea to turn this on in future.
 errors.implicit-import = false
-
-# We exclude test_torch.py because it is full of errors, but most functions lack type signatures,
-# and mypy.ini specifies `check_untyped_defs = False` for this file.
-# If you check even the unannotated stuff mypy produces 322 errors.
-# "test/test_torch.py",
-# Uncomment this file to check
-# [[tool.pyrefly.sub-config]]
-# matches = "test/test_torch.py"
-# untyped-def-behavior = "skip-and-infer-return-any"
+permissive-ignores = true
+replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*"]

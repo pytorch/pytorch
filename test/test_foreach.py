@@ -38,7 +38,6 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     parametrize,
     run_tests,
-    skipIfRocmVersionLessThan,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
@@ -196,7 +195,6 @@ class TestForeach(TestCase):
                         zero_size=True,
                     )
 
-    @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db
         + foreach_binary_op_db

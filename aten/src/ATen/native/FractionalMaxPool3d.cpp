@@ -67,13 +67,13 @@ TORCH_PRECOMPUTE_META_FUNC(fractional_max_pool3d)(
   int64_t inputH = input_.size(heightDim);
   int64_t inputW = input_.size(widthDim);
 
-  TORCH_CHECK(outputT + poolSizeT - 1 < inputT,
+  TORCH_CHECK((poolSizeT <= inputT) && (outputT + poolSizeT - 1 < inputT),
            "fractional_max_pool3d_out(): pool time ", poolSizeT,
            " too large relative to input time ", inputT);
-  TORCH_CHECK(outputW + poolSizeW - 1 < inputW,
+  TORCH_CHECK((poolSizeW <= inputW) && (outputW + poolSizeW - 1 < inputW),
            "fractional_max_pool3d_out(): pool width ", poolSizeW,
            " too large relative to input width ", inputW);
-  TORCH_CHECK(outputH + poolSizeH - 1 < inputH,
+  TORCH_CHECK((poolSizeH <= inputH) && (outputH + poolSizeH - 1 < inputH),
            "fractional_max_pool3d_out(): pool height ", poolSizeH,
            " too large relative to input height ", inputH);
 
@@ -99,7 +99,7 @@ namespace at::native {
 namespace {
 
 template<typename scalar_t>
-static void fractional_max_pool3d_out_single_batch_frame(
+void fractional_max_pool3d_out_single_batch_frame(
   const scalar_t* input,
   scalar_t* output,
   int64_t* indices,
@@ -169,7 +169,7 @@ static void fractional_max_pool3d_out_single_batch_frame(
 }
 
 template<typename scalar_t>
-static void fractional_max_pool3d_out_frame(
+void fractional_max_pool3d_out_frame(
   const scalar_t* input,
   scalar_t* output,
   int64_t* indices,
@@ -257,7 +257,7 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cpu)(
 namespace {
 
 template<typename scalar_t>
-static void fractional_max_pool3d_backward_out_single_batch_frame(
+void fractional_max_pool3d_backward_out_single_batch_frame(
   scalar_t* gradInput,
   const scalar_t* gradOutput,
   const int64_t* indices,
@@ -287,7 +287,7 @@ static void fractional_max_pool3d_backward_out_single_batch_frame(
 }
 
 template<typename scalar_t>
-static void fractional_max_pool3d_backward_out_frame(
+void fractional_max_pool3d_backward_out_frame(
   scalar_t* gradInput,
   const scalar_t* gradOutput,
   const int64_t* indices,

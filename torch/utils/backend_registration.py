@@ -6,7 +6,10 @@ from torch._C import _get_privateuse1_backend_name, _rename_privateuse1_backend
 from torch.overrides import handle_torch_function, has_torch_function_unary
 
 
-__all__ = ["rename_privateuse1_backend", "generate_methods_for_privateuse1_backend"]
+__all__ = [
+    "rename_privateuse1_backend",
+    "generate_methods_for_privateuse1_backend",
+]
 
 # TODO: Should use `torch._C._get_privateuse1_backend_name()` to get
 # renamed-backend name for `privateuse1`, but the func will cause an
@@ -199,6 +202,7 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
         Args:
             device (int, optional): if specified, all parameters will be copied to that device
         """
+        # pyrefly: ignore  # missing-attribute
         return self._apply(lambda t: getattr(t, custom_backend_name)(device))
 
     _check_register_once(torch.nn.Module, custom_backend_name)
@@ -430,11 +434,86 @@ def _get_custom_mod_func(func_name: str):
         f"func_name must be `str`, but got `{type(func_name)}`."
     )
     backend_name = _get_privateuse1_backend_name()
-    custom_device_mod = getattr(torch, backend_name, None)  # type: ignore[arg-type]
-    function = getattr(custom_device_mod, func_name, None)  # type: ignore[arg-type]
+    custom_device_mod = getattr(torch, backend_name, None)
+    function = getattr(custom_device_mod, func_name, None)
     if custom_device_mod is None or function is None:
         message = f"Try to call torch.{backend_name}.{func_name}. The backend must register a custom backend "
         message += f"module with `torch._register_device_module('{backend_name}', BackendModule)`. And "
         message += f"BackendModule needs to have the following API's:\n `{func_name}(*args, **kwargs)`. \n"
         raise RuntimeError(message)
     return function
+
+
+class _DummyBackendModule:
+    def is_initialized(self):
+        return True
+
+    def is_available(self):
+        return True
+
+    def current_device(self):
+        return 0
+
+    def _is_in_bad_fork(self):
+        return False
+
+    def manual_seed_all(self, seed: int):
+        pass
+
+    def device_count(self):
+        return 1
+
+
+class _DummyPrivateUse1Hook(torch._C._acc.PrivateUse1Hooks):
+    def is_available(self):
+        return True
+
+    def has_primary_context(self, dev_id):
+        return True
+
+    def is_built(self):
+        return True
+
+
+class _DummyDeviceGuard(torch._C._acc.DeviceGuard):
+    def type_(self):
+        return torch._C._autograd.DeviceType.PrivateUse1
+
+
+def _setup_privateuseone_for_python_backend(
+    rename=None, backend_module=None, hook=None, device_guard=None
+):
+    """This function will prepare the PrivateUse1 dispatch key to be used as a python backend.
+
+    WARNING: this API is experimental and might change without notice.
+
+    Formally, this registers things that Pytorch expects a registered backend
+    in C++ to have: including device guards, hooks, and backend modules and what not.
+
+    after this call, one can use `torch.library` to write Ops for this dispatch key
+    and expect it to behave like a backend registered in C++.
+
+    See the unit test at test/test_privateuseone_python_backend.py for more details.
+
+    Args:
+        rename: str | None, if passed in, we will rename privateuseone backend to
+           the name given.
+        backend_module: object | None, if passed in None, we will use DummyBackendModule
+        hook: object | None, if passed in None, we will use DummyPrivateUse1Hook
+        device_guard: object | None, if passed in None, we will use DummyDeviceGuard
+    """
+    # NOTE: the ordering of which these functions are called is important.
+    if rename is not None:
+        torch.utils.rename_privateuse1_backend(rename)
+    else:
+        rename = "privateuseone"
+    torch.utils.generate_methods_for_privateuse1_backend()
+    if backend_module is None:
+        backend_module = _DummyBackendModule()
+    if hook is None:
+        hook = _DummyPrivateUse1Hook()
+    if device_guard is None:
+        device_guard = _DummyDeviceGuard()
+    torch._register_device_module(rename, backend_module)
+    torch._C._acc.register_python_privateuseone_hook(hook)
+    torch._C._acc.register_python_privateuseone_device_guard(device_guard)

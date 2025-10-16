@@ -365,7 +365,7 @@ def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs)
         for mask in _generate_masked_op_mask(
             sample_input.input.shape, device, **kwargs
         ):
-            if type(mask) != torch.Tensor:
+            if type(mask) is not torch.Tensor:
                 continue
             sample_input_args, sample_input_kwargs = (
                 sample_input.args,

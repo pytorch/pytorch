@@ -91,7 +91,7 @@ C10_CUDA_API void c10_cuda_check_implementation(
     const int32_t err,
     const char* filename,
     const char* function_name,
-    const int line_number,
+    const uint32_t line_number,
     const bool include_device_assertions);
 
 } // namespace c10::cuda

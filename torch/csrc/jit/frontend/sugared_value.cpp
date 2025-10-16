@@ -867,7 +867,7 @@ std::shared_ptr<SugaredValue> TorchCheckValue::call(
     }
   }
 
-  if (args.size() >= 1) {
+  if (!args.empty()) {
     if (found_cond_kwarg) {
       throw(
           ErrorReport(loc)

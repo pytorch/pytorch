@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -40,6 +40,8 @@ from .contract import _get_registry, contract
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.distributed.tensor import Shard
 
 
@@ -98,6 +100,7 @@ class _ReplicateState(FSDPState):
         for module in modules:
             _insert_module_state(module, self)
         self._modules = modules
+        # pyrefly: ignore  # read-only
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
@@ -148,6 +151,7 @@ class _ReplicateState(FSDPState):
                     )
                 state._is_root = False
             self._state_ctx.all_states.append(state)
+            # pyrefly: ignore  # bad-argument-type
             visited_states.add(state)
         if self._fsdp_param_group and self._auto_reshard_after_forward:
             # For the root, do not reshard after forward since for training,
@@ -224,10 +228,10 @@ def replicate_impl(
     # Place Replicate leftmost for highest priority in the method resolution order
     for module in modules:
         cls = module.__class__
-        new_cls = cls_to_replicate_cls.get(cls, None)
+        new_cls = cls_to_replicate_cls.get(cls)
         if not new_cls:
             dct = {"__deepcopy__": _unimplemented_deepcopy}
-            new_cls = type(f"Replicate{cls.__name__}", (FSDPModule, cls), dct)
+            new_cls = type(f"Replicate{cls.__name__}", (ReplicateModule, cls), dct)
             cls_to_replicate_cls[cls] = new_cls
         module.__class__ = new_cls
     return arg_module
@@ -267,6 +271,20 @@ def replicate(
 
     module = replicate_impl(module, mesh=device_mesh, **kwargs)
     return module
+
+
+class ReplicateModule(FSDPModule):
+    def __new__(cls, *args, **kwargs):
+        """
+        Override ``__new__`` to remove the FSDP class and directly construct
+        the original class for cases like indexing into a container module.
+        """
+        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
+        # and index 1 is the `FSDPModule` class itself
+        orig_cls = cls.__mro__[3]
+        self = orig_cls.__new__(orig_cls, *args, **kwargs)
+        self.__init__(*args, **kwargs)
+        return self
 
 
 def _get_managed_modules(

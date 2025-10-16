@@ -4,7 +4,6 @@
 
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/OpMathType.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
@@ -407,7 +406,7 @@ scalar_t cubic_convolution2(scalar_t x, scalar_t A) {
 }
 
 template <typename scalar_t>
-void get_cubic_upsample_coefficients(
+static inline void get_cubic_upsample_coefficients(
     scalar_t coeffs[4],
     scalar_t t) {
   scalar_t A = -0.75;

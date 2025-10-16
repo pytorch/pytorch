@@ -11,7 +11,7 @@
 #include <string>
 
 PyObject* THPQScheme_New(at::QScheme qscheme, const std::string& name) {
-  auto type = (PyTypeObject*)&THPQSchemeType;
+  auto type = &THPQSchemeType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();

@@ -73,7 +73,6 @@ TESTS = discover_tests(
     cpp_tests_dir=CPP_TESTS_DIR,
     blocklisted_patterns=[
         "ao",
-        "bottleneck_test",
         "custom_backend",
         "custom_operator",
         "fx",  # executed by test_fx.py
@@ -83,6 +82,7 @@ TESTS = discover_tests(
         "package",  # executed by test_package.py
         "quantization",  # executed by test_quantization.py
         "autograd",  # executed by test_autograd.py
+        "cpp_extensions/open_registration_extension/torch_openreg/tests",  # executed by test_openreg.py
     ],
     blocklisted_tests=[
         "test_bundled_images",
@@ -138,6 +138,7 @@ TESTS = discover_tests(
         "doctests",
         "test_autoload_enable",
         "test_autoload_disable",
+        "test_openreg",
     ],
 )
 

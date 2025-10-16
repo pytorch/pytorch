@@ -175,9 +175,10 @@ class TestRaise(__TestCase):
         self.assertRaises(StopIteration, lambda: next(g))
 
     def test_erroneous_exception(self):
-        class MyException(Exception):
-            def __init__(self):
-                raise RuntimeError()
+        with torch._dynamo.error_on_graph_break(False):
+            class MyException(Exception):
+                def __init__(self):
+                    raise RuntimeError()
 
         try:
             raise MyException
@@ -188,9 +189,10 @@ class TestRaise(__TestCase):
 
     def test_new_returns_invalid_instance(self):
         # See issue #11627.
-        class MyException(Exception):
-            def __new__(cls, *args):
-                return object()
+        with torch._dynamo.error_on_graph_break(False):
+            class MyException(Exception):
+                def __new__(cls, *args):
+                    return object()
 
         with self.assertRaises(TypeError):
             raise MyException
@@ -241,10 +243,11 @@ class TestCause(__TestCase):
             self.fail("No exception raised")
 
     def test_class_cause_nonexception_result(self):
-        class ConstructsNone(BaseException):
-            @classmethod
-            def __new__(*args, **kwargs):
-                return None
+        with torch._dynamo.error_on_graph_break(False):
+            class ConstructsNone(BaseException):
+                @classmethod
+                def __new__(*args, **kwargs):
+                    return None
         try:
             raise IndexError from ConstructsNone
         except TypeError as e:
@@ -264,9 +267,10 @@ class TestCause(__TestCase):
             self.fail("No exception raised")
 
     def test_erroneous_cause(self):
-        class MyException(Exception):
-            def __init__(self):
-                raise RuntimeError()
+        with torch._dynamo.error_on_graph_break(False):
+            class MyException(Exception):
+                def __init__(self):
+                    raise RuntimeError()
 
         try:
             raise IndexError from MyException
@@ -447,11 +451,12 @@ class TestContext(__TestCase):
             self.fail("No exception raised")
 
     def test_context_manager(self):
-        class ContextManager:
-            def __enter__(self):
-                pass
-            def __exit__(self, t, v, tb):
-                xyzzy
+        with torch._dynamo.error_on_graph_break(False):
+            class ContextManager:
+                def __enter__(self):
+                    pass
+                def __exit__(self, t, v, tb):
+                    xyzzy
         try:
             with ContextManager():
                 1/0
@@ -526,12 +531,13 @@ class TestContext(__TestCase):
         import gc
         # A re-raised exception in a __del__ caused the __context__
         # to be cleared
-        class C:
-            def __del__(self):
-                try:
-                    1/0
-                except:
-                    raise
+        with torch._dynamo.error_on_graph_break(False):
+            class C:
+                def __del__(self):
+                    try:
+                        1/0
+                    except:
+                        raise
 
         def f():
             x = C()

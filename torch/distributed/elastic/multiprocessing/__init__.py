@@ -63,7 +63,8 @@ was launched a :class:`api.SubprocessContext` is returned. Both are specific
 implementations of the parent :class:`api.PContext` class.
 """
 
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 
 from torch.distributed.elastic.multiprocessing.api import (  # noqa: F401
     _validate_full_rank,

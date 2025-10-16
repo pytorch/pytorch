@@ -178,6 +178,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   FallbackPair device_fallback_;
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
+  std::string metadata_json_;
 };
 
 template <>
@@ -368,7 +369,8 @@ struct ExtraFields<EventType::Kineto> {
   uint64_t correlation_id_{0};
   libkineto::ActivityType activity_type_;
   Flow flow;
-  std::weak_ptr<Result> linked_activity_{};
+  std::weak_ptr<Result> linked_activity_;
+  std::string metadata_json_;
 };
 
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {
@@ -445,7 +447,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
         extra_fields_{std::move(extra_fields)} {}
 
   template <EventType E>
-  static EventType deduceTag(const ExtraFields<E>&) {
+  static EventType deduceTag(const ExtraFields<E>& /*unused*/) {
     return E;
   }
 };
@@ -687,21 +689,22 @@ class TORCH_API RecordQueue {
 };
 
 TORCH_API bool get_record_concrete_inputs_enabled();
-TORCH_API void set_record_concrete_inputs_enabled_fn(std::function<bool()>);
-TORCH_API void set_record_concrete_inputs_enabled_val(bool);
+TORCH_API void set_record_concrete_inputs_enabled_fn(
+    std::function<bool()> /*fn*/);
+TORCH_API void set_record_concrete_inputs_enabled_val(bool /*val*/);
 
 TORCH_API bool get_fwd_bwd_enabled();
-TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()>);
-TORCH_API void set_fwd_bwd_enabled_val(bool);
+TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()> /*fn*/);
+TORCH_API void set_fwd_bwd_enabled_val(bool /*val*/);
 
 TORCH_API bool get_cuda_sync_enabled();
-TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
-TORCH_API void set_cuda_sync_enabled_val(bool);
+TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()> /*fn*/);
+TORCH_API void set_cuda_sync_enabled_val(bool /*val*/);
 
 // Comms related RecordFunctions will record information about tensor storage
 // locations.
 TORCH_API bool get_record_tensor_addrs_enabled();
-TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()>);
-TORCH_API void set_record_tensor_addrs_enabled_val(bool);
+TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()> /*fn*/);
+TORCH_API void set_record_tensor_addrs_enabled_val(bool /*val*/);
 
 } // namespace torch::profiler::impl

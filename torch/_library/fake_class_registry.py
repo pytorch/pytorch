@@ -20,13 +20,14 @@ class FakeScriptObject:
         try:
             with _disable_current_modes():
                 self.real_obj = copy.deepcopy(x)
-        except RuntimeError:
+        except RuntimeError as e:
             log.warning(
-                "Unable to deepcopy the custom object %s. "
+                "Unable to deepcopy the custom object %s due to %s. "
                 "Defaulting to the user given object. This might be "
                 "dangerous as side effects may be directly applied "
                 "to the object.",
                 script_class_name,
+                str(e),
             )
             self.real_obj = x
 
@@ -134,55 +135,64 @@ def maybe_to_fake_obj(
     if tracing_with_real(x):
         return x
 
-    # x.__obj_flatten__() could be calling some tensor operations inside but we don't
-    # want to call these ops in surrounding dispatch modes when executing it.
-    # Otherwise, for example, the fake tensor modes will error out when the tensors inside
-    # script object execute some operations like clone if allow_non_fake_input flag is set.
-    with _disable_current_modes():
-        flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
+    from torch._library.opaque_object import FakeOpaqueObject, OpaqueTypeStr
 
-    _check_valid_flat_script_obj(flat_x)
+    if str(x._type()) == OpaqueTypeStr:
+        # In order to make OpaqueObjects truly opaque, the fake kernel should
+        # not depend on the contents of the OpaqueObject at all.
+        fake_x = FakeOpaqueObject()
 
-    with fake_mode:
-        from torch._higher_order_ops.utils import _tensor_storage
+    else:
+        # x.__obj_flatten__() could be calling some tensor operations inside but we don't
+        # want to call these ops in surrounding dispatch modes when executing it.
+        # Otherwise, for example, the fake tensor modes will error out when the tensors inside
+        # script object execute some operations like clone if allow_non_fake_input flag is set.
+        with _disable_current_modes():
+            flat_x = x.__obj_flatten__()  # type: ignore[attr-defined]
 
-        storage_map = {
-            _tensor_storage(inp): i
-            for i, inp in enumerate(flat_x)
-            if isinstance(inp, torch.Tensor)
-        }
-        alias_map = {
-            i: storage_map[_tensor_storage(inp)]
-            for i, inp in enumerate(flat_x)
-            if isinstance(inp, torch.Tensor) and storage_map[_tensor_storage(inp)] != i
-        }
-        if len(alias_map) > 0:
-            log.warning(
-                "Detected script object %s has aliasing relationship among its tensors. "
-                "Flattened obj: %s. Aliasing tensor indices: %s. "
-                "This is not supported and may cause unexpected behavior.",
-                x,
+        _check_valid_flat_script_obj(flat_x)
+
+        with fake_mode:
+            from torch._higher_order_ops.utils import _tensor_storage
+
+            storage_map = {
+                _tensor_storage(inp): i
+                for i, inp in enumerate(flat_x)
+                if isinstance(inp, torch.Tensor)
+            }
+            alias_map = {
+                i: storage_map[_tensor_storage(inp)]
+                for i, inp in enumerate(flat_x)
+                if isinstance(inp, torch.Tensor)
+                and storage_map[_tensor_storage(inp)] != i
+            }
+            if len(alias_map) > 0:
+                log.warning(
+                    "Detected script object %s has aliasing relationship among its tensors. "
+                    "Flattened obj: %s. Aliasing tensor indices: %s. "
+                    "This is not supported and may cause unexpected behavior.",
+                    x,
+                    flat_x,
+                    alias_map,
+                )
+
+            # This breaks the aliasing relationship among the tensors inside the torchbind object
+            # This is bad but since we don't need to preserve the aliasing relationship anyway and
+            # we state clearly that aliasing relationship is not preserved in the doc so this might be OK.
+            fake_flattened = pytree.tree_map_only(
+                torch.Tensor,
+                lambda t: torch.empty_strided(
+                    t.size(),
+                    t.stride(),
+                    device=t.device,
+                    dtype=t.dtype,
+                    requires_grad=t.requires_grad,
+                    layout=t.layout,
+                ),
                 flat_x,
-                alias_map,
             )
 
-        # This breaks the aliasing relationship among the tensors inside the torchbind object
-        # This is bad but since we don't need to preserve the aliasing relationship anyway and
-        # we state clearly that aliasing relationship is not preserved in the doc so this might be OK.
-        fake_flattened = pytree.tree_map_only(
-            torch.Tensor,
-            lambda t: torch.empty_strided(
-                t.size(),
-                t.stride(),
-                device=t.device,
-                dtype=t.dtype,
-                requires_grad=t.requires_grad,
-                layout=t.layout,
-            ),
-            flat_x,
-        )
-
-    fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
+        fake_x = _find_fake_class_for_script_object(x).__obj_unflatten__(fake_flattened)
 
     fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name(), x)  # type: ignore[attr-defined]
 
@@ -205,7 +215,7 @@ def maybe_to_fake_obj(
                 FakeScriptMethod(fake_x_wrapped, name, method_schema),
             )
         else:
-            override_skip_list = {"__obj_flatten__", "__get_state__", "__set_state__"}
+            override_skip_list = {"__obj_flatten__", "__getstate__", "__setstate__"}
             if name not in override_skip_list:
                 log.warning("fake object of %s doesn't implement method %s.", x, name)
     return fake_x_wrapped

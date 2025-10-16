@@ -7,21 +7,11 @@ input/output types, metadata, config, function signatures etc.
 from __future__ import annotations
 
 import collections
-import dataclasses
 import functools
 import itertools
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import (
-    Any,
-    Callable,
-    NewType,
-    Optional,
-    Protocol,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -32,16 +22,13 @@ from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
-from .functional_utils import (
-    _check_if_mutation_can_be_in_graph,
-    FunctionalTensorMetadataEq,
-)
+from .functional_utils import _check_if_mutation_can_be_in_graph, ViewMetaSequence
 from .utils import strict_zip
 
 
 if TYPE_CHECKING:
     import contextlib
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from torch._guards import Source
     from torch._inductor.output_code import OutputCode
@@ -117,15 +104,14 @@ class OutputAliasInfo:
     dynamic_dims: Optional[set[int]]
     # requires_grad
     requires_grad: bool
-    # FunctionalTensorWrapper that represents this output.
+    # Sequence of ViewMeta objects.
     #
-    # Provides us the means to replay views from it.
+    # Provides us the means to re-run view functions on other tensors.
     #
-    # We need to wrap the actual FunctionalTensorWrapper with this class so that
-    # we only compare the tensor's metadata. That's because with the transformations
-    # of the model throughout AOTAutograd, the sequence of ViewMeta and the base
-    # tensor might change.
-    functional_tensor: Optional[FunctionalTensorMetadataEq] = None
+    # We need to wrap the actual list of ViewMeta with this class so that
+    # we compare the ViewMeta elements appropriately, i.e. their type and
+    # the elements returned by the `as_tuple()` call.
+    view_meta_sequence: Optional[ViewMetaSequence] = None
 
 
 class MutationType(Enum):
@@ -210,6 +196,7 @@ class MemoryFormatMeta:
 
         if use_memory_format:
             return MemoryFormatMeta(
+                # pyrefly: ignore  # unbound-name
                 memory_format=torch._prims_common.suggest_memory_format(t),
             )
 
@@ -665,17 +652,6 @@ class ViewAndMutationMeta:
         self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
         # Clear traced tangents at runtime
         self.traced_tangents = []
-        new_output_info = []
-        for out in self.output_info:
-            if config.view_replay_for_aliased_outputs:
-                new_out = out
-            else:
-                # If we're not using view_replay, remove the functional tensor.
-                # Functional tensors are unfortunately not serializable,
-                # so doing this is required for AOTAutograd caching.
-                new_out = dataclasses.replace(out, functional_tensor=None)
-            new_output_info.append(new_out)
-        self.output_info = new_output_info
         for inp_meta in self.subclass_inp_meta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
@@ -917,12 +893,15 @@ class GraphSignature:
         parameters_to_mutate = {}
         for output_name, mutation_name in outputs_to_mutations.items():
             if mutation_name in user_inputs:
+                # pyrefly: ignore  # unsupported-operation
                 user_inputs_to_mutate[output_name] = mutation_name
             else:
                 assert mutation_name in buffers or mutation_name in parameters
                 if mutation_name in buffers:
+                    # pyrefly: ignore  # unsupported-operation
                     buffers_to_mutate[output_name] = mutation_name
                 else:
+                    # pyrefly: ignore  # unsupported-operation
                     parameters_to_mutate[output_name] = mutation_name
 
         start, stop = stop, stop + num_user_outputs
@@ -1256,7 +1235,9 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         output_code_ty: type[TOutputCode],
         compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
     ):
+        # pyrefly: ignore  # invalid-type-var
         self.output_code_ty = output_code_ty
+        # pyrefly: ignore  # invalid-type-var
         self.compiler_fn = compiler_fn
 
     def __call__(

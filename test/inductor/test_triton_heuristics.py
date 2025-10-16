@@ -3,6 +3,7 @@
 import functools
 import sys
 import unittest
+from unittest import skipUnless
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -14,10 +15,12 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     runOnRocm,
+    skipIfRocm,
     skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
+    HAS_CUDA_AND_TRITON,
     HAS_GPU,
     requires_cuda_with_enough_memory,
 )
@@ -269,9 +272,15 @@ class TestTritonHeuristics(TestCase):
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
 
+    @skipIfXpu
+    @skipIfRocm
+    @skipUnless(HAS_CUDA_AND_TRITON, "requires CUDA")
     @parametrize("do_pruning", [False, True])
     def test_prune_configs_over_shared_memory_limit(self, do_pruning):
-        from torch._inductor.template_heuristics import CUDAConfigHeuristic, GemmConfig
+        from torch._inductor.template_heuristics.triton import (
+            CUDAConfigHeuristic,
+            GemmConfig,
+        )
 
         expected_count = 1 if do_pruning else 2
         mm_configs = [

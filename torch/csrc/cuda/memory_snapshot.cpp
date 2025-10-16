@@ -1,6 +1,7 @@
 #include <ATen/Context.h>
 #include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -413,7 +414,7 @@ std::string _memory_snapshot_pickled() {
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
     }
-    throw std::runtime_error("unreachable");
+    TORCH_CHECK(false, "unreachable");
   };
 
   for (const auto& traceInfo : snapshot.device_traces) {
@@ -458,6 +459,8 @@ std::string _memory_snapshot_pickled() {
   IValue release_lock_on_malloc_s = "release_lock_on_cudamalloc";
   IValue pinned_use_host_register_s = "pinned_use_cuda_host_register";
   IValue roundup_power2_divisions_s = "roundup_power2_divisions";
+  IValue graph_capture_record_stream_reuse_s =
+      "graph_capture_record_stream_reuse";
 
   allocator_settings.insert(
       last_allocator_settings_s,
@@ -478,6 +481,9 @@ std::string _memory_snapshot_pickled() {
   allocator_settings.insert(
       pinned_use_host_register_s,
       snapshot.config_metadata.pinned_use_host_register);
+  allocator_settings.insert(
+      graph_capture_record_stream_reuse_s,
+      snapshot.config_metadata.graph_capture_record_stream_reuse);
   unsigned int roundup_key = 1;
   auto roundup_settings = new_dict();
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {

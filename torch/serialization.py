@@ -13,10 +13,11 @@ import tarfile
 import tempfile
 import threading
 import warnings
+from collections.abc import Callable
 from contextlib import closing, contextmanager
 from enum import Enum
-from typing import Any, Callable, cast, Generic, IO, Optional, TypeVar, Union
-from typing_extensions import TypeAlias, TypeIs
+from typing import Any, cast, Generic, IO, Optional, TypeAlias, TypeVar, Union
+from typing_extensions import TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -660,6 +661,11 @@ register_package(
     functools.partial(_backend_tag, "xpu"),
     functools.partial(_deserialize, "xpu"),
 )
+register_package(
+    26,
+    functools.partial(_backend_tag, "mtia"),
+    functools.partial(_deserialize, "mtia"),
+)
 
 
 def location_tag(
@@ -768,7 +774,10 @@ def _open_file_like(name_or_buffer: FileLike, mode: str) -> _opener[IO[bytes]]:
 
 class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
     def __init__(self, name_or_buffer: Union[str, IO[bytes]]) -> None:
-        super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
+        super().__init__(
+            # pyrefly: ignore  # no-matching-overload
+            torch._C.PyTorchFileReader(name_or_buffer)
+        )
 
 
 class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
@@ -781,9 +790,10 @@ class _open_zipfile_writer_file(_opener[torch._C.PyTorchFileWriter]):
             # PyTorchFileWriter only supports ascii filename.
             # For filenames with non-ascii characters, we rely on Python
             # for writing out the file.
+            # pyrefly: ignore  # bad-assignment
             self.file_stream = io.FileIO(self.name, mode="w")
             super().__init__(
-                torch._C.PyTorchFileWriter(
+                torch._C.PyTorchFileWriter(  # pyrefly: ignore  # no-matching-overload
                     self.file_stream, get_crc32_options(), _get_storage_alignment()
                 )
             )
@@ -960,7 +970,7 @@ def save(
     _check_save_filelike(f)
 
     if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
+        f = os.fspath(f)  # pyrefly: ignore  # no-matching-overload
 
     if _use_new_zipfile_serialization:
         with _open_zipfile_writer(f) as opened_zipfile:
@@ -1514,7 +1524,10 @@ def load(
                     else:
                         shared = False
                     overall_storage = torch.UntypedStorage.from_file(
-                        os.fspath(f), shared, size
+                        # pyrefly: ignore  # no-matching-overload
+                        os.fspath(f),
+                        shared,
+                        size,
                     )
                 if weights_only:
                     try:
