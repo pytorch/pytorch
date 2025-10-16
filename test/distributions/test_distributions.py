@@ -5887,7 +5887,7 @@ class TestKL(DistributionsTestCase):
 
     def test_kl_exponential_family(self):
         for (p, _), (_, q) in self.finite_examples:
-            if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
+            if type(p) is type(q) and issubclass(type(p), ExponentialFamily):
                 actual = kl_divergence(p, q)
                 expected = _kl_expfamily_expfamily(p, q)
                 self.assertEqual(

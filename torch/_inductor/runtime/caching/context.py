@@ -197,7 +197,7 @@ class _CompileContext(_Context):
         """
         return (
             repr(torch.cuda.get_device_properties())
-            if _CompileContext.runtime()
+            if _CompileContext.runtime() and torch.cuda.is_available()
             else None
         )
 
