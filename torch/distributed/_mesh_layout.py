@@ -337,7 +337,7 @@ class _MeshLayout(Layout):
         """
         assert rank_map.ndim == 1
         assert rank_map.is_contiguous()
-        assert rank_map.numel() % self.cosize() == 0
+        assert rank_map.numel() >= self.cosize()
 
         complement_layout = self.complement(rank_map.numel())
 
