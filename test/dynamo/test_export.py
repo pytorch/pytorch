@@ -1181,16 +1181,20 @@ def forward(self, x, y):
     def test_export_compare_optimize_with_make_fx(self):
         inp = torch.tensor([0.1, 0.1])
         linear = torch.nn.Linear(2, 2)
-
-        def func(x):
-            x = x + 1
-            y = x.t()
-            y = y.relu()
-            y = linear(y)
-            return y
-
-        exported = torch._dynamo.export(func, aten_graph=True)(inp)
-        out_graph = exported[0]
+        
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = linear
+            def forward(self, x):
+                x = x + 1
+                y = x.t()
+                y = y.relu()
+                y = linear(y)
+                return y
+                
+        foo = Foo()
+        out_graph = torch.export.export(foo, (inp,), strict=True).module()
         export_result = out_graph(inp)
 
         torch._dynamo.reset()
@@ -1202,10 +1206,10 @@ def forward(self, x, y):
 
             return fw
 
-        opt_func = torch.compile(func, backend=compiler, fullgraph=True, dynamic=True)
+        opt_func = torch.compile(foo, backend=compiler, fullgraph=True, dynamic=True)
         make_fx_result_through_backend = opt_func(inp)
 
-        fx_g = make_fx(func)(inp)
+        fx_g = make_fx(foo)(inp)
         make_fx_result_through_direct = fx_g(inp)
 
         self.assertTrue(
@@ -3095,11 +3099,11 @@ def forward(self, x):
                 return x.sum() + self.buffer1.sum()
 
         example_inputs = (torch.ones(1, 2, 3),)
-        gm, _ = torch._dynamo.export(
+        gm = torch.export.export(
             Foo(),
-            aten_graph=True,
-            tracing_mode="symbolic",
-        )(*example_inputs)
+            example_inputs,
+            strict=True,
+        ).module()
         count = 0
         for node in gm.graph.nodes:
             if node.target == torch.ops.aten.add_.Tensor:
@@ -3183,10 +3187,11 @@ def forward(self, x):
                 return conv
 
         example_inputs = (torch.randn(1, 1, 3, 3),)
-        torch._dynamo.export(
+        torch.export.export(
             _TestPattern(),
-            aten_graph=True,
-        )(*example_inputs)
+            example_inputs,
+            strict=True,
+        )
 
     @config.patch(
         capture_dynamic_output_shape_ops=True,
@@ -3671,7 +3676,16 @@ class GraphModule(torch.nn.Module):
 
             # Export the model with fake inputs and parameters
             for aten_graph in [True, False]:
-                graph_module, _ = torch._dynamo.export(model, aten_graph=aten_graph)(x)
+                if aten_graph == False:
+                    from torch._dynamo.functional_export import (
+                        _dynamo_graph_capture_for_export,
+                    )
+
+                    graph_module = _dynamo_graph_capture_for_export(model)(x)
+                else:
+                    graph_module = torch.export.export(
+                        model, (x,), strict=True
+                    ).module()
                 self.assertTrue(
                     isinstance(graph_module, torch.fx.GraphModule),
                     msg="test_capture_symbolic_tracing_within_fake_mode_aten_graph_"

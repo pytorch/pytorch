@@ -165,6 +165,7 @@ class AOTIRunnerUtil:
                 strict=True,
                 prefer_deferred_runtime_asserts_over_guards=True,
             )
+            print(ep.graph)
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=inductor_configs
             )

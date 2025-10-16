@@ -2475,6 +2475,13 @@ def compile_fx(
                 else example_inputs_
             )
             fake_mode = detect_fake_mode(inputs_)
+            # AOTI should be going through run_decompositions which
+            # temporarily lifts constants as buffers. Until then, we just
+            # temporarily allow fake mode created from dynamo to convert
+            # real tensors to fake
+            if V.aot_compilation and not fake_mode.allow_non_fake_inputs:
+                fake_mode.allow_non_fake_inputs = True
+
             with _fakify_script_objects(model_, inputs_, {}, fake_mode) as (
                 patched_mod,
                 fake_args,
