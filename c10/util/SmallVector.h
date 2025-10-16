@@ -1245,7 +1245,7 @@ constexpr size_t calculateSmallVectorDefaultInlinedElements() {
       kPreferredSmallVectorSizeof - sizeof(SmallVector<T, 0>);
   constexpr size_t NumElementsThatFit = PreferredInlineBytes / sizeof(T);
   return NumElementsThatFit == 0 ? 1 : NumElementsThatFit;
-};
+}
 
 /// This is a 'vector' (really, a variable-sized array), optimized
 /// for the case when the array is small.  It contains some number of elements
