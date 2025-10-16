@@ -36,12 +36,16 @@ def make_nested_cls(cls):
 
 
 tests = [
-    test_activation_checkpointing.ActivationCheckpointingViaTagsTestsCUDA,
+    getattr(
+        test_activation_checkpointing, "ActivationCheckpointingViaTagsTestsCUDA", None
+    ),
     test_ctx_manager.CtxManagerTests,
 ]
 
 test = None
 for test in tests:
+    if not test:
+        continue
     make_nested_cls(test)
 
 del test, tests
