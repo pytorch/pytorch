@@ -307,7 +307,7 @@ def create_joint(
         grad_primals: list[torch.Tensor] = []
         inputs_needs_grads = []
         # Note that we're not using primals here,
-        # being carefully not to pass any mutated inputs into autograd.grad()
+        # being careful not to pass any mutated inputs into autograd.grad()
         for p in primals:
             if isinstance(p, Tensor) and p.requires_grad:
                 inputs_needs_grads.append(True)
