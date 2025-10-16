@@ -103,11 +103,6 @@ COPY ci_commit_pins/torchbench.txt torchbench.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-requirements.txt torchbench.txt
 
-ARG INSTALL_MINGW
-COPY ./common/install_mingw.sh install_mingw.sh
-RUN if [ -n "${INSTALL_MINGW}" ]; then bash ./install_mingw.sh; fi
-RUN rm install_mingw.sh
-
 ARG TRITON
 ARG TRITON_CPU
 
