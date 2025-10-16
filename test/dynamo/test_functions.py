@@ -5173,6 +5173,28 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @unittest.expectedFailure
+    def test_property_class_transmute(self):
+        class PropertyGetter:
+            def __call__(self):
+                return True
+
+        p = property(PropertyGetter())
+
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                if self.p:
+                    return x + 1
+                else:
+                    raise RuntimeError("whoops")
+
+        mod = Mod()
+        mod.__class__ = type(mod.__class__.__name__, (mod.__class__,), {"p": p})
+
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        x = torch.randn(1)
+        self.assertEqual(opt_mod(x), x + 1)
+
 
 instantiate_parametrized_tests(FunctionTests)
 instantiate_parametrized_tests(DefaultsTests)
