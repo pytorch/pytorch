@@ -245,7 +245,12 @@ else:
                 # process (we need to know if the current global rank is in the mesh or not).
                 if _init_backend:
                     self._setup_world_group_and_device()
-                    self._init_process_groups(backend_override)
+                    self._dim_group_names = self._init_process_groups(
+                        self._layout,
+                        self._rank_map,
+                        self._mesh_dim_names,
+                        backend_override,
+                    )
 
                 if is_initialized() and get_backend() == "threaded":
                     # pyrefly: ignore  # bad-assignment
@@ -341,10 +346,13 @@ else:
 
             return _get_default_group()
 
+        @staticmethod
         def _init_process_groups(
-            self,
+            layout: _MeshLayout,
+            rank_map: torch.Tensor,
+            mesh_dim_names: Optional[tuple[str, ...]],
             backend_override: tuple[BackendConfig, ...],
-        ):
+        ) -> list[str]:
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
             #
@@ -352,8 +360,8 @@ else:
             default_group = _get_default_group()
 
             if (
-                len(self._layout) == 1
-                and self._layout.numel() == get_world_size()
+                len(layout) == 1
+                and layout.numel() == get_world_size()
                 and backend_override[0] == (None, None)
             ):
                 # Append the default pg to the first dim groups only if the default pg is compatible with `self._device_type`.
@@ -372,12 +380,10 @@ else:
                 dim_group_names.append(dim_group.group_name)
             else:
                 # create sub pgs base on the mesh argument specified
-                for dim in range(len(self._layout)):
+                for dim in range(len(layout)):
                     # swap the current dim to the last dim
                     # then reshape to flatten out other dims
-                    pg_ranks_by_dim = (
-                        self._layout[dim].nest().remap_to_tensor(self._rank_map)
-                    )
+                    pg_ranks_by_dim = layout[dim].nest().remap_to_tensor(rank_map)
                     backend, pg_options = backend_override[dim]
                     # We need to explicitly pass in timeout when specified in option, otherwise
                     # the default timeout will be used to override the timeout set in option.
@@ -389,8 +395,8 @@ else:
                     # If the mesh doesn't not have a mesh_dim_names, then the group description of the
                     # subgroup would be `mesh_dim_0` and `mesh_dim_1`.
                     group_desc = (
-                        f"mesh_{self._mesh_dim_names[dim]}"
-                        if self._mesh_dim_names
+                        f"mesh_{mesh_dim_names[dim]}"
+                        if mesh_dim_names
                         else f"mesh_dim_{dim}"
                     )
 
@@ -448,14 +454,14 @@ else:
                             )
 
                         # only add to dim_groups if the current rank in the subgroup
-                        if self.get_rank() in subgroup_ranks:
+                        if get_rank() in subgroup_ranks:
                             if len(dim_group_names) > dim:
                                 raise RuntimeError(
-                                    f"Each device mesh dimension should get only one process group, but got {self.get_rank()} "
+                                    f"Each device mesh dimension should get only one process group, but got {get_rank()} "
                                     f"in {subgroup_ranks}!"
                                 )
                             dim_group_names.append(dim_group.group_name)  # type: ignore[union-attr]
-            self._dim_group_names = dim_group_names
+            return dim_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
             return self._root_mesh if self._root_mesh else self
@@ -1068,10 +1074,21 @@ else:
                 tuple[Optional[str], Optional[C10dBackend.Options]], ...
             ] = ((None, None),),
         ) -> "DeviceMesh":
-            root_mesh = self._get_root_mesh()
-            unflattened_layout = self._layout.unflatten(dim, mesh_sizes)
+            inner_layout = _MeshLayout(tuple(mesh_sizes), suffix_product(mesh_sizes))
+
+            if inner_layout.numel() != self._layout[dim].numel():
+                raise ValueError(
+                    f"The product of {mesh_sizes=} is {inner_layout.numel()}, "
+                    f"but the original dimension at dim={dim} has size {self._layout[dim].numel()}. "
+                    f"These must be equal for unflatten to work correctly."
+                )
+
+            partial_layout = self._layout[dim].composition(inner_layout)
+            unflattened_layout = self._layout.splice(dim, dim + 1, partial_layout)
             unflattened_mesh_dim_names = list(not_none(self.mesh_dim_names))
             unflattened_mesh_dim_names[dim : dim + 1] = list(mesh_dim_names)
+
+            root_mesh = self._get_root_mesh()
             res_mesh = DeviceMesh(
                 self.device_type,
                 _layout=unflattened_layout,
@@ -1086,30 +1103,13 @@ else:
             # TODO: To make backend init more efficient with cute layout representation and support
             # per dim backend init.
             if hasattr(self, "_dim_group_names"):
-                unflatten_length = len(mesh_sizes)
-                unflatten_layout = _MeshLayout(
-                    tuple(unflattened_layout.sizes[dim : dim + unflatten_length]),  # type: ignore[index]
-                    tuple(unflattened_layout.strides[dim : dim + unflatten_length]),  # type: ignore[index]
+                dim_group_names = self._dim_group_names.copy()
+                dim_group_names[dim : dim + 1] = self._init_process_groups(
+                    partial_layout,
+                    root_mesh._rank_map,
+                    mesh_dim_names,
+                    backend_override,
                 )
-                unflatten_submesh = DeviceMesh(
-                    self.device_type,
-                    _layout=unflatten_layout,
-                    _rank_map=root_mesh._rank_map,
-                    mesh_dim_names=mesh_dim_names,
-                    backend_override=backend_override,
-                )
-                dim_group_names = []
-                for idx in range(0, res_mesh.ndim):
-                    if idx < dim:
-                        dim_group_names.append(self._dim_group_names[idx])
-                    elif idx >= dim + unflatten_length:
-                        dim_group_names.append(
-                            self._dim_group_names[idx - unflatten_length + 1]
-                        )
-                    else:
-                        dim_group_names.append(
-                            unflatten_submesh._dim_group_names[idx - dim]
-                        )
                 res_mesh._dim_group_names = dim_group_names
 
             return res_mesh
