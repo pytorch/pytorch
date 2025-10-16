@@ -8,6 +8,7 @@ from torch._inductor import ir
 from torch._inductor.codegen.common import KernelTemplate
 from torch._inductor.ir import (
     Buffer,
+    FixedLayout,
     get_free_symbols,
     get_symbolic_inputs,
     gm_original_output_strides,
@@ -239,7 +240,17 @@ class SubgraphTemplate(KernelTemplate):
         ]
 
         self._validate_stride_consistency(name, decompositions, layouts)
-        layout = layouts[0]  # All layouts have equivalent stride now
+
+        # Assert single output layout - assumes custom ops have one output tensor
+        assert len(layouts) > 0, f"No layouts inferred for custom op '{name}'"
+        assert all(
+            layout.device == layouts[0].device
+            and layout.dtype == layouts[0].dtype
+            and layout.size == layouts[0].size
+            for layout in layouts
+        ), f"All decompositions for '{name}' must produce equivalent output layouts"
+
+        layout = layouts[0]  # All layouts have equivalent stride/shape/dtype now
 
         choices = []
         for decomp in decompositions:
@@ -292,19 +303,48 @@ class SubgraphTemplate(KernelTemplate):
         kwargs: dict[str, Any],
         default_impl: Optional[Callable[..., Any]] = None,
     ) -> Layout:
-        """Infer output layout for custom ops using the default implementation when available."""
+        """Infer output layout for custom ops using the default implementation when available.
+
+        Note that the Subgraph assumes custom ops return exactly one tensor so far.
+        TODO: Add support for multiple output custom ops.
+        """
         import functools
 
-        from torch._inductor.ir import FixedLayout, ir_node_to_tensor
         from torch._inductor.virtualized import V
+
+        # Assert kwargs contain only non-tensor arguments for functools.partial
+        for key, value in kwargs.items():
+            assert not isinstance(value, (torch.Tensor, Buffer)), (
+                f"kwargs['{key}'] contains tensor {type(value)}. "
+                f"Tensor arguments should be in input_nodes, not kwargs. "
+                f"Only scalar/non-tensor parameters should be in kwargs."
+            )
 
         # Use default_impl if available, otherwise use first decomposition
         impl = default_impl if default_impl is not None else decompositions[0]
 
         with V.fake_mode:
-            example_inputs = [ir_node_to_tensor(inp) for inp in input_nodes]
-            fn = functools.partial(impl, **kwargs)
+            example_inputs = []
+            for inp in input_nodes:
+                raw_shape = inp.get_size()
+                concrete_shape = V.graph.sizevars.size_hints(
+                    raw_shape, fallback=config.unbacked_symint_fallback
+                )
+                fake_tensor = torch.empty(
+                    concrete_shape, dtype=inp.get_dtype(), device=inp.get_device()
+                )
+                example_inputs.append(fake_tensor)
+
+            fn = functools.partial(
+                impl, **kwargs
+            )  # kwargs must be non-tensor for partial
             output = fn(*example_inputs)
+
+            # Assert single output
+            assert isinstance(output, torch.Tensor), (
+                f"Expected single tensor output, got {type(output)}. "
+                f"Multi-output custom ops not yet supported in autotuning."
+            )
 
             return FixedLayout(
                 device=output.device,

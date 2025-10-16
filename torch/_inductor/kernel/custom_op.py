@@ -24,6 +24,8 @@ def _extract_tensor_inputs(
     args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> tuple[list[Any], dict[str, Any]]:
     """Extract tensor inputs from mixed args/kwargs.
+    Separates tensors (for autotuning input_nodes) from non-tensor parameters.
+    Non-tensor kwargs are later functools.partial'd into decomposition functions.
 
     Args:
         args: Positional arguments (mix of tensors and scalars)
@@ -35,16 +37,16 @@ def _extract_tensor_inputs(
     tensor_inputs = []
     non_tensor_kwargs = {}
 
-    for arg in args:
-        if isinstance(arg, (TensorBox, Buffer)) or (
-            hasattr(arg, "dtype") and hasattr(arg, "shape")
-        ):
+    # Process args and kwargs: separate tensor inputs and non tensor args
+    for i, arg in enumerate(args):
+        if isinstance(arg, (TensorBox, Buffer)):
             tensor_inputs.append(arg)
+        else:
+            # Add non-tensor positional args to kwargs with generated names
+            non_tensor_kwargs[f"arg_{i}"] = arg
 
     for key, value in kwargs.items():
-        if isinstance(value, (TensorBox, Buffer)) or (
-            hasattr(value, "dtype") and hasattr(value, "shape")
-        ):
+        if isinstance(value, (TensorBox, Buffer)):
             tensor_inputs.append(value)
         else:
             non_tensor_kwargs[key] = value
@@ -54,46 +56,50 @@ def _extract_tensor_inputs(
 
 def _create_user_input_gen_fns(
     inputs: list[Any],
-    user_input_gen_fns: dict[int, Callable[[torch.Tensor], torch.Tensor]],
+    arg_names: list[str],
+    user_input_gen_fns: dict[str, Callable[[torch.Tensor], torch.Tensor]],
 ) -> dict[int, Callable[[Any], torch.Tensor]]:
-    """Convert user input generators to internal format.
+    """Convert user input generators from name-based to index-based format.
+       Inductor autotune's input_gen_fns expects index of arg_names as key.
 
-    Args:
-        inputs: List of input IR nodes from compilation
-        user_input_gen_fns: User-provided input generation functions
-
-    Returns:
-        Dict mapping indices to internal input generation functions
+    Uses V.graph.sizevars.size_hints() to guess best for dynamic shapes.
     """
-    internal_input_gen_fns = {}
+    from torch._inductor import config
 
-    with V.fake_mode:
-        fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
+    name_to_index = {name: i for i, name in enumerate(arg_names)}
+    index_based_fns = {}
+
+    for name, gen_fn in user_input_gen_fns.items():
+        if name in name_to_index:
+            index_based_fns[name_to_index[name]] = gen_fn
+        else:
+            print(f"Warning: Unknown argument name '{name}' in input_gen_fns")
 
     def create_internal_input_gen_fn(
-        user_function: Callable[[torch.Tensor], torch.Tensor],
-        template: torch.Tensor,
+        user_function: Callable[[torch.Tensor], torch.Tensor], arg_name: str
     ) -> Callable[[Any], torch.Tensor]:
+        """Create internal input generator that converts IR buffer to user's fake tensor."""
+
         def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
-            fake_tensor_for_user = torch.empty(
-                template.shape,
-                dtype=template.dtype,
-                device="meta",
+            raw_shape = ir_buffer.get_size()
+            concrete_shape = V.graph.sizevars.size_hints(
+                raw_shape, fallback=config.unbacked_symint_fallback
             )
-            return user_function(fake_tensor_for_user)
+
+            fake_tensor = torch.empty(
+                concrete_shape, dtype=ir_buffer.get_dtype(), device="meta"
+            )
+            return user_function(fake_tensor)
 
         return internal_input_gen_fn
 
-    for i, user_gen_fn in user_input_gen_fns.items():
-        if i >= len(fake_inputs):
-            continue
-
-        fake_template = fake_inputs[i]
-        internal_input_gen_fns[i] = create_internal_input_gen_fn(
-            user_gen_fn, fake_template
+    return {
+        i: create_internal_input_gen_fn(
+            user_gen_fn, arg_names[i] if i < len(arg_names) else f"arg_{i}"
         )
-
-    return internal_input_gen_fns
+        for i, user_gen_fn in index_based_fns.items()
+        if i < len(inputs)
+    }
 
 
 def _create_fallback_choice(
@@ -102,17 +108,7 @@ def _create_fallback_choice(
     fake_output: torch.Tensor,
     kwargs: dict[str, Any],
 ) -> ExternKernelChoice:
-    """Create fallback choice for default implementation.
-
-    Args:
-        name: Base name for the fallback choice
-        default_impl: Default implementation function
-        fake_output: Fake output tensor for layout inference
-        kwargs: Keyword arguments for the implementation
-
-    Returns:
-        ExternKernelChoice configured for the default implementation
-    """
+    """Create fallback choice for default implementation."""
 
     def fallback_wrapper(*args: Any) -> Any:
         return default_impl(*args, **kwargs)
@@ -141,13 +137,9 @@ def _create_parameter_variants(
     """
     # Validate parameter values
     for param_name, param_values in tuning_knob.items():
-        if not isinstance(param_values, (list, tuple)):
+        if not param_values or not isinstance(param_values, (list, tuple)):
             raise TypeError(
                 f"Parameter values for '{param_name}' must be a list or tuple, got {type(param_values)}"
-            )
-        if not param_values:
-            raise ValueError(
-                f"At least one parameter value must be provided for '{param_name}'"
             )
 
     # Generate all combinations of parameter values using Cartesian product
@@ -166,8 +158,6 @@ def _create_parameter_variants(
 
             # Create partial function with all parameters
             variant = functools.partial(decomp_fn, **param_kwargs)
-
-            # Generate descriptive name
             param_suffix = "_".join(
                 f"{name}_{value}" for name, value in param_kwargs.items()
             )
@@ -184,10 +174,13 @@ def autotune_custom_op(
     kwargs: Optional[dict[str, Any]] = None,
     default_impl: Optional[Callable[..., Any]] = None,
     user_input_gen_fns: Optional[
-        dict[int, Callable[[torch.Tensor], torch.Tensor]]
+        dict[str, Callable[[torch.Tensor], torch.Tensor]]
     ] = None,
 ) -> Union[TensorBox, Any]:
     """Autotune custom operations by comparing multiple decomposition implementations.
+
+    Currently supports SINGLE OUTPUT custom ops only.
+    TODO: Add support for multiple output custom ops (tuple/list returns).
 
     This function generates multiple implementation choices for a custom operation and
     uses Inductor's autotuning system to select the best performing variant at runtime.
@@ -230,24 +223,28 @@ def autotune_custom_op(
 
     # Add default implementation as fallback
     if default_impl and hasattr(default_impl, "_op"):
-        # Get output shape/dtype by calling default implementation with fake inputs
-        with V.fake_mode:
-            fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
-            fake_output = default_impl(*fake_inputs, **kwargs)
+        fallback_name = f"{name}_fallback_default"
+        from torch._inductor.select_algorithm import extern_kernels
 
-        fallback_choice = _create_fallback_choice(
-            name, default_impl, fake_output, kwargs
-        )
-        fallback_choice.maybe_append_choice(
-            choices=choices,
-            input_nodes=list(inputs),
-            layout=FixedLayout(
-                device=fake_output.device,
-                dtype=fake_output.dtype,
-                size=fake_output.shape,
-                stride=fake_output.stride(),
-            ),
-        )
+        # Skip if extern_kernel already registered to avoid duplicate registration error
+        if not hasattr(extern_kernels, fallback_name):
+            with V.fake_mode:
+                fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
+                fake_output = default_impl(*fake_inputs, **kwargs)
+
+            fallback_choice = _create_fallback_choice(
+                name, default_impl, fake_output, kwargs
+            )
+            fallback_choice.maybe_append_choice(
+                choices=choices,
+                input_nodes=list(inputs),
+                layout=FixedLayout(
+                    device=fake_output.device,
+                    dtype=fake_output.dtype,
+                    size=fake_output.shape,
+                    stride=fake_output.stride(),
+                ),
+            )
 
     if not choices:
         raise RuntimeError(f"No valid choices generated for {name}")
@@ -255,7 +252,16 @@ def autotune_custom_op(
     # Convert user input generation functions to internal format
     input_gen_fns = {}
     if user_input_gen_fns:
-        input_gen_fns = _create_user_input_gen_fns(inputs, user_input_gen_fns)
+        import inspect
+
+        arg_names = (
+            list(inspect.signature(decompositions[0]).parameters.keys())
+            if decompositions
+            else []
+        )
+        input_gen_fns = _create_user_input_gen_fns(
+            inputs, arg_names, user_input_gen_fns
+        )
 
     return autotune_select_algorithm(
         name=name,
@@ -270,7 +276,7 @@ def register_custom_op_autotuning(
     custom_op: torch._ops.OpOverload,
     decompositions: list[Callable[..., Any]],
     name: Optional[str] = None,
-    input_gen_fns: Optional[dict[int, Callable[[torch.Tensor], torch.Tensor]]] = None,
+    input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
     tuning_knob: Optional[dict[str, list[Any]]] = None,
 ) -> None:
     """Register custom operation for autotuning with multiple implementations.

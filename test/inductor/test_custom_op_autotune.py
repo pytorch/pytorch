@@ -1,16 +1,14 @@
 # Owner(s): ["module: inductor"]
 """
-Test suite for custom operation autotuning integration with PyTorch Inductor.
+Tests for custom operation autotuning with PyTorch Inductor.
 
-This module tests the custom op autotuning system, which allows users to provide
-multiple decomposition implementations of custom operations and automatically
-select the best performing one through Inductor's autotuning system.
+Users can register custom ops with multiple decomposition implementations and let
+Inductor automatically select the best performing variant. Key features tested:
 
-The tests cover:
-1. Custom op registration and autotuning for different operations (RMSNorm, MLP, Attention)
-2. Numerical equivalence between different decomposition implementations
-3. End-to-end compilation and performance validation
-4. Fallback behavior when decompositions fail
+- Name-based input generators (use argument names instead of indices)
+- Dynamic shape handling across multiple compilations
+- Parametric tuning with tuning_knob for combinatorial parameter exploration
+- Numerical correctness and performance validation
 """
 
 import torch
@@ -153,8 +151,8 @@ class TestCustomOpAutoTune(TestCase):
         return input_tensor, gate_weight, up_weight, down_weight
 
     @skipIfXpu
-    def test_rmsnorm_custom_op_autotune(self):
-        """Test RMSNorm autotuning with multiple decomposition variants showcasing different performance characteristics."""
+    def test_rmsnorm_custom_op_autotune_with_dynamic_shape(self):
+        """Test RMSNorm autotuning decomposition variants compared to fallback default with dynamic shapes."""
         test_op_name = f"test_lib::rmsnorm_{id(self)}"
 
         def rmsnorm_decomposition1(
@@ -215,31 +213,42 @@ class TestCustomOpAutoTune(TestCase):
             rmsnorm_decomposition3,
         ]
 
-        # Example of user-friendly input generation functions
         register_custom_op_autotuning(
             op_object.default,
             decompositions=decompositions,
             name="test_rmsnorm_autotuned",
             input_gen_fns={
-                0: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
-                * 0.02,  # Small values for input
-                1: lambda fake_tensor: torch.ones_like(
-                    fake_tensor, device=self.device
-                ),  # Ones for weight
+                "x": lambda x: torch.randn_like(x, device=self.device) * 0.02,
+                "weight": lambda weight: torch.ones_like(weight, device=self.device),
             },
         )
 
-        # Test inputs
-        input_tensor, weight = self._create_rmsnorm_inputs()
+        # Test multiple shapes to verify dynamic shape handling
+        test_shapes = [(2, 16, 128), (8, 32, 256)]
 
-        # Test numerical equivalence for all decompositions
-        self._assert_implementations_equivalent(
-            decompositions, (input_tensor, weight), "RMSNorm"
-        )
+        for i, (batch_size, seq_len, hidden_dim) in enumerate(test_shapes):
+            input_tensor = torch.randn(
+                batch_size,
+                seq_len,
+                hidden_dim,
+                device=self.device,
+                dtype=self.dtype,
+                requires_grad=False,
+            )
+            weight = torch.randn(
+                hidden_dim, device=self.device, dtype=self.dtype, requires_grad=False
+            )
 
-        # Test autotuning
-        expected = rmsnorm_decomposition1(input_tensor, weight)
-        self._run_autotune_test(op_object, (input_tensor, weight), expected, "RMSNorm")
+            # Test numerical equivalence for all decompositions
+            self._assert_implementations_equivalent(
+                decompositions, (input_tensor, weight), f"RMSNorm_{i}"
+            )
+
+            # Test autotuning
+            expected = rmsnorm_decomposition1(input_tensor, weight)
+            self._run_autotune_test(
+                op_object, (input_tensor, weight), expected, f"RMSNorm_{i}"
+            )
 
     @skipIfXpu
     def test_mlp_custom_op_autotune(self):
@@ -326,14 +335,22 @@ class TestCustomOpAutoTune(TestCase):
             decompositions=decompositions,
             name="test_mlp_autotuned",
             input_gen_fns={
-                0: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
-                * 0.1,  # Input tensor
-                1: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
-                * 0.05,  # Gate weight
-                2: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
-                * 0.05,  # Up weight
-                3: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
-                * 0.05,  # Down weight
+                "input_tensor": lambda fake_tensor: torch.randn_like(
+                    fake_tensor, device=self.device
+                )
+                * 0.1,
+                "gate_weight": lambda fake_tensor: torch.randn_like(
+                    fake_tensor, device=self.device
+                )
+                * 0.05,
+                "up_weight": lambda fake_tensor: torch.randn_like(
+                    fake_tensor, device=self.device
+                )
+                * 0.05,
+                "down_weight": lambda fake_tensor: torch.randn_like(
+                    fake_tensor, device=self.device
+                )
+                * 0.05,
             },
         )
 
@@ -407,9 +424,13 @@ class TestCustomOpAutoTune(TestCase):
             tuning_knob={"k_splits": [32, 64, 128, 256]},
             name="test_decompose_k_autotuned",
             input_gen_fns={
-                0: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
+                "a": lambda fake_tensor: torch.randn_like(
+                    fake_tensor, device=self.device
+                )
                 * 0.1,  # Matrix A
-                1: lambda fake_tensor: torch.randn_like(fake_tensor, device=self.device)
+                "b": lambda fake_tensor: torch.randn_like(
+                    fake_tensor, device=self.device
+                )
                 * 0.1,  # Matrix B
             },
         )
@@ -497,8 +518,8 @@ class TestCustomOpAutoTune(TestCase):
             tuning_knob={"method": [0, 1, 2, 3, 4]},
             name="parametric_norm_autotuned",
             input_gen_fns={
-                0: lambda t: torch.randn_like(t, device=self.device) * 0.1,
-                1: lambda t: torch.ones_like(t, device=self.device),
+                "x": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+                "weight": lambda t: torch.ones_like(t, device=self.device),
             },
         )
 
@@ -578,8 +599,10 @@ class TestCustomOpAutoTune(TestCase):
             tuning_knob={"scale_mode": [1, 2, 3], "chunk_size": [16, 32]},
             name="multi_param_autotuned",
             input_gen_fns={
-                0: lambda t: torch.randn_like(t, device=self.device) * 0.1,
-                1: lambda t: torch.ones(t.shape[-1], device=self.device, dtype=t.dtype),
+                "x": lambda t: torch.randn_like(t, device=self.device) * 0.1,
+                "factor": lambda t: torch.ones(
+                    t.shape[-1], device=self.device, dtype=t.dtype
+                ),
             },
         )
 
