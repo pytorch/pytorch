@@ -8199,8 +8199,8 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             return torch.vmap(fn, in_dims=(0, None))(x, init)
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            """vmapped scan got init inputs that\\'re not vmapped""",
+            RuntimeError,
+            """The size of tensor a \\(4\\) must match the size of tensor b \\(2\\) at non-singleton dimension 4""",
         ):
             vmap_fn(x, init)
 
