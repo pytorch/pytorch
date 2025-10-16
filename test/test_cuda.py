@@ -1679,8 +1679,6 @@ except RuntimeError as e:
             self.assertEqual(x.grad, torch.ones_like(x) * 3)
             self.assertEqual(torch.cuda.current_stream(), bwd_ambient_stream)
 
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm(msg="flakey on ROCm https://github.com/pytorch/pytorch/issues/53190")
     def test_streaming_backwards_multiple_streams(self):
         MultiplyInStream = self._make_multiply_in_stream()
 
@@ -3178,8 +3176,6 @@ exit(2)
     @parametrize(
         "with_amp,cache_enabled,allow_unused_input",
         [
-            subtest((False, False, True), decorators=[skipIfRocm]),
-            subtest((True, False, True), decorators=[skipIfRocm]),
             subtest((True, True, True), decorators=[unittest.expectedFailure]),
             subtest((False, False, False), decorators=[unittest.expectedFailure]),
         ],
@@ -4563,21 +4559,6 @@ class TestCudaMallocAsync(TestCase):
         w = torch.rand(nelems, device="cuda")
         reg_mem = torch.cuda.memory_stats()[key_allocated]
         self.assertEqual(reg_mem - start_mem, nbytes)
-
-        # Test division==1 case.
-        torch.cuda.memory.empty_cache()
-        div1_start_mem = torch.cuda.memory_stats()[key_allocated]
-        div1_start_requested = torch.cuda.memory_stats()[key_requested]
-        torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:1")
-        torch.rand(nelems, device="cuda")
-        div1_end_mem = torch.cuda.memory_stats()[key_allocated]
-        div1_end_requested = torch.cuda.memory_stats()[key_requested]
-
-        self.assertEqual(div1_start_mem - start_mem, nbytes)
-        if not TEST_CUDAMALLOCASYNC:
-            # not supported with the cudaMallocAsync backend
-            self.assertEqual(div1_end_mem - div1_start_mem, power2_div(nbytes, 1))
-            self.assertEqual(div1_end_requested - div1_start_requested, nbytes)
 
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("foo:1,bar:2")

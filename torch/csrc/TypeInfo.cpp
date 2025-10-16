@@ -117,7 +117,7 @@ static PyObject* THPDTypeInfo_compare(
   return Py_INCREF(Py_NotImplemented), Py_NotImplemented;
 }
 
-static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
+static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void* /*unused*/) {
   uint64_t bits = elementSize(self->type) * CHAR_BIT;
   return THPUtils_packUInt64(bits);
 }
@@ -133,7 +133,7 @@ static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
       at::ScalarType::BFloat16,                   \
       AT_EXPAND(AT_FLOAT8_TYPES))
 
-static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
+static PyObject* THPFInfo_eps(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return _AT_DISPATCH_FINFO_TYPES(self->type, "epsilon", [] {
     return PyFloat_FromDouble(
@@ -142,7 +142,7 @@ static PyObject* THPFInfo_eps(THPFInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_max(THPFInfo* self, void*) {
+static PyObject* THPFInfo_max(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return _AT_DISPATCH_FINFO_TYPES(self->type, "max", [] {
     return PyFloat_FromDouble(
@@ -151,7 +151,7 @@ static PyObject* THPFInfo_max(THPFInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_min(THPFInfo* self, void*) {
+static PyObject* THPFInfo_min(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return _AT_DISPATCH_FINFO_TYPES(self->type, "lowest", [] {
     return PyFloat_FromDouble(
@@ -164,7 +164,7 @@ static PyObject* THPFInfo_min(THPFInfo* self, void*) {
   AT_DISPATCH_V2(                                \
       TYPE, NAME, AT_WRAP(__VA_ARGS__), AT_EXPAND(AT_INTEGRAL_TYPES_V2))
 
-static PyObject* THPIInfo_max(THPIInfo* self, void*) {
+static PyObject* THPIInfo_max(THPIInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
     return AT_DISPATCH_IINFO_TYPES(self->type, "max", [] {
@@ -182,7 +182,7 @@ static PyObject* THPIInfo_max(THPIInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPIInfo_min(THPIInfo* self, void*) {
+static PyObject* THPIInfo_min(THPIInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   if (at::isIntegralType(self->type, /*includeBool=*/false)) {
     return AT_DISPATCH_IINFO_TYPES(self->type, "min", [] {
@@ -200,7 +200,7 @@ static PyObject* THPIInfo_min(THPIInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
+static PyObject* THPIInfo_dtype(THPIInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   auto primary_name = c10::getDtypeNames(self->type).first;
   return AT_DISPATCH_IINFO_TYPES(self->type, "dtype", [&primary_name] {
@@ -209,7 +209,7 @@ static PyObject* THPIInfo_dtype(THPIInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_smallest_normal(THPFInfo* self, void*) {
+static PyObject* THPFInfo_smallest_normal(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return _AT_DISPATCH_FINFO_TYPES(self->type, "min", [] {
     return PyFloat_FromDouble(
@@ -218,12 +218,12 @@ static PyObject* THPFInfo_smallest_normal(THPFInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_tiny(THPFInfo* self, void*) {
+static PyObject* THPFInfo_tiny(THPFInfo* self, void* /*unused*/) {
   // see gh-70909, essentially the array_api prefers smallest_normal over tiny
   return THPFInfo_smallest_normal(self, nullptr);
 }
 
-static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
+static PyObject* THPFInfo_resolution(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return _AT_DISPATCH_FINFO_TYPES(self->type, "digits10", [] {
     return PyFloat_FromDouble(std::pow(
@@ -233,7 +233,7 @@ static PyObject* THPFInfo_resolution(THPFInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
+static PyObject* THPFInfo_dtype(THPFInfo* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   auto primary_name = c10::getDtypeNames(self->type).first;
   return _AT_DISPATCH_FINFO_TYPES(self->type, "dtype", [&primary_name] {
