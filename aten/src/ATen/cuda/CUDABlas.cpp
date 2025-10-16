@@ -1957,7 +1957,7 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     bool use_fast_accum,
-    const std::optional<Tensor>& alpha = std::nullopt) {
+    const std::optional<Tensor>& alpha) {
   // Note: see `cublasCommonArgs` for various non-intuitive manupulations
   // of input arguments to this function.
   const auto computeType = CUBLAS_COMPUTE_32F;
