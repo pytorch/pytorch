@@ -147,15 +147,12 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             from .tensor import TensorVariable
 
-            if len(args) != 1:
+            if len(args) != 1 or kwargs:
                 msg = ConstantVariable.create(
                     f"{name} takes exactly one argument ({len(args)} given)"
                 )
                 raise_observed_exception(TypeError, tx, args=[msg])
 
-            if kwargs:
-                msg = ConstantVariable.create(f"{name} takes no keyword arguments")
-                raise_observed_exception(TypeError, tx, args=[msg])
             if isinstance(args[0], TensorVariable):
                 value = get_fake_value(args[0].as_proxy().node, tx)
                 if value.constant is not None and value.constant.numel() == 1:
@@ -1117,7 +1114,7 @@ class SizeVariable(TupleVariable):
         kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         if name == "__getitem__":
-            if len(args) != 1 or kwargs:
+            if kwargs or len(args) != 1:
                 msg = ConstantVariable.create(
                     f"{name} takes exactly one argument ({len(args)} given)"
                 )
