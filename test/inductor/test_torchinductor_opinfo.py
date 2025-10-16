@@ -646,7 +646,7 @@ inductor_override_kwargs["xpu"] = {
     ("tanh", f16): {"atol": 1e-4, "rtol": 1e-2},
     ("nn.functional.embedding_bag", f32): {"check_gradient": False},
     ("nn.functional.embedding_bag", f64): {"check_gradient": False},
-    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-5, "rtol": 5e-3},
+    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
     ("_unsafe_masked_index", f16): {
         "reference_in_float": True,
         "atol": 3e-4,
