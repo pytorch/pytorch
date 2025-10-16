@@ -648,6 +648,7 @@ class TestViewOps(DTensorTestBase):
     @with_comms
     def test_squeeze_(self):
         mesh_2d = init_device_mesh(self.device_type, (3, 2), mesh_dim_names=("a", "b"))
+        self.init_manual_seed_for_rank()
         x = torch.randn((1, 4), device=self.device_type)
         dist_x = DTensor.from_local(x, mesh_2d, [Partial(), Shard(1)])
         self._test_op_on_dtensor(
