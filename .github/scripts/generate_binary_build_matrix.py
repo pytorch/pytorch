@@ -241,9 +241,6 @@ def generate_libtorch_matrix(
             arches += CUDA_ARCHES
             arches += ROCM_ARCHES
         elif os == "windows":
-            # TODO (huydhn): Only build CUDA 12.9 for Linux. This logic is to be cleaned up
-            # in 2.10
-            CUDA_ARCHES.remove("12.9")
             arches += CUDA_ARCHES
     if libtorch_variants is None:
         libtorch_variants = [
