@@ -258,7 +258,7 @@ class JointFnHandle:
 
 
 # Given a fn, computes the joint.
-# NOTE: fn is expects the following behavior:
+# NOTE: fn must conform to the following behavior:
 # (1) fn() needs to return a tuple of (outs, mask),
 #     where `mask` tells us which outputs are meant to have tangents.
 #     we don't know this info automatically, because we don't actually want to blindly
@@ -307,7 +307,7 @@ def create_joint(
         grad_primals: list[torch.Tensor] = []
         inputs_needs_grads = []
         # Note that we're not using primals here,
-        # being carefully not to pass any mutated inputs into autograd.grad()
+        # being careful not to pass any mutated inputs into autograd.grad()
         for p in primals:
             if isinstance(p, Tensor) and p.requires_grad:
                 inputs_needs_grads.append(True)
