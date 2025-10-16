@@ -149,11 +149,7 @@ inline void initGlobalDevicePoolState() {
   // retrieval of the context from any GPU device.
   const auto& platform = gDevicePool.devices[0]->get_platform();
   gDevicePool.context = std::make_unique<sycl::context>(
-#if SYCL_COMPILER_VERSION >= 20250200
       platform.khr_get_default_context());
-#else
-      platform.ext_oneapi_get_default_context());
-#endif
 #endif
 }
 
