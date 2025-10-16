@@ -1,8 +1,7 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations
-
+import io
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -11,8 +10,6 @@ from . import config
 
 
 if TYPE_CHECKING:
-    import io
-
     from ._cache import CacheInfo
 
 
@@ -263,7 +260,7 @@ def set_stance(
     stance: str = "default",
     *,
     skip_guard_eval_unsafe: bool = False,
-    force_backend: str | Callable[..., Any] | None = None,
+    force_backend: Union[str, Callable[..., Any], None] = None,
 ):
     """
     Set the current stance of the compiler.
@@ -495,7 +492,7 @@ def is_exporting() -> bool:
     return _is_exporting_flag
 
 
-def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:
+def save_cache_artifacts() -> Optional[tuple[bytes, "CacheInfo"]]:
     """
     Serializes all the cache artifacts that were created during the compilation
 
@@ -514,7 +511,7 @@ def save_cache_artifacts() -> tuple[bytes, CacheInfo] | None:
     return CacheArtifactManager.serialize()
 
 
-def load_cache_artifacts(serialized_artifacts: bytes) -> CacheInfo | None:
+def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
     """
     Hot loads cache artifacts that were previously serialized via
     save_cache_artifacts
