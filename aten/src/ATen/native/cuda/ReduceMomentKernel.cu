@@ -39,9 +39,7 @@ static void std_var_kernel_cuda(TensorIterator& iter, double correction, bool ta
 template <typename scalar_t, typename acc_t=scalar_t, typename out_t=scalar_t>
 void mean_kernel_impl(TensorIterator& iter) {
   //  returns acc_t for all non-complex dtypes and returns T for c10::complex<T>
-  constexpr bool is_16_bits =
-    ( (std::is_same<at::Half, scalar_t>::value) ||
-      (std::is_same<at::BFloat16, scalar_t>::value) );
+  constexpr bool is_16_bits = sizeof(scalar_t) == 2;
   using factor_t = typename c10::scalar_value_type<acc_t>::type;
   factor_t factor = static_cast<factor_t>(iter.num_output_elements()) / iter.numel();
   if constexpr (is_16_bits) {
