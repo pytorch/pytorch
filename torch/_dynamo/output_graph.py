@@ -1102,7 +1102,7 @@ class OutputGraph(OutputGraphCommon):
         *names: Any,
         **options: Any,
     ) -> VariableTracker:
-        if is_dynamic_nn_module(target, self.export):
+        if is_dynamic_nn_module(target):
             # Instead of returning UnspecializedNNModuleVariable, call
             # VariableTracker.build so that it is tracked for mutation.
             return VariableTracker.build(self.current_tx, target, **options)

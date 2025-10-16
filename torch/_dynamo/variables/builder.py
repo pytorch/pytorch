@@ -1888,7 +1888,7 @@ class VariableBuilder:
                 # don't allow STORE_ATTR mutation with custom __setattr__
                 return result
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif mutation_guard.is_dynamic_nn_module(value, self.tx.export):
+        elif mutation_guard.is_dynamic_nn_module(value):
             # created dynamically, don't specialize on it
 
             # Note [Tracing a torch.compiled function]
