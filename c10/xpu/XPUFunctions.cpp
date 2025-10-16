@@ -125,11 +125,11 @@ inline void initGlobalDevicePoolState() {
   // (Alchemist) series).
   namespace syclex = sycl::ext::oneapi::experimental;
   for (const auto& device : gDevicePool.devices) {
-    auto architecture = device.get_info<syclex::info::device::architecture>();
+    auto architecture = device->get_info<syclex::info::device::architecture>();
     if (architecture < syclex::architecture::intel_gpu_acm_g10) {
       TORCH_WARN(
           "The current GPU (",
-          device.get_info<sycl::info::device::name>(),
+          device->get_info<sycl::info::device::name>(),
           ") is not officially supported. Please refer to the hardware prerequisites: ",
           "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/get_start_xpu.rst#hardware-prerequisite");
     }
